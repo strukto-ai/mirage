@@ -107,6 +107,7 @@ async def ls(
     t: bool = False,
     S: bool = False,
     r: bool = False,
+    args_1: bool = False,
     R: bool = False,
     d: bool = False,
     F: bool = False,
