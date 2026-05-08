@@ -173,7 +173,7 @@ async def ls(
                 is_dir = F and e.type == FileType.DIRECTORY
                 name = e.name + "/" if is_dir else e.name
                 results.append(name)
-    output = "\n".join(results).encode()
+    output = ("\n".join(results) + "\n").encode() if results else b""
     stderr = "\n".join(warnings).encode() if warnings else None
     exit_code = 1 if warnings and not results else 0
     return output, IOResult(stderr=stderr, exit_code=exit_code)

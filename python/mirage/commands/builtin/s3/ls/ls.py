@@ -175,5 +175,5 @@ async def ls(
                 results.append(name)
     stderr = "\n".join(warnings).encode() if warnings else None
     exit_code = 1 if warnings and not results else 0
-    output = "\n".join(results).encode()
+    output = ("\n".join(results) + "\n").encode() if results else b""
     return output, IOResult(stderr=stderr, exit_code=exit_code)
