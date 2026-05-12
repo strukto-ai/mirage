@@ -277,7 +277,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 10.32.1
 
