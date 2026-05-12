@@ -104,6 +104,7 @@ async def ls(
     *texts: str,
     stdin: bytes | None = None,
     args_l: bool = False,
+    args_1: bool = False,
     a: bool = False,
     A: bool = False,
     h: bool = False,
@@ -156,7 +157,7 @@ async def ls(
         except (FileNotFoundError, ValueError) as exc:
             warnings.append(f"ls: cannot access '{p.original}': {exc}")
             continue
-        if args_l:
+        if args_l and not args_1:
             for e in entries:
                 size_str = _human_size(e.size or 0) if h else str(e.size or 0)
                 line = (f"{e.type or '-'}\t{size_str}"

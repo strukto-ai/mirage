@@ -117,7 +117,7 @@ async def join(
     if len(paths) < 2:
         raise ValueError("join: requires two paths")
     paths = await resolve_glob(accessor, paths, _extra.get("index"))
-    field1 = int(_extra.get("1", 1)) - 1
+    field1 = int(_extra.get("args_1", 1)) - 1
     field2 = int(_extra.get("2", 1)) - 1
     sep = t
     p0 = paths[0]

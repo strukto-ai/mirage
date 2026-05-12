@@ -400,6 +400,19 @@ def test_parse_to_kwargs_ambiguous_names():
     assert kw == {"args_l": True, "args_O": True, "args_I": True}
 
 
+def test_parse_to_kwargs_dash_one_maps_to_args_1():
+    parsed = ParsedArgs(flags={"-1": True}, args=[])
+    kw = parse_to_kwargs(parsed)
+    assert kw == {"args_1": True}
+
+
+def test_ls_spec_parses_dash_one_and_dash_l_together():
+    parsed = parse_command(SPECS["ls"], ["-1", "-l", "/data"], cwd="/")
+    kw = parse_to_kwargs(parsed)
+    assert kw["args_1"] is True
+    assert kw["args_l"] is True
+
+
 def test_parse_to_kwargs_empty():
     parsed = ParsedArgs(flags={}, args=[])
     kw = parse_to_kwargs(parsed)

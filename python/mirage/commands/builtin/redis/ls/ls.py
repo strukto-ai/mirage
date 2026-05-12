@@ -104,6 +104,7 @@ async def ls(
     *texts: str,
     stdin: bytes | None = None,
     args_l: bool = False,
+    args_1: bool = False,
     a: bool = False,
     A: bool = False,
     h: bool = False,
@@ -146,7 +147,7 @@ async def ls(
         except (FileNotFoundError, ValueError) as exc:
             warnings.append(f"ls: cannot access '{p.original}': {exc}")
             continue
-        if args_l:
+        if args_l and not args_1:
             for e in entries:
                 ext = _get_extension(e.name)
                 if filetype_fns and ext in filetype_fns:

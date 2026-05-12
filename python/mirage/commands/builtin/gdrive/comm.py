@@ -102,7 +102,7 @@ async def comm(
             stderr = "comm: file 1 is not in sorted order\n"
         elif lines2 != sorted(lines2):
             stderr = "comm: file 2 is not in sorted order\n"
-    suppress1 = bool(_extra.get("1", False))
+    suppress1 = bool(_extra.get("args_1", False))
     suppress2 = bool(_extra.get("2", False))
     suppress3 = bool(_extra.get("3", False))
     merged = _comm_merge(lines1, lines2)

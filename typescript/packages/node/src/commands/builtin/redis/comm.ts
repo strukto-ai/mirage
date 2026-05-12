@@ -117,7 +117,7 @@ async function commCommand(
     if (!isSorted(lines1)) stderr = 'comm: file 1 is not in sorted order\n'
     else if (!isSorted(lines2)) stderr = 'comm: file 2 is not in sorted order\n'
   }
-  const suppress1 = opts.flags['1'] === true
+  const suppress1 = opts.flags.args_1 === true
   const suppress2 = opts.flags['2'] === true
   const suppress3 = opts.flags['3'] === true
   const merged = commMerge(lines1, lines2)

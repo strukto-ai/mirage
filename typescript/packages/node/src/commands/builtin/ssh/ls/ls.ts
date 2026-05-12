@@ -132,7 +132,7 @@ async function lsCommand(
             prefix: opts.mountPrefix ?? '',
           }),
         ]
-  const long = opts.flags.args_l === true
+  const long = opts.flags.args_l === true && opts.flags.args_1 !== true
   const all = opts.flags.a === true || opts.flags.A === true
   const human = opts.flags.h === true
   const reverse = opts.flags.r === true

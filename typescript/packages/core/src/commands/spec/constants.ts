@@ -16,4 +16,5 @@ export const AMBIGUOUS_NAMES: Readonly<Record<string, string>> = Object.freeze({
   l: 'args_l',
   O: 'args_O',
   I: 'args_I',
+  '1': 'args_1',
 })

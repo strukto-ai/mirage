@@ -169,4 +169,15 @@ describe('ls', () => {
     const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { d: true })
     expect(out).toBe('tmp')
   })
+
+  it('-1 overrides -l: forces short (one-per-line) format', async () => {
+    const resource = new RAMResource()
+    seed(resource, ['/tmp'], { '/tmp/a.txt': 'a', '/tmp/b.txt': 'b' })
+    const short = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { args_1: true })
+    const overridden = await runLs(resource, [PathSpec.fromStrPath('/tmp')], {
+      args_l: true,
+      args_1: true,
+    })
+    expect(overridden).toBe(short)
+  })
 })

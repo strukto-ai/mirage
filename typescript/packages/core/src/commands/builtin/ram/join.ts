@@ -156,7 +156,7 @@ async function joinCommand(
   const p2 = paths[1]
   if (p1 === undefined || p2 === undefined) return [null, new IOResult()]
   const field1 =
-    (typeof opts.flags['1'] === 'string' ? Number.parseInt(opts.flags['1'], 10) : 1) - 1
+    (typeof opts.flags.args_1 === 'string' ? Number.parseInt(opts.flags.args_1, 10) : 1) - 1
   const field2 =
     (typeof opts.flags['2'] === 'string' ? Number.parseInt(opts.flags['2'], 10) : 1) - 1
   const sep = typeof opts.flags.t === 'string' ? opts.flags.t : null

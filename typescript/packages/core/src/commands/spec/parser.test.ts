@@ -229,4 +229,9 @@ describe('parseToKwargs', () => {
     expect(kw.args_O).toBe('x')
     expect(kw.args_I).toBe('y')
   })
+
+  it('maps -1 to args_1 (numeric flag, not a valid JS identifier)', () => {
+    const parsed = new ParsedArgs({ flags: { '-1': true }, args: [] })
+    expect(parseToKwargs(parsed)).toEqual({ args_1: true })
+  })
 })

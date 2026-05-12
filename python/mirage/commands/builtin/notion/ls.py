@@ -43,6 +43,7 @@ async def ls(
     *texts: str,
     stdin: bytes | None = None,
     args_l: bool = False,
+    args_1: bool = False,
     a: bool = False,
     A: bool = False,
     h: bool = False,
@@ -87,7 +88,7 @@ async def ls(
         else:
             entries.sort(key=lambda item: item.name, reverse=reverse)
         for entry in entries:
-            if args_l:
+            if args_l and not args_1:
                 size_str = _human_size(entry.size or 0) if h else str(
                     entry.size or 0)
                 results.append(f"{entry.type or '-'}\t{size_str}\t"

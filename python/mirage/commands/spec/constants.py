@@ -12,4 +12,4 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-AMBIGUOUS_NAMES = {"l": "args_l", "O": "args_O", "I": "args_I"}
+AMBIGUOUS_NAMES = {"l": "args_l", "O": "args_O", "I": "args_I", "1": "args_1"}

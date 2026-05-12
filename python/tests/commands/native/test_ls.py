@@ -94,6 +94,14 @@ def test_ls_1(env):
     assert "\n" in result
 
 
+def test_ls_1_overrides_l(env):
+    env.create_file("a.txt", b"hello")
+    env.create_file("b.txt", b"world")
+    short = env.mirage("ls -1 /data").strip()
+    one_overrides_long = env.mirage("ls -l -1 /data").strip()
+    assert one_overrides_long == short
+
+
 def test_ls_R(env):
     if env.resource_type == "s3":
         pytest.skip("not supported on S3")
