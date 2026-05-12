@@ -1,0 +1,8 @@
+cff-version: 1.2.0
+message: "Please cite Mirage if you use this code in your own work."
+title: "Mirage: A Unified Virtual Filesystem for AI Agents"
+authors:
+  - family-names: "Zhang"
+    given-names: "Zecheng"
+license: Apache-2.0
+url: "https://github.com/strukto-ai/mirage"
