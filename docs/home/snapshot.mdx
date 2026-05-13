@@ -149,19 +149,6 @@ Legend: ✅ = supported · 🟡 = adapter needed (no work in flight) · 📝 = p
 | GitHub | 📝 | 📝 | 📝 | 📝 | commit SHA | TODO(snapshot-github): `stat → revision=sha`, read via `repos.get_contents(path, ref=sha)`. |
 | Google Drive | 📝 | 📝 | 📝 | 📝 | `md5Checksum` + `revisionId` | TODO(snapshot-gdrive): `stat → revision=revisionId`, read via `revisions().get_media`. |
 
-### Live‑Only (No Stable Revision Today)
-
-These mounts snapshot config + history but **not content**. Reads at load time serve current state. A `live-only mount(s) opt out of snapshot replay` warning lists them.
-
-| Resource | Why live-only | Could change? |
-| --- | --- | --- |
-| Gmail | No stable per-message revision for body edits. | Unlikely. |
-| Slack | Messages can be edited in place; no public revision marker. | Unlikely. |
-| Linear | Issue history exists, but no per-field revision token. | Possible (`updatedAt` could fingerprint). |
-| Notion | `last_edited_time` flickers on unrelated edits; would yield false-positive drift. | Possible once block-level revision IDs are stable. |
-| Discord | Same shape as Slack. | Unlikely. |
-| Trello, Telegram, Postgres, MongoDB, SSH | Live state is the source of truth; snapshotting bytes would be misleading. | Out of scope. |
-
 ## Extending To A New Backend
 
 Three steps in Python:
