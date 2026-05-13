@@ -94,6 +94,35 @@ Paths that carry a revision pin are skipped — the pinned read serves the exact
 
 Pass via `Workspace.load(..., drift_policy=DriftPolicy.OFF)`.
 
+## How It Composes With Caching
+
+Snapshots interact with two existing caches:
+
+| Cache | Holds | Snapshotted? |
+| --- | --- | --- |
+| **File cache** (`Workspace._cache`) | raw bytes per virtual path | ✅ bytes for touched paths are serialized into the tar |
+| **Index cache** (`Resource._index`) | `FileStat` entries for listings | ❌ rebuilt lazily after load |
+
+**Only files the agent actually read are fingerprinted.** Capture walks `ws._ops.records` for `op == "read"` and dedups by path. Files that were listed but never opened, or touched only by `stat` / `readdir`, do not carry a fingerprint or a revision.
+
+At load time, three pieces of restored state cooperate per read:
+
+1. **Cache is consulted first.** Snapshot bytes go back into `Workspace._cache`; a warm read returns them with no network round-trip.
+2. **Fingerprint verifies the cache.** Under STRICT, the eager drift check stats every recorded path against live and raises before any read fires if anything moved. The cache is therefore trusted as authoritative until proven stale.
+3. **Revision pin is the cold-path recovery.** When the cache misses and the backend supports pinning, reads fetch the exact recorded revision (S3 `GetObject(VersionId=...)`) so you still get original bytes, not the live head.
+
+The same three states under each policy:
+
+| Scenario | Cache | Pin | Drift check | Net effect |
+| --- | --- | --- | --- | --- |
+| STRICT, fingerprint matches, cache warm | served | n/a | passes | Original bytes from cache (~0 ms) |
+| STRICT, fingerprint matches, cache cold | miss | n/a | passes | Live GET, current bytes (= original) |
+| STRICT, no pin, fingerprint differs | (n/a) | (n/a) | raises `ContentDriftError` | Caller informed before reading |
+| STRICT + pin (versioned backend) | served (matches recorded) | installed | skipped for pinned paths | Original bytes from cache or pinned GET |
+| OFF, any state | evicted for fingerprinted paths | not installed | skipped | Live GET, current bytes |
+
+The cache is the optimization, the fingerprint is the verifier, and the pin is the recovery — three independent guarantees that "what you replay equals what you captured."
+
 ## Resource Support Matrix
 
 Snapshot support is **opt-in per resource** via `SUPPORTS_SNAPSHOT = True`. Resources without it surface in a load-time warning and serve current state with no drift detection.
