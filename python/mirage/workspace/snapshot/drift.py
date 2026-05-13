@@ -50,16 +50,19 @@ async def capture_fingerprints(ws) -> list[dict]:
     """Walk session ops and capture fingerprints for every distinct
     remote read on a SUPPORTS_SNAPSHOT mount.
 
-    Skips paths whose owning mount has SUPPORTS_SNAPSHOT=False (live-only
-    backends like Gmail/Slack/Linear) and paths the resource cannot
-    fingerprint (stat() returned None).
+    Skips paths whose owning mount has ``SUPPORTS_SNAPSHOT=False``
+    (live-only backends like Gmail/Slack/Linear) and paths the resource
+    cannot fingerprint (``stat()`` returned ``None``). The optional
+    ``revision`` (e.g. S3 ``VersionId``, Drive ``revisionId``) is
+    captured alongside the fingerprint when the backend exposes one;
+    load-time replay uses it to pin reads, bypassing drift detection.
 
     Args:
         ws: Workspace whose ops history to walk.
 
     Returns:
-        list[dict]: One entry per fingerprinted path, with PATH, MOUNT_PREFIX,
-        and FINGERPRINT keys.
+        list[dict]: One entry per fingerprinted path, with ``PATH``,
+        ``MOUNT_PREFIX``, ``FINGERPRINT`` and optionally ``REVISION``.
     """
     seen: set[str] = set()
     out: list[dict] = []
@@ -89,9 +92,9 @@ async def capture_fingerprints(ws) -> list[dict]:
             FingerprintKey.MOUNT_PREFIX: mount.prefix,
             FingerprintKey.FINGERPRINT: marker,
         }
-        vid = getattr(stat, "version_id", None)
-        if vid:
-            entry[FingerprintKey.VERSION_ID] = vid
+        rev = getattr(stat, "revision", None)
+        if rev:
+            entry[FingerprintKey.REVISION] = rev
         out.append(entry)
     return out
 

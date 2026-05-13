@@ -43,7 +43,8 @@ from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
 from mirage.types import (DEFAULT_AGENT_ID, DEFAULT_SESSION_ID,
                           ConsistencyPolicy, DriftPolicy, FileStat,
-                          FingerprintKey, MountMode, PathSpec, StateKey)
+                          FingerprintKey, MountMode, PathSpec, Revision,
+                          StateKey)
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.fuse import FuseManager
 from mirage.workspace.history import ExecutionHistory
@@ -71,36 +72,6 @@ _DISPATCH_WRITE_OPS = frozenset(
 _HELP_HINT = (
     "Tip: run `man` to list every available command grouped by resource, "
     "`man <cmd>` for a single entry, and `<cmd> --help` for flag details.")
-
-
-def _drop_fingerprinted_from_cache(ws: "Workspace") -> None:
-    cache = ws._cache
-    if not hasattr(cache, "_entries") or not hasattr(cache, "_store"):
-        return
-    for path in ws._fingerprints:
-        cache._entries.pop(path, None)
-        cache._store.files.pop(path, None)
-
-
-def _inject_version_pins(ws: "Workspace", entries: list[dict]) -> None:
-    from mirage.types import VersionId
-    for f in entries:
-        vid = f.get(FingerprintKey.VERSION_ID)
-        if not vid:
-            continue
-        path = f[FingerprintKey.PATH]
-        try:
-            mount = ws._registry.mount_for(path)
-        except ValueError:
-            continue
-        accessor = getattr(mount.resource, "accessor", None)
-        if accessor is None:
-            continue
-        pins = getattr(accessor, "version_pins", None)
-        if pins is None:
-            continue
-        pins[path] = VersionId(vid)
-        ws._pinned_paths.add(path)
 
 
 class Workspace:
@@ -332,19 +303,22 @@ class Workspace:
         Captured:
             * Mount configs, sessions, history, finished jobs.
             * Cache bytes for fast replay.
-            * One fingerprint entry per remote read (ETag, plus VersionId
-              when the backend supports versioning).
+            * One fingerprint entry per remote read (ETag-equivalent,
+              plus a backend-specific ``revision`` when the resource
+              exposes one — e.g. S3 ``VersionId``).
 
         NOT captured:
-            * Live state of mounts with SUPPORTS_SNAPSHOT=False (Gmail,
-              Slack, Linear, etc.). Load logs a warning naming them.
+            * Live state of mounts with ``SUPPORTS_SNAPSHOT=False``
+              (Gmail, Slack, Linear, etc.). Load logs a warning naming
+              them.
             * Files the agent never touched.
             * Bytes of remote objects. Recovery of original bytes works
-              only when the backend supports versioning (S3, R2) and the
-              recorded VersionId still exists on the source.
+              only when the resource accepts a revision pin (S3 family
+              today) and the recorded revision still exists on the
+              source.
 
         Async because fingerprint capture stats each touched path on a
-        SUPPORTS_SNAPSHOT mount.
+        ``SUPPORTS_SNAPSHOT`` mount.
 
         Args:
             target: filesystem path OR a writable file-like object.
@@ -361,12 +335,15 @@ class Workspace:
         """Reconstruct a Workspace from a tar.
 
         Per recorded read:
-            1. VersionId recorded + backend versioning active: reads pin
-               to that VersionId. Drift check skipped (original bytes
-               served even if the live object moved on).
-            2. No VersionId: live fingerprint compared against recorded.
-               STRICT raises ContentDriftError on mismatch. OFF evicts
-               the snapshot cache for the path so reads serve current.
+            1. Revision recorded + backend accepts the pin (e.g. S3
+               with bucket versioning): reads are pinned to that
+               revision via ``Resource.pin_revision``. Drift check
+               skipped (original bytes served even if the live object
+               moved on).
+            2. No revision (or backend rejected the pin): live
+               fingerprint compared against recorded. STRICT raises
+               ``ContentDriftError`` on mismatch. OFF evicts the
+               snapshot cache for the path so reads serve current.
 
         Drift check is eager (fires once on the first dispatch or
         execute), so downstream code can rely on consistent state.
@@ -389,9 +366,19 @@ class Workspace:
         ws._drift_policy = drift_policy
         ws._drift_check_pending = (drift_policy != DriftPolicy.OFF
                                    and bool(ws._fingerprints))
-        _inject_version_pins(ws, fingerprint_entries)
+        for f in fingerprint_entries:
+            rev = f.get(FingerprintKey.REVISION)
+            if not rev:
+                continue
+            path = f[FingerprintKey.PATH]
+            try:
+                mount = ws._registry.mount_for(path)
+            except ValueError:
+                continue
+            if mount.resource.pin_revision(path, Revision(rev)):
+                ws._pinned_paths.add(path)
         if drift_policy == DriftPolicy.OFF and ws._fingerprints:
-            _drop_fingerprinted_from_cache(ws)
+            ws._cache.evict_paths(ws._fingerprints)
         live_only = state.get(StateKey.LIVE_ONLY_MOUNTS) or []
         if live_only:
             logger.warning(
@@ -527,21 +514,34 @@ class Workspace:
     async def _run_pending_drift_check(self) -> None:
         """Drain the post-load drift check.
 
-        Called once on the first async entry point (dispatch or execute)
-        after Workspace.load with a non-OFF drift policy. Walks every
-        recorded fingerprint and head-checks it against the live source;
-        raises ContentDriftError on the first mismatch. Subsequent calls
-        are no-ops.
+        Called once on the first async entry point (``dispatch`` or
+        ``execute``) after ``Workspace.load`` with a non-OFF drift
+        policy. Stats every recorded fingerprint against the live
+        source in parallel and raises :class:`ContentDriftError` on the
+        first mismatch. Subsequent calls are no-ops.
 
-        Paths that carry a VersionId pin are skipped: reads against them
+        Paths that carry a revision pin are skipped: reads against them
         will fetch the exact recorded version, so a live fingerprint
         mismatch is expected and harmless.
+
+        Stats are issued with ``asyncio.gather`` so first-op latency
+        does not scale linearly with the number of recorded reads. The
+        order in which checks complete is irrelevant; the first
+        mismatch to surface cancels the rest via ``return_exceptions``
+        re-raise.
         """
         self._drift_check_pending = False
-        for path, recorded in self._fingerprints.items():
-            if path in self._pinned_paths:
-                continue
-            await check_drift(self, path, recorded)
+        checks = [
+            check_drift(self, path, recorded)
+            for path, recorded in self._fingerprints.items()
+            if path not in self._pinned_paths
+        ]
+        if not checks:
+            return
+        results = await asyncio.gather(*checks, return_exceptions=True)
+        for r in results:
+            if isinstance(r, BaseException):
+                raise r
 
     async def stat(self, path: str) -> FileStat:
         scope = PathSpec(original=path, directory=path, resolved=True)

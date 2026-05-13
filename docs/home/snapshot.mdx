@@ -1,0 +1,167 @@
+---
+title: Snapshot & Replay
+description: Freeze an agent run, restore it later, and detect when the underlying world has drifted.
+icon: camera
+---
+
+## What It Does
+
+A snapshot captures a workspace as a single tar file: mount configs, sessions, history, finished jobs, cache bytes, and one fingerprint per recorded remote read. Loading a snapshot reconstructs the workspace and verifies that the underlying sources have not drifted since capture.
+
+When the backend exposes a stable per-object revision marker (S3 `VersionId`, Drive `revisionId`, Git commit SHA), the snapshot also records that revision. At load time, reads pin to the recorded revision and serve the exact bytes the original agent saw, even if the live object has since been overwritten.
+
+```mermaid
+flowchart TD
+    Load["Workspace.load(tar)"] --> Inject{Manifest carries<br/>revision for path?}
+    Inject -->|yes| Pin["Resource.pin_revision(path, rev)"]
+    Inject -->|no| Mark[Mark path for drift check]
+    Pin --> Ready[Workspace ready]
+    Mark --> Ready
+    Ready --> First[First dispatch / execute]
+    First --> Gather[asyncio.gather drift checks<br/>skip pinned paths]
+    Gather --> Read[Read at path]
+    Read --> Pinned{Pinned?}
+    Pinned -->|yes| Versioned[GET path with VersionId<br/>= original bytes]
+    Pinned -->|no| Live[GET path live]
+    Live --> Match{Fingerprint<br/>matches snapshot?}
+    Match -->|yes| Serve[Serve current bytes]
+    Match -->|"no, STRICT"| Raise[raise ContentDriftError]
+    Match -->|"no, OFF"| Evict[Evict cache, serve live]
+```
+
+## The API
+
+<CodeGroup>
+
+```python Python
+# capture — async, stats every touched path on a SUPPORTS_SNAPSHOT mount
+await ws.snapshot("run.tar")
+await ws.snapshot("run.tar.gz", compress="gz")
+
+# replay — sync construction; drift check fires on first dispatch/execute
+restored = Workspace.load("run.tar")                          # STRICT default
+restored = Workspace.load("run.tar", drift_policy=DriftPolicy.OFF)
+
+# in-process duplicate (shares remote resources, restores local content fresh)
+cp = await ws.copy()
+```
+
+```typescript TypeScript
+// TODO(snapshot-ts): API not implemented yet.
+// Tracking parity with Python's Workspace.snapshot / Workspace.load.
+```
+
+</CodeGroup>
+
+Both `snapshot` and `copy` are `async` because fingerprint capture stats each touched path on a `SUPPORTS_SNAPSHOT` mount.
+
+## What Is And Isn't Captured
+
+<Columns cols={2}>
+  <Card title="Captured" icon="check">
+    - Mount configs (creds redacted; restore via `resources=` override)
+    - Sessions, history, finished jobs
+    - Cache bytes for touched paths
+    - One fingerprint per remote read (ETag-equivalent)
+    - Optional per-path `revision` when the backend exposes one
+  </Card>
+  <Card title="Not captured" icon="xmark">
+    - Live state of mounts with `SUPPORTS_SNAPSHOT=False` (Gmail, Slack, Linear, Notion, …)
+    - Files the agent never touched
+    - Raw bytes of remote objects (recoverable only via revision pin)
+  </Card>
+</Columns>
+
+## Drift Detection
+
+On the first `dispatch` or `execute` after `load`, Mirage stats every fingerprinted path against the live source in parallel. If any path's live fingerprint differs from the recorded one, the workspace raises `ContentDriftError`:
+
+```python
+try:
+    await ws.execute("cat /s3/data.csv")
+except ContentDriftError as exc:
+    print(exc.path, exc.snapshot_fingerprint, exc.live_fingerprint)
+```
+
+Paths that carry a revision pin are skipped — the pinned read serves the exact original bytes, so a fingerprint mismatch is expected and harmless.
+
+## Drift Policies
+
+| Policy | Behavior on mismatch | Use when |
+| --- | --- | --- |
+| `STRICT` *(default)* | Raise `ContentDriftError` on first mismatch. | Reproducing an agent run; you want to know the world moved. |
+| `OFF` | Skip drift checks entirely. Evict snapshot cache for fingerprinted paths so reads serve current. | You only wanted the workspace skeleton, not the bytes. |
+
+Pass via `Workspace.load(..., drift_policy=DriftPolicy.OFF)`.
+
+## Resource Support Matrix
+
+Snapshot support is **opt-in per resource** via `SUPPORTS_SNAPSHOT = True`. Resources without it surface in a load-time warning and serve current state with no drift detection.
+
+Legend: ✅ = supported · 🟡 = adapter needed (no work in flight) · 📝 = planned · ❌ = not applicable.
+
+### Object Storage
+
+| Resource | Drift detection (Py) | Revision pin (Py) | Drift detection (TS) | Revision pin (TS) | Marker | Notes |
+| --- | :---: | :---: | :---: | :---: | --- | --- |
+| S3 | ✅ | ✅ | 📝 | 📝 | `ETag` + `VersionId` | Pin requires bucket versioning. |
+| R2 | ✅ | ✅ | 📝 | 📝 | `ETag` + `VersionId` | Inherits S3 path; pin requires R2 versioning (GA 2024). |
+| GCS | ✅ | 🟡 | 📝 | 🟡 | `ETag` + `x-goog-generation` | TODO(snapshot-gcs): map generation → `Revision` in `core/s3/stat.py`. |
+| OCI | ✅ | 🟡 | 📝 | 🟡 | `ETag` + `versionId` header | TODO(snapshot-oci): same shape as GCS adapter. |
+| Supabase | 📝 | ❌ | 📝 | ❌ | n/a yet | TODO(snapshot-supabase). |
+
+### Files & Code
+
+| Resource | Drift detection (Py) | Revision pin (Py) | Drift detection (TS) | Revision pin (TS) | Marker | Notes |
+| --- | :---: | :---: | :---: | :---: | --- | --- |
+| Disk | ✅ | ❌ | 📝 | ❌ | content hash | Bytes travel inside the tar; pin not meaningful. |
+| RAM | ✅ | ❌ | 📝 | ❌ | content hash | Same as Disk. |
+| Redis | ✅ | ❌ | 📝 | ❌ | content hash | Bytes restored via `resources=` override. |
+| GitHub | 📝 | 📝 | 📝 | 📝 | commit SHA | TODO(snapshot-github): `stat → revision=sha`, read via `repos.get_contents(path, ref=sha)`. |
+| Google Drive | 📝 | 📝 | 📝 | 📝 | `md5Checksum` + `revisionId` | TODO(snapshot-gdrive): `stat → revision=revisionId`, read via `revisions().get_media`. |
+
+### Live‑Only (No Stable Revision Today)
+
+These mounts snapshot config + history but **not content**. Reads at load time serve current state. A `live-only mount(s) opt out of snapshot replay` warning lists them.
+
+| Resource | Why live-only | Could change? |
+| --- | --- | --- |
+| Gmail | No stable per-message revision for body edits. | Unlikely. |
+| Slack | Messages can be edited in place; no public revision marker. | Unlikely. |
+| Linear | Issue history exists, but no per-field revision token. | Possible (`updatedAt` could fingerprint). |
+| Notion | `last_edited_time` flickers on unrelated edits; would yield false-positive drift. | Possible once block-level revision IDs are stable. |
+| Discord | Same shape as Slack. | Unlikely. |
+| Trello, Telegram, Postgres, MongoDB, SSH | Live state is the source of truth; snapshotting bytes would be misleading. | Out of scope. |
+
+## Extending To A New Backend
+
+Three steps in Python:
+
+```python
+from mirage.resource.base import BaseResource
+from mirage.types import FileStat, Fingerprint, Revision
+
+
+class MyResource(BaseResource):
+    SUPPORTS_SNAPSHOT = True  # 1. opt in
+
+    async def stat(self, ...) -> FileStat:
+        return FileStat(
+            ...,
+            fingerprint=Fingerprint(my_etag_equivalent),   # 2. for drift
+            revision=Revision(my_revision_marker),         # optional, for pin
+        )
+
+    def pin_revision(self, path: str, revision: Revision) -> bool:
+        # 3. honor the pin on subsequent reads
+        self.accessor.revision_pins[path] = revision
+        return True
+```
+
+If your backend has no stable revision, omit step 3 — drift detection still works.
+
+## Caveats
+
+- **Revision longevity.** Pinned reads only work as long as the source still retains the recorded revision. S3 bucket lifecycle rules can age out old versions; Drive keeps revisions for 30 days on non-Workspace files. Treat pins as best-effort.
+- **First-op latency.** The drift check fires on the first async entry point and issues one `head_object` per recorded read in parallel (`asyncio.gather`). On large recorded sessions, expect a one-time RTT spike.
+- **Manifest format breaks.** Snapshots from before [#32](https://github.com/strukto-ai/mirage/pull/32) are not load-compatible: the manifest schema (revision field, `FINGERPRINTS`, `LIVE_ONLY_MOUNTS`) changed.

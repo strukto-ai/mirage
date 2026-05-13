@@ -80,7 +80,8 @@
             "pages": [
               "home/architecture",
               "home/shell",
-              "home/resource-matrix"
+              "home/resource-matrix",
+              "home/snapshot"
             ]
           },
           {

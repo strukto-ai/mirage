@@ -17,7 +17,7 @@ from datetime import timezone
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.core.s3._client import _client_kwargs, _key, async_session
-from mirage.types import FileStat, FileType, Fingerprint, PathSpec, VersionId
+from mirage.types import FileStat, FileType, Fingerprint, PathSpec, Revision
 from mirage.utils.filetype import guess_type
 
 
@@ -93,7 +93,7 @@ async def stat(accessor: S3Accessor,
                 modified=modified,
                 type=guess_type(path),
                 fingerprint=Fingerprint(etag_raw) if etag_raw else None,
-                version_id=VersionId(vid_raw) if vid_raw else None,
+                revision=Revision(vid_raw) if vid_raw else None,
                 extra={"etag": etag_raw},
             )
         except Exception as exc:

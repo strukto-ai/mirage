@@ -19,7 +19,7 @@ from typing import NewType
 from pydantic import BaseModel, ConfigDict, Field
 
 Fingerprint = NewType("Fingerprint", str)
-VersionId = NewType("VersionId", str)
+Revision = NewType("Revision", str)
 
 
 class FileType(str, Enum):
@@ -47,7 +47,7 @@ class FileStat(BaseModel):
     size: int | None = None
     modified: str | None = None
     fingerprint: Fingerprint | None = None
-    version_id: VersionId | None = None
+    revision: Revision | None = None
     type: FileType | None = None
     extra: dict = Field(default_factory=dict)
 
@@ -195,7 +195,7 @@ class FingerprintKey(StrEnum):
     PATH = "path"
     MOUNT_PREFIX = "mount_prefix"
     FINGERPRINT = "fingerprint"
-    VERSION_ID = "version_id"
+    REVISION = "revision"
 
 
 class MountKey(StrEnum):

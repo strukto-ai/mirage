@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Iterable
+
 
 class FileCacheMixin:
     """LRU file cache mixin for resources.
@@ -48,6 +50,19 @@ class FileCacheMixin:
         raise NotImplementedError
 
     async def clear(self) -> None:
+        raise NotImplementedError
+
+    def evict_paths(self, paths: Iterable[str]) -> None:
+        """Synchronously evict the given keys from the cache.
+
+        Load-time helper invoked from ``Workspace.load`` (sync) to drop
+        snapshot-restored bytes for paths the caller wants to re-fetch
+        live. Backends whose state cannot be mutated synchronously
+        (e.g. Redis) override this as a no-op.
+
+        Args:
+            paths (Iterable[str]): Cache keys to drop.
+        """
         raise NotImplementedError
 
     async def all_cached(self, keys: list[str]) -> bool:

@@ -47,7 +47,7 @@ async def read_bytes(accessor: S3Accessor,
     config = accessor.config
     key = _key(path)
     kwargs = {"Bucket": config.bucket, "Key": key}
-    pin = accessor.version_pins.get(virtual)
+    pin = accessor.revision_pins.get(virtual)
     if pin:
         kwargs["VersionId"] = pin
     if offset or size is not None:

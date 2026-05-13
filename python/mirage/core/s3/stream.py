@@ -44,7 +44,7 @@ async def read_stream(
         path = path.original
     if prefix and path.startswith(prefix):
         path = path[len(prefix):] or "/"
-    pin = accessor.version_pins.get(virtual)
+    pin = accessor.revision_pins.get(virtual)
     config = accessor.config
     rec = record_stream("read", path, "s3")
     session = async_session(config)
@@ -83,7 +83,7 @@ async def range_read(accessor: S3Accessor, path: PathSpec, start: int,
             "Key": _key(path),
             "Range": f"bytes={start}-{end - 1}",
         }
-        pin = accessor.version_pins.get(virtual)
+        pin = accessor.revision_pins.get(virtual)
         if pin:
             kwargs["VersionId"] = pin
         response = await client.get_object(**kwargs)

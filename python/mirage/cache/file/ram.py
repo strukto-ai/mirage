@@ -15,6 +15,7 @@
 import asyncio
 import time
 from collections import OrderedDict
+from collections.abc import Iterable
 
 from mirage.cache.file.entry import CacheEntry
 from mirage.cache.file.mixin import FileCacheMixin
@@ -135,6 +136,13 @@ class RAMFileCacheStore(RAMResource, FileCacheMixin, KeyLockMixin):
             self._store.files.clear()
             self._cache_size = 0
             self._clear_locks()
+
+    def evict_paths(self, paths: Iterable[str]) -> None:
+        for key in paths:
+            entry = self._entries.pop(key, None)
+            if entry is not None:
+                self._cache_size -= entry.size
+            self._store.files.pop(key, None)
 
     async def _evict(self) -> None:
         while self._cache_size > self._cache_limit and self._entries:

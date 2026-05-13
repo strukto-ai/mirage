@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Iterable
+
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.file.utils import default_fingerprint, parse_limit
 from mirage.resource.redis.redis import RedisResource
@@ -97,6 +99,14 @@ class RedisFileCacheStore(RedisResource, FileCacheMixin):
                 keys.append(k)
             if keys:
                 await self._cache_client.delete(*keys)
+
+    def evict_paths(self, paths: Iterable[str]) -> None:
+        # No-op: Redis cache holds nothing restored from the snapshot
+        # (only RAM caches are repopulated by _restore_cache), and the
+        # snapshot load path is sync so we cannot await redis deletes
+        # here. If a caller needs to drop live Redis-cached entries, use
+        # await self.remove(key) per path from an async context.
+        pass
 
     @property
     def cache_size(self) -> int:
