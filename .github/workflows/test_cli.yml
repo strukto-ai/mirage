@@ -143,6 +143,9 @@ jobs:
           cache: pnpm
           cache-dependency-path: typescript/pnpm-lock.yaml
 
+      - name: Install node-gyp
+        run: npm install -g node-gyp
+
       - name: Install TypeScript dependencies
         working-directory: typescript
         run: pnpm install --frozen-lockfile
