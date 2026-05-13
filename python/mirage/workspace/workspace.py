@@ -366,17 +366,18 @@ class Workspace:
         ws._drift_policy = drift_policy
         ws._drift_check_pending = (drift_policy != DriftPolicy.OFF
                                    and bool(ws._fingerprints))
-        for f in fingerprint_entries:
-            rev = f.get(FingerprintKey.REVISION)
-            if not rev:
-                continue
-            path = f[FingerprintKey.PATH]
-            try:
-                mount = ws._registry.mount_for(path)
-            except ValueError:
-                continue
-            if mount.resource.pin_revision(path, Revision(rev)):
-                ws._pinned_paths.add(path)
+        if drift_policy != DriftPolicy.OFF:
+            for f in fingerprint_entries:
+                rev = f.get(FingerprintKey.REVISION)
+                if not rev:
+                    continue
+                path = f[FingerprintKey.PATH]
+                try:
+                    mount = ws._registry.mount_for(path)
+                except ValueError:
+                    continue
+                if mount.resource.pin_revision(path, Revision(rev)):
+                    ws._pinned_paths.add(path)
         if drift_policy == DriftPolicy.OFF and ws._fingerprints:
             ws._cache.evict_paths(ws._fingerprints)
         live_only = state.get(StateKey.LIVE_ONLY_MOUNTS) or []
