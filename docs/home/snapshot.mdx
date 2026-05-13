@@ -137,7 +137,7 @@ Legend: ✅ = supported · 🟡 = adapter needed (no work in flight) · 📝 = p
 | R2 | ✅ | ✅ | 📝 | 📝 | `ETag` + `VersionId` | Inherits S3 path; pin requires R2 versioning (GA 2024). |
 | GCS | ✅ | 🟡 | 📝 | 🟡 | `ETag` + `x-goog-generation` | TODO(snapshot-gcs): map generation → `Revision` in `core/s3/stat.py`. |
 | OCI | ✅ | 🟡 | 📝 | 🟡 | `ETag` + `versionId` header | TODO(snapshot-oci): same shape as GCS adapter. |
-| Supabase | 📝 | ❌ | 📝 | ❌ | n/a yet | TODO(snapshot-supabase). |
+| Supabase | ✅ | ❌ | 📝 | ❌ | `ETag` only | Inherits `S3Resource`. Supabase's S3-compat endpoint does not surface object `VersionId`, so drift detection works but pinning is not available. |
 
 ### Files & Code
 
