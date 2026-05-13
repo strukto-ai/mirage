@@ -180,4 +180,3 @@ If your backend has no stable revision, omit step 3 — drift detection still wo
 
 - **Revision longevity.** Pinned reads only work as long as the source still retains the recorded revision. S3 bucket lifecycle rules can age out old versions; Drive keeps revisions for 30 days on non-Workspace files. Treat pins as best-effort.
 - **First-op latency.** The drift check fires on the first async entry point and issues one `head_object` per recorded read in parallel (`asyncio.gather`). On large recorded sessions, expect a one-time RTT spike.
-- **Manifest format breaks.** Snapshots from before [#32](https://github.com/strukto-ai/mirage/pull/32) are not load-compatible: the manifest schema (revision field, `FINGERPRINTS`, `LIVE_ONLY_MOUNTS`) changed.
