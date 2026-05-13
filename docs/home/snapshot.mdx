@@ -179,4 +179,4 @@ If your backend has no stable revision, omit step 3 — drift detection still wo
 ## Caveats
 
 - **Revision longevity.** Pinned reads only work as long as the source still retains the recorded revision. S3 bucket lifecycle rules can age out old versions; Drive keeps revisions for 30 days on non-Workspace files. Treat pins as best-effort.
-- **First-op latency.** The drift check fires on the first async entry point and issues one `head_object` per recorded read in parallel (`asyncio.gather`). On large recorded sessions, expect a one-time RTT spike.
+- **First read after load is slower than the rest.** `Workspace.load()` returns immediately, but the first `execute()` or `dispatch()` afterwards pauses while Mirage verifies that nothing has drifted upstream. Concretely, it asks the live source "is this path still the bytes I remember?" once per recorded read, in parallel. Tiny for short sessions (tens of milliseconds); a few hundred milliseconds to a couple of seconds for sessions with hundreds of recorded reads. The pause happens once per loaded workspace; subsequent calls are normal speed. Pass `drift_policy=DriftPolicy.OFF` if you want to skip the check entirely.
