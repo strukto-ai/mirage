@@ -27,6 +27,25 @@ export function fail(message: string, exitCode = 1): never {
   process.exit(exitCode)
 }
 
+export function exitCodeFromResponse(r: unknown): number {
+  if (typeof r !== 'object' || r === null) return 0
+  const obj = r as Record<string, unknown>
+  const inner =
+    obj.kind === 'io' ? obj : ((obj.result as Record<string, unknown> | null | undefined) ?? null)
+  if (
+    inner !== null &&
+    inner.kind === 'io' &&
+    typeof inner.exitCode === 'number' &&
+    Number.isFinite(inner.exitCode)
+  ) {
+    return Math.min(255, Math.max(0, Math.trunc(inner.exitCode)))
+  }
+  if (typeof obj.status === 'string' && (obj.status === 'failed' || obj.status === 'canceled')) {
+    return 2
+  }
+  return 0
+}
+
 export async function handleResponse(r: Response): Promise<unknown> {
   if (r.status >= 400) {
     let detail = await r.text()

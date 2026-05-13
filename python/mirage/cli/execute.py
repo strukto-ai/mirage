@@ -18,7 +18,7 @@ import sys
 import typer
 
 from mirage.cli.client import make_client
-from mirage.cli.output import emit, handle_response
+from mirage.cli.output import emit, exit_code_from_response, handle_response
 
 app = typer.Typer(invoke_without_command=True, help="Execute a command.")
 
@@ -70,4 +70,6 @@ def execute_cmd(
             r = client.request("POST", path, files=files)
         else:
             r = client.request("POST", path, json=payload)
-    emit(handle_response(r))
+    response = handle_response(r)
+    emit(response)
+    raise typer.Exit(code=exit_code_from_response(response))

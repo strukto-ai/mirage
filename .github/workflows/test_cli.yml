@@ -1,0 +1,241 @@
+name: CLI exit codes
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python CLI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        working-directory: python
+        run: uv sync --all-extras --no-extra camel
+
+      - name: Install mirage package
+        working-directory: python
+        run: uv pip install .
+
+      - name: Smoke test exit code propagation
+        working-directory: python
+        shell: bash
+        run: |
+          set -u
+          MIRAGE=".venv/bin/mirage"
+          cat > /tmp/ws.yaml <<'YAML'
+          mounts:
+            /:
+              resource: ram
+              mode: WRITE
+          YAML
+
+          $MIRAGE workspace delete smoke > /dev/null 2>&1 || true
+          $MIRAGE workspace create /tmp/ws.yaml --id smoke
+
+          fail=0
+          check() {
+            local desc="$1"
+            local expected_exit="$2"
+            local expected_field="$3"
+            shift 3
+            echo
+            echo "--- $desc"
+            echo "+ $*"
+            set +e
+            out=$("$@")
+            got_exit=$?
+            set -e
+            echo "stdout:"
+            echo "$out" | sed 's/^/  /'
+            echo "process exit: $got_exit (expected $expected_exit)"
+            if [ "$got_exit" != "$expected_exit" ]; then
+              echo "FAIL: process exit code mismatch"
+              fail=1
+              return
+            fi
+            if [ -n "$expected_field" ]; then
+              field_val=$(echo "$out" | jq -r '.exit_code // .result.exit_code // empty')
+              echo "json exit_code: $field_val (expected $expected_field)"
+              if [ "$field_val" != "$expected_field" ]; then
+                echo "FAIL: json exit_code mismatch"
+                fail=1
+                return
+              fi
+            fi
+            echo "PASS"
+          }
+
+          check "echo ok succeeds" 0 0 $MIRAGE execute -w smoke -c 'echo ok'
+          check "false exits 1" 1 1 $MIRAGE execute -w smoke -c 'false'
+          check "false | echo: pipefail off => last cmd wins" 0 0 \
+            $MIRAGE execute -w smoke -c 'false | echo done'
+          check "pipefail on => rightmost failure wins" 1 1 \
+            $MIRAGE execute -w smoke -c 'set -o pipefail; false | echo done'
+
+          echo
+          echo "--- background + job wait"
+          submit=$($MIRAGE execute -w smoke --bg -c 'false')
+          echo "submit response:"
+          echo "$submit" | sed 's/^/  /'
+          JID=$(echo "$submit" | jq -r .job_id)
+          echo "job id: $JID"
+          check "job wait on failing job" 1 1 $MIRAGE job wait "$JID"
+
+          echo
+          echo "--- shell composition (&& and ||)"
+          if $MIRAGE execute -w smoke -c 'false' > /dev/null && echo "should not print"; then
+            echo "FAIL: && short-circuit did not work"
+            fail=1
+          else
+            echo "PASS: && correctly short-circuited on inner failure"
+          fi
+          if $MIRAGE execute -w smoke -c 'echo ok' > /dev/null && echo "should print"; then
+            echo "PASS: && correctly proceeded on inner success"
+          else
+            echo "FAIL: && incorrectly short-circuited on success"
+            fail=1
+          fi
+
+          $MIRAGE workspace delete smoke
+          $MIRAGE daemon stop || true
+
+          if [ "$fail" != "0" ]; then
+            echo
+            echo "One or more exit-code propagation checks failed."
+            exit 1
+          fi
+
+  typescript:
+    name: TypeScript CLI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.32.1
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: typescript/pnpm-lock.yaml
+
+      - name: Install TypeScript dependencies
+        working-directory: typescript
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        working-directory: typescript
+        run: pnpm -r build
+
+      - name: Smoke test exit code propagation
+        working-directory: typescript
+        shell: bash
+        run: |
+          set -u
+          MIRAGE="node packages/cli/dist/bin/mirage.js"
+          cat > /tmp/ws.yaml <<'YAML'
+          mounts:
+            /:
+              resource: ram
+              mode: WRITE
+          YAML
+
+          $MIRAGE workspace delete smoke > /dev/null 2>&1 || true
+          $MIRAGE workspace create /tmp/ws.yaml --id smoke
+
+          fail=0
+          check() {
+            local desc="$1"
+            local expected_exit="$2"
+            local expected_field="$3"
+            shift 3
+            echo
+            echo "--- $desc"
+            echo "+ $*"
+            set +e
+            out=$("$@")
+            got_exit=$?
+            set -e
+            echo "stdout:"
+            echo "$out" | sed 's/^/  /'
+            echo "process exit: $got_exit (expected $expected_exit)"
+            if [ "$got_exit" != "$expected_exit" ]; then
+              echo "FAIL: process exit code mismatch"
+              fail=1
+              return
+            fi
+            if [ -n "$expected_field" ]; then
+              field_val=$(echo "$out" | jq -r '.exitCode // .result.exitCode // empty')
+              echo "json exitCode: $field_val (expected $expected_field)"
+              if [ "$field_val" != "$expected_field" ]; then
+                echo "FAIL: json exitCode mismatch"
+                fail=1
+                return
+              fi
+            fi
+            echo "PASS"
+          }
+
+          check "echo ok succeeds" 0 0 $MIRAGE execute -w smoke -c 'echo ok'
+          check "false exits 1" 1 1 $MIRAGE execute -w smoke -c 'false'
+          check "false | echo: pipefail off => last cmd wins" 0 0 \
+            $MIRAGE execute -w smoke -c 'false | echo done'
+          check "pipefail on => rightmost failure wins" 1 1 \
+            $MIRAGE execute -w smoke -c 'set -o pipefail; false | echo done'
+
+          echo
+          echo "--- background + job wait"
+          submit=$($MIRAGE execute -w smoke --bg -c 'false')
+          echo "submit response:"
+          echo "$submit" | sed 's/^/  /'
+          JID=$(echo "$submit" | jq -r .jobId)
+          echo "job id: $JID"
+          check "job wait on failing job" 1 1 $MIRAGE job wait "$JID"
+
+          echo
+          echo "--- shell composition (&& and ||)"
+          if $MIRAGE execute -w smoke -c 'false' > /dev/null && echo "should not print"; then
+            echo "FAIL: && short-circuit did not work"
+            fail=1
+          else
+            echo "PASS: && correctly short-circuited on inner failure"
+          fi
+          if $MIRAGE execute -w smoke -c 'echo ok' > /dev/null && echo "should print"; then
+            echo "PASS: && correctly proceeded on inner success"
+          else
+            echo "FAIL: && incorrectly short-circuited on success"
+            fail=1
+          fi
+
+          $MIRAGE workspace delete smoke
+          $MIRAGE daemon stop || true
+
+          if [ "$fail" != "0" ]; then
+            echo
+            echo "One or more exit-code propagation checks failed."
+            exit 1
+          fi

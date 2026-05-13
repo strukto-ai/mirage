@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+import math
 import sys
 import time
 from typing import Any, Callable
@@ -40,6 +41,27 @@ def emit(obj: Any, human: Callable[[Any], str] | None = None) -> None:
 def fail(message: str, exit_code: int = 1) -> None:
     typer.echo(message, err=True)
     raise typer.Exit(code=exit_code)
+
+
+def exit_code_from_response(r: Any) -> int:
+    if not isinstance(r, dict):
+        return 0
+    if r.get("kind") == "io":
+        inner: dict | None = r
+    else:
+        result = r.get("result")
+        inner = result if isinstance(result, dict) else None
+    if inner is not None and inner.get("kind") == "io":
+        code = inner.get("exit_code")
+        if isinstance(code, bool) or not isinstance(code, (int, float)):
+            return 0
+        if not math.isfinite(code):
+            return 0
+        return max(0, min(255, int(code)))
+    status = r.get("status")
+    if status in ("failed", "canceled"):
+        return 2
+    return 0
 
 
 def handle_response(r: httpx.Response) -> dict | list:

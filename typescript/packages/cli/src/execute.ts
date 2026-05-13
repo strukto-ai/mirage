@@ -14,7 +14,7 @@
 
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
-import { emit, handleResponse } from './output.ts'
+import { emit, exitCodeFromResponse, handleResponse } from './output.ts'
 import { loadDaemonSettings } from './settings.ts'
 
 export function registerExecuteCommand(program: Command): void {
@@ -33,7 +33,11 @@ export function registerExecuteCommand(program: Command): void {
           `/v1/workspaces/${opts.workspace}/execute` + (opts.bg === true ? '?background=true' : '')
         const c = makeClient(loadDaemonSettings())
         await c.ensureRunning({ allowSpawn: false })
-        emit(await handleResponse(await c.request('POST', path, { body: JSON.stringify(body) })))
+        const response = await handleResponse(
+          await c.request('POST', path, { body: JSON.stringify(body) }),
+        )
+        emit(response)
+        process.exit(exitCodeFromResponse(response))
       },
     )
 }

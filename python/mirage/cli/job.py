@@ -15,7 +15,7 @@
 import typer
 
 from mirage.cli.client import make_client
-from mirage.cli.output import emit, handle_response
+from mirage.cli.output import emit, exit_code_from_response, handle_response
 
 app = typer.Typer(no_args_is_help=True, help="Manage daemon jobs.")
 
@@ -44,7 +44,9 @@ def get_cmd(job_id: str = typer.Argument(...)) -> None:
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
         r = client.request("GET", f"/v1/jobs/{job_id}")
-    emit(handle_response(r))
+    response = handle_response(r)
+    emit(response)
+    raise typer.Exit(code=exit_code_from_response(response))
 
 
 @app.command("wait")
@@ -62,7 +64,9 @@ def wait_cmd(
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
         r = client.request("POST", f"/v1/jobs/{job_id}/wait", json=body)
-    emit(handle_response(r))
+    response = handle_response(r)
+    emit(response)
+    raise typer.Exit(code=exit_code_from_response(response))
 
 
 @app.command("cancel")

@@ -50,6 +50,31 @@ function runCli(env: Record<string, string>, args: string[]): unknown {
   return JSON.parse(trimmed) as unknown
 }
 
+interface CliResult {
+  status: number | null
+  stdout: string
+  stderr: string
+  parsed: unknown
+}
+
+function runCliRaw(env: Record<string, string>, args: string[]): CliResult {
+  const r = spawnSync(process.execPath, [cliBin, ...args], {
+    env,
+    encoding: 'utf-8',
+    timeout: 30000,
+  })
+  const trimmed = r.stdout.trim()
+  let parsed: unknown = {}
+  if (trimmed !== '') {
+    try {
+      parsed = JSON.parse(trimmed) as unknown
+    } catch {
+      parsed = trimmed
+    }
+  }
+  return { status: r.status, stdout: r.stdout, stderr: r.stderr, parsed }
+}
+
 describe('mirage CLI end-to-end', () => {
   let tmp: string
   let env: Record<string, string>
@@ -89,6 +114,43 @@ describe('mirage CLI end-to-end', () => {
 
     const deleted = runCli(env, ['workspace', 'delete', created.id]) as { id: string }
     expect(deleted.id).toBe(created.id)
+  }, 30000)
+
+  it('execute propagates inner exit code to process exit', () => {
+    const cfgPath = join(tmp, 'exit-cfg.yaml')
+    writeFileSync(cfgPath, 'mounts:\n  /:\n    resource: ram\n    mode: write\n')
+    const created = runCli(env, ['workspace', 'create', cfgPath]) as { id: string }
+
+    const ok = runCliRaw(env, ['execute', '-w', created.id, '-c', 'true'])
+    expect(ok.status).toBe(0)
+
+    const fail = runCliRaw(env, ['execute', '-w', created.id, '-c', 'false'])
+    expect(fail.status).toBe(1)
+    expect((fail.parsed as { exitCode: number }).exitCode).toBe(1)
+
+    const pipeNoFail = runCliRaw(env, ['execute', '-w', created.id, '-c', 'false | true'])
+    expect(pipeNoFail.status).toBe(0)
+
+    const pipeFail = runCliRaw(env, [
+      'execute',
+      '-w',
+      created.id,
+      '-c',
+      'set -o pipefail; false | true',
+    ])
+    expect(pipeFail.status).toBe(1)
+
+    const bg = runCliRaw(env, ['execute', '-w', created.id, '--bg', '-c', 'false'])
+    expect(bg.status).toBe(0)
+    const jobId = (bg.parsed as { jobId: string }).jobId
+    expect(jobId).toMatch(/^job_/)
+
+    const waited = runCliRaw(env, ['job', 'wait', jobId])
+    expect(waited.status).toBe(1)
+    const result = (waited.parsed as { result: { exitCode: number } }).result
+    expect(result.exitCode).toBe(1)
+
+    runCli(env, ['workspace', 'delete', created.id])
   }, 30000)
 
   it('workspace snapshot + load round-trips', () => {

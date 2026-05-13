@@ -235,6 +235,30 @@ def test_provision_returns_dry_run_result(daemon, tmp_path):
     _run_cli(daemon["env"], "workspace", "delete", "provision-test")
 
 
+def test_execute_propagates_inner_exit_code(daemon, tmp_path):
+    cfg = _write_config(tmp_path)
+    _run_cli(daemon["env"], "workspace", "create", str(cfg), "--id",
+             "exit-test")
+
+    ok = _run_cli(daemon["env"], "execute", "-w", "exit-test", "-c", "echo ok")
+    assert ok["exit_code"] == 0
+
+    _run_cli(daemon["env"],
+             "execute",
+             "-w",
+             "exit-test",
+             "-c",
+             "false",
+             expect_exit=1)
+
+    bg = _run_cli(daemon["env"], "execute", "-w", "exit-test", "-c", "false",
+                  "--background")
+    job_id = bg["job_id"]
+    _run_cli(daemon["env"], "job", "wait", job_id, expect_exit=1)
+
+    _run_cli(daemon["env"], "workspace", "delete", "exit-test")
+
+
 def test_execute_subshell_cwd_does_not_leak(daemon, tmp_path):
     cfg = _write_config(tmp_path)
     _run_cli(daemon["env"], "workspace", "create", str(cfg), "--id",
@@ -268,8 +292,8 @@ def test_execute_background_then_cancel(daemon, tmp_path):
                          "sleep 30", "--background")
     job_id = submitted["job_id"]
     _run_cli(daemon["env"], "job", "cancel", job_id)
-    waited = _run_cli(daemon["env"], "job", "wait", job_id)
-    assert waited["status"] in ("canceled", "cancelled", "done")
+    waited = _run_cli(daemon["env"], "job", "wait", job_id, expect_exit=2)
+    assert waited == {}
     _run_cli(daemon["env"], "workspace", "delete", "cancel-test")
 
 
