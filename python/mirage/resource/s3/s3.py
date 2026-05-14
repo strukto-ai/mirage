@@ -39,7 +39,7 @@ from mirage.core.s3.write import write_bytes
 from mirage.ops.s3 import OPS as S3_OPS
 from mirage.resource.base import BaseResource
 from mirage.resource.s3.prompt import PROMPT
-from mirage.types import PathSpec, ResourceName, Revision
+from mirage.types import PathSpec, ResourceName
 
 _S3_OPS = {
     "read_bytes": read_bytes,
@@ -110,32 +110,6 @@ class S3Resource(BaseResource):
             return remote.extra.get("etag")
         except FileNotFoundError:
             return None
-
-    def pin_revision(self, path: str, revision: Revision) -> bool:
-        """Pin reads at `path` to an S3 ``VersionId``.
-
-        Subsequent ``GetObject`` calls from
-        :mod:`mirage.core.s3.read` /
-        :mod:`mirage.core.s3.stream` pick the pin out of
-        ``accessor.revision_pins`` and pass it as ``VersionId=``,
-        serving the exact recorded bytes even if the live object has
-        since been overwritten or deleted (subject to the bucket's
-        versioning retention).
-
-        Inherited unchanged by ``R2Resource``, ``GCSResource``, and
-        ``OCIResource`` because they all delegate to the same S3
-        client; bucket versioning must be enabled at the source for
-        the pin to actually resolve.
-
-        Args:
-            path (str): Virtual path whose reads should be pinned.
-            revision (Revision): S3 ``VersionId`` recorded at snapshot.
-
-        Returns:
-            bool: Always True.
-        """
-        self.accessor.revision_pins[path] = revision
-        return True
 
     def get_state(self) -> dict:
         redacted = [

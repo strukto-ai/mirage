@@ -13,11 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.types import Revision
 
 
 class S3Accessor(Accessor):
 
     def __init__(self, config) -> None:
         self.config = config
-        self.revision_pins: dict[str, Revision] = {}

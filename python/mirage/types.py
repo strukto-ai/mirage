@@ -14,12 +14,8 @@
 
 from dataclasses import dataclass
 from enum import Enum, StrEnum
-from typing import NewType
 
 from pydantic import BaseModel, ConfigDict, Field
-
-Fingerprint = NewType("Fingerprint", str)
-Revision = NewType("Revision", str)
 
 
 class FileType(str, Enum):
@@ -46,8 +42,8 @@ class FileStat(BaseModel):
     name: str
     size: int | None = None
     modified: str | None = None
-    fingerprint: Fingerprint | None = None
-    revision: Revision | None = None
+    fingerprint: str | None = None
+    revision: str | None = None
     type: FileType | None = None
     extra: dict = Field(default_factory=dict)
 

@@ -20,7 +20,9 @@ from mirage.commands.config import RegisteredCommand
 from mirage.commands.resolve import get_extension
 from mirage.commands.spec import CommandSpec
 from mirage.io.types import ByteSource, IOResult
-from mirage.observe.context import push_mount_prefix, with_mount_prefix
+from mirage.observe.context import (push_mount_prefix, push_revisions,
+                                    reset_revisions, with_mount_prefix,
+                                    with_revisions)
 from mirage.ops.registry import RegisteredOp
 from mirage.resource.base import BaseResource
 from mirage.types import ConsistencyPolicy, MountMode, PathSpec
@@ -29,10 +31,12 @@ from mirage.types import ConsistencyPolicy, MountMode, PathSpec
 def _wrap_cmd_streams(
     result: tuple[ByteSource | None, IOResult],
     mount_prefix: str,
+    revisions: dict[str, str] | None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Wrap any async-iterator streams in ``result`` with the mount
-    prefix, so ``record_stream`` calls inside the lazy backend body
-    see the correct prefix when consumed after this frame exits.
+    prefix and active revisions, so ``record_stream`` and
+    ``revision_for`` calls inside the lazy backend body see the right
+    context when consumed after this frame exits.
 
     Mirrors the ``exit_on_empty`` pattern: thin async-gen wrapper that
     side-effects the recorder state as bytes flow through. Same object
@@ -42,6 +46,8 @@ def _wrap_cmd_streams(
     Args:
         result: ``(stream, io)`` as returned by a command handler.
         mount_prefix: prefix to push during stream consumption.
+        revisions: revisions map to push during stream consumption
+            (None when the mount has no pins installed).
     """
     stream, io = result
     seen: dict[int, ByteSource] = {}
@@ -53,6 +59,8 @@ def _wrap_cmd_streams(
         if oid in seen:
             return seen[oid]
         wrapped = with_mount_prefix(mount_prefix, obj)
+        if revisions:
+            wrapped = with_revisions(revisions, wrapped)
         seen[oid] = wrapped
         return wrapped
 
@@ -94,6 +102,13 @@ class Mount:
         self.resource = resource
         self.mode = mode
         self.consistency = consistency
+        # Per-path revision pins installed at Workspace.load time. Read
+        # functions consult these via the ``revision_for`` contextvar
+        # lookup; on a hit, the backend GET pins to the recorded
+        # revision so replay serves the exact bytes the agent saw.
+        # Empty during normal runs; populated only by the snapshot
+        # loader.
+        self.revisions: dict[str, str] = {}
         self._cmds: dict[tuple, RegisteredCommand] = {}
         self._general_cmds: dict[str, RegisteredCommand] = {}
         self._cmd_specs: dict[str, CommandSpec] = {}
@@ -416,6 +431,7 @@ class Mount:
             kw["session_id"] = session_id
 
         prev_prefix = push_mount_prefix(mount_prefix)
+        revs_token = push_revisions(self.revisions or None)
         try:
             for cmd in handlers:
                 if cmd.write and self.mode == MountMode.READ:
@@ -426,9 +442,11 @@ class Mount:
                 result = await cmd.fn(self.resource.accessor, paths, *texts,
                                       **kw)
                 if result is not None:
-                    return _wrap_cmd_streams(result, mount_prefix)
+                    return _wrap_cmd_streams(result, mount_prefix,
+                                             self.revisions or None)
             return None, IOResult()
         finally:
+            reset_revisions(revs_token)
             push_mount_prefix(prev_prefix)
 
     async def execute_op(
@@ -465,6 +483,7 @@ class Mount:
         )
         kwargs.setdefault("index", self.resource.index)
         prev_prefix = push_mount_prefix(mount_prefix)
+        revs_token = push_revisions(self.revisions or None)
         try:
             for op in levels:
                 result = op.fn(self.resource.accessor, scope, *args, **kwargs)
@@ -474,4 +493,5 @@ class Mount:
                     return result
             return None
         finally:
+            reset_revisions(revs_token)
             push_mount_prefix(prev_prefix)

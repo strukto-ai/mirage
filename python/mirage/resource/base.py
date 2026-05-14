@@ -18,7 +18,6 @@ from typing import Any, Callable
 from mirage.accessor.base import Accessor
 from mirage.cache.index import (IndexCacheStore, IndexConfig,
                                 RAMIndexCacheStore, RedisIndexConfig)
-from mirage.types import Revision
 
 try:
     from mirage.cache.index import RedisIndexCacheStore
@@ -92,34 +91,6 @@ class BaseResource:
             str | None: Fingerprint string, or None if always fresh.
         """
         return None
-
-    def pin_revision(self, path: str, revision: Revision) -> bool:
-        """Pin future reads at `path` to a specific revision.
-
-        Snapshot+replay hook. When the snapshot manifest carries a
-        ``revision`` for a recorded read, ``Workspace.load`` calls this
-        on the owning resource to install the pin. Subsequent reads at
-        that path then fetch the exact recorded version (e.g. S3
-        ``GetObject(VersionId=...)``) instead of the current head, and
-        the drift check skips the path because the bytes are guaranteed
-        to match by construction.
-
-        Default returns False: the backend does not support revision
-        pinning, so the load layer will fall back to drift detection
-        only. Override in subclasses that can honor a pin (S3 family
-        today; Google Drive, GitHub, Azure Blob in the future).
-
-        Args:
-            path (str): Virtual path whose reads should be pinned.
-            revision (Revision): Opaque per-backend revision marker
-                that was captured at snapshot time.
-
-        Returns:
-            bool: True if the pin was accepted and future reads will
-            honor it; False if the backend does not pin (caller falls
-            back to drift detection).
-        """
-        return False
 
     def register_op(self, fn) -> None:
         for ro in fn._registered_ops:

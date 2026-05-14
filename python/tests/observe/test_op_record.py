@@ -31,6 +31,51 @@ def test_op_record_fields():
     assert r.bytes == 1024
     assert r.timestamp == 1711800000000
     assert r.duration_ms == 150
+    assert r.fingerprint is None
+    assert r.revision is None
+
+
+def test_op_record_with_fingerprint():
+    r = OpRecord(
+        op="read",
+        path="/s3/data/file.csv",
+        source="s3",
+        bytes=1024,
+        timestamp=1711800000000,
+        duration_ms=150,
+        fingerprint="abc123",
+    )
+    assert r.fingerprint == "abc123"
+    assert r.revision is None
+
+
+def test_op_record_with_revision():
+    r = OpRecord(
+        op="read",
+        path="/s3/data/file.csv",
+        source="s3",
+        bytes=1024,
+        timestamp=1711800000000,
+        duration_ms=150,
+        revision="vL5_raa...",
+    )
+    assert r.revision == "vL5_raa..."
+    assert r.fingerprint is None
+
+
+def test_op_record_with_both():
+    r = OpRecord(
+        op="read",
+        path="/s3/data/file.csv",
+        source="s3",
+        bytes=1024,
+        timestamp=1711800000000,
+        duration_ms=150,
+        fingerprint="abc123",
+        revision="vL5_raa...",
+    )
+    assert r.fingerprint == "abc123"
+    assert r.revision == "vL5_raa..."
 
 
 def test_op_record_zero_bytes():

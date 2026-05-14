@@ -18,7 +18,8 @@ from collections.abc import AsyncIterator
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.core.s3._client import _client_kwargs, _key, async_session
-from mirage.observe.context import record, record_stream
+from mirage.core.s3.read import _fp_rev_from_response
+from mirage.observe.context import record, record_stream, revision_for
 from mirage.types import PathSpec
 
 
@@ -44,15 +45,19 @@ async def read_stream(
         path = path.original
     if prefix and path.startswith(prefix):
         path = path[len(prefix):] or "/"
-    pin = accessor.revision_pins.get(virtual)
+    pinned_revision = revision_for(virtual)
     config = accessor.config
     rec = record_stream("read", path, "s3")
     session = async_session(config)
     async with session.client(**_client_kwargs(config)) as client:
         kwargs: dict = {"Bucket": config.bucket, "Key": _key(path)}
-        if pin:
-            kwargs["VersionId"] = pin
+        if pinned_revision is not None:
+            kwargs["VersionId"] = pinned_revision
         response = await client.get_object(**kwargs)
+        if rec is not None:
+            fingerprint, revision = _fp_rev_from_response(response)
+            rec.fingerprint = fingerprint
+            rec.revision = revision
         async for chunk in response["Body"].iter_chunks(chunk_size):
             if rec is not None:
                 rec.bytes += len(chunk)
@@ -83,10 +88,17 @@ async def range_read(accessor: S3Accessor, path: PathSpec, start: int,
             "Key": _key(path),
             "Range": f"bytes={start}-{end - 1}",
         }
-        pin = accessor.revision_pins.get(virtual)
-        if pin:
-            kwargs["VersionId"] = pin
+        pinned_revision = revision_for(virtual)
+        if pinned_revision is not None:
+            kwargs["VersionId"] = pinned_revision
         response = await client.get_object(**kwargs)
         data = await response["Body"].read()
-        record("read", path, "s3", len(data), start_ms)
+        fingerprint, revision = _fp_rev_from_response(response)
+        record("read",
+               path,
+               "s3",
+               len(data),
+               start_ms,
+               fingerprint=fingerprint,
+               revision=revision)
         return data

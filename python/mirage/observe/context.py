@@ -122,8 +122,13 @@ def _virtual(path: str, prefix: str) -> str:
     return path
 
 
-def record(op: str, path: str, source: str, nbytes: int,
-           start_ms: int) -> None:
+def record(op: str,
+           path: str,
+           source: str,
+           nbytes: int,
+           start_ms: int,
+           fingerprint: str | None = None,
+           revision: str | None = None) -> None:
     """Record a byte transfer event. No-op if no recording context is active.
 
     Args:
@@ -132,6 +137,11 @@ def record(op: str, path: str, source: str, nbytes: int,
         source (str): Resource name ("s3", "ram", "disk").
         nbytes (int): Bytes transferred.
         start_ms (int): Monotonic start time in milliseconds.
+        fingerprint (str | None): Content-derived identifier returned by
+            the backend (ETag, md5). Used for drift detection at replay.
+        revision (str | None): Stable revision handle returned by the
+            backend (S3 ``VersionId``, Drive ``revisionId``, Git SHA).
+            Used to pin replay reads to the exact recorded version.
     """
     rec = _recorder.get()
     if rec is None:
@@ -147,22 +157,35 @@ def record(op: str, path: str, source: str, nbytes: int,
             timestamp=int(time.time() * 1000),
             duration_ms=elapsed,
             mount_prefix=prefix,
+            fingerprint=fingerprint,
+            revision=revision,
         ))
 
 
-def record_stream(op: str, path: str, source: str) -> OpRecord | None:
+def record_stream(op: str,
+                  path: str,
+                  source: str,
+                  fingerprint: str | None = None,
+                  revision: str | None = None) -> OpRecord | None:
     """Start recording a streaming transfer. Returns a mutable OpRecord.
 
-    The caller updates `rec.bytes` as chunks flow through. The record is
-    appended to the active recorder immediately so it captures partial
-    consumption (e.g., head stopping early).
+    The caller updates ``rec.bytes`` as chunks flow through. The record
+    is appended to the active recorder immediately so it captures
+    partial consumption (e.g., head stopping early). The caller may
+    also assign ``rec.fingerprint`` / ``rec.revision`` after the initial
+    GET response is available; passing them here is a shortcut for the
+    common case where the values are known up front.
 
-    Returns None if no recording context is active.
+    Returns ``None`` if no recording context is active.
 
     Args:
         op (str): Operation name ("read", "write").
         path (str): Resource-relative path.
         source (str): Resource name ("s3", "ram", "disk").
+        fingerprint (str | None): Initial fingerprint; the caller can
+            also set ``rec.fingerprint`` later.
+        revision (str | None): Initial revision; the caller can also set
+            ``rec.revision`` later.
 
     Returns:
         OpRecord | None: Mutable record, or None if not recording.
@@ -179,6 +202,89 @@ def record_stream(op: str, path: str, source: str) -> OpRecord | None:
         timestamp=int(time.time() * 1000),
         duration_ms=0,
         mount_prefix=prefix,
+        fingerprint=fingerprint,
+        revision=revision,
     )
     rec.sink.append(op_rec)
     return op_rec
+
+
+_revisions: ContextVar[dict[str, str] | None] = ContextVar("_revisions",
+                                                           default=None)
+
+
+def push_revisions(revisions: dict[str, str] | None):
+    """Set the active revision map for the current async context.
+
+    Read functions consult :func:`revision_for` to look up whether a
+    given virtual path should be pinned to a specific backend revision
+    on replay. Mount entry points push their ``revisions`` map here
+    before dispatching, so any read fired inside the mount's command or
+    op handler sees the pin without explicit threading.
+
+    Returns the token from ``ContextVar.set`` so callers can restore
+    the previous state via :func:`reset_revisions`. Task-isolated: the
+    ContextVar copy is per-task, so concurrent mounts don't see each
+    other's pins.
+
+    Args:
+        revisions (dict[str, str] | None): Mapping of virtual path to
+            backend revision. None clears the active map.
+
+    Returns:
+        Token: passable to ``reset_revisions``.
+    """
+    return _revisions.set(revisions)
+
+
+def reset_revisions(token) -> None:
+    """Restore the previous revisions map after a :func:`push_revisions`.
+
+    Args:
+        token: The token returned by ``push_revisions``.
+    """
+    _revisions.reset(token)
+
+
+def revision_for(path: str) -> str | None:
+    """Return the revision pin for ``path`` if one is active.
+
+    Args:
+        path (str): Virtual path (mount_prefix + rel_path).
+
+    Returns:
+        str | None: The pinned revision, or None if no revisions
+        context is active or the path has no pin.
+    """
+    revs = _revisions.get()
+    if revs is None:
+        return None
+    return revs.get(path)
+
+
+async def with_revisions(revisions: dict[str, str] | None,
+                         it: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+    """Wrap an async iterator so the active revisions map is ``revisions``
+    during each ``__anext__`` of the underlying stream.
+
+    Mirrors :func:`with_mount_prefix`. A command handler can return an
+    async generator that defers its backend ``read_stream`` call to the
+    first chunk request; by the time the caller consumes it, the
+    dispatcher's ``revisions`` context would otherwise have been reset.
+    Wrapping with this restores the pins on every iteration.
+
+    Args:
+        revisions (dict[str, str] | None): Revisions to push during
+            iteration.
+        it (AsyncIterator[bytes]): The stream to wrap.
+    """
+    aiter = it.__aiter__()
+    while True:
+        token = push_revisions(revisions)
+        try:
+            chunk = await aiter.__anext__()
+        except StopAsyncIteration:
+            reset_revisions(token)
+            return
+        reset_revisions(token)
+        yield chunk

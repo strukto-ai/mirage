@@ -16,12 +16,8 @@ from typing import Any
 
 from mirage import Workspace
 from mirage.resource.registry import build_resource
+from mirage.workspace.snapshot import to_state_dict
 from mirage.workspace.snapshot.utils import norm_mount_prefix
-
-
-async def _to_state(ws: Workspace) -> dict:
-    from mirage.workspace.snapshot import to_state_dict
-    return await to_state_dict(ws)
 
 
 def _build_override_resources(override: dict[str, Any] | None) -> dict:
@@ -81,7 +77,7 @@ async def clone_workspace_with_override(src_ws: Workspace,
     Returns:
         Workspace: a new, independent workspace.
     """
-    state = await _to_state(src_ws)
+    state = to_state_dict(src_ws)
     override_resources = _build_override_resources(override)
     existing = _existing_needs_override_resources(src_ws,
                                                   skip=set(override_resources))

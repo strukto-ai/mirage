@@ -294,7 +294,7 @@ def test_workspace_copy_preserves_max_drain_bytes():
 def test_to_state_dict_shape():
     ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
-    state = asyncio.run(to_state_dict(ws))
+    state = to_state_dict(ws)
     assert state["version"] == 2
     assert "mirage_version" in state
     assert isinstance(state["mounts"], list)

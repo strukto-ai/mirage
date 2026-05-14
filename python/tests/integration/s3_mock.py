@@ -145,11 +145,12 @@ class MultiBucketS3Client:
                          Key: str,
                          Range: str | None = None,
                          VersionId: str | None = None) -> dict:
-        self._track(Bucket, Key)
+        vid_for_resp = self._track(Bucket, Key)
         if VersionId is not None:
             history = self._versions.get((Bucket, Key), [])
             for vid, data in history:
                 if vid == VersionId:
+                    vid_for_resp = vid
                     break
             else:
                 raise _mock_s3_error("NoSuchVersion")
@@ -158,9 +159,13 @@ class MultiBucketS3Client:
             if Key not in objects:
                 raise _mock_s3_error("NoSuchKey")
             data = objects[Key]
+        etag = hashlib.md5(data).hexdigest()
         if Range is not None:
             data = _slice_range(data, Range)
-        return {"Body": _AsyncMockBody(data)}
+        resp: dict = {"Body": _AsyncMockBody(data), "ETag": f'"{etag}"'}
+        if vid_for_resp is not None:
+            resp["VersionId"] = vid_for_resp
+        return resp
 
     async def head_object(self, Bucket: str, Key: str) -> dict:
         objects = self._objects(Bucket)

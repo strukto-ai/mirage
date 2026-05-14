@@ -163,6 +163,46 @@ def test_live_no_drift_passes(tmp_path):
         _cleanup_key(key)
 
 
+def test_live_pin_records_agent_version_not_snapshot_time_version(tmp_path):
+    """Race-fix regression test.
+
+    Agent reads V1 at T1. Between T1 and snapshot at T3, an external
+    actor mutates the object to V2. Old design (live stat at snapshot
+    time) would capture V2's VersionId and pin replay to V2, serving
+    bytes the agent never saw. New design records VersionId at READ
+    time (from the GET response headers), so the snapshot pins to V1
+    and serves V1 bytes on cache miss.
+
+    Skipped on non-versioned buckets (no revision = no pin).
+    """
+    if not _versioning_enabled():
+        pytest.skip("requires versioning")
+
+    key = _probe_key()
+    probe = f"/s3/{key}"
+    client = _boto_client()
+    client.put_object(Bucket=LIVE_BUCKET, Key=key, Body=b"v1\n")
+    try:
+        src = Workspace(_mount(), mode=MountMode.WRITE)
+        result = asyncio.run(src.execute(f"cat {probe}"))
+        assert b"v1" in result.stdout
+
+        # Race: upstream changes BEFORE snapshot fires
+        client.put_object(Bucket=LIVE_BUCKET, Key=key, Body=b"v2-racy\n")
+
+        snap = tmp_path / "racy.tar"
+        asyncio.run(src.snapshot(snap))
+
+        dst = Workspace.load(snap, resources=_override())
+        dst._cache.evict_paths([probe])
+        result = asyncio.run(dst.execute(f"cat {probe}"))
+        assert result.stdout == b"v1\n", (
+            f"snapshot pinned the wrong VersionId; served {result.stdout!r} "
+            "instead of the V1 the agent actually saw")
+    finally:
+        _cleanup_key(key)
+
+
 def test_live_version_pin_serves_original_on_versioned_bucket(tmp_path):
     """End-to-end pin: with bucket versioning enabled, snapshot captures
     the live VersionId. After the bucket head moves on, STRICT load
@@ -225,7 +265,7 @@ def test_live_off_policy_serves_current(tmp_path):
         dst = Workspace.load(snap,
                              resources=_override(),
                              drift_policy=DriftPolicy.OFF)
-        assert dst._pinned_paths == set()
+        assert dst.revisions == {}
         result = asyncio.run(dst.execute(f"cat {probe}"))
         assert b"mutated" in result.stdout
     finally:

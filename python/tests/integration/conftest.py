@@ -90,7 +90,7 @@ class AsyncMockS3Client:
         data = self.objects[Key]
         if Range is not None:
             data = _slice_range(data, Range)
-        return {"Body": AsyncMockBody(data)}
+        return {"Body": AsyncMockBody(data), "ETag": f'"{Key}"'}
 
     async def head_object(self, Bucket: str, Key: str) -> dict:
         del Bucket

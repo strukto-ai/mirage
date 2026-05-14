@@ -46,55 +46,51 @@ class ContentDriftError(Exception):
             "since the snapshot was taken")
 
 
-async def capture_fingerprints(ws) -> list[dict]:
-    """Walk session ops and capture fingerprints for every distinct
-    remote read on a SUPPORTS_SNAPSHOT mount.
+def capture_fingerprints(ws) -> list[dict]:
+    """Walk session ops and emit one entry per distinct read on a
+    ``SUPPORTS_SNAPSHOT`` mount.
+
+    Pure aggregation over ``ws._ops.records``. Each read ``OpRecord``
+    carries the ``fingerprint`` and/or ``revision`` the backend
+    returned at the moment the agent read the bytes (populated from
+    the GET response, not a fresh stat at snapshot time). This avoids
+    the race where the upstream changes between read and snapshot.
 
     Skips paths whose owning mount has ``SUPPORTS_SNAPSHOT=False``
-    (live-only backends like Gmail/Slack/Linear) and paths the resource
-    cannot fingerprint (``stat()`` returned ``None``). The optional
-    ``revision`` (e.g. S3 ``VersionId``, Drive ``revisionId``) is
-    captured alongside the fingerprint when the backend exposes one;
-    load-time replay uses it to pin reads, bypassing drift detection.
+    (live-only backends like Gmail/Slack/Linear) and reads where the
+    backend returned neither marker.
 
     Args:
-        ws: Workspace whose ops history to walk.
+        ws: Workspace whose ops log to walk.
 
     Returns:
-        list[dict]: One entry per fingerprinted path, with ``PATH``,
-        ``MOUNT_PREFIX``, ``FINGERPRINT`` and optionally ``REVISION``.
+        list[dict]: One entry per (recorded, fingerprinted) path, with
+        ``PATH``, ``MOUNT_PREFIX`` and at least one of ``FINGERPRINT``
+        or ``REVISION``. Both may be present on versioned backends that
+        return ETag and VersionId on every GET.
     """
     seen: set[str] = set()
     out: list[dict] = []
     for rec in ws._ops.records:
-        if rec.op != "read":
+        if rec.op != "read" or rec.path in seen:
             continue
-        path = rec.path
-        if path in seen:
+        if rec.fingerprint is None and rec.revision is None:
             continue
-        seen.add(path)
+        seen.add(rec.path)
         try:
-            mount = ws._registry.mount_for(path)
+            mount = ws._registry.mount_for(rec.path)
         except ValueError:
             continue
         if not getattr(mount.resource, "SUPPORTS_SNAPSHOT", False):
             continue
-        try:
-            stat = await mount.execute_op("stat", path)
-        except Exception as exc:
-            logger.debug("fingerprint capture skipped %s: %s", path, exc)
-            continue
-        marker = getattr(stat, "fingerprint", None)
-        if marker is None:
-            continue
         entry: dict = {
-            FingerprintKey.PATH: path,
+            FingerprintKey.PATH: rec.path,
             FingerprintKey.MOUNT_PREFIX: mount.prefix,
-            FingerprintKey.FINGERPRINT: marker,
         }
-        rev = getattr(stat, "revision", None)
-        if rev:
-            entry[FingerprintKey.REVISION] = rev
+        if rec.fingerprint is not None:
+            entry[FingerprintKey.FINGERPRINT] = rec.fingerprint
+        if rec.revision is not None:
+            entry[FingerprintKey.REVISION] = rec.revision
         out.append(entry)
     return out
 

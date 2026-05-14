@@ -13,14 +13,14 @@ When the backend exposes a stable per-object revision marker (S3 `VersionId`, Dr
 ```mermaid
 flowchart TD
     Load["Workspace.load(tar)"] --> Inject{Manifest carries<br/>revision for path?}
-    Inject -->|yes| Pin["Resource.pin_revision(path, rev)"]
-    Inject -->|no| Mark[Mark path for drift check]
+    Inject -->|yes| Pin["mount.revisions[path] = revision"]
+    Inject -->|no| Mark[Queue (mount, path, fingerprint)<br/>for drift check]
     Pin --> Ready[Workspace ready]
     Mark --> Ready
     Ready --> First[First dispatch / execute]
-    First --> Gather[asyncio.gather drift checks<br/>skip pinned paths]
+    First --> Gather[asyncio.gather drift checks<br/>pinned paths never queued]
     Gather --> Read[Read at path]
-    Read --> Pinned{Pinned?}
+    Read --> Pinned{revision_for path<br/>set?}
     Pinned -->|yes| Versioned[GET path with VersionId<br/>= original bytes]
     Pinned -->|no| Live[GET path live]
     Live --> Match{Fingerprint<br/>matches snapshot?}
@@ -135,7 +135,7 @@ Legend: ✅ = supported · 🟡 = adapter needed (no work in flight) · 📝 = p
 | --- | :---: | :---: | :---: | :---: | --- | --- |
 | S3 | ✅ | ✅ | 📝 | 📝 | `ETag` + `VersionId` | Pin requires bucket versioning. |
 | R2 | ✅ | ✅ | 📝 | 📝 | `ETag` + `VersionId` | Inherits S3 path; pin requires R2 versioning (GA 2024). |
-| GCS | ✅ | 🟡 | 📝 | 🟡 | `ETag` + `x-goog-generation` | TODO(snapshot-gcs): map generation → `Revision` in `core/s3/stat.py`. |
+| GCS | ✅ | 🟡 | 📝 | 🟡 | `ETag` + `x-goog-generation` | TODO(snapshot-gcs): map generation → `ContentVersion(kind="revision")` in `core/s3/stat.py`. |
 | OCI | ✅ | 🟡 | 📝 | 🟡 | `ETag` + `versionId` header | TODO(snapshot-oci): same shape as GCS adapter. |
 | Supabase | ✅ | ❌ | 📝 | ❌ | `ETag` only | Inherits `S3Resource`. Supabase's S3-compat endpoint does not surface object `VersionId`, so drift detection works but pinning is not available. |
 
@@ -154,8 +154,9 @@ Legend: ✅ = supported · 🟡 = adapter needed (no work in flight) · 📝 = p
 Three steps in Python:
 
 ```python
+from mirage.observe.context import record, revision_for
 from mirage.resource.base import BaseResource
-from mirage.types import FileStat, Fingerprint, Revision
+from mirage.types import FileStat
 
 
 class MyResource(BaseResource):
@@ -164,17 +165,31 @@ class MyResource(BaseResource):
     async def stat(self, ...) -> FileStat:
         return FileStat(
             ...,
-            fingerprint=Fingerprint(my_etag_equivalent),   # 2. for drift
-            revision=Revision(my_revision_marker),         # optional, for pin
+            fingerprint=my_etag_equivalent,        # 2. for drift
+            revision=my_revision_marker_or_None,   # 3. optional, for pin
         )
-
-    def pin_revision(self, path: str, revision: Revision) -> bool:
-        # 3. honor the pin on subsequent reads
-        self.accessor.revision_pins[path] = revision
-        return True
 ```
 
-If your backend has no stable revision, omit step 3 — drift detection still works.
+And in your read function, look up the active pin and pass both the
+fingerprint and the revision through to ``record`` so the snapshot
+captures whatever the backend served:
+
+```python
+async def read_bytes(accessor, virtual_path, ...):
+    pinned = revision_for(virtual_path)  # 4. None if no pin installed
+    response = backend_get(virtual_path, revision=pinned)
+    record(
+        "read", virtual_path, "my-backend", len(response.body), start_ms,
+        fingerprint=response.etag,        # 5. for drift detection
+        revision=response.revision,       # 6. for pinning on replay
+    )
+    return response.body
+```
+
+At load time the workspace writes each manifest entry straight into
+``mount.revisions`` — no per-resource hook required. If your backend
+has no stable revision, skip steps 3 and 6; drift detection still
+works on the fingerprint alone.
 
 ## Caveats
 

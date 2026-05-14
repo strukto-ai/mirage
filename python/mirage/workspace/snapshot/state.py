@@ -34,7 +34,7 @@ def _mirage_version() -> str:
         return "unknown"
 
 
-async def to_state_dict(ws) -> dict:
+def to_state_dict(ws) -> dict:
     auto_prefixes = {"/dev/"}
     if ws.observer is not None:
         auto_prefixes.add(norm_mount_prefix(ws.observer.prefix))
@@ -70,7 +70,7 @@ async def to_state_dict(ws) -> dict:
         if j.status != JobStatus.RUNNING
     ]
 
-    fingerprints = await capture_fingerprints(ws)
+    fingerprints = capture_fingerprints(ws)
     live_only_mounts = live_only_mount_prefixes(ws)
 
     return {
