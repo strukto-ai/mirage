@@ -50,7 +50,8 @@ function makeMount(prefix: string, supportsSnapshot: boolean): Mount {
 
 function makeStatFn(stats?: Record<string, FileStat>): (path: string) => Promise<FileStat> {
   return (path) => {
-    if (stats !== undefined && path in stats) return Promise.resolve(stats[path]!)
+    const hit = stats?.[path]
+    if (hit !== undefined) return Promise.resolve(hit)
     const err = new Error(`not found: ${path}`) as Error & { code: string }
     err.code = 'ENOENT'
     return Promise.reject(err)

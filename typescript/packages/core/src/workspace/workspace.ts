@@ -45,12 +45,7 @@ import {
   SNAPSHOT_FORMAT_VERSION,
   type WorkspaceStateDict,
 } from '../snapshot/state.ts'
-import {
-  captureFingerprints,
-  checkDrift,
-  ContentDriftError,
-  liveOnlyMountPrefixes,
-} from './snapshot/drift.ts'
+import { captureFingerprints, checkDrift, liveOnlyMountPrefixes } from './snapshot/drift.ts'
 import { DEFAULT_AGENT_ID, DriftPolicy, FileType, MountMode, type PathSpec } from '../types.ts'
 import type { TSNodeLike } from './expand/variable.ts'
 import type { ExecuteFn } from './expand/node.ts'

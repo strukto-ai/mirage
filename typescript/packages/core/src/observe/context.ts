@@ -118,9 +118,9 @@ export function runWithRevisions<T>(
  * installed (or no revisions context is active).
  */
 export function revisionFor(path: string): string | null {
-  const state = revisionsStorage.getStore()
-  if (state === undefined || state.map === null) return null
-  return state.map.get(path) ?? null
+  const map = revisionsStorage.getStore()?.map
+  if (!map) return null
+  return map.get(path) ?? null
 }
 
 function applyPrefix(prefix: string, path: string): string {
