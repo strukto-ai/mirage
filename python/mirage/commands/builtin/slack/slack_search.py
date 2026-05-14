@@ -20,9 +20,23 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 SPEC = CommandSpec(options=(
-    Option(long="--query", value_kind=OperandKind.TEXT),
-    Option(long="--count", value_kind=OperandKind.TEXT),
-    Option(long="--page", value_kind=OperandKind.TEXT),
+    Option(
+        long="--query",
+        value_kind=OperandKind.TEXT,
+        description=("Slack search query "
+                     "(supports operators like 'from:@user', "
+                     "'in:#channel')"),
+    ),
+    Option(
+        long="--count",
+        value_kind=OperandKind.TEXT,
+        description="Results per page (1-100, default 20)",
+    ),
+    Option(
+        long="--page",
+        value_kind=OperandKind.TEXT,
+        description="1-based page number (default 1)",
+    ),
 ), )
 
 
