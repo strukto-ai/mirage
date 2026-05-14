@@ -94,9 +94,39 @@ async def test_search(accessor, config):
         stream, io_result = await slack_search(accessor, [],
                                                query="test query")
 
-    mock_search.assert_called_once_with(config, "test query")
+    mock_search.assert_called_once_with(config, "test query", count=20, page=1)
     out = json.loads(stream)
     assert out["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_search_forwards_count_and_page(accessor, config):
+    with patch(
+            "mirage.commands.builtin.slack.slack_search"
+            ".search_messages",
+            new_callable=AsyncMock,
+            return_value=b'{"ok":true}',
+    ) as mock_search:
+        await slack_search(accessor, [], query="q", count="50", page="3")
+    mock_search.assert_called_once_with(config, "q", count=50, page=3)
+
+
+@pytest.mark.asyncio
+async def test_search_rejects_count_above_100(accessor):
+    with pytest.raises(ValueError, match="count"):
+        await slack_search(accessor, [], query="q", count="101")
+
+
+@pytest.mark.asyncio
+async def test_search_rejects_page_below_1(accessor):
+    with pytest.raises(ValueError, match="page"):
+        await slack_search(accessor, [], query="q", page="0")
+
+
+@pytest.mark.asyncio
+async def test_search_rejects_non_integer_count(accessor):
+    with pytest.raises(ValueError, match="count"):
+        await slack_search(accessor, [], query="q", count="abc")
 
 
 @pytest.mark.asyncio

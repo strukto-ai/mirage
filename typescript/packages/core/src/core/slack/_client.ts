@@ -15,6 +15,8 @@
 export interface SlackResponse {
   ok: boolean
   error?: string
+  needed?: string
+  provided?: string
   [key: string]: unknown
 }
 
@@ -22,10 +24,24 @@ export class SlackApiError extends Error {
   constructor(
     public readonly endpoint: string,
     public readonly slackError: string,
+    public readonly needed: string | null = null,
+    public readonly provided: string | null = null,
   ) {
-    super(`Slack API error (${endpoint}): ${slackError}`)
+    super(formatSlackErrorMessage(endpoint, slackError, needed, provided))
     this.name = 'SlackApiError'
   }
+}
+
+function formatSlackErrorMessage(
+  endpoint: string,
+  slackError: string,
+  needed: string | null,
+  provided: string | null,
+): string {
+  const base = `Slack API error (${endpoint}): ${slackError}`
+  if (slackError !== 'missing_scope' || needed === null || needed === '') return base
+  const providedRepr = provided !== null && provided !== '' ? provided : '(none)'
+  return `${base} (needed: ${needed}; provided: ${providedRepr})`
 }
 
 export interface SlackTransport {
@@ -58,7 +74,12 @@ export abstract class HttpSlackTransport implements SlackTransport {
     const res = await this.fetch(url, init)
     const data = (await res.json()) as SlackResponse
     if (!data.ok) {
-      throw new SlackApiError(endpoint, data.error ?? 'unknown_error')
+      throw new SlackApiError(
+        endpoint,
+        data.error ?? 'unknown_error',
+        data.needed ?? null,
+        data.provided ?? null,
+      )
     }
     return data
   }

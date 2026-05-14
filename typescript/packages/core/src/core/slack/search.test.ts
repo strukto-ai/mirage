@@ -31,19 +31,30 @@ class FakeTransport implements SlackTransport {
 }
 
 describe('searchMessages', () => {
-  it('calls search.messages with query, count, sort=timestamp', async () => {
+  it('calls search.messages with query, count, page, sort=timestamp', async () => {
     const t = new FakeTransport(() => ({ ok: true, messages: { matches: [] } }))
     const out = await searchMessages(new SlackAccessor(t), 'hello', 5)
     expect(t.calls[0]?.endpoint).toBe('search.messages')
-    expect(t.calls[0]?.params).toEqual({ query: 'hello', count: '5', sort: 'timestamp' })
+    expect(t.calls[0]?.params).toEqual({
+      query: 'hello',
+      count: '5',
+      page: '1',
+      sort: 'timestamp',
+    })
     const parsed = JSON.parse(DEC.decode(out)) as { ok: boolean }
     expect(parsed.ok).toBe(true)
   })
 
-  it('defaults count to 20', async () => {
+  it('defaults count to 20 and page to 1', async () => {
     const t = new FakeTransport(() => ({ ok: true }))
     await searchMessages(new SlackAccessor(t), 'q')
-    expect(t.calls[0]?.params).toMatchObject({ count: '20' })
+    expect(t.calls[0]?.params).toMatchObject({ count: '20', page: '1' })
+  })
+
+  it('forwards explicit page number', async () => {
+    const t = new FakeTransport(() => ({ ok: true }))
+    await searchMessages(new SlackAccessor(t), 'q', 50, 3)
+    expect(t.calls[0]?.params).toMatchObject({ count: '50', page: '3' })
   })
 
   it('returns bytes encoding the JSON response', async () => {

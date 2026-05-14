@@ -36,10 +36,12 @@ export async function searchMessages(
   accessor: SlackAccessor,
   query: string,
   count = 20,
+  page = 1,
 ): Promise<Uint8Array> {
   const params: Record<string, string> = {
     query,
     count: String(count),
+    page: String(page),
     sort: 'timestamp',
   }
   let effective = accessor

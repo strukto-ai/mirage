@@ -32,18 +32,25 @@ async def search_messages(
     config: SlackConfig,
     query: str,
     count: int = 20,
+    page: int = 1,
 ) -> bytes:
     """Search messages across workspace.
 
     Args:
         config (SlackConfig): Slack credentials.
         query (str): search query.
-        count (int): max results.
+        count (int): results per page (Slack caps at 100).
+        page (int): 1-based page number.
 
     Returns:
         bytes: JSON response.
     """
-    params = {"query": query, "count": count, "sort": "timestamp"}
+    params = {
+        "query": query,
+        "count": count,
+        "page": page,
+        "sort": "timestamp",
+    }
     data = await slack_get(
         config,
         "search.messages",
@@ -95,18 +102,25 @@ async def search_files(
     config: SlackConfig,
     query: str,
     count: int = 20,
+    page: int = 1,
 ) -> bytes:
     """Search files across workspace via Slack's search.files API.
 
     Args:
         config (SlackConfig): Slack credentials.
         query (str): search query.
-        count (int): max results.
+        count (int): results per page (Slack caps at 100).
+        page (int): 1-based page number.
 
     Returns:
         bytes: JSON response.
     """
-    params = {"query": query, "count": count, "sort": "timestamp"}
+    params = {
+        "query": query,
+        "count": count,
+        "page": page,
+        "sort": "timestamp",
+    }
     data = await slack_get(
         config,
         "search.files",

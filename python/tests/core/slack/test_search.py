@@ -13,9 +13,41 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from mirage.core.slack.scope import SlackScope
-from mirage.core.slack.search import format_grep_results
+from mirage.core.slack.search import format_grep_results, search_messages
+from mirage.resource.slack.config import SlackConfig
+
+
+@pytest.mark.asyncio
+async def test_search_messages_defaults_include_page_1():
+    cfg = SlackConfig(token="xoxp-test")
+    with patch(
+            "mirage.core.slack.search.slack_get",
+            new=AsyncMock(return_value={"ok": True}),
+    ) as fake_get:
+        await search_messages(cfg, "hello")
+    params = fake_get.call_args.kwargs["params"]
+    assert params["query"] == "hello"
+    assert params["count"] == 20
+    assert params["page"] == 1
+    assert params["sort"] == "timestamp"
+
+
+@pytest.mark.asyncio
+async def test_search_messages_forwards_explicit_count_and_page():
+    cfg = SlackConfig(token="xoxp-test")
+    with patch(
+            "mirage.core.slack.search.slack_get",
+            new=AsyncMock(return_value={"ok": True}),
+    ) as fake_get:
+        await search_messages(cfg, "hello", count=50, page=3)
+    params = fake_get.call_args.kwargs["params"]
+    assert params["count"] == 50
+    assert params["page"] == 3
 
 
 def test_format_grep_results_path_uses_chat_jsonl():

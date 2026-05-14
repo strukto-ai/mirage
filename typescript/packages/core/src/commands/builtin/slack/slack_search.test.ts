@@ -43,12 +43,13 @@ async function runSearch(
 }
 
 describe('slack-search command', () => {
-  it('calls search.messages with query and default count=20', async () => {
+  it('calls search.messages with query, default count=20, page=1', async () => {
     const { transport } = await runSearch({ query: 'hello' })
     expect(transport.calls[0]?.endpoint).toBe('search.messages')
     expect(transport.calls[0]?.params).toMatchObject({
       query: 'hello',
       count: '20',
+      page: '1',
       sort: 'timestamp',
     })
   })
@@ -56,6 +57,11 @@ describe('slack-search command', () => {
   it('respects --count', async () => {
     const { transport } = await runSearch({ query: 'hello', count: '7' })
     expect(transport.calls[0]?.params).toMatchObject({ count: '7' })
+  })
+
+  it('respects --page', async () => {
+    const { transport } = await runSearch({ query: 'hello', count: '100', page: '3' })
+    expect(transport.calls[0]?.params).toMatchObject({ count: '100', page: '3' })
   })
 
   it('returns the JSON response bytes', async () => {
@@ -69,5 +75,17 @@ describe('slack-search command', () => {
 
   it('throws when --query missing', async () => {
     await expect(runSearch({})).rejects.toThrow(/query/)
+  })
+
+  it('rejects --count above 100', async () => {
+    await expect(runSearch({ query: 'q', count: '101' })).rejects.toThrow(/count/)
+  })
+
+  it('rejects --page below 1', async () => {
+    await expect(runSearch({ query: 'q', page: '0' })).rejects.toThrow(/page/)
+  })
+
+  it('rejects non-integer --count', async () => {
+    await expect(runSearch({ query: 'q', count: 'abc' })).rejects.toThrow(/count/)
   })
 })

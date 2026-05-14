@@ -27,6 +27,18 @@ def slack_headers(config: SlackConfig,
     }
 
 
+def _format_slack_error(method: str, data: dict) -> str:
+    err = data.get("error", "unknown_error")
+    base = f"Slack API error ({method}): {err}"
+    if err != "missing_scope":
+        return base
+    needed = data.get("needed") or ""
+    if not needed:
+        return base
+    provided = data.get("provided") or "(none)"
+    return f"{base} (needed: {needed}; provided: {provided})"
+
+
 async def slack_get(
     config: SlackConfig,
     method: str,
@@ -39,8 +51,7 @@ async def slack_get(
         async with session.get(url, headers=headers, params=params) as resp:
             data = await resp.json()
             if not data.get("ok"):
-                err = data.get("error", "unknown_error")
-                raise RuntimeError(f"Slack API error: {err}")
+                raise RuntimeError(_format_slack_error(method, data))
             return data
 
 
@@ -55,6 +66,5 @@ async def slack_post(
         async with session.post(url, headers=headers, json=body or {}) as resp:
             data = await resp.json()
             if not data.get("ok"):
-                err = data.get("error", "unknown_error")
-                raise RuntimeError(f"Slack API error: {err}")
+                raise RuntimeError(_format_slack_error(method, data))
             return data

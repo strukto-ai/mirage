@@ -82,6 +82,54 @@ describe('HttpSlackTransport', () => {
     )
   })
 
+  it('missing_scope error surfaces needed and provided scopes', async () => {
+    const fakeFetch: typeof fetch = () =>
+      Promise.resolve(
+        jsonResponse({
+          ok: false,
+          error: 'missing_scope',
+          needed: 'im:read,mpim:read',
+          provided: 'channels:read,users:read',
+        }),
+      )
+    const t = new TestTransport('https://slack.com/api', {}, fakeFetch)
+    let caught: unknown = null
+    try {
+      await t.call('conversations.list')
+    } catch (e) {
+      caught = e
+    }
+    expect(caught).toBeInstanceOf(SlackApiError)
+    const err = caught as SlackApiError
+    expect(err.needed).toBe('im:read,mpim:read')
+    expect(err.provided).toBe('channels:read,users:read')
+    expect(err.message).toMatch(/needed: im:read,mpim:read/)
+    expect(err.message).toMatch(/provided: channels:read,users:read/)
+  })
+
+  it('missing_scope without needed field falls back to base message', async () => {
+    const fakeFetch: typeof fetch = () =>
+      Promise.resolve(jsonResponse({ ok: false, error: 'missing_scope' }))
+    const t = new TestTransport('https://slack.com/api', {}, fakeFetch)
+    await expect(t.call('conversations.list')).rejects.toThrow(
+      /Slack API error \(conversations\.list\): missing_scope$/,
+    )
+  })
+
+  it('missing_scope with empty provided renders provided as (none)', async () => {
+    const fakeFetch: typeof fetch = () =>
+      Promise.resolve(
+        jsonResponse({
+          ok: false,
+          error: 'missing_scope',
+          needed: 'im:read',
+          provided: '',
+        }),
+      )
+    const t = new TestTransport('https://slack.com/api', {}, fakeFetch)
+    await expect(t.call('conversations.list')).rejects.toThrow(/provided: \(none\)/)
+  })
+
   it('attaches auth headers + Content-Type', async () => {
     let observedHeaders: HeadersInit | undefined
     const fakeFetch: typeof fetch = (_url, init) => {
