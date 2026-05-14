@@ -26,7 +26,17 @@
 // The example exercises the full S3Resource surface: writes (tee, cp, mv,
 // rm, mkdir), reads (cat, head, grep, wc), find, and the du/rmR helpers.
 // At the end it clears all keys it wrote so the demo is reproducible.
-import { MountMode, S3Resource, Workspace, type S3Config } from '@struktoai/mirage-node'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import {
+  ContentDriftError,
+  DriftPolicy,
+  MountMode,
+  S3Resource,
+  Workspace,
+  type S3Config,
+} from '@struktoai/mirage-node'
 
 const DEC = new TextDecoder()
 
@@ -61,6 +71,119 @@ async function ensureBucket(): Promise<void> {
     }
   } finally {
     client.destroy()
+  }
+}
+
+async function tryEnableVersioning(): Promise<boolean> {
+  const sdk = await import('@aws-sdk/client-s3')
+  const client = new sdk.S3Client({
+    region: config.region,
+    endpoint: config.endpoint,
+    forcePathStyle: true,
+    credentials: { accessKeyId: config.accessKeyId!, secretAccessKey: config.secretAccessKey! },
+  })
+  try {
+    await client.send(
+      new sdk.PutBucketVersioningCommand({
+        Bucket: config.bucket,
+        VersioningConfiguration: { Status: 'Enabled' },
+      }),
+    )
+    const resp = await client.send(
+      new sdk.GetBucketVersioningCommand({ Bucket: config.bucket }),
+    )
+    return resp.Status === 'Enabled'
+  } catch {
+    return false
+  } finally {
+    client.destroy()
+  }
+}
+
+async function putObjectViaSdk(key: string, body: string): Promise<void> {
+  const sdk = await import('@aws-sdk/client-s3')
+  const client = new sdk.S3Client({
+    region: config.region,
+    endpoint: config.endpoint,
+    forcePathStyle: true,
+    credentials: { accessKeyId: config.accessKeyId!, secretAccessKey: config.secretAccessKey! },
+  })
+  try {
+    await client.send(
+      new sdk.PutObjectCommand({ Bucket: config.bucket, Key: key, Body: body }),
+    )
+  } finally {
+    client.destroy()
+  }
+}
+
+async function deleteObjectViaSdk(key: string): Promise<void> {
+  const sdk = await import('@aws-sdk/client-s3')
+  const client = new sdk.S3Client({
+    region: config.region,
+    endpoint: config.endpoint,
+    forcePathStyle: true,
+    credentials: { accessKeyId: config.accessKeyId!, secretAccessKey: config.secretAccessKey! },
+  })
+  try {
+    await client.send(new sdk.DeleteObjectCommand({ Bucket: config.bucket, Key: key }))
+  } catch {
+    // Best-effort cleanup; ignore tombstone artifacts on versioned buckets.
+  } finally {
+    client.destroy()
+  }
+}
+
+async function driftAndPinDemo(): Promise<void> {
+  console.log('\n=== DRIFT + VERSION PIN ===\n')
+  const versioned = await tryEnableVersioning()
+  console.log(`  bucket versioning: ${versioned ? 'enabled' : 'unavailable (drift only)'}`)
+
+  const probeKey = `drift-probe-${Math.random().toString(36).slice(2, 10)}.txt`
+  const probeVirtual = `/s3/${probeKey}`
+  await putObjectViaSdk(probeKey, 'original\n')
+
+  const ws = new Workspace({ '/s3/': new S3Resource(config) }, { mode: MountMode.WRITE })
+  const tempDir = mkdtempSync(join(tmpdir(), 'mirage-drift-'))
+  const snap = join(tempDir, 'pin.json')
+  try {
+    const readRes = await ws.execute(`cat ${probeVirtual}`)
+    console.log(`  agent saw: ${JSON.stringify(readRes.stdoutText.trim())}`)
+    const size = await ws.snapshot(snap)
+    console.log(`  snapshot: ${snap} (${String(size)} bytes)`)
+
+    await putObjectViaSdk(probeKey, 'mutated\n')
+    console.log('  upstream mutated to "mutated"')
+
+    const loaded = await Workspace.load(
+      snap,
+      { mode: MountMode.WRITE, driftPolicy: DriftPolicy.STRICT },
+      { '/s3/': new S3Resource(config) },
+    )
+    const pinned = Object.keys(loaded.revisions)
+    console.log(`  installed pins: ${pinned.length === 0 ? '(none)' : pinned.join(', ')}`)
+    try {
+      const replay = await loaded.execute(`cat ${probeVirtual}`)
+      const served = replay.stdoutText.trim()
+      if (versioned && served === 'original') {
+        console.log(`  STRICT load -> served: ${JSON.stringify(served)} (OK pin served original)`)
+      } else if (!versioned) {
+        console.log(`  STRICT load -> served: ${JSON.stringify(served)} (no pin available)`)
+      } else {
+        console.log(`  STRICT load -> served: ${JSON.stringify(served)} (UNEXPECTED)`)
+      }
+    } catch (err) {
+      if (err instanceof ContentDriftError) {
+        console.log(`  STRICT load raised ContentDriftError as expected: ${err.path}`)
+      } else {
+        throw err
+      }
+    } finally {
+      await loaded.close()
+    }
+  } finally {
+    await ws.close()
+    await deleteObjectViaSdk(probeKey)
   }
 }
 
@@ -117,6 +240,8 @@ async function main(): Promise<void> {
   } finally {
     await ws.close()
   }
+
+  await driftAndPinDemo()
 }
 
 main().catch((err: unknown) => {

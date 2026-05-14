@@ -17,6 +17,7 @@ import { command, type CommandFn, RegisteredCommand } from '../../commands/confi
 import { CommandSpec, Operand, OperandKind } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
 import type { Accessor } from '../../accessor/base.ts'
+import { revisionFor } from '../../observe/context.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
 import type { Resource } from '../../resource/base.ts'
 import { MountMode, PathSpec } from '../../types.ts'
@@ -232,6 +233,47 @@ describe('Mount.executeOp', () => {
     }
     m.registerOp(op)
     await expect(m.executeOp('write', '/x')).rejects.toThrow(/read-only/)
+  })
+})
+
+describe('Mount.revisions', () => {
+  it('starts empty and exposes the revisions map directly', () => {
+    const m = makeMount()
+    expect(m.revisions.size).toBe(0)
+  })
+
+  it('exposes installed pins to read functions via revisionFor during executeOp', async () => {
+    const m = makeMount()
+    m.revisions.set('/ram/x.txt', 'rev-1')
+    let observed: string | null = '<unset>'
+    const op: RegisteredOp = {
+      name: 'read',
+      resource: 'ram',
+      filetype: null,
+      write: false,
+      fn: (_accessor: Accessor, path: PathSpec) => {
+        observed = revisionFor(path.original)
+        return Promise.resolve(new Uint8Array())
+      },
+    }
+    m.registerOp(op)
+    await m.executeOp('read', '/ram/x.txt')
+    expect(observed).toBe('rev-1')
+  })
+
+  it('does not leak revisions outside the executeOp scope', async () => {
+    const m = makeMount()
+    m.revisions.set('/ram/x.txt', 'rev-1')
+    const op: RegisteredOp = {
+      name: 'read',
+      resource: 'ram',
+      filetype: null,
+      write: false,
+      fn: () => Promise.resolve(new Uint8Array()),
+    }
+    m.registerOp(op)
+    await m.executeOp('read', '/ram/x.txt')
+    expect(revisionFor('/ram/x.txt')).toBeNull()
   })
 })
 

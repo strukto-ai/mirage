@@ -27,6 +27,19 @@ export const ConsistencyPolicy = Object.freeze({
 
 export type ConsistencyPolicy = (typeof ConsistencyPolicy)[keyof typeof ConsistencyPolicy]
 
+/**
+ * Behaviour when a remote resource's live fingerprint differs from the
+ * value recorded at snapshot time.
+ */
+export const DriftPolicy = Object.freeze({
+  /** Raise ContentDriftError on first mismatch. */
+  STRICT: 'strict',
+  /** Skip drift checks entirely. */
+  OFF: 'off',
+} as const)
+
+export type DriftPolicy = (typeof DriftPolicy)[keyof typeof DriftPolicy]
+
 export const ResourceName = Object.freeze({
   DISK: 'disk',
   S3: 's3',
@@ -94,6 +107,7 @@ export interface FileStatInit {
   size?: number | null
   modified?: string | null
   fingerprint?: string | null
+  revision?: string | null
   type?: FileType | null
   extra?: Record<string, unknown>
 }
@@ -103,6 +117,7 @@ export class FileStat {
   readonly size: number | null
   readonly modified: string | null
   readonly fingerprint: string | null
+  readonly revision: string | null
   readonly type: FileType | null
   readonly extra: Record<string, unknown>
 
@@ -111,6 +126,7 @@ export class FileStat {
     this.size = init.size ?? null
     this.modified = init.modified ?? null
     this.fingerprint = init.fingerprint ?? null
+    this.revision = init.revision ?? null
     this.type = init.type ?? null
     this.extra = init.extra ?? {}
     Object.freeze(this)

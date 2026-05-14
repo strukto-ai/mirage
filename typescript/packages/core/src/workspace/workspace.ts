@@ -19,7 +19,7 @@ import type { FileCache } from '../cache/file/mixin.ts'
 import { RAMFileCacheStore } from '../cache/file/ram.ts'
 import type { ByteSource } from '../io/types.ts'
 import { IOResult, materialize } from '../io/types.ts'
-import { runWithRecording } from '../observe/context.ts'
+import { runWithRecording, runWithRevisions } from '../observe/context.ts'
 import { Observer } from '../observe/observer.ts'
 import type { OpRecord } from '../observe/record.ts'
 import { type OpKwargs, OpsRegistry } from '../ops/registry.ts'
@@ -39,12 +39,19 @@ import {
 import {
   type ExecutionNodeSnapshot,
   type ExecutionRecordSnapshot,
+  type FingerprintEntrySnapshot,
   type MountSnapshot,
   type ResourceState,
   SNAPSHOT_FORMAT_VERSION,
   type WorkspaceStateDict,
 } from '../snapshot/state.ts'
-import { DEFAULT_AGENT_ID, FileType, MountMode, type PathSpec } from '../types.ts'
+import {
+  captureFingerprints,
+  checkDrift,
+  ContentDriftError,
+  liveOnlyMountPrefixes,
+} from './snapshot/drift.ts'
+import { DEFAULT_AGENT_ID, DriftPolicy, FileType, MountMode, type PathSpec } from '../types.ts'
 import type { TSNodeLike } from './expand/variable.ts'
 import type { ExecuteFn } from './expand/node.ts'
 import type { DispatchFn } from './executor/cross_mount.ts'
@@ -127,6 +134,18 @@ const VALID_MODES: readonly string[] = [MountMode.READ, MountMode.WRITE, MountMo
 export interface WorkspaceOptions {
   mode?: MountMode
   modeOverrides?: Record<string, MountMode>
+  /**
+   * Behaviour for the post-load drift check on fingerprinted reads. Only
+   * consulted by {@link Workspace.load} / {@link Workspace.fromState};
+   * fresh workspaces never have fingerprints to check.
+   *
+   * - `STRICT` (load default): raise {@link ContentDriftError} on the
+   *   first mismatch when the workspace's first `dispatch`/`execute`
+   *   runs.
+   * - `OFF`: skip drift checks entirely and evict the snapshot cache
+   *   for fingerprinted paths.
+   */
+  driftPolicy?: DriftPolicy
   ops?: OpsRegistry
   shellParser?: ShellParser
   shellParserFactory?: () => Promise<ShellParser>
@@ -225,6 +244,12 @@ export class Workspace {
   private readonly pythonRuntime: PyodideRuntime
   private fuseMountpointValue: string | null = null
   private fuseOwnedInProcess = false
+  // Drift check state populated by Workspace.load. Empty during normal
+  // runs. Drained on first dispatch/execute after load (see
+  // {@link runPendingDriftCheck}).
+  protected driftPolicy: DriftPolicy = DriftPolicy.OFF
+  protected driftCheckPending = false
+  protected pendingDrift: { mount: Mount; path: string; fingerprint: string }[] = []
 
   get fuseMountpoint(): string | null {
     return this.fuseMountpointValue
@@ -504,6 +529,92 @@ export class Workspace {
     return parts.join('\n\n')
   }
 
+  /**
+   * Drain the post-load drift check.
+   *
+   * Called once on the first async entry point (`dispatch` or `execute`)
+   * after {@link Workspace.load} with a non-OFF drift policy. Stats every
+   * queued `(mount, path, expected_fingerprint)` triple against the live
+   * source in parallel and throws {@link ContentDriftError} on the first
+   * mismatch. Subsequent calls are no-ops.
+   *
+   * Pinned paths (those whose manifest entry carried a stable revision)
+   * are never enqueued — the pin guarantees bytes match by construction.
+   */
+  protected async runPendingDriftCheck(): Promise<void> {
+    this.driftCheckPending = false
+    if (this.pendingDrift.length === 0) return
+    const pending = this.pendingDrift
+    this.pendingDrift = []
+    const statFn = async (p: string): Promise<unknown> => this.dispatch('stat', p)
+    const results = await Promise.allSettled(
+      pending.map((p) => checkDrift(this.registry, statFn, p.path, p.fingerprint)),
+    )
+    for (const r of results) {
+      if (r.status === 'rejected') throw r.reason
+    }
+  }
+
+  /**
+   * Walk a loaded snapshot's fingerprint manifest. For entries with a
+   * revision, install the pin on the owning mount so replay reads pin to
+   * that revision. For fingerprint-only entries, queue a `(mount, path,
+   * fingerprint)` tuple for the drift check.
+   *
+   * Idempotent: clearing existing state before installing. Called from
+   * {@link Workspace.load} / {@link Workspace.fromState}.
+   */
+  protected installDriftState(
+    state: WorkspaceStateDict,
+    policy: DriftPolicy = DriftPolicy.STRICT,
+  ): void {
+    this.driftPolicy = policy
+    this.pendingDrift = []
+    this.driftCheckPending = false
+    const entries = state.fingerprints ?? []
+    if (entries.length === 0) return
+    if (policy === DriftPolicy.OFF) {
+      // Evict snapshot cache for fingerprinted paths so reads serve live.
+      for (const e of entries) {
+        void this.cache.remove(e.path)
+      }
+      return
+    }
+    for (const e of entries) {
+      const mount = this.registry.mountFor(e.path)
+      if (mount === null) continue
+      if (e.revision !== undefined && e.revision !== null) {
+        mount.revisions.set(e.path, e.revision)
+        continue
+      }
+      if (e.fingerprint !== undefined && e.fingerprint !== null) {
+        this.pendingDrift.push({ mount, path: e.path, fingerprint: e.fingerprint })
+      }
+    }
+    this.driftCheckPending = this.pendingDrift.length > 0
+    const liveOnly = state.liveOnlyMounts ?? []
+    if (liveOnly.length > 0) {
+      console.warn(
+        `Workspace.load: ${String(liveOnly.length)} mount(s) opt out of snapshot replay; ` +
+          `reads against them will serve current state with no drift detection: ` +
+          liveOnly.join(', '),
+      )
+    }
+  }
+
+  /**
+   * Read-only view of every mount's installed revision pins. Useful for
+   * tests, audit, and debugging. Empty until a snapshot is loaded with
+   * revisions in its manifest.
+   */
+  get revisions(): Record<string, string> {
+    const out: Record<string, string> = {}
+    for (const m of this.registry.allMounts()) {
+      for (const [path, revision] of m.revisions) out[path] = revision
+    }
+    return out
+  }
+
   async stat(path: string): Promise<unknown> {
     return this.fs.stat(path)
   }
@@ -518,6 +629,9 @@ export class Workspace {
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
+    if (this.driftCheckPending) {
+      await this.runPendingDriftCheck()
+    }
     const [resource, spec, mode] = await this.resolve(path)
     if (mode === MountMode.READ && this.opsRegistry.find(opName, resource.kind)?.write === true) {
       throw new Error(`mount at '${path}' is read-only`)
@@ -526,13 +640,18 @@ export class Workspace {
       kwargs.index === undefined && resource.index !== undefined
         ? { ...kwargs, index: resource.index }
         : kwargs
-    return this.opsRegistry.call(
-      opName,
-      resource.kind,
-      resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-      spec,
-      args,
-      fullKwargs,
+    const mount = this.registry.mountFor(path)
+    return runWithRevisions(
+      mount !== null && mount.revisions.size > 0 ? mount.revisions : null,
+      async () =>
+        this.opsRegistry.call(
+          opName,
+          resource.kind,
+          resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+          spec,
+          args,
+          fullKwargs,
+        ),
     )
   }
 
@@ -609,6 +728,9 @@ export class Workspace {
     if (options.signal?.aborted === true) {
       throw makeAbortError()
     }
+    if (this.driftCheckPending) {
+      await this.runPendingDriftCheck()
+    }
     const stdin = options.stdin ?? null
     if (options.provision === true) return this.provision(command)
     const parser = await this.getShellParser()
@@ -643,13 +765,18 @@ export class Workspace {
         kwargs?.index === undefined && resource.index !== undefined
           ? { ...(kwargs ?? {}), index: resource.index }
           : (kwargs ?? {})
-      const result = await opsRegistry.call(
-        opName,
-        resource.kind,
-        resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-        scope,
-        args ?? [],
-        fullKwargs,
+      const mount = this.registry.mountFor(path.original)
+      const result = await runWithRevisions(
+        mount !== null && mount.revisions.size > 0 ? mount.revisions : null,
+        async () =>
+          opsRegistry.call(
+            opName,
+            resource.kind,
+            resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+            scope,
+            args ?? [],
+            fullKwargs,
+          ),
       )
       if (DISPATCH_WRITE_OPS.has(opName)) {
         await this.invalidateAfterWriteByPath(path.original)
@@ -779,11 +906,18 @@ export class Workspace {
           }))
         : []
     const historyRecords = this.history.entries().map((r) => recordToSnapshot(r))
+    const fingerprints: FingerprintEntrySnapshot[] = captureFingerprints(
+      this.records,
+      this.registry,
+    )
+    const liveOnly = liveOnlyMountPrefixes(this.registry)
     return {
       version: SNAPSHOT_FORMAT_VERSION,
       mounts: mountSnapshots,
       cache: { limit: this.cache.cacheLimit, entries: cacheEntries },
       history: historyRecords,
+      fingerprints,
+      liveOnlyMounts: liveOnly,
     }
   }
 
@@ -871,6 +1005,7 @@ export class Workspace {
     }
     const ws = new this(resources, mergedOptions) as InstanceType<T>
     await ws.restore({ ...state, mounts: needsRestore })
+    ws.installDriftState(state, options.driftPolicy ?? DriftPolicy.STRICT)
     return ws
   }
 

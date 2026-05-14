@@ -21,6 +21,20 @@ export interface OpRecordInit {
   bytes: number
   timestamp: number
   durationMs: number
+  /**
+   * Content-derived identifier the backend returned for this read (ETag,
+   * md5). Captured at read time so the snapshot reflects what the agent
+   * actually saw. Null for writes, metadata ops, and backends without
+   * snapshot support.
+   */
+  fingerprint?: string | null
+  /**
+   * Stable revision handle the backend returned (S3 VersionId, Drive
+   * revisionId, Git SHA). Strictly stronger than fingerprint — populated
+   * only by backends that can guarantee revision durability. Used by
+   * replay to pin reads to the exact recorded version.
+   */
+  revision?: string | null
 }
 
 export class OpRecord {
@@ -30,6 +44,8 @@ export class OpRecord {
   bytes: number
   readonly timestamp: number
   durationMs: number
+  fingerprint: string | null
+  revision: string | null
 
   constructor(init: OpRecordInit) {
     this.op = init.op
@@ -38,6 +54,8 @@ export class OpRecord {
     this.bytes = init.bytes
     this.timestamp = init.timestamp
     this.durationMs = init.durationMs
+    this.fingerprint = init.fingerprint ?? null
+    this.revision = init.revision ?? null
   }
 
   get isCache(): boolean {
@@ -52,6 +70,8 @@ export class OpRecord {
       bytes: this.bytes,
       timestamp: this.timestamp,
       durationMs: this.durationMs,
+      fingerprint: this.fingerprint,
+      revision: this.revision,
     }
   }
 }

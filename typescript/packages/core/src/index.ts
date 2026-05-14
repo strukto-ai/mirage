@@ -17,6 +17,7 @@ export {
   ConsistencyPolicy,
   DEFAULT_AGENT_ID,
   DEFAULT_SESSION_ID,
+  DriftPolicy,
   FileStat,
   type FileStatInit,
   FileType,
@@ -25,6 +26,13 @@ export {
   type PathSpecInit,
   ResourceName,
 } from './types.ts'
+export {
+  captureFingerprints,
+  checkDrift,
+  ContentDriftError,
+  type FingerprintEntry,
+  liveOnlyMountPrefixes,
+} from './workspace/snapshot/drift.ts'
 export { type FindOptions, type Resource, throwUnsupported } from './resource/base.ts'
 export { RAMResource } from './resource/ram/ram.ts'
 export { RAMStore } from './resource/ram/store.ts'
@@ -186,7 +194,14 @@ export {
 export { OpRecord, type OpRecordInit } from './observe/record.ts'
 export { LogEntry, type LogEntryInit } from './observe/log_entry.ts'
 export { Observer } from './observe/observer.ts'
-export { record, recordStream, runWithRecording, setVirtualPrefix } from './observe/context.ts'
+export {
+  record,
+  recordStream,
+  revisionFor,
+  runWithRecording,
+  runWithRevisions,
+  setVirtualPrefix,
+} from './observe/context.ts'
 export { guessType } from './utils/filetype.ts'
 export { Accessor, NOOPAccessor, RAMAccessor } from './accessor/index.ts'
 export { cat as featherCat, describe as featherDescribe } from './core/filetype/feather.ts'
@@ -442,7 +457,7 @@ export { exists } from './core/s3/exists.ts'
 export { find } from './core/s3/find.ts'
 export { resolveGlob as resolveS3Glob } from './core/s3/glob.ts'
 export { mkdir } from './core/s3/mkdir.ts'
-export { read } from './core/s3/read.ts'
+export { fpRevFromS3Response, read } from './core/s3/read.ts'
 export { readdir } from './core/s3/readdir.ts'
 export { rename } from './core/s3/rename.ts'
 export { rmR } from './core/s3/rm.ts'

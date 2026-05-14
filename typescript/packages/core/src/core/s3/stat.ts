@@ -109,14 +109,18 @@ export async function stat(
         ContentLength?: number
         LastModified?: Date
         ETag?: string
+        VersionId?: string
       }
       const modified = resp.LastModified?.toISOString() ?? null
       const etag = resp.ETag?.replace(/^"|"$/g, '') ?? ''
+      let revision = resp.VersionId ?? null
+      if (revision === 'null') revision = null
       return new FileStat({
         name: basename(rawPath),
         size: resp.ContentLength ?? null,
         modified,
         fingerprint: etag !== '' ? etag : null,
+        revision,
         type: guessType(rawPath),
         extra: etag !== '' ? { etag } : {},
       })

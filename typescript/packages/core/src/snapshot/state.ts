@@ -64,9 +64,33 @@ export interface ExecutionRecordSnapshot {
   sessionId: string
 }
 
+/**
+ * One snapshot-time fingerprint entry per recorded read on a
+ * snapshot-capable mount. Carries the backend's identifier(s) for the
+ * bytes the agent actually saw, populated at read time from the GET
+ * response. At least one of `fingerprint` and `revision` is non-null.
+ */
+export interface FingerprintEntrySnapshot {
+  path: string
+  mountPrefix: string
+  fingerprint?: string | null
+  revision?: string | null
+}
+
 export interface WorkspaceStateDict {
   version: number
   mounts: MountSnapshot[]
   cache: CacheSnapshot
   history: ExecutionRecordSnapshot[]
+  /**
+   * Per-path fingerprint/revision pairs captured at snapshot time.
+   * Optional for backwards compatibility with v1 snapshots that
+   * predate drift detection.
+   */
+  fingerprints?: FingerprintEntrySnapshot[]
+  /**
+   * Mount prefixes whose resource opts out of snapshot replay
+   * (e.g. Gmail, Slack). Replay logs a warning naming these.
+   */
+  liveOnlyMounts?: string[]
 }

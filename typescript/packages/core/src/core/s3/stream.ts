@@ -12,37 +12,55 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '../../types.ts'
+import { recordStream, revisionFor } from '../../observe/context.ts'
+import { ResourceName, type PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import { createS3Client, isNotFoundError, loadS3Module, s3Key } from './_client.ts'
+import { fpRevFromS3Response } from './read.ts'
 
 const DEFAULT_CHUNK_SIZE = 64 * 1024
 
 export async function* stream(accessor: S3Accessor, path: PathSpec): AsyncIterable<Uint8Array> {
-  const original = path.original
+  const virtual = path.original
   const prefix = path.prefix
   const rawPath =
-    prefix !== '' && original.startsWith(prefix) ? original.slice(prefix.length) || '/' : original
+    prefix !== '' && virtual.startsWith(prefix) ? virtual.slice(prefix.length) || '/' : virtual
 
   const { config } = accessor
   const { GetObjectCommand } = await loadS3Module(config)
   const client = await createS3Client(config)
   const send = (
     client as unknown as {
-      send: (cmd: unknown) => Promise<{ Body?: unknown }>
+      send: (cmd: unknown) => Promise<{ Body?: unknown; ETag?: string; VersionId?: string }>
     }
   ).send.bind(client)
 
+  const pinnedRevision = revisionFor(virtual)
+  const input: Record<string, unknown> = { Bucket: config.bucket, Key: s3Key(rawPath) }
+  if (pinnedRevision !== null) input.VersionId = pinnedRevision
+
+  // Use virtual (mount-prefixed) path so the record stays correct even
+  // when the stream body executes after setVirtualPrefix has been reset.
+  const rec = recordStream('read', virtual, ResourceName.S3)
+
   try {
-    const resp = (await send(
-      new GetObjectCommand({ Bucket: config.bucket, Key: s3Key(rawPath) }),
-    )) as { Body?: unknown }
+    const resp = (await send(new GetObjectCommand(input))) as {
+      Body?: unknown
+      ETag?: string
+      VersionId?: string
+    }
+    if (rec !== null) {
+      const { fingerprint, revision } = fpRevFromS3Response(resp)
+      rec.fingerprint = fingerprint
+      rec.revision = revision
+    }
     const body = resp.Body as
       | (AsyncIterable<Uint8Array> & { [Symbol.asyncIterator]?: () => AsyncIterator<Uint8Array> })
       | undefined
     if (body === undefined) return
     if (typeof body[Symbol.asyncIterator] === 'function') {
       for await (const chunk of body) {
+        if (rec !== null) rec.bytes += chunk.byteLength
         yield chunk
       }
     }

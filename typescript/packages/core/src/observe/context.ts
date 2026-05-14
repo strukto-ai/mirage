@@ -22,6 +22,17 @@ interface RecordingState {
 
 const storage = createAsyncContext<RecordingState>()
 
+/**
+ * Per-task revision pins. Independent of the recording context so that
+ * direct {@link Workspace.dispatch} calls (which run outside
+ * {@link runWithRecording}) still honour installed pins.
+ */
+interface RevisionsState {
+  map: Map<string, string> | null
+}
+
+const revisionsStorage = createAsyncContext<RevisionsState>()
+
 export async function runWithRecording<T>(fn: () => Promise<T>): Promise<[T, OpRecord[]]> {
   const state: RecordingState = { records: [], virtualPrefix: '' }
   const value = await storage.run(state, fn)
@@ -33,12 +44,18 @@ export function setVirtualPrefix(prefix: string): void {
   if (state !== undefined) state.virtualPrefix = prefix
 }
 
+export interface RecordOptions {
+  fingerprint?: string | null
+  revision?: string | null
+}
+
 export function record(
   op: string,
   path: string,
   source: string,
   nbytes: number,
   startMs: number,
+  options: RecordOptions = {},
 ): void {
   const state = storage.getStore()
   if (state === undefined) return
@@ -51,11 +68,18 @@ export function record(
       bytes: nbytes,
       timestamp: Date.now(),
       durationMs: elapsed,
+      fingerprint: options.fingerprint ?? null,
+      revision: options.revision ?? null,
     }),
   )
 }
 
-export function recordStream(op: string, path: string, source: string): OpRecord | null {
+export function recordStream(
+  op: string,
+  path: string,
+  source: string,
+  options: RecordOptions = {},
+): OpRecord | null {
   const state = storage.getStore()
   if (state === undefined) return null
   const rec = new OpRecord({
@@ -65,9 +89,38 @@ export function recordStream(op: string, path: string, source: string): OpRecord
     bytes: 0,
     timestamp: Date.now(),
     durationMs: 0,
+    fingerprint: options.fingerprint ?? null,
+    revision: options.revision ?? null,
   })
   state.records.push(rec)
   return rec
+}
+
+/**
+ * Run `fn` inside a revisions context. Backend read functions inside
+ * `fn` (or any async chain it starts) can consult {@link revisionFor}
+ * to look up a pin. Independent of {@link runWithRecording} so that
+ * direct {@link Workspace.dispatch} calls (which don't open a recording
+ * scope) still honour installed pins.
+ *
+ * Task-isolated via AsyncLocalStorage: concurrent runs on different
+ * mounts each see their own pin map.
+ */
+export function runWithRevisions<T>(
+  revisions: Map<string, string> | null,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return Promise.resolve(revisionsStorage.run({ map: revisions }, fn))
+}
+
+/**
+ * Look up the active revision pin for `path`, or null if no pin is
+ * installed (or no revisions context is active).
+ */
+export function revisionFor(path: string): string | null {
+  const state = revisionsStorage.getStore()
+  if (state === undefined || state.map === null) return null
+  return state.map.get(path) ?? null
 }
 
 function applyPrefix(prefix: string, path: string): string {

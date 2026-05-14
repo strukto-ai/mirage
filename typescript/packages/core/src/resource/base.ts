@@ -39,6 +39,16 @@ export interface Resource {
   readonly writePrompt?: string
   readonly indexTtl?: number
   readonly isRemote?: boolean
+  /**
+   * Whether this resource carries enough version information for
+   * snapshot+replay drift detection. When true, the resource's
+   * {@link Resource.stat} must populate {@link FileStat.fingerprint}
+   * (and optionally {@link FileStat.revision}) with stable per-path
+   * markers. When false (the default), reads are treated as live-only
+   * at replay time: no fingerprint is captured at snapshot, no drift
+   * check fires at load.
+   */
+  readonly supportsSnapshot?: boolean
   readonly index?: IndexCacheStore
   readonly accessor?: Accessor
   readonly opsMap?: Record<string, unknown>

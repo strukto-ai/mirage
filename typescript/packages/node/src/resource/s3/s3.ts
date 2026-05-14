@@ -58,6 +58,7 @@ export interface S3ResourceState {
 export class S3Resource implements Resource {
   readonly kind: string = ResourceName.S3
   readonly isRemote: boolean = true
+  readonly supportsSnapshot: boolean = true
   readonly indexTtl: number = 600
   readonly prompt: string = S3_PROMPT
   readonly config: S3Config
