@@ -14,7 +14,8 @@
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.core.mongodb._client import count_documents, get_indexes
+from mirage.core.mongodb._client import (count_documents, get_indexes,
+                                          is_view)
 from mirage.types import FileStat, FileType, PathSpec
 
 
@@ -80,18 +81,23 @@ async def _collection_stat(
     col_name: str,
     filename: str,
 ) -> FileStat:
+    view = await is_view(accessor.client, db_name, col_name)
     doc_count = await count_documents(accessor.client, db_name, col_name)
-    indexes = await get_indexes(accessor.client, db_name, col_name)
-    index_info = [{
-        "name": idx.get("name"),
-        "keys": dict(idx.get("key", {}))
-    } for idx in indexes]
+    if view:
+        index_info: list[dict] = []
+    else:
+        indexes = await get_indexes(accessor.client, db_name, col_name)
+        index_info = [{
+            "name": idx.get("name"),
+            "keys": dict(idx.get("key", {}))
+        } for idx in indexes]
     return FileStat(
         name=filename,
         type=FileType.TEXT,
         extra={
             "database": db_name,
             "collection": col_name,
+            "kind": "view" if view else "collection",
             "document_count": doc_count,
             "indexes": index_info,
         },

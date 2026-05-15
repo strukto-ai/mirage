@@ -13,9 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
-from mirage.core.mongodb._client import iter_documents
+from mirage.core.mongodb._client import get_indexes, is_view, iter_documents
 
 
 class _AsyncIter:
@@ -85,3 +85,69 @@ async def test_iter_documents_empty_yields_nothing():
     async for doc in iter_documents(client, "db1", "coll1"):
         out.append(doc)
     assert out == []
+
+
+def _build_indexes_client(spec, indexes):
+    spec_cursor = MagicMock()
+    spec_cursor.__aiter__ = lambda self: _AsyncIter([spec] if spec else []
+                                                    ).__aiter__()
+    idx_cursor = MagicMock()
+    idx_cursor.__aiter__ = lambda self: _AsyncIter(indexes).__aiter__()
+    col = MagicMock()
+    col.list_indexes = MagicMock(return_value=idx_cursor)
+    db = MagicMock()
+    db.list_collections = AsyncMock(return_value=spec_cursor)
+    db.__getitem__.return_value = col
+    client = MagicMock()
+    client.__getitem__.return_value = db
+    return client, col, db
+
+
+@pytest.mark.asyncio
+async def test_is_view_true_when_spec_type_view():
+    client, _, db = _build_indexes_client(
+        spec={"name": "myview", "type": "view"},
+        indexes=[],
+    )
+    assert await is_view(client, "db1", "myview") is True
+    db.list_collections.assert_awaited_once_with(filter={"name": "myview"})
+
+
+@pytest.mark.asyncio
+async def test_is_view_false_for_regular_collection():
+    client, _, _ = _build_indexes_client(
+        spec={"name": "coll1", "type": "collection"},
+        indexes=[],
+    )
+    assert await is_view(client, "db1", "coll1") is False
+
+
+@pytest.mark.asyncio
+async def test_is_view_false_when_collection_absent():
+    client, _, _ = _build_indexes_client(spec=None, indexes=[])
+    assert await is_view(client, "db1", "missing") is False
+
+
+@pytest.mark.asyncio
+async def test_get_indexes_returns_indexes_for_collection():
+    indexes = [{"name": "_id_", "key": {"_id": 1}}]
+    client, col, db = _build_indexes_client(
+        spec={"name": "coll1", "type": "collection"},
+        indexes=indexes,
+    )
+    out = await get_indexes(client, "db1", "coll1")
+    assert out == indexes
+    db.list_collections.assert_awaited_once_with(filter={"name": "coll1"})
+    col.list_indexes.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_get_indexes_returns_empty_for_view_without_listing():
+    client, col, db = _build_indexes_client(
+        spec={"name": "myview", "type": "view"},
+        indexes=[],
+    )
+    out = await get_indexes(client, "db1", "myview")
+    assert out == []
+    db.list_collections.assert_awaited_once_with(filter={"name": "myview"})
+    col.list_indexes.assert_not_called()

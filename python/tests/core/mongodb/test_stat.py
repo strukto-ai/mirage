@@ -61,6 +61,11 @@ async def test_stat_collection_file(accessor, index):
     fake_indexes = [{"name": "_id_", "key": {"_id": 1}}]
     with (
             patch(
+                "mirage.core.mongodb.stat.is_view",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch(
                 "mirage.core.mongodb.stat.count_documents",
                 new_callable=AsyncMock,
                 return_value=42,
@@ -88,6 +93,11 @@ async def test_stat_collection_file(accessor, index):
 async def test_stat_single_db_collection(single_db_accessor, index):
     with (
             patch(
+                "mirage.core.mongodb.stat.is_view",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch(
                 "mirage.core.mongodb.stat.count_documents",
                 new_callable=AsyncMock,
                 return_value=10,
@@ -106,6 +116,67 @@ async def test_stat_single_db_collection(single_db_accessor, index):
     assert result.type == FileType.TEXT
     assert result.extra["database"] == "mydb"
     assert result.extra["collection"] == "movies"
+
+
+@pytest.mark.asyncio
+async def test_stat_view_skips_indexes(accessor, index):
+    with (
+            patch(
+                "mirage.core.mongodb.stat.is_view",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch(
+                "mirage.core.mongodb.stat.count_documents",
+                new_callable=AsyncMock,
+                return_value=17,
+            ),
+            patch(
+                "mirage.core.mongodb.stat.get_indexes",
+                new_callable=AsyncMock,
+                side_effect=AssertionError(
+                    "get_indexes should not be called on a view"),
+            ),
+    ):
+        result = await stat(
+            accessor,
+            PathSpec(original="/sample_mflix/my_view.jsonl",
+                     directory="/sample_mflix/my_view.jsonl"), index)
+    assert result.type == FileType.TEXT
+    assert result.name == "my_view.jsonl"
+    assert result.extra["database"] == "sample_mflix"
+    assert result.extra["collection"] == "my_view"
+    assert result.extra["document_count"] == 17
+    assert result.extra["indexes"] == []
+    assert result.extra["kind"] == "view"
+
+
+@pytest.mark.asyncio
+async def test_stat_collection_marks_kind(accessor, index):
+    fake_indexes = [{"name": "_id_", "key": {"_id": 1}}]
+    with (
+            patch(
+                "mirage.core.mongodb.stat.is_view",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch(
+                "mirage.core.mongodb.stat.count_documents",
+                new_callable=AsyncMock,
+                return_value=5,
+            ),
+            patch(
+                "mirage.core.mongodb.stat.get_indexes",
+                new_callable=AsyncMock,
+                return_value=fake_indexes,
+            ),
+    ):
+        result = await stat(
+            accessor,
+            PathSpec(original="/sample_mflix/movies.jsonl",
+                     directory="/sample_mflix/movies.jsonl"), index)
+    assert result.extra["kind"] == "collection"
+    assert result.extra["indexes"] == [{"name": "_id_", "keys": {"_id": 1}}]
 
 
 @pytest.mark.asyncio

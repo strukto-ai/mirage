@@ -83,13 +83,26 @@ async def count_documents(
     return await col.count_documents(filter or {})
 
 
+async def is_view(
+    client: AsyncIOMotorClient,
+    database: str,
+    collection: str,
+) -> bool:
+    db = client[database]
+    cursor = await db.list_collections(filter={"name": collection})
+    async for spec in cursor:
+        return spec.get("type") == "view"
+    return False
+
+
 async def get_indexes(
     client: AsyncIOMotorClient,
     database: str,
     collection: str,
 ) -> list[dict]:
-    db = client[database]
-    col = db[collection]
+    if await is_view(client, database, collection):
+        return []
+    col = client[database][collection]
     indexes = []
     async for idx in col.list_indexes():
         indexes.append(idx)
