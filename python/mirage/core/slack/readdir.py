@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from datetime import datetime, timedelta, timezone
 
 from mirage.accessor.slack import SlackAccessor
@@ -26,7 +27,17 @@ from mirage.core.slack.scope import SlackScope, detect_scope
 from mirage.core.slack.users import list_users
 from mirage.types import PathSpec
 
+logger = logging.getLogger(__name__)
+
 VIRTUAL_ROOTS = ("channels", "dms", "users")
+
+_SOFT_HISTORY_ERRORS = (
+    "not_in_channel",
+    "channel_not_found",
+    "missing_scope",
+    "is_archived",
+    "not_authed",
+)
 
 
 def _date_range(latest_ts: float,
@@ -45,12 +56,20 @@ def _date_range(latest_ts: float,
 
 
 async def _latest_message_ts(config, channel_id: str) -> float | None:
-    data = await slack_get(config,
-                           "conversations.history",
-                           params={
-                               "channel": channel_id,
-                               "limit": 1,
-                           })
+    try:
+        data = await slack_get(config,
+                               "conversations.history",
+                               params={
+                                   "channel": channel_id,
+                                   "limit": 1,
+                               })
+    except RuntimeError as e:
+        if any(code in str(e) for code in _SOFT_HISTORY_ERRORS):
+            logger.debug(
+                "slack: history denied for %s (%s); treating as empty",
+                channel_id, e)
+            return None
+        raise
     messages = data.get("messages", [])
     if messages:
         return float(messages[0].get("ts", "0"))
@@ -313,8 +332,16 @@ async def _fetch_day(
     date_vkey: str,
     index: IndexCacheStore,
 ) -> None:
-    messages = await fetch_messages_for_day(accessor.config, channel_id,
-                                            date_str)
+    try:
+        messages = await fetch_messages_for_day(accessor.config, channel_id,
+                                                date_str)
+    except RuntimeError as e:
+        if any(code in str(e) for code in _SOFT_HISTORY_ERRORS):
+            logger.debug("slack: history denied for %s/%s (%s); empty day",
+                         channel_id, date_str, e)
+            await index.set_dir(date_vkey, [])
+            return
+        raise
     chat_entry = IndexEntry(
         id=f"{channel_id}:{date_str}:chat",
         name="chat.jsonl",

@@ -248,33 +248,53 @@ async def main():
     r = await ws.execute("pwd")
     print(f"  {(await r.stdout_str()).strip()}")
 
-    print("\n=== ls (relative, in channel dir) ===")
+    # ── ls (no args) after cd — regression: bug where mount prefix
+    # was dropped, so readdir returned []. Now hard-asserts that ls
+    # surfaces cwd entries.
+    print("\n=== ls (no args, in channel dir) ===")
     r = await ws.execute("ls | tail -n 5")
     out = (await r.stdout_str()).strip()
-    if out:
-        for line in out.splitlines():
-            print(f"  {line}")
+    assert out, "regression: `ls` (no args) after cd returned empty"
+    for line in out.splitlines():
+        print(f"  {line}")
 
-    print(f"\n=== cat {target} (relative) | head -n 1 ===")
-    r = await ws.execute(f'cat {target} | head -n 1')
+    rel_chat = f"{date_dir.rsplit('/', 1)[-1]}/chat.jsonl"
+    print(f"\n=== cat {rel_chat} (relative) | head -n 1 ===")
+    r = await ws.execute(f'cat "{rel_chat}" | head -n 1')
     out = (await r.stdout_str()).strip()
-    if out:
-        print(f"  {out[:120]}")
-    else:
-        print("  (empty)")
+    assert out, "regression: relative `cat` after cd returned empty"
+    print(f"  {out[:120]}")
 
-    # ── glob expansion (exercises resolve_glob → readdir) ──
-    print(f"\n=== echo {base}/*/chat.jsonl (glob) ===")
+    # ── workspace-wide find — regression: would abort with
+    # `not_in_channel` if any channel was inaccessible. Now skips
+    # those channels and walks the rest.
+    print("\n=== find /slack/ -name 'chat.jsonl' (must not abort) ===")
+    r = await ws.execute('find /slack/ -name "chat.jsonl" | wc -l')
+    count = int((await r.stdout_str()).strip() or "0")
+    print(f"  matches: {count}")
+    assert r.exit_code == 0, ("regression: workspace-wide find aborted; "
+                              f"stderr={await r.stderr_str()}")
+    assert count > 0, "regression: workspace-wide find returned no matches"
+
+    # ── glob expansion (KNOWN LIMITATION: only single-segment globs
+    # are supported; multi-level patterns like `path/*/file` do not
+    # walk intermediate `*` segments). The next two probes document
+    # the limitation; if a future change makes them work, great.
+    print(
+        f"\n=== echo {base}/*/chat.jsonl (multi-level glob — limitation) ===")
     r = await ws.execute(f'echo "{base}/"*/chat.jsonl')
     out = (await r.stdout_str()).strip()
-    print(f"  {out[:200]}")
+    print(f"  out={out[:200]!r}  (multi-level globs are not expanded today)")
 
-    print(f"\n=== for f in {base}/*/chat.jsonl (glob loop) ===")
+    print(f"\n=== for f in {base}/*/chat.jsonl (glob loop — limitation) ===")
     r = await ws.execute(
         f'for f in "{base}/"*/chat.jsonl; do echo found:$f; done | head -n 3')
     out = (await r.stdout_str()).strip()
-    for line in out.splitlines():
-        print(f"  {line[:120]}")
+    if out:
+        for line in out.splitlines():
+            print(f"  {line[:120]}")
+    else:
+        print("  (no output — multi-level glob limitation)")
 
 
 if __name__ == "__main__":

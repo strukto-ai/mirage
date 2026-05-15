@@ -127,8 +127,9 @@ async def ls(
     results: list[str] = []
     if not paths:
         cwd = _extra.get("cwd", "/")
-        cwd_str = cwd.original if isinstance(cwd, PathSpec) else cwd
-        paths = [PathSpec(original=cwd_str, directory=cwd_str, resolved=False)]
+        paths = [cwd] if isinstance(cwd, PathSpec) else [
+            PathSpec(original=cwd, directory=cwd, resolved=False)
+        ]
     paths = await resolve_glob(accessor, paths, _extra.get("index"))
     for p in paths:
         try:
