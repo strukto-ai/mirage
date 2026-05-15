@@ -46,6 +46,7 @@ function formatSlackErrorMessage(
 
 export interface SlackTransport {
   call(endpoint: string, params?: Record<string, string>, body?: unknown): Promise<SlackResponse>
+  downloadFile?(url: string): Promise<Uint8Array>
 }
 
 export abstract class HttpSlackTransport implements SlackTransport {
@@ -82,6 +83,16 @@ export abstract class HttpSlackTransport implements SlackTransport {
       )
     }
     return data
+  }
+
+  async downloadFile(url: string): Promise<Uint8Array> {
+    const auth = await this.authHeaders()
+    const res = await this.fetch(url, { method: 'GET', headers: auth })
+    if (!res.ok) {
+      throw new Error(`slack: download failed (${String(res.status)}): ${url}`)
+    }
+    const buf = await res.arrayBuffer()
+    return new Uint8Array(buf)
   }
 }
 

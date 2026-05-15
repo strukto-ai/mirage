@@ -42,14 +42,49 @@ describe('detectScope', () => {
     expect(s.useNative).toBe(true)
   })
 
-  it('/channels/general__C123/2026-04-24.jsonl → date scope, useNative=false', () => {
+  it('/channels/general__C123/2026-04-24 → date scope, useNative=true', () => {
     const s = detectScope(
       new PathSpec({
-        original: '/channels/general__C123/2026-04-24.jsonl',
-        directory: '/channels/general__C123/2026-04-24.jsonl',
+        original: '/channels/general__C123/2026-04-24',
+        directory: '/channels/general__C123/2026-04-24',
       }),
     )
     expect(s.dateStr).toBe('2026-04-24')
+    expect(s.target).toBe('date')
+    expect(s.useNative).toBe(true)
+  })
+
+  it('/channels/<chan>/<date>/chat.jsonl → messages target, useNative=false', () => {
+    const s = detectScope(
+      new PathSpec({
+        original: '/channels/general__C123/2026-04-24/chat.jsonl',
+        directory: '/channels/general__C123/2026-04-24/chat.jsonl',
+      }),
+    )
+    expect(s.dateStr).toBe('2026-04-24')
+    expect(s.target).toBe('messages')
+    expect(s.useNative).toBe(false)
+  })
+
+  it('/channels/<chan>/<date>/files → files target, useNative=true', () => {
+    const s = detectScope(
+      new PathSpec({
+        original: '/channels/general__C123/2026-04-24/files',
+        directory: '/channels/general__C123/2026-04-24/files',
+      }),
+    )
+    expect(s.target).toBe('files')
+    expect(s.useNative).toBe(true)
+  })
+
+  it('/channels/<chan>/<date>/files/<blob> → files target, useNative=false', () => {
+    const s = detectScope(
+      new PathSpec({
+        original: '/channels/general__C123/2026-04-24/files/foo__F1.pdf',
+        directory: '/channels/general__C123/2026-04-24/files/foo__F1.pdf',
+      }),
+    )
+    expect(s.target).toBe('files')
     expect(s.useNative).toBe(false)
   })
 

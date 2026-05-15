@@ -164,26 +164,48 @@ describe('stat user file', () => {
   })
 })
 
-describe('stat jsonl file', () => {
-  it('returns TEXT with date filename for channel jsonl (no index lookup)', async () => {
+describe('stat date directory', () => {
+  it('returns DIRECTORY with date name for channel/<chan>/<date>', async () => {
     const t = new FakeTransport(() => ({ ok: true }))
     const out = await stat(
       new SlackAccessor(t),
-      spec('/mnt/slack/channels/general__C1/2026-04-24.jsonl', '/mnt/slack'),
+      spec('/mnt/slack/channels/general__C1/2026-04-24', '/mnt/slack'),
     )
-    expect(out.type).toBe(FileType.TEXT)
-    expect(out.name).toBe('2026-04-24.jsonl')
+    expect(out.type).toBe(FileType.DIRECTORY)
+    expect(out.name).toBe('2026-04-24')
     expect(t.calls).toHaveLength(0)
   })
 
-  it('returns TEXT with date filename for dm jsonl', async () => {
+  it('returns DIRECTORY with date name for dm/<dm>/<date>', async () => {
     const t = new FakeTransport(() => ({ ok: true }))
     const out = await stat(
       new SlackAccessor(t),
-      spec('/mnt/slack/dms/alice__D1/2026-04-24.jsonl', '/mnt/slack'),
+      spec('/mnt/slack/dms/alice__D1/2026-04-24', '/mnt/slack'),
+    )
+    expect(out.type).toBe(FileType.DIRECTORY)
+    expect(out.name).toBe('2026-04-24')
+  })
+})
+
+describe('stat chat.jsonl and files dir', () => {
+  it('returns TEXT chat.jsonl for <chan>/<date>/chat.jsonl', async () => {
+    const t = new FakeTransport(() => ({ ok: true }))
+    const out = await stat(
+      new SlackAccessor(t),
+      spec('/mnt/slack/channels/general__C1/2026-04-24/chat.jsonl', '/mnt/slack'),
     )
     expect(out.type).toBe(FileType.TEXT)
-    expect(out.name).toBe('2026-04-24.jsonl')
+    expect(out.name).toBe('chat.jsonl')
+  })
+
+  it('returns DIRECTORY files for <chan>/<date>/files', async () => {
+    const t = new FakeTransport(() => ({ ok: true }))
+    const out = await stat(
+      new SlackAccessor(t),
+      spec('/mnt/slack/channels/general__C1/2026-04-24/files', '/mnt/slack'),
+    )
+    expect(out.type).toBe(FileType.DIRECTORY)
+    expect(out.name).toBe('files')
   })
 })
 

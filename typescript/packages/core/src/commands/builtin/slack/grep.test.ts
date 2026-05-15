@@ -109,7 +109,7 @@ describe('slack grep', () => {
     const out = await runGrep(
       [
         new PathSpec({
-          original: '/mnt/slack/channels/general__C1/2024-01-01.jsonl',
+          original: '/mnt/slack/channels/general__C1/2024-01-01/chat.jsonl',
           directory: '/mnt/slack/channels/general__C1/',
           resolved: false,
           prefix: '/mnt/slack',

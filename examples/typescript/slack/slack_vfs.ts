@@ -66,7 +66,7 @@ async function main(): Promise<void> {
       if (dates.length > 0) {
         let found = false
         for (const d of [...dates].reverse()) {
-          path = `/slack/channels/${ch}/${d}`
+          path = `/slack/channels/${ch}/${d}/chat.jsonl`
           const content = await fs.promises.readFile(path, 'utf-8')
           const lines = content
             .trim()

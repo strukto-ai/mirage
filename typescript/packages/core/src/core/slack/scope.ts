@@ -14,14 +14,19 @@
 
 import type { PathSpec } from '../../types.ts'
 
+export type SlackTarget = 'date' | 'messages' | 'files'
+
 export interface SlackScope {
   useNative: boolean
   channelName?: string
   channelId?: string
   container?: string
   dateStr?: string
+  target?: SlackTarget
   resourcePath: string
 }
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
 function stripSlashes(s: string): string {
   return s.replace(/^\/+|\/+$/g, '')
@@ -37,42 +42,104 @@ function splitDirname(dirname: string): [string, string | undefined] {
   return [name, cid.length > 0 ? cid : undefined]
 }
 
+function deepenedScope(
+  parts: string[],
+  prefix: string,
+  channelName: string,
+  cid: string | undefined,
+  container: string,
+  key: string,
+  base: 'native' | 'non-native',
+): SlackScope {
+  const dateStr = parts[2] ?? ''
+  const useNativeBase = base === 'native'
+  if (parts.length === 2) {
+    return {
+      useNative: true,
+      channelName,
+      ...(cid !== undefined ? { channelId: cid } : {}),
+      container,
+      resourcePath: key,
+    }
+  }
+  if (parts.length === 3 && DATE_RE.test(dateStr)) {
+    return {
+      useNative: useNativeBase,
+      channelName,
+      ...(cid !== undefined ? { channelId: cid } : {}),
+      container,
+      dateStr,
+      target: 'date',
+      resourcePath: key,
+    }
+  }
+  if (parts.length === 4 && DATE_RE.test(dateStr) && parts[3] === 'chat.jsonl') {
+    return {
+      useNative: false,
+      channelName,
+      ...(cid !== undefined ? { channelId: cid } : {}),
+      container,
+      dateStr,
+      target: 'messages',
+      resourcePath: key,
+    }
+  }
+  if (parts.length === 4 && DATE_RE.test(dateStr) && parts[3] === 'files') {
+    return {
+      useNative: true,
+      channelName,
+      ...(cid !== undefined ? { channelId: cid } : {}),
+      container,
+      dateStr,
+      target: 'files',
+      resourcePath: key,
+    }
+  }
+  if (parts.length === 5 && DATE_RE.test(dateStr) && parts[3] === 'files') {
+    return {
+      useNative: false,
+      channelName,
+      ...(cid !== undefined ? { channelId: cid } : {}),
+      container,
+      dateStr,
+      target: 'files',
+      resourcePath: key,
+    }
+  }
+  void prefix
+  return { useNative: false, resourcePath: key }
+}
+
 export function detectScope(path: PathSpec): SlackScope {
   const prefix = path.prefix
 
-  if (path.pattern?.endsWith('.jsonl')) {
+  if (path.pattern !== null && path.pattern !== '') {
     let dirKey = stripSlashes(path.directory)
-    if (prefix) {
+    if (prefix !== '') {
       const stripped = stripSlashes(prefix) + '/'
       if (dirKey.startsWith(stripped)) {
         dirKey = dirKey.slice(stripped.length)
       }
     }
-    const dirParts = dirKey ? dirKey.split('/') : []
+    const dirParts = dirKey !== '' ? dirKey.split('/') : []
     const [dirRoot, dirEntry] = dirParts
     if (
-      dirParts.length === 2 &&
+      dirParts.length >= 2 &&
       dirEntry !== undefined &&
       (dirRoot === 'channels' || dirRoot === 'dms')
     ) {
       const [name, cid] = splitDirname(dirEntry)
-      return {
-        useNative: true,
-        channelName: name,
-        ...(cid !== undefined ? { channelId: cid } : {}),
-        container: dirRoot,
-        resourcePath: dirKey,
-      }
+      return deepenedScope(dirParts, prefix, name, cid, dirRoot, dirKey, 'native')
     }
   }
 
   const key = path.key
-  if (!key) {
+  if (key === '') {
     return { useNative: true, resourcePath: '/' }
   }
 
   const parts = key.split('/')
-  const [root, second, third] = parts
+  const [root, second] = parts
   if (root === undefined) {
     return { useNative: false, resourcePath: key }
   }
@@ -89,29 +156,10 @@ export function detectScope(path: PathSpec): SlackScope {
     return { useNative: true, container: root, resourcePath: key }
   }
 
-  if (parts.length === 2 && second !== undefined) {
-    const [name, cid] = splitDirname(second)
-    return {
-      useNative: true,
-      channelName: name,
-      ...(cid !== undefined ? { channelId: cid } : {}),
-      container: root,
-      resourcePath: key,
-    }
+  if (second === undefined) {
+    return { useNative: false, resourcePath: key }
   }
 
-  if (parts.length === 3 && second !== undefined && third?.endsWith('.jsonl')) {
-    const dateStr = third.slice(0, -'.jsonl'.length)
-    const [name, cid] = splitDirname(second)
-    return {
-      useNative: false,
-      channelName: name,
-      ...(cid !== undefined ? { channelId: cid } : {}),
-      container: root,
-      dateStr,
-      resourcePath: key,
-    }
-  }
-
-  return { useNative: false, resourcePath: key }
+  const [name, cid] = splitDirname(second)
+  return deepenedScope(parts, prefix, name, cid, root, key, 'native')
 }

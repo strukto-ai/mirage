@@ -114,8 +114,8 @@ describe('SlackResource integration', () => {
       if (ls.exitCode !== 0) {
         throw new Error(`ls failed: ${ls.stderrText} | stdout: ${ls.stdoutText}`)
       }
-      expect(ls.stdoutText).toContain('2024-01-01.jsonl')
-      const cat = await ws.execute('cat /slack/channels/general__C1/2024-01-01.jsonl')
+      expect(ls.stdoutText).toContain('2024-01-01')
+      const cat = await ws.execute('cat /slack/channels/general__C1/2024-01-01/chat.jsonl')
       expect(cat.exitCode).toBe(0)
       const lines = cat.stdoutText
         .trim()

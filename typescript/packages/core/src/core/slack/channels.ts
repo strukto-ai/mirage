@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SlackAccessor } from '../../accessor/slack.ts'
+import { cursorPages } from './paginate.ts'
 
 export interface SlackChannel {
   id: string
@@ -28,29 +29,40 @@ export interface ListChannelsOptions {
   limit?: number
 }
 
+function channelBaseParams(types: string, limit: number): Record<string, string> {
+  return { types, limit: String(limit), exclude_archived: 'true' }
+}
+
+export function listChannelsStream(
+  accessor: SlackAccessor,
+  options: ListChannelsOptions = {},
+): AsyncIterableIterator<SlackChannel[]> {
+  const types = options.types ?? 'public_channel,private_channel'
+  const limit = options.limit ?? 200
+  return cursorPages<SlackChannel>(
+    accessor.transport,
+    'conversations.list',
+    channelBaseParams(types, limit),
+    'channels',
+  )
+}
+
 export async function listChannels(
   accessor: SlackAccessor,
   options: ListChannelsOptions = {},
 ): Promise<SlackChannel[]> {
-  const types = options.types ?? 'public_channel,private_channel'
-  const limit = options.limit ?? 200
-  const channels: SlackChannel[] = []
-  let cursor: string | undefined
-  for (;;) {
-    const params: Record<string, string> = {
-      types,
-      limit: String(limit),
-      exclude_archived: 'true',
-    }
-    if (cursor !== undefined && cursor !== '') params.cursor = cursor
-    const data = await accessor.transport.call('conversations.list', params)
-    const page = (data.channels as SlackChannel[] | undefined) ?? []
-    channels.push(...page)
-    const meta = data.response_metadata as { next_cursor?: string } | undefined
-    cursor = meta?.next_cursor
-    if (cursor === undefined || cursor === '') break
+  const out: SlackChannel[] = []
+  for await (const page of listChannelsStream(accessor, options)) {
+    out.push(...page)
   }
-  return channels
+  return out
+}
+
+export function listDmsStream(
+  accessor: SlackAccessor,
+  options: { limit?: number } = {},
+): AsyncIterableIterator<SlackChannel[]> {
+  return listChannelsStream(accessor, { types: 'im,mpim', limit: options.limit ?? 200 })
 }
 
 export function listDms(

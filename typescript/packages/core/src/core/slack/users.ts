@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SlackAccessor } from '../../accessor/slack.ts'
+import { cursorPages } from './paginate.ts'
 
 export interface SlackUser {
   id: string
@@ -24,14 +25,34 @@ export interface SlackUser {
   [key: string]: unknown
 }
 
+function isRealUser(m: SlackUser): boolean {
+  return m.deleted !== true && m.is_bot !== true && m.id !== 'USLACKBOT'
+}
+
+export async function* listUsersStream(
+  accessor: SlackAccessor,
+  options: { limit?: number } = {},
+): AsyncIterableIterator<SlackUser[]> {
+  const limit = options.limit ?? 200
+  for await (const page of cursorPages<SlackUser>(
+    accessor.transport,
+    'users.list',
+    { limit: String(limit) },
+    'members',
+  )) {
+    yield page.filter(isRealUser)
+  }
+}
+
 export async function listUsers(
   accessor: SlackAccessor,
   options: { limit?: number } = {},
 ): Promise<SlackUser[]> {
-  const limit = options.limit ?? 200
-  const data = await accessor.transport.call('users.list', { limit: String(limit) })
-  const members = (data.members as SlackUser[] | undefined) ?? []
-  return members.filter((m) => m.deleted !== true && m.is_bot !== true && m.id !== 'USLACKBOT')
+  const out: SlackUser[] = []
+  for await (const page of listUsersStream(accessor, options)) {
+    out.push(...page)
+  }
+  return out
 }
 
 export async function getUserProfile(

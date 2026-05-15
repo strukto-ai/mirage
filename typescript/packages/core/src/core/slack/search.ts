@@ -12,24 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { SlackAccessor } from '../../accessor/slack.ts'
-import { NodeSlackTransport } from './_client.ts'
-import { sanitizeName } from './entry.ts'
-import type { SlackScope } from './scope.ts'
+import type { SlackAccessor } from '../../accessor/slack.ts'
+import { NodeSlackTransport, type SlackTransport } from './_client.ts'
+import { offsetPages } from './paginate.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
 
-interface SearchMessageMatch {
-  channel?: { name?: string; id?: string }
-  ts?: string
-  username?: string
-  user?: string
-  text?: string
-}
-
-interface SearchPayload {
-  messages?: { matches?: SearchMessageMatch[] }
+function searchTransport(accessor: SlackAccessor): SlackTransport {
+  if (accessor.transport instanceof NodeSlackTransport) {
+    const searchToken = accessor.transport.getSearchToken()
+    if (searchToken !== undefined && searchToken !== '') {
+      return new NodeSlackTransport(searchToken)
+    }
+  }
+  return accessor.transport
 }
 
 export async function searchMessages(
@@ -44,55 +40,70 @@ export async function searchMessages(
     page: String(page),
     sort: 'timestamp',
   }
-  let effective = accessor
-  if (accessor.transport instanceof NodeSlackTransport) {
-    const searchToken = accessor.transport.getSearchToken()
-    if (searchToken !== undefined && searchToken !== '') {
-      effective = new SlackAccessor(new NodeSlackTransport(searchToken))
-    }
-  }
-  const data = await effective.transport.call('search.messages', params)
+  const data = await searchTransport(accessor).call('search.messages', params)
   return ENC.encode(JSON.stringify(data))
 }
 
-export function buildQuery(pattern: string, scope: SlackScope): string {
-  if (
-    scope.container === 'channels' &&
-    scope.channelName !== undefined &&
-    scope.channelName !== ''
-  ) {
-    return `in:#${scope.channelName} ${pattern}`
+export function searchMessagesStream(
+  accessor: SlackAccessor,
+  query: string,
+  options: { count?: number; startPage?: number; maxPages?: number } = {},
+): AsyncIterableIterator<Record<string, unknown>[]> {
+  const count = options.count ?? 100
+  const baseParams: Record<string, string> = {
+    query,
+    count: String(count),
+    sort: 'timestamp',
   }
-  if (scope.container === 'dms' && scope.channelName !== undefined && scope.channelName !== '') {
-    return `in:@${scope.channelName} ${pattern}`
-  }
-  return pattern
+  const opts: { startPage?: number; maxPages?: number } = {}
+  if (options.startPage !== undefined) opts.startPage = options.startPage
+  if (options.maxPages !== undefined) opts.maxPages = options.maxPages
+  return offsetPages(
+    searchTransport(accessor),
+    'search.messages',
+    baseParams,
+    ['messages', 'pagination', 'page_count'],
+    ['messages', 'matches'],
+    opts,
+  )
 }
 
-export function formatGrepResults(raw: Uint8Array, scope: SlackScope, prefix: string): string[] {
-  const payload = JSON.parse(DEC.decode(raw)) as SearchPayload
-  const matches = payload.messages?.matches ?? []
-  const lines: string[] = []
-  for (const msg of matches) {
-    const ch = msg.channel ?? {}
-    const chName = ch.name ?? scope.channelName ?? ''
-    const chId = ch.id ?? scope.channelId ?? ''
-    const container = scope.container ?? 'channels'
-    const tsRaw = msg.ts ?? '0'
-    const tsFloat = Number.parseFloat(tsRaw)
-    let dateStr = ''
-    if (Number.isFinite(tsFloat)) {
-      const dateIso = new Date(tsFloat * 1000).toISOString()
-      dateStr = dateIso.slice(0, 10)
-    }
-    const dirname = chId !== '' ? `${sanitizeName(chName)}__${chId}` : sanitizeName(chName)
-    const path =
-      dateStr !== ''
-        ? `${prefix}/${container}/${dirname}/${dateStr}.jsonl`
-        : `${prefix}/${container}/${dirname}`
-    const author = msg.username ?? msg.user ?? '?'
-    const text = (msg.text ?? '').replaceAll('\n', ' ')
-    lines.push(`${path}:[${author}] ${text}`)
+export async function searchFiles(
+  accessor: SlackAccessor,
+  query: string,
+  count = 20,
+  page = 1,
+): Promise<Uint8Array> {
+  const params: Record<string, string> = {
+    query,
+    count: String(count),
+    page: String(page),
+    sort: 'timestamp',
   }
-  return lines
+  const data = await searchTransport(accessor).call('search.files', params)
+  return ENC.encode(JSON.stringify(data))
+}
+
+export function searchFilesStream(
+  accessor: SlackAccessor,
+  query: string,
+  options: { count?: number; startPage?: number; maxPages?: number } = {},
+): AsyncIterableIterator<Record<string, unknown>[]> {
+  const count = options.count ?? 100
+  const baseParams: Record<string, string> = {
+    query,
+    count: String(count),
+    sort: 'timestamp',
+  }
+  const opts: { startPage?: number; maxPages?: number } = {}
+  if (options.startPage !== undefined) opts.startPage = options.startPage
+  if (options.maxPages !== undefined) opts.maxPages = options.maxPages
+  return offsetPages(
+    searchTransport(accessor),
+    'search.files',
+    baseParams,
+    ['files', 'pagination', 'page_count'],
+    ['files', 'matches'],
+    opts,
+  )
 }

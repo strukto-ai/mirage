@@ -61,11 +61,35 @@ describe('listUsers', () => {
     expect(t.calls[0]?.params).toMatchObject({ limit: '50' })
   })
 
-  it('does NOT paginate (single API call only)', async () => {
+  it('paginates via response_metadata.next_cursor across pages', async () => {
+    const t = new FakeTransport((call) => {
+      if (call === 1) {
+        return {
+          ok: true,
+          members: [{ id: 'U1', name: 'alice' }],
+          response_metadata: { next_cursor: 'c2' },
+        }
+      }
+      if (call === 2) {
+        return {
+          ok: true,
+          members: [{ id: 'U2', name: 'bob' }],
+          response_metadata: { next_cursor: '' },
+        }
+      }
+      throw new Error('unexpected extra call')
+    })
+    const out = await listUsers(new SlackAccessor(t))
+    expect(out.map((u) => (u as { id: string }).id)).toEqual(['U1', 'U2'])
+    expect(t.calls).toHaveLength(2)
+    expect(t.calls[1]?.params?.cursor).toBe('c2')
+  })
+
+  it('stops paginating when next_cursor is empty / missing', async () => {
     let calls = 0
     const t = new FakeTransport(() => {
       calls++
-      return { ok: true, members: [], response_metadata: { next_cursor: 'c2' } }
+      return { ok: true, members: [] }
     })
     await listUsers(new SlackAccessor(t))
     expect(calls).toBe(1)

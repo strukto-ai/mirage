@@ -79,7 +79,7 @@ describe('read jsonl branch', () => {
     })
     const out = await read(
       new SlackAccessor(t),
-      spec('/mnt/slack/channels/general__C1/2026-04-24.jsonl', '/mnt/slack'),
+      spec('/mnt/slack/channels/general__C1/2026-04-24/chat.jsonl', '/mnt/slack'),
       idx,
     )
     const text = decoder.decode(out)
@@ -113,7 +113,7 @@ describe('read jsonl branch', () => {
     })
     const out = await read(
       new SlackAccessor(t),
-      spec('/mnt/slack/dms/alice__D1/2026-04-24.jsonl', '/mnt/slack'),
+      spec('/mnt/slack/dms/alice__D1/2026-04-24/chat.jsonl', '/mnt/slack'),
       idx,
     )
     const text = decoder.decode(out).trimEnd()
@@ -127,7 +127,7 @@ describe('read jsonl branch', () => {
     await expect(
       read(
         new SlackAccessor(t),
-        spec('/mnt/slack/channels/general__C1/2026-04-24.jsonl', '/mnt/slack'),
+        spec('/mnt/slack/channels/general__C1/2026-04-24/chat.jsonl', '/mnt/slack'),
       ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
@@ -138,7 +138,7 @@ describe('read jsonl branch', () => {
     await expect(
       read(
         new SlackAccessor(t),
-        spec('/mnt/slack/channels/general__C1/2026-04-24.jsonl', '/mnt/slack'),
+        spec('/mnt/slack/channels/general__C1/2026-04-24/chat.jsonl', '/mnt/slack'),
         idx,
       ),
     ).rejects.toMatchObject({ code: 'ENOENT' })

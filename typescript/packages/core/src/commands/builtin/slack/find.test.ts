@@ -67,7 +67,7 @@ describe('slack find', () => {
       { index: idx, transport },
     )
     const lines = out.split('\n').filter((s) => s !== '')
-    expect(lines).toContain('/mnt/slack/channels/general__C1/2024-01-01.jsonl')
-    expect(lines).toContain('/mnt/slack/channels/general__C1/2024-01-02.jsonl')
+    expect(lines).toContain('/mnt/slack/channels/general__C1/2024-01-01/chat.jsonl')
+    expect(lines).toContain('/mnt/slack/channels/general__C1/2024-01-02/chat.jsonl')
   })
 })

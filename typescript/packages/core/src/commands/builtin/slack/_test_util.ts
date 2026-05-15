@@ -78,16 +78,40 @@ export async function seedChannel(
   const dates = options.dates
   if (dates !== undefined) {
     const childKey = `${prefix}/channels/${channelDirname}`
-    const entries: [string, IndexEntry][] = dates.map((d) => [
-      `${d}.jsonl`,
+    const dateEntries: [string, IndexEntry][] = dates.map((d) => [
+      d,
       new IndexEntry({
         id: `${channelId}:${d}`,
         name: d,
-        resourceType: 'slack/history',
-        vfsName: `${d}.jsonl`,
+        resourceType: 'slack/date_dir',
+        vfsName: d,
       }),
     ])
-    await index.setDir(childKey, entries)
+    await index.setDir(childKey, dateEntries)
+    for (const d of dates) {
+      const dateKey = `${childKey}/${d}`
+      await index.setDir(dateKey, [
+        [
+          'chat.jsonl',
+          new IndexEntry({
+            id: `${channelId}:${d}:chat`,
+            name: 'chat.jsonl',
+            resourceType: 'slack/chat_jsonl',
+            vfsName: 'chat.jsonl',
+          }),
+        ],
+        [
+          'files',
+          new IndexEntry({
+            id: `${channelId}:${d}:files`,
+            name: 'files',
+            resourceType: 'slack/files_dir',
+            vfsName: 'files',
+          }),
+        ],
+      ])
+      await index.setDir(`${dateKey}/files`, [])
+    }
   }
 }
 

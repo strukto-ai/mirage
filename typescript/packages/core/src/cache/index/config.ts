@@ -41,6 +41,7 @@ export interface IndexEntryInit {
   indexTime?: string
   vfsName?: string
   size?: number | null
+  extra?: Record<string, unknown>
 }
 
 export class IndexEntry {
@@ -51,6 +52,7 @@ export class IndexEntry {
   indexTime: string
   vfsName: string
   size: number | null
+  extra: Record<string, unknown>
 
   constructor(init: IndexEntryInit) {
     this.id = init.id
@@ -60,6 +62,7 @@ export class IndexEntry {
     this.indexTime = init.indexTime ?? ''
     this.vfsName = init.vfsName ?? ''
     this.size = init.size ?? null
+    this.extra = init.extra ?? {}
   }
 
   copyWith(updates: Partial<IndexEntryInit>): IndexEntry {
@@ -71,6 +74,7 @@ export class IndexEntry {
       indexTime: updates.indexTime ?? this.indexTime,
       vfsName: updates.vfsName ?? this.vfsName,
       size: updates.size !== undefined ? updates.size : this.size,
+      extra: updates.extra ?? this.extra,
     })
   }
 }

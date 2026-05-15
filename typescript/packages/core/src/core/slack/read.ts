@@ -41,16 +41,33 @@ export async function read(
   const part0 = parts[0] ?? ''
   const part1 = parts[1] ?? ''
   const part2 = parts[2] ?? ''
+  const part3 = parts[3] ?? ''
 
-  if (parts.length === 3 && (part0 === 'channels' || part0 === 'dms') && part2.endsWith('.jsonl')) {
+  if (parts.length === 4 && (part0 === 'channels' || part0 === 'dms') && part3 === 'chat.jsonl') {
     if (index === undefined) throw fileNotFound(key)
-    const virtualKey = `${prefix}/${part0}/${part1}`
+    const parentKey = `${prefix}/${part0}/${part1}`
+    const lookup = await index.get(parentKey)
+    if (lookup.entry === undefined || lookup.entry === null) {
+      throw fileNotFound(key)
+    }
+    return await getHistoryJsonl(accessor, lookup.entry.id, part2)
+  }
+
+  if (parts.length === 5 && (part0 === 'channels' || part0 === 'dms') && part3 === 'files') {
+    if (index === undefined) throw fileNotFound(key)
+    const virtualKey = `${prefix}/${key}`
     const lookup = await index.get(virtualKey)
     if (lookup.entry === undefined || lookup.entry === null) {
       throw fileNotFound(key)
     }
-    const dateStr = part2.slice(0, -'.jsonl'.length)
-    return await getHistoryJsonl(accessor, lookup.entry.id, dateStr)
+    const url = lookup.entry.extra.url_private_download
+    if (typeof url !== 'string' || url === '') {
+      throw fileNotFound(key)
+    }
+    if (accessor.transport.downloadFile === undefined) {
+      throw new Error('slack: transport does not support file download')
+    }
+    return await accessor.transport.downloadFile(url)
   }
 
   if (parts.length === 2 && part0 === 'users') {

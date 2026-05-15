@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SlackAccessor } from '../../accessor/slack.ts'
+import { cursorPages } from './paginate.ts'
 
 export interface SlackMessage {
   ts: string
@@ -44,36 +45,69 @@ function dayBoundsUtc(dateStr: string): { oldest: string; latest: string } {
   return { oldest: String(start), latest: String(end) }
 }
 
+export function streamMessagesForDay(
+  accessor: SlackAccessor,
+  channelId: string,
+  dateStr: string,
+  options: { limit?: number } = {},
+): AsyncIterableIterator<SlackMessage[]> {
+  const limit = options.limit ?? 200
+  const { oldest, latest } = dayBoundsUtc(dateStr)
+  return cursorPages<SlackMessage>(
+    accessor.transport,
+    'conversations.history',
+    {
+      channel: channelId,
+      oldest,
+      latest,
+      limit: String(limit),
+      inclusive: 'true',
+    },
+    'messages',
+  )
+}
+
+export async function fetchMessagesForDay(
+  accessor: SlackAccessor,
+  channelId: string,
+  dateStr: string,
+): Promise<SlackMessage[]> {
+  const messages: SlackMessage[] = []
+  for await (const page of streamMessagesForDay(accessor, channelId, dateStr)) {
+    messages.push(...page)
+  }
+  messages.sort((a, b) => Number.parseFloat(a.ts) - Number.parseFloat(b.ts))
+  return messages
+}
+
 export async function getHistoryJsonl(
   accessor: SlackAccessor,
   channelId: string,
   dateStr: string,
 ): Promise<Uint8Array> {
-  const { oldest, latest } = dayBoundsUtc(dateStr)
-  const messages: SlackMessage[] = []
-  let cursor: string | undefined
-  for (;;) {
-    const params: Record<string, string> = {
-      channel: channelId,
-      oldest,
-      latest,
-      limit: '200',
-      inclusive: 'true',
-    }
-    if (cursor !== undefined && cursor !== '') params.cursor = cursor
-    const data = await accessor.transport.call('conversations.history', params)
-    const page = (data.messages as SlackMessage[] | undefined) ?? []
-    messages.push(...page)
-    const hasMore = data.has_more === true
-    if (!hasMore) break
-    const meta = data.response_metadata as { next_cursor?: string } | undefined
-    cursor = meta?.next_cursor
-    if (cursor === undefined || cursor === '') break
-  }
-  messages.sort((a, b) => Number.parseFloat(a.ts) - Number.parseFloat(b.ts))
+  const messages = await fetchMessagesForDay(accessor, channelId, dateStr)
   if (messages.length === 0) return new Uint8Array(0)
   const lines = messages.map((m) => JSON.stringify(m))
   return encoder.encode(lines.join('\n') + '\n')
+}
+
+export function streamThreadReplies(
+  accessor: SlackAccessor,
+  channelId: string,
+  threadTs: string,
+  options: { limit?: number } = {},
+): AsyncIterableIterator<SlackMessage[]> {
+  const limit = options.limit ?? 200
+  return cursorPages<SlackMessage>(
+    accessor.transport,
+    'conversations.replies',
+    {
+      channel: channelId,
+      ts: threadTs,
+      limit: String(limit),
+    },
+    'messages',
+  )
 }
 
 export async function getThreadJsonl(
@@ -82,22 +116,8 @@ export async function getThreadJsonl(
   threadTs: string,
 ): Promise<SlackMessage[]> {
   const replies: SlackMessage[] = []
-  let cursor: string | undefined
-  for (;;) {
-    const params: Record<string, string> = {
-      channel: channelId,
-      ts: threadTs,
-      limit: '200',
-    }
-    if (cursor !== undefined && cursor !== '') params.cursor = cursor
-    const data = await accessor.transport.call('conversations.replies', params)
-    const page = (data.messages as SlackMessage[] | undefined) ?? []
+  for await (const page of streamThreadReplies(accessor, channelId, threadTs)) {
     replies.push(...page)
-    const hasMore = data.has_more === true
-    if (!hasMore) break
-    const meta = data.response_metadata as { next_cursor?: string } | undefined
-    cursor = meta?.next_cursor
-    if (cursor === undefined || cursor === '') break
   }
   return replies
 }

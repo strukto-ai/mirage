@@ -18,6 +18,26 @@ import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { readdir as coreReaddir } from './readdir.ts'
 
 const VIRTUAL_DIRS: ReadonlySet<string> = new Set(['', 'channels', 'dms', 'users'])
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+const MIMETYPE_MAP: Record<string, FileType> = {
+  'application/pdf': FileType.PDF,
+  'application/zip': FileType.ZIP,
+  'application/gzip': FileType.GZIP,
+  'application/json': FileType.JSON,
+  'image/png': FileType.IMAGE_PNG,
+  'image/jpeg': FileType.IMAGE_JPEG,
+  'image/gif': FileType.IMAGE_GIF,
+  'text/csv': FileType.CSV,
+}
+
+function filetypeFromMimetype(mime: string): FileType {
+  if (mime === '') return FileType.BINARY
+  const mapped = MIMETYPE_MAP[mime]
+  if (mapped !== undefined) return mapped
+  if (mime.startsWith('text/')) return FileType.TEXT
+  return FileType.BINARY
+}
 
 function fileNotFound(key: string): Error {
   const e = new Error(`ENOENT: ${key}`) as Error & { code: string }
@@ -73,6 +93,7 @@ export async function stat(
   const parts = key.split('/')
   const part0 = parts[0] ?? ''
   const part2 = parts[2] ?? ''
+  const part3 = parts[3] ?? ''
   const virtualKey = `${prefix}/${key}`
 
   if (parts.length === 2 && (part0 === 'channels' || part0 === 'dms')) {
@@ -101,8 +122,47 @@ export async function stat(
     })
   }
 
-  if (parts.length === 3 && (part0 === 'channels' || part0 === 'dms') && part2.endsWith('.jsonl')) {
-    return new FileStat({ name: part2, type: FileType.TEXT })
+  if (parts.length === 3 && (part0 === 'channels' || part0 === 'dms') && DATE_RE.test(part2)) {
+    return new FileStat({ name: part2, type: FileType.DIRECTORY })
+  }
+
+  if (
+    parts.length === 4 &&
+    (part0 === 'channels' || part0 === 'dms') &&
+    DATE_RE.test(part2) &&
+    part3 === 'chat.jsonl'
+  ) {
+    return new FileStat({ name: 'chat.jsonl', type: FileType.TEXT })
+  }
+
+  if (
+    parts.length === 4 &&
+    (part0 === 'channels' || part0 === 'dms') &&
+    DATE_RE.test(part2) &&
+    part3 === 'files'
+  ) {
+    return new FileStat({ name: 'files', type: FileType.DIRECTORY })
+  }
+
+  if (
+    parts.length === 5 &&
+    (part0 === 'channels' || part0 === 'dms') &&
+    DATE_RE.test(part2) &&
+    part3 === 'files'
+  ) {
+    if (index === undefined) throw fileNotFound(raw)
+    const lookup = await lookupWithFallback(accessor, virtualKey, prefix, index)
+    if (lookup.entry === undefined || lookup.entry === null) {
+      throw fileNotFound(raw)
+    }
+    const mimetype =
+      typeof lookup.entry.extra.mimetype === 'string' ? lookup.entry.extra.mimetype : ''
+    return new FileStat({
+      name: lookup.entry.vfsName !== '' ? lookup.entry.vfsName : lookup.entry.name,
+      type: filetypeFromMimetype(mimetype),
+      size: lookup.entry.size ?? null,
+      extra: { file_id: lookup.entry.id },
+    })
   }
 
   throw fileNotFound(raw)
