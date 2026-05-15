@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from bson import ObjectId
@@ -25,6 +25,11 @@ from mirage.resource.mongodb.config import MongoDBConfig
 from mirage.types import PathSpec
 
 
+async def _gen(items):
+    for item in items:
+        yield item
+
+
 @pytest.fixture
 def index():
     return RAMIndexCacheStore()
@@ -32,99 +37,65 @@ def index():
 
 @pytest.fixture
 def accessor():
-    config = MongoDBConfig(uri="mongodb://localhost:27017",
-                           default_doc_limit=10)
-    return MongoDBAccessor(config=config)
+    return MongoDBAccessor(
+        config=MongoDBConfig(uri="mongodb://localhost:27017"))
+
+
+def _patched_iter(docs):
+    return patch("mirage.core.mongodb.stream.iter_documents",
+                 new=lambda *args, **kwargs: _gen(docs))
 
 
 @pytest.mark.asyncio
-async def test_read_collection_returns_jsonl(accessor, index):
+async def test_read_collection_returns_jsonl_extended_json(accessor, index):
     oid = ObjectId()
     docs = [
-        {
-            "_id": oid,
-            "title": "Movie 1"
-        },
-        {
-            "_id": ObjectId(),
-            "title": "Movie 2"
-        },
+        {"_id": oid, "title": "Movie 1"},
+        {"_id": ObjectId(), "title": "Movie 2"},
     ]
-    with patch(
-            "mirage.core.mongodb.read.find_documents",
-            new_callable=AsyncMock,
-            return_value=docs,
-    ):
+    with _patched_iter(docs):
         result = await read(
             accessor,
             PathSpec(original="/sample_mflix/movies.jsonl",
                      directory="/sample_mflix/movies.jsonl"), index)
-
     lines = result.decode().strip().split("\n")
     assert len(lines) == 2
     first = json.loads(lines[0])
     assert first["title"] == "Movie 1"
-    assert first["_id"] == str(oid)
+    assert first["_id"] == {"$oid": str(oid)}
 
 
 @pytest.mark.asyncio
-async def test_read_returns_limited_docs(accessor, index):
+async def test_read_returns_all_streamed_docs_no_cap(accessor, index):
     docs = [{"_id": ObjectId(), "x": i} for i in range(10)]
-    with patch(
-            "mirage.core.mongodb.read.find_documents",
-            new_callable=AsyncMock,
-            return_value=docs,
-    ):
+    with _patched_iter(docs):
         result = await read(
             accessor,
             PathSpec(original="/sample_mflix/movies.jsonl",
                      directory="/sample_mflix/movies.jsonl"), index)
-
     lines = result.decode().strip().split("\n")
     assert len(lines) == 10
     for line in lines:
         parsed = json.loads(line)
-        assert isinstance(parsed["_id"], str)
-
-
-@pytest.mark.asyncio
-async def test_read_id_converted_to_string(accessor, index):
-    oid = ObjectId()
-    docs = [{"_id": oid, "name": "test"}]
-    with patch(
-            "mirage.core.mongodb.read.find_documents",
-            new_callable=AsyncMock,
-            return_value=docs,
-    ):
-        result = await read(
-            accessor,
-            PathSpec(original="/sample_mflix/movies.jsonl",
-                     directory="/sample_mflix/movies.jsonl"), index)
-
-    line = json.loads(result.decode().strip())
-    assert isinstance(line["_id"], str)
-    assert line["_id"] == str(oid)
+        assert isinstance(parsed["_id"], dict)
+        assert "$oid" in parsed["_id"]
 
 
 @pytest.mark.asyncio
 async def test_read_empty_collection(accessor, index):
-    with patch(
-            "mirage.core.mongodb.read.find_documents",
-            new_callable=AsyncMock,
-            return_value=[],
-    ):
+    with _patched_iter([]):
         result = await read(
             accessor,
             PathSpec(original="/sample_mflix/movies.jsonl",
                      directory="/sample_mflix/movies.jsonl"), index)
-
     assert result == b""
 
 
 @pytest.mark.asyncio
 async def test_read_invalid_path_raises(accessor, index):
-    with pytest.raises(FileNotFoundError):
-        await read(
-            accessor,
-            PathSpec(original="/not_a_jsonl_file",
-                     directory="/not_a_jsonl_file"), index)
+    with _patched_iter([]):
+        with pytest.raises(FileNotFoundError):
+            await read(
+                accessor,
+                PathSpec(original="/not_a_jsonl_file",
+                         directory="/not_a_jsonl_file"), index)
