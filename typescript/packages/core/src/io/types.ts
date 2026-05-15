@@ -37,7 +37,7 @@ export interface IOResultInit {
 export class IOResult {
   stdout: ByteSource | null
   stderr: ByteSource | null
-  exitCode: number
+  private _exitCode: number
   reads: Record<string, ByteSource>
   writes: Record<string, ByteSource>
   cache: string[]
@@ -46,10 +46,22 @@ export class IOResult {
   constructor(init: IOResultInit = {}) {
     this.stdout = init.stdout ?? null
     this.stderr = init.stderr ?? null
-    this.exitCode = init.exitCode ?? 0
+    this._exitCode = init.exitCode ?? 0
     this.reads = init.reads ?? {}
     this.writes = init.writes ?? {}
     this.cache = init.cache ?? []
+    this.streamSource = null
+  }
+
+  get exitCode(): number {
+    return this._exitCode
+  }
+
+  // An explicit write to exitCode wins over any lazy streamSource mirror.
+  // Without this, fanOutTraversal's aggregated exit code gets clobbered by
+  // syncExitCode() following streamSource from the last merged sub-IO.
+  set exitCode(v: number) {
+    this._exitCode = v
     this.streamSource = null
   }
 

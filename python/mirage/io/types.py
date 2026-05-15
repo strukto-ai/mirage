@@ -70,6 +70,16 @@ class IOResult:
     cache: list[str] = field(default_factory=list)
     _stream_source: "IOResult | None" = field(default=None, repr=False)
 
+    def __setattr__(self, name: str, value: object) -> None:
+        object.__setattr__(self, name, value)
+        # An explicit write to exit_code wins over any lazy _stream_source
+        # mirror. Without this, fan-out's aggregated exit code gets
+        # clobbered by sync_exit_code() following _stream_source from the
+        # last merged sub-IO (issue #43).
+        if name == "exit_code" and getattr(self, "_stream_source",
+                                           None) is not None:
+            object.__setattr__(self, "_stream_source", None)
+
     async def materialize_stdout(self) -> bytes:
         self.stdout = await materialize(self.stdout)
         return self.stdout

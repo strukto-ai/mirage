@@ -76,3 +76,33 @@ def test_merge_aggregate_zero_when_all_succeed():
         assert merged.exit_code == 0
 
     asyncio.run(_run())
+
+
+def test_explicit_exit_code_clears_stream_source_issue_43():
+
+    async def _run():
+        inner = IOResult(exit_code=1)
+        outer = await IOResult().merge(inner)
+        assert outer._stream_source is inner
+        outer.exit_code = 0
+        assert outer._stream_source is None
+        outer.sync_exit_code()
+        assert outer.exit_code == 0
+
+    asyncio.run(_run())
+
+
+def test_explicit_exit_code_survives_chain_with_failing_leaf_issue_43():
+
+    async def _run():
+        a = IOResult(exit_code=0)
+        b = IOResult(exit_code=1)
+        c = IOResult(exit_code=1)
+        merged = await IOResult().merge(a)
+        merged = await merged.merge(b)
+        merged = await merged.merge(c)
+        merged.exit_code = 0
+        merged.sync_exit_code()
+        assert merged.exit_code == 0
+
+    asyncio.run(_run())

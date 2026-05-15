@@ -169,4 +169,26 @@ describe('IOResult.syncExitCode', () => {
     outer.syncExitCode()
     expect(outer.exitCode).toBe(42)
   })
+
+  it('explicit exitCode assignment survives a later syncExitCode (issue #43)', async () => {
+    const inner = new IOResult({ exitCode: 1 })
+    const outer = await new IOResult().merge(inner)
+    expect(outer.streamSource).toBe(inner)
+    outer.exitCode = 0
+    expect(outer.streamSource).toBeNull()
+    outer.syncExitCode()
+    expect(outer.exitCode).toBe(0)
+  })
+
+  it('explicit exitCode survives across a merge chain that ends with a failing leaf', async () => {
+    const a = new IOResult({ exitCode: 0 })
+    const b = new IOResult({ exitCode: 1 })
+    const c = new IOResult({ exitCode: 1 })
+    let merged = await new IOResult().merge(a)
+    merged = await merged.merge(b)
+    merged = await merged.merge(c)
+    merged.exitCode = 0
+    merged.syncExitCode()
+    expect(merged.exitCode).toBe(0)
+  })
 })
