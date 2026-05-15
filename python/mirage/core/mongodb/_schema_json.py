@@ -14,7 +14,8 @@
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.core.mongodb._client import (count_documents, get_index_stats,
-                                          get_indexes, get_validator, is_view)
+                                          get_indexes, get_validator, is_view,
+                                          list_collections)
 from mirage.core.mongodb._sampler import sample_field_types
 
 
@@ -22,6 +23,29 @@ def _index_type(idx: dict) -> str:
     if "textIndexVersion" in idx:
         return "text"
     return "btree"
+
+
+async def build_database_json(
+    accessor: MongoDBAccessor,
+    database: str,
+) -> dict:
+    all_names = await list_collections(accessor.client, database)
+    collections: list[dict] = []
+    views: list[dict] = []
+    for name in all_names:
+        if await is_view(accessor.client, database, name):
+            views.append({"name": name})
+        else:
+            doc_count = await count_documents(accessor.client, database, name)
+            collections.append({
+                "name": name,
+                "document_count": doc_count,
+            })
+    return {
+        "database": database,
+        "collections": collections,
+        "views": views,
+    }
 
 
 async def build_collection_schema_json(

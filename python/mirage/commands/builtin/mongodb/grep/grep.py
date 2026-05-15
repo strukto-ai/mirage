@@ -95,14 +95,10 @@ async def grep(
     before_ctx = int(B) if B is not None else (int(C) if C is not None else 0)
 
     config = accessor.config
-    single_db = config.databases is not None and len(config.databases) == 1
-    single_db_name = config.databases[0] if single_db else None
     limit = config.default_search_limit
 
     if paths:
-        scope = detect_scope(paths[0],
-                             single_db=single_db,
-                             single_db_name=single_db_name)
+        scope = detect_scope(paths[0])
 
         if scope.level in ("database", "root"):
             if scope.level == "database" and scope.database:

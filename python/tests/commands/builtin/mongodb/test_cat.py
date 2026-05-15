@@ -30,7 +30,7 @@ def accessor():
         config=MongoDBConfig(uri="mongodb://localhost:27017"))
 
 
-def _path(s: str = "/db1/coll1.jsonl") -> PathSpec:
+def _path(s: str = "/db1/collections/coll1/documents.jsonl") -> PathSpec:
     return PathSpec(original=s, directory=s)
 
 

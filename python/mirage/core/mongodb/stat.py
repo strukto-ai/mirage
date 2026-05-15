@@ -14,13 +14,9 @@
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.core.mongodb._client import (count_documents, get_indexes,
-                                          is_view)
+from mirage.core.mongodb._client import count_documents, get_indexes, is_view
+from mirage.core.mongodb.scope import MongoEntityKind, detect_scope
 from mirage.types import FileStat, FileType, PathSpec
-
-
-def _is_single_db(config) -> bool:
-    return config.databases is not None and len(config.databases) == 1
 
 
 async def stat(
@@ -28,75 +24,92 @@ async def stat(
     path: PathSpec,
     index: IndexCacheStore = None,
 ) -> FileStat:
-    """Get file stat for a path.
-
-    Args:
-        accessor (MongoDBAccessor): mongodb accessor.
-        path (str): resource-relative path.
-        index (IndexCacheStore | None): index cache.
-        prefix (str): mount prefix for virtual index keys.
-    """
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
-    if isinstance(path, PathSpec):
-        prefix = path.prefix
-        path = path.original
+    scope = detect_scope(path)
 
-    if prefix and path.startswith(prefix):
-        path = path[len(prefix):] or "/"
-    key = path.strip("/")
-
-    if not key:
+    if scope.level == "root":
         return FileStat(name="/", type=FileType.DIRECTORY)
 
-    parts = key.split("/")
-
-    if any(p.startswith(".") for p in parts):
-        raise FileNotFoundError(path)
-
-    if _is_single_db(accessor.config) and len(
-            parts) == 1 and parts[0].endswith(".jsonl"):
-        db_name = accessor.config.databases[0]
-        col_name = parts[0].removesuffix(".jsonl")
-        return await _collection_stat(accessor, db_name, col_name, parts[0])
-
-    if len(parts) == 1 and not parts[0].endswith(".jsonl"):
+    if scope.level == "database":
         return FileStat(
-            name=parts[0],
+            name=scope.database,
             type=FileType.DIRECTORY,
-            extra={"database": parts[0]},
+            extra={"database": scope.database},
         )
 
-    if len(parts) == 2 and parts[1].endswith(".jsonl"):
-        db_name = parts[0]
-        col_name = parts[1].removesuffix(".jsonl")
-        return await _collection_stat(accessor, db_name, col_name, parts[1])
+    if scope.level == "kind_dir":
+        return FileStat(
+            name=_kind_dir_name(scope.kind),
+            type=FileType.DIRECTORY,
+            extra={"database": scope.database, "kind": scope.kind},
+        )
 
-    raise FileNotFoundError(path)
+    if scope.level == "entity":
+        doc_count = await count_documents(accessor.client, scope.database,
+                                           scope.name)
+        return FileStat(
+            name=scope.name,
+            type=FileType.DIRECTORY,
+            extra={
+                "database": scope.database,
+                "kind": scope.kind,
+                "name": scope.name,
+                "document_count": doc_count,
+            },
+        )
+
+    if scope.level == "documents":
+        return await _documents_stat(accessor, scope.database, scope.kind,
+                                      scope.name)
+
+    if scope.level == "schema_json":
+        return FileStat(
+            name="schema.json",
+            type=FileType.TEXT,
+            extra={
+                "database": scope.database,
+                "kind": scope.kind,
+                "name": scope.name,
+            },
+        )
+
+    if scope.level == "database_json":
+        return FileStat(
+            name="database.json",
+            type=FileType.TEXT,
+            extra={"database": scope.database},
+        )
+
+    raise FileNotFoundError(path.original)
 
 
-async def _collection_stat(
+def _kind_dir_name(kind: MongoEntityKind) -> str:
+    return "collections" if kind == "collection" else "views"
+
+
+async def _documents_stat(
     accessor: MongoDBAccessor,
-    db_name: str,
-    col_name: str,
-    filename: str,
+    database: str,
+    kind: MongoEntityKind,
+    name: str,
 ) -> FileStat:
-    view = await is_view(accessor.client, db_name, col_name)
-    doc_count = await count_documents(accessor.client, db_name, col_name)
+    view = kind == "view" or await is_view(accessor.client, database, name)
+    doc_count = await count_documents(accessor.client, database, name)
     if view:
         index_info: list[dict] = []
     else:
-        indexes = await get_indexes(accessor.client, db_name, col_name)
+        indexes = await get_indexes(accessor.client, database, name)
         index_info = [{
             "name": idx.get("name"),
             "keys": dict(idx.get("key", {}))
         } for idx in indexes]
     return FileStat(
-        name=filename,
+        name="documents.jsonl",
         type=FileType.TEXT,
         extra={
-            "database": db_name,
-            "collection": col_name,
+            "database": database,
+            "name": name,
             "kind": "view" if view else "collection",
             "document_count": doc_count,
             "indexes": index_info,

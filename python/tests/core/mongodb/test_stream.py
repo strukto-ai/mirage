@@ -25,6 +25,9 @@ from mirage.core.mongodb.stream import read_stream
 from mirage.resource.mongodb.config import MongoDBConfig
 from mirage.types import PathSpec
 
+DOCS_PATH = "/db1/collections/coll1/documents.jsonl"
+VIEW_DOCS_PATH = "/db1/views/myview/documents.jsonl"
+
 
 async def _gen(items):
     for item in items:
@@ -42,15 +45,13 @@ def accessor():
         config=MongoDBConfig(uri="mongodb://localhost:27017"))
 
 
-@pytest.fixture
-def single_db_accessor():
-    return MongoDBAccessor(config=MongoDBConfig(
-        uri="mongodb://localhost:27017", databases=["db1"]))
-
-
 def _patched_iter(docs):
     return patch("mirage.core.mongodb.stream.iter_documents",
                  new=lambda *args, **kwargs: _gen(docs))
+
+
+def _path(s: str) -> PathSpec:
+    return PathSpec(original=s, directory=s)
 
 
 async def _collect(gen):
@@ -64,10 +65,8 @@ async def _collect(gen):
 async def test_read_stream_yields_one_jsonl_line_per_doc(accessor, index):
     oid_a, oid_b = ObjectId(), ObjectId()
     docs = [{"_id": oid_a, "title": "A"}, {"_id": oid_b, "title": "B"}]
-    path = PathSpec(original="/db1/coll1.jsonl",
-                    directory="/db1/coll1.jsonl")
     with _patched_iter(docs):
-        data = await _collect(read_stream(accessor, path, index))
+        data = await _collect(read_stream(accessor, _path(DOCS_PATH), index))
     lines = [line for line in data.decode().split("\n") if line]
     assert len(lines) == 2
     first = json.loads(lines[0])
@@ -84,10 +83,8 @@ async def test_read_stream_preserves_bson_types_via_extended_json(
                             tzinfo=dt.timezone.utc),
         "decimal": Decimal128("123.456"),
     }]
-    path = PathSpec(original="/db1/coll1.jsonl",
-                    directory="/db1/coll1.jsonl")
     with _patched_iter(docs):
-        data = await _collect(read_stream(accessor, path, index))
+        data = await _collect(read_stream(accessor, _path(DOCS_PATH), index))
     parsed = json.loads(data.decode().strip())
     assert parsed["_id"] == {"$oid": "65f0000000000000000000a1"}
     assert "$date" in parsed["date"]
@@ -96,11 +93,9 @@ async def test_read_stream_preserves_bson_types_via_extended_json(
 
 @pytest.mark.asyncio
 async def test_read_stream_empty_yields_nothing(accessor, index):
-    path = PathSpec(original="/db1/coll1.jsonl",
-                    directory="/db1/coll1.jsonl")
     with _patched_iter([]):
         chunks = []
-        async for chunk in read_stream(accessor, path, index):
+        async for chunk in read_stream(accessor, _path(DOCS_PATH), index):
             chunks.append(chunk)
     assert chunks == []
 
@@ -115,32 +110,39 @@ async def test_read_stream_short_circuits_when_consumer_closes(
             consumed.append(i)
             yield {"_id": ObjectId(), "i": i}
 
-    path = PathSpec(original="/db1/coll1.jsonl",
-                    directory="/db1/coll1.jsonl")
     with patch("mirage.core.mongodb.stream.iter_documents",
                new=_instrumented):
-        gen = read_stream(accessor, path, index)
+        gen = read_stream(accessor, _path(DOCS_PATH), index)
         await gen.__anext__()
         await gen.aclose()
     assert len(consumed) <= 2
 
 
 @pytest.mark.asyncio
-async def test_read_stream_single_db_mode_collapses_path(
-        single_db_accessor, index):
-    docs = [{"_id": ObjectId(), "v": 1}]
-    path = PathSpec(original="/coll1.jsonl", directory="/coll1.jsonl")
+async def test_read_stream_works_on_view_documents_path(accessor, index):
+    oid = ObjectId()
+    docs = [{"_id": oid, "v": 1}]
     with _patched_iter(docs):
-        data = await _collect(read_stream(single_db_accessor, path, index))
-    assert data
+        data = await _collect(
+            read_stream(accessor, _path(VIEW_DOCS_PATH), index))
     parsed = json.loads(data.decode().strip())
     assert parsed["v"] == 1
+    assert parsed["_id"] == {"$oid": str(oid)}
 
 
 @pytest.mark.asyncio
 async def test_read_stream_directory_path_raises(accessor, index):
-    path = PathSpec(original="/db1", directory="/db1")
     with _patched_iter([]):
         with pytest.raises(FileNotFoundError):
-            async for _ in read_stream(accessor, path, index):
+            async for _ in read_stream(accessor, _path("/db1"), index):
+                pass
+
+
+@pytest.mark.asyncio
+async def test_read_stream_schema_json_path_raises(accessor, index):
+    with _patched_iter([]):
+        with pytest.raises(FileNotFoundError):
+            async for _ in read_stream(
+                    accessor,
+                    _path("/db1/collections/coll1/schema.json"), index):
                 pass

@@ -12,8 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from bson.json_util import RELAXED_JSON_OPTIONS, dumps
+
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.core.mongodb._schema_json import (build_collection_schema_json,
+                                                build_database_json)
+from mirage.core.mongodb.scope import detect_scope
 from mirage.core.mongodb.stream import read_stream
 from mirage.types import PathSpec
 
@@ -23,7 +28,21 @@ async def read(
     path: PathSpec,
     index: IndexCacheStore = None,
 ) -> bytes:
-    chunks: list[bytes] = []
-    async for chunk in read_stream(accessor, path, index):
-        chunks.append(chunk)
-    return b"".join(chunks)
+    if isinstance(path, str):
+        path = PathSpec(original=path, directory=path)
+    scope = detect_scope(path)
+    if scope.level == "documents":
+        chunks: list[bytes] = []
+        async for chunk in read_stream(accessor, path, index):
+            chunks.append(chunk)
+        return b"".join(chunks)
+    if scope.level == "schema_json":
+        payload = await build_collection_schema_json(accessor, scope.database,
+                                                      scope.name)
+        return (dumps(payload, json_options=RELAXED_JSON_OPTIONS) +
+                "\n").encode()
+    if scope.level == "database_json":
+        payload = await build_database_json(accessor, scope.database)
+        return (dumps(payload, json_options=RELAXED_JSON_OPTIONS) +
+                "\n").encode()
+    raise FileNotFoundError(path.original)

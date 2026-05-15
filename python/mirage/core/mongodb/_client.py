@@ -29,10 +29,18 @@ async def list_databases(client: AsyncIOMotorClient,
     return sorted(dbs)
 
 
-async def list_collections(client: AsyncIOMotorClient,
-                           database: str) -> list[str]:
+async def list_collections(
+    client: AsyncIOMotorClient,
+    database: str,
+    kind: str | None = None,
+) -> list[str]:
     db = client[database]
-    return sorted(await db.list_collection_names())
+    filter_arg: dict | None = None
+    if kind == "collection":
+        filter_arg = {"type": "collection"}
+    elif kind == "view":
+        filter_arg = {"type": "view"}
+    return sorted(await db.list_collection_names(filter=filter_arg))
 
 
 async def find_documents(

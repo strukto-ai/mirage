@@ -31,18 +31,13 @@ async def read_stream(
 ) -> AsyncIterator[bytes]:
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
-    config = accessor.config
-    single = config.databases is not None and len(config.databases) == 1
-    single_name = config.databases[0] if single else None
-    scope = detect_scope(path,
-                         single_db=single,
-                         single_db_name=single_name)
-    if scope.level != "file":
+    scope = detect_scope(path)
+    if scope.level != "documents":
         raise FileNotFoundError(path.original)
     async for doc in iter_documents(
             accessor.client,
             scope.database,
-            scope.collection,
+            scope.name,
             sort=[("_id", 1)],
             batch_size=batch_size,
     ):

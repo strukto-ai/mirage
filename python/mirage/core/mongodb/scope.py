@@ -13,60 +13,80 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import dataclass
+from typing import Literal
 
 from mirage.types import PathSpec
+
+MongoEntityKind = Literal["collection", "view"]
+
+KIND_DIR_NAMES: dict[str, MongoEntityKind] = {
+    "collections": "collection",
+    "views": "view",
+}
 
 
 @dataclass
 class MongoDBScope:
     level: str
     database: str | None = None
-    collection: str | None = None
+    kind: MongoEntityKind | None = None
+    name: str | None = None
     resource_path: str = "/"
 
 
-def detect_scope(
-    path: PathSpec,
-    single_db: bool = False,
-    single_db_name: str | None = None,
-) -> MongoDBScope:
+def detect_scope(path) -> MongoDBScope:
     raw = path.strip_prefix if isinstance(path, PathSpec) else path
     key = raw.strip("/")
 
     if not key:
-        if single_db:
-            return MongoDBScope(level="database",
-                                database=single_db_name,
-                                resource_path="/")
         return MongoDBScope(level="root", resource_path="/")
 
     parts = key.split("/")
 
-    if single_db:
-        if key.endswith(".jsonl"):
-            col = key.removesuffix(".jsonl")
-            return MongoDBScope(level="file",
-                                database=single_db_name,
-                                collection=col,
-                                resource_path=raw)
-        return MongoDBScope(level="database",
-                            database=single_db_name,
-                            resource_path=raw)
-
     if len(parts) == 1:
-        if parts[0].endswith(".jsonl"):
-            return MongoDBScope(level="file",
-                                database=None,
-                                collection=parts[0].removesuffix(".jsonl"),
-                                resource_path=raw)
         return MongoDBScope(level="database",
                             database=parts[0],
                             resource_path=raw)
 
-    if len(parts) == 2 and parts[1].endswith(".jsonl"):
-        return MongoDBScope(level="file",
-                            database=parts[0],
-                            collection=parts[1].removesuffix(".jsonl"),
-                            resource_path=raw)
+    if len(parts) == 2:
+        db, leaf = parts
+        if leaf == "database.json":
+            return MongoDBScope(level="database_json",
+                                database=db,
+                                resource_path=raw)
+        if leaf in KIND_DIR_NAMES:
+            return MongoDBScope(level="kind_dir",
+                                database=db,
+                                kind=KIND_DIR_NAMES[leaf],
+                                resource_path=raw)
+        return MongoDBScope(level="unknown", resource_path=raw)
 
-    return MongoDBScope(level="root", resource_path=raw)
+    if len(parts) == 3:
+        db, kind_seg, name = parts
+        if kind_seg in KIND_DIR_NAMES:
+            return MongoDBScope(level="entity",
+                                database=db,
+                                kind=KIND_DIR_NAMES[kind_seg],
+                                name=name,
+                                resource_path=raw)
+        return MongoDBScope(level="unknown", resource_path=raw)
+
+    if len(parts) == 4:
+        db, kind_seg, name, leaf = parts
+        if kind_seg in KIND_DIR_NAMES:
+            kind = KIND_DIR_NAMES[kind_seg]
+            if leaf == "schema.json":
+                return MongoDBScope(level="schema_json",
+                                    database=db,
+                                    kind=kind,
+                                    name=name,
+                                    resource_path=raw)
+            if leaf == "documents.jsonl":
+                return MongoDBScope(level="documents",
+                                    database=db,
+                                    kind=kind,
+                                    name=name,
+                                    resource_path=raw)
+        return MongoDBScope(level="unknown", resource_path=raw)
+
+    return MongoDBScope(level="unknown", resource_path=raw)

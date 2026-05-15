@@ -16,76 +16,120 @@ from mirage.core.mongodb.scope import detect_scope
 from mirage.types import PathSpec
 
 
-def test_root_path():
+def test_root():
     scope = detect_scope("/")
     assert scope.level == "root"
     assert scope.database is None
-    assert scope.collection is None
+    assert scope.kind is None
+    assert scope.name is None
 
 
-def test_database_path():
+def test_database():
     scope = detect_scope("/sample_mflix")
     assert scope.level == "database"
     assert scope.database == "sample_mflix"
-    assert scope.collection is None
+    assert scope.kind is None
+    assert scope.name is None
 
 
-def test_file_path():
-    scope = detect_scope("/sample_mflix/movies.jsonl")
-    assert scope.level == "file"
+def test_database_json():
+    scope = detect_scope("/sample_mflix/database.json")
+    assert scope.level == "database_json"
     assert scope.database == "sample_mflix"
-    assert scope.collection == "movies"
 
 
-def test_single_db_root():
-    scope = detect_scope("/", single_db=True, single_db_name="mydb")
-    assert scope.level == "database"
-    assert scope.database == "mydb"
+def test_collections_kind_dir():
+    scope = detect_scope("/sample_mflix/collections")
+    assert scope.level == "kind_dir"
+    assert scope.database == "sample_mflix"
+    assert scope.kind == "collection"
 
 
-def test_single_db_file():
-    scope = detect_scope("/movies.jsonl",
-                         single_db=True,
-                         single_db_name="mydb")
-    assert scope.level == "file"
-    assert scope.database == "mydb"
-    assert scope.collection == "movies"
+def test_views_kind_dir():
+    scope = detect_scope("/sample_mflix/views")
+    assert scope.level == "kind_dir"
+    assert scope.database == "sample_mflix"
+    assert scope.kind == "view"
 
 
-def test_glob_scope_root():
-    gs = PathSpec(
+def test_collection_entity_dir():
+    scope = detect_scope("/sample_mflix/collections/movies")
+    assert scope.level == "entity"
+    assert scope.database == "sample_mflix"
+    assert scope.kind == "collection"
+    assert scope.name == "movies"
+
+
+def test_view_entity_dir():
+    scope = detect_scope("/sample_mflix/views/top_rated")
+    assert scope.level == "entity"
+    assert scope.database == "sample_mflix"
+    assert scope.kind == "view"
+    assert scope.name == "top_rated"
+
+
+def test_collection_schema_json():
+    scope = detect_scope("/sample_mflix/collections/movies/schema.json")
+    assert scope.level == "schema_json"
+    assert scope.database == "sample_mflix"
+    assert scope.kind == "collection"
+    assert scope.name == "movies"
+
+
+def test_collection_documents_jsonl():
+    scope = detect_scope("/sample_mflix/collections/movies/documents.jsonl")
+    assert scope.level == "documents"
+    assert scope.database == "sample_mflix"
+    assert scope.kind == "collection"
+    assert scope.name == "movies"
+
+
+def test_view_documents_jsonl():
+    scope = detect_scope("/sample_mflix/views/top_rated/documents.jsonl")
+    assert scope.level == "documents"
+    assert scope.kind == "view"
+    assert scope.name == "top_rated"
+
+
+def test_unknown_leaf_under_entity():
+    scope = detect_scope("/sample_mflix/collections/movies/weird.txt")
+    assert scope.level == "unknown"
+
+
+def test_unknown_top_segment_under_db():
+    scope = detect_scope("/sample_mflix/randomdir")
+    assert scope.level == "unknown"
+
+
+def test_pathspec_with_prefix_root():
+    p = PathSpec(
         original="/mongo/",
         directory="/mongo/",
-        pattern=None,
-        resolved=False,
         prefix="/mongo",
     )
-    scope = detect_scope(gs)
+    scope = detect_scope(p)
     assert scope.level == "root"
 
 
-def test_glob_scope_database():
-    gs = PathSpec(
+def test_pathspec_with_prefix_database():
+    p = PathSpec(
         original="/mongo/sample_mflix",
         directory="/mongo/",
-        pattern=None,
-        resolved=False,
         prefix="/mongo",
     )
-    scope = detect_scope(gs)
+    scope = detect_scope(p)
     assert scope.level == "database"
     assert scope.database == "sample_mflix"
 
 
-def test_glob_scope_file():
-    gs = PathSpec(
-        original="/mongo/sample_mflix/movies.jsonl",
-        directory="/mongo/sample_mflix/",
-        pattern="*.jsonl",
-        resolved=True,
+def test_pathspec_with_prefix_documents():
+    p = PathSpec(
+        original="/mongo/sample_mflix/collections/movies/documents.jsonl",
+        directory="/mongo/sample_mflix/collections/movies/",
         prefix="/mongo",
     )
-    scope = detect_scope(gs)
-    assert scope.level == "file"
+    scope = detect_scope(p)
+    assert scope.level == "documents"
     assert scope.database == "sample_mflix"
-    assert scope.collection == "movies"
+    assert scope.kind == "collection"
+    assert scope.name == "movies"

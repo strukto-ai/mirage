@@ -21,6 +21,8 @@ from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.mongodb.glob import resolve_glob
+from mirage.core.mongodb.read import read as mongodb_read
+from mirage.core.mongodb.scope import detect_scope
 from mirage.core.mongodb.stream import read_stream
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
@@ -48,6 +50,10 @@ async def _number_lines_stream(
         num += 1
 
 
+async def _bytes_to_stream(data: bytes) -> AsyncIterator[bytes]:
+    yield data
+
+
 @command("cat", resource="mongodb", spec=SPECS["cat"], provision=cat_provision)
 async def cat(
     accessor: MongoDBAccessor,
@@ -61,11 +67,19 @@ async def cat(
     if paths:
         paths = await resolve_glob(accessor, paths)
         p = paths[0]
-        source = read_stream(accessor, p, index)
-        io = IOResult(reads={p.strip_prefix: source}, cache=[p.strip_prefix])
+        scope = detect_scope(p)
+        if scope.level == "documents":
+            source = read_stream(accessor, p, index)
+            io = IOResult(reads={p.strip_prefix: source},
+                          cache=[p.strip_prefix])
+            if n:
+                return _number_lines_stream(source), io
+            return source, io
+        data = await mongodb_read(accessor, p, index)
+        io = IOResult(reads={p.strip_prefix: data}, cache=[p.strip_prefix])
         if n:
-            return _number_lines_stream(source), io
-        return source, io
+            return _number_lines_stream(_bytes_to_stream(data)), io
+        return data, io
     source = _resolve_source(stdin, "cat: missing operand")
     if n:
         return _number_lines_stream(source), IOResult()

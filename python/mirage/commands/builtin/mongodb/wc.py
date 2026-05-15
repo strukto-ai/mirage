@@ -20,6 +20,7 @@ from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.mongodb._client import count_documents
 from mirage.core.mongodb.glob import resolve_glob
+from mirage.core.mongodb.read import read as mongodb_read
 from mirage.core.mongodb.scope import detect_scope
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
@@ -36,10 +37,6 @@ async def wc_provision(
         accessor, paths,
         "wc " + " ".join(p.original if isinstance(p, PathSpec) else p
                          for p in paths))
-
-
-def _is_single_db(config) -> bool:
-    return (config.databases is not None and len(config.databases) == 1)
 
 
 @command("wc", resource="mongodb", spec=SPECS["wc"], provision=wc_provision)
@@ -65,30 +62,22 @@ async def wc(
     if not paths:
         raise ValueError("wc: missing operand")
 
-    single_db = _is_single_db(accessor.config)
-    dbs = accessor.config.databases
-    single_db_name = dbs[0] if single_db else None
-    scope = detect_scope(
-        paths[0],
-        single_db=single_db,
-        single_db_name=single_db_name,
-    )
+    scope = detect_scope(paths[0])
 
-    if scope.level == "file" and scope.database and scope.collection:
-        count = await count_documents(
-            accessor.client,
-            scope.database,
-            scope.collection,
-        )
+    if scope.level == "documents" and scope.database and scope.name:
         if c:
             paths = await resolve_glob(accessor, paths)
-            from mirage.core.mongodb.read import read
-            data = await read(
+            data = await mongodb_read(
                 accessor,
-                paths[0].original,
+                paths[0],
                 _extra.get("index"),
             )
             return str(len(data)).encode(), IOResult()
+        count = await count_documents(
+            accessor.client,
+            scope.database,
+            scope.name,
+        )
         return str(count).encode(), IOResult()
 
-    raise ValueError("wc: path must target a collection file")
+    raise ValueError("wc: path must target documents.jsonl")

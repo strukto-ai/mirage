@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from bson import ObjectId
@@ -23,6 +23,10 @@ from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.mongodb.read import read
 from mirage.resource.mongodb.config import MongoDBConfig
 from mirage.types import PathSpec
+
+DOCS_PATH = "/sample_mflix/collections/movies/documents.jsonl"
+SCHEMA_PATH = "/sample_mflix/collections/movies/schema.json"
+DBJSON_PATH = "/sample_mflix/database.json"
 
 
 async def _gen(items):
@@ -46,18 +50,19 @@ def _patched_iter(docs):
                  new=lambda *args, **kwargs: _gen(docs))
 
 
+def _path(s: str) -> PathSpec:
+    return PathSpec(original=s, directory=s)
+
+
 @pytest.mark.asyncio
-async def test_read_collection_returns_jsonl_extended_json(accessor, index):
+async def test_read_documents_returns_extended_json_jsonl(accessor, index):
     oid = ObjectId()
     docs = [
         {"_id": oid, "title": "Movie 1"},
         {"_id": ObjectId(), "title": "Movie 2"},
     ]
     with _patched_iter(docs):
-        result = await read(
-            accessor,
-            PathSpec(original="/sample_mflix/movies.jsonl",
-                     directory="/sample_mflix/movies.jsonl"), index)
+        result = await read(accessor, _path(DOCS_PATH), index)
     lines = result.decode().strip().split("\n")
     assert len(lines) == 2
     first = json.loads(lines[0])
@@ -66,36 +71,62 @@ async def test_read_collection_returns_jsonl_extended_json(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_read_returns_all_streamed_docs_no_cap(accessor, index):
-    docs = [{"_id": ObjectId(), "x": i} for i in range(10)]
+async def test_read_documents_no_doc_cap(accessor, index):
+    docs = [{"_id": ObjectId(), "x": i} for i in range(50)]
     with _patched_iter(docs):
-        result = await read(
-            accessor,
-            PathSpec(original="/sample_mflix/movies.jsonl",
-                     directory="/sample_mflix/movies.jsonl"), index)
+        result = await read(accessor, _path(DOCS_PATH), index)
     lines = result.decode().strip().split("\n")
-    assert len(lines) == 10
-    for line in lines:
-        parsed = json.loads(line)
-        assert isinstance(parsed["_id"], dict)
-        assert "$oid" in parsed["_id"]
+    assert len(lines) == 50
 
 
 @pytest.mark.asyncio
-async def test_read_empty_collection(accessor, index):
+async def test_read_documents_empty(accessor, index):
     with _patched_iter([]):
-        result = await read(
-            accessor,
-            PathSpec(original="/sample_mflix/movies.jsonl",
-                     directory="/sample_mflix/movies.jsonl"), index)
+        result = await read(accessor, _path(DOCS_PATH), index)
     assert result == b""
 
 
 @pytest.mark.asyncio
-async def test_read_invalid_path_raises(accessor, index):
-    with _patched_iter([]):
-        with pytest.raises(FileNotFoundError):
-            await read(
-                accessor,
-                PathSpec(original="/not_a_jsonl_file",
-                         directory="/not_a_jsonl_file"), index)
+async def test_read_schema_json_returns_jsonschema_payload(accessor, index):
+    payload = {
+        "database": "sample_mflix",
+        "name": "movies",
+        "kind": "collection",
+        "validator": None,
+        "fields": [],
+        "primary_key": "_id",
+        "indexes": [],
+        "document_count": 0,
+        "sampled": 100,
+    }
+    with patch("mirage.core.mongodb.read.build_collection_schema_json",
+               new=AsyncMock(return_value=payload)):
+        result = await read(accessor, _path(SCHEMA_PATH), index)
+    parsed = json.loads(result.decode())
+    assert parsed == payload
+
+
+@pytest.mark.asyncio
+async def test_read_database_json_returns_payload(accessor, index):
+    payload = {
+        "database": "sample_mflix",
+        "collections": [{"name": "movies", "document_count": 100}],
+        "views": [{"name": "top_rated"}],
+    }
+    with patch("mirage.core.mongodb.read.build_database_json",
+               new=AsyncMock(return_value=payload)):
+        result = await read(accessor, _path(DBJSON_PATH), index)
+    parsed = json.loads(result.decode())
+    assert parsed == payload
+
+
+@pytest.mark.asyncio
+async def test_read_unknown_path_raises(accessor, index):
+    with pytest.raises(FileNotFoundError):
+        await read(accessor, _path("/garbage/path"), index)
+
+
+@pytest.mark.asyncio
+async def test_read_kind_dir_path_raises(accessor, index):
+    with pytest.raises(FileNotFoundError):
+        await read(accessor, _path("/sample_mflix/collections"), index)
