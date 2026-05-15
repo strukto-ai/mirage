@@ -45,7 +45,7 @@ async def test_list_channels(config):
         },
     }
     with patch(
-            "mirage.core.slack.channels.slack_get",
+            "mirage.core.slack.paginate.slack_get",
             new_callable=AsyncMock,
             return_value=mock_data,
     ) as mock_get:
@@ -83,7 +83,7 @@ async def test_list_channels_pagination(config):
         },
     }
     with patch(
-            "mirage.core.slack.channels.slack_get",
+            "mirage.core.slack.paginate.slack_get",
             new_callable=AsyncMock,
             side_effect=[page1, page2],
     ) as mock_get:
@@ -108,7 +108,7 @@ async def test_list_dms(config):
         },
     }
     with patch(
-            "mirage.core.slack.channels.slack_get",
+            "mirage.core.slack.paginate.slack_get",
             new_callable=AsyncMock,
             return_value=mock_data,
     ) as mock_get:

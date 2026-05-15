@@ -12,8 +12,37 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.slack._client import slack_get
+from collections.abc import AsyncIterator
+
+from mirage.core.slack.paginate import cursor_pages
 from mirage.resource.slack.config import SlackConfig
+
+
+def _channel_base_params(types: str, limit: int) -> dict:
+    return {"types": types, "limit": limit, "exclude_archived": "true"}
+
+
+def list_channels_stream(
+    config: SlackConfig,
+    types: str = "public_channel,private_channel",
+    limit: int = 200,
+) -> AsyncIterator[list[dict]]:
+    """Page-streaming variant: yields one Slack page per HTTP round-trip.
+
+    Args:
+        config (SlackConfig): Slack credentials.
+        types (str): channel types to list.
+        limit (int): max per page.
+
+    Yields:
+        list[dict]: channels in one Slack page.
+    """
+    return cursor_pages(
+        config,
+        "conversations.list",
+        base_params=_channel_base_params(types, limit),
+        items_key="channels",
+    )
 
 
 async def list_channels(
@@ -21,7 +50,7 @@ async def list_channels(
     types: str = "public_channel,private_channel",
     limit: int = 200,
 ) -> list[dict]:
-    """List channels via conversations.list.
+    """List channels via conversations.list (eager; collects all pages).
 
     Args:
         config (SlackConfig): Slack credentials.
@@ -31,29 +60,33 @@ async def list_channels(
     Returns:
         list[dict]: channel metadata dicts.
     """
-    channels: list[dict] = []
-    cursor: str | None = None
-    while True:
-        params: dict = {
-            "types": types,
-            "limit": limit,
-            "exclude_archived": "true",
-        }
-        if cursor:
-            params["cursor"] = cursor
-        data = await slack_get(config, "conversations.list", params=params)
-        channels.extend(data.get("channels", []))
-        cursor = (data.get("response_metadata", {}).get("next_cursor", ""))
-        if not cursor:
-            break
-    return channels
+    out: list[dict] = []
+    async for page in list_channels_stream(config, types=types, limit=limit):
+        out.extend(page)
+    return out
+
+
+def list_dms_stream(
+    config: SlackConfig,
+    limit: int = 200,
+) -> AsyncIterator[list[dict]]:
+    """Page-streaming variant for direct messages.
+
+    Args:
+        config (SlackConfig): Slack credentials.
+        limit (int): max per page.
+
+    Yields:
+        list[dict]: DM channels in one Slack page.
+    """
+    return list_channels_stream(config, types="im,mpim", limit=limit)
 
 
 async def list_dms(
     config: SlackConfig,
     limit: int = 200,
 ) -> list[dict]:
-    """List direct messages via conversations.list.
+    """List direct messages via conversations.list (eager).
 
     Args:
         config (SlackConfig): Slack credentials.
