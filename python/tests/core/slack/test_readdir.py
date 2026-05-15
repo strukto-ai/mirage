@@ -247,7 +247,7 @@ async def test_readdir_date_dir_returns_chat_and_files(accessor, index):
         ),
     ])
 
-    with patch("mirage.core.slack.readdir._fetch_messages_for_day",
+    with patch("mirage.core.slack.readdir.fetch_messages_for_day",
                new_callable=AsyncMock,
                return_value=[]):
         result = await readdir(

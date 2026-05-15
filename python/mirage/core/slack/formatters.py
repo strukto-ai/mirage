@@ -20,6 +20,33 @@ from mirage.core.slack.scope import SlackScope
 from mirage.utils.sanitize import sanitize_name
 
 
+def channel_dirname(ch: dict) -> str:
+    """Compute the VFS dirname for a channel, of the form `name__C123`."""
+    name = sanitize_name(ch.get("name", ch.get("id", "unknown")))
+    return f"{name}__{ch['id']}"
+
+
+def dm_dirname(dm: dict, user_map: dict[str, str]) -> str:
+    """Compute the VFS dirname for a DM, of the form `username__D123`.
+
+    Args:
+        dm (dict): DM channel dict with id and user fields.
+        user_map (dict[str, str]): user_id -> name lookup.
+
+    Returns:
+        str: dirname; falls back to the user id when not in user_map.
+    """
+    user_id = dm.get("user", "")
+    name = sanitize_name(user_map.get(user_id, user_id))
+    return f"{name}__{dm['id']}"
+
+
+def user_filename(u: dict) -> str:
+    """Compute the VFS filename for a user, of the form `name__U123.json`."""
+    name = sanitize_name(u.get("name", u.get("id", "unknown")))
+    return f"{name}__{u['id']}.json"
+
+
 def build_query(pattern: str, scope: SlackScope) -> str:
     """Compose a Slack search query string for a pushed-down grep/rg call.
 

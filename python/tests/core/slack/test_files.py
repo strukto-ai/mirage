@@ -96,7 +96,7 @@ async def test_files_dir_listing_from_messages(accessor, index,
                     resource_type="slack/date_dir",
                     vfs_name="2026-04-10")),
     ])
-    with patch("mirage.core.slack.readdir._fetch_messages_for_day",
+    with patch("mirage.core.slack.readdir.fetch_messages_for_day",
                new_callable=AsyncMock,
                return_value=messages_with_files):
         result = await readdir(
@@ -133,7 +133,7 @@ async def test_files_dir_empty_on_no_attachments(accessor, index):
         "ts": "1712707200.0",
         "text": "hi"
     }]
-    with patch("mirage.core.slack.readdir._fetch_messages_for_day",
+    with patch("mirage.core.slack.readdir.fetch_messages_for_day",
                new_callable=AsyncMock,
                return_value=no_file_msgs):
         result = await readdir(
@@ -163,7 +163,7 @@ async def test_file_blob_index_entry_stores_url(accessor, index,
                     resource_type="slack/date_dir",
                     vfs_name="2026-04-10")),
     ])
-    with patch("mirage.core.slack.readdir._fetch_messages_for_day",
+    with patch("mirage.core.slack.readdir.fetch_messages_for_day",
                new_callable=AsyncMock,
                return_value=messages_with_files):
         await readdir(
