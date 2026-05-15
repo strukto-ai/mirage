@@ -107,3 +107,28 @@ async def get_indexes(
     async for idx in col.list_indexes():
         indexes.append(idx)
     return indexes
+
+
+async def get_validator(
+    client: AsyncIOMotorClient,
+    database: str,
+    collection: str,
+) -> dict | None:
+    db = client[database]
+    cursor = await db.list_collections(filter={"name": collection})
+    async for spec in cursor:
+        validator = spec.get("options", {}).get("validator", {})
+        return validator.get("$jsonSchema")
+    return None
+
+
+async def get_index_stats(
+    client: AsyncIOMotorClient,
+    database: str,
+    collection: str,
+) -> dict[str, dict]:
+    col = client[database][collection]
+    out: dict[str, dict] = {}
+    async for doc in col.aggregate([{"$indexStats": {}}]):
+        out[doc["name"]] = doc.get("accesses", {})
+    return out

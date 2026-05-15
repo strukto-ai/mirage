@@ -15,7 +15,9 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from mirage.core.mongodb._client import get_indexes, is_view, iter_documents
+from mirage.core.mongodb._client import (get_index_stats, get_indexes,
+                                          get_validator, is_view,
+                                          iter_documents)
 
 
 class _AsyncIter:
@@ -139,6 +141,81 @@ async def test_get_indexes_returns_indexes_for_collection():
     assert out == indexes
     db.list_collections.assert_awaited_once_with(filter={"name": "coll1"})
     col.list_indexes.assert_called_once_with()
+
+
+def _build_validator_client(spec):
+    spec_cursor = MagicMock()
+    spec_cursor.__aiter__ = lambda self: _AsyncIter([spec] if spec else []
+                                                    ).__aiter__()
+    db = MagicMock()
+    db.list_collections = AsyncMock(return_value=spec_cursor)
+    client = MagicMock()
+    client.__getitem__.return_value = db
+    return client, db
+
+
+@pytest.mark.asyncio
+async def test_get_validator_returns_json_schema_when_present():
+    spec = {
+        "name": "movies",
+        "options": {
+            "validator": {
+                "$jsonSchema": {
+                    "bsonType": "object",
+                    "required": ["title"]
+                }
+            }
+        }
+    }
+    client, db = _build_validator_client(spec)
+    out = await get_validator(client, "db1", "movies")
+    assert out == {"bsonType": "object", "required": ["title"]}
+    db.list_collections.assert_awaited_once_with(filter={"name": "movies"})
+
+
+@pytest.mark.asyncio
+async def test_get_validator_returns_none_without_validator():
+    client, _ = _build_validator_client({"name": "movies", "options": {}})
+    assert await get_validator(client, "db1", "movies") is None
+
+
+@pytest.mark.asyncio
+async def test_get_validator_returns_none_when_collection_missing():
+    client, _ = _build_validator_client(None)
+    assert await get_validator(client, "db1", "ghost") is None
+
+
+def _build_indexstats_client(rows):
+    cursor = MagicMock()
+    cursor.__aiter__ = lambda self: _AsyncIter(rows).__aiter__()
+    col = MagicMock()
+    col.aggregate = MagicMock(return_value=cursor)
+    db = MagicMock()
+    db.__getitem__.return_value = col
+    client = MagicMock()
+    client.__getitem__.return_value = db
+    return client, col
+
+
+@pytest.mark.asyncio
+async def test_get_index_stats_returns_map_keyed_by_name():
+    rows = [
+        {"name": "_id_", "accesses": {"ops": 1234, "since": "2026-01-01"}},
+        {"name": "title_text",
+         "accesses": {"ops": 5678, "since": "2026-02-01"}},
+    ]
+    client, col = _build_indexstats_client(rows)
+    out = await get_index_stats(client, "db1", "coll1")
+    assert out["title_text"] == {"ops": 5678, "since": "2026-02-01"}
+    assert out["_id_"] == {"ops": 1234, "since": "2026-01-01"}
+    col.aggregate.assert_called_once_with([{"$indexStats": {}}])
+
+
+@pytest.mark.asyncio
+async def test_get_index_stats_empty_when_view():
+    client, _ = _build_indexstats_client([])
+    out = await get_index_stats(client, "db1", "myview")
+    assert out == {}
 
 
 @pytest.mark.asyncio
