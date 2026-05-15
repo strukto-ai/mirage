@@ -30,11 +30,12 @@ from mirage.commands.spec import SPECS
 from mirage.core.mongodb._client import list_databases
 from mirage.core.mongodb.glob import resolve_glob
 from mirage.core.mongodb.read import read as mongodb_read
+from mirage.core.mongodb.stream import read_stream
 from mirage.core.mongodb.readdir import readdir as _readdir
 from mirage.core.mongodb.scope import detect_scope
 from mirage.core.mongodb.search import format_grep_results, search_database
 from mirage.core.mongodb.stat import stat as _stat
-from mirage.io.stream import exit_on_empty, quiet_match, yield_bytes
+from mirage.io.stream import exit_on_empty, quiet_match
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
@@ -196,8 +197,7 @@ async def grep(
                 return b"", IOResult(exit_code=1)
             return "\n".join(all_results).encode(), IOResult()
 
-        data = await rb(paths[0].original)
-        source = yield_bytes(data)
+        source = read_stream(accessor, paths[0], index)
         stream = grep_stream(
             source,
             pat,
