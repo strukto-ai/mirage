@@ -12,30 +12,58 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator
+
 from mirage.core.slack._client import slack_get
+from mirage.core.slack.paginate import cursor_pages
 from mirage.resource.slack.config import SlackConfig
+
+
+def _is_real_user(m: dict) -> bool:
+    return (not m.get("deleted") and not m.get("is_bot")
+            and m.get("id") != "USLACKBOT")
+
+
+async def list_users_stream(
+    config: SlackConfig,
+    limit: int = 200,
+) -> AsyncIterator[list[dict]]:
+    """Page-streaming user list; yields filtered humans per page.
+
+    Args:
+        config (SlackConfig): Slack credentials.
+        limit (int): max per page.
+
+    Yields:
+        list[dict]: real users in one Slack page (bots, deleted, and
+        slackbot are filtered out before yielding).
+    """
+    async for page in cursor_pages(
+            config,
+            "users.list",
+            base_params={"limit": limit},
+            items_key="members",
+    ):
+        yield [m for m in page if _is_real_user(m)]
 
 
 async def list_users(
     config: SlackConfig,
     limit: int = 200,
 ) -> list[dict]:
-    """List workspace users (first page).
+    """List workspace users (eager; collects all pages).
 
     Args:
         config (SlackConfig): Slack credentials.
-        limit (int): max users to fetch.
+        limit (int): max per page.
 
     Returns:
         list[dict]: user dicts.
     """
-    params = {"limit": limit}
-    data = await slack_get(config, "users.list", params=params)
-    members = data.get("members", [])
-    return [
-        m for m in members if not m.get("deleted") and not m.get("is_bot")
-        and m.get("id") != "USLACKBOT"
-    ]
+    out: list[dict] = []
+    async for page in list_users_stream(config, limit=limit):
+        out.extend(page)
+    return out
 
 
 async def get_user_profile(
@@ -60,12 +88,12 @@ async def search_users(
     query: str,
     limit: int = 200,
 ) -> list[dict]:
-    """Search users by name.
+    """Search users by name, real name, or email.
 
     Args:
         config (SlackConfig): Slack credentials.
         query (str): search query.
-        limit (int): max results.
+        limit (int): max per page.
 
     Returns:
         list[dict]: matching users.

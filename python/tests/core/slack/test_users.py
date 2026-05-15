@@ -64,7 +64,7 @@ async def test_list_users(config):
         ],
     }
     with patch(
-            "mirage.core.slack.users.slack_get",
+            "mirage.core.slack.paginate.slack_get",
             new_callable=AsyncMock,
             return_value=mock_data,
     ):
@@ -108,7 +108,7 @@ async def test_search_users(config):
         ],
     }
     with patch(
-            "mirage.core.slack.users.slack_get",
+            "mirage.core.slack.paginate.slack_get",
             new_callable=AsyncMock,
             return_value=mock_data,
     ):
@@ -147,7 +147,7 @@ async def test_search_users_by_email(config):
         ],
     }
     with patch(
-            "mirage.core.slack.users.slack_get",
+            "mirage.core.slack.paginate.slack_get",
             new_callable=AsyncMock,
             return_value=mock_data,
     ):
