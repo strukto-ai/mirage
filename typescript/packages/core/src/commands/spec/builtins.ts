@@ -142,11 +142,11 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
   }),
   python: new CommandSpec({
     options: [new Option({ short: '-c', valueKind: OperandKind.TEXT })],
-    rest: new Operand({ kind: OperandKind.PATH }),
+    rest: new Operand({ kind: OperandKind.TEXT }),
   }),
   python3: new CommandSpec({
     options: [new Option({ short: '-c', valueKind: OperandKind.TEXT })],
-    rest: new Operand({ kind: OperandKind.PATH }),
+    rest: new Operand({ kind: OperandKind.TEXT }),
   }),
   nl: new CommandSpec({
     options: [

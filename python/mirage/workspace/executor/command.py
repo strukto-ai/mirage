@@ -661,15 +661,19 @@ async def handle_command(
                                         stdin)
 
     try:
-        stdout, io = await mount.execute_cmd(cmd_name,
-                                             paths,
-                                             texts,
-                                             flag_kwargs,
-                                             stdin=stdin,
-                                             cwd=session.cwd,
-                                             dispatch=dispatch,
-                                             history=history,
-                                             session_id=session.session_id)
+        stdout, io = await mount.execute_cmd(
+            cmd_name,
+            paths,
+            texts,
+            flag_kwargs,
+            stdin=stdin,
+            cwd=session.cwd,
+            dispatch=dispatch,
+            history=history,
+            session_id=session.session_id,
+            env=session.env,
+            exec_allowed=registry.is_exec_allowed(),
+        )
     except (FileNotFoundError, NotADirectoryError, PermissionError) as exc:
         err = f"{cmd_name}: {exc}\n".encode()
         return None, IOResult(exit_code=1,

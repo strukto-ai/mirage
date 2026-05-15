@@ -17,10 +17,11 @@ from mirage.commands.builtin.general.curl import curl
 from mirage.commands.builtin.general.date import date
 from mirage.commands.builtin.general.expr import expr
 from mirage.commands.builtin.general.history import history_cmd
+from mirage.commands.builtin.general.python import python3, python_cmd
 from mirage.commands.builtin.general.seq import seq
 from mirage.commands.builtin.general.wget import wget
 
-_FNS = [bc, curl, date, expr, seq, wget]
+_FNS = [bc, curl, date, expr, python3, python_cmd, seq, wget]
 HISTORY_FN = history_cmd
 HISTORY_COMMANDS = list(history_cmd._registered_commands)
 

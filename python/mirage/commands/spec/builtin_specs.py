@@ -161,12 +161,12 @@ SPECS: dict[str, CommandSpec] = {
     "python":
     CommandSpec(
         options=(Option(short="-c", value_kind=OperandKind.TEXT), ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(kind=OperandKind.TEXT),
     ),
     "python3":
     CommandSpec(
         options=(Option(short="-c", value_kind=OperandKind.TEXT), ),
-        rest=Operand(kind=OperandKind.PATH),
+        rest=Operand(kind=OperandKind.TEXT),
     ),
     "nl":
     CommandSpec(

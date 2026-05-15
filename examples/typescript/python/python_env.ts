@@ -15,7 +15,7 @@
 import { MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
 
 async function main(): Promise<void> {
-  const ws = new Workspace({ '/ram': new RAMResource() }, { mode: MountMode.WRITE })
+  const ws = new Workspace({ '/ram': new RAMResource() }, { mode: MountMode.EXEC })
 
   console.log('python3 + session env (os.environ passthrough)\n')
 
@@ -32,8 +32,8 @@ async function main(): Promise<void> {
   )
 
   console.log('=== isolation across workspaces — each has its own Pyodide ===')
-  const wsA = new Workspace({ '/ram': new RAMResource() }, { mode: MountMode.WRITE })
-  const wsB = new Workspace({ '/ram': new RAMResource() }, { mode: MountMode.WRITE })
+  const wsA = new Workspace({ '/ram': new RAMResource() }, { mode: MountMode.EXEC })
+  const wsB = new Workspace({ '/ram': new RAMResource() }, { mode: MountMode.EXEC })
   await wsA.execute('export NAME=alice')
   await wsB.execute('export NAME=bob')
 

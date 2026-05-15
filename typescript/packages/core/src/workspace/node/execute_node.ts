@@ -828,87 +828,6 @@ async function runCommandBody(
     return [null, new IOResult(), new ExecutionNode({ command: 'timeout', exitCode: 0 })]
   }
 
-  if (name === SB.PYTHON || name === SB.PYTHON3) {
-    if (!registry.isExecAllowed()) {
-      const err = new TextEncoder().encode(`${name}: root mount '/' is not in EXEC mode\n`)
-      return [
-        null,
-        new IOResult({ exitCode: 126, stderr: err }),
-        new ExecutionNode({ command: name, exitCode: 126 }),
-      ]
-    }
-    // Reference: mirage/workspace/node/execute_node.py:639-678
-    const { handlePython } = await import('../executor/python/handle.ts')
-    if (pythonRuntime === undefined) {
-      const err = new TextEncoder().encode(`${name}: python runtime is not available\n`)
-      return [
-        null,
-        new IOResult({ exitCode: 127, stderr: err }),
-        new ExecutionNode({ command: name, exitCode: 127 }),
-      ]
-    }
-    const pythonDeps = { runtime: pythonRuntime }
-    const hasCFlag = finalExpanded.includes('-c')
-    if (hasCFlag) {
-      const cIdx = finalExpanded.indexOf('-c')
-      const code = finalExpanded[cIdx + 1] ?? ''
-      const extraArgs = finalExpanded.slice(cIdx + 2)
-      return handlePython(dispatch, null, extraArgs, { stdin, env: session.env, code }, pythonDeps)
-    }
-    let pathScope: PathSpec | null = null
-    for (let i = 1; i < classified.length; i++) {
-      const p = classified[i]
-      if (p instanceof PathSpec) {
-        pathScope = p
-        break
-      }
-    }
-    if (pathScope === null) {
-      for (let i = 1; i < finalExpanded.length; i++) {
-        const arg = finalExpanded[i]
-        if (arg === undefined || arg === '' || arg.startsWith('-')) continue
-        const resolvedBare = classifyBarePath(arg, registry, session.cwd)
-        if (resolvedBare instanceof PathSpec) {
-          pathScope = resolvedBare
-        }
-        break
-      }
-    }
-    if (pathScope !== null) {
-      const scope = pathScope
-      const extraArgs = finalExpanded.slice(1).filter((a) => a !== scope.original)
-      return handlePython(
-        dispatch,
-        pathScope,
-        extraArgs,
-        { stdin, env: session.env, code: null },
-        pythonDeps,
-      )
-    }
-    if (stdin !== null) {
-      const data = await materialize(stdin)
-      if (data.length > 0) {
-        const code = new TextDecoder().decode(data)
-        const extraArgs = finalExpanded.slice(1)
-        return handlePython(
-          dispatch,
-          null,
-          extraArgs,
-          { stdin: null, env: session.env, code },
-          pythonDeps,
-        )
-      }
-    }
-    return [
-      null,
-      new IOResult({
-        exitCode: 1,
-        stderr: new TextEncoder().encode('python3: no input\n'),
-      }),
-      new ExecutionNode({ command: 'python3', exitCode: 1 }),
-    ]
-  }
-
   // Default: mount-dispatched command
   return handleCommand(
     recurse,
@@ -922,6 +841,7 @@ async function runCommandBody(
     ensureOpen,
     unmount,
     history,
+    pythonRuntime,
   )
 }
 

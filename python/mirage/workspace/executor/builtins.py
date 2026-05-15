@@ -13,12 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import os
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.config import RegisteredCommand
 from mirage.commands.spec import SPECS, CommandSpec
 from mirage.io import IOResult
@@ -760,63 +757,3 @@ async def handle_sleep(
                                                          exit_code=1)
     await cancellable_sleep(seconds, cancel)
     return None, IOResult(), ExecutionNode(command="sleep", exit_code=0)
-
-
-async def _run_python(
-    code: str,
-    stdin_data: bytes | None = None,
-    args: list[str] | None = None,
-    env: dict[str, str] | None = None,
-) -> tuple[bytes, bytes | None, int]:
-    """Execute Python code in an async subprocess."""
-    proc = await asyncio.create_subprocess_exec(
-        sys.executable,
-        "-c",
-        code,
-        *(args or []),
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env={
-            **os.environ,
-            **(env or {})
-        },
-    )
-    stdout, stderr = await proc.communicate(input=stdin_data)
-    return stdout, stderr or None, proc.returncode
-
-
-async def handle_python(
-    dispatch: Callable,
-    path_scope: PathSpec | None,
-    args: list[str],
-    stdin: ByteSource | None = None,
-    env: dict[str, str] | None = None,
-    code: str | None = None,
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Execute Python code as an async subprocess.
-
-    Two modes:
-    - python3 -c "code": code param is set, path_scope is None
-    - python3 script.py: path_scope is set, reads file via dispatch
-    """
-    if code is None:
-        try:
-            data, _ = await dispatch("read", path_scope)
-        except FileNotFoundError:
-            err = f"python3: {path_scope.original}: No such file\n".encode()
-            return None, IOResult(exit_code=1, stderr=err), ExecutionNode(
-                command=f"python3 {path_scope.original}", exit_code=1)
-        code = data.decode(errors="replace") if isinstance(data, bytes) else ""
-
-    cmd_str = f"python3 {path_scope.original}" if path_scope else "python3 -c"
-    stdin_data = await _read_stdin_async(stdin)
-    stdout, stderr, exit_code = await _run_python(code,
-                                                  stdin_data,
-                                                  args=args,
-                                                  env=env)
-
-    return stdout, IOResult(
-        exit_code=exit_code,
-        stderr=stderr,
-    ), ExecutionNode(command=cmd_str, exit_code=exit_code)

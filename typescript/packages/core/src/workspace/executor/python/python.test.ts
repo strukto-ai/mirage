@@ -117,6 +117,49 @@ describe('python3: core (ports of Python tests_workspace)', () => {
     await ws.close()
   })
 
+  // ── flag-conditional argv classification (no-c vs -c)
+  // These guard the spec/parser interaction: positional args after `-c "code"`
+  // must NOT be path-resolved (raw text → sys.argv); without -c, the first
+  // positional IS the script (PATH), and subsequent positionals are argv.
+
+  it('python3 -c "code" arg1 arg2 → argv stays bare (no path prefix)', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('python3 -c "import sys; print(sys.argv[1:])" alpha beta')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe("['alpha', 'beta']\n")
+    await ws.close()
+  })
+
+  it('python3 -c "code" /abs/path → abs path stays as text argv', async () => {
+    const { ws } = await makeWorkspace()
+    const io = await ws.execute('python3 -c "import sys; print(sys.argv[1:])" /disk/some_file')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe("['/disk/some_file']\n")
+    await ws.close()
+  })
+
+  it('python3 /abs/script.py arg1 arg2 → script reads, argv passes through', async () => {
+    const { ws } = await makeWorkspace()
+    await ws.execute("echo 'import sys; print(sys.argv[1:])' > /disk/argv.py")
+    const io = await ws.execute('python3 /disk/argv.py alpha beta')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe("['alpha', 'beta']\n")
+    await ws.close()
+  })
+
+  it('python3 script.py one two (bare name + argv via cwd)', async () => {
+    const { ws, disk } = await makeWorkspace()
+    disk.store.files.set(
+      '/with_argv.py',
+      new TextEncoder().encode('import sys; print(sys.argv[1:])\n'),
+    )
+    ws.getSession(DEFAULT_SESSION_ID).cwd = '/disk'
+    const io = await ws.execute('python3 with_argv.py one two')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe("['one', 'two']\n")
+    await ws.close()
+  })
+
   it('test_python_pipe (L848): python3 -c ... | grep', async () => {
     const { ws } = await makeWorkspace()
     const io = await ws.execute("python3 -c 'print(42)' | grep 42")

@@ -373,6 +373,8 @@ class Mount:
         dispatch: Callable | None = None,
         history: Any = None,
         session_id: str | None = None,
+        env: dict[str, str] | None = None,
+        exec_allowed: bool = True,
     ) -> tuple[ByteSource | None, IOResult]:
         """Execute a command on this mount's resource.
 
@@ -429,6 +431,9 @@ class Mount:
             kw["history"] = history
         if session_id is not None:
             kw["session_id"] = session_id
+        if env is not None:
+            kw["env"] = env
+        kw["exec_allowed"] = exec_allowed
 
         prev_prefix = push_mount_prefix(mount_prefix)
         revs_token = push_revisions(self.revisions or None)

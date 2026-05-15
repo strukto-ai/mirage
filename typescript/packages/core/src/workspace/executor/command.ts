@@ -25,6 +25,7 @@ import { ERREXIT_EXEMPT_TYPES } from '../../shell/types.ts'
 import { PathSpec } from '../../types.ts'
 import type { Mount } from '../mount/mount.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import type { PyodideRuntime } from './python/runtime.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import { asyncChain } from '../../io/stream.ts'
@@ -58,6 +59,7 @@ export async function handleCommand(
   ensureOpen?: (resource: Resource) => Promise<void>,
   unmount?: (prefix: string) => Promise<void>,
   history?: CommandHistory,
+  pythonRuntime?: PyodideRuntime,
 ): Promise<Result> {
   if (parts.length === 0) {
     return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
@@ -193,6 +195,9 @@ export async function handleCommand(
       dispatch,
       ...(history !== undefined ? { history } : {}),
       sessionId: session.sessionId,
+      env: session.env,
+      execAllowed: registry.isExecAllowed(),
+      ...(pythonRuntime !== undefined ? { pythonRuntime } : {}),
     })
     let stdout = initialStdout
     if (cmdName === 'ls' && io.exitCode === 0) {

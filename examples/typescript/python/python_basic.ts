@@ -32,7 +32,7 @@ async function runLabeled(ws: Workspace, label: string, cmd: string): Promise<vo
 
 async function main(): Promise<void> {
   const ram = new RAMResource()
-  const ws = new Workspace({ '/data': ram }, { mode: MountMode.WRITE })
+  const ws = new Workspace({ '/data': ram }, { mode: MountMode.EXEC })
 
   console.log('python3 in @mirage-ai — Pyodide-backed, three invocation modes')
   console.log('(first call takes ~1-2s to boot Pyodide; subsequent calls are instant)\n')

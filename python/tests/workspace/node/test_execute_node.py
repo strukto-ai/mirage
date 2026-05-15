@@ -2466,47 +2466,22 @@ def test_nested_while_loops():
 
 
 # ═══════════════════════════════════════════════
-# Python command parsing + execution
+# Python command shell-parser routing
 # ═══════════════════════════════════════════════
+#
+# python3 is now a registered general command (see
+# mirage.commands.builtin.general.python). End-to-end behavior
+# (script read via dispatch, env passthrough, exit codes) is covered
+# by tests/workspace/test_workspace.py against a real workspace.
+# Tests here only verify the shell parser routes python3 like any
+# other command (heredocs, pipelines, redirects, fan-out).
 
 
-def test_python3_script_dispatches():
-    """python3 /data/script.py → reads via dispatch, executes."""
-    dispatch = _mock_dispatch()
-    dispatch.return_value = (b"print('hello')", IOResult())
-    stdout, io, _, _, _, _ = _exec("python3 /data/script.py",
-                                   dispatch=dispatch)
-    read_calls = [c for c in dispatch.call_args_list if c[0][0] == "read"]
-    assert len(read_calls) == 1
-    assert read_calls[0][0][1].original == "/data/script.py"
-
-
-def test_python3_c_flag():
-    """python3 -c 'print(1)' → runs code in subprocess."""
-    stdout, io, _, _, _, _ = _exec("python3 -c 'print(42)'")
-    assert io.exit_code == 0
-    assert stdout == b"42\n"
-
-
-def test_python_command():
-    """python script.py → reads via dispatch."""
-    dispatch = _mock_dispatch()
-    dispatch.return_value = (b"print('ok')", IOResult())
-    _, io, _, _, _, _ = _exec("python /data/script.py", dispatch=dispatch)
-    read_calls = [c for c in dispatch.call_args_list if c[0][0] == "read"]
-    assert len(read_calls) == 1
-
-
-def test_python3_with_var_arg():
-    """python3 $SCRIPT → expanded, reads via dispatch."""
-    dispatch = _mock_dispatch()
-    dispatch.return_value = (b"print('hi')", IOResult())
-    _, io, _, _, _, _ = _exec("python3 $SCRIPT",
-                              dispatch=dispatch,
-                              env={"SCRIPT": "/data/run.py"})
-    read_calls = [c for c in dispatch.call_args_list if c[0][0] == "read"]
-    assert len(read_calls) == 1
-    assert read_calls[0][0][1].original == "/data/run.py"
+def test_python3_dispatched_to_mount():
+    """python3 -c 'code' → dispatched as a command to mount."""
+    _, _, _, _, mount, _ = _exec("python3 -c 'print(42)'")
+    mount.execute_cmd.assert_called_once()
+    assert mount.execute_cmd.call_args[0][0] == "python3"
 
 
 def test_python3_heredoc_parsed():
@@ -2525,23 +2500,6 @@ def test_python3_heredoc_double_quoted():
     """python3 <<"EOF"\\ncode\\nEOF → parsed correctly."""
     _, io, _, _, _, _ = _exec('python3 <<"EOF"\nimport os\nEOF')
     assert io.exit_code is not None
-
-
-def test_python3_no_args():
-    """python3 with no args → error."""
-    _, io, _, _, _, _ = _exec("python3")
-    assert io.exit_code == 1
-    assert b"no input" in io.stderr
-
-
-def test_python3_in_for():
-    """python3 inside for loop — dispatches read per iteration."""
-    dispatch = _mock_dispatch()
-    dispatch.return_value = (b"print(1)", IOResult())
-    _, _, _, _, _, dispatch = _exec(
-        "for f in a b; do python3 /data/$f.py; done", dispatch=dispatch)
-    read_calls = [c for c in dispatch.call_args_list if c[0][0] == "read"]
-    assert len(read_calls) == 2
 
 
 def test_python3_in_pipeline():

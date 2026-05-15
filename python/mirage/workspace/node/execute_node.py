@@ -54,10 +54,9 @@ from mirage.shell.helpers import (  # isort: skip
     get_subshell_body, get_text, get_unset_names, get_while_parts)
 from mirage.workspace.executor.builtins import (  # isort: skip
     handle_bash, handle_cd, handle_echo, handle_eval, handle_export,
-    handle_local, handle_man, handle_printenv, handle_printf, handle_python,
-    handle_read, handle_readonly, handle_return, handle_set, handle_shift,
-    handle_sleep, handle_source, handle_test, handle_trap, handle_unset,
-    handle_whoami)
+    handle_local, handle_man, handle_printenv, handle_printf, handle_read,
+    handle_readonly, handle_return, handle_set, handle_shift, handle_sleep,
+    handle_source, handle_test, handle_trap, handle_unset, handle_whoami)
 
 _UNSUPPORTED_BUILTINS = frozenset({
     "bg",
@@ -838,53 +837,6 @@ async def _dispatch_command_body(
 
     if name == SB.CONTINUE:
         raise ContinueSignal()
-
-    if name in (SB.PYTHON, SB.PYTHON3):
-        if not registry.is_exec_allowed():
-            err = f"{name}: root mount '/' is not in EXEC mode\n".encode()
-            return None, IOResult(
-                exit_code=126,
-                stderr=err,
-            ), ExecutionNode(command=name, exit_code=126)
-        # Both -c and script.py need session.env for the
-        # subprocess, so handle everything here.
-        has_c_flag = "-c" in expanded
-        if has_c_flag:
-            c_idx = expanded.index("-c")
-            code = expanded[c_idx + 1] if c_idx + 1 < len(expanded) else ""
-            extra_args = expanded[c_idx + 2:]
-            return await handle_python(dispatch,
-                                       None,
-                                       extra_args,
-                                       stdin=stdin,
-                                       env=session.env,
-                                       code=code)
-        path_scope = None
-        for p in classified[1:]:
-            if isinstance(p, PathSpec):
-                path_scope = p
-                break
-        if path_scope is not None:
-            extra_args = [e for e in expanded[1:] if e != path_scope.original]
-            return await handle_python(dispatch,
-                                       path_scope,
-                                       extra_args,
-                                       stdin=stdin,
-                                       env=session.env)
-        if stdin is not None:
-            stdin_data = await materialize(stdin)
-            if stdin_data:
-                code = stdin_data.decode(errors="replace")
-                extra_args = expanded[1:]
-                return await handle_python(dispatch,
-                                           None,
-                                           extra_args,
-                                           env=session.env,
-                                           code=code)
-        return None, IOResult(
-            exit_code=1,
-            stderr=b"python3: no input\n",
-        ), ExecutionNode(command="python3", exit_code=1)
 
     # ── mount command (default) ─────────────────
     return await handle_command(recurse,

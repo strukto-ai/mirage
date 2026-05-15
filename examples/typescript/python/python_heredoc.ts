@@ -15,7 +15,7 @@
 import { MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
 
 async function main(): Promise<void> {
-  const ws = new Workspace({ '/ram': new RAMResource() }, { mode: MountMode.WRITE })
+  const ws = new Workspace({ '/ram': new RAMResource() }, { mode: MountMode.EXEC })
 
   console.log('python3 heredoc patterns (commonly emitted by AI agents)\n')
 

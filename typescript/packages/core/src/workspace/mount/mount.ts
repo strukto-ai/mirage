@@ -31,6 +31,7 @@ import { runWithRevisions, setVirtualPrefix } from '../../observe/context.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
 import type { Resource } from '../../resource/base.ts'
 import { ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
+import type { PyodideRuntime } from '../executor/python/runtime.ts'
 
 type CmdKey = string
 type OpKey = string
@@ -318,6 +319,9 @@ export class Mount {
       dispatch?: CommandDispatch
       history?: CommandHistory
       sessionId?: string
+      env?: Record<string, string>
+      execAllowed?: boolean
+      pythonRuntime?: PyodideRuntime
     } = {},
   ): Promise<[ByteSource | null, IOResult]> {
     const extension =
@@ -365,6 +369,9 @@ export class Mount {
       ...(opts.dispatch !== undefined ? { dispatch: opts.dispatch } : {}),
       ...(opts.history !== undefined ? { history: opts.history } : {}),
       ...(opts.sessionId !== undefined ? { sessionId: opts.sessionId } : {}),
+      ...(opts.env !== undefined ? { env: opts.env } : {}),
+      ...(opts.execAllowed !== undefined ? { execAllowed: opts.execAllowed } : {}),
+      ...(opts.pythonRuntime !== undefined ? { pythonRuntime: opts.pythonRuntime } : {}),
     }
 
     setVirtualPrefix(mountPrefix)

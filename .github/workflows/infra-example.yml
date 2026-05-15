@@ -263,6 +263,113 @@ jobs:
           echo "$output" | grep -q "read: lazy demo" || (echo "FAIL: lazy-on-miss read failed" && exit 1)
           echo "$output" | grep -q "PNG magic: 89 50 4e 47" || (echo "FAIL: PIL save did not produce a PNG" && exit 1)
 
+  examples-python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.32.1
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: typescript/pnpm-lock.yaml
+
+      - name: Install node-gyp
+        run: npm install -g node-gyp
+
+      - name: Install Python dependencies
+        working-directory: python
+        run: uv sync --all-extras --no-extra camel
+
+      - name: Install TypeScript dependencies
+        working-directory: typescript
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        working-directory: typescript
+        run: pnpm -r build
+
+      - name: Run python3 example (Python, RAM)
+        run: |
+          output=$(./python/.venv/bin/python examples/python/ram/ram_python.py 2>&1)
+          echo "$output"
+          # Regression guard: argv after -c must stay raw, not be path-resolved
+          echo "$output" | grep -q "argv after -c: \['alpha', 'beta'\]" || (echo "FAIL: argv after -c regression" && exit 1)
+          # Script + argv path
+          echo "$output" | grep -q "argv after script: \['one', 'two'\]" || (echo "FAIL: argv after script" && exit 1)
+          # Script dispatched through VFS
+          echo "$output" | grep -q "hello from vfs" || (echo "FAIL: script via dispatch" && exit 1)
+          # Session env passthrough
+          echo "$output" | grep -q "hello_mirage" || (echo "FAIL: env passthrough" && exit 1)
+
+      - name: Run python_basic example (TypeScript)
+        run: |
+          output=$(pnpm -C examples/typescript exec tsx python/python_basic.ts 2>&1)
+          echo "$output"
+          # Regression guard: argv after -c
+          echo "$output" | grep -q "\['alpha', 'beta'\]" || (echo "FAIL: argv after -c regression" && exit 1)
+          # SystemExit honored
+          echo "$output" | grep -q "exit: 3 (expect 3)" || (echo "FAIL: SystemExit code" && exit 1)
+          # Traceback propagates to stderr
+          echo "$output" | grep -q "RuntimeError: boom" || (echo "FAIL: traceback on stderr" && exit 1)
+
+      - name: Run python_env example (TypeScript)
+        run: |
+          output=$(pnpm -C examples/typescript exec tsx python/python_env.ts 2>&1)
+          echo "$output"
+          echo "$output" | grep -q "stdout: bar" || (echo "FAIL: env passthrough" && exit 1)
+          echo "$output" | grep -q "wsA:  alice" || (echo "FAIL: cross-workspace isolation wsA" && exit 1)
+          echo "$output" | grep -q "wsB:  bob" || (echo "FAIL: cross-workspace isolation wsB" && exit 1)
+
+      - name: Run python_heredoc example (TypeScript)
+        run: |
+          output=$(pnpm -C examples/typescript exec tsx python/python_heredoc.ts 2>&1)
+          echo "$output"
+          # quoted heredoc: $X literal (fixed-string match to avoid regex anchor)
+          echo "$output" | grep -qF 'stdout: $X' || (echo "FAIL: quoted heredoc" && exit 1)
+          # unquoted heredoc: $X expanded
+          echo "$output" | grep -q "stdout: shellval" || (echo "FAIL: unquoted heredoc" && exit 1)
+          # dash-strip
+          echo "$output" | grep -q "item-0" || (echo "FAIL: dash-strip heredoc" && exit 1)
+          # heredoc + pipe
+          echo "$output" | grep -q "^keep 1$" || (echo "FAIL: heredoc + pipe" && exit 1)
+          # heredoc in for-loop
+          echo "$output" | grep -q "hello, alice!" || (echo "FAIL: heredoc in for-loop" && exit 1)
+
+      - name: Run python_script example (TypeScript)
+        run: |
+          output=$(pnpm -C examples/typescript exec tsx python/python_script.ts 2>&1)
+          echo "$output"
+          echo "$output" | grep -q "count: 4" || (echo "FAIL: script + stdin pipeline" && exit 1)
+          echo "$output" | grep -q "alice -> login" || (echo "FAIL: inline -c pipeline" && exit 1)
+
+      - name: Run python_ram example (TypeScript)
+        run: |
+          output=$(pnpm -C examples/typescript exec tsx python/python_ram.ts 2>&1)
+          echo "$output"
+          echo "$output" | grep -q "hello, world!" || (echo "FAIL: bare script run" && exit 1)
+          echo "$output" | grep -q "sum(1..10): 55" || (echo "FAIL: script computation" && exit 1)
+          # Regression guard: argv after script
+          echo "$output" | grep -q "args: \['alice', 'bob'\]" || (echo "FAIL: argv after script" && exit 1)
+          echo "$output" | grep -q "alice: 2" || (echo "FAIL: cat | python pipeline" && exit 1)
+          echo "$output" | grep -q "python3: /ram/missing.py: No such file" || (echo "FAIL: missing script error" && exit 1)
+
   examples-custom-command:
     runs-on: ubuntu-latest
     steps:
