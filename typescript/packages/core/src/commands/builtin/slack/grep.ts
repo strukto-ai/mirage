@@ -17,9 +17,13 @@ import { resolveSlackGlob } from '../../../core/slack/glob.ts'
 import { read as slackRead } from '../../../core/slack/read.ts'
 import { readdir as slackReaddir } from '../../../core/slack/readdir.ts'
 import { stat as slackStat } from '../../../core/slack/stat.ts'
-import { buildQuery, formatGrepResults } from '../../../core/slack/formatters.ts'
+import {
+  buildQuery,
+  formatFileGrepResults,
+  formatGrepResults,
+} from '../../../core/slack/formatters.ts'
 import { detectScope } from '../../../core/slack/scope.ts'
-import { searchMessages } from '../../../core/slack/search.ts'
+import { searchFiles, searchMessages } from '../../../core/slack/search.ts'
 import { exitOnEmpty, quietMatch, yieldBytes } from '../../../io/stream.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { type FileStat, PathSpec, ResourceName } from '../../../types.ts'
@@ -95,6 +99,7 @@ async function grepCommand(
   }
   const f = parseFlags(opts.flags)
 
+  const pushdownWarnings: string[] = []
   if (paths.length > 0) {
     const firstPath = paths[0]
     if (firstPath !== undefined) {
@@ -103,14 +108,41 @@ async function grepCommand(
         const filePrefix = firstPath.prefix
         const query = buildQuery(pattern, scope)
         const count = f.maxCount ?? 100
-        const raw = await searchMessages(accessor, query, count)
-        const lines = formatGrepResults(raw, scope, filePrefix)
-        if (lines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-        return [ENC.encode(lines.join('\n') + '\n'), new IOResult()]
+        const target = scope.target
+        const doMessages = target === undefined || target === 'date' || target === 'messages'
+        const doFiles = target === undefined || target === 'date' || target === 'files'
+        try {
+          const nativeLines: string[] = []
+          if (doMessages) {
+            const raw = await searchMessages(accessor, query, count)
+            nativeLines.push(...formatGrepResults(raw, scope, filePrefix))
+          }
+          if (doFiles) {
+            const rawF = await searchFiles(accessor, query, count)
+            nativeLines.push(...formatFileGrepResults(rawF, scope, filePrefix))
+          }
+          if (nativeLines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
+          return [ENC.encode(nativeLines.join('\n') + '\n'), new IOResult()]
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          pushdownWarnings.push(
+            `slack: native search push-down failed (${msg}); falling back to per-file scan`,
+          )
+          if (msg.includes('not_allowed_token_type') || msg.includes('missing_scope')) {
+            pushdownWarnings.push(
+              'slack: hint - set SLACK_USER_TOKEN (xoxp-) with search:read scope to enable workspace search',
+            )
+          }
+        }
       }
     }
     const resolved = await resolveSlackGlob(accessor, paths, opts.index ?? undefined)
     const pat = compilePattern(pattern, f.ignoreCase, f.fixedString, f.wholeWord)
+
+    const stderrFromWarnings = (extra: string[] = []): Uint8Array | undefined => {
+      const all = [...pushdownWarnings, ...extra]
+      return all.length > 0 ? ENC.encode(all.join('\n') + '\n') : undefined
+    }
 
     if (f.filesOnly) {
       const filePrefix = resolved[0]?.prefix ?? ''
@@ -144,7 +176,7 @@ async function grepCommand(
         },
         warnings,
       )
-      const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n')) : undefined
+      const stderr = stderrFromWarnings(warnings)
       if (results.length === 0) {
         return [
           new Uint8Array(0),
@@ -156,6 +188,10 @@ async function grepCommand(
         new IOResult({ ...(stderr !== undefined ? { stderr } : {}) }),
       ]
     }
+
+    const stderr = stderrFromWarnings()
+    const ioWith = (init: { exitCode?: number } = {}): IOResult =>
+      new IOResult({ ...init, ...(stderr !== undefined ? { stderr } : {}) })
 
     if (resolved.length > 1) {
       const allResults: string[] = []
@@ -170,21 +206,21 @@ async function grepCommand(
           for (const h of hits) allResults.push(`${p.original}:${h}`)
         }
       }
-      if (allResults.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
+      if (allResults.length === 0) return [new Uint8Array(0), ioWith({ exitCode: 1 })]
       const out: ByteSource = ENC.encode(allResults.join('\n'))
-      return [out, new IOResult()]
+      return [out, ioWith()]
     }
 
     const first = resolved[0]
-    if (first === undefined) return [null, new IOResult()]
+    if (first === undefined) return [null, ioWith()]
     const raw = await slackRead(accessor, first, opts.index ?? undefined)
     const source = yieldBytes(raw)
     const stream = grepStream(source, pat, f)
     if (f.quiet) {
-      const io = new IOResult({ exitCode: 1 })
+      const io = ioWith({ exitCode: 1 })
       return [quietMatch(stream, io), io]
     }
-    const io = new IOResult()
+    const io = ioWith()
     return [exitOnEmpty(stream, io), io]
   }
 
