@@ -49,7 +49,7 @@ class TestPatchedOs:
         run(ops.write("/data/dir/b.txt", b"b"))
         patched = make_os_module(ops)
         entries = patched.listdir("/data/dir")
-        assert len(entries) == 2
+        assert sorted(entries) == ["a.txt", "b.txt"]
 
     def test_remove(self):
         ops, _ = make_ops_with_dir()
@@ -78,7 +78,7 @@ class TestPatchedOs:
         with ws:
             vos = sys.modules["os"]
             entries = vos.listdir("/mem/dir")
-            assert len(entries) == 2
+            assert sorted(entries) == ["a.txt", "b.txt"]
             assert vos.path.exists("/mem/dir/a.txt") is True
             assert vos.path.exists("/mem/dir/nope.txt") is False
         assert sys.modules["os"] is original_os
