@@ -12,13 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  channelDirname,
-  dmDirname,
-  fileBlobName,
-  sanitizeName,
-  userFilename,
-} from './entry.ts'
+import { channelDirname, dmDirname, fileBlobName, sanitizeName, userFilename } from './entry.ts'
 import type { SlackScope } from './scope.ts'
 
 const DEC = new TextDecoder('utf-8', { fatal: false })

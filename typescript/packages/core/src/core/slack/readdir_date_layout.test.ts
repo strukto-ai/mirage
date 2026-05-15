@@ -22,9 +22,7 @@ import { readdir } from './readdir.ts'
 
 class FakeTransport implements SlackTransport {
   public readonly calls: { endpoint: string; params?: Record<string, string> }[] = []
-  constructor(
-    private readonly responder: (endpoint: string) => SlackResponse | Error,
-  ) {}
+  constructor(private readonly responder: (endpoint: string) => SlackResponse | Error) {}
   call(endpoint: string, params?: Record<string, string>): Promise<SlackResponse> {
     this.calls.push({ endpoint, ...(params !== undefined ? { params } : {}) })
     const result = this.responder(endpoint)
@@ -90,7 +88,11 @@ describe('readdir: date directory layout', () => {
       }
       throw new Error(`unexpected ${endpoint}`)
     })
-    const out = await readdir(new SlackAccessor(t), p(`${PREFIX}/channels/general__C1/2024-01-01`), idx)
+    const out = await readdir(
+      new SlackAccessor(t),
+      p(`${PREFIX}/channels/general__C1/2024-01-01`),
+      idx,
+    )
     expect(out).toEqual([
       `${PREFIX}/channels/general__C1/2024-01-01/chat.jsonl`,
       `${PREFIX}/channels/general__C1/2024-01-01/files`,

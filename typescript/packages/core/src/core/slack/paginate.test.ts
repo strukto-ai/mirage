@@ -61,7 +61,12 @@ describe('cursorPages', () => {
       { ok: true, items: [3], response_metadata: { next_cursor: '' } },
     ]
     const t = new FakeTransport((call) => pages[call - 1] ?? { ok: false })
-    for await (const page of cursorPages<number>(t, 'conversations.list', { limit: '1' }, 'items')) {
+    for await (const page of cursorPages<number>(
+      t,
+      'conversations.list',
+      { limit: '1' },
+      'items',
+    )) {
       expect(page).toEqual([1])
       break
     }

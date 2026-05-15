@@ -24,9 +24,7 @@ import { latestMessageTs, readdir } from './readdir.ts'
 // degrade to "no messages" rather than aborting a workspace-wide walk.
 
 class FakeTransport implements SlackTransport {
-  constructor(
-    private readonly responder: (endpoint: string) => SlackResponse | Error,
-  ) {}
+  constructor(private readonly responder: (endpoint: string) => SlackResponse | Error) {}
   call(endpoint: string): Promise<SlackResponse> {
     const result = this.responder(endpoint)
     if (result instanceof Error) return Promise.reject(result)
@@ -36,16 +34,20 @@ class FakeTransport implements SlackTransport {
 
 describe('latestMessageTs soft errors', () => {
   it('returns null on not_in_channel', async () => {
-    const t = new FakeTransport(
-      () => new SlackApiError('conversations.history', 'not_in_channel'),
-    )
+    const t = new FakeTransport(() => new SlackApiError('conversations.history', 'not_in_channel'))
     const ts = await latestMessageTs(new SlackAccessor(t), 'C_INACCESSIBLE')
     expect(ts).toBeNull()
   })
 
   it('returns null on missing_scope', async () => {
     const t = new FakeTransport(
-      () => new SlackApiError('conversations.history', 'missing_scope', 'channels:history', 'channels:read'),
+      () =>
+        new SlackApiError(
+          'conversations.history',
+          'missing_scope',
+          'channels:history',
+          'channels:read',
+        ),
     )
     const ts = await latestMessageTs(new SlackAccessor(t), 'C_NO_SCOPE')
     expect(ts).toBeNull()
@@ -60,17 +62,13 @@ describe('latestMessageTs soft errors', () => {
   })
 
   it('returns null on is_archived', async () => {
-    const t = new FakeTransport(
-      () => new SlackApiError('conversations.history', 'is_archived'),
-    )
+    const t = new FakeTransport(() => new SlackApiError('conversations.history', 'is_archived'))
     const ts = await latestMessageTs(new SlackAccessor(t), 'C_ARCH')
     expect(ts).toBeNull()
   })
 
   it('re-raises unrelated errors (rate_limited)', async () => {
-    const t = new FakeTransport(
-      () => new SlackApiError('conversations.history', 'rate_limited'),
-    )
+    const t = new FakeTransport(() => new SlackApiError('conversations.history', 'rate_limited'))
     await expect(latestMessageTs(new SlackAccessor(t), 'C1')).rejects.toThrow(/rate_limited/)
   })
 })

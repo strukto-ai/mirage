@@ -15,11 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
 import type { SlackResponse, SlackTransport } from './_client.ts'
-import {
-  fetchMessagesForDay,
-  streamMessagesForDay,
-  streamThreadReplies,
-} from './history.ts'
+import { fetchMessagesForDay, streamMessagesForDay, streamThreadReplies } from './history.ts'
 
 class FakeTransport implements SlackTransport {
   public readonly calls: { endpoint: string; params?: Record<string, string> }[] = []

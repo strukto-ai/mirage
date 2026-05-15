@@ -45,10 +45,7 @@ describe('listChannelsStream', () => {
     for await (const page of listChannelsStream(new SlackAccessor(t))) {
       collected.push(page)
     }
-    expect(collected).toEqual([
-      [{ id: 'C1', name: 'general' }],
-      [{ id: 'C2', name: 'eng' }],
-    ])
+    expect(collected).toEqual([[{ id: 'C1', name: 'general' }], [{ id: 'C2', name: 'eng' }]])
     expect(t.calls).toHaveLength(2)
     expect(t.calls[0]?.params).toMatchObject({
       types: 'public_channel,private_channel',
@@ -76,7 +73,10 @@ describe('listChannels (eager wrapper)', () => {
     const pages: SlackResponse[] = [
       {
         ok: true,
-        channels: [{ id: 'C1', name: 'a' }, { id: 'C2', name: 'b' }],
+        channels: [
+          { id: 'C1', name: 'a' },
+          { id: 'C2', name: 'b' },
+        ],
         response_metadata: { next_cursor: 'cur' },
       },
       {
