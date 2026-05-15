@@ -26,17 +26,19 @@ async def cursor_pages(
     items_key: str,
     token: str | None = None,
 ) -> AsyncIterator[list[dict]]:
-    """Walk a cursor-paginated Slack endpoint, yielding one page of items per HTTP round-trip.
+    """Walk a cursor-paginated Slack endpoint, one page per round-trip.
 
     Args:
         config (SlackConfig): Slack credentials.
         endpoint (str): Slack API method, e.g. "conversations.list".
-        base_params (dict): per-request params; "cursor" is set by this function.
-        items_key (str): top-level response key that holds the page list (e.g. "channels", "members", "messages").
+        base_params (dict): per-request params; "cursor" is set here.
+        items_key (str): top-level response key holding the page list
+            (e.g. "channels", "members", "messages").
         token (str | None): override token; falls back to config.token.
 
     Yields:
-        list[dict]: the items in each page. Generator returns when Slack signals last page (empty next_cursor).
+        list[dict]: items in each page. Generator returns when Slack
+        signals last page (empty next_cursor).
     """
     cursor: str | None = None
     while True:
@@ -69,16 +71,19 @@ async def offset_pages(
     max_pages: int | None = None,
     token: str | None = None,
 ) -> AsyncIterator[list[dict]]:
-    """Walk a page-paginated Slack endpoint (search.messages, files.list, etc.), yielding one page at a time.
+    """Walk a page-paginated Slack endpoint (search, files.list, ...).
 
     Args:
         config (SlackConfig): Slack credentials.
         endpoint (str): Slack API method, e.g. "search.messages".
-        base_params (dict): per-request params; "page" is set by this function.
-        pages_path (tuple[str, ...]): nested path in response to the total page count, e.g. ("messages", "pagination", "page_count").
-        items_path (tuple[str, ...]): nested path to the items list, e.g. ("messages", "matches").
+        base_params (dict): per-request params; "page" is set here.
+        pages_path (tuple[str, ...]): nested path to total page count
+            in the response, e.g. ("messages", "pagination",
+            "page_count").
+        items_path (tuple[str, ...]): nested path to items list, e.g.
+            ("messages", "matches").
         start_page (int): page number to start from (1-based).
-        max_pages (int | None): cap on number of pages to fetch; None = unbounded.
+        max_pages (int | None): cap on pages fetched; None = unbounded.
         token (str | None): override token.
 
     Yields:
@@ -95,7 +100,9 @@ async def offset_pages(
         yield items
         fetched += 1
         if total_pages is None:
-            total_pages = _get_nested(data, pages_path) or 1  # stop after one page if pagination metadata is missing
+            total_pages = _get_nested(
+                data, pages_path
+            ) or 1  # stop after one page if pagination metadata is missing
         if page >= total_pages:
             return
         if max_pages is not None and fetched >= max_pages:

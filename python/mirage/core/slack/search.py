@@ -99,7 +99,7 @@ async def search_files(
     count: int = 20,
     page: int = 1,
 ) -> bytes:
-    """Search files across workspace via Slack's search.files API (single page).
+    """Search files across workspace via search.files (single page).
 
     Args:
         config (SlackConfig): Slack credentials.

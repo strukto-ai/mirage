@@ -16,7 +16,8 @@ from unittest.mock import patch
 
 import pytest
 
-from mirage.core.slack.search import search_files_stream, search_messages_stream
+from mirage.core.slack.search import (search_files_stream,
+                                      search_messages_stream)
 from mirage.resource.slack.config import SlackConfig
 
 
@@ -24,12 +25,39 @@ from mirage.resource.slack.config import SlackConfig
 async def test_search_messages_stream_walks_pages_until_page_count():
     cfg = SlackConfig(token="xoxp-t")
     pages = [
-        {"messages": {"matches": [{"text": "a"}],
-                      "pagination": {"page": 1, "page_count": 3}}},
-        {"messages": {"matches": [{"text": "b"}],
-                      "pagination": {"page": 2, "page_count": 3}}},
-        {"messages": {"matches": [{"text": "c"}],
-                      "pagination": {"page": 3, "page_count": 3}}},
+        {
+            "messages": {
+                "matches": [{
+                    "text": "a"
+                }],
+                "pagination": {
+                    "page": 1,
+                    "page_count": 3
+                }
+            }
+        },
+        {
+            "messages": {
+                "matches": [{
+                    "text": "b"
+                }],
+                "pagination": {
+                    "page": 2,
+                    "page_count": 3
+                }
+            }
+        },
+        {
+            "messages": {
+                "matches": [{
+                    "text": "c"
+                }],
+                "pagination": {
+                    "page": 3,
+                    "page_count": 3
+                }
+            }
+        },
     ]
     calls = []
 
@@ -52,12 +80,39 @@ async def test_search_messages_stream_walks_pages_until_page_count():
 async def test_search_messages_stream_honors_max_pages():
     cfg = SlackConfig(token="xoxp-t")
     pages = [
-        {"messages": {"matches": [{"text": "a"}],
-                      "pagination": {"page": 1, "page_count": 10}}},
-        {"messages": {"matches": [{"text": "b"}],
-                      "pagination": {"page": 2, "page_count": 10}}},
-        {"messages": {"matches": [{"text": "c"}],
-                      "pagination": {"page": 3, "page_count": 10}}},
+        {
+            "messages": {
+                "matches": [{
+                    "text": "a"
+                }],
+                "pagination": {
+                    "page": 1,
+                    "page_count": 10
+                }
+            }
+        },
+        {
+            "messages": {
+                "matches": [{
+                    "text": "b"
+                }],
+                "pagination": {
+                    "page": 2,
+                    "page_count": 10
+                }
+            }
+        },
+        {
+            "messages": {
+                "matches": [{
+                    "text": "c"
+                }],
+                "pagination": {
+                    "page": 3,
+                    "page_count": 10
+                }
+            }
+        },
     ]
     calls = {"n": 0}
 
@@ -81,8 +136,17 @@ async def test_search_files_stream_uses_files_endpoint():
 
     async def fake_get(_cfg, method, params=None, token=None):
         assert method == "search.files"
-        return {"files": {"matches": [{"id": "F1"}],
-                          "pagination": {"page": 1, "page_count": 1}}}
+        return {
+            "files": {
+                "matches": [{
+                    "id": "F1"
+                }],
+                "pagination": {
+                    "page": 1,
+                    "page_count": 1
+                }
+            }
+        }
 
     with patch("mirage.core.slack.paginate.slack_get", new=fake_get):
         seen = []

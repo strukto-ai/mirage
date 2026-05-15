@@ -29,11 +29,20 @@ async def test_list_files_for_day_scopes_to_channel_and_date():
     async def fake_get(_cfg, method, params=None, token=None):
         assert method == "files.list"
         captured.append(dict(params or {}))
-        return {"files": [{"id": "F1", "title": "doc.pdf"}],
-                "paging": {"page": 1, "pages": 1}}
+        return {
+            "files": [{
+                "id": "F1",
+                "title": "doc.pdf"
+            }],
+            "paging": {
+                "page": 1,
+                "pages": 1
+            }
+        }
 
     with patch("mirage.core.slack.paginate.slack_get", new=fake_get):
-        files = await list_files_for_day(cfg, channel_id="C1",
+        files = await list_files_for_day(cfg,
+                                         channel_id="C1",
                                          date_str="2026-05-10")
 
     assert files[0]["id"] == "F1"
@@ -48,8 +57,24 @@ async def test_list_files_for_day_scopes_to_channel_and_date():
 async def test_list_files_for_day_walks_multiple_pages():
     cfg = SlackConfig(token="xoxp-t")
     pages = [
-        {"files": [{"id": "F1"}], "paging": {"page": 1, "pages": 2}},
-        {"files": [{"id": "F2"}], "paging": {"page": 2, "pages": 2}},
+        {
+            "files": [{
+                "id": "F1"
+            }],
+            "paging": {
+                "page": 1,
+                "pages": 2
+            }
+        },
+        {
+            "files": [{
+                "id": "F2"
+            }],
+            "paging": {
+                "page": 2,
+                "pages": 2
+            }
+        },
     ]
     calls = []
 
@@ -69,8 +94,24 @@ async def test_list_files_for_day_walks_multiple_pages():
 async def test_list_files_for_day_stream_yields_each_page():
     cfg = SlackConfig(token="xoxp-t")
     pages = [
-        {"files": [{"id": "F1"}], "paging": {"page": 1, "pages": 2}},
-        {"files": [{"id": "F2"}], "paging": {"page": 2, "pages": 2}},
+        {
+            "files": [{
+                "id": "F1"
+            }],
+            "paging": {
+                "page": 1,
+                "pages": 2
+            }
+        },
+        {
+            "files": [{
+                "id": "F2"
+            }],
+            "paging": {
+                "page": 2,
+                "pages": 2
+            }
+        },
     ]
     calls = {"n": 0}
 

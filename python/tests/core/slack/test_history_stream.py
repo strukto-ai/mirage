@@ -27,12 +27,22 @@ async def test_stream_messages_for_day_applies_day_bounds_and_yields_pages():
     cfg = SlackConfig(token="xoxb-t")
     pages = [
         {
-            "messages": [{"ts": "1.0", "text": "a"}],
-            "response_metadata": {"next_cursor": "cur1"},
+            "messages": [{
+                "ts": "1.0",
+                "text": "a"
+            }],
+            "response_metadata": {
+                "next_cursor": "cur1"
+            },
         },
         {
-            "messages": [{"ts": "2.0", "text": "b"}],
-            "response_metadata": {"next_cursor": ""},
+            "messages": [{
+                "ts": "2.0",
+                "text": "b"
+            }],
+            "response_metadata": {
+                "next_cursor": ""
+            },
         },
     ]
     calls = []
@@ -61,12 +71,22 @@ async def test_fetch_messages_for_day_collects_and_sorts_across_pages():
     cfg = SlackConfig(token="xoxb-t")
     pages = [
         {
-            "messages": [{"ts": "3.0"}, {"ts": "1.0"}],
-            "response_metadata": {"next_cursor": "cur1"},
+            "messages": [{
+                "ts": "3.0"
+            }, {
+                "ts": "1.0"
+            }],
+            "response_metadata": {
+                "next_cursor": "cur1"
+            },
         },
         {
-            "messages": [{"ts": "2.0"}],
-            "response_metadata": {"next_cursor": ""},
+            "messages": [{
+                "ts": "2.0"
+            }],
+            "response_metadata": {
+                "next_cursor": ""
+            },
         },
     ]
     calls = {"n": 0}
