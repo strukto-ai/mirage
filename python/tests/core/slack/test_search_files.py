@@ -17,9 +17,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.core.slack.formatters import (build_query,
+                                          format_file_grep_results)
 from mirage.core.slack.scope import SlackScope
-from mirage.core.slack.search import (build_query, format_file_grep_results,
-                                      search_files)
+from mirage.core.slack.search import search_files
 from mirage.resource.slack.config import SlackConfig
 
 

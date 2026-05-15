@@ -25,9 +25,11 @@ from mirage.core.slack.glob import resolve_glob
 from mirage.core.slack.read import read as slack_read
 from mirage.core.slack.readdir import readdir as _readdir
 from mirage.core.slack.scope import coalesce_scopes, detect_scope
-from mirage.core.slack.search import (build_query, format_file_grep_results,
-                                      format_grep_results, search_available,
-                                      search_files, search_messages)
+from mirage.core.slack.formatters import (build_query,
+                                          format_file_grep_results,
+                                          format_grep_results)
+from mirage.core.slack.search import (search_available, search_files,
+                                      search_messages)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
