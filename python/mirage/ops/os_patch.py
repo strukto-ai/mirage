@@ -64,8 +64,10 @@ def make_os_module(ops: Ops, loop: asyncio.AbstractEventLoop | None = None):
     def _run(coro):
         return run_async_from_sync(coro, loop)
 
-    patched.listdir = (lambda p: _run(ops.readdir(p))
-                       if ops.is_mounted(p) else _real_os.listdir(p))
+    patched.listdir = (
+        lambda p:
+        [e.rstrip("/").rsplit("/", 1)[-1] for e in _run(ops.readdir(p))]
+        if ops.is_mounted(p) else _real_os.listdir(p))
     patched.remove = (lambda p: _run(ops.unlink(p))
                       if ops.is_mounted(p) else _real_os.remove(p))
     patched.rmdir = (lambda p: _run(ops.rmdir(p))

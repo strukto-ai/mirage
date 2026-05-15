@@ -48,14 +48,15 @@ async def main():
 
         if channels:
             ch = next((c for c in channels if "general" in c), channels[0])
+            ch_dir = f"/slack/channels/{ch}"
             print("\n--- os.listdir() dates ---")
-            dates = vos.listdir(f"/slack{ch}")
+            dates = vos.listdir(ch_dir)
             for d in dates[-5:]:
                 print(f"  {d}")
 
             if dates:
                 for d in reversed(dates):
-                    path = f"/slack{d}"
+                    path = f"{ch_dir}/{d}/chat.jsonl"
                     with open(path) as f:
                         content = f.read()
                     lines = [
@@ -82,11 +83,12 @@ async def main():
 
         print("\n--- session observer ---")
         day_folders = vos.listdir("/.sessions")
-        log_entries = vos.listdir(day_folders[0]) if day_folders else []
+        day_dir = f"/.sessions/{day_folders[0]}" if day_folders else None
+        log_entries = vos.listdir(day_dir) if day_dir else []
         for e in log_entries:
-            print(f"  {e}")
-        if log_entries:
-            with open(log_entries[0]) as f:
+            print(f"  {day_dir}/{e}")
+        if log_entries and day_dir:
+            with open(f"{day_dir}/{log_entries[0]}") as f:
                 for i, line in enumerate(f):
                     if i >= 3:
                         break
