@@ -50,7 +50,8 @@ async def test_cursor_pages_propagates_cancellation():
     cfg = SlackConfig(token="xoxb-t")
     pages = [
         {"items": [1], "response_metadata": {"next_cursor": "cur1"}},
-        {"items": [2], "response_metadata": {"next_cursor": ""}},
+        {"items": [2], "response_metadata": {"next_cursor": "cur2"}},
+        {"items": [3], "response_metadata": {"next_cursor": ""}},
     ]
     calls = []
 

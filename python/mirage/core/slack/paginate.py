@@ -45,7 +45,7 @@ async def cursor_pages(
             params["cursor"] = cursor
         data = await slack_get(config, endpoint, params=params, token=token)
         yield data.get(items_key, []) or []
-        cursor = (data.get("response_metadata", {}).get("next_cursor") or "") or None
+        cursor = data.get("response_metadata", {}).get("next_cursor") or None
         if cursor is None:
             return
 
@@ -95,7 +95,7 @@ async def offset_pages(
         yield items
         fetched += 1
         if total_pages is None:
-            total_pages = _get_nested(data, pages_path) or 1
+            total_pages = _get_nested(data, pages_path) or 1  # stop after one page if pagination metadata is missing
         if page >= total_pages:
             return
         if max_pages is not None and fetched >= max_pages:
