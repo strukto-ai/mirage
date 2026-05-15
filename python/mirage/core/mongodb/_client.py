@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator
+
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from mirage.resource.mongodb.config import MongoDBConfig
@@ -49,6 +51,25 @@ async def find_documents(
         cursor = cursor.sort(sort)
     cursor = cursor.limit(limit)
     return await cursor.to_list(length=limit)
+
+
+async def iter_documents(
+    client: AsyncIOMotorClient,
+    database: str,
+    collection: str,
+    filter: dict | None = None,
+    projection: dict | None = None,
+    sort: list[tuple[str, int]] | None = None,
+    batch_size: int = 100,
+) -> AsyncIterator[dict]:
+    db = client[database]
+    col = db[collection]
+    cursor = col.find(filter or {}, projection)
+    if sort:
+        cursor = cursor.sort(sort)
+    cursor = cursor.batch_size(batch_size)
+    async for doc in cursor:
+        yield doc
 
 
 async def count_documents(
