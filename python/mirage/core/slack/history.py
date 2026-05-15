@@ -13,10 +13,51 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
-from mirage.core.slack._client import slack_get
+from mirage.core.slack.paginate import cursor_pages
 from mirage.resource.slack.config import SlackConfig
+
+
+def _day_bounds_ts(date_str: str) -> tuple[str, str]:
+    dt = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    oldest = str(dt.timestamp())
+    latest = str(dt.replace(hour=23, minute=59, second=59).timestamp())
+    return oldest, latest
+
+
+def stream_messages_for_day(
+    config: SlackConfig,
+    channel_id: str,
+    date_str: str,
+    limit: int = 200,
+) -> AsyncIterator[list[dict]]:
+    """Page-streaming history for a channel-day.
+
+    Args:
+        config (SlackConfig): Slack credentials.
+        channel_id (str): channel ID.
+        date_str (str): date in YYYY-MM-DD format.
+        limit (int): max per page.
+
+    Yields:
+        list[dict]: messages in one Slack page (unsorted; the eager
+        wrapper sorts at the end).
+    """
+    oldest, latest = _day_bounds_ts(date_str)
+    return cursor_pages(
+        config,
+        "conversations.history",
+        base_params={
+            "channel": channel_id,
+            "oldest": oldest,
+            "latest": latest,
+            "limit": limit,
+            "inclusive": "true",
+        },
+        items_key="messages",
+    )
 
 
 async def fetch_messages_for_day(
@@ -24,7 +65,7 @@ async def fetch_messages_for_day(
     channel_id: str,
     date_str: str,
 ) -> list[dict]:
-    """Fetch all messages for a date as parsed dicts.
+    """Fetch all messages for a date as parsed dicts (eager).
 
     Args:
         config (SlackConfig): Slack credentials.
@@ -34,30 +75,9 @@ async def fetch_messages_for_day(
     Returns:
         list[dict]: messages sorted by ts ascending.
     """
-    dt = datetime.strptime(date_str, "%Y-%m-%d")
-    dt = dt.replace(tzinfo=timezone.utc)
-    oldest = str(dt.timestamp())
-    latest = str(dt.replace(hour=23, minute=59, second=59).timestamp())
-
     messages: list[dict] = []
-    cursor: str | None = None
-    while True:
-        params: dict = {
-            "channel": channel_id,
-            "oldest": oldest,
-            "latest": latest,
-            "limit": 200,
-            "inclusive": "true",
-        }
-        if cursor:
-            params["cursor"] = cursor
-        data = await slack_get(config, "conversations.history", params=params)
-        messages.extend(data.get("messages", []))
-        if not data.get("has_more"):
-            break
-        cursor = (data.get("response_metadata", {}).get("next_cursor", ""))
-        if not cursor:
-            break
+    async for page in stream_messages_for_day(config, channel_id, date_str):
+        messages.extend(page)
     messages.sort(key=lambda m: float(m.get("ts", "0")))
     return messages
 
@@ -82,12 +102,41 @@ async def get_history_jsonl(
     return ("\n".join(lines) + "\n").encode() if lines else b""
 
 
+def stream_thread_replies(
+    config: SlackConfig,
+    channel_id: str,
+    thread_ts: str,
+    limit: int = 200,
+) -> AsyncIterator[list[dict]]:
+    """Page-streaming thread replies.
+
+    Args:
+        config (SlackConfig): Slack credentials.
+        channel_id (str): channel ID.
+        thread_ts (str): parent message ts.
+        limit (int): max per page.
+
+    Yields:
+        list[dict]: reply messages in one Slack page.
+    """
+    return cursor_pages(
+        config,
+        "conversations.replies",
+        base_params={
+            "channel": channel_id,
+            "ts": thread_ts,
+            "limit": limit,
+        },
+        items_key="messages",
+    )
+
+
 async def get_thread_jsonl(
     config: SlackConfig,
     channel_id: str,
     thread_ts: str,
 ) -> list[dict]:
-    """Fetch thread replies.
+    """Fetch thread replies (eager).
 
     Args:
         config (SlackConfig): Slack credentials.
@@ -98,20 +147,6 @@ async def get_thread_jsonl(
         list[dict]: reply messages.
     """
     replies: list[dict] = []
-    cursor: str | None = None
-    while True:
-        params: dict = {
-            "channel": channel_id,
-            "ts": thread_ts,
-            "limit": 200,
-        }
-        if cursor:
-            params["cursor"] = cursor
-        data = await slack_get(config, "conversations.replies", params=params)
-        replies.extend(data.get("messages", []))
-        if not data.get("has_more"):
-            break
-        cursor = (data.get("response_metadata", {}).get("next_cursor", ""))
-        if not cursor:
-            break
+    async for page in stream_thread_replies(config, channel_id, thread_ts):
+        replies.extend(page)
     return replies

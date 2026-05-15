@@ -45,7 +45,7 @@ async def test_get_history_jsonl(config):
         False,
     }
     with patch(
-            "mirage.core.slack.history.slack_get",
+            "mirage.core.slack.paginate.slack_get",
             new_callable=AsyncMock,
             return_value=mock_data,
     ):
@@ -68,7 +68,7 @@ async def test_get_history_empty(config):
         "has_more": False,
     }
     with patch(
-            "mirage.core.slack.history.slack_get",
+            "mirage.core.slack.paginate.slack_get",
             new_callable=AsyncMock,
             return_value=mock_data,
     ):
