@@ -26,7 +26,7 @@ export interface DiscordAttachment {
 
 export function fileBlobName(att: DiscordAttachment): string {
   const rawName = att.filename ?? att.title ?? 'file'
-  const aid = String(att.id ?? '')
+  const aid = att.id
   const dot = rawName.lastIndexOf('.')
   if (dot >= 0 && dot < rawName.length - 1) {
     const stem = rawName.slice(0, dot)

@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { DiscordAccessor } from '../../../accessor/discord.ts'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { DiscordApiError, type DiscordTransport } from '../../../core/discord/_client.ts'
 import { PathSpec } from '../../../types.ts'
@@ -71,8 +70,7 @@ describe('discord grep push-down fallback', () => {
     )
     if (result === null) throw new Error('expected a result tuple')
     const [, io] = result
-    const stderr =
-      io.stderr instanceof Uint8Array ? DEC.decode(io.stderr) : ''
+    const stderr = io.stderr instanceof Uint8Array ? DEC.decode(io.stderr) : ''
     expect(stderr).toContain('push-down failed')
     expect(stderr).toContain('READ_MESSAGE_HISTORY')
   })
@@ -108,8 +106,7 @@ describe('discord rg push-down fallback', () => {
     )
     if (result === null) throw new Error('expected a result tuple')
     const [, io] = result
-    const stderr =
-      io.stderr instanceof Uint8Array ? DEC.decode(io.stderr) : ''
+    const stderr = io.stderr instanceof Uint8Array ? DEC.decode(io.stderr) : ''
     expect(stderr).toContain('push-down failed')
     expect(stderr).not.toContain('READ_MESSAGE_HISTORY')
   })

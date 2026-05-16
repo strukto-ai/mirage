@@ -91,7 +91,7 @@ export async function* offsetPages<T>(
       total = typeof t === 'number' ? t : 0
     }
     offset += pageSize
-    if (total !== null && offset >= total) return
+    if (offset >= total) return
     if (maxPages !== undefined && fetched >= maxPages) return
   }
 }

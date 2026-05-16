@@ -34,7 +34,7 @@ function attachMeta(
     ...att,
     _date: dateStr,
     _channel_id: channelId,
-    _message_id: String(msg.id ?? ''),
+    _message_id: msg.id,
     _author: author,
   }
 }

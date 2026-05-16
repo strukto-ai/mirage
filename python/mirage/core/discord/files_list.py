@@ -18,8 +18,7 @@ from mirage.core.discord.history import stream_messages_for_day
 from mirage.resource.discord.config import DiscordConfig
 
 
-def _attach_meta(att: dict, msg: dict, date_str: str,
-                 channel_id: str) -> dict:
+def _attach_meta(att: dict, msg: dict, date_str: str, channel_id: str) -> dict:
     """Attach context (date, channel_id, author, message_id) to an
     attachment so downstream readdir/read can hydrate without re-walking.
     """

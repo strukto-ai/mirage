@@ -57,8 +57,11 @@ async def test_grep_emits_token_hint_on_forbidden():
             "mirage.commands.builtin.discord.grep.grep.discord_read",
             new=AsyncMock(return_value=b""),
     ):
-        _out, io = await grep(accessor, paths, "hi",
-                              index=_fake_index(), args_l=True)
+        _out, io = await grep(accessor,
+                              paths,
+                              "hi",
+                              index=_fake_index(),
+                              args_l=True)
     stderr = (io.stderr or b"").decode()
     assert "push-down failed" in stderr
     assert "READ_MESSAGE_HISTORY" in stderr
