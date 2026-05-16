@@ -41,8 +41,8 @@ def index():
 
 @pytest.fixture
 def accessor():
-    return MongoDBAccessor(
-        config=MongoDBConfig(uri="mongodb://localhost:27017"))
+    return MongoDBAccessor(config=MongoDBConfig(
+        uri="mongodb://localhost:27017"))
 
 
 def _patched_iter(docs):
@@ -78,10 +78,12 @@ async def test_read_stream_yields_one_jsonl_line_per_doc(accessor, index):
 async def test_read_stream_preserves_bson_types_via_extended_json(
         accessor, index):
     docs = [{
-        "_id": ObjectId("65f0000000000000000000a1"),
-        "date": dt.datetime(2026, 5, 15, 12, 30, 45,
-                            tzinfo=dt.timezone.utc),
-        "decimal": Decimal128("123.456"),
+        "_id":
+        ObjectId("65f0000000000000000000a1"),
+        "date":
+        dt.datetime(2026, 5, 15, 12, 30, 45, tzinfo=dt.timezone.utc),
+        "decimal":
+        Decimal128("123.456"),
     }]
     with _patched_iter(docs):
         data = await _collect(read_stream(accessor, _path(DOCS_PATH), index))
@@ -110,8 +112,7 @@ async def test_read_stream_short_circuits_when_consumer_closes(
             consumed.append(i)
             yield {"_id": ObjectId(), "i": i}
 
-    with patch("mirage.core.mongodb.stream.iter_documents",
-               new=_instrumented):
+    with patch("mirage.core.mongodb.stream.iter_documents", new=_instrumented):
         gen = read_stream(accessor, _path(DOCS_PATH), index)
         await gen.__anext__()
         await gen.aclose()
@@ -143,8 +144,8 @@ async def test_read_stream_schema_json_path_raises(accessor, index):
     with _patched_iter([]):
         with pytest.raises(FileNotFoundError):
             async for _ in read_stream(
-                    accessor,
-                    _path("/db1/collections/coll1/schema.json"), index):
+                    accessor, _path("/db1/collections/coll1/schema.json"),
+                    index):
                 pass
 
 
@@ -156,16 +157,12 @@ async def test_read_stream_elides_configured_top_level_field(index):
     )
     acc = MongoDBAccessor(config=cfg)
     oid = ObjectId()
-    docs = [{
-        "_id": oid,
-        "title": "hi",
-        "vector": [0.1, 0.2, 0.3, 0.4, 0.5]
-    }]
+    docs = [{"_id": oid, "title": "hi", "vector": [0.1, 0.2, 0.3, 0.4, 0.5]}]
     with _patched_iter(docs):
         data = await _collect(read_stream(acc, _path(DOCS_PATH), index))
     parsed = json.loads(data.decode().strip())
     assert parsed["title"] == "hi"
-    assert parsed["vector"] == {"$elided": "array<double>(5)"}
+    assert "vector" not in parsed
     assert parsed["_id"] == {"$oid": str(oid)}
 
 
@@ -187,9 +184,7 @@ async def test_read_stream_elides_configured_nested_path(index):
         data = await _collect(read_stream(acc, _path(DOCS_PATH), index))
     parsed = json.loads(data.decode().strip())
     assert parsed["metadata"]["tag"] == "alpha"
-    assert parsed["metadata"]["embedding"] == {
-        "$elided": "array<double>(1024)"
-    }
+    assert "embedding" not in parsed["metadata"]
 
 
 @pytest.mark.asyncio
@@ -204,17 +199,3 @@ async def test_read_stream_elision_isolated_to_configured_collection(index):
         data = await _collect(read_stream(acc, _path(DOCS_PATH), index))
     parsed = json.loads(data.decode().strip())
     assert parsed["vector"] == [1.0, 2.0]
-
-
-@pytest.mark.asyncio
-async def test_read_stream_elision_stub_uses_array_string_tag(index):
-    cfg = MongoDBConfig(
-        uri="mongodb://localhost:27017",
-        elide_fields={"db1.coll1": ["tags"]},
-    )
-    acc = MongoDBAccessor(config=cfg)
-    docs = [{"_id": ObjectId(), "tags": ["a", "b", "c"]}]
-    with _patched_iter(docs):
-        data = await _collect(read_stream(acc, _path(DOCS_PATH), index))
-    parsed = json.loads(data.decode().strip())
-    assert parsed["tags"] == {"$elided": "array<string>"}

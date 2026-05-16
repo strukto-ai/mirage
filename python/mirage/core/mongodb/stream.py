@@ -19,17 +19,8 @@ from bson.json_util import RELAXED_JSON_OPTIONS, dumps
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.core.mongodb._client import iter_documents
-from mirage.core.mongodb._sampler import _array_tag, _scalar_tag
 from mirage.core.mongodb.scope import detect_scope
 from mirage.types import PathSpec
-
-
-def _stub_for(value: object) -> dict:
-    if isinstance(value, list):
-        tag = _array_tag(value)
-    else:
-        tag = _scalar_tag(value)
-    return {"$elided": tag}
 
 
 def _apply_elision(value: dict, paths: set[str]) -> dict:
@@ -44,8 +35,8 @@ def _apply_elision(value: dict, paths: set[str]) -> dict:
     out: dict = {}
     for k, v in value.items():
         if k in leaves:
-            out[k] = _stub_for(v)
-        elif k in grouped and isinstance(v, dict):
+            continue
+        if k in grouped and isinstance(v, dict):
             out[k] = _apply_elision(v, grouped[k])
         else:
             out[k] = v
