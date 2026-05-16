@@ -49,7 +49,7 @@ def test_search_returns_messages():
             }
         },
     ]
-    with patch("mirage.core.discord.search.discord_get",
+    with patch("mirage.core.discord.paginate.discord_get",
                new_callable=AsyncMock,
                return_value=_make_search_response(msgs)):
         results = _run(search_guild(_config(), "G1", "hello"))
@@ -60,7 +60,7 @@ def test_search_returns_messages():
 
 def test_search_with_channel_filter():
     msgs = [{"id": "300", "content": "test", "author": {"username": "c"}}]
-    with patch("mirage.core.discord.search.discord_get",
+    with patch("mirage.core.discord.paginate.discord_get",
                new_callable=AsyncMock,
                return_value=_make_search_response(msgs)) as mock:
         results = _run(search_guild(_config(), "G1", "test", channel_id="C1"))
@@ -71,7 +71,7 @@ def test_search_with_channel_filter():
 
 
 def test_search_empty_results():
-    with patch("mirage.core.discord.search.discord_get",
+    with patch("mirage.core.discord.paginate.discord_get",
                new_callable=AsyncMock,
                return_value={
                    "messages": [],
@@ -98,7 +98,7 @@ def test_search_sorted_oldest_first():
             }
         },
     ]
-    with patch("mirage.core.discord.search.discord_get",
+    with patch("mirage.core.discord.paginate.discord_get",
                new_callable=AsyncMock,
                return_value=_make_search_response(msgs)):
         results = _run(search_guild(_config(), "G1", "hello"))
@@ -114,7 +114,7 @@ def test_search_respects_limit():
             "username": "a"
         }
     } for i in range(10)]
-    with patch("mirage.core.discord.search.discord_get",
+    with patch("mirage.core.discord.paginate.discord_get",
                new_callable=AsyncMock,
                return_value=_make_search_response(msgs, total=10)):
         results = _run(search_guild(_config(), "G1", "msg", limit=3))
@@ -140,7 +140,7 @@ def test_search_paginates():
         _make_search_response(page1, total=30),
         _make_search_response(page2, total=30),
     ]
-    with patch("mirage.core.discord.search.discord_get",
+    with patch("mirage.core.discord.paginate.discord_get",
                new_callable=AsyncMock,
                side_effect=responses):
         results = _run(search_guild(_config(), "G1", "msg", limit=100))

@@ -28,11 +28,12 @@ from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.discord.channels import list_channels
+from mirage.core.discord.formatters import format_grep_results
 from mirage.core.discord.glob import resolve_glob
 from mirage.core.discord.read import read as discord_read
 from mirage.core.discord.readdir import readdir as _readdir
 from mirage.core.discord.scope import coalesce_scopes, detect_scope
-from mirage.core.discord.search import format_grep_results, search_guild
+from mirage.core.discord.search import search_guild
 from mirage.core.discord.stat import stat as _stat
 from mirage.io.stream import exit_on_empty, quiet_match, yield_bytes
 from mirage.io.types import ByteSource, IOResult

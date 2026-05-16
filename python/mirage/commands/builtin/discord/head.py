@@ -23,7 +23,7 @@ from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.discord._client import discord_get
 from mirage.core.discord.glob import resolve_glob
-from mirage.core.discord.history import _date_to_snowflake
+from mirage.core.discord.history import date_to_snowflake
 from mirage.core.discord.read import read as discord_read
 from mirage.core.discord.scope import detect_scope
 from mirage.io.types import ByteSource, IOResult
@@ -74,7 +74,7 @@ async def head(
         # Smart head: fetch only first N messages for a date
         if (scope.level == "file" and scope.channel_id and scope.date_str
                 and not bytes_mode):
-            after = _date_to_snowflake(scope.date_str)
+            after = date_to_snowflake(scope.date_str)
             msgs = await discord_get(
                 accessor.config,
                 f"/channels/{scope.channel_id}/messages",

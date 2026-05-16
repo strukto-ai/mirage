@@ -12,17 +12,48 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.discord._client import discord_get
+from collections.abc import AsyncIterator
+
+from mirage.core.discord.paginate import after_id_pages
 from mirage.resource.discord.config import DiscordConfig
 
 
-async def list_guilds(config: DiscordConfig) -> list[dict]:
-    """List guilds the bot is in.
+def list_guilds_stream(
+    config: DiscordConfig,
+    page_size: int = 200,
+) -> AsyncIterator[list[dict]]:
+    """Page-streaming variant of list_guilds.
 
     Args:
         config (DiscordConfig): Discord credentials.
+        page_size (int): per-page limit (Discord caps at 200).
+
+    Yields:
+        list[dict]: guild dicts per page.
+    """
+    return after_id_pages(
+        config,
+        "/users/@me/guilds",
+        base_params={},
+        last_id_fn=lambda g: g["id"],
+        page_size=page_size,
+    )
+
+
+async def list_guilds(
+    config: DiscordConfig,
+    page_size: int = 200,
+) -> list[dict]:
+    """List all guilds the bot is in (paginated).
+
+    Args:
+        config (DiscordConfig): Discord credentials.
+        page_size (int): per-page limit.
 
     Returns:
         list[dict]: guild dicts with id, name.
     """
-    return await discord_get(config, "/users/@me/guilds")
+    out: list[dict] = []
+    async for page in list_guilds_stream(config, page_size):
+        out.extend(page)
+    return out

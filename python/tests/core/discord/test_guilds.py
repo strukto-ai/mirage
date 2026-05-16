@@ -38,7 +38,7 @@ async def test_list_guilds(config):
         },
     ]
     with patch(
-            "mirage.core.discord.guilds.discord_get",
+            "mirage.core.discord.paginate.discord_get",
             new_callable=AsyncMock,
             return_value=mock_data,
     ) as mock_get:
@@ -47,4 +47,8 @@ async def test_list_guilds(config):
     assert len(result) == 2
     assert result[0]["name"] == "My Server"
     assert result[1]["id"] == "G002"
-    mock_get.assert_called_once_with(config, "/users/@me/guilds")
+    mock_get.assert_called_once()
+    args, kwargs = mock_get.call_args
+    assert args[1] == "/users/@me/guilds"
+    assert kwargs["params"]["after"] == "0"
+    assert kwargs["params"]["limit"] == 200

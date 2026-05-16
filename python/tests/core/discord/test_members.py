@@ -42,7 +42,7 @@ async def test_list_members(config):
         },
     ]
     with patch(
-            "mirage.core.discord.members.discord_get",
+            "mirage.core.discord.paginate.discord_get",
             new_callable=AsyncMock,
             return_value=mock_data,
     ) as mock_get:
@@ -50,11 +50,11 @@ async def test_list_members(config):
 
     assert len(result) == 2
     assert result[0]["user"]["username"] == "alice"
-    mock_get.assert_called_once_with(
-        config,
-        "/guilds/G001/members",
-        params={"limit": 200},
-    )
+    mock_get.assert_called_once()
+    args, kwargs = mock_get.call_args
+    assert args[1] == "/guilds/G001/members"
+    assert kwargs["params"]["after"] == "0"
+    assert kwargs["params"]["limit"] == 1000
 
 
 @pytest.mark.asyncio

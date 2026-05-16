@@ -1,0 +1,90 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+from datetime import datetime, timezone
+from enum import Enum
+
+from mirage.cache.index.config import IndexEntry
+
+
+class DiscordResourceType(str, Enum):
+    GUILD = "discord/guild"
+    CHANNEL = "discord/channel"
+    MEMBER = "discord/member"
+    HISTORY = "discord/history"
+
+
+def safe_name(name: str) -> str:
+    if not name:
+        return "unknown"
+    return name.replace("/", "∕")
+
+
+def guild_dirname(g: dict) -> str:
+    return safe_name(g.get("name", g.get("id", "unknown")))
+
+
+def channel_dirname(c: dict) -> str:
+    return safe_name(c.get("name", c.get("id", "unknown")))
+
+
+def member_filename(m: dict) -> str:
+    user = m.get("user", {})
+    name = user.get("username", user.get("id", "unknown"))
+    return safe_name(name) + ".json"
+
+
+def snowflake_to_date(snowflake: str) -> str:
+    """Convert a Discord snowflake to a UTC YYYY-MM-DD date string."""
+    ms = (int(snowflake) >> 22) + 1420070400000
+    return datetime.fromtimestamp(ms / 1000,
+                                  tz=timezone.utc).strftime("%Y-%m-%d")
+
+
+def guild_entry(g: dict) -> IndexEntry:
+    return IndexEntry(
+        id=g["id"],
+        name=g.get("name", ""),
+        resource_type=DiscordResourceType.GUILD,
+        vfs_name=guild_dirname(g),
+    )
+
+
+def channel_entry(c: dict) -> IndexEntry:
+    return IndexEntry(
+        id=c["id"],
+        name=c.get("name", ""),
+        resource_type=DiscordResourceType.CHANNEL,
+        vfs_name=channel_dirname(c),
+        remote_time=c.get("last_message_id", "") or "",
+    )
+
+
+def member_entry(m: dict) -> IndexEntry:
+    user = m.get("user", {})
+    return IndexEntry(
+        id=user.get("id", ""),
+        name=user.get("username", ""),
+        resource_type=DiscordResourceType.MEMBER,
+        vfs_name=member_filename(m),
+    )
+
+
+def history_entry(channel_key: str, date: str) -> IndexEntry:
+    return IndexEntry(
+        id=f"{channel_key}:{date}",
+        name=date,
+        resource_type=DiscordResourceType.HISTORY,
+        vfs_name=f"{date}.jsonl",
+    )

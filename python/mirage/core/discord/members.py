@@ -12,30 +12,63 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator
+
 from mirage.core.discord._client import discord_get
+from mirage.core.discord.paginate import after_id_pages
 from mirage.resource.discord.config import DiscordConfig
+
+
+def _member_user_id(m: dict) -> str:
+    return m.get("user", {}).get("id", "")
+
+
+def list_members_stream(
+    config: DiscordConfig,
+    guild_id: str,
+    page_size: int = 1000,
+) -> AsyncIterator[list[dict]]:
+    """Stream guild members across pages.
+
+    Walks ``/guilds/<id>/members?after=<user_id>&limit=N`` until the
+    API returns a partial page.
+
+    Args:
+        config (DiscordConfig): Discord credentials.
+        guild_id (str): guild ID.
+        page_size (int): per-page limit (Discord caps at 1000).
+
+    Yields:
+        list[dict]: member dicts per page.
+    """
+    return after_id_pages(
+        config,
+        f"/guilds/{guild_id}/members",
+        base_params={},
+        last_id_fn=_member_user_id,
+        page_size=page_size,
+    )
 
 
 async def list_members(
     config: DiscordConfig,
     guild_id: str,
-    limit: int = 200,
+    page_size: int = 1000,
 ) -> list[dict]:
-    """List guild members (first page).
+    """List all guild members (paginated).
 
     Args:
         config (DiscordConfig): Discord credentials.
         guild_id (str): guild ID.
-        limit (int): max members.
+        page_size (int): per-page limit.
 
     Returns:
         list[dict]: member dicts.
     """
-    return await discord_get(
-        config,
-        f"/guilds/{guild_id}/members",
-        params={"limit": limit},
-    )
+    out: list[dict] = []
+    async for page in list_members_stream(config, guild_id, page_size):
+        out.extend(page)
+    return out
 
 
 async def search_members(
@@ -55,7 +88,7 @@ async def search_members(
     Returns:
         list[dict]: matching members.
     """
-    return await discord_get(
+    result = await discord_get(
         config,
         f"/guilds/{guild_id}/members/search",
         params={
@@ -63,3 +96,4 @@ async def search_members(
             "limit": limit
         },
     )
+    return result if isinstance(result, list) else []

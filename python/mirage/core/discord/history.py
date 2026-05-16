@@ -13,21 +13,93 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
-from mirage.core.discord._client import discord_get
+from mirage.core.discord.paginate import after_id_pages
 from mirage.resource.discord.config import DiscordConfig
 
 DISCORD_EPOCH = 1420070400000
 
 
-def _date_to_snowflake(date_str: str, end: bool = False) -> str:
-    dt = datetime.strptime(date_str, "%Y-%m-%d")
-    dt = dt.replace(tzinfo=timezone.utc)
+def date_to_snowflake(date_str: str, end: bool = False) -> str:
+    """Convert a YYYY-MM-DD date to a Discord snowflake bound.
+
+    Args:
+        date_str (str): YYYY-MM-DD date.
+        end (bool): when True, returns the snowflake for 23:59:59 UTC.
+
+    Returns:
+        str: snowflake id usable as ``after``/``before`` parameter.
+    """
+    dt = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     if end:
         dt = dt.replace(hour=23, minute=59, second=59)
     ms = int(dt.timestamp() * 1000) - DISCORD_EPOCH
     return str(ms << 22)
+
+
+async def stream_messages_for_day(
+    config: DiscordConfig,
+    channel_id: str,
+    date_str: str,
+    page_size: int = 100,
+) -> AsyncIterator[list[dict]]:
+    """Stream message pages for a channel-day.
+
+    Walks ``/channels/<id>/messages?after=<snowflake>&limit=N``
+    forward through the day, stopping when messages exceed the
+    end-of-day snowflake.
+
+    Args:
+        config (DiscordConfig): Discord credentials.
+        channel_id (str): channel ID.
+        date_str (str): YYYY-MM-DD.
+        page_size (int): per-page limit (Discord caps at 100).
+
+    Yields:
+        list[dict]: message dicts, filtered to within the date.
+    """
+    after = date_to_snowflake(date_str)
+    before_int = int(date_to_snowflake(date_str, end=True))
+    async for page in after_id_pages(
+            config,
+            f"/channels/{channel_id}/messages",
+            base_params={},
+            last_id_fn=lambda m: m["id"],
+            page_size=page_size,
+            start_after=after,
+    ):
+        in_range = [m for m in page if int(m["id"]) <= before_int]
+        if in_range:
+            yield in_range
+        if any(int(m["id"]) > before_int for m in page):
+            return
+
+
+async def list_messages_for_day(
+    config: DiscordConfig,
+    channel_id: str,
+    date_str: str,
+    page_size: int = 100,
+) -> list[dict]:
+    """List all messages for a channel-day (eager).
+
+    Args:
+        config (DiscordConfig): Discord credentials.
+        channel_id (str): channel ID.
+        date_str (str): YYYY-MM-DD.
+        page_size (int): per-page limit.
+
+    Returns:
+        list[dict]: messages within the date, sorted oldest-first.
+    """
+    out: list[dict] = []
+    async for page in stream_messages_for_day(config, channel_id, date_str,
+                                              page_size):
+        out.extend(page)
+    out.sort(key=lambda m: int(m["id"]))
+    return out
 
 
 async def get_history_jsonl(
@@ -45,32 +117,6 @@ async def get_history_jsonl(
     Returns:
         bytes: JSONL-encoded messages.
     """
-    after = _date_to_snowflake(date_str)
-    before = _date_to_snowflake(date_str, end=True)
-
-    messages: list[dict] = []
-    last_id = after
-    while True:
-        params = {
-            "after": last_id,
-            "limit": 100,
-        }
-        batch = await discord_get(
-            config,
-            f"/channels/{channel_id}/messages",
-            params=params,
-        )
-        if not batch:
-            break
-        for msg in batch:
-            msg_id = int(msg["id"])
-            if msg_id > int(before):
-                continue
-            messages.append(msg)
-        if len(batch) < 100:
-            break
-        last_id = batch[-1]["id"]
-
-    messages.sort(key=lambda m: int(m["id"]))
+    messages = await list_messages_for_day(config, channel_id, date_str)
     lines = [json.dumps(m, ensure_ascii=False) for m in messages]
     return ("\n".join(lines) + "\n").encode() if lines else b""

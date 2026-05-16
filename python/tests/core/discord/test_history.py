@@ -39,7 +39,7 @@ async def test_get_history_jsonl(config):
         },
     ]
     with patch(
-            "mirage.core.discord.history.discord_get",
+            "mirage.core.discord.paginate.discord_get",
             new_callable=AsyncMock,
             return_value=messages,
     ):
@@ -57,7 +57,7 @@ async def test_get_history_jsonl(config):
 @pytest.mark.asyncio
 async def test_get_history_empty(config):
     with patch(
-            "mirage.core.discord.history.discord_get",
+            "mirage.core.discord.paginate.discord_get",
             new_callable=AsyncMock,
             return_value=[],
     ):
