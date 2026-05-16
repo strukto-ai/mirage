@@ -146,3 +146,75 @@ async def test_read_stream_schema_json_path_raises(accessor, index):
                     accessor,
                     _path("/db1/collections/coll1/schema.json"), index):
                 pass
+
+
+@pytest.mark.asyncio
+async def test_read_stream_elides_configured_top_level_field(index):
+    cfg = MongoDBConfig(
+        uri="mongodb://localhost:27017",
+        elide_fields={"db1.coll1": ["vector"]},
+    )
+    acc = MongoDBAccessor(config=cfg)
+    oid = ObjectId()
+    docs = [{
+        "_id": oid,
+        "title": "hi",
+        "vector": [0.1, 0.2, 0.3, 0.4, 0.5]
+    }]
+    with _patched_iter(docs):
+        data = await _collect(read_stream(acc, _path(DOCS_PATH), index))
+    parsed = json.loads(data.decode().strip())
+    assert parsed["title"] == "hi"
+    assert parsed["vector"] == {"$elided": "array<double>(5)"}
+    assert parsed["_id"] == {"$oid": str(oid)}
+
+
+@pytest.mark.asyncio
+async def test_read_stream_elides_configured_nested_path(index):
+    cfg = MongoDBConfig(
+        uri="mongodb://localhost:27017",
+        elide_fields={"db1.coll1": ["metadata.embedding"]},
+    )
+    acc = MongoDBAccessor(config=cfg)
+    docs = [{
+        "_id": ObjectId(),
+        "metadata": {
+            "tag": "alpha",
+            "embedding": [0.1] * 1024,
+        },
+    }]
+    with _patched_iter(docs):
+        data = await _collect(read_stream(acc, _path(DOCS_PATH), index))
+    parsed = json.loads(data.decode().strip())
+    assert parsed["metadata"]["tag"] == "alpha"
+    assert parsed["metadata"]["embedding"] == {
+        "$elided": "array<double>(1024)"
+    }
+
+
+@pytest.mark.asyncio
+async def test_read_stream_elision_isolated_to_configured_collection(index):
+    cfg = MongoDBConfig(
+        uri="mongodb://localhost:27017",
+        elide_fields={"db1.other_coll": ["vector"]},
+    )
+    acc = MongoDBAccessor(config=cfg)
+    docs = [{"_id": ObjectId(), "vector": [1.0, 2.0]}]
+    with _patched_iter(docs):
+        data = await _collect(read_stream(acc, _path(DOCS_PATH), index))
+    parsed = json.loads(data.decode().strip())
+    assert parsed["vector"] == [1.0, 2.0]
+
+
+@pytest.mark.asyncio
+async def test_read_stream_elision_stub_uses_array_string_tag(index):
+    cfg = MongoDBConfig(
+        uri="mongodb://localhost:27017",
+        elide_fields={"db1.coll1": ["tags"]},
+    )
+    acc = MongoDBAccessor(config=cfg)
+    docs = [{"_id": ObjectId(), "tags": ["a", "b", "c"]}]
+    with _patched_iter(docs):
+        data = await _collect(read_stream(acc, _path(DOCS_PATH), index))
+    parsed = json.loads(data.decode().strip())
+    assert parsed["tags"] == {"$elided": "array<string>"}

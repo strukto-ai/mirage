@@ -19,8 +19,42 @@ from bson.json_util import RELAXED_JSON_OPTIONS, dumps
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.core.mongodb._client import iter_documents
+from mirage.core.mongodb._sampler import _array_tag, _scalar_tag
 from mirage.core.mongodb.scope import detect_scope
 from mirage.types import PathSpec
+
+
+def _stub_for(value: object) -> dict:
+    if isinstance(value, list):
+        tag = _array_tag(value)
+    else:
+        tag = _scalar_tag(value)
+    return {"$elided": tag}
+
+
+def _apply_elision(value: dict, paths: set[str]) -> dict:
+    grouped: dict[str, set[str]] = {}
+    leaves: set[str] = set()
+    for p in paths:
+        head, _, tail = p.partition(".")
+        if tail:
+            grouped.setdefault(head, set()).add(tail)
+        else:
+            leaves.add(head)
+    out: dict = {}
+    for k, v in value.items():
+        if k in leaves:
+            out[k] = _stub_for(v)
+        elif k in grouped and isinstance(v, dict):
+            out[k] = _apply_elision(v, grouped[k])
+        else:
+            out[k] = v
+    return out
+
+
+def _elision_paths(config, database: str, name: str) -> set[str]:
+    key = f"{database}.{name}"
+    return set(config.elide_fields.get(key, []))
 
 
 async def read_stream(
@@ -34,6 +68,7 @@ async def read_stream(
     scope = detect_scope(path)
     if scope.level != "documents":
         raise FileNotFoundError(path.original)
+    elide = _elision_paths(accessor.config, scope.database, scope.name)
     async for doc in iter_documents(
             accessor.client,
             scope.database,
@@ -41,4 +76,6 @@ async def read_stream(
             sort=[("_id", 1)],
             batch_size=batch_size,
     ):
+        if elide:
+            doc = _apply_elision(doc, elide)
         yield (dumps(doc, json_options=RELAXED_JSON_OPTIONS) + "\n").encode()
