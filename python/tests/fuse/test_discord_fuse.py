@@ -26,10 +26,12 @@ from mirage.types import FileType, MountMode
 
 GUILD = "TestGuild"
 CHANNEL = "general"
-FILE = "2024-01-15.jsonl"
+DATE = "2024-01-15"
+FILE = "chat.jsonl"
 GUILD_PATH = f"{GUILD}"
 CHANNEL_PATH = f"{GUILD}/channels/{CHANNEL}"
-FILE_PATH = f"{GUILD}/channels/{CHANNEL}/{FILE}"
+DATE_DIR_PATH = f"{GUILD}/channels/{CHANNEL}/{DATE}"
+FILE_PATH = f"{GUILD}/channels/{CHANNEL}/{DATE}/{FILE}"
 MEMBER_PATH = f"{GUILD}/members/alice.json"
 
 PREFIX = "/discord"
@@ -64,10 +66,17 @@ def _make_resource() -> DiscordResource:
                        vfs_name=CHANNEL)))
     _run(
         index.put(
-            f"{PREFIX}/{FILE_PATH}",
+            f"{PREFIX}/{DATE_DIR_PATH}",
             IndexEntry(id="C1:2024-01-15",
                        name="2024-01-15",
                        resource_type="discord/history",
+                       vfs_name=DATE)))
+    _run(
+        index.put(
+            f"{PREFIX}/{FILE_PATH}",
+            IndexEntry(id="C1:2024-01-15:chat",
+                       name="chat.jsonl",
+                       resource_type="discord/chat_jsonl",
                        vfs_name=FILE)))
     _run(
         index.put(
@@ -92,10 +101,18 @@ def _make_resource() -> DiscordResource:
         ]))
     _run(
         index.set_dir(f"{PREFIX}/{CHANNEL_PATH}", [
-            (FILE,
+            (DATE,
              IndexEntry(id="C1:2024-01-15",
                         name="2024-01-15",
                         resource_type="discord/history",
+                        vfs_name=DATE)),
+        ]))
+    _run(
+        index.set_dir(f"{PREFIX}/{DATE_DIR_PATH}", [
+            (FILE,
+             IndexEntry(id="C1:2024-01-15:chat",
+                        name="chat.jsonl",
+                        resource_type="discord/chat_jsonl",
                         vfs_name=FILE)),
         ]))
     _run(
@@ -155,7 +172,7 @@ def test_ops_readdir_channels(ops):
 def test_ops_readdir_dates(ops):
     entries = _run(ops.readdir(f"{PREFIX}/{CHANNEL_PATH}/"))
     names = [e.rsplit("/", 1)[-1] for e in entries]
-    assert FILE in names
+    assert DATE in names
 
 
 def test_ops_readdir_members(ops):
@@ -270,7 +287,7 @@ def test_fuse_readdir_channels(fs):
 
 def test_fuse_readdir_dates(fs):
     entries = fs.readdir(f"{PREFIX}/{CHANNEL_PATH}", None)
-    assert FILE in entries
+    assert DATE in entries
 
 
 # ── FUSE open + read ─────────────────────────────

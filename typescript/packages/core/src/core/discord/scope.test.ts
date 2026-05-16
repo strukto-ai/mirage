@@ -74,19 +74,42 @@ describe('detectScope', () => {
     expect(s.useNative).toBe(true)
   })
 
-  it('/myserver__G1/channels/general__C1/2026-04-24.jsonl → level=file, dateStr set, useNative=false', () => {
+  it('/myserver__G1/channels/general__C1/2026-04-24/chat.jsonl → level=messages', () => {
     const s = detectScope(
       new PathSpec({
-        original: '/myserver__G1/channels/general__C1/2026-04-24.jsonl',
-        directory: '/myserver__G1/channels/general__C1/2026-04-24.jsonl',
+        original: '/myserver__G1/channels/general__C1/2026-04-24/chat.jsonl',
+        directory: '/myserver__G1/channels/general__C1/2026-04-24/chat.jsonl',
       }),
     )
-    expect(s.level).toBe('file')
+    expect(s.level).toBe('messages')
     expect(s.dateStr).toBe('2026-04-24')
     expect(s.useNative).toBe(false)
     expect(s.guildId).toBe('G1')
     expect(s.channelId).toBe('C1')
     expect(s.container).toBe('channels')
+  })
+
+  it('/myserver__G1/channels/general__C1/2026-04-24 → level=date', () => {
+    const s = detectScope(
+      new PathSpec({
+        original: '/myserver__G1/channels/general__C1/2026-04-24',
+        directory: '/myserver__G1/channels/general__C1/2026-04-24',
+      }),
+    )
+    expect(s.level).toBe('date')
+    expect(s.dateStr).toBe('2026-04-24')
+    expect(s.useNative).toBe(true)
+  })
+
+  it('/myserver__G1/channels/general__C1/2026-04-24/files/blob.png → level=file_blob', () => {
+    const s = detectScope(
+      new PathSpec({
+        original: '/myserver__G1/channels/general__C1/2026-04-24/files/blob__A1.png',
+        directory: '/myserver__G1/channels/general__C1/2026-04-24/files/blob__A1.png',
+      }),
+    )
+    expect(s.level).toBe('file_blob')
+    expect(s.dateStr).toBe('2026-04-24')
   })
 
   it('*.jsonl glob in channel dir → level=channel, useNative=true', () => {
@@ -146,14 +169,14 @@ describe('detectScope', () => {
     expect(s.channelId).toBe('C1')
   })
 
-  it('member json file → level=file, container=members, useNative=false', () => {
+  it('member json file → level=member, container=members, useNative=false', () => {
     const s = detectScope(
       new PathSpec({
         original: '/myserver__G1/members/alice__U1.json',
         directory: '/myserver__G1/members/alice__U1.json',
       }),
     )
-    expect(s.level).toBe('file')
+    expect(s.level).toBe('member')
     expect(s.container).toBe('members')
     expect(s.useNative).toBe(false)
     expect(s.guildId).toBe('G1')

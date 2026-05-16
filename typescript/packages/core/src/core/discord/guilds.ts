@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiscordAccessor } from '../../accessor/discord.ts'
+import { afterIdPages } from './paginate.ts'
 
 export interface DiscordGuild {
   id: string
@@ -20,7 +21,24 @@ export interface DiscordGuild {
   [key: string]: unknown
 }
 
-export async function listGuilds(accessor: DiscordAccessor): Promise<DiscordGuild[]> {
-  const out = await accessor.transport.call('GET', '/users/@me/guilds')
-  return Array.isArray(out) ? (out as DiscordGuild[]) : []
+export function listGuildsStream(
+  accessor: DiscordAccessor,
+  pageSize = 200,
+): AsyncIterableIterator<DiscordGuild[]> {
+  return afterIdPages<DiscordGuild & Record<string, unknown>>(accessor, {
+    endpoint: '/users/@me/guilds',
+    lastIdFn: (g) => (g as DiscordGuild).id,
+    pageSize,
+  })
+}
+
+export async function listGuilds(
+  accessor: DiscordAccessor,
+  pageSize = 200,
+): Promise<DiscordGuild[]> {
+  const out: DiscordGuild[] = []
+  for await (const page of listGuildsStream(accessor, pageSize)) {
+    out.push(...page)
+  }
+  return out
 }

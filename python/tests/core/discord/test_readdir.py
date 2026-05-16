@@ -179,5 +179,7 @@ async def test_readdir_channel_dates(accessor, index):
                  directory="/My Server/channels/general"), index)
 
     assert len(result) >= 1
-    assert all(r.endswith(".jsonl") for r in result)
-    assert all(r.startswith("/My Server/channels/general/") for r in result)
+    # New layout: date directories (no extension)
+    import re
+    date_re = re.compile(r"^/My Server/channels/general/\d{4}-\d{2}-\d{2}$")
+    assert all(date_re.match(r) for r in result)

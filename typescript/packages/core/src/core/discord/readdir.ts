@@ -13,15 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiscordAccessor } from '../../accessor/discord.ts'
-import type { IndexEntry } from '../../cache/index/config.ts'
+import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
 import { listChannels } from './channels.ts'
-import { DiscordIndexEntry } from './entry.ts'
+import { DiscordIndexEntry, DiscordResourceType } from './entry.ts'
+import { fileBlobName } from './files.ts'
 import { listGuilds } from './guilds.ts'
+import { listMessagesForDay } from './history.ts'
 import { listMembers } from './members.ts'
+import { DiscordApiError } from './_client.ts'
 
 const DISCORD_EPOCH = 1420070400000n
+const SOFT_STATUSES = new Set([403, 404, 429])
 
 export function snowflakeToDate(snowflake: string): string {
   if (snowflake === '') return ''
@@ -62,35 +66,278 @@ function todayUtc(): string {
   return `${yyyy}-${mm}-${dd}`
 }
 
+function isSoftError(err: unknown): boolean {
+  return err instanceof DiscordApiError && SOFT_STATUSES.has(err.status)
+}
+
+interface Normalized {
+  prefix: string
+  key: string
+  virtualKey: string
+  rawPath: string
+}
+
+function normalize(path: PathSpec): Normalized {
+  const prefix = path.prefix
+  let raw = path.pattern !== null ? path.directory : path.original
+  if (prefix !== '' && raw.startsWith(prefix)) {
+    raw = raw.slice(prefix.length) || '/'
+  }
+  const key = raw.replace(/^\/+|\/+$/g, '')
+  const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
+  return { prefix, key, virtualKey, rawPath: path.original }
+}
+
+async function ensureGuildId(
+  accessor: DiscordAccessor,
+  prefix: string,
+  guildPart: string,
+  index: IndexCacheStore,
+  rawPath: string,
+): Promise<string> {
+  const vk = `${prefix}/${guildPart}`
+  let lookup = await index.get(vk)
+  if (lookup.entry === undefined || lookup.entry === null) {
+    const root = new PathSpec({
+      original: prefix !== '' ? prefix : '/',
+      directory: prefix !== '' ? prefix : '/',
+      prefix,
+    })
+    await readdir(accessor, root, index)
+    lookup = await index.get(vk)
+  }
+  if (lookup.entry === undefined || lookup.entry === null) throw enoent(rawPath)
+  return lookup.entry.id
+}
+
+async function ensureChannelLookup(
+  accessor: DiscordAccessor,
+  prefix: string,
+  parts: string[],
+  index: IndexCacheStore,
+  rawPath: string,
+): Promise<IndexEntry> {
+  const channelVk = `${prefix}/${parts.slice(0, 3).join('/')}`
+  let lookup = await index.get(channelVk)
+  if (lookup.entry === undefined || lookup.entry === null) {
+    const parentPath = `${prefix}/${parts.slice(0, 2).join('/')}`
+    await readdir(
+      accessor,
+      new PathSpec({ original: parentPath, directory: parentPath, prefix }),
+      index,
+    )
+    lookup = await index.get(channelVk)
+  }
+  if (lookup.entry === undefined || lookup.entry === null) throw enoent(rawPath)
+  return lookup.entry
+}
+
+async function readdirRoot(
+  accessor: DiscordAccessor,
+  prefix: string,
+  virtualKey: string,
+  index: IndexCacheStore | undefined,
+): Promise<string[]> {
+  if (index !== undefined) {
+    const listing = await index.listDir(virtualKey)
+    if (listing.entries !== undefined && listing.entries !== null) return listing.entries
+  }
+  const guilds = await listGuilds(accessor)
+  const entries: [string, IndexEntry][] = []
+  const names: string[] = []
+  for (const g of guilds) {
+    const entry = DiscordIndexEntry.guild(g)
+    entries.push([entry.vfsName, entry])
+    names.push(`${prefix}/${entry.vfsName}`)
+  }
+  if (index !== undefined) await index.setDir(virtualKey, entries)
+  return names
+}
+
+async function readdirGuildContainer(
+  accessor: DiscordAccessor,
+  prefix: string,
+  key: string,
+  virtualKey: string,
+  parts: string[],
+  index: IndexCacheStore,
+  rawPath: string,
+): Promise<string[]> {
+  const listing = await index.listDir(virtualKey)
+  if (listing.entries !== undefined && listing.entries !== null) return listing.entries
+  const guildPart = parts[0]
+  if (guildPart === undefined) throw enoent(rawPath)
+  const guildId = await ensureGuildId(accessor, prefix, guildPart, index, rawPath)
+  const entries: [string, IndexEntry][] = []
+  const names: string[] = []
+  if (parts[1] === 'channels') {
+    const channels = await listChannels(accessor, guildId)
+    for (const c of channels) {
+      const base = DiscordIndexEntry.channel(c)
+      const lastMsgId = typeof c.last_message_id === 'string' ? c.last_message_id : ''
+      const entry = lastMsgId !== '' ? base.copyWith({ remoteTime: lastMsgId }) : base
+      entries.push([entry.vfsName, entry])
+      names.push(`${prefix}/${key}/${entry.vfsName}`)
+    }
+  } else {
+    const members = await listMembers(accessor, guildId)
+    for (const m of members) {
+      const user = m.user
+      if (user === undefined || user.id === '') continue
+      const entry = DiscordIndexEntry.member({ id: user.id, name: user.username ?? '' })
+      entries.push([entry.vfsName, entry])
+      names.push(`${prefix}/${key}/${entry.vfsName}`)
+    }
+  }
+  await index.setDir(virtualKey, entries)
+  return names
+}
+
+async function readdirChannelDates(
+  accessor: DiscordAccessor,
+  prefix: string,
+  key: string,
+  virtualKey: string,
+  parts: string[],
+  index: IndexCacheStore,
+  rawPath: string,
+): Promise<string[]> {
+  const listing = await index.listDir(virtualKey)
+  if (listing.entries !== undefined && listing.entries !== null) return listing.entries
+  const lookup = await ensureChannelLookup(accessor, prefix, parts, index, rawPath)
+  const lastMsgId = lookup.remoteTime
+  const endDate = lastMsgId !== '' ? snowflakeToDate(lastMsgId) : todayUtc()
+  const dates = dateRangeDescending(endDate, 30)
+  const channelDir = parts[2] ?? ''
+  const entries: [string, IndexEntry][] = []
+  const names: string[] = []
+  for (const d of dates) {
+    const entry = new IndexEntry({
+      id: `${channelDir}:${d}`,
+      name: d,
+      resourceType: DiscordResourceType.DATE_DIR,
+      vfsName: d,
+    })
+    entries.push([d, entry])
+    names.push(`${prefix}/${key}/${d}`)
+  }
+  await index.setDir(virtualKey, entries)
+  return names
+}
+
+async function fetchDay(
+  accessor: DiscordAccessor,
+  channelId: string,
+  dateStr: string,
+  dateVk: string,
+  index: IndexCacheStore,
+): Promise<void> {
+  let messages
+  try {
+    messages = await listMessagesForDay(accessor, channelId, dateStr)
+  } catch (e) {
+    if (isSoftError(e)) {
+      await index.setDir(dateVk, [])
+      return
+    }
+    throw e
+  }
+  const chatEntry = new IndexEntry({
+    id: `${channelId}:${dateStr}:chat`,
+    name: 'chat.jsonl',
+    resourceType: DiscordResourceType.CHAT_JSONL,
+    vfsName: 'chat.jsonl',
+  })
+  const filesEntry = new IndexEntry({
+    id: `${channelId}:${dateStr}:files`,
+    name: 'files',
+    resourceType: DiscordResourceType.FILES_DIR,
+    vfsName: 'files',
+  })
+  await index.setDir(dateVk, [
+    ['chat.jsonl', chatEntry],
+    ['files', filesEntry],
+  ])
+  const fileEntries: [string, IndexEntry][] = []
+  for (const msg of messages) {
+    const atts = (msg.attachments ?? []) as {
+      id: string
+      filename?: string
+      url?: string
+      proxy_url?: string
+      content_type?: string
+      size?: number
+    }[]
+    for (const att of atts) {
+      if (!att.id) continue
+      const blobName = fileBlobName(att)
+      const entry = new IndexEntry({
+        id: att.id,
+        name: att.filename ?? '',
+        resourceType: DiscordResourceType.FILE,
+        vfsName: blobName,
+        ...(att.size !== undefined ? { size: att.size } : {}),
+        extra: {
+          url: att.url ?? '',
+          proxy_url: att.proxy_url ?? '',
+          content_type: att.content_type ?? '',
+          message_id: msg.id,
+          author: (msg.author as { username?: string } | undefined)?.username ?? '',
+          channel_id: channelId,
+          date: dateStr,
+        },
+      })
+      fileEntries.push([blobName, entry])
+    }
+  }
+  await index.setDir(`${dateVk}/files`, fileEntries)
+}
+
+async function readdirDateContents(
+  accessor: DiscordAccessor,
+  prefix: string,
+  virtualKey: string,
+  parts: string[],
+  index: IndexCacheStore,
+  rawPath: string,
+): Promise<string[]> {
+  const cached = await index.listDir(virtualKey)
+  if (cached.entries !== undefined && cached.entries !== null) return cached.entries
+  const lookup = await ensureChannelLookup(accessor, prefix, parts, index, rawPath)
+  const dateStr = parts[3]
+  if (dateStr === undefined) throw enoent(rawPath)
+  await fetchDay(accessor, lookup.id, dateStr, virtualKey, index)
+  const after = await index.listDir(virtualKey)
+  if (after.entries === undefined || after.entries === null) throw enoent(rawPath)
+  return after.entries
+}
+
+async function readdirFilesDir(
+  accessor: DiscordAccessor,
+  prefix: string,
+  virtualKey: string,
+  parts: string[],
+  index: IndexCacheStore,
+  rawPath: string,
+): Promise<string[]> {
+  const cached = await index.listDir(virtualKey)
+  if (cached.entries !== undefined && cached.entries !== null) return cached.entries
+  const dateKey = parts.slice(0, 4).join('/')
+  const dateVk = `${prefix}/${dateKey}`
+  await readdir(accessor, new PathSpec({ original: dateVk, directory: dateVk, prefix }), index)
+  const after = await index.listDir(virtualKey)
+  if (after.entries === undefined || after.entries === null) throw enoent(rawPath)
+  return after.entries
+}
+
 export async function readdir(
   accessor: DiscordAccessor,
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<string[]> {
-  const prefix = path.prefix
-  let p = path.pattern !== null ? path.directory : path.original
-  if (prefix !== '' && p.startsWith(prefix)) {
-    p = p.slice(prefix.length) || '/'
-  }
-  const key = p.replace(/^\/+|\/+$/g, '')
-  const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
+  const { prefix, key, virtualKey, rawPath } = normalize(path)
 
-  if (key === '') {
-    if (index !== undefined) {
-      const listing = await index.listDir(virtualKey)
-      if (listing.entries !== undefined && listing.entries !== null) return listing.entries
-    }
-    const guilds = await listGuilds(accessor)
-    const entries: [string, IndexEntry][] = []
-    const names: string[] = []
-    for (const g of guilds) {
-      const entry = DiscordIndexEntry.guild(g)
-      entries.push([entry.vfsName, entry])
-      names.push(`${prefix}/${entry.vfsName}`)
-    }
-    if (index !== undefined) await index.setDir(virtualKey, entries)
-    return names
-  }
+  if (key === '') return readdirRoot(accessor, prefix, virtualKey, index)
 
   const parts = key.split('/')
 
@@ -105,87 +352,43 @@ export async function readdir(
         })
         await readdir(accessor, root, index)
         const retry = await index.get(virtualKey)
-        if (retry.entry === undefined || retry.entry === null) throw enoent(p)
+        if (retry.entry === undefined || retry.entry === null) throw enoent(rawPath)
       }
     }
     return [`${prefix}/${key}/channels`, `${prefix}/${key}/members`]
   }
 
   if (parts.length === 2 && (parts[1] === 'channels' || parts[1] === 'members')) {
-    if (index === undefined) throw enoent(p)
-    const listing = await index.listDir(virtualKey)
-    if (listing.entries !== undefined && listing.entries !== null) return listing.entries
-    const guildSeg = parts[0]
-    if (guildSeg === undefined) throw enoent(p)
-    const guildVirtualKey = `${prefix}/${guildSeg}`
-    let guildLookup = await index.get(guildVirtualKey)
-    if (guildLookup.entry === undefined || guildLookup.entry === null) {
-      const root = new PathSpec({
-        original: prefix !== '' ? prefix : '/',
-        directory: prefix !== '' ? prefix : '/',
-        prefix,
-      })
-      await readdir(accessor, root, index)
-      guildLookup = await index.get(guildVirtualKey)
-    }
-    if (guildLookup.entry === undefined || guildLookup.entry === null) throw enoent(p)
-    const guildId = guildLookup.entry.id
-
-    const entries: [string, IndexEntry][] = []
-    const names: string[] = []
-    if (parts[1] === 'channels') {
-      const channels = await listChannels(accessor, guildId)
-      for (const c of channels) {
-        const base = DiscordIndexEntry.channel(c)
-        const lastMsgId = typeof c.last_message_id === 'string' ? c.last_message_id : ''
-        const entry = lastMsgId !== '' ? base.copyWith({ remoteTime: lastMsgId }) : base
-        entries.push([entry.vfsName, entry])
-        names.push(`${prefix}/${key}/${entry.vfsName}`)
-      }
-    } else {
-      const members = await listMembers(accessor, guildId)
-      for (const m of members) {
-        const user = m.user
-        if (user === undefined || user.id === '') continue
-        const entry = DiscordIndexEntry.member({ id: user.id, name: user.username ?? '' })
-        entries.push([entry.vfsName, entry])
-        names.push(`${prefix}/${key}/${entry.vfsName}`)
-      }
-    }
-    await index.setDir(virtualKey, entries)
-    return names
+    if (index === undefined) throw enoent(rawPath)
+    return readdirGuildContainer(accessor, prefix, key, virtualKey, parts, index, rawPath)
   }
 
   if (parts.length === 3 && parts[1] === 'channels') {
-    if (index === undefined) throw enoent(p)
-    const listing = await index.listDir(virtualKey)
-    if (listing.entries !== undefined && listing.entries !== null) return listing.entries
-    let chLookup = await index.get(virtualKey)
-    if (chLookup.entry === undefined || chLookup.entry === null) {
-      const parentPath = `${prefix}/${parts.slice(0, 2).join('/')}`
-      const parent = new PathSpec({
-        original: parentPath,
-        directory: parentPath,
-        prefix,
-      })
-      await readdir(accessor, parent, index)
-      chLookup = await index.get(virtualKey)
-    }
-    if (chLookup.entry === undefined || chLookup.entry === null) throw enoent(p)
-    const lastMsgId = chLookup.entry.remoteTime
-    const endDate = lastMsgId !== '' ? snowflakeToDate(lastMsgId) : todayUtc()
-    const dates = dateRangeDescending(endDate, 30)
-    const entries: [string, IndexEntry][] = []
-    const names: string[] = []
-    const channelDir = parts[2]
-    if (channelDir === undefined) return []
-    for (const d of dates) {
-      const entry = DiscordIndexEntry.history(channelDir, d)
-      entries.push([entry.vfsName, entry])
-      names.push(`${prefix}/${key}/${entry.vfsName}`)
-    }
-    await index.setDir(virtualKey, entries)
-    return names
+    if (index === undefined) throw enoent(rawPath)
+    return readdirChannelDates(accessor, prefix, key, virtualKey, parts, index, rawPath)
+  }
+
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+  if (
+    parts.length === 4 &&
+    parts[1] === 'channels' &&
+    parts[3] !== undefined &&
+    DATE_RE.test(parts[3])
+  ) {
+    if (index === undefined) throw enoent(rawPath)
+    return readdirDateContents(accessor, prefix, virtualKey, parts, index, rawPath)
+  }
+
+  if (
+    parts.length === 5 &&
+    parts[1] === 'channels' &&
+    parts[3] !== undefined &&
+    DATE_RE.test(parts[3]) &&
+    parts[4] === 'files'
+  ) {
+    if (index === undefined) throw enoent(rawPath)
+    return readdirFilesDir(accessor, prefix, virtualKey, parts, index, rawPath)
   }
 
   return []

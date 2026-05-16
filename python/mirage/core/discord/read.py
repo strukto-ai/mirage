@@ -16,9 +16,24 @@ import json
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.core.discord.files import download_file
 from mirage.core.discord.history import get_history_jsonl
 from mirage.core.discord.members import list_members
+from mirage.core.discord.readdir import readdir as _readdir
 from mirage.types import PathSpec
+
+
+async def _ensure_channel(
+    index: IndexCacheStore,
+    prefix: str,
+    ch_key: str,
+    raw: str,
+):
+    ch_virtual = prefix + "/" + ch_key
+    lookup = await index.get(ch_virtual)
+    if lookup.entry is None:
+        raise FileNotFoundError(raw)
+    return lookup
 
 
 async def read(
@@ -37,20 +52,43 @@ async def read(
     key = path.strip("/")
     parts = key.split("/")
 
-    if (len(parts) == 4 and parts[1] == "channels"
-            and parts[3].endswith(".jsonl")):
-        ch_key = f"{parts[0]}/{parts[1]}/{parts[2]}"
+    # <guild>/channels/<ch>/<date>/chat.jsonl
+    if (len(parts) == 5 and parts[1] == "channels"
+            and parts[4] == "chat.jsonl"):
         if index is None:
             raise FileNotFoundError(key)
-        ch_virtual = prefix + "/" + ch_key
-        ch_lookup = await index.get(ch_virtual)
-        if ch_lookup.entry is None:
-            raise FileNotFoundError(key)
-        date_str = parts[3].removesuffix(".jsonl")
+        ch_key = f"{parts[0]}/{parts[1]}/{parts[2]}"
+        ch_lookup = await _ensure_channel(index, prefix, ch_key, key)
         return await get_history_jsonl(accessor.config, ch_lookup.entry.id,
-                                       date_str)
+                                       parts[3])
 
-    if (len(parts) == 3 and parts[1] == "members"):
+    # <guild>/channels/<ch>/<date>/files/<blob>
+    if (len(parts) == 6 and parts[1] == "channels" and parts[4] == "files"):
+        if index is None:
+            raise FileNotFoundError(key)
+        virtual_key = prefix + "/" + key
+        lookup = await index.get(virtual_key)
+        if lookup.entry is None:
+            # Hydrate via date dir readdir, which triggers _fetch_day
+            date_key = "/".join(parts[:4])
+            date_spec = PathSpec(
+                original=prefix + "/" + date_key,
+                directory=prefix + "/" + date_key,
+                prefix=prefix,
+            )
+            await _readdir(accessor, date_spec, index)
+            lookup = await index.get(virtual_key)
+        if lookup.entry is None:
+            raise FileNotFoundError(key)
+        url = (lookup.entry.extra
+               or {}).get("url") or (lookup.entry.extra
+                                     or {}).get("proxy_url") or ""
+        if not url:
+            raise FileNotFoundError(key)
+        return await download_file(url)
+
+    # <guild>/members/<user>.json
+    if len(parts) == 3 and parts[1] == "members":
         if index is None:
             raise FileNotFoundError(key)
         virtual_key = prefix + "/" + key
@@ -61,9 +99,7 @@ async def read(
         guild_lookup = await index.get(guild_virtual)
         if guild_lookup.entry is None:
             raise FileNotFoundError(key)
-        members = await list_members(accessor.config,
-                                     guild_lookup.entry.id,
-                                     limit=200)
+        members = await list_members(accessor.config, guild_lookup.entry.id)
         for m in members:
             user = m.get("user", {})
             if user.get("id") == entry_lookup.entry.id:

@@ -89,6 +89,6 @@ describe('discord tree', () => {
       { index: idx, transport },
     )
     expect(out).toContain('general__C1')
-    expect(out).toContain('2024-01-01.jsonl')
+    expect(out).toContain('2024-01-01')
   })
 })

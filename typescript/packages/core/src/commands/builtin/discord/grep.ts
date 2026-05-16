@@ -14,6 +14,7 @@
 
 import type { DiscordAccessor } from '../../../accessor/discord.ts'
 import { listChannels } from '../../../core/discord/channels.ts'
+import { DiscordApiError } from '../../../core/discord/_client.ts'
 import { resolveDiscordGlob } from '../../../core/discord/glob.ts'
 import { read as discordRead } from '../../../core/discord/read.ts'
 import { readdir as discordReaddir } from '../../../core/discord/readdir.ts'
@@ -95,23 +96,50 @@ async function grepCommand(
   }
   const f = parseFlags(opts.flags)
 
+  const pushdownWarnings: string[] = []
   if (paths.length > 0) {
     const firstPath = paths[0]
     if (firstPath !== undefined) {
       const scope = detectScope(firstPath)
       if (scope.useNative && scope.guildId !== undefined) {
-        const count = f.maxCount ?? 100
-        const raw = await searchGuild(accessor, scope.guildId, pattern, scope.channelId, count)
-        const channelMap = new Map<string, string>()
-        if (scope.channelId === undefined) {
-          for (const ch of await listChannels(accessor, scope.guildId)) {
-            if (ch.name !== undefined) channelMap.set(ch.id, ch.name)
+        try {
+          const count = f.maxCount ?? 100
+          const raw = await searchGuild(accessor, scope.guildId, pattern, scope.channelId, count)
+          const channelMap = new Map<string, string>()
+          if (scope.channelId === undefined) {
+            for (const ch of await listChannels(accessor, scope.guildId)) {
+              if (ch.name !== undefined) channelMap.set(ch.id, ch.name)
+            }
+          }
+          const lines = formatGrepResults(raw, scope, firstPath.prefix, channelMap)
+          if (lines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
+          return [ENC.encode(lines.join('\n') + '\n'), new IOResult()]
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          pushdownWarnings.push(
+            `discord: native search push-down failed (${msg}); ` + `falling back to per-file scan`,
+          )
+          const status = err instanceof DiscordApiError ? err.status : null
+          const lower = msg.toLowerCase()
+          if (
+            status === 403 ||
+            lower.includes('forbidden') ||
+            lower.includes('missing permissions') ||
+            lower.includes('missing access')
+          ) {
+            pushdownWarnings.push(
+              'discord: hint - ensure the bot has the READ_MESSAGE_HISTORY ' +
+                'permission for this guild and the MESSAGE CONTENT privileged ' +
+                'intent enabled',
+            )
           }
         }
-        const lines = formatGrepResults(raw, scope, firstPath.prefix, channelMap)
-        if (lines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-        return [ENC.encode(lines.join('\n') + '\n'), new IOResult()]
       }
+    }
+    const stderrFromWarnings = (extra: string[] = []): Uint8Array | undefined => {
+      const all = [...pushdownWarnings, ...extra]
+      if (all.length === 0) return undefined
+      return ENC.encode(all.join('\n') + '\n')
     }
     const resolved = await resolveDiscordGlob(accessor, paths, opts.index ?? undefined)
     const pat = compilePattern(pattern, f.ignoreCase, f.fixedString, f.wholeWord)
@@ -148,7 +176,7 @@ async function grepCommand(
         },
         warnings,
       )
-      const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n')) : undefined
+      const stderr = stderrFromWarnings(warnings)
       if (results.length === 0) {
         return [
           new Uint8Array(0),
@@ -174,9 +202,15 @@ async function grepCommand(
           for (const h of hits) allResults.push(`${p.original}:${h}`)
         }
       }
-      if (allResults.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
+      const stderr = stderrFromWarnings()
+      if (allResults.length === 0) {
+        return [
+          new Uint8Array(0),
+          new IOResult({ exitCode: 1, ...(stderr !== undefined ? { stderr } : {}) }),
+        ]
+      }
       const out: ByteSource = ENC.encode(allResults.join('\n'))
-      return [out, new IOResult()]
+      return [out, new IOResult({ ...(stderr !== undefined ? { stderr } : {}) })]
     }
 
     const first = resolved[0]
@@ -184,11 +218,12 @@ async function grepCommand(
     const raw = await discordRead(accessor, first, opts.index ?? undefined)
     const source = yieldBytes(raw)
     const stream = grepStream(source, pat, f)
+    const stderr = stderrFromWarnings()
     if (f.quiet) {
-      const io = new IOResult({ exitCode: 1 })
+      const io = new IOResult({ exitCode: 1, ...(stderr !== undefined ? { stderr } : {}) })
       return [quietMatch(stream, io), io]
     }
-    const io = new IOResult()
+    const io = new IOResult({ ...(stderr !== undefined ? { stderr } : {}) })
     return [exitOnEmpty(stream, io), io]
   }
 

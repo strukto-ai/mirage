@@ -84,7 +84,7 @@ describe('read history jsonl branch', () => {
     })
     const out = await read(
       new DiscordAccessor(t),
-      spec('/mnt/discord/My_Server__G1/channels/general__C1/2024-01-15.jsonl', '/mnt/discord'),
+      spec('/mnt/discord/My_Server__G1/channels/general__C1/2024-01-15/chat.jsonl', '/mnt/discord'),
       idx,
     )
     const text = decoder.decode(out).trimEnd()
@@ -101,7 +101,10 @@ describe('read history jsonl branch', () => {
     await expect(
       read(
         new DiscordAccessor(t),
-        spec('/mnt/discord/My_Server__G1/channels/general__C1/2024-01-15.jsonl', '/mnt/discord'),
+        spec(
+          '/mnt/discord/My_Server__G1/channels/general__C1/2024-01-15/chat.jsonl',
+          '/mnt/discord',
+        ),
       ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
@@ -112,7 +115,10 @@ describe('read history jsonl branch', () => {
     await expect(
       read(
         new DiscordAccessor(t),
-        spec('/mnt/discord/My_Server__G1/channels/general__C1/2024-01-15.jsonl', '/mnt/discord'),
+        spec(
+          '/mnt/discord/My_Server__G1/channels/general__C1/2024-01-15/chat.jsonl',
+          '/mnt/discord',
+        ),
         idx,
       ),
     ).rejects.toMatchObject({ code: 'ENOENT' })

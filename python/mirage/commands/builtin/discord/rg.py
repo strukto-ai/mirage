@@ -87,9 +87,10 @@ async def rg(
     max_count = int(m) if m is not None else None
     pat = compile_pattern(pattern_str, i, F, w)
 
+    pushdown_warnings: list[str] = []
     if paths:
         scope = await detect_scope(paths[0], index)
-        if scope.level == "file":
+        if scope.level in ("messages", "file_blob", "date"):
             coalesced = await coalesce_scopes(paths, index)
             if coalesced is not None:
                 scope = coalesced
@@ -123,6 +124,16 @@ async def rg(
                     return b"", IOResult(exit_code=1)
                 return "\n".join(lines).encode(), IOResult()
             except Exception as exc:
+                msg = str(exc)
+                pushdown_warnings.append(
+                    f"discord: native search push-down failed ({msg}); "
+                    f"falling back to per-file scan")
+                if ("403" in msg or "Forbidden" in msg
+                        or "missing access" in msg.lower()):
+                    pushdown_warnings.append(
+                        "discord: hint - ensure the bot has the "
+                        "READ_MESSAGE_HISTORY permission for this guild "
+                        "and the MESSAGE CONTENT privileged intent enabled")
                 logger.warning(
                     "discord search push-down failed (%s); "
                     "falling back to per-file scan", exc)
@@ -171,9 +182,11 @@ async def rg(
                 continue
             for line in matched:
                 all_results.append(f"{bp}:{line}")
+        stderr = (("\n".join(pushdown_warnings) +
+                   "\n").encode() if pushdown_warnings else None)
         if not any_match:
-            return b"", IOResult(exit_code=1)
-        return "\n".join(all_results).encode(), IOResult()
+            return b"", IOResult(exit_code=1, stderr=stderr)
+        return "\n".join(all_results).encode(), IOResult(stderr=stderr)
 
     raw = await _read_stdin_async(stdin)
     if raw is None:

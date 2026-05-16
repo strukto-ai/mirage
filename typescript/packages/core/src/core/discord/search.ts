@@ -14,11 +14,42 @@
 
 import type { DiscordAccessor } from '../../accessor/discord.ts'
 import { channelDirname, guildDirname } from './entry.ts'
+import { offsetPages } from './paginate.ts'
 import type { DiscordScope } from './scope.ts'
 
 const PAGE_SIZE = 25
 
 export type DiscordSearchMessage = Record<string, unknown> & { id?: string }
+
+function flattenContexts(contexts: DiscordSearchMessage[][]): DiscordSearchMessage[] {
+  const out: DiscordSearchMessage[] = []
+  for (const ctx of contexts) {
+    if (ctx.length > 0 && ctx[0] !== undefined) out.push(ctx[0])
+  }
+  return out
+}
+
+export async function* searchGuildStream(
+  accessor: DiscordAccessor,
+  guildId: string,
+  query: string,
+  channelId?: string,
+  maxPages?: number,
+): AsyncIterableIterator<DiscordSearchMessage[]> {
+  const baseParams: Record<string, string | number> = { content: query }
+  if (channelId !== undefined && channelId !== '') baseParams.channel_id = channelId
+  for await (const raw of offsetPages<DiscordSearchMessage[]>(accessor, {
+    endpoint: `/guilds/${guildId}/messages/search`,
+    baseParams,
+    itemsPath: ['messages'],
+    totalKey: 'total_results',
+    pageSize: PAGE_SIZE,
+    ...(maxPages !== undefined ? { maxPages } : {}),
+  })) {
+    const flat = flattenContexts(raw)
+    if (flat.length > 0) yield flat
+  }
+}
 
 export async function searchGuild(
   accessor: DiscordAccessor,
@@ -28,26 +59,12 @@ export async function searchGuild(
   limit = 100,
 ): Promise<DiscordSearchMessage[]> {
   const messages: DiscordSearchMessage[] = []
-  let offset = 0
-  while (offset < limit) {
-    const params: Record<string, string | number> = { content: query, offset }
-    if (channelId !== undefined && channelId !== '') params.channel_id = channelId
-    const data = await accessor.transport.call('GET', `/guilds/${guildId}/messages/search`, params)
-    if (typeof data !== 'object' || data === null || Array.isArray(data)) break
-    const dict = data as { total_results?: number; messages?: DiscordSearchMessage[][] }
-    const total = dict.total_results ?? 0
-    const hits = dict.messages ?? []
-    if (hits.length === 0) break
-    let stop = false
-    for (const context of hits) {
-      if (context.length > 0 && context[0] !== undefined) messages.push(context[0])
-      if (messages.length >= limit) {
-        stop = true
-        break
-      }
+  for await (const page of searchGuildStream(accessor, guildId, query, channelId)) {
+    for (const msg of page) {
+      messages.push(msg)
+      if (messages.length >= limit) break
     }
-    offset += PAGE_SIZE
-    if (stop || offset >= total || messages.length >= limit) break
+    if (messages.length >= limit) break
   }
   messages.sort((a, b) => {
     const ai = BigInt(a.id ?? '0')

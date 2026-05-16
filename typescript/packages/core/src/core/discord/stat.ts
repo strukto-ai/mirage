@@ -117,8 +117,40 @@ export async function stat(
     })
   }
 
-  if (parts.length === 4 && part1 === 'channels' && part3.endsWith('.jsonl')) {
-    return new FileStat({ name: part3, type: FileType.TEXT })
+  // <guild>/channels/<ch>/<date>
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+  if (parts.length === 4 && part1 === 'channels' && DATE_RE.test(part3)) {
+    return new FileStat({ name: part3, type: FileType.DIRECTORY })
+  }
+
+  // <guild>/channels/<ch>/<date>/chat.jsonl
+  if (
+    parts.length === 5 &&
+    part1 === 'channels' &&
+    DATE_RE.test(part3) &&
+    parts[4] === 'chat.jsonl'
+  ) {
+    return new FileStat({ name: 'chat.jsonl', type: FileType.TEXT })
+  }
+
+  // <guild>/channels/<ch>/<date>/files
+  if (parts.length === 5 && part1 === 'channels' && DATE_RE.test(part3) && parts[4] === 'files') {
+    return new FileStat({ name: 'files', type: FileType.DIRECTORY })
+  }
+
+  // <guild>/channels/<ch>/<date>/files/<blob>
+  if (parts.length === 6 && part1 === 'channels' && DATE_RE.test(part3) && parts[4] === 'files') {
+    if (index === undefined) throw fileNotFound(raw)
+    const lookup = await lookupWithFallback(accessor, virtualKey, prefix, index)
+    if (lookup.entry === undefined || lookup.entry === null) throw fileNotFound(raw)
+    const extra = lookup.entry.extra
+    const mime = typeof extra.content_type === 'string' ? extra.content_type : ''
+    return new FileStat({
+      name: lookup.entry.vfsName !== '' ? lookup.entry.vfsName : lookup.entry.name,
+      ...(lookup.entry.size !== null ? { size: lookup.entry.size } : {}),
+      type: mime !== '' ? (mime as FileType) : FileType.BINARY,
+      extra: { content_type: mime, attachment_id: lookup.entry.id },
+    })
   }
 
   throw fileNotFound(raw)

@@ -64,12 +64,13 @@ with Workspace({"/discord/": resource}, mode=MountMode.READ, fuse=True) as ws:
             for d in dates[-5:]:
                 print(f"  {d}")
 
-            # ── read a file ──────────────────────
+            # ── read chat.jsonl ──────────────────
             if dates:
                 target = dates[-1]
-                path = f"{mp}/discord/{guild}/channels/{ch}/{target}"
-                print(f"\n--- open() + read {target} ---")
-                with open(path) as f:
+                date_dir = f"{mp}/discord/{guild}/channels/{ch}/{target}"
+                chat_path = f"{date_dir}/chat.jsonl"
+                print(f"\n--- open() + read {target}/chat.jsonl ---")
+                with open(chat_path) as f:
                     text = f.read().strip()
                 if text:
                     for i, line in enumerate(text.splitlines()):
@@ -88,6 +89,16 @@ with Workspace({"/discord/": resource}, mode=MountMode.READ, fuse=True) as ws:
                         print(f"  [{author}] {content[:80]}")
                 else:
                     print("  (empty — no messages on this date)")
+                # list attachments
+                files_dir = f"{date_dir}/files"
+                try:
+                    atts = os.listdir(files_dir)
+                except (FileNotFoundError, OSError):
+                    atts = []
+                if atts:
+                    print(f"\n--- os.listdir() {target}/files ---")
+                    for a in atts[:5]:
+                        print(f"  {a}")
 
         # ── list members ─────────────────────────
         print(f"\n--- os.listdir() {guild}/members ---")
@@ -115,7 +126,7 @@ with Workspace({"/discord/": resource}, mode=MountMode.READ, fuse=True) as ws:
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> Open another terminal and run:")
     print(f">>>   ls {mp}/discord/")
-    print(f">>>   cat {mp}/discord/<guild>/channels/<ch>/<date>.jsonl")
+    print(f">>>   cat {mp}/discord/<guild>/channels/<ch>/<date>/chat.jsonl")
     print(">>> Press Enter to unmount and exit...")
     input()
 

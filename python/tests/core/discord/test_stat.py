@@ -101,15 +101,30 @@ async def test_stat_member(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_stat_jsonl(accessor, index):
-    result = await stat(
-        accessor,
-        PathSpec(original="/My Server/channels/general/2024-01-15.jsonl",
-                 directory="/My Server/channels/general/2024-01-15.jsonl"),
-        index,
-    )
+async def test_stat_date_dir(accessor, index):
+    path = "/My Server/channels/general/2024-01-15"
+    result = await stat(accessor, PathSpec(original=path, directory=path),
+                        index)
+    assert result.type == FileType.DIRECTORY
+    assert result.name == "2024-01-15"
+
+
+@pytest.mark.asyncio
+async def test_stat_chat_jsonl(accessor, index):
+    path = "/My Server/channels/general/2024-01-15/chat.jsonl"
+    result = await stat(accessor, PathSpec(original=path, directory=path),
+                        index)
     assert result.type == FileType.TEXT
-    assert result.name == "2024-01-15.jsonl"
+    assert result.name == "chat.jsonl"
+
+
+@pytest.mark.asyncio
+async def test_stat_files_dir(accessor, index):
+    path = "/My Server/channels/general/2024-01-15/files"
+    result = await stat(accessor, PathSpec(original=path, directory=path),
+                        index)
+    assert result.type == FileType.DIRECTORY
+    assert result.name == "files"
 
 
 @pytest.mark.asyncio

@@ -44,19 +44,20 @@ class FakeDiscordTransport implements DiscordTransport {
 }
 
 describe('listMembers', () => {
-  it('GETs /guilds/<id>/members with default limit', async () => {
+  it('GETs /guilds/<id>/members with default page size', async () => {
     const t = new FakeDiscordTransport(() => [{ user: { id: 'U1', username: 'alice' } }])
     const out = await listMembers(new DiscordAccessor(t), 'G1')
     expect(t.calls[0]?.method).toBe('GET')
     expect(t.calls[0]?.endpoint).toBe('/guilds/G1/members')
-    expect(t.calls[0]?.params).toEqual({ limit: 200 })
+    expect(t.calls[0]?.params?.after).toBe('0')
+    expect(t.calls[0]?.params?.limit).toBe(1000)
     expect(out).toEqual([{ user: { id: 'U1', username: 'alice' } }])
   })
 
-  it('honors custom limit', async () => {
+  it('honors custom page size', async () => {
     const t = new FakeDiscordTransport(() => [])
     await listMembers(new DiscordAccessor(t), 'G1', 50)
-    expect(t.calls[0]?.params).toEqual({ limit: 50 })
+    expect(t.calls[0]?.params?.limit).toBe(50)
   })
 
   it('returns empty array on non-array response', async () => {

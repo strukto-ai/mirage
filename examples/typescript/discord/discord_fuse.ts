@@ -88,9 +88,10 @@ async function main(): Promise<void> {
 
         if (dates.length > 0) {
           const target = dates[dates.length - 1]!
-          const path = `${mp}/discord/${guild}/channels/${ch}/${target}`
-          console.log(`\n--- readFile() ${target} ---`)
-          const text = (await readFile(path, 'utf-8')).trim()
+          const dateDir = `${mp}/discord/${guild}/channels/${ch}/${target}`
+          const chatPath = `${dateDir}/chat.jsonl`
+          console.log(`\n--- readFile() ${target}/chat.jsonl ---`)
+          const text = (await readFile(chatPath, 'utf-8')).trim()
           if (text !== '') {
             const lines = text.split('\n').filter((ln) => ln.trim() !== '')
             for (let i = 0; i < lines.length; i++) {
@@ -112,6 +113,15 @@ async function main(): Promise<void> {
             }
           } else {
             console.log('  (empty — no messages on this date)')
+          }
+          try {
+            const atts = await readdir(`${dateDir}/files`)
+            if (atts.length > 0) {
+              console.log(`\n--- readdir() ${target}/files ---`)
+              for (const a of atts.slice(0, 5)) console.log(`  ${a}`)
+            }
+          } catch {
+            // no files dir
           }
         }
       }
@@ -145,7 +155,7 @@ async function main(): Promise<void> {
     console.log(`\n>>> FUSE mounted at: ${mp}`)
     console.log('>>> Open another terminal and run:')
     console.log(`>>>   ls ${mp}/discord/`)
-    console.log(`>>>   cat ${mp}/discord/<guild>/channels/<ch>/<date>.jsonl`)
+    console.log(`>>>   cat ${mp}/discord/<guild>/channels/<ch>/<date>/chat.jsonl`)
     console.log('>>> Press Enter to unmount and exit...')
 
     const rl = createInterface({ input: process.stdin, output: process.stdout })

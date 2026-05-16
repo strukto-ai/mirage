@@ -12,12 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
+
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.core.discord.readdir import readdir as _readdir
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.filetype import filetype_from_mimetype
 
 VIRTUAL_DIRS = {"", "channels", "members"}
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 async def _populate_via_parent(
@@ -109,8 +113,39 @@ async def stat(
             extra={"user_id": lookup.entry.id},
         )
 
+    # <guild>/channels/<ch>/<date>
     if (len(parts) == 4 and parts[1] == "channels"
-            and parts[3].endswith(".jsonl")):
-        return FileStat(name=parts[3], type=FileType.TEXT)
+            and _DATE_RE.match(parts[3])):
+        return FileStat(name=parts[3], type=FileType.DIRECTORY)
+
+    # <guild>/channels/<ch>/<date>/chat.jsonl
+    if (len(parts) == 5 and parts[1] == "channels"
+            and parts[4] == "chat.jsonl"):
+        return FileStat(name="chat.jsonl", type=FileType.TEXT)
+
+    # <guild>/channels/<ch>/<date>/files
+    if (len(parts) == 5 and parts[1] == "channels" and parts[4] == "files"):
+        return FileStat(name="files", type=FileType.DIRECTORY)
+
+    # <guild>/channels/<ch>/<date>/files/<blob>
+    if (len(parts) == 6 and parts[1] == "channels" and parts[4] == "files"):
+        if index is None:
+            raise FileNotFoundError(path)
+        lookup = await index.get(virtual_key)
+        if lookup.entry is None:
+            await _populate_via_parent(accessor, virtual_key, prefix, index)
+            lookup = await index.get(virtual_key)
+            if lookup.entry is None:
+                raise FileNotFoundError(path)
+        mimetype = (lookup.entry.extra or {}).get("content_type", "")
+        return FileStat(
+            name=lookup.entry.vfs_name or lookup.entry.name,
+            size=lookup.entry.size,
+            type=filetype_from_mimetype(mimetype),
+            extra={
+                "content_type": mimetype,
+                "attachment_id": lookup.entry.id,
+            },
+        )
 
     raise FileNotFoundError(path)

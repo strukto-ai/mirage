@@ -18,18 +18,31 @@ export interface DiscordChannel {
   id: string
   name?: string
   type?: number
+  last_message_id?: string
   [key: string]: unknown
 }
 
 const TEXT_CHANNEL_TYPES: ReadonlySet<number> = new Set([0, 5, 15])
 
+export async function* listChannelsStream(
+  accessor: DiscordAccessor,
+  guildId: string,
+): AsyncIterableIterator<DiscordChannel[]> {
+  const raw = await accessor.transport.call('GET', `/guilds/${guildId}/channels`)
+  if (!Array.isArray(raw)) return
+  const filtered = (raw as DiscordChannel[]).filter(
+    (c) => c.type !== undefined && TEXT_CHANNEL_TYPES.has(c.type),
+  )
+  yield filtered
+}
+
 export async function listChannels(
   accessor: DiscordAccessor,
   guildId: string,
 ): Promise<DiscordChannel[]> {
-  const out = await accessor.transport.call('GET', `/guilds/${guildId}/channels`)
-  if (!Array.isArray(out)) return []
-  return (out as DiscordChannel[]).filter(
-    (c) => c.type !== undefined && TEXT_CHANNEL_TYPES.has(c.type),
-  )
+  const out: DiscordChannel[] = []
+  for await (const page of listChannelsStream(accessor, guildId)) {
+    out.push(...page)
+  }
+  return out
 }

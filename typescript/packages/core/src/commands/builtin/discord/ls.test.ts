@@ -102,7 +102,7 @@ describe('discord ls', () => {
     expect(transport.calls).toHaveLength(0)
   })
 
-  it('walks 4-level VFS and lists date.jsonl files', async () => {
+  it('walks 4-level VFS and lists date directories', async () => {
     const idx = new RAMIndexCacheStore()
     const transport = new FakeDiscordTransport(() => {
       throw new Error('should not be called')
@@ -124,6 +124,6 @@ describe('discord ls', () => {
       { index: idx, transport },
     )
     const lines = out.stdout.split('\n').sort()
-    expect(lines).toEqual(['2024-01-01.jsonl', '2024-01-02.jsonl'])
+    expect(lines).toEqual(['2024-01-01', '2024-01-02'])
   })
 })

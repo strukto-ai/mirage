@@ -14,6 +14,7 @@
 
 import type { DiscordAccessor } from '../../../accessor/discord.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
+import { DiscordApiError } from '../../../core/discord/_client.ts'
 import { resolveDiscordGlob } from '../../../core/discord/glob.ts'
 import { read as discordRead } from '../../../core/discord/read.ts'
 import { readdir as discordReaddir } from '../../../core/discord/readdir.ts'
@@ -110,22 +111,44 @@ async function rgCommand(
   const f = parseRgFlags(opts.flags)
   const pat = compilePattern(exprText, f.ignoreCase, f.fixedString, f.wholeWord)
 
+  const pushdownWarnings: string[] = []
   if (paths.length > 0) {
     const firstPath = paths[0]
     if (firstPath !== undefined) {
       const scope = detectScope(firstPath)
       if (scope.useNative && scope.guildId !== undefined) {
-        const count = f.maxCount ?? 100
-        const raw = await searchGuild(accessor, scope.guildId, exprText, scope.channelId, count)
-        const channelMap = new Map<string, string>()
-        if (scope.channelId === undefined) {
-          for (const ch of await listChannels(accessor, scope.guildId)) {
-            if (ch.name !== undefined) channelMap.set(ch.id, ch.name)
+        try {
+          const count = f.maxCount ?? 100
+          const raw = await searchGuild(accessor, scope.guildId, exprText, scope.channelId, count)
+          const channelMap = new Map<string, string>()
+          if (scope.channelId === undefined) {
+            for (const ch of await listChannels(accessor, scope.guildId)) {
+              if (ch.name !== undefined) channelMap.set(ch.id, ch.name)
+            }
+          }
+          const lines = formatGrepResults(raw, scope, firstPath.prefix, channelMap)
+          if (lines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
+          return [ENC.encode(lines.join('\n') + '\n'), new IOResult()]
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          pushdownWarnings.push(
+            `discord: native search push-down failed (${msg}); ` + `falling back to per-file scan`,
+          )
+          const status = err instanceof DiscordApiError ? err.status : null
+          const lower = msg.toLowerCase()
+          if (
+            status === 403 ||
+            lower.includes('forbidden') ||
+            lower.includes('missing permissions') ||
+            lower.includes('missing access')
+          ) {
+            pushdownWarnings.push(
+              'discord: hint - ensure the bot has the READ_MESSAGE_HISTORY ' +
+                'permission for this guild and the MESSAGE CONTENT privileged ' +
+                'intent enabled',
+            )
           }
         }
-        const lines = formatGrepResults(raw, scope, firstPath.prefix, channelMap)
-        if (lines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-        return [ENC.encode(lines.join('\n') + '\n'), new IOResult()]
       }
     }
     const resolved = await resolveDiscordGlob(accessor, paths, opts.index ?? undefined)
@@ -170,9 +193,16 @@ async function rgCommand(
         allResults.push(`${bp}:${line}`)
       }
     }
-    if (!anyMatch) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
+    const stderr =
+      pushdownWarnings.length > 0 ? ENC.encode(pushdownWarnings.join('\n') + '\n') : undefined
+    if (!anyMatch) {
+      return [
+        new Uint8Array(0),
+        new IOResult({ exitCode: 1, ...(stderr !== undefined ? { stderr } : {}) }),
+      ]
+    }
     const out: ByteSource = ENC.encode(allResults.join('\n'))
-    return [out, new IOResult()]
+    return [out, new IOResult({ ...(stderr !== undefined ? { stderr } : {}) })]
   }
 
   const raw = await readStdinAsync(opts.stdin)

@@ -12,10 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
 from dataclasses import dataclass
 
 from mirage.cache.index import IndexCacheStore
 from mirage.types import PathSpec
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 @dataclass
@@ -23,11 +26,12 @@ class DiscordScope:
     """Resolved scope for a discord path.
 
     Attributes:
-        level (str): "file", "channel", "guild", or "root".
-        guild_id (str | None): guild snowflake ID.
-        channel_id (str | None): channel snowflake ID.
-        date_str (str | None): YYYY-MM-DD for file-level paths.
-        resource_path (str): resource-relative path (prefix stripped).
+        level (str): one of ``root``, ``guild``, ``channel``, ``date``,
+            ``messages``, ``files``, ``file_blob``, ``member``.
+        guild_id (str | None): guild snowflake.
+        channel_id (str | None): channel snowflake.
+        date_str (str | None): ``YYYY-MM-DD`` for date-level and below.
+        resource_path (str): resource-relative key (prefix stripped).
     """
 
     level: str
@@ -37,78 +41,118 @@ class DiscordScope:
     resource_path: str = "/"
 
 
+def _strip_prefix(raw: str, prefix: str) -> str:
+    stripped = raw.strip("/")
+    if not prefix:
+        return stripped
+    pfx = prefix.strip("/")
+    if stripped == pfx:
+        return ""
+    if stripped.startswith(pfx + "/"):
+        return stripped[len(pfx) + 1:]
+    return stripped
+
+
 async def detect_scope(
     path: PathSpec,
     index: IndexCacheStore = None,
 ) -> DiscordScope:
-    """Determine scope from a resolved path or raw PathSpec.
-
-    Args:
-        path (str | PathSpec): virtual path or raw PathSpec.
-        index (IndexCacheStore | None): index for looking up IDs.
+    """Determine scope from a path.
 
     Examples::
 
-        guild/channels/general/2024-04-10.jsonl → file
-        guild/channels/general/ (or *.jsonl glob) → channel
-        guild/ or guild/channels/                → guild
-        / (empty)                                → root
+        /                                              → root
+        /<guild>                                       → guild
+        /<guild>/channels                              → guild
+        /<guild>/members                               → guild
+        /<guild>/channels/<ch>                         → channel
+        /<guild>/members/<user>.json                   → member
+        /<guild>/channels/<ch>/<date>                  → date
+        /<guild>/channels/<ch>/<date>/chat.jsonl       → messages
+        /<guild>/channels/<ch>/<date>/files            → files
+        /<guild>/channels/<ch>/<date>/files/<blob>     → file_blob
     """
-    prefix = path.prefix if isinstance(path, PathSpec) else ""
-
-    # PathSpec: glob pattern in a channel dir → channel scope
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
-    if isinstance(path, PathSpec):
-        if path.pattern and path.pattern.endswith(".jsonl"):
-            dir_key = path.directory.strip("/")
-            if prefix:
-                dir_key = dir_key.removeprefix(prefix.strip("/") + "/")
-            parts = dir_key.split("/")
-            if len(parts) == 3 and parts[1] == "channels":
-                guild_id, channel_id = await _resolve_ids(
-                    parts[0], "/".join(parts[:3]), index, prefix)
-                return DiscordScope(
-                    level="channel",
-                    guild_id=guild_id,
-                    channel_id=channel_id,
-                    resource_path=dir_key,
-                )
-        path = path.original
 
-    # Strip prefix for resource-relative key
-    if isinstance(path, str) and prefix:
-        stripped = path.strip("/")
-        pfx = prefix.strip("/")
-        if stripped.startswith(pfx + "/"):
-            stripped = stripped[len(pfx) + 1:]
-        elif stripped == pfx:
-            stripped = ""
-        key = stripped
-    else:
-        key = path.strip("/") if isinstance(path, str) else ""
+    prefix = path.prefix or ""
+
+    if path.pattern and path.pattern.endswith(".jsonl"):
+        dir_key = _strip_prefix(path.directory, prefix)
+        parts = dir_key.split("/") if dir_key else []
+        if len(parts) >= 3 and parts[1] == "channels":
+            guild_id, channel_id = await _resolve_ids(parts[0],
+                                                      "/".join(parts[:3]),
+                                                      index, prefix)
+            date_str = (parts[3] if len(parts) == 4
+                        and _DATE_RE.match(parts[3]) else None)
+            return DiscordScope(
+                level="messages" if date_str else "channel",
+                guild_id=guild_id,
+                channel_id=channel_id,
+                date_str=date_str,
+                resource_path=dir_key,
+            )
+
+    key = _strip_prefix(path.original, prefix)
 
     if not key:
         return DiscordScope(level="root", resource_path="/")
 
     parts = key.split("/")
 
-    # File: guild/channels/ch/date.jsonl
-    if len(parts) == 4 and parts[1] == "channels" and parts[3].endswith(
-            ".jsonl"):
-        date_str = parts[3].removesuffix(".jsonl")
+    # /<guild>/channels/<ch>/<date>/files/<blob>
+    if (len(parts) == 6 and parts[1] == "channels" and _DATE_RE.match(parts[3])
+            and parts[4] == "files"):
         guild_id, channel_id = await _resolve_ids(parts[0],
                                                   "/".join(parts[:3]), index,
                                                   prefix)
         return DiscordScope(
-            level="file",
+            level="file_blob",
             guild_id=guild_id,
             channel_id=channel_id,
-            date_str=date_str,
+            date_str=parts[3],
             resource_path=key,
         )
 
-    # Channel: guild/channels/ch
+    # /<guild>/channels/<ch>/<date>/chat.jsonl or .../files
+    if (len(parts) == 5 and parts[1] == "channels"
+            and _DATE_RE.match(parts[3])):
+        guild_id, channel_id = await _resolve_ids(parts[0],
+                                                  "/".join(parts[:3]), index,
+                                                  prefix)
+        if parts[4] == "chat.jsonl":
+            return DiscordScope(
+                level="messages",
+                guild_id=guild_id,
+                channel_id=channel_id,
+                date_str=parts[3],
+                resource_path=key,
+            )
+        if parts[4] == "files":
+            return DiscordScope(
+                level="files",
+                guild_id=guild_id,
+                channel_id=channel_id,
+                date_str=parts[3],
+                resource_path=key,
+            )
+
+    # /<guild>/channels/<ch>/<date>
+    if (len(parts) == 4 and parts[1] == "channels"
+            and _DATE_RE.match(parts[3])):
+        guild_id, channel_id = await _resolve_ids(parts[0],
+                                                  "/".join(parts[:3]), index,
+                                                  prefix)
+        return DiscordScope(
+            level="date",
+            guild_id=guild_id,
+            channel_id=channel_id,
+            date_str=parts[3],
+            resource_path=key,
+        )
+
+    # /<guild>/channels/<ch>
     if len(parts) == 3 and parts[1] == "channels":
         guild_id, channel_id = await _resolve_ids(parts[0], key, index, prefix)
         return DiscordScope(
@@ -118,7 +162,16 @@ async def detect_scope(
             resource_path=key,
         )
 
-    # Guild: guild or guild/channels or guild/members
+    # /<guild>/members/<user>.json
+    if len(parts) == 3 and parts[1] == "members":
+        guild_id = await _resolve_guild_id(parts[0], index, prefix)
+        return DiscordScope(
+            level="member",
+            guild_id=guild_id,
+            resource_path=key,
+        )
+
+    # /<guild>, /<guild>/channels, /<guild>/members
     if len(parts) <= 2:
         guild_id = await _resolve_guild_id(parts[0], index, prefix)
         return DiscordScope(
@@ -127,7 +180,7 @@ async def detect_scope(
             resource_path=key,
         )
 
-    return DiscordScope(level="file", resource_path=key)
+    return DiscordScope(level="file_blob", resource_path=key)
 
 
 async def coalesce_scopes(
@@ -148,7 +201,7 @@ async def coalesce_scopes(
         guild_id=first.guild_id,
         channel_id=first.channel_id,
         resource_path=first.resource_path.rsplit("/", 1)[0]
-        if first.level == "file" else first.resource_path,
+        if first.level == "messages" else first.resource_path,
     )
 
 
@@ -168,7 +221,7 @@ async def _resolve_guild_id(
 
 async def _resolve_ids(
     guild_name: str,
-    channel_path: PathSpec,
+    channel_path: str,
     index: IndexCacheStore | None,
     prefix: str,
 ) -> tuple[str | None, str | None]:

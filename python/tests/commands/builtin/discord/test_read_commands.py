@@ -34,9 +34,11 @@ from mirage.types import PathSpec
 
 GUILD_PATH = "TestGuild"
 CHANNEL_PATH = "TestGuild/channels/general"
-FILE_PATH = "TestGuild/channels/general/2024-01-15.jsonl"
+DATE_DIR_PATH = "TestGuild/channels/general/2024-01-15"
+FILE_PATH = "TestGuild/channels/general/2024-01-15/chat.jsonl"
 ABS_FILE = "/" + FILE_PATH
 ABS_CHANNEL = "/" + CHANNEL_PATH
+ABS_DATE_DIR = "/" + DATE_DIR_PATH
 
 
 def _glob_result(path: str) -> list[PathSpec]:
@@ -75,18 +77,33 @@ def _make_index() -> RAMIndexCacheStore:
                        vfs_name="general")))
     _run(
         index.put(
-            "/" + FILE_PATH,
+            "/" + DATE_DIR_PATH,
             IndexEntry(id="C1:2024-01-15",
                        name="2024-01-15",
                        resource_type="discord/history",
-                       vfs_name="2024-01-15.jsonl")))
+                       vfs_name="2024-01-15")))
     _run(
         index.set_dir("/" + CHANNEL_PATH, [
-            ("2024-01-15.jsonl",
+            ("2024-01-15",
              IndexEntry(id="C1:2024-01-15",
                         name="2024-01-15",
                         resource_type="discord/history",
-                        vfs_name="2024-01-15.jsonl")),
+                        vfs_name="2024-01-15")),
+        ]))
+    _run(
+        index.put(
+            "/" + FILE_PATH,
+            IndexEntry(id="C1:2024-01-15:chat",
+                       name="chat.jsonl",
+                       resource_type="discord/chat_jsonl",
+                       vfs_name="chat.jsonl")))
+    _run(
+        index.set_dir("/" + DATE_DIR_PATH, [
+            ("chat.jsonl",
+             IndexEntry(id="C1:2024-01-15:chat",
+                        name="chat.jsonl",
+                        resource_type="discord/chat_jsonl",
+                        vfs_name="chat.jsonl")),
         ]))
     return index
 
@@ -267,7 +284,7 @@ async def test_stat(accessor):
         stream, io = await stat(accessor, _make_glob(ABS_FILE))
     data = await _collect(stream)
     text = data.decode()
-    assert "2024-01-15.jsonl" in text
+    assert "chat.jsonl" in text
 
 
 @pytest.mark.asyncio
@@ -312,7 +329,7 @@ async def test_find(accessor, index):
                                 _make_glob(ABS_CHANNEL, resolved=False),
                                 index=index)
     data = await _collect(stream)
-    assert b"2024-01-15.jsonl" in data
+    assert b"2024-01-15" in data
 
 
 @pytest.mark.asyncio
@@ -323,11 +340,11 @@ async def test_find_with_name(accessor, index):
         stream, io = await find(
             accessor,
             _make_glob(ABS_CHANNEL, resolved=False),
-            name="*.jsonl",
+            name="chat.jsonl",
             index=index,
         )
     data = await _collect(stream)
-    assert b"2024-01-15.jsonl" in data
+    assert b"chat.jsonl" in data
 
 
 @pytest.mark.asyncio
@@ -338,9 +355,9 @@ async def test_ls(accessor):
                   return_value=_glob_result(ABS_CHANNEL)),
             patch("mirage.commands.builtin.discord.ls.readdir",
                   new_callable=AsyncMock,
-                  return_value=[ABS_FILE]),
+                  return_value=[ABS_DATE_DIR]),
     ):
         stream, io = await ls(accessor, _make_glob(ABS_CHANNEL,
                                                    resolved=False))
     data = await _collect(stream)
-    assert b"2024-01-15.jsonl" in data
+    assert b"2024-01-15" in data

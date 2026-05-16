@@ -64,7 +64,7 @@ describe('discord cat', () => {
     const out = await runCat(
       [
         new PathSpec({
-          original: '/mnt/discord/My_Server__G1/channels/general__C1/2016-04-30.jsonl',
+          original: '/mnt/discord/My_Server__G1/channels/general__C1/2016-04-30/chat.jsonl',
           directory: '/mnt/discord/My_Server__G1/channels/general__C1/',
           resolved: false,
           prefix: '/mnt/discord',
@@ -94,7 +94,7 @@ describe('discord cat', () => {
     const out = await runCat(
       [
         new PathSpec({
-          original: '/mnt/discord/My_Server__G1/channels/general__C1/2016-04-30.jsonl',
+          original: '/mnt/discord/My_Server__G1/channels/general__C1/2016-04-30/chat.jsonl',
           directory: '/mnt/discord/My_Server__G1/channels/general__C1/',
           resolved: false,
           prefix: '/mnt/discord',

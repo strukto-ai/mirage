@@ -109,15 +109,39 @@ export async function seedChannel(
   if (dates !== undefined) {
     const childKey = `${prefix}/${guildDirname}/channels/${channelDirname}`
     const entries: [string, IndexEntry][] = dates.map((d) => [
-      `${d}.jsonl`,
+      d,
       new IndexEntry({
         id: `${channelDirname}:${d}`,
         name: d,
-        resourceType: 'discord/history',
-        vfsName: `${d}.jsonl`,
+        resourceType: 'discord/date_dir',
+        vfsName: d,
       }),
     ])
     await index.setDir(childKey, entries)
+    // Seed each date's chat.jsonl placeholder so reads via index work
+    for (const d of dates) {
+      const dateKey = `${childKey}/${d}`
+      await index.setDir(dateKey, [
+        [
+          'chat.jsonl',
+          new IndexEntry({
+            id: `${channelDirname}:${d}:chat`,
+            name: 'chat.jsonl',
+            resourceType: 'discord/chat_jsonl',
+            vfsName: 'chat.jsonl',
+          }),
+        ],
+        [
+          'files',
+          new IndexEntry({
+            id: `${channelDirname}:${d}:files`,
+            name: 'files',
+            resourceType: 'discord/files_dir',
+            vfsName: 'files',
+          }),
+        ],
+      ])
+    }
   }
 }
 

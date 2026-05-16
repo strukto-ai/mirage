@@ -38,62 +38,73 @@ async def main():
         for g in guilds:
             print(f"  {g}")
 
-        if guilds:
-            guild = guilds[0]
-            print(f"\n--- os.listdir() {guild} ---")
-            sections = vos.listdir(guild)
-            for s in sections:
-                print(f"  {s}")
+        if not guilds:
+            return
 
-            print("\n--- os.listdir() channels ---")
-            ch_dir = [
-                s for s in sections
-                if s.endswith("/channels") or "channels" in s
-            ][0] if sections else None
-            if ch_dir:
-                channels = vos.listdir(ch_dir)
+        guild = guilds[0]
+        guild_dir = f"/discord/{guild}"
+        print(f"\n--- os.listdir() {guild_dir} ---")
+        for s in vos.listdir(guild_dir):
+            print(f"  {s}")
+
+        ch_root = f"{guild_dir}/channels"
+        print(f"\n--- os.listdir() {ch_root} ---")
+        channels = vos.listdir(ch_root)
+        for ch in channels[:5]:
+            print(f"  {ch}")
+
+        if not channels:
+            return
+
+        ch = channels[0]
+        ch_dir = f"{ch_root}/{ch}"
+        print(f"\n--- os.listdir() {ch_dir} (last 5 dates) ---")
+        dates = vos.listdir(ch_dir)
+        for d in dates[-5:]:
+            print(f"  {d}")
+
+        if dates:
+            for d in reversed(dates):
+                chat_path = f"{ch_dir}/{d}/chat.jsonl"
+                try:
+                    with open(chat_path) as f:
+                        content = f.read()
+                except FileNotFoundError:
+                    continue
+                lines = [
+                    line_text for line_text in content.strip().split("\n")
+                    if line_text.strip()
+                ]
+                if lines:
+                    print(f"\n--- open() + read {d}/chat.jsonl ---")
+                    print(f"  messages: {len(lines)}")
+                    for line in lines[:3]:
+                        rec = json.loads(line)
+                        author = rec.get("author", {}).get("username", "?")
+                        text = rec.get("content", "")[:80]
+                        print(f"  [{author}] {text}")
+                    # also list attachments in that day's files dir
+                    files_dir = f"{ch_dir}/{d}/files"
+                    try:
+                        atts = vos.listdir(files_dir)
+                    except FileNotFoundError:
+                        atts = []
+                    if atts:
+                        print(f"\n--- os.listdir() {d}/files ---")
+                        for a in atts[:5]:
+                            print(f"  {a}")
+                    break
             else:
-                channels = []
-            for ch in channels[:5]:
-                print(f"  {ch}")
-
-            if channels:
-                ch = channels[0]
-                print("\n--- os.listdir() dates ---")
-                dates = vos.listdir(ch)
-                for d in dates[-5:]:
-                    print(f"  {d}")
-
-                if dates:
-                    for d in reversed(dates):
-                        path = d
-                        with open(path) as f:
-                            content = f.read()
-                        lines = [
-                            line_text
-                            for line_text in content.strip().split("\n")
-                            if line_text.strip()
-                        ]
-                        if lines:
-                            print(f"\n--- open() + read {d} ---")
-                            print(f"  messages: {len(lines)}")
-                            for line in lines[:3]:
-                                rec = json.loads(line)
-                                author = rec.get("author",
-                                                 {}).get("username", "?")
-                                text = rec.get("content", "")[:80]
-                                print(f"  [{author}] {text}")
-                            break
-                    else:
-                        print("\n  (no messages found in recent dates)")
+                print("\n  (no messages found in recent dates)")
 
         print("\n--- session observer ---")
         day_folders = vos.listdir("/.sessions")
-        log_entries = vos.listdir(day_folders[0]) if day_folders else []
+        day_dir = f"/.sessions/{day_folders[0]}" if day_folders else None
+        log_entries = vos.listdir(day_dir) if day_dir else []
         for e in log_entries:
-            print(f"  {e}")
-        if log_entries:
-            with open(log_entries[0]) as f:
+            print(f"  {day_dir}/{e}")
+        if log_entries and day_dir:
+            with open(f"{day_dir}/{log_entries[0]}") as f:
                 for i, line in enumerate(f):
                     if i >= 3:
                         break

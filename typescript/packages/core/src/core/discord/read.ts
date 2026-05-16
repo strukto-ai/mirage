@@ -14,9 +14,11 @@
 
 import type { DiscordAccessor } from '../../accessor/discord.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
+import { PathSpec } from '../../types.ts'
+import { downloadFile } from './files.ts'
 import { getHistoryJsonl } from './history.ts'
 import { listMembers } from './members.ts'
+import { readdir as discordReaddir } from './readdir.ts'
 
 const encoder = new TextEncoder()
 
@@ -38,36 +40,65 @@ export async function read(
   }
   const key = raw.replace(/^\/+|\/+$/g, '')
   const parts = key.split('/')
-  const part0 = parts[0] ?? ''
-  const part1 = parts[1] ?? ''
-  const part2 = parts[2] ?? ''
-  const part3 = parts[3] ?? ''
 
-  if (parts.length === 4 && part1 === 'channels' && part3.endsWith('.jsonl')) {
+  // <guild>/channels/<ch>/<date>/chat.jsonl
+  if (
+    parts.length === 5 &&
+    parts[1] === 'channels' &&
+    parts[4] === 'chat.jsonl' &&
+    parts[0] !== undefined &&
+    parts[2] !== undefined &&
+    parts[3] !== undefined
+  ) {
     if (index === undefined) throw fileNotFound(key)
-    const chKey = `${part0}/${part1}/${part2}`
-    const chVirtual = `${prefix}/${chKey}`
-    const chLookup = await index.get(chVirtual)
-    if (chLookup.entry === undefined || chLookup.entry === null) {
-      throw fileNotFound(key)
-    }
-    const dateStr = part3.slice(0, -'.jsonl'.length)
-    return await getHistoryJsonl(accessor, chLookup.entry.id, dateStr)
+    const chKey = `${parts[0]}/${parts[1]}/${parts[2]}`
+    const chLookup = await index.get(`${prefix}/${chKey}`)
+    if (chLookup.entry === undefined || chLookup.entry === null) throw fileNotFound(key)
+    return await getHistoryJsonl(accessor, chLookup.entry.id, parts[3])
   }
 
-  if (parts.length === 3 && part1 === 'members' && part2.endsWith('.json')) {
+  // <guild>/channels/<ch>/<date>/files/<blob>
+  if (parts.length === 6 && parts[1] === 'channels' && parts[4] === 'files') {
+    if (index === undefined) throw fileNotFound(key)
+    const virtualKey = `${prefix}/${key}`
+    let lookup = await index.get(virtualKey)
+    if (lookup.entry === undefined || lookup.entry === null) {
+      // Hydrate via date dir readdir (triggers fetchDay)
+      const dateKey = parts.slice(0, 4).join('/')
+      const dateVk = `${prefix}/${dateKey}`
+      await discordReaddir(
+        accessor,
+        new PathSpec({ original: dateVk, directory: dateVk, prefix }),
+        index,
+      )
+      lookup = await index.get(virtualKey)
+    }
+    if (lookup.entry === undefined || lookup.entry === null) throw fileNotFound(key)
+    const extra = lookup.entry.extra
+    const url =
+      typeof extra.url === 'string' && extra.url !== ''
+        ? extra.url
+        : typeof extra.proxy_url === 'string'
+          ? extra.proxy_url
+          : ''
+    if (url === '') throw fileNotFound(key)
+    return await downloadFile(url)
+  }
+
+  // <guild>/members/<user>.json
+  if (
+    parts.length === 3 &&
+    parts[1] === 'members' &&
+    parts[2]?.endsWith('.json') === true &&
+    parts[0] !== undefined
+  ) {
     if (index === undefined) throw fileNotFound(key)
     const virtualKey = `${prefix}/${key}`
     const lookup = await index.get(virtualKey)
-    if (lookup.entry === undefined || lookup.entry === null) {
-      throw fileNotFound(key)
-    }
-    const guildVirtual = `${prefix}/${part0}`
-    const guildLookup = await index.get(guildVirtual)
-    if (guildLookup.entry === undefined || guildLookup.entry === null) {
-      throw fileNotFound(key)
-    }
-    const members = await listMembers(accessor, guildLookup.entry.id, 200)
+    if (lookup.entry === undefined || lookup.entry === null) throw fileNotFound(key)
+    const guildLookup = await index.get(`${prefix}/${parts[0]}`)
+    if (guildLookup.entry === undefined || guildLookup.entry === null) throw fileNotFound(key)
+    const members = await listMembers(accessor, guildLookup.entry.id)
     for (const m of members) {
       if (m.user?.id === lookup.entry.id) {
         return encoder.encode(JSON.stringify(m))

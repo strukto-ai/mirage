@@ -204,16 +204,26 @@ describe('stat member file', () => {
   })
 })
 
-describe('stat history jsonl', () => {
-  it('returns TEXT with date filename (no index lookup)', async () => {
+describe('stat history chat.jsonl', () => {
+  it('returns TEXT with chat.jsonl name (no index lookup)', async () => {
     const t = new FakeDiscordTransport()
     const out = await stat(
       new DiscordAccessor(t),
-      spec('/mnt/discord/My_Server__G1/channels/general__C1/2024-01-15.jsonl', '/mnt/discord'),
+      spec('/mnt/discord/My_Server__G1/channels/general__C1/2024-01-15/chat.jsonl', '/mnt/discord'),
     )
     expect(out.type).toBe(FileType.TEXT)
-    expect(out.name).toBe('2024-01-15.jsonl')
+    expect(out.name).toBe('chat.jsonl')
     expect(t.calls).toHaveLength(0)
+  })
+
+  it('returns DIRECTORY for date dir', async () => {
+    const t = new FakeDiscordTransport()
+    const out = await stat(
+      new DiscordAccessor(t),
+      spec('/mnt/discord/My_Server__G1/channels/general__C1/2024-01-15', '/mnt/discord'),
+    )
+    expect(out.type).toBe(FileType.DIRECTORY)
+    expect(out.name).toBe('2024-01-15')
   })
 })
 

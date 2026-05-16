@@ -301,12 +301,12 @@ describe('readdir /<guild>/channels/<ch>', () => {
       idx,
     )
     expect(out).toHaveLength(30)
-    expect(out[0]).toBe('/mnt/discord/My_Server__G1/channels/general__C1/2016-04-30.jsonl')
-    expect(out[1]).toBe('/mnt/discord/My_Server__G1/channels/general__C1/2016-04-29.jsonl')
-    expect(out[29]).toBe('/mnt/discord/My_Server__G1/channels/general__C1/2016-04-01.jsonl')
-    const lookup = await idx.get('/mnt/discord/My_Server__G1/channels/general__C1/2016-04-30.jsonl')
+    expect(out[0]).toBe('/mnt/discord/My_Server__G1/channels/general__C1/2016-04-30')
+    expect(out[1]).toBe('/mnt/discord/My_Server__G1/channels/general__C1/2016-04-29')
+    expect(out[29]).toBe('/mnt/discord/My_Server__G1/channels/general__C1/2016-04-01')
+    const lookup = await idx.get('/mnt/discord/My_Server__G1/channels/general__C1/2016-04-30')
     expect(lookup.entry?.id).toBe('general__C1:2016-04-30')
-    expect(lookup.entry?.resourceType).toBe('discord/history')
+    expect(lookup.entry?.resourceType).toBe('discord/date_dir')
     expect(t.calls).toHaveLength(0)
   })
 
@@ -335,19 +335,19 @@ describe('readdir /<guild>/channels/<ch>', () => {
     const yyyy = now.getUTCFullYear().toString().padStart(4, '0')
     const mm = (now.getUTCMonth() + 1).toString().padStart(2, '0')
     const dd = now.getUTCDate().toString().padStart(2, '0')
-    expect(out[0]).toBe(`/mnt/discord/My_Server__G1/channels/empty__C2/${yyyy}-${mm}-${dd}.jsonl`)
+    expect(out[0]).toBe(`/mnt/discord/My_Server__G1/channels/empty__C2/${yyyy}-${mm}-${dd}`)
   })
 
   it('returns from cache without API call when listDir hits', async () => {
     const idx = new RAMIndexCacheStore()
     await idx.setDir('/mnt/discord/My_Server__G1/channels/general__C1', [
       [
-        '2024-01-01.jsonl',
+        '2024-01-01',
         new IndexEntry({
           id: 'general__C1:2024-01-01',
           name: '2024-01-01',
-          resourceType: 'discord/history',
-          vfsName: '2024-01-01.jsonl',
+          resourceType: 'discord/date_dir',
+          vfsName: '2024-01-01',
         }),
       ],
     ])
@@ -359,7 +359,7 @@ describe('readdir /<guild>/channels/<ch>', () => {
       spec('/mnt/discord/My_Server__G1/channels/general__C1', '/mnt/discord'),
       idx,
     )
-    expect(out).toEqual(['/mnt/discord/My_Server__G1/channels/general__C1/2024-01-01.jsonl'])
+    expect(out).toEqual(['/mnt/discord/My_Server__G1/channels/general__C1/2024-01-01'])
     expect(t.calls).toHaveLength(0)
   })
 
@@ -388,15 +388,16 @@ describe('readdir /<guild>/channels/<ch>', () => {
       idx,
     )
     expect(out).toHaveLength(30)
-    expect(out[0]).toBe('/mnt/discord/My_Server__G1/channels/general__C1/2016-04-30.jsonl')
+    expect(out[0]).toBe('/mnt/discord/My_Server__G1/channels/general__C1/2016-04-30')
     const endpoints = t.calls.map((c) => c.endpoint)
     expect(endpoints).toContain('/guilds/G1/channels')
   })
 })
 
 describe('readdir unrecognized paths', () => {
-  it('returns [] for 4+ segment paths', async () => {
+  it('returns [] for non-date 4-segment paths', async () => {
     const idx = new RAMIndexCacheStore()
+    // 4-segment with non-date last part — must not match date_dir rule
     const t = new FakeDiscordTransport(() => null)
     const out = await readdir(
       new DiscordAccessor(t),

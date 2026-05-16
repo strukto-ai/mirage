@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiscordAccessor } from '../../accessor/discord.ts'
+import { afterIdPages } from './paginate.ts'
 
 export const DISCORD_EPOCH = 1420070400000n
 
@@ -31,35 +32,55 @@ export function dateToSnowflake(dateStr: string, endOfDay = false): string {
   return (offset << 22n).toString()
 }
 
+export interface DiscordMessage extends Record<string, unknown> {
+  id: string
+  attachments?: { id: string; [key: string]: unknown }[]
+}
+
+export async function* streamMessagesForDay(
+  accessor: DiscordAccessor,
+  channelId: string,
+  dateStr: string,
+  pageSize = 100,
+): AsyncIterableIterator<DiscordMessage[]> {
+  const after = dateToSnowflake(dateStr, false)
+  const beforeBig = BigInt(dateToSnowflake(dateStr, true))
+  for await (const page of afterIdPages<DiscordMessage>(accessor, {
+    endpoint: `/channels/${channelId}/messages`,
+    lastIdFn: (m) => (m as DiscordMessage).id,
+    pageSize,
+    startAfter: after,
+  })) {
+    const inRange = page.filter((m) => BigInt(m.id) <= beforeBig)
+    if (inRange.length > 0) yield inRange
+    if (page.some((m) => BigInt(m.id) > beforeBig)) return
+  }
+}
+
+export async function listMessagesForDay(
+  accessor: DiscordAccessor,
+  channelId: string,
+  dateStr: string,
+  pageSize = 100,
+): Promise<DiscordMessage[]> {
+  const out: DiscordMessage[] = []
+  for await (const page of streamMessagesForDay(accessor, channelId, dateStr, pageSize)) {
+    out.push(...page)
+  }
+  out.sort((a, b) => {
+    const ai = BigInt(a.id)
+    const bi = BigInt(b.id)
+    return ai < bi ? -1 : ai > bi ? 1 : 0
+  })
+  return out
+}
+
 export async function getHistoryJsonl(
   accessor: DiscordAccessor,
   channelId: string,
   dateStr: string,
 ): Promise<Uint8Array> {
-  const after = dateToSnowflake(dateStr, false)
-  const beforeSnowflake = dateToSnowflake(dateStr, true)
-  const beforeBig = BigInt(beforeSnowflake)
-  const messages: { id: string; [key: string]: unknown }[] = []
-  let lastId = after
-  for (;;) {
-    const batch = (await accessor.transport.call('GET', `/channels/${channelId}/messages`, {
-      after: lastId,
-      limit: 100,
-    })) as { id: string }[] | null
-    if (!Array.isArray(batch) || batch.length === 0) break
-    for (const msg of batch) {
-      if (BigInt(msg.id) <= beforeBig) messages.push(msg)
-    }
-    if (batch.length < 100) break
-    const tail = batch[batch.length - 1]
-    if (tail === undefined) break
-    lastId = tail.id
-  }
-  messages.sort((a, b) => {
-    const ai = BigInt(a.id)
-    const bi = BigInt(b.id)
-    return ai < bi ? -1 : ai > bi ? 1 : 0
-  })
+  const messages = await listMessagesForDay(accessor, channelId, dateStr)
   if (messages.length === 0) return new Uint8Array()
   const lines = messages.map((m) => JSON.stringify(m))
   return new TextEncoder().encode(lines.join('\n') + '\n')

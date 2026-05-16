@@ -19,6 +19,10 @@ export const DiscordResourceType = Object.freeze({
   CHANNEL: 'discord/channel',
   MEMBER: 'discord/member',
   HISTORY: 'discord/history',
+  DATE_DIR: 'discord/date_dir',
+  CHAT_JSONL: 'discord/chat_jsonl',
+  FILES_DIR: 'discord/files_dir',
+  FILE: 'discord/file',
 } as const)
 
 export type DiscordResourceType = (typeof DiscordResourceType)[keyof typeof DiscordResourceType]

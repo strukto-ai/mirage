@@ -55,10 +55,10 @@ async def test_read_jsonl(accessor, index):
             new_callable=AsyncMock,
             return_value=fake_data,
     ) as mock_hist:
+        path = "/My Server/channels/general/2024-01-15/chat.jsonl"
         result = await read(
             accessor,
-            PathSpec(original="/My Server/channels/general/2024-01-15.jsonl",
-                     directory="/My Server/channels/general/2024-01-15.jsonl"),
+            PathSpec(original=path, directory=path),
             index,
         )
 

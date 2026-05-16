@@ -76,14 +76,19 @@ async function main(): Promise<void> {
         if (dates.length > 0) {
           let found = false
           for (const d of [...dates].reverse()) {
-            path = `/discord/${guild}/channels/${ch}/${d}`
-            const content = await fs.promises.readFile(path, 'utf-8')
+            const chatPath = `/discord/${guild}/channels/${ch}/${d}/chat.jsonl`
+            let content: string
+            try {
+              content = await fs.promises.readFile(chatPath, 'utf-8')
+            } catch {
+              continue
+            }
             const lines = content
               .trim()
               .split('\n')
               .filter((line) => line.trim() !== '')
             if (lines.length > 0) {
-              console.log(`\n--- fs.readFile() ${d} ---`)
+              console.log(`\n--- fs.readFile() ${d}/chat.jsonl ---`)
               console.log(`  messages: ${String(lines.length)}`)
               for (const line of lines.slice(0, 3)) {
                 try {
@@ -98,6 +103,18 @@ async function main(): Promise<void> {
                   console.log(`  (unparseable: ${line.slice(0, 80)})`)
                 }
               }
+              // list attachments
+              const filesDir = `/discord/${guild}/channels/${ch}/${d}/files`
+              try {
+                const atts = await fs.promises.readdir(filesDir)
+                if (atts.length > 0) {
+                  console.log(`\n--- fs.readdir() ${d}/files ---`)
+                  for (const a of atts.slice(0, 5)) console.log(`  ${a}`)
+                }
+              } catch {
+                // no files dir or unreadable
+              }
+              path = chatPath
               found = true
               break
             }

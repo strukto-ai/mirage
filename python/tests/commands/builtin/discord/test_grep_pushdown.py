@@ -24,7 +24,8 @@ from mirage.types import PathSpec
 def _concrete_paths(n: int = 7):
     paths = []
     for d in range(1, n + 1):
-        original = (f"/discord/myguild/channels/general/2026-01-{d:02d}.jsonl")
+        original = (
+            f"/discord/myguild/channels/general/2026-01-{d:02d}/chat.jsonl")
         paths.append(
             PathSpec(
                 original=original,

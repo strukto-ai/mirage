@@ -30,6 +30,10 @@ function buildConfig(): DiscordConfig {
   return { token }
 }
 
+function assertNonEmpty(out: string, msg: string): void {
+  if (out.trim() === '') throw new Error(`regression: ${msg}`)
+}
+
 async function main(): Promise<void> {
   const resource = new DiscordResource(buildConfig())
   const ws = new Workspace({ '/discord': resource }, { mode: MountMode.READ })
@@ -38,190 +42,130 @@ async function main(): Promise<void> {
     console.log('=== ls /discord/ (guilds) ===')
     let r = await ws.execute('ls /discord/')
     console.log(r.stdoutText)
+    assertNonEmpty(r.stdoutText, 'ls /discord/ returned no guilds')
 
-    const guilds = r.stdoutText.trim() === '' ? [] : r.stdoutText.trim().split('\n')
-    if (guilds.length === 0) {
-      console.log('no guilds found')
-      return
-    }
-
-    const guild = guilds[0]!.trim()
+    const guild = r.stdoutText.trim().split('\n')[0]!.trim()
     console.log(`=== ls /discord/${guild}/channels/ ===`)
     r = await ws.execute(`ls "/discord/${guild}/channels/"`)
     console.log(r.stdoutText)
+    assertNonEmpty(r.stdoutText, 'no channels in first guild')
 
-    const channels = r.stdoutText.trim() === '' ? [] : r.stdoutText.trim().split('\n')
-    if (channels.length === 0) {
-      console.log('no channels found')
-      return
-    }
-
-    const ch = channels[0]!.trim()
+    const ch = r.stdoutText.trim().split('\n')[0]!.trim()
     const base = `/discord/${guild}/channels/${ch}`
 
-    console.log('\n=== finding a date with messages via search API ===')
-    r = await ws.execute(`grep -m 1 "" "${base}/"`)
-    const searchOut = r.stdoutText.trim()
-    let target = '2026-04-04.jsonl'
-    if (searchOut !== '') {
-      for (const line of searchOut.split('\n')) {
-        const parts = line.split('/')
-        let matched = false
-        for (const part of parts) {
-          if (part.endsWith('.jsonl')) {
-            target = part.split(':')[0]!
-            matched = true
-            break
-          }
-        }
-        if (matched) break
+    // ── pick a date with messages ──────────────────
+    console.log(`\n=== ls ${base}/ (date directories, last 5) ===`)
+    r = await ws.execute(`ls "${base}/" | tail -n 5`)
+    console.log(r.stdoutText)
+    const dates = r.stdoutText
+      .trim()
+      .split('\n')
+      .map((d) => d.trim())
+      .filter((d) => d !== '')
+    if (dates.length === 0) {
+      console.log('  (no date directories — channel is empty)')
+      return
+    }
+    let targetDate = dates[dates.length - 1]!
+    for (let i = dates.length - 1; i >= 0; i--) {
+      const d = dates[i]!
+      const test = await ws.execute(`cat "${base}/${d}/chat.jsonl" | head -c 1`)
+      if (test.stdoutText.trim() !== '') {
+        targetDate = d
+        break
       }
     }
-    const filePath = `${base}/${target}`
-    console.log(`  using: ${target}`)
+    console.log(`  using date: ${targetDate}`)
+    const filePath = `${base}/${targetDate}/chat.jsonl`
 
-    console.log(`\n=== cat ${target} | head -n 3 ===`)
+    // ── cat chat.jsonl ─────────────────────────────
+    console.log(`\n=== cat ${targetDate}/chat.jsonl | head -n 3 ===`)
     r = await ws.execute(`cat "${filePath}" | head -n 3`)
     console.log(r.stdoutText.slice(0, 300))
 
-    console.log(`\n=== grep at FILE level: grep content ${target} ===`)
-    r = await ws.execute(`grep content "${filePath}"`)
-    const grepOut = r.stdoutText.trim()
-    const grepLines = grepOut === '' ? [] : grepOut.split('\n')
-    console.log(`  matches: ${String(grepLines.length)}`)
-    if (grepLines.length > 0) {
-      console.log(`  first: ${grepLines[0]!.slice(0, 120)}...`)
+    // ── date dir contents ──────────────────────────
+    console.log(`\n=== ls ${base}/${targetDate}/ ===`)
+    r = await ws.execute(`ls "${base}/${targetDate}/"`)
+    console.log(r.stdoutText)
+
+    // ── files dir ──────────────────────────────────
+    console.log(`\n=== ls ${base}/${targetDate}/files/ (attachments) ===`)
+    r = await ws.execute(`ls "${base}/${targetDate}/files/"`)
+    const filesOut = r.stdoutText.trim()
+    if (filesOut !== '') {
+      for (const line of filesOut.split('\n').slice(0, 5)) console.log(`  ${line}`)
+    } else {
+      console.log('  (no attachments on this date)')
     }
 
-    console.log('\n=== grep -c content (file, count only) ===')
-    r = await ws.execute(`grep -c content "${filePath}"`)
-    console.log(`  count: ${r.stdoutText.trim()}`)
+    // ── grep at FILE level ─────────────────────────
+    console.log(`\n=== grep at FILE level: grep -c . ${targetDate}/chat.jsonl ===`)
+    r = await ws.execute(`grep -c . "${filePath}"`)
+    console.log(`  line count: ${r.stdoutText.trim()}`)
 
-    console.log(`\n=== grep at CHANNEL level: grep hihi ${base}/ ===`)
-    r = await ws.execute(`grep hihi "${base}/"`)
+    // ── grep at CHANNEL level (Discord search push-down) ──
+    console.log(`\n=== grep at CHANNEL level: grep -m 5 . ${base}/ ===`)
+    r = await ws.execute(`grep -m 5 . "${base}/"`)
     console.log(`  exit=${String(r.exitCode)}`)
-    {
-      const out = r.stdoutText.trim()
-      if (out !== '') {
-        for (const line of out.split('\n').slice(0, 5)) {
-          console.log(`  ${line.slice(0, 120)}`)
-        }
-      } else {
-        console.log('  (no results)')
-      }
-      if (r.stderrText !== '') {
-        console.log(`  stderr: ${r.stderrText}`)
-      }
+    const chanOut = r.stdoutText.trim()
+    if (chanOut !== '') {
+      for (const line of chanOut.split('\n').slice(0, 5)) console.log(`  ${line.slice(0, 120)}`)
+    } else {
+      console.log('  (no results)')
     }
+    const err = r.stderrText
+    if (err !== '') console.log(`  stderr: ${err.slice(0, 200)}`)
 
-    console.log(`\n=== grep at GUILD level: grep hihi /discord/${guild}/ ===`)
-    r = await ws.execute(`grep hihi "/discord/${guild}/"`)
+    // ── grep at GUILD level ────────────────────────
+    console.log(`\n=== grep at GUILD level: grep -m 5 . /discord/${guild}/ ===`)
+    r = await ws.execute(`grep -m 5 . "/discord/${guild}/"`)
     console.log(`  exit=${String(r.exitCode)}`)
-    {
-      const out = r.stdoutText.trim()
-      if (out !== '') {
-        for (const line of out.split('\n').slice(0, 5)) {
-          console.log(`  ${line.slice(0, 120)}`)
-        }
-      } else {
-        console.log('  (no results)')
-      }
-      if (r.stderrText !== '') {
-        console.log(`  stderr: ${r.stderrText}`)
-      }
+    const guildOut = r.stdoutText.trim()
+    if (guildOut !== '') {
+      for (const line of guildOut.split('\n').slice(0, 5)) console.log(`  ${line.slice(0, 120)}`)
     }
 
-    console.log(`\n=== rg at CHANNEL level: rg hihi ${base}/ ===`)
-    r = await ws.execute(`rg hihi "${base}/"`)
-    console.log(`  exit=${String(r.exitCode)}`)
-    {
-      const out = r.stdoutText.trim()
-      if (out !== '') {
-        for (const line of out.split('\n').slice(0, 5)) {
-          console.log(`  ${line.slice(0, 120)}`)
-        }
-      } else {
-        console.log('  (no results)')
-      }
+    // ── jq pipeline ────────────────────────────────
+    console.log(`\n=== jq -r '.[] | .author.username' ${targetDate}/chat.jsonl ===`)
+    r = await ws.execute(`jq -r ".[] | .author.username" "${filePath}" | head -n 5`)
+    const jqOut = r.stdoutText.trim()
+    if (jqOut !== '') {
+      for (const line of jqOut.split('\n').slice(0, 5)) console.log(`  ${line}`)
     }
 
-    console.log(`\n=== jq '.[] | .author.username' ${target} ===`)
-    r = await ws.execute(`jq ".[] | .author.username" "${filePath}"`)
-    console.log(`  exit=${String(r.exitCode)}`)
-    {
-      const out = r.stdoutText.trim()
-      if (out !== '') {
-        for (const line of out.split('\n').slice(0, 5)) {
-          console.log(`  ${line}`)
-        }
-      } else {
-        console.log('  (no output)')
-      }
-    }
-
-    console.log(`\n=== jq -r '.[] | .content' ${target} | head -n 5 ===`)
-    r = await ws.execute(`jq -r ".[] | .content" "${filePath}" | head -n 5`)
-    console.log(`  exit=${String(r.exitCode)}`)
-    {
-      const out = r.stdoutText.trim()
-      if (out !== '') {
-        for (const line of out.split('\n').slice(0, 5)) {
-          console.log(`  ${line}`)
-        }
-      }
-    }
-
-    console.log(`\n=== stat ${target} ===`)
+    // ── stat ───────────────────────────────────────
+    console.log(`\n=== stat ${filePath} ===`)
     r = await ws.execute(`stat "${filePath}"`)
-    console.log(`  ${r.stdoutText.trim()}`)
+    console.log(`  ${r.stdoutText.trim().slice(0, 200)}`)
 
-    console.log(
-      `\n=== cat ${target} | jq -r '.[] | .author.username' | sort | uniq -c ===`,
-    )
-    r = await ws.execute(
-      `cat "${filePath}" | jq -r ".[] | .author.username" | sort | uniq -c`,
-    )
-    console.log(`  exit=${String(r.exitCode)}`)
-    {
-      const out = r.stdoutText.trim()
-      if (out !== '') {
-        for (const line of out.split('\n').slice(0, 10)) {
-          console.log(`  ${line}`)
-        }
-      }
-    }
-
-    console.log(`\n=== wc -l ${target} ===`)
+    // ── wc ─────────────────────────────────────────
+    console.log(`\n=== wc -l ${targetDate}/chat.jsonl ===`)
     r = await ws.execute(`wc -l "${filePath}"`)
     console.log(`  ${r.stdoutText.trim()}`)
 
-    console.log(`\n=== head -n 3 ${target} ===`)
-    r = await ws.execute(`head -n 3 "${filePath}"`)
-    {
-      const out = r.stdoutText.trim()
-      if (out !== '') {
-        for (const line of out.split('\n')) {
-          console.log(`  ${line.slice(0, 120)}`)
-        }
-      }
+    // ── tree ───────────────────────────────────────
+    console.log(`\n=== tree -L 2 /discord/${guild}/ | head -n 20 ===`)
+    r = await ws.execute(`tree -L 2 "/discord/${guild}/" | head -n 20`)
+    for (const line of r.stdoutText.trim().split('\n').slice(0, 20)) {
+      console.log(`  ${line}`)
     }
 
-    console.log(`\n=== tail -n 2 ${target} ===`)
-    r = await ws.execute(`tail -n 2 "${filePath}"`)
-    {
-      const out = r.stdoutText.trim()
-      if (out !== '') {
-        for (const line of out.split('\n')) {
-          console.log(`  ${line.slice(0, 120)}`)
-        }
-      }
+    // ── find chat.jsonl everywhere ────────────────
+    console.log(`\n=== find /discord/${guild}/ -name chat.jsonl | head -n 5 ===`)
+    r = await ws.execute(`find "/discord/${guild}/" -name "chat.jsonl" | head -n 5`)
+    console.log(`  exit=${String(r.exitCode)}`)
+    if (r.exitCode !== 0) {
+      throw new Error(
+        `regression: find chat.jsonl exited ${String(r.exitCode)} (soft errors should not abort)`,
+      )
+    }
+    const findOut = r.stdoutText.trim()
+    if (findOut !== '') {
+      for (const line of findOut.split('\n')) console.log(`  ${line}`)
     }
 
-    console.log('\n=== pwd ===')
-    r = await ws.execute('pwd')
-    console.log(`  ${r.stdoutText.trim()}`)
-
-    console.log(`\n=== cd "${base}" ===`)
+    // ── pwd / cd / relative ────────────────────────
+    console.log(`\n=== cd ${base} ===`)
     r = await ws.execute(`cd "${base}"`)
     console.log(`  exit=${String(r.exitCode)}`)
 
@@ -229,81 +173,10 @@ async function main(): Promise<void> {
     r = await ws.execute('pwd')
     console.log(`  ${r.stdoutText.trim()}`)
 
-    console.log('\n=== ls (relative, in channel dir) ===')
-    r = await ws.execute('ls | tail -n 5')
-    {
-      const out = r.stdoutText.trim()
-      if (out !== '') {
-        for (const line of out.split('\n')) {
-          console.log(`  ${line}`)
-        }
-      }
-    }
-
-    console.log(`\n=== cat ${target} (relative) | head -n 1 ===`)
-    r = await ws.execute(`cat ${target} | head -n 1`)
-    {
-      const out = r.stdoutText.trim()
-      if (out !== '') {
-        console.log(`  ${out.slice(0, 120)}`)
-      } else {
-        console.log('  (empty)')
-      }
-    }
-
-    console.log(`\n=== tree -L 1 /discord/${guild}/ ===`)
-    r = await ws.execute(`tree -L 1 "/discord/${guild}/"`)
-    console.log(`  exit=${String(r.exitCode)}`)
-    {
-      const out = r.stdoutText.trim()
-      if (out !== '') {
-        for (const line of out.split('\n')) {
-          console.log(`  ${line}`)
-        }
-      }
-    }
-
-    console.log(
-      `\n=== find /discord/${guild}/ -name '*.jsonl' -maxdepth 3 | head -n 10 ===`,
-    )
-    r = await ws.execute(
-      `find "/discord/${guild}/" -name "*.jsonl" -maxdepth 3 | head -n 10`,
-    )
-    console.log(`  exit=${String(r.exitCode)}`)
-    {
-      const out = r.stdoutText.trim()
-      if (out !== '') {
-        for (const line of out.split('\n')) {
-          console.log(`  ${line}`)
-        }
-      }
-    }
-
-    console.log("\n=== find /discord/ -name 'general*' ===")
-    r = await ws.execute('find "/discord/" -name "general*"')
-    console.log(`  exit=${String(r.exitCode)}`)
-    {
-      const out = r.stdoutText.trim()
-      if (out !== '') {
-        for (const line of out.split('\n')) {
-          console.log(`  ${line}`)
-        }
-      }
-    }
-
-    console.log(`\n=== echo ${base}/*.jsonl (glob) ===`)
-    r = await ws.execute(`echo "${base}/"*.jsonl`)
-    console.log(`  ${r.stdoutText.trim().slice(0, 200)}`)
-
-    console.log(`\n=== for f in ${base}/*.jsonl (glob loop) ===`)
-    r = await ws.execute(
-      `for f in "${base}/"*.jsonl; do echo found:$f; done | head -n 3`,
-    )
-    {
-      const out = r.stdoutText.trim()
-      for (const line of out.split('\n')) {
-        console.log(`  ${line.slice(0, 120)}`)
-      }
+    console.log(`\n=== cat ${targetDate}/chat.jsonl (relative) | head -n 1 ===`)
+    r = await ws.execute(`cat "${targetDate}/chat.jsonl" | head -n 1`)
+    if (r.stdoutText.trim() !== '') {
+      console.log(`  ${r.stdoutText.trim().slice(0, 120)}`)
     }
   } finally {
     await ws.close()

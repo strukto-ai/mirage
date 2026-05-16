@@ -110,16 +110,50 @@ def test_channel(index):
     assert scope.channel_id == "C1"
 
 
-# ── file ──────────────────────────────────────
+# ── date / messages / files ────────────────────
 
 
-def test_file(index):
+def test_date_dir(index):
     scope = _run(
         detect_scope(
-            _gs("/discord/TestGuild/channels/general/2024-04-10.jsonl",
+            _gs("/discord/TestGuild/channels/general/2024-04-10",
                 prefix="/discord"), index))
-    assert scope.level == "file"
+    assert scope.level == "date"
     assert scope.guild_id == "G1"
+    assert scope.channel_id == "C1"
+    assert scope.date_str == "2024-04-10"
+
+
+def test_messages_file(index):
+    scope = _run(
+        detect_scope(
+            _gs("/discord/TestGuild/channels/general/2024-04-10/chat.jsonl",
+                prefix="/discord"), index))
+    assert scope.level == "messages"
+    assert scope.guild_id == "G1"
+    assert scope.channel_id == "C1"
+    assert scope.date_str == "2024-04-10"
+
+
+def test_files_dir(index):
+    scope = _run(
+        detect_scope(
+            _gs("/discord/TestGuild/channels/general/2024-04-10/files",
+                prefix="/discord"), index))
+    assert scope.level == "files"
+    assert scope.guild_id == "G1"
+    assert scope.channel_id == "C1"
+    assert scope.date_str == "2024-04-10"
+
+
+def test_file_blob(index):
+    scope = _run(
+        detect_scope(
+            _gs(
+                "/discord/TestGuild/channels/general/2024-04-10/files/"
+                "img__A1.png",
+                prefix="/discord"), index))
+    assert scope.level == "file_blob"
     assert scope.channel_id == "C1"
     assert scope.date_str == "2024-04-10"
 
@@ -206,7 +240,7 @@ def fake_index():
 @pytest.mark.asyncio
 async def test_coalesce_concrete_jsonl_paths_same_channel(fake_index):
     paths = [
-        _spec(f"/discord/myguild/channels/general/2026-01-{d:02d}.jsonl")
+        _spec(f"/discord/myguild/channels/general/2026-01-{d:02d}/chat.jsonl")
         for d in range(1, 8)
     ]
     scope = await coalesce_scopes(paths, fake_index)
@@ -219,8 +253,8 @@ async def test_coalesce_concrete_jsonl_paths_same_channel(fake_index):
 @pytest.mark.asyncio
 async def test_coalesce_returns_none_for_mixed_channels(fake_index):
     paths = [
-        _spec("/discord/myguild/channels/general/2026-01-01.jsonl"),
-        _spec("/discord/myguild/channels/random/2026-01-01.jsonl"),
+        _spec("/discord/myguild/channels/general/2026-01-01/chat.jsonl"),
+        _spec("/discord/myguild/channels/random/2026-01-01/chat.jsonl"),
     ]
     assert await coalesce_scopes(paths, fake_index) is None
 
