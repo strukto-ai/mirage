@@ -9,7 +9,7 @@ MIRAGE ships `DiscordResource` in **two runtimes**:
 - `@struktoai/mirage-node`, talks to `https://discord.com/api/v10/*` directly using a bot token.
 - `@struktoai/mirage-browser`, stays secret-free: a small proxy server on your backend holds the token and forwards `/api/discord/*` to `https://discord.com/api/v10/*`. The browser only ever sees the proxy URL.
 
-Both runtimes expose the same filesystem shape (`/discord/<guild>/channels/`, `/discord/<guild>/members/`) and the same shell commands (`discord-send-message`, `discord-add-reaction`, etc.).
+Both runtimes expose the same filesystem shape (`/discord/<guild>/channels/<channel>/<date>/{chat.jsonl,files/}`, `/discord/<guild>/members/`) and the same shell commands (`discord-send-message`, `discord-add-reaction`, etc.).
 
 ## Get a bot token
 
@@ -122,35 +122,41 @@ Calling `https://discord.com/api/v10/*` directly from a browser fails CORS. The 
 
 ```text
 /discord/
-  <guild-name>_<guild-id>/
+  <guild-name>__<guild-id>/
     channels/
-      <channel-name>_<channel-id>/
-        <yyyy-mm-dd>.jsonl
+      <channel-name>__<channel-id>/
+        <yyyy-mm-dd>/
+          chat.jsonl
+          files/
+            <stem>__<attachment-id>.<ext>
+            ...
         ...
     members/
-      <username>_<user-id>.json
+      <username>__<user-id>.json
       ...
 ```
 
-The root lists one directory per guild the bot has access to. Each guild contains a `channels/` directory with text channels (types 0, 5, 15) and a `members/` directory with one `.json` file per member. Each channel directory contains day-partitioned JSONL files for the 30 days leading up to the channel's last message, inactive channels show dates around their last activity, not today. The Discord snowflake ID is appended after `_` in directory and file names so resource-specific commands can extract it without an extra lookup.
+The root lists one directory per guild the bot has access to. Each guild contains a `channels/` directory with text channels (types 0, 5, 15) and a `members/` directory with one `.json` file per member. Each channel directory contains day-partitioned **directories** for the 30 days leading up to the channel's last message, inactive channels show dates around their last activity, not today. Each day directory holds `chat.jsonl` (one JSON object per message) and a `files/` directory with that day's attachments, `cat`'ing a blob downloads it from the Discord CDN. Soft errors (403 missing permissions, 404 unknown channel, 429 rate limit) on a single day are swallowed so listings, `find`, and `grep` keep working across the rest of the tree.
+
+Names are sanitized (unsafe characters replaced with `_`) and the Discord snowflake ID is appended after `__` (double underscore) on guild, channel, member, and attachment names so resource-specific commands can extract it without an extra lookup.
 
 ## Shell commands
 
 Every standard MIRAGE shell command works on the mounted Discord tree:
 
-| Command         | Notes                                          |
-| --------------- | ---------------------------------------------- |
-| `ls`            | List guilds, channels, members, dates          |
-| `cat`           | Read `.jsonl` history or member `.json`        |
-| `head` / `tail` | Smart: uses messages API for file scope        |
-| `grep` / `rg`   | Smart: uses search API for channel/guild scope |
-| `jq`            | Query JSON; use `.[]` prefix for JSONL files   |
-| `wc`            | Line/word/byte counts                          |
-| `stat`          | File metadata (name, size, type)               |
-| `find`          | Recursive search with `-name`, `-maxdepth`     |
-| `tree`          | Directory tree view                            |
-| `pwd` / `cd`    | Navigate the virtual tree                      |
-| `echo` (glob)   | Glob expansion via `resolve_glob`              |
+| Command         | Notes                                                            |
+| --------------- | ---------------------------------------------------------------- |
+| `ls`            | List guilds, channels, members, dates, attachments               |
+| `cat`           | Read `chat.jsonl`, member `.json`, or download an attachment     |
+| `head` / `tail` | Smart: uses messages API for file scope                          |
+| `grep` / `rg`   | Smart: uses search API for channel/guild scope (with fallback)   |
+| `jq`            | Query JSON; use `.[]` prefix for JSONL files                     |
+| `wc`            | Line/word/byte counts                                            |
+| `stat`          | File metadata (name, size, type, ID via `extra`)                 |
+| `find`          | Recursive search with `-name`, `-maxdepth`                       |
+| `tree`          | Directory tree view                                              |
+| `pwd` / `cd`    | Navigate the virtual tree                                        |
+| `echo` (glob)   | Glob expansion via `resolve_glob`                                |
 
 Resource-specific commands:
 

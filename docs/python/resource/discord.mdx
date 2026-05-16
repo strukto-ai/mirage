@@ -24,13 +24,17 @@ ws = Workspace({"/discord": resource}, mode=MountMode.READ)
 
 ```text
 /discord/
-  <guild-name>_<guild-id>/
+  <guild-name>/
     channels/
-      <channel-name>_<channel-id>/
-        <yyyy-mm-dd>.jsonl
+      <channel-name>/
+        <yyyy-mm-dd>/
+          chat.jsonl
+          files/
+            <stem>__<attachment-id>.<ext>
+            ...
         ...
     members/
-      <username>_<user-id>.json
+      <username>.json
       ...
 ```
 
@@ -38,43 +42,57 @@ Example:
 
 ```text
 /discord/
-  My Server_111222333444555666/
+  My Server/
     channels/
-      general_777888999000111222/
-        2026-04-04.jsonl
-        2026-04-05.jsonl
-      random_777888999000111223/
-        2026-04-11.jsonl
+      general/
+        2026-04-04/
+          chat.jsonl
+          files/
+            screenshot__1488111222333444555.png
+        2026-04-05/
+          chat.jsonl
+      random/
+        2026-04-11/
+          chat.jsonl
     members/
-      alice_444555666777888999.json
-      bob_444555666777888900.json
+      alice.json
+      bob.json
 ```
 
-Directory and file names embed the Discord snowflake ID so that write
-commands (`discord-send-message --channel_id`, etc.) can reference
-the correct resource without extra lookups.
+Snowflake IDs are **not** embedded in directory or file names. Resource
+specific commands resolve IDs via the in-memory `IndexCacheStore`, and
+`stat` exposes them in the `extra` dict (see [Finding IDs](#finding-ids)).
+Names containing unsafe characters have `/` replaced with `∕` (U+2215).
 
 ### Guilds
 
 The root lists one directory per guild the bot has access to.
-Names containing `/` are replaced with `∕` (U+2215).
-The guild ID is appended after `_`.
 
 ### Channels
 
 `/discord/<guild>/channels/` lists text channels (types 0, 5, 15).
-The channel ID is appended after `_`.
-Each channel directory contains day-partitioned `.jsonl` history files
-for the 30 days leading up to the channel's last message.
+Each channel directory contains day-partitioned **directories** for the
+30 days leading up to the channel's last message. Each day directory
+holds:
+
+- `chat.jsonl`, the day's messages (one JSON object per line).
+- `files/`, attachments posted on that day. Each blob is named
+  `<sanitized-stem>__<attachment-id>.<ext>` to keep collisions
+  impossible while preserving the original filename. `cat`'ing a
+  blob downloads it from the Discord CDN.
 
 The date range is derived from `last_message_id` on the channel object,
 so inactive channels show dates around their last activity, not today.
 
+Soft errors (403 missing permissions, 404 unknown channel, 429 rate
+limit) on a single day are swallowed so listings, `find`, and `grep`
+keep working across the rest of the tree.
+
 ### Members
 
 `/discord/<guild>/members/` lists one `.json` file per member.
-The user ID is appended after `_` in the filename.
-Reading a member file returns the full member payload from the Discord API.
+Reading a member file returns the full member payload from the
+Discord API.
 
 ## Smart Commands
 
@@ -85,7 +103,7 @@ they use the Discord search API instead of downloading every `.jsonl` file:
 
 ```bash
 # FILE level - downloads the .jsonl, greps locally
-grep hello "/discord/My Server/channels/general/2026-04-04.jsonl"
+grep hello "/discord/My Server/channels/general/2026-04-04/chat.jsonl"
 
 # CHANNEL level - uses Discord search API (GET /guilds/{id}/messages/search)
 grep hello "/discord/My Server/channels/general/"
@@ -142,19 +160,27 @@ async def main():
     base = f"/discord/{guild}/channels/{ch}"
 
     # Read messages from a specific date
-    r = await ws.execute(f'cat "{base}/2026-04-04.jsonl" | head -n 3')
+    r = await ws.execute(f'cat "{base}/2026-04-04/chat.jsonl" | head -n 3')
     print(await r.stdout_str())
 
     # Extract usernames with jq
     r = await ws.execute(
-        f'jq -r ".[] | .author.username" "{base}/2026-04-04.jsonl"')
+        f'jq -r ".[] | .author.username" "{base}/2026-04-04/chat.jsonl"')
     print(await r.stdout_str())
 
     # Count messages per user
     r = await ws.execute(
-        f'cat "{base}/2026-04-04.jsonl"'
+        f'cat "{base}/2026-04-04/chat.jsonl"'
         ' | jq -r ".[] | .author.username" | sort | uniq -c')
     print(await r.stdout_str())
+
+    # List attachments for a day and download one
+    r = await ws.execute(f'ls "{base}/2026-04-04/files/"')
+    print(await r.stdout_str())
+    r = await ws.execute(
+        f'cat "{base}/2026-04-04/files/screenshot__1488111222333444555.png"')
+    blob = await r.materialize_stdout()
+    print(f"downloaded {len(blob)} bytes")
 
     # Search across channel (uses Discord search API)
     r = await ws.execute(f'grep hello "{base}/"')
@@ -178,7 +204,7 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-See `examples/chat/discord.py` for the full working example.
+See `examples/python/discord/discord.py` for the full working example.
 
 ## Finding IDs
 
@@ -197,12 +223,12 @@ stat "/discord/My Server/channels/general"
 
 # Message ID - inside JSONL messages
 jq -r '.[] | "\(.id) [\(.author.username)] \(.content)"' \
-  "/discord/My Server/channels/general/2026-04-04.jsonl"
+  "/discord/My Server/channels/general/2026-04-04/chat.jsonl"
 # → 1489887688978075769 [alice] hello world
 
 # Find a message then reply
 jq -r '.[] | select(.content | test("hello")) | .id' \
-  "/discord/My Server/channels/general/2026-04-04.jsonl"
+  "/discord/My Server/channels/general/2026-04-04/chat.jsonl"
 # → 1489887688978075769
 discord-send-message --channel_id 1256522563555819574 \
   --text "Reply" --message_id 1489887688978075769
@@ -214,20 +240,20 @@ Tips for efficient access on busy channels:
 
 ```bash
 # Check message count per day
-wc -l "/discord/My Server/channels/general/2026-04-04.jsonl"
+wc -l "/discord/My Server/channels/general/2026-04-04/chat.jsonl"
 
 # Read only recent messages
-tail -n 10 "/discord/My Server/channels/general/2026-04-04.jsonl"
+tail -n 10 "/discord/My Server/channels/general/2026-04-04/chat.jsonl"
 
 # Search uses Discord API at channel/guild level (no file download)
 grep "keyword" "/discord/My Server/channels/general/"
 
 # Extract specific fields
 jq -r '.[] | "\(.author.username): \(.content)"' \
-  "/discord/My Server/channels/general/2026-04-04.jsonl" | head -n 20
+  "/discord/My Server/channels/general/2026-04-04/chat.jsonl" | head -n 20
 
 # Count messages per user
-cat "/discord/My Server/channels/general/2026-04-04.jsonl" \
+cat "/discord/My Server/channels/general/2026-04-04/chat.jsonl" \
   | jq -r '.[] | .author.username' | sort | uniq -c
 ```
 
@@ -239,17 +265,17 @@ even for large channels.
 
 Standard commands available on the mounted Discord tree:
 
-| Command         | Notes                                          |
-| --------------- | ---------------------------------------------- |
-| `ls`            | List guilds, channels, members, dates          |
-| `cat`           | Read .jsonl history or member .json            |
-| `head` / `tail` | Smart: uses messages API for file scope        |
-| `grep` / `rg`   | Smart: uses search API for channel/guild scope |
-| `jq`            | Query JSON; use `.[]` prefix for JSONL files   |
-| `wc`            | Line/word/byte counts                          |
-| `stat`          | File metadata (name, size, type)               |
-| `find`          | Recursive search with `-name`, `-maxdepth`     |
-| `tree`          | Directory tree view                            |
+| Command         | Notes                                                          |
+| --------------- | -------------------------------------------------------------- |
+| `ls`            | List guilds, channels, members, dates, attachments             |
+| `cat`           | Read `chat.jsonl`, member `.json`, or download an attachment   |
+| `head` / `tail` | Smart: uses messages API for file scope                        |
+| `grep` / `rg`   | Smart: uses search API for channel/guild scope (with fallback) |
+| `jq`            | Query JSON; use `.[]` prefix for JSONL files                   |
+| `wc`            | Line/word/byte counts                                          |
+| `stat`          | File metadata (name, size, type, ID via `extra`)               |
+| `find`          | Recursive search with `-name`, `-maxdepth`                     |
+| `tree`          | Directory tree view                                            |
 
 Resource-specific commands:
 
