@@ -21,7 +21,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from mirage.server.host_validation import resolve_allowed_hosts
 from mirage.server.jobs import JobTable
 from mirage.server.persist import restore_all, snapshot_all
 from mirage.server.registry import WorkspaceRegistry
@@ -91,7 +93,8 @@ async def _lifespan(app: FastAPI):
 
 def build_app(idle_grace_seconds: float = 30.0,
               exit_event: asyncio.Event | None = None,
-              persist_dir: str | Path | None = None) -> FastAPI:
+              persist_dir: str | Path | None = None,
+              allowed_hosts: list[str] | None = None) -> FastAPI:
     """Construct a daemon FastAPI app.
 
     The workspace registry is created eagerly so the app is usable
@@ -109,11 +112,21 @@ def build_app(idle_grace_seconds: float = 30.0,
         persist_dir (str | Path | None): directory for snapshot /
             restore. When set, the daemon snapshots every workspace
             on graceful shutdown and rehydrates them on next start.
+        allowed_hosts (list[str] | None): host allowlist for the
+            ``Host`` header. ``None`` (default) reads
+            ``$MIRAGE_ALLOWED_HOSTS`` (CSV) or falls back to
+            loopback-only (``127.0.0.1``, ``localhost``, ``::1``).
+            Pass ``["*"]`` to disable enforcement (only safe behind
+            a trusted reverse proxy).
 
     Returns:
         FastAPI: configured app with all routers mounted.
     """
     app = FastAPI(title="Mirage daemon", version="0.1", lifespan=_lifespan)
+    hosts = resolve_allowed_hosts(allowed_hosts)
+    if "*" not in hosts:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
+    app.state.allowed_hosts = hosts
     app.state.started_at = time.time()
     app.state.exit_event = exit_event or asyncio.Event()
     app.state.registry = WorkspaceRegistry(

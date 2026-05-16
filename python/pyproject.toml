@@ -194,4 +194,5 @@ testpaths = ["tests"]
 addopts = "--cov=mirage --cov-report=term-missing -q --import-mode=importlib"
 markers = [
     "network: tests that require network access",
+    "no_host_override: skip the tests/server/conftest autouse MIRAGE_ALLOWED_HOSTS=* override",
 ]
