@@ -18,6 +18,7 @@ from bson.json_util import RELAXED_JSON_OPTIONS, dumps
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from mirage.core.mongodb._client import get_indexes, list_collections
+from mirage.core.mongodb.types import PRIMARY_KEY, EntityKind
 
 
 def _collect_string_paths(value, prefix: str, out: set[str]) -> None:
@@ -26,7 +27,7 @@ def _collect_string_paths(value, prefix: str, out: set[str]) -> None:
             sub = f"{prefix}.{k}" if prefix else k
             _collect_string_paths(v, sub, out)
         return
-    if isinstance(value, str) and prefix and prefix != "_id":
+    if isinstance(value, str) and prefix and prefix != PRIMARY_KEY:
         out.add(prefix)
 
 
@@ -75,7 +76,9 @@ async def search_database(
     pattern: str,
     limit: int,
 ) -> list[tuple[str, str, list[dict]]]:
-    collections = await list_collections(client, database, kind="collection")
+    collections = await list_collections(client,
+                                         database,
+                                         kind=EntityKind.COLLECTION)
     tasks = [
         search_collection(client, database, col, pattern, limit=limit)
         for col in collections

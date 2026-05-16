@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator
 
 from motor.motor_asyncio import AsyncIOMotorClient
 
+from mirage.core.mongodb.types import EntityKind
 from mirage.resource.mongodb.config import MongoDBConfig
 
 
@@ -32,14 +33,12 @@ async def list_databases(client: AsyncIOMotorClient,
 async def list_collections(
     client: AsyncIOMotorClient,
     database: str,
-    kind: str | None = None,
+    kind: EntityKind | None = None,
 ) -> list[str]:
     db = client[database]
     filter_arg: dict | None = None
-    if kind == "collection":
-        filter_arg = {"type": "collection"}
-    elif kind == "view":
-        filter_arg = {"type": "view"}
+    if kind is not None:
+        filter_arg = {"type": kind.value}
     return sorted(await db.list_collection_names(filter=filter_arg))
 
 
@@ -113,7 +112,7 @@ async def is_view(
     db = client[database]
     cursor = await db.list_collections(filter={"name": collection})
     async for spec in cursor:
-        return spec.get("type") == "view"
+        return spec.get("type") == EntityKind.VIEW
     return False
 
 

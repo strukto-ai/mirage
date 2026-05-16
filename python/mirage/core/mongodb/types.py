@@ -31,7 +31,20 @@ class EntityKind(StrEnum):
     VIEW = "view"
 
 
-KIND_DIR_NAMES: dict[str, EntityKind] = {
-    "collections": EntityKind.COLLECTION,
-    "views": EntityKind.VIEW,
+PRIMARY_KEY = "_id"
+
+RESOURCE_TYPE_DATABASE = "mongodb/database"
+RESOURCE_TYPE_COLLECTION = "mongodb/collection"
+RESOURCE_TYPE_VIEW = "mongodb/view"
+
+KIND_TO_DIR: dict[EntityKind, str] = {
+    EntityKind.COLLECTION: "collections",
+    EntityKind.VIEW: "views",
 }
+
+KIND_TO_RESOURCE_TYPE: dict[EntityKind, str] = {
+    EntityKind.COLLECTION: RESOURCE_TYPE_COLLECTION,
+    EntityKind.VIEW: RESOURCE_TYPE_VIEW,
+}
+
+KIND_DIR_NAMES: dict[str, EntityKind] = {v: k for k, v in KIND_TO_DIR.items()}

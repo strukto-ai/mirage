@@ -20,7 +20,7 @@ from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.core.mongodb._client import iter_documents, iter_inserts
 from mirage.core.mongodb.scope import detect_scope
-from mirage.core.mongodb.types import ScopeLevel
+from mirage.core.mongodb.types import PRIMARY_KEY, ScopeLevel
 from mirage.types import PathSpec
 
 
@@ -65,7 +65,7 @@ async def read_stream(
             accessor.client,
             scope.database,
             scope.name,
-            sort=[("_id", 1)],
+            sort=[(PRIMARY_KEY, 1)],
             batch_size=batch_size,
     ):
         if elide:

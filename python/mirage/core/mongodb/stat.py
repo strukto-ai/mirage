@@ -16,7 +16,7 @@ from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.core.mongodb._client import count_documents, get_indexes, is_view
 from mirage.core.mongodb.scope import detect_scope
-from mirage.core.mongodb.types import EntityKind, ScopeLevel
+from mirage.core.mongodb.types import KIND_TO_DIR, EntityKind, ScopeLevel
 from mirage.types import FileStat, FileType, PathSpec
 
 
@@ -89,7 +89,7 @@ async def stat(
 
 
 def _kind_dir_name(kind: EntityKind) -> str:
-    return "collections" if kind == EntityKind.COLLECTION else "views"
+    return KIND_TO_DIR[kind]
 
 
 async def _documents_stat(
@@ -115,7 +115,7 @@ async def _documents_stat(
         extra={
             "database": database,
             "name": name,
-            "kind": "view" if view else "collection",
+            "kind": EntityKind.VIEW if view else EntityKind.COLLECTION,
             "document_count": doc_count,
             "indexes": index_info,
         },

@@ -17,6 +17,8 @@ from collections.abc import Iterable
 
 from bson import Binary, Decimal128, Int64, ObjectId, Regex, Timestamp
 
+from mirage.core.mongodb.types import PRIMARY_KEY
+
 
 def _bump(counts: dict[str, dict[str, int]], path: str, tag: str) -> None:
     counts.setdefault(path, {})
@@ -88,7 +90,7 @@ async def sample_field_types(col, sample_size: int = 100) -> list[dict]:
         return []
     fields: list[dict] = []
     for path, type_counts in sorted(counts.items()):
-        if path == "_id":
+        if path == PRIMARY_KEY:
             continue
         presence_count = sum(type_counts.values())
         fields.append({

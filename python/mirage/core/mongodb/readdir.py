@@ -16,17 +16,10 @@ from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import IndexCacheStore, IndexEntry
 from mirage.core.mongodb._client import list_collections, list_databases
 from mirage.core.mongodb.scope import detect_scope
-from mirage.core.mongodb.types import EntityKind, ScopeLevel
+from mirage.core.mongodb.types import (KIND_TO_DIR, KIND_TO_RESOURCE_TYPE,
+                                       RESOURCE_TYPE_DATABASE, EntityKind,
+                                       ScopeLevel)
 from mirage.types import PathSpec
-
-_KIND_TO_DIR: dict[EntityKind, str] = {
-    EntityKind.COLLECTION: "collections",
-    EntityKind.VIEW: "views",
-}
-_KIND_RESOURCE_TYPE: dict[EntityKind, str] = {
-    EntityKind.COLLECTION: "mongodb/collection",
-    EntityKind.VIEW: "mongodb/view",
-}
 
 
 async def readdir(
@@ -57,7 +50,7 @@ async def readdir(
 
     if scope.level == ScopeLevel.ENTITY:
         base = (f"{prefix}/{scope.database}/"
-                f"{_KIND_TO_DIR[scope.kind]}/{scope.name}")
+                f"{KIND_TO_DIR[scope.kind]}/{scope.name}")
         return [
             f"{base}/schema.json",
             f"{base}/documents.jsonl",
@@ -83,7 +76,7 @@ async def _list_root(
         entry = IndexEntry(
             id=db_name,
             name=db_name,
-            resource_type="mongodb/database",
+            resource_type=RESOURCE_TYPE_DATABASE,
             vfs_name=db_name,
         )
         entries.append((db_name, entry))
@@ -106,14 +99,14 @@ async def _list_kind_dir(
         if listing.entries is not None:
             return listing.entries
     names = await list_collections(accessor.client, database, kind=kind)
-    base = f"{prefix}/{database}/{_KIND_TO_DIR[kind]}"
+    base = f"{prefix}/{database}/{KIND_TO_DIR[kind]}"
     entries: list[tuple[str, IndexEntry]] = []
     out: list[str] = []
     for name in names:
         entry = IndexEntry(
             id=name,
             name=name,
-            resource_type=_KIND_RESOURCE_TYPE[kind],
+            resource_type=KIND_TO_RESOURCE_TYPE[kind],
             vfs_name=name,
         )
         entries.append((name, entry))

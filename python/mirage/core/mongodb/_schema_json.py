@@ -17,6 +17,7 @@ from mirage.core.mongodb._client import (count_documents, get_index_stats,
                                          get_indexes, get_validator, is_view,
                                          list_collections)
 from mirage.core.mongodb._sampler import sample_field_types
+from mirage.core.mongodb.types import PRIMARY_KEY, EntityKind
 
 
 def _index_type(idx: dict) -> str:
@@ -73,10 +74,10 @@ async def build_collection_schema_json(
     return {
         "database": database,
         "name": collection,
-        "kind": "view" if view else "collection",
+        "kind": EntityKind.VIEW if view else EntityKind.COLLECTION,
         "validator": validator,
         "fields": fields,
-        "primary_key": "_id",
+        "primary_key": PRIMARY_KEY,
         "indexes": enriched_indexes,
         "document_count": doc_count,
         "sampled": sample_size,
