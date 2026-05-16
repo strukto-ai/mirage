@@ -45,7 +45,7 @@ def accessor():
 @pytest.mark.asyncio
 async def test_schema_captures_jsonschema_validator(accessor):
     s = await build_collection_schema_json(accessor, "mirage_test",
-                                            "with_validator")
+                                           "with_validator")
     assert s["kind"] == "collection"
     assert s["validator"]["bsonType"] == "object"
     assert "title" in s["validator"]["required"]
@@ -55,7 +55,7 @@ async def test_schema_captures_jsonschema_validator(accessor):
 @pytest.mark.asyncio
 async def test_schema_recognizes_fixed_length_embedding_array(accessor):
     s = await build_collection_schema_json(accessor, "mirage_test",
-                                            "embeddings")
+                                           "embeddings")
     vec = next(f for f in s["fields"] if f["path"] == "vector")
     assert vec["types"] == {"array<double>(1024)": 1.0}
 
@@ -63,7 +63,7 @@ async def test_schema_recognizes_fixed_length_embedding_array(accessor):
 @pytest.mark.asyncio
 async def test_schema_tags_text_index_and_returns_indexstats(accessor):
     s = await build_collection_schema_json(accessor, "mirage_test",
-                                            "text_indexed")
+                                           "text_indexed")
     by_name = {idx["name"]: idx for idx in s["indexes"]}
     assert by_name["title_body_text"]["type"] == "text"
     assert "ops" in by_name["title_body_text"]["stats"]
@@ -73,7 +73,7 @@ async def test_schema_tags_text_index_and_returns_indexstats(accessor):
 @pytest.mark.asyncio
 async def test_schema_view_marks_kind_and_skips_indexes(accessor):
     s = await build_collection_schema_json(accessor, "mirage_test",
-                                            "high_rated_films")
+                                           "high_rated_films")
     assert s["kind"] == "view"
     assert s["indexes"] == []
     assert s["document_count"] == 40
@@ -82,9 +82,9 @@ async def test_schema_view_marks_kind_and_skips_indexes(accessor):
 @pytest.mark.asyncio
 async def test_schema_heterogeneous_collection_surfaces_mixed_types(accessor):
     s = await build_collection_schema_json(accessor,
-                                            "mirage_test",
-                                            "heterogeneous",
-                                            sample_size=200)
+                                           "mirage_test",
+                                           "heterogeneous",
+                                           sample_size=200)
     by_path = {f["path"]: f for f in s["fields"]}
     assert "metadata.tag" in by_path
     score = by_path["score"]

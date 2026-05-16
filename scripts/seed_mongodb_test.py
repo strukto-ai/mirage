@@ -15,7 +15,6 @@
 import asyncio
 import datetime as dt
 import os
-import re
 
 from bson import Binary, Decimal128, Int64, ObjectId, Regex, Timestamp
 from dotenv import load_dotenv
@@ -38,7 +37,12 @@ BSON_TYPE_DOCS = [
     {
         "_id": ObjectId("65f0000000000000000000a2"),
         "label": "temporal",
-        "date_utc": dt.datetime(2026, 5, 15, 12, 30, 45,
+        "date_utc": dt.datetime(2026,
+                                5,
+                                15,
+                                12,
+                                30,
+                                45,
                                 tzinfo=dt.timezone.utc),
         "timestamp": Timestamp(1715774400, 1),
     },
@@ -54,14 +58,19 @@ BSON_TYPE_DOCS = [
         "metadata": {
             "tag": "alpha",
             "ratings": [4.5, 3.7, Decimal128("4.85")],
-            "nested": {"depth": 2, "leaf": ObjectId("65f0000000000000000000b1")},
+            "nested": {
+                "depth": 2,
+                "leaf": ObjectId("65f0000000000000000000b1")
+            },
         },
     },
     {
         "_id": ObjectId("65f0000000000000000000a5"),
         "label": "arrays",
-        "mixed_array": [1, "two", 3.0, True, None,
-                        {"inner": "value"}, [10, 20]],
+        "mixed_array":
+        [1, "two", 3.0, True, None, {
+            "inner": "value"
+        }, [10, 20]],
         "string_array": ["alpha", "beta", "gamma"],
     },
 ]
@@ -94,14 +103,20 @@ def _embedding_doc(i: int, dim: int) -> dict:
 
 
 def _text_doc(i: int) -> dict:
-    topics = ["mongodb streaming", "vector database",
-              "filesystem mount", "agent search", "BSON encoding"]
+    topics = [
+        "mongodb streaming", "vector database", "filesystem mount",
+        "agent search", "BSON encoding"
+    ]
     return {
-        "_id": ObjectId(),
-        "i": i,
-        "title": f"article-{i}",
-        "body": f"This is article {i} about {topics[i % len(topics)]}. "
-                "It explores the topic in depth and provides examples.",
+        "_id":
+        ObjectId(),
+        "i":
+        i,
+        "title":
+        f"article-{i}",
+        "body":
+        f"This is article {i} about {topics[i % len(topics)]}. "
+        "It explores the topic in depth and provides examples.",
     }
 
 
@@ -140,15 +155,23 @@ async def seed_with_validator(db) -> int:
                 "bsonType": "object",
                 "required": ["title", "year"],
                 "properties": {
-                    "title": {"bsonType": "string"},
-                    "year": {"bsonType": "int", "minimum": 1900},
+                    "title": {
+                        "bsonType": "string"
+                    },
+                    "year": {
+                        "bsonType": "int",
+                        "minimum": 1900
+                    },
                 },
             }
         },
         validationLevel="moderate",
     )
-    docs = [{"_id": ObjectId(), "title": f"book-{i}", "year": 2000 + i}
-            for i in range(10)]
+    docs = [{
+        "_id": ObjectId(),
+        "title": f"book-{i}",
+        "year": 2000 + i
+    } for i in range(10)]
     await db.with_validator.insert_many(docs)
     return len(docs)
 
@@ -165,11 +188,26 @@ async def seed_view_source_and_view(db, n: int = 100) -> int:
     docs = [_view_source_doc(i) for i in range(n)]
     await db.view_source.insert_many(docs)
     await db.command({
-        "create": "high_rated_films",
-        "viewOn": "view_source",
+        "create":
+        "high_rated_films",
+        "viewOn":
+        "view_source",
         "pipeline": [
-            {"$match": {"rating": {"$gte": 8.0}}},
-            {"$project": {"title": 1, "year": 1, "rating": 1, "_id": 1}},
+            {
+                "$match": {
+                    "rating": {
+                        "$gte": 8.0
+                    }
+                }
+            },
+            {
+                "$project": {
+                    "title": 1,
+                    "year": 1,
+                    "rating": 1,
+                    "_id": 1
+                }
+            },
         ],
     })
     return len(docs)
@@ -180,7 +218,11 @@ async def seed_streaming_large(db, n: int = 5000) -> int:
     total = 0
     for start in range(0, n, batch_size):
         end = min(start + batch_size, n)
-        docs = [{"_id": ObjectId(), "i": i, "v": i * 2} for i in range(start, end)]
+        docs = [{
+            "_id": ObjectId(),
+            "i": i,
+            "v": i * 2
+        } for i in range(start, end)]
         await db.streaming_large.insert_many(docs)
         total += len(docs)
     return total
@@ -212,7 +254,8 @@ async def main() -> None:
     print(f"  streaming_large: {n} docs")
     result = await db.command({"listCollections": 1})
     coll_info = result["cursor"]["firstBatch"]
-    summary = sorted([(c["name"], c.get("type", "collection")) for c in coll_info])
+    summary = sorted([(c["name"], c.get("type", "collection"))
+                      for c in coll_info])
     print(f"\nFinal collections in {DB_NAME}:")
     for name, kind in summary:
         print(f"  {name:<22} ({kind})")

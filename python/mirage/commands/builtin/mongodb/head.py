@@ -65,7 +65,7 @@ async def _head_stream(source: AsyncIterator[bytes], lines: int,
 
 
 async def _head_bytes_static(data: bytes, lines: int,
-                              bytes_mode: int | None) -> AsyncIterator[bytes]:
+                             bytes_mode: int | None) -> AsyncIterator[bytes]:
     if bytes_mode is not None:
         yield data[:bytes_mode]
         return

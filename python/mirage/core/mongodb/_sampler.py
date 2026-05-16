@@ -94,7 +94,9 @@ async def sample_field_types(col, sample_size: int = 100) -> list[dict]:
         fields.append({
             "path": path,
             "presence": presence_count / total,
-            "types": {t: c / total
-                      for t, c in type_counts.items()},
+            "types": {
+                t: c / total
+                for t, c in type_counts.items()
+            },
         })
     return fields

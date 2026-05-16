@@ -14,8 +14,8 @@
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.core.mongodb._client import (count_documents, get_index_stats,
-                                          get_indexes, get_validator, is_view,
-                                          list_collections)
+                                         get_indexes, get_validator, is_view,
+                                         list_collections)
 from mirage.core.mongodb._sampler import sample_field_types
 
 

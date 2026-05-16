@@ -12,12 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from mirage.core.mongodb._client import (get_index_stats, get_indexes,
-                                          get_validator, is_view,
-                                          iter_documents)
+                                         get_validator, is_view,
+                                         iter_documents)
 
 
 class _AsyncIter:
@@ -69,7 +70,9 @@ async def test_iter_documents_applies_filter_projection_and_sort():
     async for doc in iter_documents(client,
                                     "db1",
                                     "coll1",
-                                    filter={"x": {"$gt": 0}},
+                                    filter={"x": {
+                                        "$gt": 0
+                                    }},
                                     projection={"x": 1},
                                     sort=[("_id", -1)],
                                     batch_size=50):
@@ -91,8 +94,9 @@ async def test_iter_documents_empty_yields_nothing():
 
 def _build_indexes_client(spec, indexes):
     spec_cursor = MagicMock()
-    spec_cursor.__aiter__ = lambda self: _AsyncIter([spec] if spec else []
-                                                    ).__aiter__()
+    spec_cursor.__aiter__ = lambda self: _AsyncIter([spec]
+                                                    if spec else []).__aiter__(
+                                                    )
     idx_cursor = MagicMock()
     idx_cursor.__aiter__ = lambda self: _AsyncIter(indexes).__aiter__()
     col = MagicMock()
@@ -108,7 +112,10 @@ def _build_indexes_client(spec, indexes):
 @pytest.mark.asyncio
 async def test_is_view_true_when_spec_type_view():
     client, _, db = _build_indexes_client(
-        spec={"name": "myview", "type": "view"},
+        spec={
+            "name": "myview",
+            "type": "view"
+        },
         indexes=[],
     )
     assert await is_view(client, "db1", "myview") is True
@@ -118,7 +125,10 @@ async def test_is_view_true_when_spec_type_view():
 @pytest.mark.asyncio
 async def test_is_view_false_for_regular_collection():
     client, _, _ = _build_indexes_client(
-        spec={"name": "coll1", "type": "collection"},
+        spec={
+            "name": "coll1",
+            "type": "collection"
+        },
         indexes=[],
     )
     assert await is_view(client, "db1", "coll1") is False
@@ -134,7 +144,10 @@ async def test_is_view_false_when_collection_absent():
 async def test_get_indexes_returns_indexes_for_collection():
     indexes = [{"name": "_id_", "key": {"_id": 1}}]
     client, col, db = _build_indexes_client(
-        spec={"name": "coll1", "type": "collection"},
+        spec={
+            "name": "coll1",
+            "type": "collection"
+        },
         indexes=indexes,
     )
     out = await get_indexes(client, "db1", "coll1")
@@ -145,8 +158,9 @@ async def test_get_indexes_returns_indexes_for_collection():
 
 def _build_validator_client(spec):
     spec_cursor = MagicMock()
-    spec_cursor.__aiter__ = lambda self: _AsyncIter([spec] if spec else []
-                                                    ).__aiter__()
+    spec_cursor.__aiter__ = lambda self: _AsyncIter([spec]
+                                                    if spec else []).__aiter__(
+                                                    )
     db = MagicMock()
     db.list_collections = AsyncMock(return_value=spec_cursor)
     client = MagicMock()
@@ -200,9 +214,20 @@ def _build_indexstats_client(rows):
 @pytest.mark.asyncio
 async def test_get_index_stats_returns_map_keyed_by_name():
     rows = [
-        {"name": "_id_", "accesses": {"ops": 1234, "since": "2026-01-01"}},
-        {"name": "title_text",
-         "accesses": {"ops": 5678, "since": "2026-02-01"}},
+        {
+            "name": "_id_",
+            "accesses": {
+                "ops": 1234,
+                "since": "2026-01-01"
+            }
+        },
+        {
+            "name": "title_text",
+            "accesses": {
+                "ops": 5678,
+                "since": "2026-02-01"
+            }
+        },
     ]
     client, col = _build_indexstats_client(rows)
     out = await get_index_stats(client, "db1", "coll1")
@@ -221,7 +246,10 @@ async def test_get_index_stats_empty_when_view():
 @pytest.mark.asyncio
 async def test_get_indexes_returns_empty_for_view_without_listing():
     client, col, db = _build_indexes_client(
-        spec={"name": "myview", "type": "view"},
+        spec={
+            "name": "myview",
+            "type": "view"
+        },
         indexes=[],
     )
     out = await get_indexes(client, "db1", "myview")

@@ -41,8 +41,8 @@ def index():
 
 @pytest.fixture
 def accessor():
-    return MongoDBAccessor(
-        config=MongoDBConfig(uri="mongodb://localhost:27017"))
+    return MongoDBAccessor(config=MongoDBConfig(
+        uri="mongodb://localhost:27017"))
 
 
 def _patched_iter(docs):
@@ -58,8 +58,14 @@ def _path(s: str) -> PathSpec:
 async def test_read_documents_returns_extended_json_jsonl(accessor, index):
     oid = ObjectId()
     docs = [
-        {"_id": oid, "title": "Movie 1"},
-        {"_id": ObjectId(), "title": "Movie 2"},
+        {
+            "_id": oid,
+            "title": "Movie 1"
+        },
+        {
+            "_id": ObjectId(),
+            "title": "Movie 2"
+        },
     ]
     with _patched_iter(docs):
         result = await read(accessor, _path(DOCS_PATH), index)
@@ -110,8 +116,13 @@ async def test_read_schema_json_returns_jsonschema_payload(accessor, index):
 async def test_read_database_json_returns_payload(accessor, index):
     payload = {
         "database": "sample_mflix",
-        "collections": [{"name": "movies", "document_count": 100}],
-        "views": [{"name": "top_rated"}],
+        "collections": [{
+            "name": "movies",
+            "document_count": 100
+        }],
+        "views": [{
+            "name": "top_rated"
+        }],
     }
     with patch("mirage.core.mongodb.read.build_database_json",
                new=AsyncMock(return_value=payload)):

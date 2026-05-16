@@ -26,8 +26,8 @@ from mirage.types import PathSpec
 
 @pytest.fixture
 def accessor():
-    return MongoDBAccessor(
-        config=MongoDBConfig(uri="mongodb://localhost:27017"))
+    return MongoDBAccessor(config=MongoDBConfig(
+        uri="mongodb://localhost:27017"))
 
 
 def _path(s: str = "/db1/collections/coll1/documents.jsonl") -> PathSpec:
@@ -54,10 +54,9 @@ async def test_head_default_returns_first_10_lines(accessor):
             consumed.append(i)
             yield {"_id": ObjectId(), "i": i}
 
-    with patch("mirage.core.mongodb.stream.iter_documents",
-               new=_fake), patch(
-                   "mirage.commands.builtin.mongodb.head.resolve_glob",
-                   new=AsyncMock(return_value=[_path()])):
+    with patch("mirage.core.mongodb.stream.iter_documents", new=_fake), patch(
+            "mirage.commands.builtin.mongodb.head.resolve_glob",
+            new=AsyncMock(return_value=[_path()])):
         source, _ = await head(accessor, [_path()])
         data = await _drain(source)
     lines = [line for line in data.decode().split("\n") if line]
@@ -74,10 +73,9 @@ async def test_head_n5_short_circuits_after_5_docs(accessor):
             consumed.append(i)
             yield {"_id": ObjectId(), "i": i}
 
-    with patch("mirage.core.mongodb.stream.iter_documents",
-               new=_fake), patch(
-                   "mirage.commands.builtin.mongodb.head.resolve_glob",
-                   new=AsyncMock(return_value=[_path()])):
+    with patch("mirage.core.mongodb.stream.iter_documents", new=_fake), patch(
+            "mirage.commands.builtin.mongodb.head.resolve_glob",
+            new=AsyncMock(return_value=[_path()])):
         source, _ = await head(accessor, [_path()], n="5")
         data = await _drain(source)
     lines = [line for line in data.decode().split("\n") if line]
@@ -94,10 +92,9 @@ async def test_head_output_uses_extended_json_for_oid(accessor):
         for d in docs:
             yield d
 
-    with patch("mirage.core.mongodb.stream.iter_documents",
-               new=_fake), patch(
-                   "mirage.commands.builtin.mongodb.head.resolve_glob",
-                   new=AsyncMock(return_value=[_path()])):
+    with patch("mirage.core.mongodb.stream.iter_documents", new=_fake), patch(
+            "mirage.commands.builtin.mongodb.head.resolve_glob",
+            new=AsyncMock(return_value=[_path()])):
         source, _ = await head(accessor, [_path()], n="1")
         data = await _drain(source)
     parsed = json.loads(data.decode().strip())
@@ -114,10 +111,9 @@ async def test_head_c_bytes_mode_short_circuits(accessor):
             consumed.append(i)
             yield {"_id": ObjectId(), "i": i, "filler": "x" * 100}
 
-    with patch("mirage.core.mongodb.stream.iter_documents",
-               new=_fake), patch(
-                   "mirage.commands.builtin.mongodb.head.resolve_glob",
-                   new=AsyncMock(return_value=[_path()])):
+    with patch("mirage.core.mongodb.stream.iter_documents", new=_fake), patch(
+            "mirage.commands.builtin.mongodb.head.resolve_glob",
+            new=AsyncMock(return_value=[_path()])):
         source, _ = await head(accessor, [_path()], c="50")
         data = await _drain(source)
     assert len(data) == 50

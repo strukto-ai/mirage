@@ -30,8 +30,8 @@ def index():
 
 @pytest.fixture
 def accessor():
-    return MongoDBAccessor(
-        config=MongoDBConfig(uri="mongodb://localhost:27017"))
+    return MongoDBAccessor(config=MongoDBConfig(
+        uri="mongodb://localhost:27017"))
 
 
 def _path(s: str) -> PathSpec:
@@ -67,13 +67,13 @@ async def test_readdir_collections_dir_lists_collections_only(accessor, index):
             new_callable=AsyncMock,
             return_value=["movies", "users"],
     ) as mock_list:
-        result = await readdir(accessor,
-                               _path("/sample_mflix/collections"), index)
+        result = await readdir(accessor, _path("/sample_mflix/collections"),
+                               index)
     assert "/sample_mflix/collections/movies" in result
     assert "/sample_mflix/collections/users" in result
     mock_list.assert_awaited_once_with(accessor.client,
-                                        "sample_mflix",
-                                        kind="collection")
+                                       "sample_mflix",
+                                       kind="collection")
 
 
 @pytest.mark.asyncio
@@ -83,19 +83,18 @@ async def test_readdir_views_dir_lists_views_only(accessor, index):
             new_callable=AsyncMock,
             return_value=["top_rated"],
     ) as mock_list:
-        result = await readdir(accessor, _path("/sample_mflix/views"),
-                               index)
+        result = await readdir(accessor, _path("/sample_mflix/views"), index)
     assert result == ["/sample_mflix/views/top_rated"]
     mock_list.assert_awaited_once_with(accessor.client,
-                                        "sample_mflix",
-                                        kind="view")
+                                       "sample_mflix",
+                                       kind="view")
 
 
 @pytest.mark.asyncio
 async def test_readdir_collection_entity_lists_schema_and_documents(
         accessor, index):
-    result = await readdir(accessor,
-                           _path("/sample_mflix/collections/movies"), index)
+    result = await readdir(accessor, _path("/sample_mflix/collections/movies"),
+                           index)
     assert result == [
         "/sample_mflix/collections/movies/schema.json",
         "/sample_mflix/collections/movies/documents.jsonl",
@@ -103,10 +102,9 @@ async def test_readdir_collection_entity_lists_schema_and_documents(
 
 
 @pytest.mark.asyncio
-async def test_readdir_view_entity_lists_schema_and_documents(
-        accessor, index):
-    result = await readdir(accessor,
-                           _path("/sample_mflix/views/top_rated"), index)
+async def test_readdir_view_entity_lists_schema_and_documents(accessor, index):
+    result = await readdir(accessor, _path("/sample_mflix/views/top_rated"),
+                           index)
     assert result == [
         "/sample_mflix/views/top_rated/schema.json",
         "/sample_mflix/views/top_rated/documents.jsonl",
@@ -122,8 +120,7 @@ async def test_readdir_unknown_path_raises(accessor, index):
 @pytest.mark.asyncio
 async def test_readdir_root_index_caches_databases(accessor, index):
     mock_list = AsyncMock(return_value=["db1"])
-    with patch("mirage.core.mongodb.readdir.list_databases",
-               new=mock_list):
+    with patch("mirage.core.mongodb.readdir.list_databases", new=mock_list):
         first = await readdir(accessor, _path("/"), index)
         second = await readdir(accessor, _path("/"), index)
     assert first == second

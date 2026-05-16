@@ -23,8 +23,8 @@ from mirage.resource.mongodb.config import MongoDBConfig
 
 @pytest.fixture
 def accessor():
-    return MongoDBAccessor(
-        config=MongoDBConfig(uri="mongodb://localhost:27017"))
+    return MongoDBAccessor(config=MongoDBConfig(
+        uri="mongodb://localhost:27017"))
 
 
 @pytest.mark.asyncio
@@ -67,7 +67,10 @@ async def test_build_collection_schema_json_assembles_all_sections(accessor):
 async def test_build_collection_schema_json_text_index_tagged(accessor):
     indexes = [{
         "name": "title_text",
-        "key": {"_fts": "text", "_ftsx": 1},
+        "key": {
+            "_fts": "text",
+            "_ftsx": 1
+        },
         "textIndexVersion": 3,
     }]
     with (
@@ -98,13 +101,11 @@ async def test_build_collection_schema_json_view_skips_indexes(accessor):
             patch("mirage.core.mongodb._schema_json.sample_field_types",
                   new=AsyncMock(return_value=fields)),
             patch("mirage.core.mongodb._schema_json.get_indexes",
-                  new=AsyncMock(
-                      side_effect=AssertionError(
-                          "get_indexes must not be called for views"))),
+                  new=AsyncMock(side_effect=AssertionError(
+                      "get_indexes must not be called for views"))),
             patch("mirage.core.mongodb._schema_json.get_index_stats",
-                  new=AsyncMock(
-                      side_effect=AssertionError(
-                          "get_index_stats must not be called for views"))),
+                  new=AsyncMock(side_effect=AssertionError(
+                      "get_index_stats must not be called for views"))),
             patch("mirage.core.mongodb._schema_json.count_documents",
                   new=AsyncMock(return_value=40)),
             patch("mirage.core.mongodb._schema_json.is_view",

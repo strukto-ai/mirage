@@ -25,8 +25,8 @@ from mirage.types import PathSpec
 
 @pytest.fixture
 def accessor():
-    return MongoDBAccessor(
-        config=MongoDBConfig(uri="mongodb://localhost:27017"))
+    return MongoDBAccessor(config=MongoDBConfig(
+        uri="mongodb://localhost:27017"))
 
 
 def _path(s: str = "/db1/collections/coll1/documents.jsonl") -> PathSpec:
@@ -53,10 +53,9 @@ async def test_grep_streams_and_finds_match(accessor):
         for d in docs:
             yield d
 
-    with patch("mirage.core.mongodb.stream.iter_documents",
-               new=_fake), patch(
-                   "mirage.commands.builtin.mongodb.grep.grep.resolve_glob",
-                   new=AsyncMock(return_value=[_path()])):
+    with patch("mirage.core.mongodb.stream.iter_documents", new=_fake), patch(
+            "mirage.commands.builtin.mongodb.grep.grep.resolve_glob",
+            new=AsyncMock(return_value=[_path()])):
         source, io = await grep(accessor, [_path()], "target")
         data = await _drain(source)
     text = data.decode()
@@ -74,10 +73,9 @@ async def test_grep_m1_short_circuits_after_first_match(accessor):
             tag = "FOUND" if i == 3 else "skip"
             yield {"_id": ObjectId(), "i": i, "tag": tag}
 
-    with patch("mirage.core.mongodb.stream.iter_documents",
-               new=_fake), patch(
-                   "mirage.commands.builtin.mongodb.grep.grep.resolve_glob",
-                   new=AsyncMock(return_value=[_path()])):
+    with patch("mirage.core.mongodb.stream.iter_documents", new=_fake), patch(
+            "mirage.commands.builtin.mongodb.grep.grep.resolve_glob",
+            new=AsyncMock(return_value=[_path()])):
         source, _ = await grep(accessor, [_path()], "FOUND", m="1")
         data = await _drain(source)
     assert b"FOUND" in data
@@ -92,10 +90,9 @@ async def test_grep_no_match_returns_exit_code_1(accessor):
         for d in docs:
             yield d
 
-    with patch("mirage.core.mongodb.stream.iter_documents",
-               new=_fake), patch(
-                   "mirage.commands.builtin.mongodb.grep.grep.resolve_glob",
-                   new=AsyncMock(return_value=[_path()])):
+    with patch("mirage.core.mongodb.stream.iter_documents", new=_fake), patch(
+            "mirage.commands.builtin.mongodb.grep.grep.resolve_glob",
+            new=AsyncMock(return_value=[_path()])):
         source, io = await grep(accessor, [_path()], "absent_pattern_xyz")
         _ = await _drain(source)
     assert io.exit_code == 1

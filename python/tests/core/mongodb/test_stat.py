@@ -30,8 +30,8 @@ def index():
 
 @pytest.fixture
 def accessor():
-    return MongoDBAccessor(
-        config=MongoDBConfig(uri="mongodb://localhost:27017"))
+    return MongoDBAccessor(config=MongoDBConfig(
+        uri="mongodb://localhost:27017"))
 
 
 def _path(s: str) -> PathSpec:
@@ -111,14 +111,13 @@ async def test_stat_documents_view_skips_indexes(accessor, index):
             ),
             patch(
                 "mirage.core.mongodb.stat.get_indexes",
-                new=AsyncMock(
-                    side_effect=AssertionError(
-                        "get_indexes must not be called for views")),
+                new=AsyncMock(side_effect=AssertionError(
+                    "get_indexes must not be called for views")),
             ),
     ):
         result = await stat(
-            accessor,
-            _path("/sample_mflix/views/my_view/documents.jsonl"), index)
+            accessor, _path("/sample_mflix/views/my_view/documents.jsonl"),
+            index)
     assert result.type == FileType.TEXT
     assert result.extra["kind"] == "view"
     assert result.extra["indexes"] == []
@@ -127,9 +126,9 @@ async def test_stat_documents_view_skips_indexes(accessor, index):
 
 @pytest.mark.asyncio
 async def test_stat_schema_json(accessor, index):
-    result = await stat(
-        accessor, _path("/sample_mflix/collections/movies/schema.json"),
-        index)
+    result = await stat(accessor,
+                        _path("/sample_mflix/collections/movies/schema.json"),
+                        index)
     assert result.type == FileType.TEXT
     assert result.name == "schema.json"
     assert result.extra["kind"] == "collection"
@@ -138,8 +137,7 @@ async def test_stat_schema_json(accessor, index):
 
 @pytest.mark.asyncio
 async def test_stat_database_json(accessor, index):
-    result = await stat(accessor, _path("/sample_mflix/database.json"),
-                        index)
+    result = await stat(accessor, _path("/sample_mflix/database.json"), index)
     assert result.type == FileType.TEXT
     assert result.name == "database.json"
     assert result.extra["database"] == "sample_mflix"

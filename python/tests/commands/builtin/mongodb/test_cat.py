@@ -26,8 +26,8 @@ from mirage.types import PathSpec
 
 @pytest.fixture
 def accessor():
-    return MongoDBAccessor(
-        config=MongoDBConfig(uri="mongodb://localhost:27017"))
+    return MongoDBAccessor(config=MongoDBConfig(
+        uri="mongodb://localhost:27017"))
 
 
 def _path(s: str = "/db1/collections/coll1/documents.jsonl") -> PathSpec:
@@ -53,10 +53,9 @@ async def test_cat_streams_all_docs_as_extended_json(accessor):
         for d in docs:
             yield d
 
-    with patch("mirage.core.mongodb.stream.iter_documents",
-               new=_fake), patch(
-                   "mirage.commands.builtin.mongodb.cat.resolve_glob",
-                   new=AsyncMock(return_value=[_path()])):
+    with patch("mirage.core.mongodb.stream.iter_documents", new=_fake), patch(
+            "mirage.commands.builtin.mongodb.cat.resolve_glob",
+            new=AsyncMock(return_value=[_path()])):
         source, _ = await cat(accessor, [_path()])
         data = await _drain(source)
     lines = [line for line in data.decode().split("\n") if line]
@@ -75,10 +74,9 @@ async def test_cat_n_prepends_line_numbers(accessor):
         for d in docs:
             yield d
 
-    with patch("mirage.core.mongodb.stream.iter_documents",
-               new=_fake), patch(
-                   "mirage.commands.builtin.mongodb.cat.resolve_glob",
-                   new=AsyncMock(return_value=[_path()])):
+    with patch("mirage.core.mongodb.stream.iter_documents", new=_fake), patch(
+            "mirage.commands.builtin.mongodb.cat.resolve_glob",
+            new=AsyncMock(return_value=[_path()])):
         source, _ = await cat(accessor, [_path()], n=True)
         data = await _drain(source)
     lines = data.decode().splitlines()
