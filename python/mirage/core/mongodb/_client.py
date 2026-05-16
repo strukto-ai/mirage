@@ -91,6 +91,20 @@ async def count_documents(
     return await col.count_documents(filter or {})
 
 
+async def iter_inserts(
+    client: AsyncIOMotorClient,
+    database: str,
+    collection: str,
+) -> AsyncIterator[dict]:
+    col = client[database][collection]
+    pipeline = [{"$match": {"operationType": "insert"}}]
+    async with col.watch(pipeline) as stream:
+        async for change in stream:
+            doc = change.get("fullDocument")
+            if doc is not None:
+                yield doc
+
+
 async def is_view(
     client: AsyncIOMotorClient,
     database: str,

@@ -23,6 +23,8 @@ from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.mongodb.glob import resolve_glob
 from mirage.core.mongodb.read import read as mongodb_read
+from mirage.core.mongodb.scope import detect_scope
+from mirage.core.mongodb.stream import watch_stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
@@ -61,6 +63,7 @@ async def tail(
     c: str | None = None,
     q: bool = False,
     v: bool = False,
+    f: bool = False,
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -69,6 +72,8 @@ async def tail(
     if paths:
         paths = await resolve_glob(accessor, paths, index=index)
         p = paths[0]
+        if f and detect_scope(p).level == "documents":
+            return watch_stream(accessor, p, index), IOResult()
         raw = await mongodb_read(accessor, p, index)
         return _tail_result(raw, lines, plus_mode, bytes_mode), IOResult()
     raw = await _read_stdin_async(stdin)

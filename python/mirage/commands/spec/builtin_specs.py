@@ -121,6 +121,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-c", value_kind=OperandKind.TEXT),
             Option(short="-q"),
             Option(short="-v"),
+            Option(short="-f", long="--follow"),
         ),
         rest=Operand(kind=OperandKind.PATH),
     ),
