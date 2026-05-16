@@ -17,7 +17,7 @@ from collections.abc import Iterable
 
 from bson import Binary, Decimal128, Int64, ObjectId, Regex, Timestamp
 
-from mirage.core.mongodb.types import PRIMARY_KEY
+from mirage.core.mongodb.types import PRIMARY_KEY, BsonTypeTag
 
 
 def _bump(counts: dict[str, dict[str, int]], path: str, tag: str) -> None:
@@ -27,49 +27,49 @@ def _bump(counts: dict[str, dict[str, int]], path: str, tag: str) -> None:
 
 def _scalar_tag(v) -> str:
     if isinstance(v, bool):
-        return "bool"
+        return BsonTypeTag.BOOL
     if isinstance(v, Int64):
-        return "long"
+        return BsonTypeTag.LONG
     if isinstance(v, int):
-        return "int"
+        return BsonTypeTag.INT
     if isinstance(v, float):
-        return "double"
+        return BsonTypeTag.DOUBLE
     if isinstance(v, str):
-        return "string"
+        return BsonTypeTag.STRING
     if isinstance(v, ObjectId):
-        return "objectId"
+        return BsonTypeTag.OBJECT_ID
     if isinstance(v, Decimal128):
-        return "decimal"
+        return BsonTypeTag.DECIMAL
     if isinstance(v, dt.datetime):
-        return "date"
+        return BsonTypeTag.DATE
     if isinstance(v, Timestamp):
-        return "timestamp"
+        return BsonTypeTag.TIMESTAMP
     if isinstance(v, Binary):
-        return "binary"
+        return BsonTypeTag.BINARY
     if isinstance(v, Regex):
-        return "regex"
+        return BsonTypeTag.REGEX
     if v is None:
-        return "null"
+        return BsonTypeTag.NULL
     return type(v).__name__
 
 
 def _array_tag(items: Iterable) -> str:
     items = list(items)
     if not items:
-        return "array"
+        return BsonTypeTag.ARRAY
     if all(
             isinstance(x, (int, float)) and not isinstance(x, bool)
             for x in items):
-        return f"array<double>({len(items)})"
+        return f"array<{BsonTypeTag.DOUBLE}>({len(items)})"
     if all(isinstance(x, str) for x in items):
-        return "array<string>"
-    return "array"
+        return f"array<{BsonTypeTag.STRING}>"
+    return BsonTypeTag.ARRAY
 
 
 def _walk(value, prefix: str, counts: dict[str, dict[str, int]]) -> None:
     if isinstance(value, dict):
         if prefix:
-            _bump(counts, prefix, "object")
+            _bump(counts, prefix, BsonTypeTag.OBJECT)
         for k, v in value.items():
             _walk(v, f"{prefix}.{k}" if prefix else k, counts)
         return

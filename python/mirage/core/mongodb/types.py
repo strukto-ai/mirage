@@ -31,6 +31,24 @@ class EntityKind(StrEnum):
     VIEW = "view"
 
 
+class BsonTypeTag(StrEnum):
+    BOOL = "bool"
+    INT = "int"
+    LONG = "long"
+    DOUBLE = "double"
+    STRING = "string"
+    OBJECT_ID = "objectId"
+    DECIMAL = "decimal"
+    DATE = "date"
+    TIMESTAMP = "timestamp"
+    BINARY = "binary"
+    REGEX = "regex"
+    NULL = "null"
+    OBJECT = "object"
+    ARRAY = "array"
+    UNKNOWN = "unknown"
+
+
 PRIMARY_KEY = "_id"
 
 RESOURCE_TYPE_DATABASE = "mongodb/database"
