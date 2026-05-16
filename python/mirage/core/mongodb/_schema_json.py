@@ -17,13 +17,13 @@ from mirage.core.mongodb._client import (count_documents, get_index_stats,
                                          get_indexes, get_validator, is_view,
                                          list_collections)
 from mirage.core.mongodb._sampler import sample_field_types
-from mirage.core.mongodb.types import PRIMARY_KEY, EntityKind
+from mirage.core.mongodb.types import PRIMARY_KEY, EntityKind, IndexType
 
 
 def _index_type(idx: dict) -> str:
     if "textIndexVersion" in idx:
-        return "text"
-    return "btree"
+        return IndexType.TEXT
+    return IndexType.BTREE
 
 
 async def build_database_json(
