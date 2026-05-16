@@ -15,77 +15,111 @@
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import { detectScope } from './scope.ts'
+import { EntityKind, ScopeLevel } from './types.ts'
 
 function ps(p: string): PathSpec {
   return new PathSpec({ original: p, directory: p })
 }
 
-describe('detectScope (multi-db)', () => {
-  it('detects root from "/"', () => {
+describe('detectScope', () => {
+  it('returns root for "/"', () => {
     const s = detectScope(ps('/'))
-    expect(s.level).toBe('root')
+    expect(s.level).toBe(ScopeLevel.ROOT)
     expect(s.resourcePath).toBe('/')
   })
 
-  it('detects root from empty string', () => {
-    expect(detectScope(ps('')).level).toBe('root')
+  it('returns root for empty string', () => {
+    expect(detectScope(ps('')).level).toBe(ScopeLevel.ROOT)
   })
 
-  it('detects database level for /<db>', () => {
+  it('returns database level for /<db>', () => {
     const s = detectScope(ps('/app'))
-    expect(s.level).toBe('database')
+    expect(s.level).toBe(ScopeLevel.DATABASE)
     expect(s.database).toBe('app')
   })
 
-  it('detects database level with trailing slash', () => {
+  it('handles trailing slash on database path', () => {
     const s = detectScope(ps('/app/'))
-    expect(s.level).toBe('database')
+    expect(s.level).toBe(ScopeLevel.DATABASE)
     expect(s.database).toBe('app')
   })
 
-  it('detects file level for /<db>/<col>.jsonl', () => {
-    const s = detectScope(ps('/app/users.jsonl'))
-    expect(s.level).toBe('file')
-    expect(s.database).toBe('app')
-    expect(s.collection).toBe('users')
-  })
-
-  it('returns root for too-deep paths', () => {
-    expect(detectScope(ps('/app/users/extra')).level).toBe('root')
-  })
-})
-
-describe('detectScope (single-db mode)', () => {
-  it('treats "/" as the database', () => {
-    const s = detectScope(ps('/'), { singleDb: true, singleDbName: 'app' })
-    expect(s.level).toBe('database')
+  it('returns database_json for /<db>/database.json', () => {
+    const s = detectScope(ps('/app/database.json'))
+    expect(s.level).toBe(ScopeLevel.DATABASE_JSON)
     expect(s.database).toBe('app')
   })
 
-  it('treats /<col>.jsonl as a file', () => {
-    const s = detectScope(ps('/users.jsonl'), { singleDb: true, singleDbName: 'app' })
-    expect(s.level).toBe('file')
+  it('returns kind_dir for /<db>/collections', () => {
+    const s = detectScope(ps('/app/collections'))
+    expect(s.level).toBe(ScopeLevel.KIND_DIR)
     expect(s.database).toBe('app')
-    expect(s.collection).toBe('users')
+    expect(s.kind).toBe(EntityKind.COLLECTION)
   })
 
-  it('treats /<x> as still the database', () => {
-    const s = detectScope(ps('/sub'), { singleDb: true, singleDbName: 'app' })
-    expect(s.level).toBe('database')
+  it('returns kind_dir for /<db>/views', () => {
+    const s = detectScope(ps('/app/views'))
+    expect(s.level).toBe(ScopeLevel.KIND_DIR)
+    expect(s.kind).toBe(EntityKind.VIEW)
+  })
+
+  it('returns entity for /<db>/collections/<name>', () => {
+    const s = detectScope(ps('/app/collections/users'))
+    expect(s.level).toBe(ScopeLevel.ENTITY)
     expect(s.database).toBe('app')
+    expect(s.kind).toBe(EntityKind.COLLECTION)
+    expect(s.name).toBe('users')
+  })
+
+  it('returns entity for /<db>/views/<name>', () => {
+    const s = detectScope(ps('/app/views/active_users'))
+    expect(s.level).toBe(ScopeLevel.ENTITY)
+    expect(s.kind).toBe(EntityKind.VIEW)
+    expect(s.name).toBe('active_users')
+  })
+
+  it('returns schema_json for documents-deep schema.json', () => {
+    const s = detectScope(ps('/app/collections/users/schema.json'))
+    expect(s.level).toBe(ScopeLevel.SCHEMA_JSON)
+    expect(s.kind).toBe(EntityKind.COLLECTION)
+    expect(s.name).toBe('users')
+  })
+
+  it('returns documents for documents-deep documents.jsonl', () => {
+    const s = detectScope(ps('/app/collections/users/documents.jsonl'))
+    expect(s.level).toBe(ScopeLevel.DOCUMENTS)
+    expect(s.kind).toBe(EntityKind.COLLECTION)
+    expect(s.name).toBe('users')
+  })
+
+  it('returns documents for a view documents.jsonl', () => {
+    const s = detectScope(ps('/app/views/active_users/documents.jsonl'))
+    expect(s.level).toBe(ScopeLevel.DOCUMENTS)
+    expect(s.kind).toBe(EntityKind.VIEW)
+  })
+
+  it('returns unknown for unrecognized 2-part paths', () => {
+    expect(detectScope(ps('/app/something')).level).toBe(ScopeLevel.UNKNOWN)
+  })
+
+  it('returns unknown for too-deep paths', () => {
+    expect(detectScope(ps('/a/collections/b/documents.jsonl/extra')).level).toBe(
+      ScopeLevel.UNKNOWN,
+    )
   })
 })
 
 describe('detectScope (path prefix)', () => {
   it('strips mount prefix before detection', () => {
     const path = new PathSpec({
-      original: '/mongo/app/users.jsonl',
-      directory: '/mongo/app/',
+      original: '/mongo/app/collections/users/documents.jsonl',
+      directory: '/mongo/app/collections/users/',
       prefix: '/mongo',
     })
     const s = detectScope(path)
-    expect(s.level).toBe('file')
+    expect(s.level).toBe(ScopeLevel.DOCUMENTS)
     expect(s.database).toBe('app')
-    expect(s.collection).toBe('users')
+    expect(s.kind).toBe(EntityKind.COLLECTION)
+    expect(s.name).toBe('users')
   })
 })
