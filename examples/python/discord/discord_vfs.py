@@ -15,6 +15,7 @@
 import asyncio
 import json
 import os
+import re
 import sys
 
 from dotenv import load_dotenv
@@ -93,6 +94,45 @@ async def main():
                         print(f"\n--- os.listdir() {d}/files ---")
                         for a in atts[:5]:
                             print(f"  {a}")
+
+                    print("\n--- os.path.isfile / isdir / exists ---")
+                    print(f"  isfile(chat.jsonl): "
+                          f"{vos.path.isfile(chat_path)}")
+                    print(f"  isdir(files/): "
+                          f"{vos.path.isdir(files_dir)}")
+                    print(f"  exists(bogus): "
+                          f"{vos.path.exists(f'{ch_dir}/{d}/nope.txt')}")
+
+                    print(f"\n--- os.stat {d}/chat.jsonl ---")
+                    st = vos.stat(chat_path)
+                    print(f"  type={st.type} size={st.size}")
+
+                    if atts:
+                        att_path = f"{files_dir}/{atts[0]}"
+                        print(f"\n--- os.stat {atts[0]} ---")
+                        ast = vos.stat(att_path)
+                        print(f"  type={ast.type} size={ast.size}")
+
+                        print(f"\n--- open({atts[0]}, 'rb') ---")
+                        with open(att_path, "rb") as f:
+                            blob = f.read()
+                        print(f"  bytes={len(blob)} expected={ast.size} "
+                              f"match={len(blob) == ast.size}")
+                        if ast.size is not None and len(blob) != ast.size:
+                            raise AssertionError(
+                                f"regression: open('rb') got {len(blob)} "
+                                f"bytes, expected {ast.size}")
+
+                    print("\n--- json.loads + regex search on chat.jsonl ---")
+                    pattern = re.compile(r"\S+")
+                    matches = 0
+                    for raw in lines:
+                        rec = json.loads(raw)
+                        text = rec.get("content", "") or ""
+                        if pattern.search(text):
+                            matches += 1
+                    print(f"  messages with non-whitespace content: "
+                          f"{matches}/{len(lines)}")
                     break
             else:
                 print("\n  (no messages found in recent dates)")

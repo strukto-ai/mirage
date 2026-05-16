@@ -14,6 +14,7 @@
 
 import asyncio
 import os
+import re
 
 from dotenv import load_dotenv
 
@@ -91,6 +92,28 @@ async def main():
             print(f"  {line}")
     else:
         print("  (no attachments on this date)")
+
+    # ── stat + cat first attachment (byte-exact CDN download) ──
+    if files_out:
+        first_att = files_out.splitlines()[0].strip()
+        att_path = f"{base}/{target_date}/files/{first_att}"
+
+        print(f"\n=== stat {first_att} ===")
+        r = await ws.execute(f'stat "{att_path}"')
+        stat_out = (await r.stdout_str()).strip()
+        print(f"  {stat_out[:200]}")
+        size_match = re.search(r"size=(\d+)", stat_out)
+        expected_size = int(size_match.group(1)) if size_match else None
+
+        print(f"\n=== cat {first_att} (byte-exact CDN download) ===")
+        r = await ws.execute(f'cat "{att_path}"')
+        data = await r.materialize_stdout()
+        print(f"  bytes={len(data)} expected={expected_size} "
+              f"exit={r.exit_code}")
+        if expected_size is not None and len(data) != expected_size:
+            raise AssertionError(
+                f"regression: attachment cat got {len(data)} bytes, "
+                f"expected {expected_size}")
 
     # ── grep at FILE level ────────────────────────────
     print(f"\n=== grep at FILE level: grep . {target_date}/chat.jsonl ===")
@@ -176,6 +199,21 @@ async def main():
     out = (await r.stdout_str()).strip()
     if out:
         print(f"  {out[:120]}")
+
+    # ── members ──────────────────────────────────────
+    print(f"\n=== ls /discord/{guild}/members/ | head -n 5 ===")
+    r = await ws.execute(f'ls "/discord/{guild}/members/" | head -n 5')
+    mem_out = (await r.stdout_str()).strip()
+    if mem_out:
+        for line in mem_out.splitlines():
+            print(f"  {line}")
+        first_member = mem_out.splitlines()[0].strip()
+        print(f"\n=== cat /discord/{guild}/members/{first_member} ===")
+        r = await ws.execute(f'cat "/discord/{guild}/members/{first_member}"')
+        body = (await r.stdout_str()).strip()
+        print(f"  {body[:200]}")
+    else:
+        print("  (no members visible)")
 
 
 if __name__ == "__main__":
