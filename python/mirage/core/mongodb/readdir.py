@@ -15,16 +15,17 @@
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import IndexCacheStore, IndexEntry
 from mirage.core.mongodb._client import list_collections, list_databases
-from mirage.core.mongodb.scope import MongoEntityKind, detect_scope
+from mirage.core.mongodb.scope import detect_scope
+from mirage.core.mongodb.types import EntityKind, ScopeLevel
 from mirage.types import PathSpec
 
-_KIND_TO_DIR: dict[MongoEntityKind, str] = {
-    "collection": "collections",
-    "view": "views",
+_KIND_TO_DIR: dict[EntityKind, str] = {
+    EntityKind.COLLECTION: "collections",
+    EntityKind.VIEW: "views",
 }
-_KIND_RESOURCE_TYPE: dict[MongoEntityKind, str] = {
-    "collection": "mongodb/collection",
-    "view": "mongodb/view",
+_KIND_RESOURCE_TYPE: dict[EntityKind, str] = {
+    EntityKind.COLLECTION: "mongodb/collection",
+    EntityKind.VIEW: "mongodb/view",
 }
 
 
@@ -39,10 +40,10 @@ async def readdir(
     scope = detect_scope(path)
     virtual_key = (prefix + scope.resource_path).rstrip("/") or "/"
 
-    if scope.level == "root":
+    if scope.level == ScopeLevel.ROOT:
         return await _list_root(accessor, virtual_key, index, prefix)
 
-    if scope.level == "database":
+    if scope.level == ScopeLevel.DATABASE:
         base = f"{prefix}/{scope.database}"
         return [
             f"{base}/database.json",
@@ -50,11 +51,11 @@ async def readdir(
             f"{base}/views",
         ]
 
-    if scope.level == "kind_dir":
+    if scope.level == ScopeLevel.KIND_DIR:
         return await _list_kind_dir(accessor, scope.database, scope.kind,
-                                     virtual_key, index, prefix)
+                                    virtual_key, index, prefix)
 
-    if scope.level == "entity":
+    if scope.level == ScopeLevel.ENTITY:
         base = (f"{prefix}/{scope.database}/"
                 f"{_KIND_TO_DIR[scope.kind]}/{scope.name}")
         return [
@@ -95,7 +96,7 @@ async def _list_root(
 async def _list_kind_dir(
     accessor: MongoDBAccessor,
     database: str,
-    kind: MongoEntityKind,
+    kind: EntityKind,
     virtual_key: str,
     index: IndexCacheStore | None,
     prefix: str,

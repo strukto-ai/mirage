@@ -129,6 +129,7 @@ async def ls(
                 PathSpec(
                     original=cwd.original,
                     directory=cwd.directory,
+                    prefix=cwd.prefix,
                     resolved=False,
                 )
             ]

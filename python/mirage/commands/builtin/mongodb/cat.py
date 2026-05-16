@@ -24,6 +24,7 @@ from mirage.core.mongodb.glob import resolve_glob
 from mirage.core.mongodb.read import read as mongodb_read
 from mirage.core.mongodb.scope import detect_scope
 from mirage.core.mongodb.stream import read_stream
+from mirage.core.mongodb.types import ScopeLevel
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
@@ -68,7 +69,7 @@ async def cat(
         paths = await resolve_glob(accessor, paths)
         p = paths[0]
         scope = detect_scope(p)
-        if scope.level == "documents":
+        if scope.level == ScopeLevel.DOCUMENTS:
             source = read_stream(accessor, p, index)
             io = IOResult(reads={p.strip_prefix: source},
                           cache=[p.strip_prefix])

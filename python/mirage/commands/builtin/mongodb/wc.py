@@ -22,6 +22,7 @@ from mirage.core.mongodb._client import count_documents
 from mirage.core.mongodb.glob import resolve_glob
 from mirage.core.mongodb.read import read as mongodb_read
 from mirage.core.mongodb.scope import detect_scope
+from mirage.core.mongodb.types import ScopeLevel
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
@@ -64,7 +65,7 @@ async def wc(
 
     scope = detect_scope(paths[0])
 
-    if scope.level == "documents" and scope.database and scope.name:
+    if scope.level == ScopeLevel.DOCUMENTS and scope.database and scope.name:
         if c:
             paths = await resolve_glob(accessor, paths)
             data = await mongodb_read(

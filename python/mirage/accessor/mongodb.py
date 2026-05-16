@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from mirage.accessor.base import Accessor
@@ -22,4 +24,22 @@ class MongoDBAccessor(Accessor):
 
     def __init__(self, config: MongoDBConfig) -> None:
         self.config = config
-        self.client = AsyncIOMotorClient(config.uri)
+        self._clients: dict[int, AsyncIOMotorClient] = {}
+
+    @property
+    def client(self) -> AsyncIOMotorClient:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return self._for_loop(None)
+        return self._for_loop(loop)
+
+    def _for_loop(
+            self,
+            loop: asyncio.AbstractEventLoop | None) -> AsyncIOMotorClient:
+        key = id(loop) if loop is not None else 0
+        client = self._clients.get(key)
+        if client is None:
+            client = AsyncIOMotorClient(self.config.uri)
+            self._clients[key] = client
+        return client

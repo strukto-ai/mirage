@@ -25,6 +25,7 @@ from mirage.core.mongodb.glob import resolve_glob
 from mirage.core.mongodb.read import read as mongodb_read
 from mirage.core.mongodb.scope import detect_scope
 from mirage.core.mongodb.stream import watch_stream
+from mirage.core.mongodb.types import ScopeLevel
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
@@ -72,7 +73,7 @@ async def tail(
     if paths:
         paths = await resolve_glob(accessor, paths, index=index)
         p = paths[0]
-        if f and detect_scope(p).level == "documents":
+        if f and detect_scope(p).level == ScopeLevel.DOCUMENTS:
             return watch_stream(accessor, p, index), IOResult()
         raw = await mongodb_read(accessor, p, index)
         return _tail_result(raw, lines, plus_mode, bytes_mode), IOResult()

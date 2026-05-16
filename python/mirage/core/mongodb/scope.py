@@ -13,23 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import dataclass
-from typing import Literal
 
+from mirage.core.mongodb.types import KIND_DIR_NAMES, EntityKind, ScopeLevel
 from mirage.types import PathSpec
-
-MongoEntityKind = Literal["collection", "view"]
-
-KIND_DIR_NAMES: dict[str, MongoEntityKind] = {
-    "collections": "collection",
-    "views": "view",
-}
 
 
 @dataclass
 class MongoDBScope:
-    level: str
+    level: ScopeLevel
     database: str | None = None
-    kind: MongoEntityKind | None = None
+    kind: EntityKind | None = None
     name: str | None = None
     resource_path: str = "/"
 
@@ -39,54 +32,54 @@ def detect_scope(path) -> MongoDBScope:
     key = raw.strip("/")
 
     if not key:
-        return MongoDBScope(level="root", resource_path="/")
+        return MongoDBScope(level=ScopeLevel.ROOT, resource_path="/")
 
     parts = key.split("/")
 
     if len(parts) == 1:
-        return MongoDBScope(level="database",
+        return MongoDBScope(level=ScopeLevel.DATABASE,
                             database=parts[0],
                             resource_path=raw)
 
     if len(parts) == 2:
         db, leaf = parts
         if leaf == "database.json":
-            return MongoDBScope(level="database_json",
+            return MongoDBScope(level=ScopeLevel.DATABASE_JSON,
                                 database=db,
                                 resource_path=raw)
         if leaf in KIND_DIR_NAMES:
-            return MongoDBScope(level="kind_dir",
+            return MongoDBScope(level=ScopeLevel.KIND_DIR,
                                 database=db,
                                 kind=KIND_DIR_NAMES[leaf],
                                 resource_path=raw)
-        return MongoDBScope(level="unknown", resource_path=raw)
+        return MongoDBScope(level=ScopeLevel.UNKNOWN, resource_path=raw)
 
     if len(parts) == 3:
         db, kind_seg, name = parts
         if kind_seg in KIND_DIR_NAMES:
-            return MongoDBScope(level="entity",
+            return MongoDBScope(level=ScopeLevel.ENTITY,
                                 database=db,
                                 kind=KIND_DIR_NAMES[kind_seg],
                                 name=name,
                                 resource_path=raw)
-        return MongoDBScope(level="unknown", resource_path=raw)
+        return MongoDBScope(level=ScopeLevel.UNKNOWN, resource_path=raw)
 
     if len(parts) == 4:
         db, kind_seg, name, leaf = parts
         if kind_seg in KIND_DIR_NAMES:
             kind = KIND_DIR_NAMES[kind_seg]
             if leaf == "schema.json":
-                return MongoDBScope(level="schema_json",
+                return MongoDBScope(level=ScopeLevel.SCHEMA_JSON,
                                     database=db,
                                     kind=kind,
                                     name=name,
                                     resource_path=raw)
             if leaf == "documents.jsonl":
-                return MongoDBScope(level="documents",
+                return MongoDBScope(level=ScopeLevel.DOCUMENTS,
                                     database=db,
                                     kind=kind,
                                     name=name,
                                     resource_path=raw)
-        return MongoDBScope(level="unknown", resource_path=raw)
+        return MongoDBScope(level=ScopeLevel.UNKNOWN, resource_path=raw)
 
-    return MongoDBScope(level="unknown", resource_path=raw)
+    return MongoDBScope(level=ScopeLevel.UNKNOWN, resource_path=raw)

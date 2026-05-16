@@ -30,11 +30,13 @@ from mirage.commands.spec import SPECS
 from mirage.core.mongodb._client import list_databases
 from mirage.core.mongodb.glob import resolve_glob
 from mirage.core.mongodb.read import read as mongodb_read
-from mirage.core.mongodb.stream import read_stream
 from mirage.core.mongodb.readdir import readdir as _readdir
 from mirage.core.mongodb.scope import detect_scope
-from mirage.core.mongodb.search import format_grep_results, search_database
+from mirage.core.mongodb.search import (format_grep_results, search_collection,
+                                        search_database)
 from mirage.core.mongodb.stat import stat as _stat
+from mirage.core.mongodb.stream import read_stream
+from mirage.core.mongodb.types import ScopeLevel
 from mirage.io.stream import exit_on_empty, quiet_match
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
@@ -100,8 +102,20 @@ async def grep(
     if paths:
         scope = detect_scope(paths[0])
 
-        if scope.level in ("database", "root"):
-            if scope.level == "database" and scope.database:
+        if scope.level in (ScopeLevel.ENTITY, ScopeLevel.DATABASE,
+                           ScopeLevel.ROOT):
+            entity_match = (scope.level == ScopeLevel.ENTITY and scope.database
+                            and scope.name)
+            if entity_match:
+                docs = await search_collection(
+                    accessor.client,
+                    scope.database,
+                    scope.name,
+                    pattern,
+                    limit=limit,
+                )
+                results = [(scope.database, scope.name, docs)] if docs else []
+            elif scope.level == ScopeLevel.DATABASE and scope.database:
                 results = await search_database(
                     accessor.client,
                     scope.database,

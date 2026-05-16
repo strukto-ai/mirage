@@ -20,6 +20,7 @@ from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.core.mongodb._client import iter_documents, iter_inserts
 from mirage.core.mongodb.scope import detect_scope
+from mirage.core.mongodb.types import ScopeLevel
 from mirage.types import PathSpec
 
 
@@ -57,7 +58,7 @@ async def read_stream(
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
     scope = detect_scope(path)
-    if scope.level != "documents":
+    if scope.level != ScopeLevel.DOCUMENTS:
         raise FileNotFoundError(path.original)
     elide = _elision_paths(accessor.config, scope.database, scope.name)
     async for doc in iter_documents(
@@ -80,7 +81,7 @@ async def watch_stream(
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
     scope = detect_scope(path)
-    if scope.level != "documents":
+    if scope.level != ScopeLevel.DOCUMENTS:
         raise FileNotFoundError(path.original)
     elide = _elision_paths(accessor.config, scope.database, scope.name)
     async for doc in iter_inserts(accessor.client, scope.database, scope.name):

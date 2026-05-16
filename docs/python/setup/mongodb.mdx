@@ -39,16 +39,9 @@ resource = MongoDBResource(config=config)
 ws = Workspace({"/mongodb/": resource}, mode=MountMode.READ)
 ```
 
-### Mount a single database (flat layout)
-
-```python
-config = MongoDBConfig(
-    uri=os.environ["MONGODB_URI"],
-    databases=["sample_mflix"],
-)
-resource = MongoDBResource(config=config)
-ws = Workspace({"/mongodb/": resource}, mode=MountMode.READ)
-```
+The database directory always appears in the path, even when `databases`
+filters to a single entry. The full layout is documented under
+[MongoDB Resource](/python/resource/mongodb).
 
 ## Config Reference
 

@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from mirage.core.mongodb.search import (search_collection, search_database)
+from mirage.core.mongodb.search import search_collection, search_database
 
 
 class _AsyncIter:
@@ -55,15 +55,29 @@ def _build_search_client(sampled_docs, matched_docs):
 @pytest.mark.asyncio
 async def test_search_collection_unions_string_fields_across_sampled_docs():
     sampled = [
-        {"_id": 1, "title": "Hello"},
-        {"_id": 2, "body": "World"},
-        {"_id": 3, "metadata": {"tag": "x"}},
+        {
+            "_id": 1,
+            "title": "Hello"
+        },
+        {
+            "_id": 2,
+            "body": "World"
+        },
+        {
+            "_id": 3,
+            "metadata": {
+                "tag": "x"
+            }
+        },
     ]
     matched = [{"_id": 2, "body": "World matches"}]
     client, col = _build_search_client(sampled, matched)
     with patch("mirage.core.mongodb.search.get_indexes",
                new=AsyncMock(return_value=[])):
-        out = await search_collection(client, "db1", "coll1", "World",
+        out = await search_collection(client,
+                                      "db1",
+                                      "coll1",
+                                      "World",
                                       limit=10)
     assert out == matched
     filter_arg = col.find.call_args[0][0]
@@ -75,8 +89,13 @@ async def test_search_collection_unions_string_fields_across_sampled_docs():
 async def test_search_collection_uses_text_when_textIndexVersion_present():
     indexes = [{
         "name": "title_text",
-        "key": {"_fts": "text", "_ftsx": 1},
-        "weights": {"title": 1},
+        "key": {
+            "_fts": "text",
+            "_ftsx": 1
+        },
+        "weights": {
+            "title": 1
+        },
         "textIndexVersion": 3,
     }]
     client, col = _build_search_client([], [{"_id": 1}])
@@ -87,14 +106,18 @@ async def test_search_collection_uses_text_when_textIndexVersion_present():
 
 
 @pytest.mark.asyncio
-async def test_search_collection_no_string_fields_uses_empty_filter():
+async def test_search_collection_no_string_fields_returns_no_results():
     sampled = [{"_id": 1, "n": 42}, {"_id": 2, "n": 7}]
     client, col = _build_search_client(sampled, [])
     with patch("mirage.core.mongodb.search.get_indexes",
                new=AsyncMock(return_value=[])):
-        await search_collection(client, "db1", "coll1", "anything", limit=10)
-    filter_arg = col.find.call_args[0][0]
-    assert filter_arg == {}
+        out = await search_collection(client,
+                                      "db1",
+                                      "coll1",
+                                      "anything",
+                                      limit=10)
+    assert out == []
+    assert col.find.call_args is None
 
 
 @pytest.mark.asyncio

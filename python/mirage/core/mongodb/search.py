@@ -56,14 +56,15 @@ async def search_collection(
     else:
         paths = await _sampled_string_paths(col)
         if not paths:
-            filter_expr = {}
-        else:
-            filter_expr = {
-                "$or": [{p: {
+            return []
+        filter_expr = {
+            "$or": [{
+                p: {
                     "$regex": pattern,
                     "$options": "i"
-                }} for p in paths]
-            }
+                }
+            } for p in paths]
+        }
     cursor = col.find(filter_expr).limit(limit)
     return await cursor.to_list(length=limit)
 
@@ -74,7 +75,7 @@ async def search_database(
     pattern: str,
     limit: int,
 ) -> list[tuple[str, str, list[dict]]]:
-    collections = await list_collections(client, database)
+    collections = await list_collections(client, database, kind="collection")
     tasks = [
         search_collection(client, database, col, pattern, limit=limit)
         for col in collections
@@ -88,7 +89,8 @@ def format_grep_results(
         results: list[tuple[str, str, list[dict]]]) -> list[str]:  # noqa: E125
     lines: list[str] = []
     for db_name, col_name, docs in results:
+        path = f"{db_name}/collections/{col_name}/documents.jsonl"
         for doc in docs:
             line_json = dumps(doc, json_options=RELAXED_JSON_OPTIONS)
-            lines.append(f"{db_name}/{col_name}.jsonl:{line_json}")
+            lines.append(f"{path}:{line_json}")
     return lines

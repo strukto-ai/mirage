@@ -22,7 +22,17 @@ from mirage.resource.mongodb import MongoDBConfig, MongoDBResource
 
 load_dotenv(".env.development")
 
-config = MongoDBConfig(uri=os.environ["MONGODB_URI"])
+DB = "mirage_test"
+COLL_HET = "heterogeneous"
+COLL_EMB = "embeddings"
+COLL_TXT = "text_indexed"
+VIEW = "high_rated_films"
+
+config = MongoDBConfig(
+    uri=os.environ["MONGODB_URI"],
+    databases=[DB],
+    elide_fields={f"{DB}.{COLL_EMB}": ["vector"]},
+)
 resource = MongoDBResource(config=config)
 
 
@@ -32,13 +42,13 @@ async def _run(ws, cmd):
     out = (await r.stdout_str()).strip()
     err = await r.stderr_str()
     if out:
-        for line in out.splitlines()[:10]:
-            print(f"  {line[:120]}")
+        for line in out.splitlines()[:8]:
+            print(f"  {line[:160]}")
         total = len(out.splitlines())
-        if total > 10:
+        if total > 8:
             print(f"  ... ({total} lines total)")
     if err:
-        print(f"  [stderr] {err.strip()[:120]}")
+        print(f"  [stderr] {err.strip()[:160]}")
     if not out and not err:
         print(f"  (empty, exit={r.exit_code})")
     return r
@@ -47,89 +57,84 @@ async def _run(ws, cmd):
 async def main():
     ws = Workspace({"/mongodb": resource}, mode=MountMode.READ)
 
+    coll_doc = f"/mongodb/{DB}/collections/{COLL_HET}/documents.jsonl"
+    coll_schema = f"/mongodb/{DB}/collections/{COLL_HET}/schema.json"
+    emb_doc = f"/mongodb/{DB}/collections/{COLL_EMB}/documents.jsonl"
+    text_doc = f"/mongodb/{DB}/collections/{COLL_TXT}/documents.jsonl"
+    view_doc = f"/mongodb/{DB}/views/{VIEW}/documents.jsonl"
+    view_schema = f"/mongodb/{DB}/views/{VIEW}/schema.json"
+    db_json = f"/mongodb/{DB}/database.json"
+
+    print("=" * 60)
+    print("DIRECTORY LISTING")
+    print("=" * 60)
     await _run(ws, "ls /mongodb/")
-    await _run(ws, "ls /mongodb/sample_mflix/")
-    await _run(ws, "tree -L 1 /mongodb/")
-
-    fp = "/mongodb/sample_mflix/movies.jsonl"
-
-    await _run(ws, f'head -n 3 "{fp}"')
-    await _run(ws, f'tail -n 3 "{fp}"')
-    await _run(ws, f'wc -l "{fp}"')
-    await _run(ws, f'stat "{fp}"')
+    await _run(ws, f"ls /mongodb/{DB}/")
+    await _run(ws, f"ls /mongodb/{DB}/collections/")
+    await _run(ws, f"ls /mongodb/{DB}/views/")
+    await _run(ws, f"ls /mongodb/{DB}/collections/{COLL_HET}/")
+    await _run(ws, f"tree -L 3 /mongodb/{DB}/")
 
     print("\n" + "=" * 60)
-    print("GREP at different scopes")
+    print("CAT (database.json, schema.json, documents.jsonl)")
     print("=" * 60)
-
-    await _run(ws, f'grep Godfather "{fp}"')
-
-    await _run(ws, f'grep -c Godfather "{fp}"')
-
-    await _run(ws, 'grep Godfather "/mongodb/sample_mflix/"')
-
-    await _run(ws, 'grep Godfather "/mongodb/"')
+    await _run(ws, f'cat "{db_json}"')
+    await _run(ws, f'cat "{coll_schema}"')
+    await _run(ws, f'cat "{view_schema}"')
 
     print("\n" + "=" * 60)
-    print("RG at database scope")
+    print("HEAD / TAIL / WC / STAT")
     print("=" * 60)
-
-    await _run(ws, 'rg Godfather "/mongodb/sample_mflix/"')
-
-    print("\n>>> native search across all dbs:")
-    await _run(ws, 'rg Godfather /mongodb/')
+    await _run(ws, f'head -n 3 "{coll_doc}"')
+    await _run(ws, f'tail -n 3 "{coll_doc}"')
+    await _run(ws, f'wc -l "{coll_doc}"')
+    await _run(ws, f'stat "{coll_doc}"')
+    await _run(ws, f'head -n 2 "{view_doc}"')
 
     print("\n" + "=" * 60)
-    print("JQ at different granularities")
+    print("ELIDE_FIELDS in action (embedding dropped from output)")
     print("=" * 60)
-
-    await _run(ws, f'jq ".[] | .title" "{fp}" | head -n 5')
-
-    await _run(ws, f'jq -r ".[] | .title" "{fp}" | head -n 5')
-
-    await _run(
-        ws,
-        f'jq -r ".[] | select(.year > 2000) | .title" "{fp}"'
-        " | head -n 5",
-    )
-
-    await _run(
-        ws,
-        f'jq -r ".[] | select(.year > 1990) | .title"'
-        f' "{fp}" | head -n 5',
-    )
-
-    await _run(
-        ws,
-        f'jq -r ".[] | ._id"'
-        f' "{fp}" | head -n 5',
-    )
-
-    await _run(
-        ws,
-        'jq -r ".[] | .name" '
-        '"/mongodb/sample_mflix/users.jsonl" | head -n 5',
-    )
-
-    await _run(
-        ws,
-        'jq -r ".[] | .cuisine" '
-        '"/mongodb/sample_restaurants/restaurants.jsonl"'
-        " | sort | uniq -c | sort -rn | head -n 10",
-    )
+    await _run(ws, f'head -n 1 "{emb_doc}"')
 
     print("\n" + "=" * 60)
-    print("FIND and CD")
+    print("GREP at every scope")
     print("=" * 60)
+    await _run(ws, f'grep -c title "{coll_doc}"')
+    await _run(ws, f'grep -m 3 title "{coll_doc}"')
+    await _run(ws, f'grep mongodb "/mongodb/{DB}/collections/{COLL_TXT}/"')
+    await _run(ws, f'grep mongodb "/mongodb/{DB}/"')
+    await _run(ws, 'grep mongodb "/mongodb/"')
 
+    print("\n" + "=" * 60)
+    print("RG at db / root scope")
+    print("=" * 60)
+    await _run(ws, f'rg database "/mongodb/{DB}/"')
+    await _run(ws, 'rg database "/mongodb/"')
+
+    print("\n" + "=" * 60)
+    print("JQ on documents.jsonl")
+    print("=" * 60)
+    await _run(ws, f'jq -r ".[] | .title" "{coll_doc}" | head -n 5')
+    await _run(ws, f'jq -r \'.[] | ._id["$oid"]\' "{coll_doc}" | head -n 5')
     await _run(
-        ws,
-        'find "/mongodb/sample_mflix/" -name "*.jsonl"',
-    )
+        ws, f'jq -r ".[] | select(.year >= 2024) | .title" "{coll_doc}"'
+        " | head -n 5")
+    await _run(ws, f'jq -r ".[] | .body" "{text_doc}" | head -n 3')
 
-    await ws.execute('cd "/mongodb/sample_mflix"')
+    print("\n" + "=" * 60)
+    print("FIND")
+    print("=" * 60)
+    await _run(ws, f'find "/mongodb/{DB}/" -name "schema.json"')
+    await _run(ws, f'find "/mongodb/{DB}/" -name "documents.jsonl"')
+    await _run(ws, f'find "/mongodb/{DB}/" -maxdepth 2')
+
+    print("\n" + "=" * 60)
+    print("CD + pwd + ls + relative path read")
+    print("=" * 60)
+    await ws.execute(f'cd "/mongodb/{DB}/collections/{COLL_HET}"')
     await _run(ws, "pwd")
     await _run(ws, "ls")
+    await _run(ws, 'head -n 1 documents.jsonl')
 
 
 if __name__ == "__main__":

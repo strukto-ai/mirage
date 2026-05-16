@@ -14,6 +14,7 @@
 
 import json
 import os
+import sys
 import time
 
 from dotenv import load_dotenv
@@ -23,7 +24,11 @@ from mirage.resource.mongodb import MongoDBConfig, MongoDBResource
 
 load_dotenv(".env.development")
 
-config = MongoDBConfig(uri=os.environ["MONGODB_URI"])
+DB = "mirage_test"
+COLL = "heterogeneous"
+VIEW = "high_rated_films"
+
+config = MongoDBConfig(uri=os.environ["MONGODB_URI"], databases=[DB])
 resource = MongoDBResource(config=config)
 
 with Workspace(
@@ -36,56 +41,70 @@ with Workspace(
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
 
-    print("--- os.listdir() databases ---")
-    databases = os.listdir(f"{mp}/mongodb")
-    for db in databases:
+    print("--- listdir() root (databases) ---")
+    for db in os.listdir(f"{mp}/mongodb"):
         print(f"  {db}")
 
-    if not databases:
-        print("no databases found")
-    else:
-        db = "sample_mflix"
-        if db not in databases:
-            db = databases[0]
+    print(f"\n--- listdir() /mongodb/{DB} (entities) ---")
+    for entry in os.listdir(f"{mp}/mongodb/{DB}"):
+        print(f"  {entry}")
 
-        print(f"\n--- os.listdir() {db} collections ---")
-        collections = os.listdir(f"{mp}/mongodb/{db}")
-        for col in collections:
-            print(f"  {col}")
+    print(f"\n--- listdir() /mongodb/{DB}/collections ---")
+    for col in os.listdir(f"{mp}/mongodb/{DB}/collections"):
+        print(f"  {col}")
 
-        if collections:
-            target = None
-            for col in collections:
-                if "movies" in col:
-                    target = col
-                    break
-            if not target:
-                target = collections[0]
+    print(f"\n--- listdir() /mongodb/{DB}/views ---")
+    for v in os.listdir(f"{mp}/mongodb/{DB}/views"):
+        print(f"  {v}")
 
-            path = f"{mp}/mongodb/{db}/{target}"
-            print(f"\n--- open() + read {target} ---")
-            with open(path) as f:
-                text = f.read().strip()
-            if text:
-                lines = text.splitlines()
-                print(f"  documents: {len(lines)}")
-                for line in lines[:5]:
-                    try:
-                        doc = json.loads(line)
-                        title = doc.get("title", doc.get("name", "?"))
-                        print(f"  {title}")
-                    except json.JSONDecodeError:
-                        print(f"  {line[:80]}")
-            else:
-                print("  (empty)")
+    print(f"\n--- listdir() /mongodb/{DB}/collections/{COLL} (entity) ---")
+    for entry in os.listdir(f"{mp}/mongodb/{DB}/collections/{COLL}"):
+        print(f"  {entry}")
+
+    print("\n--- open() database.json ---")
+    with open(f"{mp}/mongodb/{DB}/database.json") as f:
+        db_meta = json.loads(f.read())
+    print(f"  collections: {len(db_meta.get('collections', []))}")
+    print(f"  views: {len(db_meta.get('views', []))}")
+
+    print(f"\n--- open() schema.json for {COLL} ---")
+    with open(f"{mp}/mongodb/{DB}/collections/{COLL}/schema.json") as f:
+        schema = json.loads(f.read())
+    print(f"  kind: {schema.get('kind')}")
+    print(f"  fields: {len(schema.get('fields', []))}")
+    print(f"  indexes: {len(schema.get('indexes', []))}")
+
+    print(f"\n--- open() + read documents.jsonl for {COLL} ---")
+    path = f"{mp}/mongodb/{DB}/collections/{COLL}/documents.jsonl"
+    with open(path) as f:
+        text = f.read().strip()
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    print(f"  documents: {len(lines)}")
+    for line in lines[:3]:
+        doc = json.loads(line)
+        print(f"  {doc.get('title', '?')}")
+
+    print(f"\n--- open() + read view documents for {VIEW} ---")
+    view_path = f"{mp}/mongodb/{DB}/views/{VIEW}/documents.jsonl"
+    with open(view_path) as f:
+        view_text = f.read().strip()
+    view_lines = [ln for ln in view_text.splitlines() if ln.strip()]
+    print(f"  documents: {len(view_lines)}")
+    for line in view_lines[:3]:
+        doc = json.loads(line)
+        print(f"  {doc.get('title', '?')} (rating={doc.get('rating', '?')})")
 
     print(f"\n>>> FUSE mounted at: {mp}")
-    print(">>> Open another terminal and run:")
-    print(f">>>   ls {mp}/mongodb/")
-    print(f">>>   cat {mp}/mongodb/sample_mflix/movies.jsonl"
-          " | head -n 5")
-    print(">>> Press Enter to unmount and exit...")
-    input()
+    print(">>> Open another terminal and try:")
+    print(f">>>   ls {mp}/mongodb/{DB}/collections/")
+    print(
+        f">>>   head -n 3 {mp}/mongodb/{DB}/collections/{COLL}/documents.jsonl"
+    )
+    if sys.stdin.isatty():
+        print(">>> Press Enter to unmount and exit...")
+        input()
+    else:
+        print(">>> (non-interactive: unmounting now)")
 
     records = ws.ops.records
     total = sum(r.bytes for r in records)

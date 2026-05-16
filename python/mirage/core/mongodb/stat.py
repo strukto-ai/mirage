@@ -15,7 +15,8 @@
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.core.mongodb._client import count_documents, get_indexes, is_view
-from mirage.core.mongodb.scope import MongoEntityKind, detect_scope
+from mirage.core.mongodb.scope import detect_scope
+from mirage.core.mongodb.types import EntityKind, ScopeLevel
 from mirage.types import FileStat, FileType, PathSpec
 
 
@@ -28,26 +29,29 @@ async def stat(
         path = PathSpec(original=path, directory=path)
     scope = detect_scope(path)
 
-    if scope.level == "root":
+    if scope.level == ScopeLevel.ROOT:
         return FileStat(name="/", type=FileType.DIRECTORY)
 
-    if scope.level == "database":
+    if scope.level == ScopeLevel.DATABASE:
         return FileStat(
             name=scope.database,
             type=FileType.DIRECTORY,
             extra={"database": scope.database},
         )
 
-    if scope.level == "kind_dir":
+    if scope.level == ScopeLevel.KIND_DIR:
         return FileStat(
             name=_kind_dir_name(scope.kind),
             type=FileType.DIRECTORY,
-            extra={"database": scope.database, "kind": scope.kind},
+            extra={
+                "database": scope.database,
+                "kind": scope.kind
+            },
         )
 
-    if scope.level == "entity":
+    if scope.level == ScopeLevel.ENTITY:
         doc_count = await count_documents(accessor.client, scope.database,
-                                           scope.name)
+                                          scope.name)
         return FileStat(
             name=scope.name,
             type=FileType.DIRECTORY,
@@ -59,11 +63,11 @@ async def stat(
             },
         )
 
-    if scope.level == "documents":
+    if scope.level == ScopeLevel.DOCUMENTS:
         return await _documents_stat(accessor, scope.database, scope.kind,
-                                      scope.name)
+                                     scope.name)
 
-    if scope.level == "schema_json":
+    if scope.level == ScopeLevel.SCHEMA_JSON:
         return FileStat(
             name="schema.json",
             type=FileType.TEXT,
@@ -74,7 +78,7 @@ async def stat(
             },
         )
 
-    if scope.level == "database_json":
+    if scope.level == ScopeLevel.DATABASE_JSON:
         return FileStat(
             name="database.json",
             type=FileType.TEXT,
@@ -84,17 +88,18 @@ async def stat(
     raise FileNotFoundError(path.original)
 
 
-def _kind_dir_name(kind: MongoEntityKind) -> str:
-    return "collections" if kind == "collection" else "views"
+def _kind_dir_name(kind: EntityKind) -> str:
+    return "collections" if kind == EntityKind.COLLECTION else "views"
 
 
 async def _documents_stat(
     accessor: MongoDBAccessor,
     database: str,
-    kind: MongoEntityKind,
+    kind: EntityKind,
     name: str,
 ) -> FileStat:
-    view = kind == "view" or await is_view(accessor.client, database, name)
+    view = (kind == EntityKind.VIEW
+            or await is_view(accessor.client, database, name))
     doc_count = await count_documents(accessor.client, database, name)
     if view:
         index_info: list[dict] = []

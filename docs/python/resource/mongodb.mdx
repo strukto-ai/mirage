@@ -20,29 +20,39 @@ config = MongoDBConfig(
     default_doc_limit=1000,
     default_search_limit=100,
     max_doc_limit=5000,
+    elide_fields={"sample_mflix.movies": ["plot_embedding"]},
 )
 resource = MongoDBResource(config=config)
 ws = Workspace({"/mongodb": resource}, mode=MountMode.READ)
 ```
 
-| Config field           | Required | Default | Description                                        |
-| ---------------------- | -------- | ------- | -------------------------------------------------- |
-| `uri`                  | yes      |         | MongoDB connection URI                             |
-| `databases`            | no       |         | List of database names to mount (omit for all)     |
-| `default_doc_limit`    | no       | 1000    | Default doc cap for `cat`, `jq`, file-level `grep` |
-| `default_search_limit` | no       | 100     | Default result cap for collection/db-level `grep`  |
-| `max_doc_limit`        | no       | 5000    | Hard cap for `head -n K` / `tail -n K`             |
+| Config field           | Required | Default | Description                                                                |
+| ---------------------- | -------- | ------- | -------------------------------------------------------------------------- |
+| `uri`                  | yes      |         | MongoDB connection URI                                                     |
+| `databases`            | no       |         | List of database names to mount (omit for all)                             |
+| `default_doc_limit`    | no       | 1000    | Default doc cap for one-shot reads (not used by streaming `cat`)           |
+| `default_search_limit` | no       | 100     | Default result cap for collection/db-level `grep`                          |
+| `max_doc_limit`        | no       | 5000    | Hard cap for `head -n K` / `tail -n K`                                     |
+| `elide_fields`         | no       | `{}`    | `{"<db>.<coll>": ["field", "nested.path"]}`; listed fields are dropped from `documents.jsonl` |
 
 ## Filesystem Layout
 
-### All databases (databases omitted)
+The mount mirrors MongoDB's `cluster → database → collection / view`
+model. The database directory always appears in the path, even when
+`databases` filters to a single entry.
 
 ```text
 /mongodb/
   <database>/
-    <collection>.jsonl
-    ...
-  ...
+    database.json                  # collections + views + counts
+    collections/
+      <collection>/
+        schema.json                # sampled types + indexes + validator
+        documents.jsonl            # streamed BSON Extended JSON
+    views/
+      <view>/
+        schema.json                # view-aware (no indexes / validator)
+        documents.jsonl            # streamed, same format as collections
 ```
 
 Example:
@@ -50,123 +60,138 @@ Example:
 ```text
 /mongodb/
   sample_mflix/
-    movies.jsonl
-    comments.jsonl
-    users.jsonl
-    theaters.jsonl
-  sample_analytics/
-    accounts.jsonl
-    transactions.jsonl
-    customers.jsonl
-  sample_airbnb/
-    listingsAndReviews.jsonl
+    database.json
+    collections/
+      movies/
+        schema.json
+        documents.jsonl
+      comments/
+        schema.json
+        documents.jsonl
+    views/
+      top_rated_movies/
+        schema.json
+        documents.jsonl
 ```
 
-### Filtered databases
+### documents.jsonl
+
+One JSON object per line, encoded with BSON
+[Relaxed Extended JSON](https://www.mongodb.com/docs/manual/reference/mongodb-extended-json/).
+BSON-specific types round-trip through their canonical `$` wrappers:
+
+```json
+{"_id":{"$oid":"573a1390f29313caabcd4135"},"title":"Casablanca","released":{"$date":"1943-01-23T00:00:00Z"},"runtime":102}
+```
+
+`cat` / `head` / `tail` / `grep` / `jq` all stream from this file; nothing
+materializes the full collection in memory.
+
+### schema.json
+
+Generated from a 100-document `$sample`. Includes:
+
+- field path → observed BSON type frequencies (nested paths unioned across the sample)
+- indexes from `listIndexes` plus access counts from `$indexStats`
+- the `$jsonSchema` validator if one is registered
+
+Views skip the index and validator sections.
+
+### database.json
+
+Lists every collection and view under the database with their document
+counts. Useful for `cat /mongodb/<db>/database.json` to get an overview
+without recursing into each entity.
+
+### Elided fields
+
+Fields listed under `elide_fields` are dropped entirely from
+`documents.jsonl` output. The type stays documented in `schema.json`, so
+heavy fields (embeddings, large binary, raw text blobs) can be hidden
+from agent reads without losing the schema signal:
 
 ```python
 config = MongoDBConfig(
     uri=os.environ["MONGODB_URI"],
-    databases=["sample_mflix", "sample_analytics"],
+    elide_fields={
+        "sample_mflix.movies": ["plot_embedding"],
+        "rag.docs": ["metadata.embedding"],
+    },
 )
 ```
 
-```text
-/mongodb/
-  sample_mflix/
-    movies.jsonl
-    comments.jsonl
-    users.jsonl
-  sample_analytics/
-    accounts.jsonl
-    transactions.jsonl
-    customers.jsonl
-```
+Nested paths use dot notation. Elision applies to both `cat` (one-shot
+streaming reads) and `tail -f` (live change-stream follows).
 
-### Single database
+## Streaming and Limits
 
-When `databases` contains exactly one entry, the database directory
-layer is skipped:
+`cat`, `grep`, `head`, and `tail -f` consume documents lazily through a
+batched Motor cursor (or change stream); the consumer cancels to stop
+fetching. There is no truncation notice because nothing is forced into
+memory ahead of the consumer.
 
-```text
-/mongodb/
-  movies.jsonl
-  comments.jsonl
-  users.jsonl
-  theaters.jsonl
-```
-
-### Collections
-
-Each `.jsonl` file represents a collection. Each line is a JSON object
-representing one document. The `_id` field is serialized as a string.
-
-## Limits
-
-All document-reading commands enforce limits to prevent dumping huge
-collections:
-
-| Command                      | Limit behavior                                                  |
-| ---------------------------- | --------------------------------------------------------------- |
-| `cat`                        | Returns up to `default_doc_limit` docs, appends truncation note |
-| `head -n K` / `tail -n K`    | K is capped at `max_doc_limit`; server-side sort+limit          |
-| `grep` (file level)          | Inherits `default_doc_limit` when downloading                   |
-| `grep` (collection/db level) | Server-side query, capped at `default_search_limit`             |
-| `jq`                         | Inherits `default_doc_limit`                                    |
-| `wc`                         | Uses `countDocuments()` server-side - zero download             |
-| `stat`                       | Metadata only (doc count, indexes, size in extra dict)          |
-
-When a limit is hit, the output includes a truncation notice:
-
-```text
-[truncated: showing 1000/125000 documents]
-```
+| Command                      | Behavior                                                          |
+| ---------------------------- | ----------------------------------------------------------------- |
+| `cat`                        | Streams the whole collection sorted by `_id`; pipe to `head` to cap |
+| `head -n K` / `tail -n K`    | K is capped at `max_doc_limit`; server-side sort + limit          |
+| `tail -f`                    | Opens a change stream; yields each new insert as a JSONL line     |
+| `grep` (file level)          | Streams from `documents.jsonl`; supports `-m` for short-circuit   |
+| `grep` (collection/db level) | Server-side query, capped at `default_search_limit`               |
+| `jq`                         | Inherits the streaming `cat` source                               |
+| `wc`                         | Uses `countDocuments()` server-side; zero download                |
+| `stat`                       | Metadata only (doc count, indexes; views skip the index lookup)   |
 
 ## Smart Commands
 
 ### grep at different scopes
 
 `grep` uses MongoDB's query engine at directory scopes instead of
-downloading documents:
+streaming all documents through the regex pipeline:
 
 ```bash
-# FILE level - downloads docs (up to default_doc_limit), greps locally
-grep "Godfather" "/mongodb/sample_mflix/movies.jsonl"
+# FILE level - streams documents.jsonl, runs the regex locally
+grep "Godfather" "/mongodb/sample_mflix/collections/movies/documents.jsonl"
 
-# COLLECTION level - uses MongoDB query engine
+# COLLECTION level - server-side query against the collection
+grep "Godfather" "/mongodb/sample_mflix/collections/movies/"
+
+# DATABASE level - searches across every collection in sample_mflix
 grep "Godfather" "/mongodb/sample_mflix/"
 
-# DATABASE level - searches across all collections in sample_mflix
-grep "Godfather" "/mongodb/sample_mflix/"
-
-# ROOT level (all databases) - searches across all databases
+# ROOT level - fans out across every mounted database
 grep "Godfather" "/mongodb/"
 ```
 
-At collection or higher scope, the resource automatically picks the best
-server-side search strategy based on available indexes:
+At collection or higher scope the resource picks the best server-side
+strategy from the indexes available:
 
-1. **Text index exists** → uses `$text` query (fast, ranked by relevance)
-1. **Atlas Search index exists** → uses `$search` aggregation (fuzzy, Lucene-based)
-1. **Neither** → falls back to `$regex` on string fields (still server-side, no download)
+1. **Text index exists** → uses `$text` (ranked by relevance)
+1. **Atlas Search index exists** → uses `$search` (fuzzy, Lucene-based)
+1. **Neither** → falls back to `$regex` on sampled string fields
 
 Scope detection is handled by `mirage/core/mongodb/scope.py`.
 
-### head / tail
+### head / tail / tail -f
 
-`head` and `tail` use MongoDB's `sort` + `limit` instead of downloading
-documents. The requested count is capped at `max_doc_limit`:
+`head` and `tail` use server-side `sort` + `limit`; the requested count
+is capped at `max_doc_limit`. `tail -f` opens a Mongo change stream
+filtered to insert events and yields each new document as a JSONL line
+in the same format as `cat`:
 
 ```bash
-# Returns first 10 documents (sorted by _id ascending)
-head -n 10 "/mongodb/sample_mflix/movies.jsonl"
+# First 10 docs (sorted by _id ascending)
+head -n 10 "/mongodb/sample_mflix/collections/movies/documents.jsonl"
 
-# Returns last 10 documents (sorted by _id descending)
-tail -n 10 "/mongodb/sample_mflix/movies.jsonl"
+# Last 10 docs (sorted by _id descending)
+tail -n 10 "/mongodb/sample_mflix/collections/movies/documents.jsonl"
 
-# Requesting more than max_doc_limit gets capped silently
-head -n 100000 "/mongodb/sample_mflix/movies.jsonl"  # → returns max_doc_limit (5000)
+# Live-follow new inserts; consumer cancels to stop
+tail -f "/mongodb/sample_mflix/collections/movies/documents.jsonl"
 ```
+
+`tail -f` requires the cluster to be a replica set; Atlas already
+satisfies this. Views fall through to the non-streaming path because
+change streams aren't defined on views.
 
 ## Cache
 
@@ -199,21 +224,33 @@ async def main():
     r = await ws.execute("ls /mongodb/")
     print(await r.stdout_str())
 
-    # List collections in a database
+    # List the entities under a database (database.json, collections/, views/)
     r = await ws.execute("ls /mongodb/sample_mflix/")
     print(await r.stdout_str())
 
+    # List collections
+    r = await ws.execute("ls /mongodb/sample_mflix/collections/")
+    print(await r.stdout_str())
+
     # Read first 5 movies
-    r = await ws.execute('head -n 5 "/mongodb/sample_mflix/movies.jsonl"')
+    r = await ws.execute(
+        'head -n 5 "/mongodb/sample_mflix/collections/movies/documents.jsonl"')
     print(await r.stdout_str())
 
     # Read last 5 movies
-    r = await ws.execute('tail -n 5 "/mongodb/sample_mflix/movies.jsonl"')
+    r = await ws.execute(
+        'tail -n 5 "/mongodb/sample_mflix/collections/movies/documents.jsonl"')
+    print(await r.stdout_str())
+
+    # Inspect the sampled schema and indexes
+    r = await ws.execute(
+        'cat "/mongodb/sample_mflix/collections/movies/schema.json"')
     print(await r.stdout_str())
 
     # Extract titles with jq
     r = await ws.execute(
-        'jq -r ".[] | .title" "/mongodb/sample_mflix/movies.jsonl"')
+        'jq -r ".[] | .title" "/mongodb/sample_mflix/collections/movies/documents.jsonl"'
+    )
     print(await r.stdout_str())
 
     # Search across a database (uses MongoDB query engine)
@@ -221,11 +258,12 @@ async def main():
     print(await r.stdout_str())
 
     # Count documents (server-side, no download)
-    r = await ws.execute('wc -l "/mongodb/sample_mflix/movies.jsonl"')
+    r = await ws.execute(
+        'wc -l "/mongodb/sample_mflix/collections/movies/documents.jsonl"')
     print(await r.stdout_str())
 
-    # View all databases at a glance
-    r = await ws.execute("tree -L 1 /mongodb/")
+    # View the database overview without recursing
+    r = await ws.execute('cat "/mongodb/sample_mflix/database.json"')
     print(await r.stdout_str())
 
 
@@ -233,58 +271,70 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-See `examples/chat/mongodb.py` for the full working example.
+## Runnable examples
+
+Three working examples live under `examples/python/mongodb/`:
+
+- [`mongodb.py`](https://github.com/StruktoAI/mirage/blob/main/examples/python/mongodb/mongodb.py) — agent-shell workflow: `ls`, `tree`, `cat`, `head`, `tail`, `wc`, `stat`, `grep`/`rg` at every scope, `jq`, `find`, `cd` + relative paths.
+- [`mongodb_vfs.py`](https://github.com/StruktoAI/mirage/blob/main/examples/python/mongodb/mongodb_vfs.py) — in-process VFS: `os.listdir` and `open()` walk every readdir level (root, database, `collections/`, `views/`, entity) and read `database.json`, `schema.json`, `documents.jsonl` (collection + view).
+- [`mongodb_fuse.py`](https://github.com/StruktoAI/mirage/blob/main/examples/python/mongodb/mongodb_fuse.py) — same coverage as the VFS example, but the tree is mounted as a real filesystem so other processes can `cat`/`ls`/`head` the mountpoint directly.
+
+All three default to the `mirage_test` database seeded by `python/scripts/seed_mongodb_test.py`.
 
 ## Finding IDs
 
-MongoDB document `_id` fields are accessible in the JSONL output:
+`_id` is serialized as `{"$oid": "..."}` under Extended JSON:
 
 ```bash
-# List document IDs
-jq -r '.[] | ._id' "/mongodb/sample_mflix/movies.jsonl" | head -n 10
+# List the first 10 ObjectId values
+jq -r '.[] | ._id["$oid"]' \
+  "/mongodb/sample_mflix/collections/movies/documents.jsonl" | head -n 10
 
 # Find a specific document by ID
-grep "573a1390f29313caabcd4135" "/mongodb/sample_mflix/movies.jsonl"
+grep "573a1390f29313caabcd42e8" \
+  "/mongodb/sample_mflix/collections/movies/documents.jsonl"
 
-# Extract specific fields
-jq -r '.[] | "\(._id) \(.title) \(.year)"' "/mongodb/sample_mflix/movies.jsonl"
+# Extract a few fields together
+jq -r '.[] | "\(._id["$oid"]) \(.title) \(.year)"' \
+  "/mongodb/sample_mflix/collections/movies/documents.jsonl"
 ```
 
 ## Working with Large Collections
 
-Tips for efficient access on collections with many documents:
+Streaming is the default; reach for these patterns when you want to keep
+the round trip small:
 
 ```bash
-# Check document count (server-side, no download)
-wc -l "/mongodb/sample_mflix/comments.jsonl"
+# Document count (server-side, no download)
+wc -l "/mongodb/sample_mflix/collections/comments/documents.jsonl"
 
-# Read only recent documents (sorted by _id desc)
-tail -n 10 "/mongodb/sample_mflix/comments.jsonl"
+# Most recent documents (sorted by _id desc)
+tail -n 10 "/mongodb/sample_mflix/collections/comments/documents.jsonl"
 
-# Search uses MongoDB query engine at collection/database level (no download)
-grep "great movie" "/mongodb/sample_mflix/comments.jsonl"
+# Server-side query at collection scope avoids streaming the whole jsonl
+grep "love" "/mongodb/sample_mflix/collections/comments/"
 
-# Extract specific fields
-jq -r '.[] | "\(.name): \(.text)"' "/mongodb/sample_mflix/comments.jsonl" | head -n 20
-
+# Drop heavy fields via elide_fields, then take the slice you want
+head -n 20 "/mongodb/sample_mflix/collections/movies/documents.jsonl"
 ```
 
-Note: `grep`/`rg` at collection or database level uses MongoDB's query
-engine instead of downloading all documents, making it efficient even
-for large collections.
+Hide embeddings or large blobs from agent reads with `elide_fields`;
+`schema.json` still documents the original type so the agent can decide
+when to ask for the raw bytes through a different path.
 
 ## Shell Commands
 
 Standard commands available on the mounted MongoDB tree:
 
-| Command         | Notes                                                     |
-| --------------- | --------------------------------------------------------- |
-| `ls`            | List databases, collections                               |
-| `cat`           | Read collection docs (capped at `default_doc_limit`)      |
-| `head` / `tail` | Smart: server-side sort+limit (capped at `max_doc_limit`) |
-| `grep` / `rg`   | Smart: uses MongoDB query engine at collection/db scope   |
-| `jq`            | Query JSON; use `.[]` prefix for JSONL files              |
-| `wc`            | Smart: uses `countDocuments()` server-side                |
-| `stat`          | Metadata (doc count, indexes, size in extra dict)         |
-| `find`          | List databases/collections with `-name`, `-maxdepth`      |
-| `tree`          | Directory tree view                                       |
+| Command         | Notes                                                                   |
+| --------------- | ----------------------------------------------------------------------- |
+| `ls`            | List databases, collections, views, and per-entity files                |
+| `cat`           | Stream `documents.jsonl` (or read `schema.json` / `database.json`)      |
+| `head` / `tail` | Smart: server-side sort + limit (capped at `max_doc_limit`)             |
+| `tail -f`       | Live-follow new inserts via Mongo change stream                         |
+| `grep` / `rg`   | Smart: MongoDB query engine at collection/db scope, regex at file scope |
+| `jq`            | Query JSON; use `.[]` prefix when iterating JSONL files                 |
+| `wc`            | Smart: uses `countDocuments()` server-side                              |
+| `stat`          | Metadata (doc count, indexes; views skip the index lookup)              |
+| `find`          | List databases/collections/views with `-name`, `-maxdepth`              |
+| `tree`          | Directory tree view                                                     |
