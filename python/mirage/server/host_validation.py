@@ -21,7 +21,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 DEFAULT_ALLOWED_HOSTS: tuple[str, ...] = ("127.0.0.1", "localhost", "::1")
 
-ENV_VAR = "MIRAGE_ALLOWED_HOSTS"
+ENV_ALLOWED_HOSTS = "MIRAGE_ALLOWED_HOSTS"
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ def resolve_allowed_hosts(
     """
     if allowed_hosts is not None:
         return list(allowed_hosts)
-    return parse_allowed_hosts(os.environ.get(ENV_VAR))
+    return parse_allowed_hosts(os.environ.get(ENV_ALLOWED_HOSTS))
 
 
 class HostHeaderMiddleware:

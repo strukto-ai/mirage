@@ -16,6 +16,8 @@ import Fastify from 'fastify'
 import multipart from '@fastify/multipart'
 import { WorkspaceRegistry } from './registry.ts'
 import { JobTable } from './jobs.ts'
+import type { AuthConfig } from './auth/index.ts'
+import { registerAuth, resolveAuthConfig } from './auth/index.ts'
 import { isHostAllowed, resolveAllowedHosts } from './host_validation.ts'
 import { restoreAll, snapshotAll } from './persist.ts'
 import { registerExecuteRoutes } from './routers/execute.ts'
@@ -29,6 +31,7 @@ export interface BuildAppOptions {
   persistDir?: string
   onIdleExit?: () => void
   allowedHosts?: readonly string[]
+  authConfig?: AuthConfig
 }
 
 export type MirageApp = ReturnType<typeof buildApp>
@@ -74,6 +77,8 @@ export function buildApp(options: BuildAppOptions = {}) {
       done()
     })
   }
+  const authConfig = options.authConfig ?? resolveAuthConfig()
+  registerAuth(app, authConfig)
   void app.register(multipart, {
     limits: { fileSize: 10 * 1024 * 1024 * 1024 },
   })

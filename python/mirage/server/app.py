@@ -22,6 +22,8 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
+from mirage.server.auth import (AuthConfig, AuthMiddleware, AuthMode,
+                                resolve_auth_config)
 from mirage.server.host_validation import (HostHeaderMiddleware,
                                            resolve_allowed_hosts)
 from mirage.server.jobs import JobTable
@@ -94,7 +96,8 @@ async def _lifespan(app: FastAPI):
 def build_app(idle_grace_seconds: float = 30.0,
               exit_event: asyncio.Event | None = None,
               persist_dir: str | Path | None = None,
-              allowed_hosts: list[str] | None = None) -> FastAPI:
+              allowed_hosts: list[str] | None = None,
+              auth_config: AuthConfig | None = None) -> FastAPI:
     """Construct a daemon FastAPI app.
 
     The workspace registry is created eagerly so the app is usable
@@ -118,6 +121,9 @@ def build_app(idle_grace_seconds: float = 30.0,
             loopback-only (``127.0.0.1``, ``localhost``, ``::1``).
             Pass ``["*"]`` to disable enforcement (only safe behind
             a trusted reverse proxy).
+        auth_config (AuthConfig | None): bearer/JWT auth config.
+            ``None`` (default) resolves from ``MIRAGE_AUTH_MODE`` env
+            and the mode-specific ``MIRAGE_*`` env vars.
 
     Returns:
         FastAPI: configured app with all routers mounted.
@@ -126,7 +132,15 @@ def build_app(idle_grace_seconds: float = 30.0,
     hosts = resolve_allowed_hosts(allowed_hosts)
     if "*" not in hosts:
         app.add_middleware(HostHeaderMiddleware, allowed_hosts=hosts)
+    auth = auth_config if auth_config is not None else resolve_auth_config()
+    if auth.mode == AuthMode.LOCAL and auth.local_token is None:
+        logger.warning(
+            "daemon starting without bearer auth; anyone who can reach "
+            "it can drive it. Set MIRAGE_AUTH_TOKEN or use a non-local "
+            "MIRAGE_AUTH_MODE to enforce authentication.")
+    app.add_middleware(AuthMiddleware, config=auth)
     app.state.allowed_hosts = hosts
+    app.state.auth_config = auth
     app.state.started_at = time.time()
     app.state.exit_event = exit_event or asyncio.Event()
     app.state.registry = WorkspaceRegistry(

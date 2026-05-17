@@ -393,6 +393,9 @@ importers:
       fastify:
         specifier: ^5.8.5
         version: 5.8.5
+      jose:
+        specifier: ^6.2.3
+        version: 6.2.3
       yaml:
         specifier: ^2.6.0
         version: 2.8.3
@@ -3172,6 +3175,9 @@ packages:
 
   jose@6.2.2:
     resolution: {integrity: sha512-d7kPDd34KO/YnzaDOlikGpOurfF0ByC2sEV4cANCtdqLlTfBlw2p14O/5d/zv40gJPbIQxfES3nSx1/oYNyuZQ==}
+
+  jose@6.2.3:
+    resolution: {integrity: sha512-YYVDInQKFJfR/xa3ojUTl8c2KoTwiL1R5Wg9YCydwH0x0B9grbzlg5HC7mMjCtUJjbQ/YnGEZIhI5tCgfTb4Hw==}
 
   joycon@3.1.1:
     resolution: {integrity: sha512-34wB/Y7MW7bzjKRjUKTa46I2Z7eV62Rkhva+KkopW7Qvv/OSWBqvkSY7vusOPrNuZcUG3tApvdVgNB8POj3SPw==}
@@ -8453,6 +8459,8 @@ snapshots:
   isexe@2.0.0: {}
 
   jose@6.2.2: {}
+
+  jose@6.2.3: {}
 
   joycon@3.1.1: {}
 

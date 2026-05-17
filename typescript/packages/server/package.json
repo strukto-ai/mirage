@@ -53,10 +53,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@fastify/multipart": "^10.0.0",
     "@struktoai/mirage-core": "workspace:*",
     "@struktoai/mirage-node": "workspace:*",
     "fastify": "^5.8.5",
-    "@fastify/multipart": "^10.0.0",
+    "jose": "^6.2.3",
     "yaml": "^2.6.0"
   },
   "devDependencies": {

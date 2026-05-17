@@ -15,6 +15,9 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { DEFAULT_TOKEN_FILE, readTokenFile } from '@struktoai/mirage-server'
+
+import { ENV_DAEMON_URL, ENV_TOKEN } from './env.ts'
 
 export const DEFAULT_DAEMON_URL = 'http://127.0.0.1:8765'
 
@@ -28,6 +31,7 @@ export interface DaemonSettings {
 export interface LoadOptions {
   env?: Record<string, string | undefined>
   configPath?: string
+  tokenFile?: string
 }
 
 function defaultConfigPath(): string {
@@ -74,11 +78,19 @@ export function loadDaemonSettings(options: LoadOptions = {}): DaemonSettings {
     authToken: table.auth_token ?? '',
     idleGraceSeconds: Number(table.idle_grace_seconds ?? '30'),
   }
-  if (env.MIRAGE_DAEMON_URL !== undefined && env.MIRAGE_DAEMON_URL !== '') {
-    settings.url = env.MIRAGE_DAEMON_URL
+  const envUrl = env[ENV_DAEMON_URL]
+  if (envUrl !== undefined && envUrl !== '') {
+    settings.url = envUrl
   }
-  if (env.MIRAGE_TOKEN !== undefined && env.MIRAGE_TOKEN !== '') {
-    settings.authToken = env.MIRAGE_TOKEN
+  const envToken = env[ENV_TOKEN]
+  if (envToken !== undefined && envToken !== '') {
+    settings.authToken = envToken
+  }
+  if (settings.authToken === '') {
+    const fileToken = readTokenFile(options.tokenFile ?? DEFAULT_TOKEN_FILE)
+    if (fileToken !== undefined && fileToken !== '') {
+      settings.authToken = fileToken
+    }
   }
   return settings
 }

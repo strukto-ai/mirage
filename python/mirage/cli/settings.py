@@ -17,6 +17,9 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from mirage.cli.env import ENV_DAEMON_URL, ENV_TOKEN
+from mirage.server.auth import storage as auth_storage
+
 DEFAULT_DAEMON_URL = "http://127.0.0.1:8765"
 
 
@@ -65,10 +68,15 @@ def load_daemon_settings(path: Path | None = None) -> DaemonSettings:
         auth_token=str(table.get("auth_token", "")),
         idle_grace_seconds=float(table.get("idle_grace_seconds", 30.0)),
     )
-    env_url = os.environ.get("MIRAGE_DAEMON_URL")
+    env_url = os.environ.get(ENV_DAEMON_URL)
     if env_url:
         settings.url = env_url
-    env_token = os.environ.get("MIRAGE_TOKEN")
+    env_token = os.environ.get(ENV_TOKEN)
     if env_token:
         settings.auth_token = env_token
+    if not settings.auth_token:
+        file_token = auth_storage.read_token_file(
+            auth_storage.DEFAULT_TOKEN_FILE)
+        if file_token:
+            settings.auth_token = file_token
     return settings

@@ -12,12 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_DAEMON_URL, loadDaemonSettings } from './settings.ts'
 
+const ABSENT_FILE = '/nonexistent/auth_token'
+
 describe('loadDaemonSettings', () => {
   it('returns defaults when env unset and no file', () => {
-    const s = loadDaemonSettings({ env: {}, configPath: '/nonexistent/config.toml' })
+    const s = loadDaemonSettings({
+      env: {},
+      configPath: '/nonexistent/config.toml',
+      tokenFile: ABSENT_FILE,
+    })
     expect(s.url).toBe(DEFAULT_DAEMON_URL)
     expect(s.authToken).toBe('')
   })
@@ -26,6 +35,7 @@ describe('loadDaemonSettings', () => {
     const s = loadDaemonSettings({
       env: { MIRAGE_DAEMON_URL: 'http://10.0.0.1:9000' },
       configPath: '/nonexistent/config.toml',
+      tokenFile: ABSENT_FILE,
     })
     expect(s.url).toBe('http://10.0.0.1:9000')
   })
@@ -34,7 +44,24 @@ describe('loadDaemonSettings', () => {
     const s = loadDaemonSettings({
       env: { MIRAGE_TOKEN: 'secret' },
       configPath: '/nonexistent/config.toml',
+      tokenFile: ABSENT_FILE,
     })
     expect(s.authToken).toBe('secret')
+  })
+
+  it('falls back to token file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-settings-'))
+    try {
+      const tokenFile = join(dir, 'auth_token')
+      writeFileSync(tokenFile, 'from-file')
+      const s = loadDaemonSettings({
+        env: {},
+        configPath: '/nonexistent/config.toml',
+        tokenFile,
+      })
+      expect(s.authToken).toBe('from-file')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

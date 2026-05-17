@@ -10,6 +10,7 @@ export default tseslint.config(
       '**/*.d.ts',
       '**/*.config.ts',
       '**/*.config.js',
+      '**/*.setup.ts',
       '**/scripts/**',
       '**/generated/**',
     ],

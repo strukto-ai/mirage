@@ -51,6 +51,7 @@ dependencies = [
     "pillow>=12.2.0",
     "jq>=1.11.0",
     "mfusepy>=1.0.0",
+    "pyjwt[crypto]>=2.10",
 ]
 
 [project.urls]
@@ -195,4 +196,5 @@ addopts = "--cov=mirage --cov-report=term-missing -q --import-mode=importlib"
 markers = [
     "network: tests that require network access",
     "no_host_override: skip the tests/server/conftest autouse MIRAGE_ALLOWED_HOSTS=* override",
+    "no_auth_override: skip the tests/server/conftest autouse MIRAGE_AUTH_MODE=local-with-no-token override",
 ]

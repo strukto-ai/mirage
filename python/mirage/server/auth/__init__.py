@@ -12,12 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import os
+from mirage.server.auth.config import (AuthConfig, AuthMode, JWTConfig,
+                                       resolve_auth_config,
+                                       resolve_local_token)
+from mirage.server.auth.middleware import AuthMiddleware
+from mirage.server.auth.storage import (DEFAULT_TOKEN_FILE, ensure_token_file,
+                                        read_token_file)
 
-from mirage.cli.env import ENV_IDLE_GRACE_SECONDS, ENV_PERSIST_DIR
-from mirage.server import build_app
-
-_persist_dir = os.environ.get(ENV_PERSIST_DIR) or None
-_idle_grace = float(os.environ.get(ENV_IDLE_GRACE_SECONDS, "30"))
-
-app = build_app(idle_grace_seconds=_idle_grace, persist_dir=_persist_dir)
+__all__ = [
+    "AuthConfig",
+    "AuthMiddleware",
+    "AuthMode",
+    "DEFAULT_TOKEN_FILE",
+    "JWTConfig",
+    "ensure_token_file",
+    "read_token_file",
+    "resolve_auth_config",
+    "resolve_local_token",
+]

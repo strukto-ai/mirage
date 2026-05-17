@@ -17,6 +17,15 @@ import { existsSync, mkdirSync, openSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { AuthMode, DEFAULT_TOKEN_FILE, ensureTokenFile } from '@struktoai/mirage-server'
+
+import {
+  ENV_AUTH_MODE,
+  ENV_AUTH_TOKEN,
+  ENV_DAEMON_PORT,
+  ENV_IDLE_GRACE_SECONDS,
+  ENV_PERSIST_DIR,
+} from './env.ts'
 import type { DaemonSettings } from './settings.ts'
 
 const requireFromHere = createRequire(import.meta.url)
@@ -123,10 +132,14 @@ export class DaemonClient {
     for (const [k, v] of Object.entries(process.env)) {
       if (typeof v === 'string') env[k] = v
     }
-    env.MIRAGE_DAEMON_PORT = String(this.portFromUrl())
-    env.MIRAGE_IDLE_GRACE_SECONDS = String(this.settings.idleGraceSeconds)
-    if (this.settings.authToken !== '') env.MIRAGE_AUTH_TOKEN = this.settings.authToken
-    if (this.settings.persistDir !== '') env.MIRAGE_PERSIST_DIR = this.settings.persistDir
+    env[ENV_DAEMON_PORT] = String(this.portFromUrl())
+    env[ENV_IDLE_GRACE_SECONDS] = String(this.settings.idleGraceSeconds)
+    if (this.settings.authToken === '') {
+      this.settings.authToken = ensureTokenFile(DEFAULT_TOKEN_FILE)
+    }
+    env[ENV_AUTH_TOKEN] = this.settings.authToken
+    env[ENV_AUTH_MODE] ??= AuthMode.Local
+    if (this.settings.persistDir !== '') env[ENV_PERSIST_DIR] = this.settings.persistDir
     const logDir = join(homedir(), '.mirage')
     mkdirSync(logDir, { recursive: true })
     const out = openSync(join(logDir, 'daemon.log'), 'a')

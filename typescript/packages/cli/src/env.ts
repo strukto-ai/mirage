@@ -12,20 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { buildApp, type BuildAppOptions, type MirageApp } from './app.ts'
 export {
-  configToWorkspaceArgs,
-  interpolateEnv,
-  loadWorkspaceConfig,
-  type MountBlock,
-  type WorkspaceArgs,
-  type WorkspaceConfigRaw,
-} from './config.ts'
-export {
-  AuthMode,
-  DEFAULT_TOKEN_FILE,
   ENV_AUTH_MODE,
   ENV_AUTH_TOKEN,
+  ENV_DAEMON_PORT,
+  ENV_IDLE_GRACE_SECONDS,
   ENV_JWT_ALG,
   ENV_JWT_AUDIENCE,
   ENV_JWT_AUTHORIZED_PARTIES,
@@ -33,13 +24,8 @@ export {
   ENV_JWT_ISSUER,
   ENV_JWT_PUBKEY,
   ENV_JWT_PUBKEY_FILE,
-  JWTVerificationError,
-  ensureTokenFile,
-  readTokenFile,
-  registerAuth,
-  resolveAuthConfig,
-  resolveLocalToken,
-  type AuthConfig,
-  type JWTConfig,
-} from './auth/index.ts'
-export { ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS, ENV_PERSIST_DIR } from './env.ts'
+  ENV_PERSIST_DIR,
+} from '@struktoai/mirage-server'
+
+export const ENV_DAEMON_URL = 'MIRAGE_DAEMON_URL'
+export const ENV_TOKEN = 'MIRAGE_TOKEN'

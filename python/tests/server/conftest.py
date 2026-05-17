@@ -27,3 +27,21 @@ def _allow_asgi_test_host(monkeypatch, request):
     if "no_host_override" in request.keywords:
         return
     monkeypatch.setenv("MIRAGE_ALLOWED_HOSTS", "test,127.0.0.1,localhost,::1")
+
+
+@pytest.fixture(autouse=True)
+def _disable_auth_for_legacy_tests(monkeypatch, request, tmp_path_factory):
+    # Existing server tests don't send Authorization headers. With the
+    # auth middleware now installed by build_app, we keep them passing
+    # by forcing the daemon into mode=local with no token configured
+    # (env unset + token file pointed at a path that doesn't exist),
+    # which the middleware treats as "no auth" and lets every request
+    # through with a startup warning. Tests that exercise auth paths
+    # opt out with the @pytest.mark.no_auth_override marker.
+    if "no_auth_override" in request.keywords:
+        return
+    monkeypatch.setenv("MIRAGE_AUTH_MODE", "local")
+    monkeypatch.delenv("MIRAGE_AUTH_TOKEN", raising=False)
+    absent = tmp_path_factory.mktemp("notoken") / "absent"
+    monkeypatch.setattr("mirage.server.auth.storage.DEFAULT_TOKEN_FILE",
+                        absent)
