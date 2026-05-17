@@ -56,7 +56,7 @@ describe('DiscordResource integration', () => {
       if (result.exitCode !== 0) {
         throw new Error(`ls failed: ${result.stderrText} | stdout: ${result.stdoutText}`)
       }
-      expect(result.stdoutText).toContain('My_Server__G1')
+      expect(result.stdoutText).toContain('My Server__G1')
     } finally {
       await ws.close()
     }
