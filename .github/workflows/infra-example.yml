@@ -3,8 +3,18 @@ name: Examples
 "on":
   push:
     branches: [main]
+    paths:
+      - examples/**
+      - python/**
+      - typescript/**
+      - .github/workflows/infra-example.yml
   pull_request:
     branches: [main]
+    paths:
+      - examples/**
+      - python/**
+      - typescript/**
+      - .github/workflows/infra-example.yml
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

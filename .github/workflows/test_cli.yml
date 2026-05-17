@@ -3,8 +3,16 @@ name: CLI exit codes
 "on":
   push:
     branches: [main]
+    paths:
+      - python/**
+      - typescript/**
+      - .github/workflows/test_cli.yml
   pull_request:
     branches: [main]
+    paths:
+      - python/**
+      - typescript/**
+      - .github/workflows/test_cli.yml
   workflow_dispatch:
 
 concurrency:
