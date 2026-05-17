@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { sanitizeName } from './entry.ts'
+import { pathSafeName } from './entry.ts'
 
 export interface DiscordAttachment {
   id: string
@@ -31,9 +31,9 @@ export function fileBlobName(att: DiscordAttachment): string {
   if (dot >= 0 && dot < rawName.length - 1) {
     const stem = rawName.slice(0, dot)
     const ext = rawName.slice(dot + 1)
-    return `${sanitizeName(stem)}__${aid}.${ext}`
+    return `${pathSafeName(stem)}__${aid}.${ext}`
   }
-  return `${sanitizeName(rawName)}__${aid}`
+  return `${pathSafeName(rawName)}__${aid}`
 }
 
 export async function downloadFile(url: string): Promise<Uint8Array> {

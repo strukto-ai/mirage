@@ -56,16 +56,17 @@ describe('sanitizeName', () => {
 })
 
 describe('guildDirname', () => {
-  it('returns name__id', () => {
-    expect(guildDirname({ id: 'G1', name: 'My Server' })).toBe('My_Server__G1')
+  it('returns name__id with original spelling preserved', () => {
+    expect(guildDirname({ id: 'G1', name: 'My Server' })).toBe('My Server__G1')
   })
 
-  it('falls back to id when name missing', () => {
-    expect(guildDirname({ id: 'G1' })).toBe('G1__G1')
+  it('falls back to unknown when name missing', () => {
+    expect(guildDirname({ id: 'G1' })).toBe('unknown__G1')
   })
 
-  it('sanitizes the name', () => {
-    expect(guildDirname({ id: 'G2', name: 'cool!server' })).toBe('cool_server__G2')
+  it('preserves special characters except the path separator', () => {
+    expect(guildDirname({ id: 'G2', name: 'cool!server' })).toBe('cool!server__G2')
+    expect(guildDirname({ id: 'G3', name: 'A/B Test' })).toBe('A∕B Test__G3')
   })
 })
 
@@ -74,12 +75,13 @@ describe('channelDirname', () => {
     expect(channelDirname({ id: 'C123', name: 'general' })).toBe('general__C123')
   })
 
-  it('falls back to id when name missing', () => {
-    expect(channelDirname({ id: 'C456' })).toBe('C456__C456')
+  it('falls back to unknown when name missing', () => {
+    expect(channelDirname({ id: 'C456' })).toBe('unknown__C456')
   })
 
-  it('sanitizes the name', () => {
-    expect(channelDirname({ id: 'C789', name: 'eng team!' })).toBe('eng_team__C789')
+  it('preserves spaces and unicode', () => {
+    expect(channelDirname({ id: 'C789', name: 'eng team!' })).toBe('eng team!__C789')
+    expect(channelDirname({ id: 'C790', name: '🔥-deals' })).toBe('🔥-deals__C790')
   })
 })
 
@@ -88,12 +90,12 @@ describe('memberFilename', () => {
     expect(memberFilename({ id: 'M1', name: 'alice' })).toBe('alice__M1.json')
   })
 
-  it('falls back to id when name missing', () => {
-    expect(memberFilename({ id: 'M2' })).toBe('M2__M2.json')
+  it('falls back to unknown when name missing', () => {
+    expect(memberFilename({ id: 'M2' })).toBe('unknown__M2.json')
   })
 
-  it('sanitizes the name', () => {
-    expect(memberFilename({ id: 'M3', name: 'bob jones' })).toBe('bob_jones__M3.json')
+  it('preserves special characters', () => {
+    expect(memberFilename({ id: 'M3', name: 'bob jones' })).toBe('bob jones__M3.json')
   })
 })
 
@@ -104,13 +106,13 @@ describe('DiscordIndexEntry', () => {
     expect(entry.name).toBe('My Server')
     expect(entry.resourceType).toBe(DiscordResourceType.GUILD)
     expect(entry.resourceType).toBe('discord/guild')
-    expect(entry.vfsName).toBe('My_Server__G1')
+    expect(entry.vfsName).toBe('My Server__G1')
   })
 
   it('guild() handles missing name', () => {
     const entry = DiscordIndexEntry.guild({ id: 'G2' })
     expect(entry.name).toBe('')
-    expect(entry.vfsName).toBe('G2__G2')
+    expect(entry.vfsName).toBe('unknown__G2')
   })
 
   it('channel() returns IndexEntry with discord/channel resourceType', () => {
@@ -125,7 +127,7 @@ describe('DiscordIndexEntry', () => {
   it('channel() handles missing name', () => {
     const entry = DiscordIndexEntry.channel({ id: 'C2' })
     expect(entry.name).toBe('')
-    expect(entry.vfsName).toBe('C2__C2')
+    expect(entry.vfsName).toBe('unknown__C2')
   })
 
   it('member() returns IndexEntry with discord/member resourceType', () => {
@@ -140,7 +142,7 @@ describe('DiscordIndexEntry', () => {
   it('member() handles missing name', () => {
     const entry = DiscordIndexEntry.member({ id: 'M2' })
     expect(entry.name).toBe('')
-    expect(entry.vfsName).toBe('M2__M2.json')
+    expect(entry.vfsName).toBe('unknown__M2.json')
   })
 
   it('history() returns IndexEntry with discord/history resourceType', () => {

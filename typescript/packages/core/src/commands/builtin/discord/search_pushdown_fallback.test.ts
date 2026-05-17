@@ -34,8 +34,8 @@ function failingSearchTransport(status: number, message: string): DiscordTranspo
 }
 
 async function setupChannel(idx: RAMIndexCacheStore): Promise<void> {
-  await seedGuild(idx, '/mnt/discord', 'My_Server__G1', 'G1')
-  await seedChannel(idx, '/mnt/discord', 'My_Server__G1', 'general__C1', 'C1', {
+  await seedGuild(idx, '/mnt/discord', 'My Server__G1', 'G1')
+  await seedChannel(idx, '/mnt/discord', 'My Server__G1', 'general__C1', 'C1', {
     dates: ['2026-01-01'],
   })
 }
@@ -52,8 +52,8 @@ describe('discord grep push-down fallback', () => {
       resource.accessor,
       [
         new PathSpec({
-          original: '/mnt/discord/My_Server__G1/channels/general__C1',
-          directory: '/mnt/discord/My_Server__G1/channels/general__C1',
+          original: '/mnt/discord/My Server__G1/channels/general__C1',
+          directory: '/mnt/discord/My Server__G1/channels/general__C1',
           resolved: false,
           prefix: '/mnt/discord',
         }),
@@ -88,8 +88,8 @@ describe('discord rg push-down fallback', () => {
       resource.accessor,
       [
         new PathSpec({
-          original: '/mnt/discord/My_Server__G1/channels/general__C1',
-          directory: '/mnt/discord/My_Server__G1/channels/general__C1',
+          original: '/mnt/discord/My Server__G1/channels/general__C1',
+          directory: '/mnt/discord/My Server__G1/channels/general__C1',
           resolved: false,
           prefix: '/mnt/discord',
         }),

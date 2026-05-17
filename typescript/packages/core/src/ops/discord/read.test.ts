@@ -48,16 +48,16 @@ describe('ops/discord/read', () => {
     const idx = new RAMIndexCacheStore()
     await idx.setDir('/mnt/discord', [
       [
-        'My_Server__G1',
+        'My Server__G1',
         new IndexEntry({
           id: 'G1',
           name: 'My Server',
           resourceType: 'discord/guild',
-          vfsName: 'My_Server__G1',
+          vfsName: 'My Server__G1',
         }),
       ],
     ])
-    await idx.setDir('/mnt/discord/My_Server__G1/members', [
+    await idx.setDir('/mnt/discord/My Server__G1/members', [
       [
         'alice__U1.json',
         new IndexEntry({
@@ -78,8 +78,8 @@ describe('ops/discord/read', () => {
     const out = (await readOp.fn(
       accessor,
       new PathSpec({
-        original: '/mnt/discord/My_Server__G1/members/alice__U1.json',
-        directory: '/mnt/discord/My_Server__G1/members/alice__U1.json',
+        original: '/mnt/discord/My Server__G1/members/alice__U1.json',
+        directory: '/mnt/discord/My Server__G1/members/alice__U1.json',
         prefix: '/mnt/discord',
       }),
       [],

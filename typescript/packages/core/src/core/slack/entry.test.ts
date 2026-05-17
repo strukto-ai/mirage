@@ -53,12 +53,12 @@ describe('channelDirname', () => {
     expect(channelDirname({ id: 'C123', name: 'general' })).toBe('general__C123')
   })
 
-  it('falls back to id when name missing', () => {
-    expect(channelDirname({ id: 'C456' })).toBe('C456__C456')
+  it('falls back to unknown when name missing', () => {
+    expect(channelDirname({ id: 'C456' })).toBe('unknown__C456')
   })
 
-  it('sanitizes the name', () => {
-    expect(channelDirname({ id: 'C789', name: 'eng team!' })).toBe('eng_team__C789')
+  it('preserves spaces and punctuation', () => {
+    expect(channelDirname({ id: 'C789', name: 'eng team!' })).toBe('eng team!__C789')
   })
 })
 
@@ -81,11 +81,11 @@ describe('userFilename', () => {
     expect(userFilename({ id: 'U1', name: 'alice' })).toBe('alice__U1.json')
   })
 
-  it('falls back to id when name missing', () => {
-    expect(userFilename({ id: 'U2' })).toBe('U2__U2.json')
+  it('falls back to unknown when name missing', () => {
+    expect(userFilename({ id: 'U2' })).toBe('unknown__U2.json')
   })
 
-  it('sanitizes the name', () => {
-    expect(userFilename({ id: 'U3', name: 'bob jones' })).toBe('bob_jones__U3.json')
+  it('preserves spaces and punctuation', () => {
+    expect(userFilename({ id: 'U3', name: 'bob jones' })).toBe('bob jones__U3.json')
   })
 })

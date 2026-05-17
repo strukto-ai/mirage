@@ -15,15 +15,26 @@
 export const SLACK_PROMPT = `{prefix}
   channels/
     <channel-name>__<channel-id>/
-      <yyyy-mm-dd>.jsonl        # messages for that date
+      <yyyy-mm-dd>/
+        chat.jsonl                # messages for that date
+        files/                    # attachments shared that day (may be empty)
+          <name>__<F-id>.<ext>    # cat to download bytes
   dms/
     <user-name>__<dm-id>/
-      <yyyy-mm-dd>.jsonl
+      <yyyy-mm-dd>/
+        chat.jsonl
+        files/
+          <name>__<F-id>.<ext>
   users/
-    <username>.json              # user profile
-  <channel-name> / <user-name> are sanitized — don't construct them.
-  Always ls directories first to discover exact names (they include IDs).
-  Messages are JSONL — use jq to extract fields like .text, .user, .ts.`
+    <username>__<user-id>.json    # user profile
+  Naming: channel/DM/user directory names are \`<display-name>__<id>\`.
+  The display name keeps the original spelling from Slack; only \`/\` is
+  replaced with \`∕\` (U+2215) so paths don't break. Quote names
+  containing spaces in shell commands. Always ls the parent dir first
+  to discover exact entry names (they include IDs).
+  Messages are JSONL; use jq to extract fields like .text, .user, .ts, .files.
+  rg over files/ uses Slack's server-side file content search; works on
+  PDFs, Word docs, code snippets that Slack has indexed.`
 
 export const SLACK_WRITE_PROMPT = `  Write commands:
     slack-post-message <channel-path> "message"

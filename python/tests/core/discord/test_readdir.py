@@ -50,7 +50,7 @@ async def test_readdir_root(accessor, index):
         result = await readdir(accessor, PathSpec(original="/", directory="/"),
                                index)
 
-    assert "/My_Server__G001" in result
+    assert "/My Server__G001" in result
 
 
 @pytest.mark.asyncio
@@ -69,7 +69,7 @@ async def test_readdir_root_with_slash_in_name(accessor, index):
         result = await readdir(accessor, PathSpec(original="/", directory="/"),
                                index)
 
-    assert result == ["/A_B_Test_Server__G001"]
+    assert result == ["/A∕B Test Server__G001"]
 
 
 @pytest.mark.asyncio
@@ -88,7 +88,7 @@ async def test_readdir_root_with_apostrophe(accessor, index):
         result = await readdir(accessor, PathSpec(original="/", directory="/"),
                                index)
 
-    assert "/Zecheng_s_Server__G001" in result
+    assert "/Zecheng's Server__G001" in result
 
 
 @pytest.mark.asyncio

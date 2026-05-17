@@ -28,11 +28,13 @@ PROMPT = """\
           <name>__<F-id>.<ext>
   users/
     <username>__<user-id>.json    # user profile
-  Naming: channel/DM/user directory names are `<sanitized-name>__<id>`.
-  Names are sanitized — don't construct them; always ls the parent dir
-  first to discover exact entry names (they include IDs).
-  Messages are JSONL — use jq to extract fields like .text, .user, .ts, .files.
-  rg over files/ uses Slack's server-side file content search — works on
+  Naming: channel/DM/user directory names are `<display-name>__<id>`.
+  The display name keeps the original spelling from Slack; only `/` is
+  replaced with `∕` (U+2215) so paths don't break. Quote names
+  containing spaces in shell commands. Always ls the parent dir first
+  to discover exact entry names (they include IDs).
+  Messages are JSONL; use jq to extract fields like .text, .user, .ts, .files.
+  rg over files/ uses Slack's server-side file content search; works on
   PDFs, Word docs, code snippets that Slack has indexed."""
 
 WRITE_PROMPT = """\

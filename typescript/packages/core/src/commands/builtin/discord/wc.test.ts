@@ -48,8 +48,8 @@ async function runWc(
 describe('discord wc', () => {
   it('counts lines, words, bytes by default', async () => {
     const idx = new RAMIndexCacheStore()
-    await seedGuild(idx, '/mnt/discord', 'My_Server__G1', 'G1')
-    await seedChannel(idx, '/mnt/discord', 'My_Server__G1', 'general__C1', 'C1', {
+    await seedGuild(idx, '/mnt/discord', 'My Server__G1', 'G1')
+    await seedChannel(idx, '/mnt/discord', 'My Server__G1', 'general__C1', 'C1', {
       dates: ['2016-04-30'],
     })
     const transport = new FakeDiscordTransport((_m, endpoint) => {
@@ -65,8 +65,8 @@ describe('discord wc', () => {
     const out = await runWc(
       [
         new PathSpec({
-          original: '/mnt/discord/My_Server__G1/channels/general__C1/2016-04-30/chat.jsonl',
-          directory: '/mnt/discord/My_Server__G1/channels/general__C1/',
+          original: '/mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl',
+          directory: '/mnt/discord/My Server__G1/channels/general__C1/',
           resolved: false,
           prefix: '/mnt/discord',
         }),
@@ -81,8 +81,8 @@ describe('discord wc', () => {
 
   it('supports -l flag (line count)', async () => {
     const idx = new RAMIndexCacheStore()
-    await seedGuild(idx, '/mnt/discord', 'My_Server__G1', 'G1')
-    await seedChannel(idx, '/mnt/discord', 'My_Server__G1', 'general__C1', 'C1', {
+    await seedGuild(idx, '/mnt/discord', 'My Server__G1', 'G1')
+    await seedChannel(idx, '/mnt/discord', 'My Server__G1', 'general__C1', 'C1', {
       dates: ['2016-04-30'],
     })
     const transport = new FakeDiscordTransport((_m, endpoint) => {
@@ -97,8 +97,8 @@ describe('discord wc', () => {
     const out = await runWc(
       [
         new PathSpec({
-          original: '/mnt/discord/My_Server__G1/channels/general__C1/2016-04-30/chat.jsonl',
-          directory: '/mnt/discord/My_Server__G1/channels/general__C1/',
+          original: '/mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl',
+          directory: '/mnt/discord/My Server__G1/channels/general__C1/',
           resolved: false,
           prefix: '/mnt/discord',
         }),

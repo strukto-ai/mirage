@@ -44,7 +44,7 @@ describe('fileReadProvision', () => {
     const accessor = new DiscordAccessor(transport)
     const index = new RAMIndexCacheStore()
     await index.put(
-      '/mnt/discord/My_Server__G1/members/alice__U1.json',
+      '/mnt/discord/My Server__G1/members/alice__U1.json',
       new IndexEntry({
         id: 'U1',
         name: 'alice',
@@ -54,7 +54,7 @@ describe('fileReadProvision', () => {
     )
     const result = await fileReadProvision(
       accessor,
-      [spec('/mnt/discord/My_Server__G1/members/alice__U1.json', '/mnt/discord')],
+      [spec('/mnt/discord/My Server__G1/members/alice__U1.json', '/mnt/discord')],
       [],
       {
         stdin: null,

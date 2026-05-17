@@ -17,13 +17,17 @@ from datetime import datetime, timezone
 
 from mirage.core.slack.files import file_blob_name
 from mirage.core.slack.scope import SlackScope
-from mirage.utils.sanitize import sanitize_name
+from mirage.utils.naming import make_id_name
+from mirage.utils.sanitize import path_safe_name
 
 
 def channel_dirname(ch: dict) -> str:
     """Compute the VFS dirname for a channel, of the form `name__C123`."""
-    name = sanitize_name(ch.get("name", ch.get("id", "unknown")))
-    return f"{name}__{ch['id']}"
+    return make_id_name(
+        ch.get("name", ch.get("id", "unknown")),
+        ch["id"],
+        path_safe=True,
+    )
 
 
 def dm_dirname(dm: dict, user_map: dict[str, str]) -> str:
@@ -37,14 +41,14 @@ def dm_dirname(dm: dict, user_map: dict[str, str]) -> str:
         str: dirname; falls back to the user id when not in user_map.
     """
     user_id = dm.get("user", "")
-    name = sanitize_name(user_map.get(user_id, user_id))
-    return f"{name}__{dm['id']}"
+    display = user_map.get(user_id, user_id)
+    return make_id_name(display, dm["id"], path_safe=True)
 
 
 def user_filename(u: dict) -> str:
     """Compute the VFS filename for a user, of the form `name__U123.json`."""
-    name = sanitize_name(u.get("name", u.get("id", "unknown")))
-    return f"{name}__{u['id']}.json"
+    name = u.get("name", u.get("id", "unknown"))
+    return f"{make_id_name(name, u['id'], path_safe=True)}.json"
 
 
 def build_query(pattern: str, scope: SlackScope) -> str:
@@ -94,7 +98,7 @@ def format_grep_results(
                 ts_float, tz=timezone.utc).date().isoformat()
         except (TypeError, ValueError):
             date_str = ""
-        safe_name = sanitize_name(ch_name)
+        safe_name = path_safe_name(ch_name)
         dirname = f"{safe_name}__{ch_id}" if ch_id else safe_name
         path = (f"{prefix}/{container}/{dirname}/{date_str}/chat.jsonl"
                 if date_str else f"{prefix}/{container}/{dirname}")
@@ -136,7 +140,7 @@ def format_file_grep_results(
             continue
         ch_id = scope.channel_id
         ch_name = scope.channel_name or ""
-        safe_name = sanitize_name(ch_name) if ch_name else ""
+        safe_name = path_safe_name(ch_name) if ch_name else ""
         dirname = f"{safe_name}__{ch_id}" if safe_name else ch_id
         container = scope.container or "channels"
         path = (f"{prefix}/{container}/{dirname}/{date_str}/files/{blob_name}"

@@ -22,9 +22,12 @@ export const DISCORD_PROMPT = `{prefix}
             <name>__<att-id>.<ext>  # cat to download bytes from Discord CDN
     members/
       <username>__<user-id>.json  # member profile
-  Naming: guild, channel, member, attachment names are \`<sanitized-name>__<id>\`.
-  Names are sanitized, don't construct them; always ls the parent dir
-  first to discover exact entry names (they include IDs).
+  Naming: guild, channel, member, attachment names are \`<display-name>__<id>\`.
+  The display name keeps the original spelling from Discord (spaces,
+  apostrophes, emoji); only \`/\` is replaced with \`∕\` (U+2215) so paths
+  don't break. Quote names containing spaces in shell commands. Always
+  ls the parent dir first to discover exact entry names (they include
+  IDs).
   Messages are JSONL; use jq to extract fields like .content, .author.username,
   .attachments.
   grep / rg at channel or guild scope uses Discord's \`/messages/search\` API

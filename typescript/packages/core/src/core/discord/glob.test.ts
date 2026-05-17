@@ -58,8 +58,8 @@ describe('resolveDiscordGlob', () => {
     const t = new FakeDiscordTransport()
     const idx = new RAMIndexCacheStore()
     const resolved = new PathSpec({
-      original: '/mnt/discord/My_Server__G1/channels/general__C1/2026-04-24.jsonl',
-      directory: '/mnt/discord/My_Server__G1/channels/general__C1/',
+      original: '/mnt/discord/My Server__G1/channels/general__C1/2026-04-24.jsonl',
+      directory: '/mnt/discord/My Server__G1/channels/general__C1/',
       prefix: '/mnt/discord',
       resolved: true,
     })
@@ -73,8 +73,8 @@ describe('resolveDiscordGlob', () => {
     const t = new FakeDiscordTransport()
     const idx = new RAMIndexCacheStore()
     const noPattern = new PathSpec({
-      original: '/mnt/discord/My_Server__G1/channels/general__C1',
-      directory: '/mnt/discord/My_Server__G1/channels/general__C1',
+      original: '/mnt/discord/My Server__G1/channels/general__C1',
+      directory: '/mnt/discord/My Server__G1/channels/general__C1',
       prefix: '/mnt/discord',
       resolved: false,
     })
@@ -87,14 +87,14 @@ describe('resolveDiscordGlob', () => {
   it('expands a pattern to matching entries via readdir', async () => {
     const t = new FakeDiscordTransport()
     const idx = new RAMIndexCacheStore()
-    await seedChannelHistory(idx, '/mnt/discord', 'My_Server__G1', 'general__C1', [
+    await seedChannelHistory(idx, '/mnt/discord', 'My Server__G1', 'general__C1', [
       '2026-04-24.jsonl',
       '2026-04-23.jsonl',
       'README.md',
     ])
     const spec = new PathSpec({
-      original: '/mnt/discord/My_Server__G1/channels/general__C1/*.jsonl',
-      directory: '/mnt/discord/My_Server__G1/channels/general__C1',
+      original: '/mnt/discord/My Server__G1/channels/general__C1/*.jsonl',
+      directory: '/mnt/discord/My Server__G1/channels/general__C1',
       pattern: '*.jsonl',
       prefix: '/mnt/discord',
       resolved: false,
@@ -103,8 +103,8 @@ describe('resolveDiscordGlob', () => {
     expect(out).toHaveLength(2)
     const originals = out.map((p) => p.original).sort()
     expect(originals).toEqual([
-      '/mnt/discord/My_Server__G1/channels/general__C1/2026-04-23.jsonl',
-      '/mnt/discord/My_Server__G1/channels/general__C1/2026-04-24.jsonl',
+      '/mnt/discord/My Server__G1/channels/general__C1/2026-04-23.jsonl',
+      '/mnt/discord/My Server__G1/channels/general__C1/2026-04-24.jsonl',
     ])
     for (const p of out) {
       expect(p.prefix).toBe('/mnt/discord')
@@ -114,13 +114,13 @@ describe('resolveDiscordGlob', () => {
   it('returns empty when pattern matches nothing', async () => {
     const t = new FakeDiscordTransport()
     const idx = new RAMIndexCacheStore()
-    await seedChannelHistory(idx, '/mnt/discord', 'My_Server__G1', 'general__C1', [
+    await seedChannelHistory(idx, '/mnt/discord', 'My Server__G1', 'general__C1', [
       '2026-04-24.jsonl',
       'README.md',
     ])
     const spec = new PathSpec({
-      original: '/mnt/discord/My_Server__G1/channels/general__C1/*.csv',
-      directory: '/mnt/discord/My_Server__G1/channels/general__C1',
+      original: '/mnt/discord/My Server__G1/channels/general__C1/*.csv',
+      directory: '/mnt/discord/My Server__G1/channels/general__C1',
       pattern: '*.csv',
       prefix: '/mnt/discord',
       resolved: false,
@@ -136,10 +136,10 @@ describe('resolveDiscordGlob', () => {
     for (let i = 0; i < SCOPE_ERROR + 5; i++) {
       filenames.push(`file-${String(i).padStart(5, '0')}.jsonl`)
     }
-    await seedChannelHistory(idx, '/mnt/discord', 'My_Server__G1', 'general__C1', filenames)
+    await seedChannelHistory(idx, '/mnt/discord', 'My Server__G1', 'general__C1', filenames)
     const spec = new PathSpec({
-      original: '/mnt/discord/My_Server__G1/channels/general__C1/*.jsonl',
-      directory: '/mnt/discord/My_Server__G1/channels/general__C1',
+      original: '/mnt/discord/My Server__G1/channels/general__C1/*.jsonl',
+      directory: '/mnt/discord/My Server__G1/channels/general__C1',
       pattern: '*.jsonl',
       prefix: '/mnt/discord',
       resolved: false,
@@ -151,26 +151,26 @@ describe('resolveDiscordGlob', () => {
   it('handles a mix of resolved, pattern, and no-pattern PathSpecs', async () => {
     const t = new FakeDiscordTransport()
     const idx = new RAMIndexCacheStore()
-    await seedChannelHistory(idx, '/mnt/discord', 'My_Server__G1', 'general__C1', [
+    await seedChannelHistory(idx, '/mnt/discord', 'My Server__G1', 'general__C1', [
       '2026-04-24.jsonl',
       '2026-04-23.jsonl',
     ])
     const resolved = new PathSpec({
-      original: '/mnt/discord/My_Server__G1/members/alice__U1.json',
-      directory: '/mnt/discord/My_Server__G1/members/',
+      original: '/mnt/discord/My Server__G1/members/alice__U1.json',
+      directory: '/mnt/discord/My Server__G1/members/',
       prefix: '/mnt/discord',
       resolved: true,
     })
     const patterned = new PathSpec({
-      original: '/mnt/discord/My_Server__G1/channels/general__C1/*.jsonl',
-      directory: '/mnt/discord/My_Server__G1/channels/general__C1',
+      original: '/mnt/discord/My Server__G1/channels/general__C1/*.jsonl',
+      directory: '/mnt/discord/My Server__G1/channels/general__C1',
       pattern: '*.jsonl',
       prefix: '/mnt/discord',
       resolved: false,
     })
     const noPattern = new PathSpec({
-      original: '/mnt/discord/My_Server__G1/channels/eng__C2',
-      directory: '/mnt/discord/My_Server__G1/channels/eng__C2',
+      original: '/mnt/discord/My Server__G1/channels/eng__C2',
+      directory: '/mnt/discord/My Server__G1/channels/eng__C2',
       prefix: '/mnt/discord',
       resolved: false,
     })
@@ -183,8 +183,8 @@ describe('resolveDiscordGlob', () => {
     expect(out[0]).toBe(resolved)
     const middle = [out[1]?.original, out[2]?.original].sort()
     expect(middle).toEqual([
-      '/mnt/discord/My_Server__G1/channels/general__C1/2026-04-23.jsonl',
-      '/mnt/discord/My_Server__G1/channels/general__C1/2026-04-24.jsonl',
+      '/mnt/discord/My Server__G1/channels/general__C1/2026-04-23.jsonl',
+      '/mnt/discord/My Server__G1/channels/general__C1/2026-04-24.jsonl',
     ])
     expect(out[3]).toBe(noPattern)
   })

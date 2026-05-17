@@ -60,7 +60,7 @@ describe('ops/discord/readdir', () => {
       [],
       {},
     )) as string[]
-    expect(out).toEqual(['/mnt/discord/My_Server__G1'])
+    expect(out).toEqual(['/mnt/discord/My Server__G1'])
     const endpoints = t.calls.map((c) => c.endpoint)
     expect(endpoints).toContain('/users/@me/guilds')
   })

@@ -48,30 +48,30 @@ describe('stat guild dir', () => {
     const idx = new RAMIndexCacheStore()
     await idx.setDir('/mnt/discord', [
       [
-        'My_Server__G1',
+        'My Server__G1',
         new IndexEntry({
           id: 'G1',
           name: 'My Server',
           resourceType: 'discord/guild',
-          vfsName: 'My_Server__G1',
+          vfsName: 'My Server__G1',
         }),
       ],
     ])
     const t = new FakeDiscordTransport()
     const out = await stat(
       new DiscordAccessor(t),
-      spec('/mnt/discord/My_Server__G1', '/mnt/discord'),
+      spec('/mnt/discord/My Server__G1', '/mnt/discord'),
       idx,
     )
     expect(out.type).toBe(FileType.DIRECTORY)
-    expect(out.name).toBe('My_Server__G1')
+    expect(out.name).toBe('My Server__G1')
     expect(out.extra.guild_id).toBe('G1')
   })
 
   it('throws ENOENT for guild without index', async () => {
     const t = new FakeDiscordTransport()
     await expect(
-      stat(new DiscordAccessor(t), spec('/mnt/discord/My_Server__G1', '/mnt/discord')),
+      stat(new DiscordAccessor(t), spec('/mnt/discord/My Server__G1', '/mnt/discord')),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
@@ -89,7 +89,7 @@ describe('stat virtual containers under guild', () => {
     const t = new FakeDiscordTransport()
     const out = await stat(
       new DiscordAccessor(t),
-      spec('/mnt/discord/My_Server__G1/channels', '/mnt/discord'),
+      spec('/mnt/discord/My Server__G1/channels', '/mnt/discord'),
     )
     expect(out.type).toBe(FileType.DIRECTORY)
     expect(out.name).toBe('channels')
@@ -100,7 +100,7 @@ describe('stat virtual containers under guild', () => {
     const t = new FakeDiscordTransport()
     const out = await stat(
       new DiscordAccessor(t),
-      spec('/mnt/discord/My_Server__G1/members', '/mnt/discord'),
+      spec('/mnt/discord/My Server__G1/members', '/mnt/discord'),
     )
     expect(out.type).toBe(FileType.DIRECTORY)
     expect(out.name).toBe('members')
@@ -110,7 +110,7 @@ describe('stat virtual containers under guild', () => {
 describe('stat channel dir', () => {
   it('returns DIRECTORY with extra.channel_id for cached channel', async () => {
     const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/discord/My_Server__G1/channels', [
+    await idx.setDir('/mnt/discord/My Server__G1/channels', [
       [
         'general__C1',
         new IndexEntry({
@@ -125,7 +125,7 @@ describe('stat channel dir', () => {
     const t = new FakeDiscordTransport()
     const out = await stat(
       new DiscordAccessor(t),
-      spec('/mnt/discord/My_Server__G1/channels/general__C1', '/mnt/discord'),
+      spec('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
       idx,
     )
     expect(out.type).toBe(FileType.DIRECTORY)
@@ -138,7 +138,7 @@ describe('stat channel dir', () => {
     await expect(
       stat(
         new DiscordAccessor(t),
-        spec('/mnt/discord/My_Server__G1/channels/general__C1', '/mnt/discord'),
+        spec('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
       ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
@@ -149,7 +149,7 @@ describe('stat channel dir', () => {
     await expect(
       stat(
         new DiscordAccessor(t),
-        spec('/mnt/discord/My_Server__G1/channels/general__C1', '/mnt/discord'),
+        spec('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
         idx,
       ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
@@ -159,7 +159,7 @@ describe('stat channel dir', () => {
 describe('stat member file', () => {
   it('returns JSON with extra.user_id for cached member', async () => {
     const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/discord/My_Server__G1/members', [
+    await idx.setDir('/mnt/discord/My Server__G1/members', [
       [
         'alice__U1.json',
         new IndexEntry({
@@ -173,7 +173,7 @@ describe('stat member file', () => {
     const t = new FakeDiscordTransport()
     const out = await stat(
       new DiscordAccessor(t),
-      spec('/mnt/discord/My_Server__G1/members/alice__U1.json', '/mnt/discord'),
+      spec('/mnt/discord/My Server__G1/members/alice__U1.json', '/mnt/discord'),
       idx,
     )
     expect(out.type).toBe(FileType.JSON)
@@ -186,7 +186,7 @@ describe('stat member file', () => {
     await expect(
       stat(
         new DiscordAccessor(t),
-        spec('/mnt/discord/My_Server__G1/members/alice__U1.json', '/mnt/discord'),
+        spec('/mnt/discord/My Server__G1/members/alice__U1.json', '/mnt/discord'),
       ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
@@ -197,7 +197,7 @@ describe('stat member file', () => {
     await expect(
       stat(
         new DiscordAccessor(t),
-        spec('/mnt/discord/My_Server__G1/members/alice__U1.json', '/mnt/discord'),
+        spec('/mnt/discord/My Server__G1/members/alice__U1.json', '/mnt/discord'),
         idx,
       ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
@@ -209,7 +209,7 @@ describe('stat history chat.jsonl', () => {
     const t = new FakeDiscordTransport()
     const out = await stat(
       new DiscordAccessor(t),
-      spec('/mnt/discord/My_Server__G1/channels/general__C1/2024-01-15/chat.jsonl', '/mnt/discord'),
+      spec('/mnt/discord/My Server__G1/channels/general__C1/2024-01-15/chat.jsonl', '/mnt/discord'),
     )
     expect(out.type).toBe(FileType.TEXT)
     expect(out.name).toBe('chat.jsonl')
@@ -220,7 +220,7 @@ describe('stat history chat.jsonl', () => {
     const t = new FakeDiscordTransport()
     const out = await stat(
       new DiscordAccessor(t),
-      spec('/mnt/discord/My_Server__G1/channels/general__C1/2024-01-15', '/mnt/discord'),
+      spec('/mnt/discord/My Server__G1/channels/general__C1/2024-01-15', '/mnt/discord'),
     )
     expect(out.type).toBe(FileType.DIRECTORY)
     expect(out.name).toBe('2024-01-15')
@@ -231,7 +231,7 @@ describe('stat unknown', () => {
   it('throws ENOENT for unknown 2-segment shape', async () => {
     const t = new FakeDiscordTransport()
     await expect(
-      stat(new DiscordAccessor(t), spec('/mnt/discord/My_Server__G1/foo', '/mnt/discord')),
+      stat(new DiscordAccessor(t), spec('/mnt/discord/My Server__G1/foo', '/mnt/discord')),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
@@ -240,7 +240,7 @@ describe('stat unknown', () => {
     await expect(
       stat(
         new DiscordAccessor(t),
-        spec('/mnt/discord/My_Server__G1/channels/general__C1/extra', '/mnt/discord'),
+        spec('/mnt/discord/My Server__G1/channels/general__C1/extra', '/mnt/discord'),
       ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
@@ -248,7 +248,7 @@ describe('stat unknown', () => {
   it('throws ENOENT for unknown 3-segment shape', async () => {
     const t = new FakeDiscordTransport()
     await expect(
-      stat(new DiscordAccessor(t), spec('/mnt/discord/My_Server__G1/foo/bar', '/mnt/discord')),
+      stat(new DiscordAccessor(t), spec('/mnt/discord/My Server__G1/foo/bar', '/mnt/discord')),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })

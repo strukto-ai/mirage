@@ -18,38 +18,38 @@ from mirage.core.discord.entry import (channel_dirname, channel_entry,
 
 
 def test_guild_dirname_basic():
-    assert guild_dirname({"id": "G1", "name": "My Server"}) == "My_Server__G1"
+    assert guild_dirname({"id": "G1", "name": "My Server"}) == "My Server__G1"
 
 
-def test_guild_dirname_apostrophe():
+def test_guild_dirname_apostrophe_is_preserved():
     assert guild_dirname({
         "id": "G1",
         "name": "Zecheng's Server"
-    }) == "Zecheng_s_Server__G1"
+    }) == "Zecheng's Server__G1"
 
 
-def test_guild_dirname_slash_in_name():
-    assert guild_dirname({"id": "G1", "name": "A/B Test"}) == "A_B_Test__G1"
+def test_guild_dirname_slash_in_name_is_replaced():
+    assert guild_dirname({"id": "G1", "name": "A/B Test"}) == "A∕B Test__G1"
 
 
-def test_guild_dirname_falls_back_to_id_when_name_missing():
-    assert guild_dirname({"id": "G1"}) == "G1__G1"
+def test_guild_dirname_falls_back_to_unknown_when_name_missing():
+    assert guild_dirname({"id": "G1"}) == "unknown__G1"
 
 
-def test_guild_dirname_falls_back_to_id_when_name_empty():
-    assert guild_dirname({"id": "G1", "name": ""}) == "G1__G1"
+def test_guild_dirname_falls_back_to_unknown_when_name_empty():
+    assert guild_dirname({"id": "G1", "name": ""}) == "unknown__G1"
 
 
 def test_channel_dirname_basic():
     assert channel_dirname({"id": "C1", "name": "general"}) == "general__C1"
 
 
-def test_channel_dirname_with_emoji_or_unsafe_chars():
-    assert channel_dirname({"id": "C1", "name": "🔥-deals"}) == "-deals__C1"
+def test_channel_dirname_with_emoji_is_preserved():
+    assert channel_dirname({"id": "C1", "name": "🔥-deals"}) == "🔥-deals__C1"
 
 
-def test_channel_dirname_falls_back_to_id():
-    assert channel_dirname({"id": "C1"}) == "C1__C1"
+def test_channel_dirname_falls_back_to_unknown():
+    assert channel_dirname({"id": "C1"}) == "unknown__C1"
 
 
 def test_member_filename_basic():
@@ -57,14 +57,14 @@ def test_member_filename_basic():
     assert member_filename(member) == "alice__U1.json"
 
 
-def test_member_filename_with_unsafe_username():
+def test_member_filename_preserves_special_chars():
     member = {"user": {"id": "U1", "username": "bob.smith!"}}
-    assert member_filename(member) == "bob.smith__U1.json"
+    assert member_filename(member) == "bob.smith!__U1.json"
 
 
-def test_member_filename_falls_back_to_id():
+def test_member_filename_falls_back_to_unknown():
     member = {"user": {"id": "U1"}}
-    assert member_filename(member) == "U1__U1.json"
+    assert member_filename(member) == "unknown__U1.json"
 
 
 def test_same_named_members_get_distinct_filenames():

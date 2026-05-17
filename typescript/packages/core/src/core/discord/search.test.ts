@@ -119,7 +119,7 @@ describe('formatGrepResults', () => {
     useNative: true,
     guildId: 'G1',
     guildName: 'My Server',
-    resourcePath: 'My_Server__G1',
+    resourcePath: 'My Server__G1',
   }
 
   it('builds full VFS path with prefix, sanitized guild and channel dirs', () => {
@@ -138,11 +138,11 @@ describe('formatGrepResults', () => {
       new Map([['C1', 'general']]),
     )
     expect(lines).toEqual([
-      '/discord/My_Server__G1/channels/general__C1/2026-04-25/chat.jsonl:[alice] hello world',
+      '/discord/My Server__G1/channels/general__C1/2026-04-25/chat.jsonl:[alice] hello world',
     ])
   })
 
-  it('falls back to id__id when channel name unknown', () => {
+  it('falls back to unknown__id when channel name unknown', () => {
     const lines = formatGrepResults(
       [
         {
@@ -156,7 +156,9 @@ describe('formatGrepResults', () => {
       scope,
       '/discord',
     )
-    expect(lines).toEqual(['/discord/My_Server__G1/channels/C2__C2/2026-04-25/chat.jsonl:[bob] hi'])
+    expect(lines).toEqual([
+      '/discord/My Server__G1/channels/unknown__C2/2026-04-25/chat.jsonl:[bob] hi',
+    ])
   })
 
   it('uses scope.channelName when channel-scoped', () => {
@@ -174,7 +176,7 @@ describe('formatGrepResults', () => {
       '/discord',
     )
     expect(lines).toEqual([
-      '/discord/My_Server__G1/channels/eng__C3/2026-04-25/chat.jsonl:[carol] msg',
+      '/discord/My Server__G1/channels/eng__C3/2026-04-25/chat.jsonl:[carol] msg',
     ])
   })
 })

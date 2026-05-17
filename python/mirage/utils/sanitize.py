@@ -41,3 +41,23 @@ def sanitize_name(name: str) -> str:
     if len(cleaned) > MAX_LEN:
         cleaned = cleaned[:MAX_LEN]
     return cleaned
+
+
+def path_safe_name(name: str) -> str:
+    """Make a name safe to embed in a VFS path segment.
+
+    Preserves the original spelling (spaces, apostrophes, emoji, etc.)
+    and only replaces the path separator ``/`` with ``∕`` (U+2215)
+    so the value cannot collide with a directory boundary. Use this
+    for resource directory and file names where keeping the original
+    display name matters more than shell ergonomics.
+
+    Args:
+        name (str): raw name from API.
+
+    Returns:
+        str: path-safe name, or "unknown" if empty.
+    """
+    if not name.strip():
+        return "unknown"
+    return name.replace("/", "∕")

@@ -15,7 +15,7 @@
 import aiohttp
 
 from mirage.resource.slack.config import SlackConfig
-from mirage.utils.sanitize import sanitize_name
+from mirage.utils.sanitize import path_safe_name
 
 
 def file_blob_name(file_meta: dict) -> str:
@@ -25,14 +25,15 @@ def file_blob_name(file_meta: dict) -> str:
         file_meta (dict): Slack file dict (with id, name/title fields).
 
     Returns:
-        str: VFS filename of shape `<sanitized-stem>__<F-id>.<ext>`.
+        str: VFS filename of shape `<stem>__<F-id>.<ext>`. The stem keeps
+        the original spelling, only ``/`` is replaced.
     """
     raw_name = file_meta.get("name") or file_meta.get("title") or "file"
     fid = file_meta.get("id", "")
     if "." in raw_name:
         stem, _, ext = raw_name.rpartition(".")
-        return f"{sanitize_name(stem)}__{fid}.{ext}"
-    return f"{sanitize_name(raw_name)}__{fid}"
+        return f"{path_safe_name(stem)}__{fid}.{ext}"
+    return f"{path_safe_name(raw_name)}__{fid}"
 
 
 async def download_file(config: SlackConfig, url: str) -> bytes:

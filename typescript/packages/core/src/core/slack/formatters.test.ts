@@ -133,7 +133,7 @@ describe('fileBlobName', () => {
   })
 
   it('falls back to title when name missing', () => {
-    expect(fileBlobName({ id: 'F2', title: 'design doc.docx' })).toBe('design_doc__F2.docx')
+    expect(fileBlobName({ id: 'F2', title: 'design doc.docx' })).toBe('design doc__F2.docx')
   })
 
   it('drops extension when name has none', () => {

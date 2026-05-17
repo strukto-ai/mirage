@@ -43,7 +43,7 @@ describe('ops/discord/stat', () => {
 
   it('dispatches to coreStat using the resource accessor', async () => {
     const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/discord/My_Server__G1/channels', [
+    await idx.setDir('/mnt/discord/My Server__G1/channels', [
       [
         'general__C1',
         new IndexEntry({
@@ -60,8 +60,8 @@ describe('ops/discord/stat', () => {
     const out = (await statOp.fn(
       accessor,
       new PathSpec({
-        original: '/mnt/discord/My_Server__G1/channels/general__C1',
-        directory: '/mnt/discord/My_Server__G1/channels/general__C1',
+        original: '/mnt/discord/My Server__G1/channels/general__C1',
+        directory: '/mnt/discord/My Server__G1/channels/general__C1',
         prefix: '/mnt/discord',
       }),
       [],

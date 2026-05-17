@@ -48,6 +48,7 @@ class SlackIndexEntry(IndexEntry):
             vfs_name=make_id_name(
                 ch.get("name", ch.get("id", "unknown")),
                 ch["id"],
+                path_safe=True,
             ),
             remote_time=str(ch.get("created", 0)),
         )
@@ -70,21 +71,19 @@ class SlackIndexEntry(IndexEntry):
             id=dm["id"],
             name=display,
             resource_type=SlackResourceType.DM,
-            vfs_name=make_id_name(display, dm["id"]),
+            vfs_name=make_id_name(display, dm["id"], path_safe=True),
             remote_time=str(dm.get("created", 0)),
         )
 
     @classmethod
     def user(cls, u: dict) -> "SlackIndexEntry":
         """Build entry from Slack user API response."""
-        from mirage.utils.sanitize import sanitize_name
-
         name = u.get("name", u.get("id", "unknown"))
         return cls(
             id=u["id"],
             name=name,
             resource_type=SlackResourceType.USER,
-            vfs_name=f"{sanitize_name(name)}.json",
+            vfs_name=f"{make_id_name(name, u['id'], path_safe=True)}.json",
         )
 
     @classmethod

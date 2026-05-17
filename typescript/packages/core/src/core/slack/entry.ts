@@ -40,12 +40,17 @@ export function sanitizeName(name: string): string {
   return cleaned
 }
 
+export function pathSafeName(name: string): string {
+  if (name.trim() === '') return 'unknown'
+  return name.replace(/\//g, '∕')
+}
+
 function makeIdName(name: string, id: string): string {
-  return `${sanitizeName(name)}__${id}`
+  return `${pathSafeName(name)}__${id}`
 }
 
 export function channelDirname(ch: { id: string; name?: string }): string {
-  return makeIdName(ch.name ?? ch.id, ch.id)
+  return makeIdName(ch.name ?? '', ch.id)
 }
 
 export function dmDirname(
@@ -58,7 +63,7 @@ export function dmDirname(
 }
 
 export function userFilename(u: { id: string; name?: string }): string {
-  return `${sanitizeName(u.name ?? u.id)}__${u.id}.json`
+  return `${makeIdName(u.name ?? '', u.id)}.json`
 }
 
 export function fileBlobName(file: { id?: string; name?: string; title?: string }): string {
@@ -68,9 +73,9 @@ export function fileBlobName(file: { id?: string; name?: string; title?: string 
   if (dot >= 0) {
     const stem = raw.slice(0, dot)
     const ext = raw.slice(dot + 1)
-    return `${sanitizeName(stem)}__${fid}.${ext}`
+    return `${pathSafeName(stem)}__${fid}.${ext}`
   }
-  return `${sanitizeName(raw)}__${fid}`
+  return `${pathSafeName(raw)}__${fid}`
 }
 
 interface SlackFileMeta {

@@ -14,7 +14,7 @@
 
 import aiohttp
 
-from mirage.utils.sanitize import sanitize_name
+from mirage.utils.sanitize import path_safe_name
 
 
 def file_blob_name(att: dict) -> str:
@@ -24,14 +24,15 @@ def file_blob_name(att: dict) -> str:
         att (dict): Discord attachment dict (with id, filename fields).
 
     Returns:
-        str: VFS filename of shape ``<sanitized-stem>__<att-id>.<ext>``.
+        str: VFS filename of shape ``<stem>__<att-id>.<ext>``. The stem
+        keeps the original spelling, only ``/`` is replaced.
     """
     raw_name = att.get("filename") or att.get("title") or "file"
     aid = str(att.get("id", ""))
     if "." in raw_name:
         stem, _, ext = raw_name.rpartition(".")
-        return f"{sanitize_name(stem)}__{aid}.{ext}"
-    return f"{sanitize_name(raw_name)}__{aid}"
+        return f"{path_safe_name(stem)}__{aid}.{ext}"
+    return f"{path_safe_name(raw_name)}__{aid}"
 
 
 async def download_file(url: str) -> bytes:
