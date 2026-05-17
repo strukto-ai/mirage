@@ -23,13 +23,14 @@ vi.mock('./_client.ts', () => ({
 import { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { resolveMongoDBConfig } from '../../resource/mongodb/config.ts'
 import * as _client from './_client.ts'
-import { stubMongoDriver } from './_test_util.ts'
+import { arrayIter, stubMongoDriver } from './_test_util.ts'
 import { formatGrepResults, searchCollection, searchDatabase } from './search.ts'
 
-const STUB_DRIVER = stubMongoDriver()
-
-function makeAccessor(): MongoDBAccessor {
-  return new MongoDBAccessor(STUB_DRIVER, resolveMongoDBConfig({ uri: 'mongodb://h' }))
+function accessorWith(iterDocs: readonly Record<string, unknown>[] = []): MongoDBAccessor {
+  return new MongoDBAccessor(
+    stubMongoDriver({ iterDocuments: arrayIter(iterDocs) }),
+    resolveMongoDBConfig({ uri: 'mongodb://h' }),
+  )
 }
 
 beforeEach(() => {
@@ -40,48 +41,61 @@ beforeEach(() => {
 
 describe('searchCollection', () => {
   it('uses $text when a text index exists', async () => {
-    vi.mocked(_client.listIndexes).mockResolvedValue([{ key: { name: 'text' } }])
+    vi.mocked(_client.listIndexes).mockResolvedValue([
+      { name: 'body_text', textIndexVersion: 3 },
+    ])
     vi.mocked(_client.findDocuments).mockResolvedValue([{ _id: '1', name: 'a' }])
-    const out = await searchCollection(makeAccessor(), 'app', 'users', 'foo', 5)
+    const out = await searchCollection(accessorWith(), 'app', 'users', 'foo', 5)
     expect(out).toEqual([{ _id: '1', name: 'a' }])
     const call = vi.mocked(_client.findDocuments).mock.calls[0]
     expect(call?.[3]).toEqual({ $text: { $search: 'foo' } })
   })
 
   it('falls back to $or of $regex over sampled string fields', async () => {
-    vi.mocked(_client.listIndexes).mockResolvedValue([{ key: { _id: 1 } }])
-    vi.mocked(_client.findDocuments)
-      .mockResolvedValueOnce([{ _id: '1', name: 'x', email: 'y', age: 7 }])
-      .mockResolvedValueOnce([{ _id: '1', name: 'foobar' }])
-    const out = await searchCollection(makeAccessor(), 'app', 'users', 'foo', 5)
+    vi.mocked(_client.listIndexes).mockResolvedValue([{ name: '_id_', key: { _id: 1 } }])
+    vi.mocked(_client.findDocuments).mockResolvedValue([{ _id: '1', name: 'foobar' }])
+    const acc = accessorWith([{ _id: '1', name: 'x', email: 'y', age: 7 }])
+    const out = await searchCollection(acc, 'app', 'users', 'foo', 5)
     expect(out).toEqual([{ _id: '1', name: 'foobar' }])
-    const call = vi.mocked(_client.findDocuments).mock.calls[1]
+    const call = vi.mocked(_client.findDocuments).mock.calls[0]
     expect(call?.[3]).toEqual({
       $or: [
-        { name: { $regex: 'foo', $options: 'i' } },
         { email: { $regex: 'foo', $options: 'i' } },
+        { name: { $regex: 'foo', $options: 'i' } },
       ],
     })
+  })
+
+  it('returns no results when sampled docs have no string fields', async () => {
+    vi.mocked(_client.listIndexes).mockResolvedValue([{ name: '_id_', key: { _id: 1 } }])
+    const acc = accessorWith([{ _id: '1', i: 0, v: 0 }])
+    const out = await searchCollection(acc, 'app', 'numbers', 'foo', 5)
+    expect(out).toEqual([])
+    expect(_client.findDocuments).not.toHaveBeenCalled()
   })
 })
 
 describe('searchDatabase', () => {
   it('walks collections and emits matches', async () => {
     vi.mocked(_client.listCollections).mockResolvedValue(['users', 'orders'])
-    vi.mocked(_client.listIndexes).mockResolvedValue([{ key: { name: 'text' } }])
+    vi.mocked(_client.listIndexes).mockResolvedValue([
+      { name: 'body_text', textIndexVersion: 3 },
+    ])
     vi.mocked(_client.findDocuments)
       .mockResolvedValueOnce([{ _id: '1' }])
       .mockResolvedValueOnce([])
-    const out = await searchDatabase(makeAccessor(), 'app', 'foo', 5)
+    const out = await searchDatabase(accessorWith(), 'app', 'foo', 5)
     expect(out).toEqual([{ database: 'app', collection: 'users', docs: [{ _id: '1' }] }])
   })
 })
 
 describe('formatGrepResults', () => {
-  it('emits one line per matching doc with path-prefix', () => {
+  it('emits one line per matching doc with nested-path prefix', () => {
     const lines = formatGrepResults([
       { database: 'app', collection: 'users', docs: [{ _id: '1', name: 'a' }] },
     ])
-    expect(lines).toEqual(['app/users.jsonl:{"_id":"1","name":"a"}'])
+    expect(lines).toEqual([
+      'app/collections/users/documents.jsonl:{"_id":"1","name":"a"}',
+    ])
   })
 })
