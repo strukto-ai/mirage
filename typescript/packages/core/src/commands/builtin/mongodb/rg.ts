@@ -19,6 +19,7 @@ import { resolveGlob } from '../../../core/mongodb/glob.ts'
 import { read as mongoRead } from '../../../core/mongodb/read.ts'
 import { readdir as mongoReaddir } from '../../../core/mongodb/readdir.ts'
 import { detectScope } from '../../../core/mongodb/scope.ts'
+import { ScopeLevel } from '../../../core/mongodb/types.ts'
 import {
   formatGrepResults,
   searchCollection,
@@ -114,16 +115,13 @@ async function rgCommand(
   const f = parseRgFlags(opts.flags)
   const pat = compilePattern(exprText, f.ignoreCase, f.fixedString, f.wholeWord)
   const limit = accessor.config.defaultSearchLimit
-  const cfg = accessor.config
-  const singleDb = cfg.databases !== null && cfg.databases.length === 1
-  const singleDbName = singleDb ? (cfg.databases?.[0] ?? null) : null
 
   if (paths.length > 0) {
     const first = paths[0]
     if (first === undefined) return [null, new IOResult()]
-    const scope = detectScope(first, { singleDb, singleDbName })
+    const scope = detectScope(first)
 
-    if (scope.level === 'root') {
+    if (scope.level === ScopeLevel.ROOT) {
       const dbs = await listDatabases(accessor)
       const results: Awaited<ReturnType<typeof searchDatabase>> = []
       for (const db of dbs) {
@@ -133,22 +131,20 @@ async function rgCommand(
       if (allLines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
       return [ENC.encode(allLines.join('\n')), new IOResult()]
     }
-    if (scope.level === 'database' && scope.database !== null) {
+    if (scope.level === ScopeLevel.DATABASE && scope.database !== null) {
       const results = await searchDatabase(accessor, scope.database, exprText, limit)
       const allLines = formatGrepResults(results)
       if (allLines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
       return [ENC.encode(allLines.join('\n')), new IOResult()]
     }
-    if (scope.level === 'file' && scope.database !== null && scope.collection !== null) {
-      const docs = await searchCollection(
-        accessor,
-        scope.database,
-        scope.collection,
-        exprText,
-        limit,
-      )
+    if (
+      (scope.level === ScopeLevel.ENTITY || scope.level === ScopeLevel.DOCUMENTS) &&
+      scope.database !== null &&
+      scope.name !== null
+    ) {
+      const docs = await searchCollection(accessor, scope.database, scope.name, exprText, limit)
       if (docs.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-      const results = [{ database: scope.database, collection: scope.collection, docs }]
+      const results = [{ database: scope.database, collection: scope.name, docs }]
       const allLines = formatGrepResults(results)
       return [ENC.encode(allLines.join('\n')), new IOResult()]
     }

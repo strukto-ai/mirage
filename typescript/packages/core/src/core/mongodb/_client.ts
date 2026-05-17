@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
-import type { MongoFindOptions } from './_driver.ts'
+import type { MongoFindOptions, MongoIndexAccess, MongoIterOptions } from './_driver.ts'
+import { EntityKind } from './types.ts'
 
 const SYSTEM_DBS: ReadonlySet<string> = new Set(['admin', 'local', 'config'])
 
@@ -31,8 +32,9 @@ export async function listDatabases(accessor: MongoDBAccessor): Promise<string[]
 export async function listCollections(
   accessor: MongoDBAccessor,
   database: string,
+  kind: EntityKind | null = null,
 ): Promise<string[]> {
-  const cols = await accessor.driver.listCollections(database)
+  const cols = await accessor.driver.listCollections(database, kind)
   return [...cols].sort()
 }
 
@@ -52,6 +54,23 @@ export async function findDocuments<T = Record<string, unknown>>(
   })
 }
 
+export function iterDocuments<T = Record<string, unknown>>(
+  accessor: MongoDBAccessor,
+  database: string,
+  collection: string,
+  options: MongoIterOptions = {},
+): AsyncIterableIterator<T> {
+  return accessor.driver.iterDocuments<T>(database, collection, options)
+}
+
+export function iterInserts<T = Record<string, unknown>>(
+  accessor: MongoDBAccessor,
+  database: string,
+  collection: string,
+): AsyncIterableIterator<T> {
+  return accessor.driver.iterInserts<T>(database, collection)
+}
+
 export async function countDocuments(
   accessor: MongoDBAccessor,
   database: string,
@@ -61,10 +80,46 @@ export async function countDocuments(
   return accessor.driver.countDocuments(database, collection, filter)
 }
 
+export async function isView(
+  accessor: MongoDBAccessor,
+  database: string,
+  collection: string,
+): Promise<boolean> {
+  const specs = await accessor.driver.listCollectionsDetailed(database, {
+    name: collection,
+  })
+  for (const spec of specs) return spec.type === EntityKind.VIEW
+  return false
+}
+
 export async function listIndexes(
   accessor: MongoDBAccessor,
   database: string,
   collection: string,
 ): Promise<Record<string, unknown>[]> {
+  if (await isView(accessor, database, collection)) return []
   return accessor.driver.listIndexes(database, collection)
+}
+
+export async function getValidator(
+  accessor: MongoDBAccessor,
+  database: string,
+  collection: string,
+): Promise<unknown> {
+  const specs = await accessor.driver.listCollectionsDetailed(database, {
+    name: collection,
+  })
+  for (const spec of specs) {
+    const validator = spec.options?.validator as { $jsonSchema?: unknown } | undefined
+    return validator?.$jsonSchema ?? null
+  }
+  return null
+}
+
+export async function getIndexStats(
+  accessor: MongoDBAccessor,
+  database: string,
+  collection: string,
+): Promise<Record<string, MongoIndexAccess>> {
+  return accessor.driver.getIndexStats(database, collection)
 }

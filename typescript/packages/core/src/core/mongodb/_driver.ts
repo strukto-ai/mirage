@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { EntityKind } from './types.ts'
+
 export interface MongoFindOptions {
   limit?: number
   sort?: Record<string, 1 | -1>
@@ -19,20 +21,55 @@ export interface MongoFindOptions {
   skip?: number
 }
 
+export interface MongoIterOptions {
+  filter?: Record<string, unknown>
+  sort?: Record<string, 1 | -1>
+  projection?: Record<string, unknown>
+  batchSize?: number
+}
+
+export interface MongoCollectionSpec {
+  name: string
+  type?: EntityKind | string
+  options?: { validator?: { $jsonSchema?: unknown } | Record<string, unknown> }
+}
+
+export interface MongoIndexAccess {
+  ops?: number
+  since?: string
+}
+
 export interface MongoDriver {
   listDatabases(): Promise<string[]>
-  listCollections(database: string): Promise<string[]>
+  listCollections(database: string, kind?: EntityKind | null): Promise<string[]>
+  listCollectionsDetailed(
+    database: string,
+    filter?: { name?: string },
+  ): Promise<MongoCollectionSpec[]>
   findDocuments<T = Record<string, unknown>>(
     database: string,
     collection: string,
     filter?: Record<string, unknown>,
     options?: MongoFindOptions,
   ): Promise<T[]>
+  iterDocuments<T = Record<string, unknown>>(
+    database: string,
+    collection: string,
+    options?: MongoIterOptions,
+  ): AsyncIterableIterator<T>
+  iterInserts<T = Record<string, unknown>>(
+    database: string,
+    collection: string,
+  ): AsyncIterableIterator<T>
   countDocuments(
     database: string,
     collection: string,
     filter?: Record<string, unknown>,
   ): Promise<number>
   listIndexes(database: string, collection: string): Promise<Record<string, unknown>[]>
+  getIndexStats(
+    database: string,
+    collection: string,
+  ): Promise<Record<string, MongoIndexAccess>>
   close(): Promise<void>
 }

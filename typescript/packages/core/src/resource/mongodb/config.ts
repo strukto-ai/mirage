@@ -20,6 +20,7 @@ export interface MongoDBConfig {
   defaultDocLimit?: number
   defaultSearchLimit?: number
   maxDocLimit?: number
+  elideFields?: Record<string, readonly string[]>
 }
 
 export interface MongoDBConfigResolved {
@@ -28,6 +29,7 @@ export interface MongoDBConfigResolved {
   defaultDocLimit: number
   defaultSearchLimit: number
   maxDocLimit: number
+  elideFields: Record<string, readonly string[]>
 }
 
 export function normalizeMongoDBConfig(input: Record<string, unknown>): MongoDBConfig {
@@ -41,5 +43,6 @@ export function resolveMongoDBConfig(config: MongoDBConfig): MongoDBConfigResolv
     defaultDocLimit: config.defaultDocLimit ?? 1000,
     defaultSearchLimit: config.defaultSearchLimit ?? 100,
     maxDocLimit: config.maxDocLimit ?? 5000,
+    elideFields: config.elideFields ?? {},
   }
 }

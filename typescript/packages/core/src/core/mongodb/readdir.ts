@@ -15,19 +15,21 @@
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { MongoDBConfigResolved } from '../../resource/mongodb/config.ts'
 import { PathSpec } from '../../types.ts'
 import { listCollections, listDatabases } from './_client.ts'
+import { detectScope } from './scope.ts'
+import {
+  EntityKind,
+  KIND_TO_DIR,
+  KIND_TO_RESOURCE_TYPE,
+  RESOURCE_TYPE_DATABASE,
+  ScopeLevel,
+} from './types.ts'
 
-function isSingleDb(config: MongoDBConfigResolved): boolean {
-  return config.databases !== null && config.databases.length === 1
-}
-
-function singleDbName(config: MongoDBConfigResolved): string | null {
-  if (config.databases !== null && config.databases.length === 1) {
-    return config.databases[0] ?? null
-  }
-  return null
+function notFound(p: string): Error {
+  const err = new Error(p) as Error & { code?: string }
+  err.code = 'ENOENT'
+  return err
 }
 
 export async function readdir(
@@ -37,93 +39,96 @@ export async function readdir(
 ): Promise<string[]> {
   const spec = typeof path === 'string' ? PathSpec.fromStrPath(path) : path
   const prefix = spec.prefix
-  let raw = spec.pattern !== null ? spec.directory : spec.original
-  if (prefix !== '' && raw.startsWith(prefix)) {
-    raw = raw.slice(prefix.length) || '/'
-  }
-  const key = raw.replace(/^\/+|\/+$/g, '')
+  const scope = detectScope(spec)
+  const virtualKey = `${prefix}${scope.resourcePath}`.replace(/\/+$/, '') || '/'
 
-  if (key !== '' && key.split('/').some((p) => p.startsWith('.'))) {
-    const err = new Error(raw) as Error & { code?: string }
-    err.code = 'ENOENT'
-    throw err
+  if (scope.level === ScopeLevel.ROOT) {
+    return listRoot(accessor, virtualKey, index, prefix)
   }
 
-  const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
-
-  if (key === '') {
-    if (isSingleDb(accessor.config)) {
-      const db = singleDbName(accessor.config)
-      if (db === null) {
-        const err = new Error(raw) as Error & { code?: string }
-        err.code = 'ENOENT'
-        throw err
-      }
-      return readdirCollections(accessor, db, virtualKey, index, prefix, true)
-    }
-    if (index !== undefined) {
-      const cached = await index.listDir(virtualKey)
-      if (cached.entries !== null && cached.entries !== undefined) return cached.entries
-    }
-    const dbs = await listDatabases(accessor)
-    const entries: [string, IndexEntry][] = []
-    const names: string[] = []
-    for (const db of dbs) {
-      entries.push([
-        db,
-        new IndexEntry({
-          id: db,
-          name: db,
-          resourceType: 'mongodb/database',
-          vfsName: db,
-        }),
-      ])
-      names.push(`${prefix}/${db}`)
-    }
-    if (index !== undefined) await index.setDir(virtualKey, entries)
-    return names
+  if (scope.level === ScopeLevel.DATABASE && scope.database !== null) {
+    const base = `${prefix}/${scope.database}`
+    return [`${base}/database.json`, `${base}/collections`, `${base}/views`]
   }
 
-  const parts = key.split('/')
-  if (parts.length === 1) {
-    const dbName = parts[0] ?? ''
-    return readdirCollections(accessor, dbName, virtualKey, index, prefix, false)
+  if (
+    scope.level === ScopeLevel.KIND_DIR &&
+    scope.database !== null &&
+    scope.kind !== null
+  ) {
+    return listKindDir(accessor, scope.database, scope.kind, virtualKey, index, prefix)
   }
 
-  const err = new Error(raw) as Error & { code?: string }
-  err.code = 'ENOENT'
-  throw err
+  if (
+    scope.level === ScopeLevel.ENTITY &&
+    scope.database !== null &&
+    scope.kind !== null &&
+    scope.name !== null
+  ) {
+    const base = `${prefix}/${scope.database}/${KIND_TO_DIR[scope.kind]}/${scope.name}`
+    return [`${base}/schema.json`, `${base}/documents.jsonl`]
+  }
+
+  throw notFound(spec.original)
 }
 
-async function readdirCollections(
+async function listRoot(
   accessor: MongoDBAccessor,
-  dbName: string,
   virtualKey: string,
   index: IndexCacheStore | undefined,
   prefix: string,
-  collapsed: boolean,
 ): Promise<string[]> {
   if (index !== undefined) {
     const cached = await index.listDir(virtualKey)
     if (cached.entries !== null && cached.entries !== undefined) return cached.entries
   }
-  const collections = await listCollections(accessor, dbName)
+  const dbs = await listDatabases(accessor)
   const entries: [string, IndexEntry][] = []
   const names: string[] = []
-  for (const col of collections) {
-    const filename = `${col}.jsonl`
+  for (const db of dbs) {
     entries.push([
-      filename,
+      db,
       new IndexEntry({
-        id: col,
-        name: col,
-        resourceType: 'mongodb/collection',
-        vfsName: filename,
+        id: db,
+        name: db,
+        resourceType: RESOURCE_TYPE_DATABASE,
+        vfsName: db,
       }),
     ])
-    const fullPath = collapsed ? `${prefix}/${filename}` : `${prefix}/${dbName}/${filename}`
-    names.push(fullPath)
+    names.push(`${prefix}/${db}`)
   }
   if (index !== undefined) await index.setDir(virtualKey, entries)
   return names
+}
+
+async function listKindDir(
+  accessor: MongoDBAccessor,
+  database: string,
+  kind: EntityKind,
+  virtualKey: string,
+  index: IndexCacheStore | undefined,
+  prefix: string,
+): Promise<string[]> {
+  if (index !== undefined) {
+    const cached = await index.listDir(virtualKey)
+    if (cached.entries !== null && cached.entries !== undefined) return cached.entries
+  }
+  const names = await listCollections(accessor, database, kind)
+  const base = `${prefix}/${database}/${KIND_TO_DIR[kind]}`
+  const entries: [string, IndexEntry][] = []
+  const out: string[] = []
+  for (const name of names) {
+    entries.push([
+      name,
+      new IndexEntry({
+        id: name,
+        name,
+        resourceType: KIND_TO_RESOURCE_TYPE[kind],
+        vfsName: name,
+      }),
+    ])
+    out.push(`${base}/${name}`)
+  }
+  if (index !== undefined) await index.setDir(virtualKey, entries)
+  return out
 }

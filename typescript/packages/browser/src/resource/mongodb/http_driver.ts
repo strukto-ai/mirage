@@ -12,7 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { MongoDriver, MongoFindOptions } from '@struktoai/mirage-core'
+import type {
+  EntityKind,
+  MongoCollectionSpec,
+  MongoDriver,
+  MongoFindOptions,
+  MongoIndexAccess,
+  MongoIterOptions,
+} from '@struktoai/mirage-core'
 
 export interface HttpMongoDriverOptions {
   endpoint: string
@@ -21,11 +28,21 @@ export interface HttpMongoDriverOptions {
 }
 
 interface MongoProxyRequest {
-  op: 'listDatabases' | 'listCollections' | 'findDocuments' | 'countDocuments' | 'listIndexes'
+  op:
+    | 'listDatabases'
+    | 'listCollections'
+    | 'listCollectionsDetailed'
+    | 'findDocuments'
+    | 'iterDocuments'
+    | 'countDocuments'
+    | 'listIndexes'
+    | 'getIndexStats'
   database?: string
   collection?: string
+  kind?: EntityKind | null
+  nameFilter?: { name?: string }
   filter?: Record<string, unknown>
-  options?: MongoFindOptions
+  options?: MongoFindOptions | MongoIterOptions
 }
 
 export class HttpMongoDriver implements MongoDriver {
@@ -56,8 +73,19 @@ export class HttpMongoDriver implements MongoDriver {
     return this.post<string[]>({ op: 'listDatabases' })
   }
 
-  listCollections(database: string): Promise<string[]> {
-    return this.post<string[]>({ op: 'listCollections', database })
+  listCollections(database: string, kind: EntityKind | null = null): Promise<string[]> {
+    return this.post<string[]>({ op: 'listCollections', database, kind })
+  }
+
+  listCollectionsDetailed(
+    database: string,
+    filter: { name?: string } = {},
+  ): Promise<MongoCollectionSpec[]> {
+    return this.post<MongoCollectionSpec[]>({
+      op: 'listCollectionsDetailed',
+      database,
+      nameFilter: filter,
+    })
   }
 
   async findDocuments<T = Record<string, unknown>>(
@@ -75,6 +103,27 @@ export class HttpMongoDriver implements MongoDriver {
     })
   }
 
+  async *iterDocuments<T = Record<string, unknown>>(
+    database: string,
+    collection: string,
+    options: MongoIterOptions = {},
+  ): AsyncIterableIterator<T> {
+    const docs = await this.post<T[]>({
+      op: 'iterDocuments',
+      database,
+      collection,
+      options,
+    })
+    for (const d of docs) yield d
+  }
+
+  async *iterInserts<T = Record<string, unknown>>(
+    _database: string,
+    _collection: string,
+  ): AsyncIterableIterator<T> {
+    throw new Error('iterInserts (tail -f) is not supported by HttpMongoDriver')
+  }
+
   countDocuments(
     database: string,
     collection: string,
@@ -86,6 +135,17 @@ export class HttpMongoDriver implements MongoDriver {
   listIndexes(database: string, collection: string): Promise<Record<string, unknown>[]> {
     return this.post<Record<string, unknown>[]>({
       op: 'listIndexes',
+      database,
+      collection,
+    })
+  }
+
+  getIndexStats(
+    database: string,
+    collection: string,
+  ): Promise<Record<string, MongoIndexAccess>> {
+    return this.post<Record<string, MongoIndexAccess>>({
+      op: 'getIndexStats',
       database,
       collection,
     })

@@ -12,7 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { loadOptionalPeer, type MongoDriver, type MongoFindOptions } from '@struktoai/mirage-core'
+import {
+  loadOptionalPeer,
+  type EntityKind,
+  type MongoCollectionSpec,
+  type MongoDriver,
+  type MongoFindOptions,
+  type MongoIndexAccess,
+  type MongoIterOptions,
+} from '@struktoai/mirage-core'
 
 interface MongoCollectionLike {
   find: (
@@ -22,21 +30,31 @@ interface MongoCollectionLike {
     sort: (sort: Record<string, 1 | -1>) => MongoCursorLike
     skip: (n: number) => MongoCursorLike
     limit: (n: number) => MongoCursorLike
+    batchSize: (n: number) => MongoCursorLike
     toArray: () => Promise<Record<string, unknown>[]>
+    [Symbol.asyncIterator]?: () => AsyncIterableIterator<Record<string, unknown>>
   }
   countDocuments: (filter?: Record<string, unknown>) => Promise<number>
   listIndexes: () => { toArray: () => Promise<Record<string, unknown>[]> }
+  aggregate: (pipeline: unknown[]) => { toArray: () => Promise<Record<string, unknown>[]> }
+  watch: (
+    pipeline?: unknown[],
+  ) => AsyncIterableIterator<Record<string, unknown>> & { close: () => Promise<void> }
 }
 
 interface MongoCursorLike {
   sort: (sort: Record<string, 1 | -1>) => MongoCursorLike
   skip: (n: number) => MongoCursorLike
   limit: (n: number) => MongoCursorLike
+  batchSize: (n: number) => MongoCursorLike
   toArray: () => Promise<Record<string, unknown>[]>
+  [Symbol.asyncIterator]?: () => AsyncIterableIterator<Record<string, unknown>>
 }
 
 interface MongoDbLike {
-  listCollections: () => { toArray: () => Promise<{ name: string }[]> }
+  listCollections: (filter?: Record<string, unknown>) => {
+    toArray: () => Promise<Record<string, unknown>[]>
+  }
   collection: (name: string) => MongoCollectionLike
   admin: () => { listDatabases: () => Promise<{ databases: { name: string }[] }> }
 }
@@ -65,10 +83,24 @@ export class MongoDBStore implements MongoDriver {
     return r.databases.map((d) => d.name)
   }
 
-  async listCollections(database: string): Promise<string[]> {
+  async listCollections(database: string, kind: EntityKind | null = null): Promise<string[]> {
     const c = await this._client()
-    const cols = await c.db(database).listCollections().toArray()
-    return cols.map((col) => col.name)
+    const filter = kind === null ? undefined : { type: kind }
+    const cols = await c.db(database).listCollections(filter).toArray()
+    return cols.map((col) => col.name as string).sort()
+  }
+
+  async listCollectionsDetailed(
+    database: string,
+    filter: { name?: string } = {},
+  ): Promise<MongoCollectionSpec[]> {
+    const c = await this._client()
+    const cols = await c.db(database).listCollections(filter).toArray()
+    return cols.map((col) => ({
+      name: col.name as string,
+      type: col.type as string | undefined,
+      options: col.options as MongoCollectionSpec['options'],
+    }))
   }
 
   async findDocuments<T = Record<string, unknown>>(
@@ -90,6 +122,50 @@ export class MongoDBStore implements MongoDriver {
     return (await cursor.toArray()) as T[]
   }
 
+  async *iterDocuments<T = Record<string, unknown>>(
+    database: string,
+    collection: string,
+    options: MongoIterOptions = {},
+  ): AsyncIterableIterator<T> {
+    const c = await this._client()
+    const filter = options.filter ?? {}
+    let cursor = c
+      .db(database)
+      .collection(collection)
+      .find(filter, {
+        ...(options.projection !== undefined ? { projection: options.projection } : {}),
+      }) as MongoCursorLike
+    if (options.sort !== undefined) cursor = cursor.sort(options.sort)
+    if (options.batchSize !== undefined) cursor = cursor.batchSize(options.batchSize)
+    if (cursor[Symbol.asyncIterator] === undefined) {
+      const all = (await cursor.toArray()) as T[]
+      for (const doc of all) yield doc
+      return
+    }
+    for await (const doc of cursor as unknown as AsyncIterableIterator<T>) {
+      yield doc
+    }
+  }
+
+  async *iterInserts<T = Record<string, unknown>>(
+    database: string,
+    collection: string,
+  ): AsyncIterableIterator<T> {
+    const c = await this._client()
+    const stream = c
+      .db(database)
+      .collection(collection)
+      .watch([{ $match: { operationType: 'insert' } }])
+    try {
+      for await (const change of stream as AsyncIterableIterator<Record<string, unknown>>) {
+        const doc = change.fullDocument
+        if (doc !== undefined && doc !== null) yield doc as T
+      }
+    } finally {
+      await stream.close()
+    }
+  }
+
   async countDocuments(
     database: string,
     collection: string,
@@ -102,6 +178,26 @@ export class MongoDBStore implements MongoDriver {
   async listIndexes(database: string, collection: string): Promise<Record<string, unknown>[]> {
     const c = await this._client()
     return c.db(database).collection(collection).listIndexes().toArray()
+  }
+
+  async getIndexStats(
+    database: string,
+    collection: string,
+  ): Promise<Record<string, MongoIndexAccess>> {
+    const c = await this._client()
+    const docs = await c
+      .db(database)
+      .collection(collection)
+      .aggregate([{ $indexStats: {} }])
+      .toArray()
+    const out: Record<string, MongoIndexAccess> = {}
+    for (const d of docs) {
+      const name = d.name as string | undefined
+      if (name !== undefined) {
+        out[name] = (d.accesses as MongoIndexAccess) ?? {}
+      }
+    }
+    return out
   }
 
   async close(): Promise<void> {

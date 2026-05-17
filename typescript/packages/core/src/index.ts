@@ -883,7 +883,26 @@ export {
   searchKind as postgresSearchKind,
   searchSchema as postgresSearchSchema,
 } from './core/postgres/search.ts'
-export type { MongoDriver, MongoFindOptions } from './core/mongodb/_driver.ts'
+export type {
+  MongoCollectionSpec,
+  MongoDriver,
+  MongoFindOptions,
+  MongoIndexAccess,
+  MongoIterOptions,
+} from './core/mongodb/_driver.ts'
+export {
+  BsonTypeTag,
+  EntityKind,
+  IndexType,
+  KIND_DIR_NAMES,
+  KIND_TO_DIR,
+  KIND_TO_RESOURCE_TYPE,
+  PRIMARY_KEY,
+  RESOURCE_TYPE_COLLECTION,
+  RESOURCE_TYPE_DATABASE,
+  RESOURCE_TYPE_VIEW,
+  ScopeLevel,
+} from './core/mongodb/types.ts'
 export { MongoDBAccessor } from './accessor/mongodb.ts'
 export {
   normalizeMongoDBConfig,
@@ -902,6 +921,11 @@ export { detectScope as detectMongoScope, type MongoDBScope } from './core/mongo
 export {
   countDocuments as mongoCountDocuments,
   findDocuments as mongoFindDocuments,
+  getIndexStats as mongoGetIndexStats,
+  getValidator as mongoGetValidator,
+  isView as mongoIsView,
+  iterDocuments as mongoIterDocuments,
+  iterInserts as mongoIterInserts,
   listCollections as mongoListCollections,
   listDatabases as mongoListDatabases,
   listIndexes as mongoListIndexes,

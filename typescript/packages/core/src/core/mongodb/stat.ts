@@ -14,19 +14,15 @@
 
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { MongoDBConfigResolved } from '../../resource/mongodb/config.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { countDocuments, listIndexes } from './_client.ts'
+import { countDocuments, isView, listIndexes } from './_client.ts'
+import { detectScope } from './scope.ts'
+import { EntityKind, KIND_TO_DIR, ScopeLevel } from './types.ts'
 
-function isSingleDb(config: MongoDBConfigResolved): boolean {
-  return config.databases !== null && config.databases.length === 1
-}
-
-function singleDbName(config: MongoDBConfigResolved): string | null {
-  if (config.databases !== null && config.databases.length === 1) {
-    return config.databases[0] ?? null
-  }
-  return null
+function notFound(p: string): Error {
+  const err = new Error(p) as Error & { code?: string }
+  err.code = 'ENOENT'
+  return err
 }
 
 export async function stat(
@@ -35,76 +31,112 @@ export async function stat(
   _index?: IndexCacheStore,
 ): Promise<FileStat> {
   const spec = typeof path === 'string' ? PathSpec.fromStrPath(path) : path
-  const prefix = spec.prefix
-  let raw = spec.original
-  if (prefix !== '' && raw.startsWith(prefix)) {
-    raw = raw.slice(prefix.length) || '/'
-  }
-  const key = raw.replace(/^\/+|\/+$/g, '')
+  const scope = detectScope(spec)
 
-  if (key === '') {
+  if (scope.level === ScopeLevel.ROOT) {
     return new FileStat({ name: '/', type: FileType.DIRECTORY })
   }
 
-  const parts = key.split('/')
-  if (parts.some((p) => p.startsWith('.'))) {
-    const err = new Error(raw) as Error & { code?: string }
-    err.code = 'ENOENT'
-    throw err
-  }
-
-  if (isSingleDb(accessor.config) && parts.length === 1 && (parts[0] ?? '').endsWith('.jsonl')) {
-    const db = singleDbName(accessor.config)
-    if (db === null) {
-      const err = new Error(raw) as Error & { code?: string }
-      err.code = 'ENOENT'
-      throw err
-    }
-    const filename = parts[0] ?? ''
-    const colName = filename.slice(0, -'.jsonl'.length)
-    return collectionStat(accessor, db, colName, filename)
-  }
-
-  if (parts.length === 1 && !(parts[0] ?? '').endsWith('.jsonl')) {
-    const dbName = parts[0] ?? ''
+  if (scope.level === ScopeLevel.DATABASE && scope.database !== null) {
     return new FileStat({
-      name: dbName,
+      name: scope.database,
       type: FileType.DIRECTORY,
-      extra: { database: dbName },
+      extra: { database: scope.database },
     })
   }
 
-  if (parts.length === 2 && (parts[1] ?? '').endsWith('.jsonl')) {
-    const dbName = parts[0] ?? ''
-    const filename = parts[1] ?? ''
-    const colName = filename.slice(0, -'.jsonl'.length)
-    return collectionStat(accessor, dbName, colName, filename)
+  if (
+    scope.level === ScopeLevel.KIND_DIR &&
+    scope.database !== null &&
+    scope.kind !== null
+  ) {
+    return new FileStat({
+      name: KIND_TO_DIR[scope.kind],
+      type: FileType.DIRECTORY,
+      extra: { database: scope.database, kind: scope.kind },
+    })
   }
 
-  const err = new Error(raw) as Error & { code?: string }
-  err.code = 'ENOENT'
-  throw err
+  if (
+    scope.level === ScopeLevel.ENTITY &&
+    scope.database !== null &&
+    scope.kind !== null &&
+    scope.name !== null
+  ) {
+    const docCount = await countDocuments(accessor, scope.database, scope.name)
+    return new FileStat({
+      name: scope.name,
+      type: FileType.DIRECTORY,
+      extra: {
+        database: scope.database,
+        kind: scope.kind,
+        name: scope.name,
+        document_count: docCount,
+      },
+    })
+  }
+
+  if (
+    scope.level === ScopeLevel.DOCUMENTS &&
+    scope.database !== null &&
+    scope.kind !== null &&
+    scope.name !== null
+  ) {
+    return documentsStat(accessor, scope.database, scope.kind, scope.name)
+  }
+
+  if (
+    scope.level === ScopeLevel.SCHEMA_JSON &&
+    scope.database !== null &&
+    scope.kind !== null &&
+    scope.name !== null
+  ) {
+    return new FileStat({
+      name: 'schema.json',
+      type: FileType.TEXT,
+      extra: {
+        database: scope.database,
+        kind: scope.kind,
+        name: scope.name,
+      },
+    })
+  }
+
+  if (scope.level === ScopeLevel.DATABASE_JSON && scope.database !== null) {
+    return new FileStat({
+      name: 'database.json',
+      type: FileType.TEXT,
+      extra: { database: scope.database },
+    })
+  }
+
+  throw notFound(spec.original)
 }
 
-async function collectionStat(
+async function documentsStat(
   accessor: MongoDBAccessor,
-  dbName: string,
-  colName: string,
-  filename: string,
+  database: string,
+  kind: EntityKind,
+  name: string,
 ): Promise<FileStat> {
-  const docCount = await countDocuments(accessor, dbName, colName)
-  const indexes = await listIndexes(accessor, dbName, colName)
-  const indexInfo = indexes.map((idx) => ({
-    name: idx.name ?? null,
-    keys: { ...((idx.key as Record<string, unknown> | undefined) ?? {}) },
-  }))
+  const view = kind === EntityKind.VIEW || (await isView(accessor, database, name))
+  const docCount = await countDocuments(accessor, database, name)
+  let indexInfo: { name: unknown; keys: Record<string, unknown> }[] = []
+  if (!view) {
+    const indexes = await listIndexes(accessor, database, name)
+    indexInfo = indexes.map((idx) => ({
+      name: idx.name ?? null,
+      keys: { ...((idx.key as Record<string, unknown> | undefined) ?? {}) },
+    }))
+  }
   return new FileStat({
-    name: filename,
+    name: 'documents.jsonl',
     type: FileType.TEXT,
     size: null,
     extra: {
-      database: dbName,
-      collection: colName,
+      database,
+      name,
+      kind: view ? EntityKind.VIEW : EntityKind.COLLECTION,
       document_count: docCount,
       indexes: indexInfo,
     },

@@ -23,11 +23,6 @@ export const readOp: RegisteredOp = {
   filetype: null,
   write: false,
   fn: (accessor, path, _args, kwargs: OpKwargs) => {
-    const limit = typeof kwargs.limit === 'number' ? kwargs.limit : null
-    const offset = typeof kwargs.offset === 'number' ? kwargs.offset : null
-    return coreRead(accessor as MongoDBAccessor, path, kwargs.index, {
-      limit,
-      offset,
-    })
+    return coreRead(accessor as MongoDBAccessor, path, kwargs.index)
   },
 }

@@ -17,6 +17,7 @@ import { findDocuments } from '../../../core/mongodb/_client.ts'
 import { resolveGlob } from '../../../core/mongodb/glob.ts'
 import { read as mongoRead } from '../../../core/mongodb/read.ts'
 import { detectScope } from '../../../core/mongodb/scope.ts'
+import { ScopeLevel } from '../../../core/mongodb/types.ts'
 import { type ByteSource, IOResult } from '../../../io/types.ts'
 import { type PathSpec, ResourceName } from '../../../types.ts'
 import { encodeBase64 } from '../../../utils/base64.ts'
@@ -99,21 +100,19 @@ async function tailCommand(
   if (paths.length > 0) {
     const first = paths[0]
     if (first === undefined) return [null, new IOResult()]
-    const singleDb = accessor.config.databases !== null && accessor.config.databases.length === 1
-    const singleDbName = singleDb ? (accessor.config.databases?.[0] ?? null) : null
-    const scope = detectScope(first, { singleDb, singleDbName })
+    const scope = detectScope(first)
 
     if (
-      scope.level === 'file' &&
+      scope.level === ScopeLevel.DOCUMENTS &&
       scope.database !== null &&
-      scope.collection !== null &&
+      scope.name !== null &&
       bytesMode === null
     ) {
       const limit = Math.min(lines, accessor.config.maxDocLimit)
       const docs = await findDocuments(
         accessor,
         scope.database,
-        scope.collection,
+        scope.name,
         {},
         { limit, sort: { _id: -1 } },
       )

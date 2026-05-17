@@ -17,6 +17,7 @@ import { countDocuments } from '../../../core/mongodb/_client.ts'
 import { resolveGlob } from '../../../core/mongodb/glob.ts'
 import { read as mongoRead } from '../../../core/mongodb/read.ts'
 import { detectScope } from '../../../core/mongodb/scope.ts'
+import { ScopeLevel } from '../../../core/mongodb/types.ts'
 import { type ByteSource, IOResult } from '../../../io/types.ts'
 import { type PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
@@ -54,11 +55,13 @@ async function wcCommand(
 
   const first = paths[0]
   if (first === undefined) return [null, new IOResult()]
-  const singleDb = accessor.config.databases !== null && accessor.config.databases.length === 1
-  const singleDbName = singleDb ? (accessor.config.databases?.[0] ?? null) : null
-  const scope = detectScope(first, { singleDb, singleDbName })
+  const scope = detectScope(first)
 
-  if (scope.level === 'file' && scope.database !== null && scope.collection !== null) {
+  if (
+    scope.level === ScopeLevel.DOCUMENTS &&
+    scope.database !== null &&
+    scope.name !== null
+  ) {
     if (cFlag) {
       const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
       const target = resolved[0]
@@ -68,10 +71,10 @@ async function wcCommand(
       return [out, new IOResult()]
     }
     if (lFlag) {
-      const count = await countDocuments(accessor, scope.database, scope.collection)
+      const count = await countDocuments(accessor, scope.database, scope.name)
       return [ENC.encode(String(count)), new IOResult()]
     }
-    const count = await countDocuments(accessor, scope.database, scope.collection)
+    const count = await countDocuments(accessor, scope.database, scope.name)
     return [ENC.encode(String(count)), new IOResult()]
   }
 
