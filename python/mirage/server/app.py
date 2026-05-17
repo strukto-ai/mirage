@@ -21,9 +21,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from mirage.server.host_validation import resolve_allowed_hosts
+from mirage.server.host_validation import (HostHeaderMiddleware,
+                                           resolve_allowed_hosts)
 from mirage.server.jobs import JobTable
 from mirage.server.persist import restore_all, snapshot_all
 from mirage.server.registry import WorkspaceRegistry
@@ -125,7 +125,7 @@ def build_app(idle_grace_seconds: float = 30.0,
     app = FastAPI(title="Mirage daemon", version="0.1", lifespan=_lifespan)
     hosts = resolve_allowed_hosts(allowed_hosts)
     if "*" not in hosts:
-        app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
+        app.add_middleware(HostHeaderMiddleware, allowed_hosts=hosts)
     app.state.allowed_hosts = hosts
     app.state.started_at = time.time()
     app.state.exit_event = exit_event or asyncio.Event()

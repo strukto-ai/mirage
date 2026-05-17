@@ -16,6 +16,7 @@ import Fastify from 'fastify'
 import multipart from '@fastify/multipart'
 import { WorkspaceRegistry } from './registry.ts'
 import { JobTable } from './jobs.ts'
+import { isHostAllowed, resolveAllowedHosts } from './host_validation.ts'
 import { restoreAll, snapshotAll } from './persist.ts'
 import { registerExecuteRoutes } from './routers/execute.ts'
 import { registerHealthRoutes } from './routers/health.ts'
@@ -27,6 +28,7 @@ export interface BuildAppOptions {
   idleGraceSeconds?: number
   persistDir?: string
   onIdleExit?: () => void
+  allowedHosts?: readonly string[]
 }
 
 export type MirageApp = ReturnType<typeof buildApp>
@@ -59,6 +61,19 @@ export function buildApp(options: BuildAppOptions = {}) {
   }
   const jobs = new JobTable()
   const app = Fastify({ logger: false })
+  const allowedHosts = resolveAllowedHosts(options.allowedHosts)
+  if (!allowedHosts.includes('*')) {
+    app.addHook('onRequest', (request, reply, done) => {
+      if (!isHostAllowed(request.headers.host, allowedHosts)) {
+        console.warn(
+          `rejecting request from ${request.ip}: Host=${JSON.stringify(request.headers.host)} not in allowlist ${JSON.stringify(allowedHosts)}`,
+        )
+        void reply.code(400).send({ detail: 'Invalid host header' })
+        return
+      }
+      done()
+    })
+  }
   void app.register(multipart, {
     limits: { fileSize: 10 * 1024 * 1024 * 1024 },
   })

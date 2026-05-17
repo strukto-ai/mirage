@@ -108,3 +108,22 @@ async def test_explicit_wildcard_disables_enforcement(monkeypatch):
                            base_url="http://anything.example") as client:
         r = await client.get("/v1/workspaces")
         assert r.status_code == 200
+
+
+@pytest.mark.no_host_override
+@pytest.mark.asyncio
+async def test_rejection_emits_log_warning(monkeypatch, caplog):
+    monkeypatch.delenv("MIRAGE_ALLOWED_HOSTS", raising=False)
+    app = build_app(idle_grace_seconds=10.0)
+    transport = ASGITransport(app=app)
+    caplog.set_level("WARNING", logger="mirage.server.host_validation")
+    async with AsyncClient(transport=transport,
+                           base_url="http://attacker.example") as client:
+        r = await client.get("/v1/workspaces")
+        assert r.status_code == 400
+    rejection_logs = [
+        rec for rec in caplog.records
+        if "attacker.example" in rec.getMessage()
+    ]
+    assert rejection_logs, "expected a warning log for the rejected host"
+    assert rejection_logs[0].levelname == "WARNING"

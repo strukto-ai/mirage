@@ -12,12 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 import os
 from collections.abc import Iterable
+
+from starlette.responses import PlainTextResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 DEFAULT_ALLOWED_HOSTS: tuple[str, ...] = ("127.0.0.1", "localhost", "::1")
 
 ENV_VAR = "MIRAGE_ALLOWED_HOSTS"
+
+logger = logging.getLogger(__name__)
 
 
 def parse_allowed_hosts(value: str | None) -> list[str]:
@@ -38,8 +44,7 @@ def parse_allowed_hosts(value: str | None) -> list[str]:
 
 
 def resolve_allowed_hosts(
-    allowed_hosts: Iterable[str] | None = None,
-) -> list[str]:
+        allowed_hosts: Iterable[str] | None = None) -> list[str]:
     """Resolve allowed hosts from explicit arg or env var.
 
     Args:
@@ -53,3 +58,40 @@ def resolve_allowed_hosts(
     if allowed_hosts is not None:
         return list(allowed_hosts)
     return parse_allowed_hosts(os.environ.get(ENV_VAR))
+
+
+class HostHeaderMiddleware:
+    """ASGI middleware that 400s requests with disallowed Host headers.
+
+    Replaces Starlette's TrustedHostMiddleware so we can log on
+    rejection. Port is stripped before comparison (parity with
+    Starlette).
+
+    Args:
+        app (ASGIApp): downstream ASGI app.
+        allowed_hosts (list[str]): exact hosts to accept. ``"*"`` in
+            the list disables enforcement.
+    """
+
+    def __init__(self, app: ASGIApp, allowed_hosts: list[str]) -> None:
+        self.app = app
+        self.allowed_hosts = allowed_hosts
+        self.allow_any = "*" in allowed_hosts
+
+    async def __call__(self, scope: Scope, receive: Receive,
+                       send: Send) -> None:
+        if scope["type"] not in ("http", "websocket") or self.allow_any:
+            await self.app(scope, receive, send)
+            return
+        headers = dict(scope.get("headers") or [])
+        raw_host = headers.get(b"host", b"").decode("latin-1")
+        host = raw_host.split(":")[0]
+        if host in self.allowed_hosts:
+            await self.app(scope, receive, send)
+            return
+        client = scope.get("client") or ("?", 0)
+        logger.warning(
+            "rejecting request from %s:%s: Host=%r not in allowlist %s",
+            client[0], client[1], raw_host, self.allowed_hosts)
+        response = PlainTextResponse("Invalid host header", status_code=400)
+        await response(scope, receive, send)
