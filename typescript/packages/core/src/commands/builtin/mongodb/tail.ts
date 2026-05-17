@@ -17,10 +17,10 @@ import { findDocuments } from '../../../core/mongodb/_client.ts'
 import { resolveGlob } from '../../../core/mongodb/glob.ts'
 import { read as mongoRead } from '../../../core/mongodb/read.ts'
 import { detectScope } from '../../../core/mongodb/scope.ts'
+import { applyElision, elisionPaths, stringifyDoc } from '../../../core/mongodb/stream.ts'
 import { ScopeLevel } from '../../../core/mongodb/types.ts'
 import { type ByteSource, IOResult } from '../../../io/types.ts'
 import { type PathSpec, ResourceName } from '../../../types.ts'
-import { encodeBase64 } from '../../../utils/base64.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { parseN, tailBytes } from '../tail_helper.ts'
@@ -28,51 +28,6 @@ import { readStdinAsync } from '../utils/stream.ts'
 import { fileReadProvision } from './_provision.ts'
 
 const ENC = new TextEncoder()
-
-function safeToString(value: unknown): string {
-  if (value === null || value === undefined) return ''
-  if (typeof value === 'string') return value
-  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
-    return String(value)
-  }
-  if (typeof value === 'object' && 'toString' in value) {
-    try {
-      return (value as { toString: () => string }).toString()
-    } catch {
-      return Object.prototype.toString.call(value)
-    }
-  }
-  return Object.prototype.toString.call(value)
-}
-
-function bsonReplacer(_key: string, value: unknown): unknown {
-  if (value instanceof Date) return value.toISOString()
-  if (typeof value === 'bigint') return value.toString()
-  if (value instanceof Uint8Array) return encodeBase64(value)
-  if (typeof value === 'object' && value !== null && 'toJSON' in value) {
-    try {
-      return (value as { toJSON: () => unknown }).toJSON()
-    } catch {
-      return safeToString(value)
-    }
-  }
-  return value
-}
-
-function stringifyId(value: unknown): unknown {
-  if (typeof value === 'string') return value
-  if (typeof value === 'number') return value
-  if (value === null || value === undefined) return value
-  if (typeof value === 'object' && 'toString' in value) {
-    try {
-      const s = (value as { toString: () => string }).toString()
-      if (s !== '[object Object]') return s
-    } catch {
-      return safeToString(value)
-    }
-  }
-  return safeToString(value)
-}
 
 function tailResult(
   raw: Uint8Array,
@@ -120,14 +75,13 @@ async function tailCommand(
       if (docs.length === 0) {
         return [tailResult(new Uint8Array(0), lines, plusMode, null), new IOResult()]
       }
+      const elide = elisionPaths(accessor, scope.database, scope.name)
       const jsonl =
         docs
           .map((d) => {
-            const copy: Record<string, unknown> = { ...d }
-            if (copy._id !== undefined && copy._id !== null) {
-              copy._id = stringifyId(copy._id)
-            }
-            return JSON.stringify(copy, bsonReplacer)
+            const doc = d
+            const final = elide.size > 0 ? applyElision(doc, elide) : doc
+            return stringifyDoc(final)
           })
           .join('\n') + '\n'
       return [tailResult(ENC.encode(jsonl), lines, plusMode, null), new IOResult()]

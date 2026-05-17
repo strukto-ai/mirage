@@ -19,14 +19,16 @@ import { EntityKind } from './types.ts'
 const SYSTEM_DBS: ReadonlySet<string> = new Set(['admin', 'local', 'config'])
 
 export async function listDatabases(accessor: MongoDBAccessor): Promise<string[]> {
-  const all = await accessor.driver.listDatabases()
-  let dbs = all.filter((d) => !SYSTEM_DBS.has(d))
-  const allow = accessor.config.databases
-  if (allow !== null) {
-    const allowSet = new Set(allow)
-    dbs = dbs.filter((d) => allowSet.has(d))
-  }
-  return [...dbs].sort()
+  return accessor.cachedList('listDatabases', async () => {
+    const all = await accessor.driver.listDatabases()
+    let dbs = all.filter((d) => !SYSTEM_DBS.has(d))
+    const allow = accessor.config.databases
+    if (allow !== null) {
+      const allowSet = new Set(allow)
+      dbs = dbs.filter((d) => allowSet.has(d))
+    }
+    return [...dbs].sort()
+  })
 }
 
 export async function listCollections(
@@ -34,8 +36,30 @@ export async function listCollections(
   database: string,
   kind: EntityKind | null = null,
 ): Promise<string[]> {
-  const cols = await accessor.driver.listCollections(database, kind)
-  return [...cols].sort()
+  const key = `listCollections:${database}:${kind ?? ''}`
+  return accessor.cachedList(key, async () => {
+    const cols = await accessor.driver.listCollections(database, kind)
+    return [...cols].sort()
+  })
+}
+
+export async function databaseExists(
+  accessor: MongoDBAccessor,
+  database: string,
+): Promise<boolean> {
+  const dbs = await listDatabases(accessor)
+  return dbs.includes(database)
+}
+
+export async function entityExists(
+  accessor: MongoDBAccessor,
+  database: string,
+  name: string,
+  kind: EntityKind | null = null,
+): Promise<boolean> {
+  if (!(await databaseExists(accessor, database))) return false
+  const names = await listCollections(accessor, database, kind)
+  return names.includes(name)
 }
 
 export async function findDocuments<T = Record<string, unknown>>(

@@ -16,6 +16,7 @@ from bson.json_util import RELAXED_JSON_OPTIONS, dumps
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.core.mongodb._client import database_exists, entity_exists
 from mirage.core.mongodb._schema_json import (build_collection_schema_json,
                                               build_database_json)
 from mirage.core.mongodb.scope import detect_scope
@@ -33,16 +34,27 @@ async def read(
         path = PathSpec(original=path, directory=path)
     scope = detect_scope(path)
     if scope.level == ScopeLevel.DOCUMENTS:
+        if not await entity_exists(accessor.client, accessor.config,
+                                   scope.database, scope.name, scope.kind,
+                                   accessor):
+            raise FileNotFoundError(path.original)
         chunks: list[bytes] = []
         async for chunk in read_stream(accessor, path, index):
             chunks.append(chunk)
         return b"".join(chunks)
     if scope.level == ScopeLevel.SCHEMA_JSON:
+        if not await entity_exists(accessor.client, accessor.config,
+                                   scope.database, scope.name, scope.kind,
+                                   accessor):
+            raise FileNotFoundError(path.original)
         payload = await build_collection_schema_json(accessor, scope.database,
                                                      scope.name)
         return (dumps(payload, json_options=RELAXED_JSON_OPTIONS) +
                 "\n").encode()
     if scope.level == ScopeLevel.DATABASE_JSON:
+        if not await database_exists(accessor.client, accessor.config,
+                                     scope.database, accessor):
+            raise FileNotFoundError(path.original)
         payload = await build_database_json(accessor, scope.database)
         return (dumps(payload, json_options=RELAXED_JSON_OPTIONS) +
                 "\n").encode()

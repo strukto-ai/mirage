@@ -38,6 +38,20 @@ def _path(s: str) -> PathSpec:
     return PathSpec(original=s, directory=s)
 
 
+@pytest.fixture(autouse=True)
+def _stub_existence_checks():
+    with patch(
+            "mirage.core.mongodb.stat.database_exists",
+            new_callable=AsyncMock,
+            return_value=True,
+    ), patch(
+            "mirage.core.mongodb.stat.entity_exists",
+            new_callable=AsyncMock,
+            return_value=True,
+    ):
+        yield
+
+
 @pytest.mark.asyncio
 async def test_stat_root(accessor, index):
     result = await stat(accessor, _path("/"), index)
@@ -147,3 +161,40 @@ async def test_stat_database_json(accessor, index):
 async def test_stat_unknown_path_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
         await stat(accessor, _path("/db/something/extra/leaf"), index)
+
+
+@pytest.mark.asyncio
+async def test_stat_database_missing_raises(accessor, index):
+    with patch(
+            "mirage.core.mongodb.stat.database_exists",
+            new_callable=AsyncMock,
+            return_value=False,
+    ):
+        with pytest.raises(FileNotFoundError):
+            await stat(accessor, _path("/ghost"), index)
+
+
+@pytest.mark.asyncio
+async def test_stat_collection_missing_raises(accessor, index):
+    with patch(
+            "mirage.core.mongodb.stat.entity_exists",
+            new_callable=AsyncMock,
+            return_value=False,
+    ):
+        with pytest.raises(FileNotFoundError):
+            await stat(accessor, _path("/sample_mflix/collections/ghost"),
+                       index)
+
+
+@pytest.mark.asyncio
+async def test_stat_documents_under_missing_collection_raises(accessor, index):
+    with patch(
+            "mirage.core.mongodb.stat.entity_exists",
+            new_callable=AsyncMock,
+            return_value=False,
+    ):
+        with pytest.raises(FileNotFoundError):
+            await stat(
+                accessor,
+                _path("/sample_mflix/collections/ghost/documents.jsonl"),
+                index)

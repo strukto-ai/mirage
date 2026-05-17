@@ -14,8 +14,13 @@
 
 import type { MongoDriver } from './_driver.ts'
 
-async function* emptyAsyncIter<T>(): AsyncIterableIterator<T> {
-  // no docs
+function emptyAsyncIter<T>(): AsyncIterableIterator<T> {
+  return {
+    next: () => Promise.resolve({ value: undefined as T, done: true }),
+    [Symbol.asyncIterator]() {
+      return this
+    },
+  }
 }
 
 export function stubMongoDriver(overrides: Partial<MongoDriver> = {}): MongoDriver {
@@ -37,7 +42,18 @@ export function stubMongoDriver(overrides: Partial<MongoDriver> = {}): MongoDriv
 export function arrayIter(
   items: readonly Record<string, unknown>[],
 ): <T = Record<string, unknown>>() => AsyncIterableIterator<T> {
-  return async function* <T = Record<string, unknown>>() {
-    for (const i of items) yield i as T
+  return <T = Record<string, unknown>>(): AsyncIterableIterator<T> => {
+    let i = 0
+    return {
+      next: () =>
+        Promise.resolve(
+          i < items.length
+            ? { value: items[i++] as T, done: false }
+            : { value: undefined as T, done: true },
+        ),
+      [Symbol.asyncIterator]() {
+        return this
+      },
+    }
   }
 }

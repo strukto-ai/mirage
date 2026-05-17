@@ -140,10 +140,7 @@ export class HttpMongoDriver implements MongoDriver {
     })
   }
 
-  getIndexStats(
-    database: string,
-    collection: string,
-  ): Promise<Record<string, MongoIndexAccess>> {
+  getIndexStats(database: string, collection: string): Promise<Record<string, MongoIndexAccess>> {
     return this.post<Record<string, MongoIndexAccess>>({
       op: 'getIndexStats',
       database,

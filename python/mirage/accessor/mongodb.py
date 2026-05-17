@@ -13,6 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import time
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -22,9 +25,13 @@ from mirage.resource.mongodb.config import MongoDBConfig
 
 class MongoDBAccessor(Accessor):
 
-    def __init__(self, config: MongoDBConfig) -> None:
+    def __init__(self,
+                 config: MongoDBConfig,
+                 listing_cache_ttl: float = 5.0) -> None:
         self.config = config
+        self.listing_cache_ttl = listing_cache_ttl
         self._clients: dict[int, AsyncIOMotorClient] = {}
+        self._cache: dict[str, tuple[float, Any]] = {}
 
     @property
     def client(self) -> AsyncIOMotorClient:
@@ -43,3 +50,18 @@ class MongoDBAccessor(Accessor):
             client = AsyncIOMotorClient(self.config.uri)
             self._clients[key] = client
         return client
+
+    async def cached_list(self, key: str,
+                          fetch: Callable[[], Awaitable[Any]]) -> Any:
+        if self.listing_cache_ttl <= 0:
+            return await fetch()
+        now = time.monotonic()
+        hit = self._cache.get(key)
+        if hit is not None and hit[0] > now:
+            return hit[1]
+        value = await fetch()
+        self._cache[key] = (now + self.listing_cache_ttl, value)
+        return value
+
+    def invalidate_listings(self) -> None:
+        self._cache.clear()

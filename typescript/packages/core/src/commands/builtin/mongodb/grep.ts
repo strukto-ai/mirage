@@ -176,18 +176,6 @@ async function grepCommand(
 
     const pat = compilePattern(pattern, f.ignoreCase, f.fixedString, f.wholeWord)
 
-    if (
-      scope.level === ScopeLevel.DOCUMENTS &&
-      scope.database !== null &&
-      scope.name !== null
-    ) {
-      const docs = await searchCollection(accessor, scope.database, scope.name, pattern, limit)
-      if (docs.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-      const results = [{ database: scope.database, collection: scope.name, docs }]
-      const allLines = formatGrepResults(results)
-      return [ENC.encode(allLines.join('\n')), new IOResult()]
-    }
-
     let fileStat: FileStat
     try {
       fileStat = await st(target.original)

@@ -38,6 +38,20 @@ def _path(s: str) -> PathSpec:
     return PathSpec(original=s, directory=s)
 
 
+@pytest.fixture(autouse=True)
+def _stub_existence_checks():
+    with patch(
+            "mirage.core.mongodb.readdir.database_exists",
+            new_callable=AsyncMock,
+            return_value=True,
+    ), patch(
+            "mirage.core.mongodb.readdir.entity_exists",
+            new_callable=AsyncMock,
+            return_value=True,
+    ):
+        yield
+
+
 @pytest.mark.asyncio
 async def test_readdir_root_lists_databases(accessor, index):
     with patch(
@@ -125,6 +139,29 @@ async def test_readdir_root_index_caches_databases(accessor, index):
         second = await readdir(accessor, _path("/"), index)
     assert first == second
     assert mock_list.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_readdir_database_raises_when_db_missing(accessor, index):
+    with patch(
+            "mirage.core.mongodb.readdir.database_exists",
+            new_callable=AsyncMock,
+            return_value=False,
+    ):
+        with pytest.raises(FileNotFoundError):
+            await readdir(accessor, _path("/ghost"), index)
+
+
+@pytest.mark.asyncio
+async def test_readdir_entity_raises_when_collection_missing(accessor, index):
+    with patch(
+            "mirage.core.mongodb.readdir.entity_exists",
+            new_callable=AsyncMock,
+            return_value=False,
+    ):
+        with pytest.raises(FileNotFoundError):
+            await readdir(accessor, _path("/sample_mflix/collections/ghost"),
+                          index)
 
 
 @pytest.mark.asyncio

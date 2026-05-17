@@ -41,9 +41,7 @@ beforeEach(() => {
 
 describe('searchCollection', () => {
   it('uses $text when a text index exists', async () => {
-    vi.mocked(_client.listIndexes).mockResolvedValue([
-      { name: 'body_text', textIndexVersion: 3 },
-    ])
+    vi.mocked(_client.listIndexes).mockResolvedValue([{ name: 'body_text', textIndexVersion: 3 }])
     vi.mocked(_client.findDocuments).mockResolvedValue([{ _id: '1', name: 'a' }])
     const out = await searchCollection(accessorWith(), 'app', 'users', 'foo', 5)
     expect(out).toEqual([{ _id: '1', name: 'a' }])
@@ -78,9 +76,7 @@ describe('searchCollection', () => {
 describe('searchDatabase', () => {
   it('walks collections and emits matches', async () => {
     vi.mocked(_client.listCollections).mockResolvedValue(['users', 'orders'])
-    vi.mocked(_client.listIndexes).mockResolvedValue([
-      { name: 'body_text', textIndexVersion: 3 },
-    ])
+    vi.mocked(_client.listIndexes).mockResolvedValue([{ name: 'body_text', textIndexVersion: 3 }])
     vi.mocked(_client.findDocuments)
       .mockResolvedValueOnce([{ _id: '1' }])
       .mockResolvedValueOnce([])
@@ -94,8 +90,6 @@ describe('formatGrepResults', () => {
     const lines = formatGrepResults([
       { database: 'app', collection: 'users', docs: [{ _id: '1', name: 'a' }] },
     ])
-    expect(lines).toEqual([
-      'app/collections/users/documents.jsonl:{"_id":"1","name":"a"}',
-    ])
+    expect(lines).toEqual(['app/collections/users/documents.jsonl:{"_id":"1","name":"a"}'])
   })
 })

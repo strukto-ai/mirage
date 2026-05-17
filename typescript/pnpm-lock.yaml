@@ -271,6 +271,9 @@ importers:
       apache-arrow:
         specifier: ^21.1.0
         version: 21.1.0
+      bson:
+        specifier: ^6.10.4
+        version: 6.10.4
       h5wasm:
         specifier: ^0.10.1
         version: 0.10.1

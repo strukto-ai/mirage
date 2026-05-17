@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { PathSpec } from '../../types.ts'
-import { EntityKind, KIND_DIR_NAMES, ScopeLevel } from './types.ts'
+import type { EntityKind } from './types.ts'
+import { KIND_DIR_NAMES, ScopeLevel } from './types.ts'
 
 export interface MongoDBScope {
   level: ScopeLevel

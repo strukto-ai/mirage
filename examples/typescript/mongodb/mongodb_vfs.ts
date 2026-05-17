@@ -13,66 +13,84 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { setServers } from 'node:dns'
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import { MongoDBResource, MountMode, Workspace } from '@struktoai/mirage-node'
 
+const __HERE = fileURLToPath(new URL('.', import.meta.url))
 setServers(['8.8.8.8', '1.1.1.1'])
-dotenv.config({ path: '.env.development' })
-
-const uri = process.env.MONGODB_URI
-if (uri === undefined) {
-  console.error('MONGODB_URI missing in .env.development')
-  process.exit(1)
-}
+dotenv.config({ path: resolve(__HERE, '../../../.env.development') })
 
 const DB = 'mirage_test'
 const COLL = 'heterogeneous'
 const VIEW = 'high_rated_films'
 
-const DEC = new TextDecoder()
-
-async function dump(ws: Workspace, label: string, cmd: string): Promise<void> {
-  console.log(`\n--- ${label} ---`)
-  const r = await ws.execute(cmd)
-  if (r.exitCode !== 0) {
-    console.log(`(exit=${String(r.exitCode)}) ${DEC.decode(r.stderr)}`)
-    return
-  }
-  const out = DEC.decode(r.stdout)
-  for (const ln of out.trimEnd().split('\n').slice(0, 8)) console.log(`  ${ln.slice(0, 160)}`)
-}
-
 async function main(): Promise<void> {
-  const resource = new MongoDBResource({
-    uri,
-    databases: [DB],
-  })
+  const uri = process.env.MONGODB_URI
+  if (uri === undefined) {
+    console.error('MONGODB_URI missing in .env.development')
+    process.exit(1)
+  }
+  const resource = new MongoDBResource({ uri, databases: [DB] })
   const ws = new Workspace({ '/mongodb/': resource }, { mode: MountMode.READ })
 
   try {
-    console.log('=== VFS MODE: shell pipelines transparently read MongoDB ===')
+    console.log('=== VFS MODE: open() reads from MongoDB ===\n')
 
-    const base = `/mongodb/${DB}`
-    const collDoc = `${base}/collections/${COLL}/documents.jsonl`
-    const collSchema = `${base}/collections/${COLL}/schema.json`
-    const viewDoc = `${base}/views/${VIEW}/documents.jsonl`
+    console.log('--- listdir() root (databases) ---')
+    for (const db of await ws.fs.readdir('/mongodb')) console.log(`  ${db}`)
 
-    await dump(ws, 'listdir root', 'ls /mongodb/')
-    await dump(ws, `listdir ${base}/`, `ls ${base}/`)
-    await dump(ws, `listdir ${base}/collections/`, `ls ${base}/collections/`)
-    await dump(ws, `listdir ${base}/views/`, `ls ${base}/views/`)
-    await dump(
-      ws,
-      `listdir ${base}/collections/${COLL}/ (entity)`,
-      `ls ${base}/collections/${COLL}/`,
+    console.log(`\n--- listdir() /mongodb/${DB} (entities) ---`)
+    for (const e of await ws.fs.readdir(`/mongodb/${DB}`)) console.log(`  ${e}`)
+
+    console.log(`\n--- listdir() /mongodb/${DB}/collections ---`)
+    for (const c of await ws.fs.readdir(`/mongodb/${DB}/collections`)) console.log(`  ${c}`)
+
+    console.log(`\n--- listdir() /mongodb/${DB}/views ---`)
+    for (const v of await ws.fs.readdir(`/mongodb/${DB}/views`)) console.log(`  ${v}`)
+
+    console.log(`\n--- listdir() /mongodb/${DB}/collections/${COLL} (entity) ---`)
+    for (const e of await ws.fs.readdir(`/mongodb/${DB}/collections/${COLL}`)) console.log(`  ${e}`)
+
+    console.log('\n--- open() database.json ---')
+    const dbMeta = JSON.parse(await ws.fs.readFileText(`/mongodb/${DB}/database.json`)) as {
+      collections: unknown[]
+      views: unknown[]
+    }
+    console.log(`  collections: ${String(dbMeta.collections.length)}`)
+    console.log(`  views: ${String(dbMeta.views.length)}`)
+
+    console.log(`\n--- open() schema.json for ${COLL} ---`)
+    const schema = JSON.parse(
+      await ws.fs.readFileText(`/mongodb/${DB}/collections/${COLL}/schema.json`),
+    ) as { kind: string; fields: unknown[]; indexes: unknown[] }
+    console.log(`  kind: ${schema.kind}`)
+    console.log(`  fields: ${String(schema.fields.length)}`)
+    console.log(`  indexes: ${String(schema.indexes.length)}`)
+
+    console.log(`\n--- open() + read documents.jsonl for ${COLL} ---`)
+    const content = await ws.fs.readFileText(
+      `/mongodb/${DB}/collections/${COLL}/documents.jsonl`,
     )
+    const lines = content.trim().split('\n').filter((ln) => ln.trim() !== '')
+    console.log(`  documents: ${String(lines.length)}`)
+    for (const ln of lines.slice(0, 3)) {
+      const doc = JSON.parse(ln) as { _id: { $oid?: string }; title?: string }
+      console.log(`  [${doc._id.$oid ?? '?'}] ${doc.title ?? '?'}`)
+    }
 
-    await dump(ws, `cat ${base}/database.json`, `cat ${base}/database.json`)
-    await dump(ws, `cat schema.json for ${COLL}`, `cat ${collSchema}`)
-    await dump(ws, `head -n 3 documents.jsonl`, `head -n 3 ${collDoc}`)
-    await dump(ws, `wc -l documents.jsonl`, `wc -l ${collDoc}`)
-    await dump(ws, `head -n 2 view documents`, `head -n 2 ${viewDoc}`)
-    await dump(ws, `jq titles`, `jq -r ".[] | .title" ${collDoc} | head -n 5`)
+    console.log(`\n--- open() + read view documents for ${VIEW} ---`)
+    const viewContent = await ws.fs.readFileText(
+      `/mongodb/${DB}/views/${VIEW}/documents.jsonl`,
+    )
+    const viewLines = viewContent.trim().split('\n').filter((ln) => ln.trim() !== '')
+    console.log(`  documents: ${String(viewLines.length)}`)
+    for (const ln of viewLines.slice(0, 3)) {
+      const doc = JSON.parse(ln) as { title?: string; rating?: number }
+      console.log(`  ${doc.title ?? '?'} (rating=${String(doc.rating ?? '?')})`)
+    }
+
   } finally {
     await ws.close()
     await resource.close()

@@ -57,11 +57,7 @@ async function wcCommand(
   if (first === undefined) return [null, new IOResult()]
   const scope = detectScope(first)
 
-  if (
-    scope.level === ScopeLevel.DOCUMENTS &&
-    scope.database !== null &&
-    scope.name !== null
-  ) {
+  if (scope.level === ScopeLevel.DOCUMENTS && scope.database !== null && scope.name !== null) {
     if (cFlag) {
       const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
       const target = resolved[0]

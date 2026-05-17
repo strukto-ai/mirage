@@ -54,6 +54,20 @@ def _path(s: str) -> PathSpec:
     return PathSpec(original=s, directory=s)
 
 
+@pytest.fixture(autouse=True)
+def _stub_existence_checks():
+    with patch(
+            "mirage.core.mongodb.read.database_exists",
+            new_callable=AsyncMock,
+            return_value=True,
+    ), patch(
+            "mirage.core.mongodb.read.entity_exists",
+            new_callable=AsyncMock,
+            return_value=True,
+    ):
+        yield
+
+
 @pytest.mark.asyncio
 async def test_read_documents_returns_extended_json_jsonl(accessor, index):
     oid = ObjectId()
@@ -141,3 +155,28 @@ async def test_read_unknown_path_raises(accessor, index):
 async def test_read_kind_dir_path_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
         await read(accessor, _path("/sample_mflix/collections"), index)
+
+
+@pytest.mark.asyncio
+async def test_read_documents_missing_collection_raises(accessor, index):
+    with patch(
+            "mirage.core.mongodb.read.entity_exists",
+            new_callable=AsyncMock,
+            return_value=False,
+    ):
+        with pytest.raises(FileNotFoundError):
+            await read(
+                accessor,
+                _path("/sample_mflix/collections/ghost/documents.jsonl"),
+                index)
+
+
+@pytest.mark.asyncio
+async def test_read_database_json_missing_db_raises(accessor, index):
+    with patch(
+            "mirage.core.mongodb.read.database_exists",
+            new_callable=AsyncMock,
+            return_value=False,
+    ):
+        with pytest.raises(FileNotFoundError):
+            await read(accessor, _path("/ghost/database.json"), index)

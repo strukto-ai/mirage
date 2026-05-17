@@ -30,6 +30,8 @@ function decode(b: Uint8Array): string {
 describe('read', () => {
   it('streams documents.jsonl as one JSON line per doc', async () => {
     const driver = stubMongoDriver({
+      listDatabases: () => Promise.resolve(['app']),
+      listCollections: () => Promise.resolve(['users']),
       iterDocuments: arrayIter([
         { _id: 'a', x: 1 },
         { _id: 'b', x: 2 },
@@ -50,6 +52,7 @@ describe('read', () => {
 
   it('returns database.json payload at database_json scope', async () => {
     const driver = stubMongoDriver({
+      listDatabases: () => Promise.resolve(['app']),
       listCollections: () => Promise.resolve(['users', 'orders']),
       listCollectionsDetailed: (_db, filter = {}) =>
         Promise.resolve([{ name: filter.name ?? 'users', type: 'collection' }]),
@@ -60,5 +63,24 @@ describe('read', () => {
     const parsed = JSON.parse(decode(out)) as { database: string; collections: unknown[] }
     expect(parsed.database).toBe('app')
     expect(parsed.collections).toHaveLength(2)
+  })
+
+  it('throws ENOENT when DOCUMENTS path references a missing collection', async () => {
+    const driver = stubMongoDriver({
+      listDatabases: () => Promise.resolve(['app']),
+      listCollections: () => Promise.resolve([]),
+    })
+    const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
+    await expect(
+      read(accessor, ps('/mongo/app/collections/ghost/documents.jsonl')),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('throws ENOENT when DATABASE_JSON path references a missing database', async () => {
+    const driver = stubMongoDriver({ listDatabases: () => Promise.resolve([]) })
+    const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
+    await expect(read(accessor, ps('/mongo/ghost/database.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 })

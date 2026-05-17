@@ -14,6 +14,7 @@
 
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { findDocuments, listCollections, listIndexes } from './_client.ts'
+import { stringifyDoc } from './stream.ts'
 import { EntityKind, PRIMARY_KEY } from './types.ts'
 
 export interface CollectionMatches {
@@ -22,11 +23,7 @@ export interface CollectionMatches {
   docs: Record<string, unknown>[]
 }
 
-function collectStringPaths(
-  value: unknown,
-  prefix: string,
-  out: Set<string>,
-): void {
+function collectStringPaths(value: unknown, prefix: string, out: Set<string>): void {
   if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
       const sub = prefix === '' ? k : `${prefix}.${k}`
@@ -83,9 +80,7 @@ export async function searchDatabase(
 ): Promise<CollectionMatches[]> {
   const collections = await listCollections(accessor, database, EntityKind.COLLECTION)
   const tasks = collections.map((col) =>
-    searchCollection(accessor, database, col, pattern, limit).then(
-      (docs) => [col, docs] as const,
-    ),
+    searchCollection(accessor, database, col, pattern, limit).then((docs) => [col, docs] as const),
   )
   const settled = await Promise.all(tasks)
   const out: CollectionMatches[] = []
@@ -100,56 +95,8 @@ export function formatGrepResults(results: readonly CollectionMatches[]): string
   for (const { database, collection, docs } of results) {
     const path = `${database}/collections/${collection}/documents.jsonl`
     for (const doc of docs) {
-      const copy: Record<string, unknown> = { ...doc }
-      if (copy._id !== undefined && copy._id !== null) {
-        copy._id = stringifyId(copy._id)
-      }
-      lines.push(`${path}:${JSON.stringify(copy, bsonReplacer)}`)
+      lines.push(`${path}:${stringifyDoc(doc)}`)
     }
   }
   return lines
-}
-
-function bsonReplacer(_key: string, value: unknown): unknown {
-  if (value instanceof Date) return value.toISOString()
-  if (typeof value === 'bigint') return value.toString()
-  if (typeof value === 'object' && value !== null && 'toJSON' in value) {
-    try {
-      return (value as { toJSON: () => unknown }).toJSON()
-    } catch {
-      return safeToString(value)
-    }
-  }
-  return value
-}
-
-function safeToString(value: unknown): string {
-  if (value === null || value === undefined) return ''
-  if (typeof value === 'string') return value
-  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
-    return String(value)
-  }
-  if (typeof value === 'object' && 'toString' in value) {
-    try {
-      return (value as { toString: () => string }).toString()
-    } catch {
-      return Object.prototype.toString.call(value)
-    }
-  }
-  return Object.prototype.toString.call(value)
-}
-
-function stringifyId(value: unknown): unknown {
-  if (typeof value === 'string') return value
-  if (typeof value === 'number') return value
-  if (value === null || value === undefined) return value
-  if (typeof value === 'object' && 'toString' in value) {
-    try {
-      const s = (value as { toString: () => string }).toString()
-      if (s !== '[object Object]') return s
-    } catch {
-      return safeToString(value)
-    }
-  }
-  return safeToString(value)
 }

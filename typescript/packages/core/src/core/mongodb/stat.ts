@@ -15,7 +15,7 @@
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { countDocuments, isView, listIndexes } from './_client.ts'
+import { countDocuments, databaseExists, entityExists, isView, listIndexes } from './_client.ts'
 import { detectScope } from './scope.ts'
 import { EntityKind, KIND_TO_DIR, ScopeLevel } from './types.ts'
 
@@ -38,6 +38,7 @@ export async function stat(
   }
 
   if (scope.level === ScopeLevel.DATABASE && scope.database !== null) {
+    if (!(await databaseExists(accessor, scope.database))) throw notFound(spec.original)
     return new FileStat({
       name: scope.database,
       type: FileType.DIRECTORY,
@@ -45,11 +46,8 @@ export async function stat(
     })
   }
 
-  if (
-    scope.level === ScopeLevel.KIND_DIR &&
-    scope.database !== null &&
-    scope.kind !== null
-  ) {
+  if (scope.level === ScopeLevel.KIND_DIR && scope.database !== null && scope.kind !== null) {
+    if (!(await databaseExists(accessor, scope.database))) throw notFound(spec.original)
     return new FileStat({
       name: KIND_TO_DIR[scope.kind],
       type: FileType.DIRECTORY,
@@ -63,6 +61,9 @@ export async function stat(
     scope.kind !== null &&
     scope.name !== null
   ) {
+    if (!(await entityExists(accessor, scope.database, scope.name, scope.kind))) {
+      throw notFound(spec.original)
+    }
     const docCount = await countDocuments(accessor, scope.database, scope.name)
     return new FileStat({
       name: scope.name,
@@ -82,6 +83,9 @@ export async function stat(
     scope.kind !== null &&
     scope.name !== null
   ) {
+    if (!(await entityExists(accessor, scope.database, scope.name, scope.kind))) {
+      throw notFound(spec.original)
+    }
     return documentsStat(accessor, scope.database, scope.kind, scope.name)
   }
 
@@ -91,6 +95,9 @@ export async function stat(
     scope.kind !== null &&
     scope.name !== null
   ) {
+    if (!(await entityExists(accessor, scope.database, scope.name, scope.kind))) {
+      throw notFound(spec.original)
+    }
     return new FileStat({
       name: 'schema.json',
       type: FileType.TEXT,
@@ -103,6 +110,7 @@ export async function stat(
   }
 
   if (scope.level === ScopeLevel.DATABASE_JSON && scope.database !== null) {
+    if (!(await databaseExists(accessor, scope.database))) throw notFound(spec.original)
     return new FileStat({
       name: 'database.json',
       type: FileType.TEXT,

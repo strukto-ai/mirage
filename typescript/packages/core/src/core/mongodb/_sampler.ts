@@ -128,7 +128,7 @@ export async function sampleFieldTypes(
   const fields: SampledField[] = []
   for (const path of [...counts.keys()].sort()) {
     if (path === PRIMARY_KEY) continue
-    const inner = counts.get(path) ?? new Map()
+    const inner = counts.get(path) ?? new Map<string, number>()
     const presenceCount = [...inner.values()].reduce((a, b) => a + b, 0)
     const types: Record<string, number> = {}
     for (const [t, c] of inner) types[t] = c / total

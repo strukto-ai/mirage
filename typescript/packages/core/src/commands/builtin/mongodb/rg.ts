@@ -137,11 +137,7 @@ async function rgCommand(
       if (allLines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
       return [ENC.encode(allLines.join('\n')), new IOResult()]
     }
-    if (
-      (scope.level === ScopeLevel.ENTITY || scope.level === ScopeLevel.DOCUMENTS) &&
-      scope.database !== null &&
-      scope.name !== null
-    ) {
+    if (scope.level === ScopeLevel.ENTITY && scope.database !== null && scope.name !== null) {
       const docs = await searchCollection(accessor, scope.database, scope.name, exprText, limit)
       if (docs.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
       const results = [{ database: scope.database, collection: scope.name, docs }]

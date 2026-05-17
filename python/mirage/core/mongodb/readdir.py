@@ -14,7 +14,8 @@
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import IndexCacheStore, IndexEntry
-from mirage.core.mongodb._client import list_collections, list_databases
+from mirage.core.mongodb._client import (database_exists, entity_exists,
+                                         list_collections, list_databases)
 from mirage.core.mongodb.scope import detect_scope
 from mirage.core.mongodb.types import (KIND_TO_DIR, KIND_TO_RESOURCE_TYPE,
                                        RESOURCE_TYPE_DATABASE, EntityKind,
@@ -37,6 +38,9 @@ async def readdir(
         return await _list_root(accessor, virtual_key, index, prefix)
 
     if scope.level == ScopeLevel.DATABASE:
+        if not await database_exists(accessor.client, accessor.config,
+                                     scope.database, accessor):
+            raise FileNotFoundError(path.original)
         base = f"{prefix}/{scope.database}"
         return [
             f"{base}/database.json",
@@ -45,10 +49,17 @@ async def readdir(
         ]
 
     if scope.level == ScopeLevel.KIND_DIR:
+        if not await database_exists(accessor.client, accessor.config,
+                                     scope.database, accessor):
+            raise FileNotFoundError(path.original)
         return await _list_kind_dir(accessor, scope.database, scope.kind,
                                     virtual_key, index, prefix)
 
     if scope.level == ScopeLevel.ENTITY:
+        if not await entity_exists(accessor.client, accessor.config,
+                                   scope.database, scope.name, scope.kind,
+                                   accessor):
+            raise FileNotFoundError(path.original)
         base = (f"{prefix}/{scope.database}/"
                 f"{KIND_TO_DIR[scope.kind]}/{scope.name}")
         return [

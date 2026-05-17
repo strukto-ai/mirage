@@ -12,13 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { EJSON } from 'bson'
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { PathSpec } from '../../types.ts'
 import { iterDocuments, iterInserts } from './_client.ts'
 import { detectScope } from './scope.ts'
 import { PRIMARY_KEY, ScopeLevel } from './types.ts'
 
-function applyElision(
+export function applyElision(
   value: Record<string, unknown>,
   paths: Set<string>,
 ): Record<string, unknown> {
@@ -43,7 +44,7 @@ function applyElision(
       typeof v === 'object' &&
       v !== null &&
       !Array.isArray(v) &&
-      (v as object).constructor === Object
+      v.constructor === Object
     ) {
       out[k] = applyElision(v as Record<string, unknown>, grouped[k])
     } else {
@@ -53,15 +54,22 @@ function applyElision(
   return out
 }
 
-function elisionPaths(accessor: MongoDBAccessor, database: string, name: string): Set<string> {
+export function elisionPaths(
+  accessor: MongoDBAccessor,
+  database: string,
+  name: string,
+): Set<string> {
   const key = `${database}.${name}`
   const fields = accessor.config.elideFields?.[key] ?? []
   return new Set(fields)
 }
 
+export function stringifyDoc(doc: Record<string, unknown>): string {
+  return EJSON.stringify(doc, undefined, 0, { relaxed: true })
+}
+
 function encodeLine(doc: Record<string, unknown>): Uint8Array {
-  const json = JSON.stringify(doc)
-  return new TextEncoder().encode(`${json}\n`)
+  return new TextEncoder().encode(`${stringifyDoc(doc)}\n`)
 }
 
 export async function* readStream(
@@ -80,9 +88,8 @@ export async function* readStream(
     sort: { [PRIMARY_KEY]: 1 },
     batchSize,
   })) {
-    const final =
-      elide.size > 0 ? applyElision(doc as Record<string, unknown>, elide) : doc
-    yield encodeLine(final as Record<string, unknown>)
+    const final = elide.size > 0 ? applyElision(doc, elide) : doc
+    yield encodeLine(final)
   }
 }
 
@@ -97,8 +104,7 @@ export async function* watchStream(
   }
   const elide = elisionPaths(accessor, scope.database, scope.name)
   for await (const doc of iterInserts(accessor, scope.database, scope.name)) {
-    const final =
-      elide.size > 0 ? applyElision(doc as Record<string, unknown>, elide) : doc
-    yield encodeLine(final as Record<string, unknown>)
+    const final = elide.size > 0 ? applyElision(doc, elide) : doc
+    yield encodeLine(final)
   }
 }

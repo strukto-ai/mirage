@@ -25,7 +25,11 @@ function ps(p: string): PathSpec {
 
 function accessor(overrides: Partial<Parameters<typeof stubMongoDriver>[0]> = {}) {
   return new MongoDBAccessor(
-    stubMongoDriver(overrides),
+    stubMongoDriver({
+      listDatabases: () => Promise.resolve(['app']),
+      listCollections: (_db, kind) => Promise.resolve(kind === 'view' ? ['recent'] : ['users']),
+      ...overrides,
+    }),
     resolveMongoDBConfig({ uri: 'mongodb://h' }),
   )
 }
@@ -69,8 +73,7 @@ describe('stat', () => {
     const r = await stat(
       accessor({
         countDocuments: () => Promise.resolve(42),
-        listCollectionsDetailed: () =>
-          Promise.resolve([{ name: 'users', type: 'collection' }]),
+        listCollectionsDetailed: () => Promise.resolve([{ name: 'users', type: 'collection' }]),
         listIndexes: () => Promise.resolve([{ name: '_id_', key: { _id: 1 } }]),
       }),
       ps('/mongo/app/collections/users/documents.jsonl'),
@@ -85,8 +88,7 @@ describe('stat', () => {
     const r = await stat(
       accessor({
         countDocuments: () => Promise.resolve(10),
-        listCollectionsDetailed: () =>
-          Promise.resolve([{ name: 'recent', type: 'view' }]),
+        listCollectionsDetailed: () => Promise.resolve([{ name: 'recent', type: 'view' }]),
       }),
       ps('/mongo/app/views/recent/documents.jsonl'),
     )
@@ -96,10 +98,7 @@ describe('stat', () => {
   })
 
   it('marks schema.json as TEXT', async () => {
-    const r = await stat(
-      accessor(),
-      ps('/mongo/app/collections/users/schema.json'),
-    )
+    const r = await stat(accessor(), ps('/mongo/app/collections/users/schema.json'))
     expect(r.type).toBe(FileType.TEXT)
     expect(r.name).toBe('schema.json')
   })
@@ -114,5 +113,23 @@ describe('stat', () => {
     await expect(stat(accessor(), ps('/mongo/app/foo'))).rejects.toMatchObject({
       code: 'ENOENT',
     })
+  })
+
+  it('throws ENOENT for a nonexistent database', async () => {
+    await expect(stat(accessor(), ps('/mongo/ghost'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
+  it('throws ENOENT for a nonexistent collection under a real database', async () => {
+    await expect(stat(accessor(), ps('/mongo/app/collections/ghost'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
+  it('throws ENOENT for documents.jsonl under a nonexistent collection', async () => {
+    await expect(
+      stat(accessor(), ps('/mongo/app/collections/ghost/documents.jsonl')),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })

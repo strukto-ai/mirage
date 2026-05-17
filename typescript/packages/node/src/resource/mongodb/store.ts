@@ -96,11 +96,13 @@ export class MongoDBStore implements MongoDriver {
   ): Promise<MongoCollectionSpec[]> {
     const c = await this._client()
     const cols = await c.db(database).listCollections(filter).toArray()
-    return cols.map((col) => ({
-      name: col.name as string,
-      type: col.type as string | undefined,
-      options: col.options as MongoCollectionSpec['options'],
-    }))
+    return cols.map((col) => {
+      const spec: MongoCollectionSpec = { name: col.name as string }
+      if (col.type !== undefined) spec.type = col.type as string
+      if (col.options !== undefined)
+        spec.options = col.options as NonNullable<MongoCollectionSpec['options']>
+      return spec
+    })
   }
 
   async findDocuments<T = Record<string, unknown>>(

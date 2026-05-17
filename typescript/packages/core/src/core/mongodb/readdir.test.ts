@@ -12,11 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('./_client.ts', () => ({
   listDatabases: vi.fn(),
   listCollections: vi.fn(),
+  databaseExists: vi.fn(),
+  entityExists: vi.fn(),
 }))
 
 import { MongoDBAccessor } from '../../accessor/mongodb.ts'
@@ -38,6 +40,11 @@ function ps(p: string): PathSpec {
 }
 
 describe('readdir', () => {
+  beforeEach(() => {
+    vi.mocked(_client.databaseExists).mockResolvedValue(true)
+    vi.mocked(_client.entityExists).mockResolvedValue(true)
+  })
+
   it('lists root: databases', async () => {
     vi.mocked(_client.listDatabases).mockResolvedValue(['app', 'analytics'])
     const out = await readdir(makeAccessor(), ps('/mongo/'))
@@ -46,11 +53,7 @@ describe('readdir', () => {
 
   it('lists database: fixed [database.json, collections, views]', async () => {
     const out = await readdir(makeAccessor(), ps('/mongo/app'))
-    expect(out).toEqual([
-      '/mongo/app/database.json',
-      '/mongo/app/collections',
-      '/mongo/app/views',
-    ])
+    expect(out).toEqual(['/mongo/app/database.json', '/mongo/app/collections', '/mongo/app/views'])
   })
 
   it('lists kind_dir (collections): collection names', async () => {
@@ -87,5 +90,19 @@ describe('readdir', () => {
     await expect(
       readdir(makeAccessor(), ps('/mongo/app/collections/users/documents.jsonl')),
     ).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('throws ENOENT when database does not exist', async () => {
+    vi.mocked(_client.databaseExists).mockResolvedValue(false)
+    await expect(readdir(makeAccessor(), ps('/mongo/ghost'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
+  it('throws ENOENT when collection does not exist', async () => {
+    vi.mocked(_client.entityExists).mockResolvedValue(false)
+    await expect(readdir(makeAccessor(), ps('/mongo/app/collections/ghost'))).rejects.toMatchObject(
+      { code: 'ENOENT' },
+    )
   })
 })

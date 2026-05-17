@@ -103,9 +103,7 @@ describe('detectScope', () => {
   })
 
   it('returns unknown for too-deep paths', () => {
-    expect(detectScope(ps('/a/collections/b/documents.jsonl/extra')).level).toBe(
-      ScopeLevel.UNKNOWN,
-    )
+    expect(detectScope(ps('/a/collections/b/documents.jsonl/extra')).level).toBe(ScopeLevel.UNKNOWN)
   })
 })
 

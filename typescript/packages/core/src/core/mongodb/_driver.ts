@@ -30,7 +30,7 @@ export interface MongoIterOptions {
 
 export interface MongoCollectionSpec {
   name: string
-  type?: EntityKind | string
+  type?: string
   options?: { validator?: { $jsonSchema?: unknown } | Record<string, unknown> }
 }
 
@@ -67,9 +67,6 @@ export interface MongoDriver {
     filter?: Record<string, unknown>,
   ): Promise<number>
   listIndexes(database: string, collection: string): Promise<Record<string, unknown>[]>
-  getIndexStats(
-    database: string,
-    collection: string,
-  ): Promise<Record<string, MongoIndexAccess>>
+  getIndexStats(database: string, collection: string): Promise<Record<string, MongoIndexAccess>>
   close(): Promise<void>
 }

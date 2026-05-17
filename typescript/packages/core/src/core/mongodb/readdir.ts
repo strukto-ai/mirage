@@ -16,15 +16,10 @@ import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
-import { listCollections, listDatabases } from './_client.ts'
+import { databaseExists, entityExists, listCollections, listDatabases } from './_client.ts'
 import { detectScope } from './scope.ts'
-import {
-  EntityKind,
-  KIND_TO_DIR,
-  KIND_TO_RESOURCE_TYPE,
-  RESOURCE_TYPE_DATABASE,
-  ScopeLevel,
-} from './types.ts'
+import type { EntityKind } from './types.ts'
+import { KIND_TO_DIR, KIND_TO_RESOURCE_TYPE, RESOURCE_TYPE_DATABASE, ScopeLevel } from './types.ts'
 
 function notFound(p: string): Error {
   const err = new Error(p) as Error & { code?: string }
@@ -47,15 +42,13 @@ export async function readdir(
   }
 
   if (scope.level === ScopeLevel.DATABASE && scope.database !== null) {
+    if (!(await databaseExists(accessor, scope.database))) throw notFound(spec.original)
     const base = `${prefix}/${scope.database}`
     return [`${base}/database.json`, `${base}/collections`, `${base}/views`]
   }
 
-  if (
-    scope.level === ScopeLevel.KIND_DIR &&
-    scope.database !== null &&
-    scope.kind !== null
-  ) {
+  if (scope.level === ScopeLevel.KIND_DIR && scope.database !== null && scope.kind !== null) {
+    if (!(await databaseExists(accessor, scope.database))) throw notFound(spec.original)
     return listKindDir(accessor, scope.database, scope.kind, virtualKey, index, prefix)
   }
 
@@ -65,6 +58,9 @@ export async function readdir(
     scope.kind !== null &&
     scope.name !== null
   ) {
+    if (!(await entityExists(accessor, scope.database, scope.name, scope.kind))) {
+      throw notFound(spec.original)
+    }
     const base = `${prefix}/${scope.database}/${KIND_TO_DIR[scope.kind]}/${scope.name}`
     return [`${base}/schema.json`, `${base}/documents.jsonl`]
   }

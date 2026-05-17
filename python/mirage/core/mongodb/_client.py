@@ -42,6 +42,43 @@ async def list_collections(
     return sorted(await db.list_collection_names(filter=filter_arg))
 
 
+async def database_exists(
+    client: AsyncIOMotorClient,
+    config: MongoDBConfig,
+    database: str,
+    accessor: object | None = None,
+) -> bool:
+    if accessor is not None:
+        dbs = await accessor.cached_list(
+            "list_databases",
+            lambda: list_databases(client, config),
+        )
+    else:
+        dbs = await list_databases(client, config)
+    return database in dbs
+
+
+async def entity_exists(
+    client: AsyncIOMotorClient,
+    config: MongoDBConfig,
+    database: str,
+    name: str,
+    kind: EntityKind | None = None,
+    accessor: object | None = None,
+) -> bool:
+    if not await database_exists(client, config, database, accessor):
+        return False
+    if accessor is not None:
+        key = f"list_collections:{database}:{kind.value if kind is not None else ''}"
+        names = await accessor.cached_list(
+            key,
+            lambda: list_collections(client, database, kind),
+        )
+    else:
+        names = await list_collections(client, database, kind)
+    return name in names
+
+
 async def find_documents(
     client: AsyncIOMotorClient,
     database: str,

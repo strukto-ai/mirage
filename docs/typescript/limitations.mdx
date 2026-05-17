@@ -144,7 +144,7 @@ readFileSync('/data/x.txt')  // hits the real filesystem, throws ENOENT
 
 ### 3. FUSE files from API-backed resources cap at 100 MiB
 
-**The problem.** API-backed resources (Trello, Linear, Slack, etc.) return `stat.size = null` because the byte size isn't known until the API has been called. Python passes `direct_io=True` to libfuse at mount time so the kernel ignores reported size and issues `read()` until it returns 0 (Slack's daily history can be tens of MB and it just works).
+**The problem.** API-backed resources (Trello, Linear, Slack, MongoDB, etc.) return `stat.size = null` because the byte size isn't known until the API has been called. Python passes `direct_io=True` to libfuse at mount time so the kernel ignores reported size and issues `read()` until it returns 0 (Slack's daily history can be tens of MB and it just works).
 
 `@zkochan/fuse-native` doesn't expose `direct_io`. There's no per-file flag (the `open` C bridge can only return `fh`, not modify `fuse_file_info.direct_io`), and the `-o direct_io` mount option is rejected by macFUSE/libosxfuse and crashes the channel. So when Mirage's FUSE layer hits a `size=null` file, it has to report **some** non-zero size to make the kernel issue reads, otherwise `cat board.json` would print empty.
 
@@ -164,6 +164,8 @@ await readFile(`${ws.fuseMountpoint}/slack/channels/super-busy-channel/2026-04-1
 `ls -l` shows `100M` for any unfetched API-backed file. Once a file has been opened, the real size is cached and subsequent `ls -l` shows the actual byte count.
 
 The cap exists because Node's `fs/promises.readFile` allocates a Buffer of the reported size and decodes it as utf-8 at the end; V8's string length limit is ~512 MiB, so a larger sentinel throws `RangeError: Invalid string length` (which is what you'd hit before any real read).
+
+**Knock-on effect for JSON files.** Because the kernel zero-pads the unread tail of the 100 MiB buffer, `JSON.parse(readFile(...))` on a FUSE-mounted JSON file fails at the first ` ` byte right after the real payload with `SyntaxError: Unexpected non-whitespace character after JSON`. Streaming tools (`cat`, `grep`, `head`, `wc -c`, `jq`) stop at EOF and are unaffected; only consumers that decode the full buffer as UTF-8 and then parse it choke on the padding. MongoDB's FUSE-exposed `schema.json`, `database.json`, and `documents.jsonl` are the most visible cases, see [TS MongoDB → FUSE caveat](/typescript/setup/mongodb#fuse-caveat-padded-reads-of-schemajson-documentsjsonl) for workarounds.
 
 **Why Python doesn't hit this.** Python's `mfusepy` accepts `direct_io=True` and passes it to libfuse2 as a mount option. macFUSE supports it through that path even though it rejects the same option from `@zkochan/fuse-native`'s option string. With direct_io enabled, the kernel doesn't care what size getattr reports.
 
