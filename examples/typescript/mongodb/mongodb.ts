@@ -25,53 +25,91 @@ if (uri === undefined) {
   process.exit(1)
 }
 
-const resource = new MongoDBResource({ uri })
+const DB = 'mirage_test'
+const COLL = 'heterogeneous'
+const VIEW = 'high_rated_films'
+
+const resource = new MongoDBResource({
+  uri,
+  databases: [DB],
+  elideFields: { [`${DB}.embeddings`]: ['vector'] },
+})
 const ws = new Workspace({ '/mongodb/': resource }, { mode: MountMode.READ })
 
 const DEC = new TextDecoder()
 
-async function run(label: string, cmd: string): Promise<void> {
-  console.log(`\n=== ${label} ===`)
+async function run(cmd: string): Promise<void> {
+  console.log(`\n>>> ${cmd}`)
   const r = await ws.execute(cmd)
-  if (r.exitCode !== 0) {
-    console.log(`(exit=${String(r.exitCode)})`)
-    if (r.stderr.byteLength > 0) console.log(DEC.decode(r.stderr))
-    if (r.stdout.byteLength > 0) console.log(DEC.decode(r.stdout))
-    return
+  const out = DEC.decode(r.stdout).trimEnd()
+  const err = DEC.decode(r.stderr).trimEnd()
+  if (out !== '') {
+    const lines = out.split('\n').slice(0, 8)
+    for (const ln of lines) console.log(`  ${ln.slice(0, 160)}`)
+    const total = out.split('\n').length
+    if (total > 8) console.log(`  ... (${String(total)} lines total)`)
   }
-  process.stdout.write(DEC.decode(r.stdout))
-  if (!DEC.decode(r.stdout).endsWith('\n')) process.stdout.write('\n')
+  if (err !== '') console.log(`  [stderr] ${err.slice(0, 160)}`)
+  if (out === '' && err === '') console.log(`  (empty, exit=${String(r.exitCode)})`)
 }
 
+const base = `/mongodb/${DB}`
+const collDoc = `${base}/collections/${COLL}/documents.jsonl`
+const collSchema = `${base}/collections/${COLL}/schema.json`
+const emb = `${base}/collections/embeddings/documents.jsonl`
+const viewDoc = `${base}/views/${VIEW}/documents.jsonl`
+const dbJson = `${base}/database.json`
+
 try {
-  await run('ls /mongodb', 'ls /mongodb')
+  console.log('============================================================')
+  console.log('DIRECTORY LISTING')
+  console.log('============================================================')
+  await run('ls /mongodb/')
+  await run(`ls ${base}/`)
+  await run(`ls ${base}/collections/`)
+  await run(`ls ${base}/views/`)
+  await run(`ls ${base}/collections/${COLL}/`)
+  await run(`tree -L 3 ${base}/`)
 
-  const dbsOut = await ws.execute('ls /mongodb')
-  const dbs = DEC.decode(dbsOut.stdout).split('\n').filter((s) => s.length > 0)
-  if (dbs.length === 0) {
-    console.log('\nno databases visible; stopping')
-    process.exit(0)
-  }
-  const target = dbs[0]!
-  await run(`ls /mongodb/${target}`, `ls /mongodb/${target}`)
+  console.log('\n============================================================')
+  console.log('CAT (database.json, schema.json, documents.jsonl)')
+  console.log('============================================================')
+  await run(`cat ${dbJson}`)
+  await run(`cat ${collSchema}`)
 
-  const colsOut = await ws.execute(`ls /mongodb/${target}`)
-  const cols = DEC.decode(colsOut.stdout).split('\n').filter((s) => s.endsWith('.jsonl'))
-  if (cols.length === 0) {
-    console.log(`\nno collections in ${target}; stopping`)
-    process.exit(0)
-  }
-  const col = cols[0]!
-  const path = `/mongodb/${target}/${col}`
+  console.log('\n============================================================')
+  console.log('HEAD / TAIL / WC / STAT')
+  console.log('============================================================')
+  await run(`head -n 3 ${collDoc}`)
+  await run(`tail -n 3 ${collDoc}`)
+  await run(`wc -l ${collDoc}`)
+  await run(`stat ${collDoc}`)
+  await run(`head -n 2 ${viewDoc}`)
 
-  await run(`stat ${path}`, `stat ${path}`)
-  await run(`head -n 3 ${path}`, `head -n 3 ${path}`)
-  await run(`tail -n 2 ${path}`, `tail -n 2 ${path}`)
-  await run(`wc -l ${path}`, `wc -l ${path}`)
-  await run(`cat ${path} | head -n 1`, `cat ${path} | head -n 1`)
-  await run(`jq -s ".[0]" ${path}`, `jq -s ".[0]" ${path}`)
-  await run(`find /mongodb/${target} -maxdepth 1`, `find /mongodb/${target} -maxdepth 1`)
-  await run(`tree -L 2 /mongodb/${target}`, `tree -L 2 /mongodb/${target}`)
+  console.log('\n============================================================')
+  console.log('ELIDE_FIELDS in action (vector dropped from embeddings)')
+  console.log('============================================================')
+  await run(`head -n 1 ${emb}`)
+
+  console.log('\n============================================================')
+  console.log('GREP / RG at every scope')
+  console.log('============================================================')
+  await run(`grep -c title ${collDoc}`)
+  await run(`grep mongodb ${base}/collections/text_indexed/`)
+  await run(`grep mongodb ${base}/`)
+  await run('grep mongodb /mongodb/')
+  await run(`rg database ${base}/`)
+
+  console.log('\n============================================================')
+  console.log('JQ on documents.jsonl')
+  console.log('============================================================')
+  await run(`jq -r ".[] | .title" ${collDoc} | head -n 5`)
+
+  console.log('\n============================================================')
+  console.log('FIND')
+  console.log('============================================================')
+  await run(`find ${base}/ -name "schema.json"`)
+  await run(`find ${base}/ -name "documents.jsonl"`)
 } finally {
   await ws.close()
   await resource.close()

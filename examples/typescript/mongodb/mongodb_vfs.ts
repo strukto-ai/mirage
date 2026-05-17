@@ -25,6 +25,10 @@ if (uri === undefined) {
   process.exit(1)
 }
 
+const DB = 'mirage_test'
+const COLL = 'heterogeneous'
+const VIEW = 'high_rated_films'
+
 const DEC = new TextDecoder()
 
 async function dump(ws: Workspace, label: string, cmd: string): Promise<void> {
@@ -34,44 +38,41 @@ async function dump(ws: Workspace, label: string, cmd: string): Promise<void> {
     console.log(`(exit=${String(r.exitCode)}) ${DEC.decode(r.stderr)}`)
     return
   }
-  process.stdout.write(DEC.decode(r.stdout))
-  if (!DEC.decode(r.stdout).endsWith('\n')) process.stdout.write('\n')
+  const out = DEC.decode(r.stdout)
+  for (const ln of out.trimEnd().split('\n').slice(0, 8)) console.log(`  ${ln.slice(0, 160)}`)
 }
 
 async function main(): Promise<void> {
   const resource = new MongoDBResource({
     uri,
-    defaultDocLimit: 50,
+    databases: [DB],
   })
   const ws = new Workspace({ '/mongodb/': resource }, { mode: MountMode.READ })
 
   try {
     console.log('=== VFS MODE: shell pipelines transparently read MongoDB ===')
 
-    await dump(ws, 'ls /mongodb — databases', 'ls /mongodb')
+    const base = `/mongodb/${DB}`
+    const collDoc = `${base}/collections/${COLL}/documents.jsonl`
+    const collSchema = `${base}/collections/${COLL}/schema.json`
+    const viewDoc = `${base}/views/${VIEW}/documents.jsonl`
 
-    const dbsOut = await ws.execute('ls /mongodb')
-    const dbs = DEC.decode(dbsOut.stdout).split('\n').filter((s) => s.length > 0)
-    if (dbs.length === 0) {
-      console.log('\nno databases')
-      return
-    }
-    const target = dbs[0]!
+    await dump(ws, 'listdir root', 'ls /mongodb/')
+    await dump(ws, `listdir ${base}/`, `ls ${base}/`)
+    await dump(ws, `listdir ${base}/collections/`, `ls ${base}/collections/`)
+    await dump(ws, `listdir ${base}/views/`, `ls ${base}/views/`)
+    await dump(
+      ws,
+      `listdir ${base}/collections/${COLL}/ (entity)`,
+      `ls ${base}/collections/${COLL}/`,
+    )
 
-    await dump(ws, `ls /mongodb/${target}`, `ls /mongodb/${target} | head -n 5`)
-
-    const colsOut = await ws.execute(`ls /mongodb/${target}`)
-    const cols = DEC.decode(colsOut.stdout).split('\n').filter((s) => s.endsWith('.jsonl'))
-    if (cols.length === 0) {
-      console.log(`\nno collections in ${target}`)
-      return
-    }
-    const path = `/mongodb/${target}/${cols[0]!}`
-
-    await dump(ws, `head -n 1 ${path}`, `head -n 1 ${path}`)
-    await dump(ws, `wc -l ${path}`, `wc -l ${path}`)
-    await dump(ws, `cat ${path} | wc -l`, `cat ${path} | wc -l`)
-    await dump(ws, `jq -s ".[0]" ${path}`, `jq -s ".[0]" ${path}`)
+    await dump(ws, `cat ${base}/database.json`, `cat ${base}/database.json`)
+    await dump(ws, `cat schema.json for ${COLL}`, `cat ${collSchema}`)
+    await dump(ws, `head -n 3 documents.jsonl`, `head -n 3 ${collDoc}`)
+    await dump(ws, `wc -l documents.jsonl`, `wc -l ${collDoc}`)
+    await dump(ws, `head -n 2 view documents`, `head -n 2 ${viewDoc}`)
+    await dump(ws, `jq titles`, `jq -r ".[] | .title" ${collDoc} | head -n 5`)
   } finally {
     await ws.close()
     await resource.close()

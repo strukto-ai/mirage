@@ -43,25 +43,23 @@ const ClientCtor = vi.fn((_uri: string) => {
         arr = arr.slice(0, n)
         return cursor
       }),
+      batchSize: vi.fn(() => cursor),
       toArray: vi.fn(() => Promise.resolve(arr)),
     }
     return cursor
   }
-  const makeColl = (docs: Record<string, unknown>[]) => {
-    const findCursor = makeCursor(docs)
-    return {
-      find: vi.fn(() => ({ ...findCursor, batchSize: vi.fn(() => findCursor) })),
-      countDocuments: vi.fn(() => Promise.resolve(docs.length)),
-      listIndexes: vi.fn(() => ({ toArray: () => Promise.resolve([{ name: '_id_' }]) })),
-      aggregate: vi.fn(() => ({ toArray: () => Promise.resolve([]) })),
-      watch: vi.fn(() => ({
-        async *[Symbol.asyncIterator]() {
-          // no events
-        },
-        close: () => Promise.resolve(),
-      })),
-    }
-  }
+  const makeColl = (docs: Record<string, unknown>[]) => ({
+    find: vi.fn(() => makeCursor(docs)),
+    countDocuments: vi.fn(() => Promise.resolve(docs.length)),
+    listIndexes: vi.fn(() => ({ toArray: () => Promise.resolve([{ name: '_id_' }]) })),
+    aggregate: vi.fn(() => ({ toArray: () => Promise.resolve([]) })),
+    watch: vi.fn(() => ({
+      async *[Symbol.asyncIterator]() {
+        // no events
+      },
+      close: () => Promise.resolve(),
+    })),
+  })
   const profilesCollection = makeColl(profilesDocs)
   const sessionsCollection = makeColl([])
   const db = {

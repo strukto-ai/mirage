@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { setServers } from 'node:dns'
-import { readdir, stat } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import dotenv from 'dotenv'
 import { FuseManager, MongoDBResource, MountMode, Workspace } from '@struktoai/mirage-node'
 
@@ -26,13 +26,14 @@ if (uri === undefined) {
   process.exit(1)
 }
 
-const DEC = new TextDecoder()
+const DB = 'mirage_test'
+const COLL = 'heterogeneous'
+const VIEW = 'high_rated_films'
 
 async function main(): Promise<void> {
   const resource = new MongoDBResource({
     uri,
-    defaultDocLimit: 1000,
-    maxDocLimit: 100_000,
+    databases: [DB],
   })
   const ws = new Workspace({ '/mongodb/': resource }, { mode: MountMode.READ })
   const fm = new FuseManager()
@@ -58,37 +59,65 @@ async function main(): Promise<void> {
   try {
     console.log(`\n=== FUSE MODE: mounted at ${mp} ===\n`)
 
-    console.log('--- fs.readdir() root ---')
-    const dbs = (await readdir(`${mp}/mongodb`)).sort()
-    for (const e of dbs) console.log(`  ${e}`)
+    const base = `${mp}/mongodb/${DB}`
 
-    if (dbs.length === 0) return
-    const target = dbs[0]!
+    console.log('--- readdir root ---')
+    for (const e of (await readdir(`${mp}/mongodb`)).sort()) console.log(`  ${e}`)
 
-    console.log(`\n--- fs.readdir(${mp}/mongodb/${target}) ---`)
-    const cols = (await readdir(`${mp}/mongodb/${target}`)).sort()
-    for (const c of cols.slice(0, 5)) console.log(`  ${c}`)
+    console.log(`\n--- readdir ${base} ---`)
+    for (const e of (await readdir(base)).sort()) console.log(`  ${e}`)
 
-    if (cols.length === 0) return
-    const colPath = `/mongodb/${target}/${cols[0]!}`
+    console.log(`\n--- readdir ${base}/collections ---`)
+    for (const e of (await readdir(`${base}/collections`)).sort()) console.log(`  ${e}`)
 
-    console.log(`\n--- fs.stat(${mp}${colPath}) ---`)
-    const st = await stat(`${mp}${colPath}`)
-    console.log(`  size=${String(st.size)} type=${st.isFile() ? 'file' : 'dir'}`)
+    console.log(`\n--- readdir ${base}/views ---`)
+    for (const e of (await readdir(`${base}/views`)).sort()) console.log(`  ${e}`)
 
-    console.log(`\n--- ws.execute(head -n 1 ${colPath}) ---`)
-    const r = await ws.execute(`head -n 1 ${colPath}`)
-    process.stdout.write(DEC.decode(r.stdout).slice(0, 200))
-    console.log('...')
+    console.log(`\n--- readdir ${base}/collections/${COLL} (entity) ---`)
+    for (const e of (await readdir(`${base}/collections/${COLL}`)).sort()) console.log(`  ${e}`)
 
-    console.log(`\n--- ws.execute(wc -l ${colPath}) ---`)
-    const w = await ws.execute(`wc -l ${colPath}`)
-    process.stdout.write(DEC.decode(w.stdout))
+    console.log(`\n--- readFile database.json ---`)
+    const dbMeta = JSON.parse(await readFile(`${base}/database.json`, 'utf8')) as {
+      collections: unknown[]
+      views: unknown[]
+    }
+    console.log(`  collections: ${String(dbMeta.collections.length)}`)
+    console.log(`  views: ${String(dbMeta.views.length)}`)
+
+    console.log(`\n--- readFile schema.json for ${COLL} ---`)
+    const schema = JSON.parse(
+      await readFile(`${base}/collections/${COLL}/schema.json`, 'utf8'),
+    ) as { kind: string; fields: unknown[]; indexes: unknown[] }
+    console.log(`  kind: ${schema.kind}`)
+    console.log(`  fields: ${String(schema.fields.length)}`)
+    console.log(`  indexes: ${String(schema.indexes.length)}`)
+
+    console.log(`\n--- readFile documents.jsonl for ${COLL} (first 3 lines) ---`)
+    const docsText = (
+      await readFile(`${base}/collections/${COLL}/documents.jsonl`, 'utf8')
+    ).trim()
+    const lines = docsText.split('\n')
+    console.log(`  documents: ${String(lines.length)}`)
+    for (const ln of lines.slice(0, 3)) {
+      const doc = JSON.parse(ln) as { title?: string }
+      console.log(`  ${doc.title ?? '?'}`)
+    }
+
+    console.log(`\n--- readFile view documents for ${VIEW} (first 3 lines) ---`)
+    const viewText = (
+      await readFile(`${base}/views/${VIEW}/documents.jsonl`, 'utf8')
+    ).trim()
+    const viewLines = viewText.split('\n')
+    console.log(`  documents: ${String(viewLines.length)}`)
+    for (const ln of viewLines.slice(0, 3)) {
+      const doc = JSON.parse(ln) as { title?: string; rating?: number }
+      console.log(`  ${doc.title ?? '?'} (rating=${String(doc.rating ?? '?')})`)
+    }
 
     console.log(`\n>>> FUSE mounted at: ${mp}`)
-    console.log('>>> You could open another terminal and try:')
-    console.log(`>>>   ls ${mp}/mongodb/`)
-    console.log(`>>>   head -n 3 ${mp}${colPath}`)
+    console.log('>>> Open another terminal and try:')
+    console.log(`>>>   ls ${base}/collections/`)
+    console.log(`>>>   head -n 3 ${base}/collections/${COLL}/documents.jsonl`)
     console.log('>>> Auto-unmounting now (run interactively for manual exploration).')
   } finally {
     await fm.close()
