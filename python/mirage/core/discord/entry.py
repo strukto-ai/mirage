@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from enum import Enum
 
 from mirage.cache.index.config import IndexEntry
+from mirage.utils.sanitize import sanitize_name
 
 
 class DiscordResourceType(str, Enum):
@@ -25,24 +26,22 @@ class DiscordResourceType(str, Enum):
     HISTORY = "discord/history"
 
 
-def safe_name(name: str) -> str:
-    if not name:
-        return "unknown"
-    return name.replace("/", "∕")
+def _make_id_name(name: str, snowflake: str) -> str:
+    return f"{sanitize_name(name)}__{snowflake}"
 
 
 def guild_dirname(g: dict) -> str:
-    return safe_name(g.get("name", g.get("id", "unknown")))
+    return _make_id_name(g.get("name", "") or g.get("id", ""), g["id"])
 
 
 def channel_dirname(c: dict) -> str:
-    return safe_name(c.get("name", c.get("id", "unknown")))
+    return _make_id_name(c.get("name", "") or c.get("id", ""), c["id"])
 
 
 def member_filename(m: dict) -> str:
     user = m.get("user", {})
-    name = user.get("username", user.get("id", "unknown"))
-    return safe_name(name) + ".json"
+    name = user.get("username", "") or user.get("id", "")
+    return f"{_make_id_name(name, user['id'])}.json"
 
 
 def snowflake_to_date(snowflake: str) -> str:

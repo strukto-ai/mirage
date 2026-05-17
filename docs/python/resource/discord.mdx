@@ -24,9 +24,9 @@ ws = Workspace({"/discord": resource}, mode=MountMode.READ)
 
 ```text
 /discord/
-  <guild-name>/
+  <guild-name>__<guild-id>/
     channels/
-      <channel-name>/
+      <channel-name>__<channel-id>/
         <yyyy-mm-dd>/
           chat.jsonl
           files/
@@ -34,7 +34,7 @@ ws = Workspace({"/discord": resource}, mode=MountMode.READ)
             ...
         ...
     members/
-      <username>.json
+      <username>__<user-id>.json
       ...
 ```
 
@@ -42,27 +42,29 @@ Example:
 
 ```text
 /discord/
-  My Server/
+  My_Server__111222333444555666/
     channels/
-      general/
+      general__777888999000111222/
         2026-04-04/
           chat.jsonl
           files/
             screenshot__1488111222333444555.png
         2026-04-05/
           chat.jsonl
-      random/
+      random__777888999000111223/
         2026-04-11/
           chat.jsonl
     members/
-      alice.json
-      bob.json
+      alice__444555666777888999.json
+      bob__444555666777888900.json
 ```
 
-Snowflake IDs are **not** embedded in directory or file names. Resource
-specific commands resolve IDs via the in-memory `IndexCacheStore`, and
-`stat` exposes them in the `extra` dict (see [Finding IDs](#finding-ids)).
-Names containing unsafe characters have `/` replaced with `∕` (U+2215).
+Names are sanitized (unsafe characters replaced with `_`) and the Discord
+snowflake ID is appended after `__` (double underscore) on guild,
+channel, member, and attachment names so resource specific commands can
+extract it without an extra lookup, and so two same named entities never
+collide. `stat` also exposes the ID in the `extra` dict (see
+[Finding IDs](#finding-ids)).
 
 ### Guilds
 
@@ -103,13 +105,13 @@ they use the Discord search API instead of downloading every `.jsonl` file:
 
 ```bash
 # FILE level - downloads the .jsonl, greps locally
-grep hello "/discord/My Server/channels/general/2026-04-04/chat.jsonl"
+grep hello "/discord/My_Server__111222333444555666/channels/general__777888999000111222/2026-04-04/chat.jsonl"
 
 # CHANNEL level - uses Discord search API (GET /guilds/{id}/messages/search)
-grep hello "/discord/My Server/channels/general/"
+grep hello "/discord/My_Server__111222333444555666/channels/general__777888999000111222/"
 
 # GUILD level - searches across all channels
-grep hello "/discord/My Server/"
+grep hello "/discord/My_Server__111222333444555666/"
 ```
 
 Scope detection is handled by `mirage/core/discord/scope.py`.
@@ -214,21 +216,21 @@ from the filesystem:
 
 ```bash
 # Guild ID - use stat
-stat "/discord/My Server"
+stat "/discord/My_Server__111222333444555666"
 # → extra={"guild_id": "1256522563555819574"}
 
 # Channel ID - use stat
-stat "/discord/My Server/channels/general"
+stat "/discord/My_Server__111222333444555666/channels/general__777888999000111222"
 # → extra={"channel_id": "1256522563555819574"}
 
 # Message ID - inside JSONL messages
 jq -r '.[] | "\(.id) [\(.author.username)] \(.content)"' \
-  "/discord/My Server/channels/general/2026-04-04/chat.jsonl"
+  "/discord/My_Server__111222333444555666/channels/general__777888999000111222/2026-04-04/chat.jsonl"
 # → 1489887688978075769 [alice] hello world
 
 # Find a message then reply
 jq -r '.[] | select(.content | test("hello")) | .id' \
-  "/discord/My Server/channels/general/2026-04-04/chat.jsonl"
+  "/discord/My_Server__111222333444555666/channels/general__777888999000111222/2026-04-04/chat.jsonl"
 # → 1489887688978075769
 discord-send-message --channel_id 1256522563555819574 \
   --text "Reply" --message_id 1489887688978075769
@@ -240,20 +242,20 @@ Tips for efficient access on busy channels:
 
 ```bash
 # Check message count per day
-wc -l "/discord/My Server/channels/general/2026-04-04/chat.jsonl"
+wc -l "/discord/My_Server__111222333444555666/channels/general__777888999000111222/2026-04-04/chat.jsonl"
 
 # Read only recent messages
-tail -n 10 "/discord/My Server/channels/general/2026-04-04/chat.jsonl"
+tail -n 10 "/discord/My_Server__111222333444555666/channels/general__777888999000111222/2026-04-04/chat.jsonl"
 
 # Search uses Discord API at channel/guild level (no file download)
-grep "keyword" "/discord/My Server/channels/general/"
+grep "keyword" "/discord/My_Server__111222333444555666/channels/general__777888999000111222/"
 
 # Extract specific fields
 jq -r '.[] | "\(.author.username): \(.content)"' \
-  "/discord/My Server/channels/general/2026-04-04/chat.jsonl" | head -n 20
+  "/discord/My_Server__111222333444555666/channels/general__777888999000111222/2026-04-04/chat.jsonl" | head -n 20
 
 # Count messages per user
-cat "/discord/My Server/channels/general/2026-04-04/chat.jsonl" \
+cat "/discord/My_Server__111222333444555666/channels/general__777888999000111222/2026-04-04/chat.jsonl" \
   | jq -r '.[] | .author.username' | sort | uniq -c
 ```
 

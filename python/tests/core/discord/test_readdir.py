@@ -50,7 +50,7 @@ async def test_readdir_root(accessor, index):
         result = await readdir(accessor, PathSpec(original="/", directory="/"),
                                index)
 
-    assert "/My Server" in result
+    assert "/My_Server__G001" in result
 
 
 @pytest.mark.asyncio
@@ -69,9 +69,7 @@ async def test_readdir_root_with_slash_in_name(accessor, index):
         result = await readdir(accessor, PathSpec(original="/", directory="/"),
                                index)
 
-    assert len(result) == 1
-    assert "/" not in result[0].lstrip("/").split(
-        "\u2215")[0] or "\u2215" in result[0]
+    assert result == ["/A_B_Test_Server__G001"]
 
 
 @pytest.mark.asyncio
@@ -90,7 +88,7 @@ async def test_readdir_root_with_apostrophe(accessor, index):
         result = await readdir(accessor, PathSpec(original="/", directory="/"),
                                index)
 
-    assert "/Zecheng's Server" in result
+    assert "/Zecheng_s_Server__G001" in result
 
 
 @pytest.mark.asyncio
@@ -148,8 +146,8 @@ async def test_readdir_channels(accessor, index):
             PathSpec(original="/My Server/channels",
                      directory="/My Server/channels"), index)
 
-    assert "/My Server/channels/general" in result
-    assert "/My Server/channels/random" in result
+    assert "/My Server/channels/general__C001" in result
+    assert "/My Server/channels/random__C002" in result
 
 
 @pytest.mark.asyncio
