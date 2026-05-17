@@ -117,11 +117,17 @@ export class HttpMongoDriver implements MongoDriver {
     for (const d of docs) yield d
   }
 
-  async *iterInserts<T = Record<string, unknown>>(
+  iterInserts<T = Record<string, unknown>>(
     _database: string,
     _collection: string,
   ): AsyncIterableIterator<T> {
-    throw new Error('iterInserts (tail -f) is not supported by HttpMongoDriver')
+    return {
+      next: () =>
+        Promise.reject(new Error('iterInserts (tail -f) is not supported by HttpMongoDriver')),
+      [Symbol.asyncIterator]() {
+        return this
+      },
+    }
   }
 
   countDocuments(

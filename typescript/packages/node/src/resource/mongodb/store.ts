@@ -196,7 +196,7 @@ export class MongoDBStore implements MongoDriver {
     for (const d of docs) {
       const name = d.name as string | undefined
       if (name !== undefined) {
-        out[name] = (d.accesses as MongoIndexAccess) ?? {}
+        out[name] = (d.accesses as MongoIndexAccess | undefined) ?? {}
       }
     }
     return out

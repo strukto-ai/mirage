@@ -60,7 +60,7 @@ export function elisionPaths(
   name: string,
 ): Set<string> {
   const key = `${database}.${name}`
-  const fields = accessor.config.elideFields?.[key] ?? []
+  const fields = accessor.config.elideFields[key] ?? []
   return new Set(fields)
 }
 
