@@ -14,8 +14,7 @@
 
 import pytest
 
-from mirage.server.auth.config import (AuthConfig, JWTConfig,
-                                       resolve_auth_config,
+from mirage.server.auth.config import (JWTConfig, resolve_auth_config,
                                        resolve_local_token)
 
 
@@ -69,9 +68,11 @@ def test_resolve_auth_config_token_mode_requires_env(tmp_path):
 
 @pytest.mark.no_host_override
 def test_resolve_auth_config_token_mode_uses_env_token(tmp_path):
-    cfg = resolve_auth_config(
-        env={"MIRAGE_AUTH_MODE": "token", "MIRAGE_AUTH_TOKEN": "operator-pat"},
-        token_file=tmp_path / "missing")
+    cfg = resolve_auth_config(env={
+        "MIRAGE_AUTH_MODE": "token",
+        "MIRAGE_AUTH_TOKEN": "operator-pat"
+    },
+                              token_file=tmp_path / "missing")
     assert cfg.mode == "token"
     assert cfg.bearer_token == "operator-pat"
     assert cfg.local_token is None
@@ -81,32 +82,37 @@ def test_resolve_auth_config_token_mode_uses_env_token(tmp_path):
 @pytest.mark.no_host_override
 def test_resolve_auth_config_jwt_mode_requires_key(tmp_path):
     with pytest.raises(RuntimeError, match="MIRAGE_JWT_PUBKEY"):
-        resolve_auth_config(
-            env={"MIRAGE_AUTH_MODE": "jwt", "MIRAGE_JWT_ALG": "RS256"},
-            token_file=tmp_path / "missing")
+        resolve_auth_config(env={
+            "MIRAGE_AUTH_MODE": "jwt",
+            "MIRAGE_JWT_ALG": "RS256"
+        },
+                            token_file=tmp_path / "missing")
 
 
 @pytest.mark.no_host_override
 def test_resolve_auth_config_jwt_mode_requires_alg(tmp_path):
     with pytest.raises(RuntimeError, match="MIRAGE_JWT_ALG"):
-        resolve_auth_config(
-            env={"MIRAGE_AUTH_MODE": "jwt", "MIRAGE_JWT_PUBKEY": "-----BEGIN"},
-            token_file=tmp_path / "missing")
+        resolve_auth_config(env={
+            "MIRAGE_AUTH_MODE": "jwt",
+            "MIRAGE_JWT_PUBKEY": "-----BEGIN"
+        },
+                            token_file=tmp_path / "missing")
 
 
 @pytest.mark.no_host_override
 def test_resolve_auth_config_jwt_mode_inline_key(tmp_path):
-    cfg = resolve_auth_config(
-        env={
-            "MIRAGE_AUTH_MODE": "jwt",
-            "MIRAGE_JWT_PUBKEY": "-----BEGIN PUBLIC KEY-----\nFAKE\n-----END PUBLIC KEY-----",
-            "MIRAGE_JWT_ALG": "RS256",
-            "MIRAGE_JWT_ISSUER": "https://issuer.example",
-            "MIRAGE_JWT_AUDIENCE": "mirage-daemon",
-            "MIRAGE_JWT_AUTHORIZED_PARTIES": "https://app.example,https://other.example",
-            "MIRAGE_JWT_CLOCK_SKEW_SECONDS": "12",
-        },
-        token_file=tmp_path / "missing")
+    cfg = resolve_auth_config(env={
+        "MIRAGE_AUTH_MODE": "jwt",
+        "MIRAGE_JWT_PUBKEY":
+        "-----BEGIN PUBLIC KEY-----\nFAKE\n-----END PUBLIC KEY-----",
+        "MIRAGE_JWT_ALG": "RS256",
+        "MIRAGE_JWT_ISSUER": "https://issuer.example",
+        "MIRAGE_JWT_AUDIENCE": "mirage-daemon",
+        "MIRAGE_JWT_AUTHORIZED_PARTIES":
+        "https://app.example,https://other.example",
+        "MIRAGE_JWT_CLOCK_SKEW_SECONDS": "12",
+    },
+                              token_file=tmp_path / "missing")
     assert cfg.mode == "jwt"
     assert cfg.jwt is not None
     assert isinstance(cfg.jwt, JWTConfig)
@@ -122,14 +128,14 @@ def test_resolve_auth_config_jwt_mode_inline_key(tmp_path):
 @pytest.mark.no_host_override
 def test_resolve_auth_config_jwt_mode_pubkey_from_file(tmp_path):
     key_file = tmp_path / "jwt.pub"
-    key_file.write_text("-----BEGIN PUBLIC KEY-----\nFROMFILE\n-----END PUBLIC KEY-----")
-    cfg = resolve_auth_config(
-        env={
-            "MIRAGE_AUTH_MODE": "jwt",
-            "MIRAGE_JWT_PUBKEY_FILE": str(key_file),
-            "MIRAGE_JWT_ALG": "RS256",
-        },
-        token_file=tmp_path / "missing")
+    key_file.write_text(
+        "-----BEGIN PUBLIC KEY-----\nFROMFILE\n-----END PUBLIC KEY-----")
+    cfg = resolve_auth_config(env={
+        "MIRAGE_AUTH_MODE": "jwt",
+        "MIRAGE_JWT_PUBKEY_FILE": str(key_file),
+        "MIRAGE_JWT_ALG": "RS256",
+    },
+                              token_file=tmp_path / "missing")
     assert cfg.mode == "jwt"
     assert cfg.jwt is not None
     assert "FROMFILE" in cfg.jwt.key

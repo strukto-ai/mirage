@@ -32,7 +32,8 @@ class KeyPair:
 
 @pytest.fixture(scope="module")
 def rsa_keys() -> KeyPair:
-    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    private_key = rsa.generate_private_key(public_exponent=65537,
+                                           key_size=2048)
     private_pem = private_key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
@@ -58,9 +59,14 @@ def _make_cfg(rsa_keys: KeyPair, **overrides) -> JWTConfig:
     return JWTConfig(**base)
 
 
-def _sign(rsa_keys: KeyPair, claims: dict, *, alg: str = "RS256",
+def _sign(rsa_keys: KeyPair,
+          claims: dict,
+          *,
+          alg: str = "RS256",
           headers: dict | None = None) -> str:
-    return pyjwt.encode(claims, rsa_keys.private_pem, algorithm=alg,
+    return pyjwt.encode(claims,
+                        rsa_keys.private_pem,
+                        algorithm=alg,
                         headers=headers)
 
 
@@ -75,8 +81,12 @@ def test_verify_jwt_accepts_valid_rs256(rsa_keys):
 @pytest.mark.no_host_override
 def test_verify_jwt_rejects_alg_none(rsa_keys):
     cfg = _make_cfg(rsa_keys)
-    token = pyjwt.encode({"sub": "x", "exp": int(time.time()) + 60},
-                         key="", algorithm="none")
+    token = pyjwt.encode({
+        "sub": "x",
+        "exp": int(time.time()) + 60
+    },
+                         key="",
+                         algorithm="none")
     with pytest.raises(JWTVerificationError):
         verify_jwt(token, cfg)
 
@@ -84,8 +94,12 @@ def test_verify_jwt_rejects_alg_none(rsa_keys):
 @pytest.mark.no_host_override
 def test_verify_jwt_rejects_alg_confusion(rsa_keys):
     cfg = _make_cfg(rsa_keys, algorithm="RS256")
-    token = pyjwt.encode({"sub": "x", "exp": int(time.time()) + 60},
-                         key="shared-secret", algorithm="HS256")
+    token = pyjwt.encode({
+        "sub": "x",
+        "exp": int(time.time()) + 60
+    },
+                         key="shared-secret",
+                         algorithm="HS256")
     with pytest.raises(JWTVerificationError):
         verify_jwt(token, cfg)
 
@@ -117,10 +131,12 @@ def test_verify_jwt_accepts_within_clock_skew(rsa_keys):
 @pytest.mark.no_host_override
 def test_verify_jwt_rejects_wrong_issuer(rsa_keys):
     cfg = _make_cfg(rsa_keys, issuer="https://issuer.example")
-    token = _sign(rsa_keys, {
-        "sub": "x", "exp": int(time.time()) + 60,
-        "iss": "https://attacker.example",
-    })
+    token = _sign(
+        rsa_keys, {
+            "sub": "x",
+            "exp": int(time.time()) + 60,
+            "iss": "https://attacker.example",
+        })
     with pytest.raises(JWTVerificationError):
         verify_jwt(token, cfg)
 
@@ -129,7 +145,8 @@ def test_verify_jwt_rejects_wrong_issuer(rsa_keys):
 def test_verify_jwt_rejects_wrong_audience(rsa_keys):
     cfg = _make_cfg(rsa_keys, audience="mirage-daemon")
     token = _sign(rsa_keys, {
-        "sub": "x", "exp": int(time.time()) + 60,
+        "sub": "x",
+        "exp": int(time.time()) + 60,
         "aud": "something-else",
     })
     with pytest.raises(JWTVerificationError):
@@ -138,21 +155,25 @@ def test_verify_jwt_rejects_wrong_audience(rsa_keys):
 
 @pytest.mark.no_host_override
 def test_verify_jwt_rejects_unauthorized_party(rsa_keys):
-    cfg = _make_cfg(rsa_keys, authorized_parties=("https://app.example",))
-    token = _sign(rsa_keys, {
-        "sub": "x", "exp": int(time.time()) + 60,
-        "azp": "https://attacker.example",
-    })
+    cfg = _make_cfg(rsa_keys, authorized_parties=("https://app.example", ))
+    token = _sign(
+        rsa_keys, {
+            "sub": "x",
+            "exp": int(time.time()) + 60,
+            "azp": "https://attacker.example",
+        })
     with pytest.raises(JWTVerificationError):
         verify_jwt(token, cfg)
 
 
 @pytest.mark.no_host_override
 def test_verify_jwt_accepts_matching_authorized_party(rsa_keys):
-    cfg = _make_cfg(rsa_keys, authorized_parties=("https://app.example",
-                                                  "https://other.example"))
+    cfg = _make_cfg(rsa_keys,
+                    authorized_parties=("https://app.example",
+                                        "https://other.example"))
     token = _sign(rsa_keys, {
-        "sub": "x", "exp": int(time.time()) + 60,
+        "sub": "x",
+        "exp": int(time.time()) + 60,
         "azp": "https://other.example",
     })
     claims = verify_jwt(token, cfg)
@@ -162,7 +183,10 @@ def test_verify_jwt_accepts_matching_authorized_party(rsa_keys):
 @pytest.mark.no_host_override
 def test_verify_jwt_rejects_bad_typ_header(rsa_keys):
     cfg = _make_cfg(rsa_keys)
-    token = _sign(rsa_keys, {"sub": "x", "exp": int(time.time()) + 60},
+    token = _sign(rsa_keys, {
+        "sub": "x",
+        "exp": int(time.time()) + 60
+    },
                   headers={"typ": "NotAJWT"})
     with pytest.raises(JWTVerificationError):
         verify_jwt(token, cfg)

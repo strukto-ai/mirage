@@ -36,7 +36,7 @@ def test_ensure_token_file_is_idempotent(tmp_path):
     target = tmp_path / "auth_token"
     first = ensure_token_file(target)
     second = ensure_token_file(target)
-    assert first == second, "second call must return existing token, not regenerate"
+    assert first == second, "second call must reuse existing token"
 
 
 @pytest.mark.no_host_override

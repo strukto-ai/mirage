@@ -33,9 +33,9 @@ describe('resolveLocalToken', () => {
   it('env wins', () => {
     const f = join(dir, 'auth_token')
     writeFileSync(f, 'from-file')
-    expect(
-      resolveLocalToken({ env: { MIRAGE_AUTH_TOKEN: 'from-env' }, tokenFile: f }),
-    ).toBe('from-env')
+    expect(resolveLocalToken({ env: { MIRAGE_AUTH_TOKEN: 'from-env' }, tokenFile: f })).toBe(
+      'from-env',
+    )
   })
 
   it('falls back to file', () => {
@@ -132,10 +132,7 @@ describe('resolveAuthConfig', () => {
     expect(cfg.jwt?.algorithm).toBe('RS256')
     expect(cfg.jwt?.issuer).toBe('https://issuer.example')
     expect(cfg.jwt?.audience).toBe('mirage-daemon')
-    expect(cfg.jwt?.authorizedParties).toEqual([
-      'https://app.example',
-      'https://other.example',
-    ])
+    expect(cfg.jwt?.authorizedParties).toEqual(['https://app.example', 'https://other.example'])
     expect(cfg.jwt?.clockSkewSeconds).toBe(12)
   })
 

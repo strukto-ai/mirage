@@ -76,7 +76,8 @@ def resolve_local_token(
     val = e.get(ENV_AUTH_TOKEN, "").strip()
     if val:
         return val
-    path = token_file if token_file is not None else _storage.DEFAULT_TOKEN_FILE
+    path = (token_file
+            if token_file is not None else _storage.DEFAULT_TOKEN_FILE)
     return _storage.read_token_file(path)
 
 
@@ -114,7 +115,8 @@ def resolve_auth_config(
         RuntimeError: if required env vars are missing for the chosen mode.
     """
     e = env if env is not None else os.environ
-    raw_mode = (e.get(ENV_AUTH_MODE, "") or AuthMode.LOCAL.value).strip().lower()
+    raw_mode = (e.get(ENV_AUTH_MODE, "")
+                or AuthMode.LOCAL.value).strip().lower()
     try:
         mode = AuthMode(raw_mode)
     except ValueError as exc:
@@ -139,8 +141,7 @@ def resolve_auth_config(
     key = _read_jwt_key(e)
     alg = e.get(ENV_JWT_ALG, "").strip()
     if not alg:
-        raise RuntimeError(
-            f"mode=jwt requires {ENV_JWT_ALG} (e.g. RS256)")
+        raise RuntimeError(f"mode=jwt requires {ENV_JWT_ALG} (e.g. RS256)")
     issuer = (e.get(ENV_JWT_ISSUER) or "").strip() or None
     audience = (e.get(ENV_JWT_AUDIENCE) or "").strip() or None
     azp = _parse_csv(e.get(ENV_JWT_AUTHORIZED_PARTIES, ""))

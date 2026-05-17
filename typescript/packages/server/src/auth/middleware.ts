@@ -71,8 +71,7 @@ export function registerAuth(app: FastifyInstance, config: AuthConfig): void {
       }
       return
     }
-    const expected =
-      config.mode === AuthMode.Local ? config.localToken : config.bearerToken
+    const expected = config.mode === AuthMode.Local ? config.localToken : config.bearerToken
     if (expected === undefined || !constantTimeEqual(token, expected)) {
       await unauthorized(reply, 'bearer mismatch')
       return

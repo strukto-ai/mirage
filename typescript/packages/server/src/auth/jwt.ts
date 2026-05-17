@@ -68,9 +68,7 @@ export async function verifyJwt(token: string, cfg: JWTConfig): Promise<JWTPaylo
   if (cfg.authorizedParties.length > 0) {
     const azp = payload.azp as string | undefined
     if (azp === undefined || !cfg.authorizedParties.includes(azp)) {
-      throw new JWTVerificationError(
-        `JWT azp ${JSON.stringify(azp)} not in authorized_parties`,
-      )
+      throw new JWTVerificationError(`JWT azp ${JSON.stringify(azp)} not in authorized_parties`)
     }
   }
   return payload
