@@ -34,8 +34,10 @@ export function stubMongoDriver(overrides: Partial<MongoDriver> = {}): MongoDriv
   }
 }
 
-export function arrayIter<T>(items: readonly T[]): () => AsyncIterableIterator<T> {
-  return async function* () {
-    for (const i of items) yield i
+export function arrayIter(
+  items: readonly Record<string, unknown>[],
+): <T = Record<string, unknown>>() => AsyncIterableIterator<T> {
+  return async function* <T = Record<string, unknown>>() {
+    for (const i of items) yield i as T
   }
 }

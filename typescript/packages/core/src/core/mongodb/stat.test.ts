@@ -12,63 +12,68 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi } from 'vitest'
-
-vi.mock('./_client.ts', () => ({
-  countDocuments: vi.fn(),
-  listIndexes: vi.fn(),
-}))
-
+import { describe, expect, it } from 'vitest'
 import { MongoDBAccessor } from '../../accessor/mongodb.ts'
-import { resolveMongoDBConfig, type MongoDBConfig } from '../../resource/mongodb/config.ts'
+import { resolveMongoDBConfig } from '../../resource/mongodb/config.ts'
 import { FileType, PathSpec } from '../../types.ts'
-import * as _client from './_client.ts'
-import type { MongoDriver } from './_driver.ts'
 import { stat } from './stat.ts'
+import { stubMongoDriver } from './_test_util.ts'
 
-const STUB_DRIVER: MongoDriver = {
-  listDatabases: () => Promise.resolve([]),
-  listCollections: () => Promise.resolve([]),
-  findDocuments: () => Promise.resolve([]),
-  countDocuments: () => Promise.resolve(0),
-  listIndexes: () => Promise.resolve([]),
-  close: () => Promise.resolve(),
+function ps(p: string): PathSpec {
+  return new PathSpec({ original: p, directory: p, prefix: '/mongo' })
 }
 
-function makeAccessor(cfgOverrides: Partial<MongoDBConfig> = {}): MongoDBAccessor {
-  const cfg = resolveMongoDBConfig({ uri: 'mongodb://h', ...cfgOverrides })
-  return new MongoDBAccessor(STUB_DRIVER, cfg)
+function accessor(overrides: Partial<Parameters<typeof stubMongoDriver>[0]> = {}) {
+  return new MongoDBAccessor(
+    stubMongoDriver(overrides),
+    resolveMongoDBConfig({ uri: 'mongodb://h' }),
+  )
 }
 
 describe('stat', () => {
   it('marks root as DIRECTORY', async () => {
-    const r = await stat(
-      makeAccessor(),
-      new PathSpec({ original: '/mongo/', directory: '/mongo/', prefix: '/mongo' }),
-    )
+    const r = await stat(accessor(), ps('/mongo/'))
     expect(r.name).toBe('/')
     expect(r.type).toBe(FileType.DIRECTORY)
   })
 
   it('marks database level as DIRECTORY with extras', async () => {
-    const r = await stat(
-      makeAccessor(),
-      new PathSpec({ original: '/mongo/app', directory: '/mongo/', prefix: '/mongo' }),
-    )
+    const r = await stat(accessor(), ps('/mongo/app'))
     expect(r.type).toBe(FileType.DIRECTORY)
     expect(r.extra).toEqual({ database: 'app' })
   })
 
-  it('marks collection file as TEXT with size=null and extras', async () => {
-    vi.mocked(_client.countDocuments).mockResolvedValue(42)
-    vi.mocked(_client.listIndexes).mockResolvedValue([{ name: '_id_', key: { _id: 1 } }])
+  it('marks kind_dir as DIRECTORY with kind extra', async () => {
+    const r = await stat(accessor(), ps('/mongo/app/collections'))
+    expect(r.type).toBe(FileType.DIRECTORY)
+    expect(r.name).toBe('collections')
+    expect(r.extra).toMatchObject({ database: 'app', kind: 'collection' })
+  })
+
+  it('marks entity (collection dir) as DIRECTORY with document_count', async () => {
     const r = await stat(
-      makeAccessor(),
-      new PathSpec({
-        original: '/mongo/app/users.jsonl',
-        directory: '/mongo/app/',
-        prefix: '/mongo',
+      accessor({ countDocuments: () => Promise.resolve(42) }),
+      ps('/mongo/app/collections/users'),
+    )
+    expect(r.type).toBe(FileType.DIRECTORY)
+    expect(r.name).toBe('users')
+    expect(r.extra).toMatchObject({
+      database: 'app',
+      kind: 'collection',
+      name: 'users',
+      document_count: 42,
+    })
+  })
+
+  it('marks documents.jsonl as TEXT with indexes for a collection', async () => {
+    const r = await stat(
+      accessor({
+        countDocuments: () => Promise.resolve(42),
+        listCollectionsDetailed: () =>
+          Promise.resolve([{ name: 'users', type: 'collection' }]),
+        listIndexes: () => Promise.resolve([{ name: '_id_', key: { _id: 1 } }]),
       }),
+      ps('/mongo/app/collections/users/documents.jsonl'),
     )
     expect(r.type).toBe(FileType.TEXT)
     expect(r.size).toBeNull()
@@ -76,32 +81,38 @@ describe('stat', () => {
     expect(r.extra.indexes).toEqual([{ name: '_id_', keys: { _id: 1 } }])
   })
 
-  it('single-db mode resolves /<col>.jsonl to a file', async () => {
-    vi.mocked(_client.countDocuments).mockResolvedValue(7)
-    vi.mocked(_client.listIndexes).mockResolvedValue([])
+  it('marks documents.jsonl as TEXT but with no indexes for a view', async () => {
     const r = await stat(
-      makeAccessor({ databases: ['app'] }),
-      new PathSpec({
-        original: '/mongo/users.jsonl',
-        directory: '/mongo/',
-        prefix: '/mongo',
+      accessor({
+        countDocuments: () => Promise.resolve(10),
+        listCollectionsDetailed: () =>
+          Promise.resolve([{ name: 'recent', type: 'view' }]),
       }),
+      ps('/mongo/app/views/recent/documents.jsonl'),
     )
     expect(r.type).toBe(FileType.TEXT)
-    expect(r.extra.database).toBe('app')
-    expect(r.extra.collection).toBe('users')
+    expect(r.extra.indexes).toEqual([])
+    expect(r.extra.kind).toBe('view')
   })
 
-  it('throws ENOENT for invalid paths', async () => {
-    await expect(
-      stat(
-        makeAccessor(),
-        new PathSpec({
-          original: '/mongo/a/b/c',
-          directory: '/mongo/a/b/',
-          prefix: '/mongo',
-        }),
-      ),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
+  it('marks schema.json as TEXT', async () => {
+    const r = await stat(
+      accessor(),
+      ps('/mongo/app/collections/users/schema.json'),
+    )
+    expect(r.type).toBe(FileType.TEXT)
+    expect(r.name).toBe('schema.json')
+  })
+
+  it('marks database.json as TEXT', async () => {
+    const r = await stat(accessor(), ps('/mongo/app/database.json'))
+    expect(r.type).toBe(FileType.TEXT)
+    expect(r.name).toBe('database.json')
+  })
+
+  it('throws ENOENT for unrecognized paths', async () => {
+    await expect(stat(accessor(), ps('/mongo/app/foo'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 })

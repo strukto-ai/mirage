@@ -21,74 +21,71 @@ vi.mock('./_client.ts', () => ({
 
 import { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { resolveMongoDBConfig, type MongoDBConfig } from '../../resource/mongodb/config.ts'
+import { resolveMongoDBConfig } from '../../resource/mongodb/config.ts'
 import { PathSpec } from '../../types.ts'
 import * as _client from './_client.ts'
-import type { MongoDriver } from './_driver.ts'
+import { stubMongoDriver } from './_test_util.ts'
 import { readdir } from './readdir.ts'
 
-const STUB_DRIVER: MongoDriver = {
-  listDatabases: () => Promise.resolve([]),
-  listCollections: () => Promise.resolve([]),
-  findDocuments: () => Promise.resolve([]),
-  countDocuments: () => Promise.resolve(0),
-  listIndexes: () => Promise.resolve([]),
-  close: () => Promise.resolve(),
+const STUB_DRIVER = stubMongoDriver()
+
+function makeAccessor(): MongoDBAccessor {
+  return new MongoDBAccessor(STUB_DRIVER, resolveMongoDBConfig({ uri: 'mongodb://h' }))
 }
 
-function makeAccessor(cfgOverrides: Partial<MongoDBConfig> = {}): MongoDBAccessor {
-  const cfg = resolveMongoDBConfig({ uri: 'mongodb://h', ...cfgOverrides })
-  return new MongoDBAccessor(STUB_DRIVER, cfg)
+function ps(p: string): PathSpec {
+  return new PathSpec({ original: p, directory: p, prefix: '/mongo' })
 }
 
 describe('readdir', () => {
-  it('lists root: databases with mount prefix', async () => {
+  it('lists root: databases', async () => {
     vi.mocked(_client.listDatabases).mockResolvedValue(['app', 'analytics'])
-    const accessor = makeAccessor()
-    const path = new PathSpec({ original: '/mongo/', directory: '/mongo/', prefix: '/mongo' })
-    const out = await readdir(accessor, path)
+    const out = await readdir(makeAccessor(), ps('/mongo/'))
     expect(out).toEqual(['/mongo/app', '/mongo/analytics'])
   })
 
-  it('lists database level: <col>.jsonl files', async () => {
-    vi.mocked(_client.listCollections).mockResolvedValue(['users', 'orders'])
-    const out = await readdir(
-      makeAccessor(),
-      new PathSpec({ original: '/mongo/app', directory: '/mongo/app', prefix: '/mongo' }),
-    )
-    expect(out).toEqual(['/mongo/app/users.jsonl', '/mongo/app/orders.jsonl'])
+  it('lists database: fixed [database.json, collections, views]', async () => {
+    const out = await readdir(makeAccessor(), ps('/mongo/app'))
+    expect(out).toEqual([
+      '/mongo/app/database.json',
+      '/mongo/app/collections',
+      '/mongo/app/views',
+    ])
   })
 
-  it('single-db mode collapses root to collections', async () => {
-    vi.mocked(_client.listCollections).mockResolvedValue(['users'])
-    const out = await readdir(
-      makeAccessor({ databases: ['app'] }),
-      new PathSpec({ original: '/mongo/', directory: '/mongo/', prefix: '/mongo' }),
-    )
-    expect(out).toEqual(['/mongo/users.jsonl'])
+  it('lists kind_dir (collections): collection names', async () => {
+    vi.mocked(_client.listCollections).mockResolvedValue(['users', 'orders'])
+    const out = await readdir(makeAccessor(), ps('/mongo/app/collections'))
+    expect(out).toEqual(['/mongo/app/collections/users', '/mongo/app/collections/orders'])
+  })
+
+  it('lists kind_dir (views): view names', async () => {
+    vi.mocked(_client.listCollections).mockResolvedValue(['recent'])
+    const out = await readdir(makeAccessor(), ps('/mongo/app/views'))
+    expect(out).toEqual(['/mongo/app/views/recent'])
+  })
+
+  it('lists entity (collection): [schema.json, documents.jsonl]', async () => {
+    const out = await readdir(makeAccessor(), ps('/mongo/app/collections/users'))
+    expect(out).toEqual([
+      '/mongo/app/collections/users/schema.json',
+      '/mongo/app/collections/users/documents.jsonl',
+    ])
   })
 
   it('caches root listing in index when provided', async () => {
     vi.mocked(_client.listDatabases).mockResolvedValue(['app'])
     const index = new RAMIndexCacheStore()
     const accessor = makeAccessor()
-    const path = new PathSpec({ original: '/mongo/', directory: '/mongo/', prefix: '/mongo' })
-    await readdir(accessor, path, index)
+    await readdir(accessor, ps('/mongo/'), index)
     vi.mocked(_client.listDatabases).mockClear()
-    await readdir(accessor, path, index)
+    await readdir(accessor, ps('/mongo/'), index)
     expect(_client.listDatabases).not.toHaveBeenCalled()
   })
 
-  it('throws ENOENT for file-level paths', async () => {
+  it('throws ENOENT for documents-leaf paths', async () => {
     await expect(
-      readdir(
-        makeAccessor(),
-        new PathSpec({
-          original: '/mongo/app/users.jsonl',
-          directory: '/mongo/app/',
-          prefix: '/mongo',
-        }),
-      ),
+      readdir(makeAccessor(), ps('/mongo/app/collections/users/documents.jsonl')),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })

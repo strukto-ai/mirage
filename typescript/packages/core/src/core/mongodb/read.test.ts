@@ -12,31 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-
-vi.mock('./_client.ts', () => ({
-  findDocuments: vi.fn(),
-}))
-
+import { describe, expect, it } from 'vitest'
 import { MongoDBAccessor } from '../../accessor/mongodb.ts'
-import { resolveMongoDBConfig, type MongoDBConfig } from '../../resource/mongodb/config.ts'
+import { resolveMongoDBConfig } from '../../resource/mongodb/config.ts'
 import { PathSpec } from '../../types.ts'
-import * as _client from './_client.ts'
-import type { MongoDriver } from './_driver.ts'
 import { read } from './read.ts'
+import { arrayIter, stubMongoDriver } from './_test_util.ts'
 
-const STUB_DRIVER: MongoDriver = {
-  listDatabases: () => Promise.resolve([]),
-  listCollections: () => Promise.resolve([]),
-  findDocuments: () => Promise.resolve([]),
-  countDocuments: () => Promise.resolve(0),
-  listIndexes: () => Promise.resolve([]),
-  close: () => Promise.resolve(),
-}
-
-function makeAccessor(cfgOverrides: Partial<MongoDBConfig> = {}): MongoDBAccessor {
-  const cfg = resolveMongoDBConfig({ uri: 'mongodb://h', ...cfgOverrides })
-  return new MongoDBAccessor(STUB_DRIVER, cfg)
+function ps(p: string): PathSpec {
+  return new PathSpec({ original: p, directory: p, prefix: '/mongo' })
 }
 
 function decode(b: Uint8Array): string {
@@ -44,82 +28,37 @@ function decode(b: Uint8Array): string {
 }
 
 describe('read', () => {
-  beforeEach(() => {
-    vi.mocked(_client.findDocuments).mockReset()
+  it('streams documents.jsonl as one JSON line per doc', async () => {
+    const driver = stubMongoDriver({
+      iterDocuments: arrayIter([
+        { _id: 'a', x: 1 },
+        { _id: 'b', x: 2 },
+      ]),
+    })
+    const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
+    const out = await read(accessor, ps('/mongo/app/collections/users/documents.jsonl'))
+    const lines = decode(out).trim().split('\n')
+    expect(lines).toHaveLength(2)
+    expect(JSON.parse(lines[0] ?? '')).toEqual({ _id: 'a', x: 1 })
   })
 
-  it('returns empty bytes when no docs', async () => {
-    vi.mocked(_client.findDocuments).mockResolvedValue([])
-    const out = await read(
-      makeAccessor(),
-      new PathSpec({
-        original: '/mongo/app/users.jsonl',
-        directory: '/mongo/app/',
-        prefix: '/mongo',
-      }),
-    )
-    expect(out.byteLength).toBe(0)
+  it('throws ENOENT for an unknown path', async () => {
+    const driver = stubMongoDriver()
+    const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
+    await expect(read(accessor, ps('/mongo/app/something'))).rejects.toThrow()
   })
 
-  it('uses defaultDocLimit when no explicit limit', async () => {
-    vi.mocked(_client.findDocuments).mockResolvedValue([{ _id: 'a', x: 1 }])
-    await read(
-      makeAccessor({ defaultDocLimit: 7 }),
-      new PathSpec({
-        original: '/mongo/app/users.jsonl',
-        directory: '/mongo/app/',
-        prefix: '/mongo',
-      }),
-    )
-    const call = vi.mocked(_client.findDocuments).mock.calls[0]
-    expect(call?.[4]?.limit).toBe(7)
-    expect(call?.[4]?.sort).toEqual({ _id: 1 })
-  })
-
-  it('honors explicit limit/offset (skip)', async () => {
-    vi.mocked(_client.findDocuments).mockResolvedValue([])
-    await read(
-      makeAccessor(),
-      new PathSpec({
-        original: '/mongo/app/users.jsonl',
-        directory: '/mongo/app/',
-        prefix: '/mongo',
-      }),
-      undefined,
-      { limit: 10, offset: 5 },
-    )
-    const call = vi.mocked(_client.findDocuments).mock.calls[0]
-    expect(call?.[4]?.limit).toBe(10)
-    expect(call?.[4]?.skip).toBe(5)
-  })
-
-  it('serializes Date as ISO and stringifies _id', async () => {
-    vi.mocked(_client.findDocuments).mockResolvedValue([
-      { _id: { toString: () => 'abc123' }, ts: new Date('2026-04-30T00:00:00.000Z') },
-    ])
-    const out = await read(
-      makeAccessor(),
-      new PathSpec({
-        original: '/mongo/app/users.jsonl',
-        directory: '/mongo/app/',
-        prefix: '/mongo',
-      }),
-    )
-    expect(decode(out)).toBe('{"_id":"abc123","ts":"2026-04-30T00:00:00.000Z"}\n')
-  })
-
-  it('single-db mode resolves /<col>.jsonl', async () => {
-    vi.mocked(_client.findDocuments).mockResolvedValue([{ _id: '1' }])
-    await read(
-      makeAccessor({ databases: ['app'] }),
-      new PathSpec({
-        original: '/mongo/users.jsonl',
-        directory: '/mongo/',
-        prefix: '/mongo',
-      }),
-    )
-    const call = vi.mocked(_client.findDocuments).mock.calls[0]
-    expect(call?.[1]).toBe('app')
-    expect(call?.[2]).toBe('users')
+  it('returns database.json payload at database_json scope', async () => {
+    const driver = stubMongoDriver({
+      listCollections: () => Promise.resolve(['users', 'orders']),
+      listCollectionsDetailed: (_db, filter = {}) =>
+        Promise.resolve([{ name: filter.name ?? 'users', type: 'collection' }]),
+      countDocuments: () => Promise.resolve(7),
+    })
+    const accessor = new MongoDBAccessor(driver, resolveMongoDBConfig({ uri: 'mongodb://h' }))
+    const out = await read(accessor, ps('/mongo/app/database.json'))
+    const parsed = JSON.parse(decode(out)) as { database: string; collections: unknown[] }
+    expect(parsed.database).toBe('app')
+    expect(parsed.collections).toHaveLength(2)
   })
 })

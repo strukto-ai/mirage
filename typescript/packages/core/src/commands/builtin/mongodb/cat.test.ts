@@ -19,7 +19,7 @@ vi.mock('../../../core/mongodb/read.ts', () => ({
 }))
 
 import { MongoDBAccessor } from '../../../accessor/mongodb.ts'
-import type { MongoDriver } from '../../../core/mongodb/_driver.ts'
+import { stubMongoDriver } from '../../../core/mongodb/_test_util.ts'
 import * as readModule from '../../../core/mongodb/read.ts'
 import { resolveMongoDBConfig } from '../../../resource/mongodb/config.ts'
 import { materialize } from '../../../io/types.ts'
@@ -28,14 +28,7 @@ import { MONGODB_CAT } from './cat.ts'
 
 const DEC = new TextDecoder()
 
-const STUB_DRIVER: MongoDriver = {
-  listDatabases: () => Promise.resolve([]),
-  listCollections: () => Promise.resolve([]),
-  findDocuments: () => Promise.resolve([]),
-  countDocuments: () => Promise.resolve(0),
-  listIndexes: () => Promise.resolve([]),
-  close: () => Promise.resolve(),
-}
+const STUB_DRIVER = stubMongoDriver()
 
 function makeAccessor(): MongoDBAccessor {
   return new MongoDBAccessor(STUB_DRIVER, resolveMongoDBConfig({ uri: 'mongodb://h' }))

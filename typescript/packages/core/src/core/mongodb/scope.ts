@@ -48,33 +48,41 @@ export function detectScope(path: PathSpec | string): MongoDBScope {
   }
 
   if (parts.length === 2) {
-    const [db, leaf] = parts
+    const db = parts[0] ?? ''
+    const leaf = parts[1] ?? ''
     if (leaf === 'database.json') {
       return scope(ScopeLevel.DATABASE_JSON, raw, db)
     }
-    if (leaf in KIND_DIR_NAMES) {
-      return scope(ScopeLevel.KIND_DIR, raw, db, KIND_DIR_NAMES[leaf])
+    const dirKind = KIND_DIR_NAMES[leaf]
+    if (dirKind !== undefined) {
+      return scope(ScopeLevel.KIND_DIR, raw, db, dirKind)
     }
     return scope(ScopeLevel.UNKNOWN, raw)
   }
 
   if (parts.length === 3) {
-    const [db, kindSeg, name] = parts
-    if (kindSeg in KIND_DIR_NAMES) {
-      return scope(ScopeLevel.ENTITY, raw, db, KIND_DIR_NAMES[kindSeg], name)
+    const db = parts[0] ?? ''
+    const kindSeg = parts[1] ?? ''
+    const name = parts[2] ?? ''
+    const dirKind = KIND_DIR_NAMES[kindSeg]
+    if (dirKind !== undefined) {
+      return scope(ScopeLevel.ENTITY, raw, db, dirKind, name)
     }
     return scope(ScopeLevel.UNKNOWN, raw)
   }
 
   if (parts.length === 4) {
-    const [db, kindSeg, name, leaf] = parts
-    if (kindSeg in KIND_DIR_NAMES) {
-      const kind = KIND_DIR_NAMES[kindSeg]
+    const db = parts[0] ?? ''
+    const kindSeg = parts[1] ?? ''
+    const name = parts[2] ?? ''
+    const leaf = parts[3] ?? ''
+    const dirKind = KIND_DIR_NAMES[kindSeg]
+    if (dirKind !== undefined) {
       if (leaf === 'schema.json') {
-        return scope(ScopeLevel.SCHEMA_JSON, raw, db, kind, name)
+        return scope(ScopeLevel.SCHEMA_JSON, raw, db, dirKind, name)
       }
       if (leaf === 'documents.jsonl') {
-        return scope(ScopeLevel.DOCUMENTS, raw, db, kind, name)
+        return scope(ScopeLevel.DOCUMENTS, raw, db, dirKind, name)
       }
     }
     return scope(ScopeLevel.UNKNOWN, raw)

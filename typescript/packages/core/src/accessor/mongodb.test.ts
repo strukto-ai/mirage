@@ -13,18 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { MongoDriver } from '../core/mongodb/_driver.ts'
+import { stubMongoDriver } from '../core/mongodb/_test_util.ts'
 import { resolveMongoDBConfig } from '../resource/mongodb/config.ts'
 import { MongoDBAccessor } from './mongodb.ts'
 
-const STUB_DRIVER: MongoDriver = {
-  listDatabases: () => Promise.resolve([]),
-  listCollections: () => Promise.resolve([]),
-  findDocuments: () => Promise.resolve([]),
-  countDocuments: () => Promise.resolve(0),
-  listIndexes: () => Promise.resolve([]),
-  close: () => Promise.resolve(),
-}
+const STUB_DRIVER = stubMongoDriver()
 
 describe('MongoDBAccessor', () => {
   it('holds the driver and resolved config', () => {

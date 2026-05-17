@@ -21,18 +21,11 @@ vi.mock('./readdir.ts', () => ({
 import { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { resolveMongoDBConfig } from '../../resource/mongodb/config.ts'
 import { PathSpec } from '../../types.ts'
-import type { MongoDriver } from './_driver.ts'
+import { stubMongoDriver } from './_test_util.ts'
 import { resolveGlob } from './glob.ts'
 import { readdir } from './readdir.ts'
 
-const STUB_DRIVER: MongoDriver = {
-  listDatabases: () => Promise.resolve([]),
-  listCollections: () => Promise.resolve([]),
-  findDocuments: () => Promise.resolve([]),
-  countDocuments: () => Promise.resolve(0),
-  listIndexes: () => Promise.resolve([]),
-  close: () => Promise.resolve(),
-}
+const STUB_DRIVER = stubMongoDriver()
 
 function makeAccessor(): MongoDBAccessor {
   return new MongoDBAccessor(STUB_DRIVER, resolveMongoDBConfig({ uri: 'mongodb://h' }))

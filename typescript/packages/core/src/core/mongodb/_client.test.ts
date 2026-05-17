@@ -23,9 +23,10 @@ import {
   listIndexes,
 } from './_client.ts'
 import type { MongoDriver } from './_driver.ts'
+import { stubMongoDriver } from './_test_util.ts'
 
 function makeDriver(overrides: Partial<MongoDriver> = {}): MongoDriver {
-  return {
+  return stubMongoDriver({
     listDatabases: vi.fn(() => Promise.resolve([])),
     listCollections: vi.fn(() => Promise.resolve([])),
     findDocuments: vi.fn(() => Promise.resolve([])),
@@ -33,7 +34,7 @@ function makeDriver(overrides: Partial<MongoDriver> = {}): MongoDriver {
     listIndexes: vi.fn(() => Promise.resolve([])),
     close: vi.fn(() => Promise.resolve()),
     ...overrides,
-  }
+  })
 }
 
 function makeAccessor(
