@@ -116,12 +116,103 @@ jobs:
             fail=1
           fi
 
+          curl_check() {
+            local desc="$1"
+            local expected="$2"
+            shift 2
+            local got
+            got=$(curl -s -o /dev/null -w "%{http_code}" "$@")
+            echo "  $desc: got $got (expected $expected)"
+            if [ "$got" != "$expected" ]; then
+              echo "  FAIL"
+              fail=1
+            fi
+          }
+
+          echo
+          echo "===== auth: mode=local (daemon spawned by CLI, token auto-minted) ====="
+          TOKEN=$(cat "$HOME/.mirage/auth_token")
+          MODE=$(stat -c "%a" "$HOME/.mirage/auth_token" 2>/dev/null || stat -f "%Lp" "$HOME/.mirage/auth_token")
+          echo "token file mode: $MODE (expected 600)"
+          if [ "$MODE" != "600" ]; then
+            echo "FAIL: token file must be 0o600"
+            fail=1
+          fi
+          curl_check "correct bearer => 200" 200 \
+            -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8765/v1/workspaces
+          curl_check "wrong bearer => 401" 401 \
+            -H "Authorization: Bearer wrong-token" http://127.0.0.1:8765/v1/workspaces
+          curl_check "no header => 401" 401 http://127.0.0.1:8765/v1/workspaces
+          curl_check "/v1/health bypass => 200" 200 http://127.0.0.1:8765/v1/health
+          curl_check "JWT-shaped value treated as opaque => 401" 401 \
+            -H "Authorization: Bearer aaaa.bbbb.cccc" http://127.0.0.1:8765/v1/workspaces
+
           $MIRAGE workspace delete smoke
           $MIRAGE daemon stop || true
+          sleep 2
+
+          echo
+          echo "===== auth: mode=token (operator PAT) ====="
+          MIRAGE_AUTH_MODE=token MIRAGE_AUTH_TOKEN=operator-pat-xyz \
+            .venv/bin/python -m uvicorn mirage.cli.server_factory:app \
+            --host 127.0.0.1 --port 8765 --log-level warning >/tmp/auth-token.log 2>&1 &
+          TOKEN_PID=$!
+          sleep 2
+          curl_check "correct PAT => 200" 200 \
+            -H "Authorization: Bearer operator-pat-xyz" http://127.0.0.1:8765/v1/workspaces
+          curl_check "wrong PAT => 401" 401 \
+            -H "Authorization: Bearer something-else" http://127.0.0.1:8765/v1/workspaces
+          curl_check "no header => 401" 401 http://127.0.0.1:8765/v1/workspaces
+          curl_check "/v1/health bypass => 200" 200 http://127.0.0.1:8765/v1/health
+          kill $TOKEN_PID 2>/dev/null || true
+          sleep 2
+
+          echo
+          echo "===== auth: mode=jwt (RS256, external issuer) ====="
+          mkdir -p /tmp/jwt-test
+          .venv/bin/python - <<'PYEOF'
+          import time, jwt
+          from pathlib import Path
+          from cryptography.hazmat.primitives import serialization
+          from cryptography.hazmat.primitives.asymmetric import rsa
+          d = Path("/tmp/jwt-test")
+          priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+          priv_pem = priv.private_bytes(
+              encoding=serialization.Encoding.PEM,
+              format=serialization.PrivateFormat.PKCS8,
+              encryption_algorithm=serialization.NoEncryption())
+          (d / "pub.pem").write_bytes(priv.public_key().public_bytes(
+              encoding=serialization.Encoding.PEM,
+              format=serialization.PublicFormat.SubjectPublicKeyInfo))
+          now = int(time.time())
+          (d / "good.jwt").write_text(jwt.encode(
+              {"sub": "agent", "exp": now + 60}, priv_pem, algorithm="RS256"))
+          (d / "expired.jwt").write_text(jwt.encode(
+              {"sub": "agent", "exp": now - 60}, priv_pem, algorithm="RS256"))
+          PYEOF
+
+          MIRAGE_AUTH_MODE=jwt \
+            MIRAGE_JWT_PUBKEY_FILE=/tmp/jwt-test/pub.pem \
+            MIRAGE_JWT_ALG=RS256 \
+            .venv/bin/python -m uvicorn mirage.cli.server_factory:app \
+            --host 127.0.0.1 --port 8765 --log-level warning >/tmp/auth-jwt.log 2>&1 &
+          JWT_PID=$!
+          sleep 2
+          GOOD=$(cat /tmp/jwt-test/good.jwt)
+          EXPIRED=$(cat /tmp/jwt-test/expired.jwt)
+          curl_check "valid signed JWT => 200" 200 \
+            -H "Authorization: Bearer $GOOD" http://127.0.0.1:8765/v1/workspaces
+          curl_check "expired JWT => 401" 401 \
+            -H "Authorization: Bearer $EXPIRED" http://127.0.0.1:8765/v1/workspaces
+          curl_check "opaque (not 3-part) => 401" 401 \
+            -H "Authorization: Bearer opaque-not-a-jwt" http://127.0.0.1:8765/v1/workspaces
+          curl_check "/v1/health bypass => 200" 200 http://127.0.0.1:8765/v1/health
+          kill $JWT_PID 2>/dev/null || true
+          sleep 2
 
           if [ "$fail" != "0" ]; then
             echo
-            echo "One or more exit-code propagation checks failed."
+            echo "One or more checks failed."
             exit 1
           fi
 
@@ -234,8 +325,55 @@ jobs:
             fail=1
           fi
 
+          curl_check() {
+            local desc="$1"
+            local expected="$2"
+            shift 2
+            local got
+            got=$(curl -s -o /dev/null -w "%{http_code}" "$@")
+            echo "  $desc: got $got (expected $expected)"
+            if [ "$got" != "$expected" ]; then
+              echo "  FAIL"
+              fail=1
+            fi
+          }
+
+          echo
+          echo "===== auth: mode=local (TS daemon spawned by CLI, token auto-minted) ====="
+          TOKEN=$(cat "$HOME/.mirage/auth_token")
+          MODE=$(stat -c "%a" "$HOME/.mirage/auth_token" 2>/dev/null || stat -f "%Lp" "$HOME/.mirage/auth_token")
+          echo "token file mode: $MODE (expected 600)"
+          if [ "$MODE" != "600" ]; then
+            echo "FAIL: token file must be 0o600"
+            fail=1
+          fi
+          curl_check "correct bearer => 200" 200 \
+            -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8765/v1/workspaces
+          curl_check "wrong bearer => 401" 401 \
+            -H "Authorization: Bearer wrong-token" http://127.0.0.1:8765/v1/workspaces
+          curl_check "no header => 401" 401 http://127.0.0.1:8765/v1/workspaces
+          curl_check "/v1/health bypass => 200" 200 http://127.0.0.1:8765/v1/health
+          curl_check "JWT-shaped value treated as opaque => 401" 401 \
+            -H "Authorization: Bearer aaaa.bbbb.cccc" http://127.0.0.1:8765/v1/workspaces
+
           $MIRAGE workspace delete smoke
           $MIRAGE daemon stop || true
+          sleep 2
+
+          echo
+          echo "===== auth: mode=token (TS daemon, operator PAT) ====="
+          MIRAGE_AUTH_MODE=token MIRAGE_AUTH_TOKEN=operator-pat-xyz \
+            node packages/server/dist/bin/daemon.js >/tmp/auth-token-ts.log 2>&1 &
+          TOKEN_PID=$!
+          sleep 2
+          curl_check "correct PAT => 200" 200 \
+            -H "Authorization: Bearer operator-pat-xyz" http://127.0.0.1:8765/v1/workspaces
+          curl_check "wrong PAT => 401" 401 \
+            -H "Authorization: Bearer something-else" http://127.0.0.1:8765/v1/workspaces
+          curl_check "no header => 401" 401 http://127.0.0.1:8765/v1/workspaces
+          curl_check "/v1/health bypass => 200" 200 http://127.0.0.1:8765/v1/health
+          kill $TOKEN_PID 2>/dev/null || true
+          sleep 2
 
           if [ "$fail" != "0" ]; then
             echo
