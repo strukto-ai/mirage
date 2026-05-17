@@ -97,7 +97,7 @@ export function formatGrepResults(
     const chVfs = channelDirname({ id: chId, ...(chName !== '' ? { name: chName } : {}) })
     const author = (msg.author as { username?: string } | undefined)?.username ?? '?'
     const content = asString(msg.content).replace(/\n/g, ' ')
-    lines.push(`${prefix}/${guildVfs}/channels/${chVfs}/${ts}.jsonl:[${author}] ${content}`)
+    lines.push(`${prefix}/${guildVfs}/channels/${chVfs}/${ts}/chat.jsonl:[${author}] ${content}`)
   }
   return lines
 }

@@ -39,5 +39,5 @@ def format_grep_results(
         author = msg.get("author", {}).get("username", "?")
         content = msg.get("content", "").replace("\n", " ")
         lines.append(f"{prefix}/{guild_dirname}/channels/{ch_name}/"
-                     f"{ts}.jsonl:[{author}] {content}")
+                     f"{ts}/chat.jsonl:[{author}] {content}")
     return lines

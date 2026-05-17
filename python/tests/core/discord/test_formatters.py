@@ -12,10 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.core.discord.entry import channel_dirname, guild_dirname
 from mirage.core.discord.formatters import format_grep_results
 
 
-def test_format_grep_results_uses_channel_name_when_available():
+def test_format_grep_results_uses_vfs_channel_dirname():
     msgs = [{
         "timestamp": "2024-04-10T12:34:56.000000+00:00",
         "channel_id": "C1",
@@ -24,12 +25,16 @@ def test_format_grep_results_uses_channel_name_when_available():
         },
         "content": "hello",
     }]
-    lines = format_grep_results(msgs,
-                                prefix="/discord",
-                                guild_dirname="MyGuild",
-                                channel_names={"C1": "general"})
+    guild = {"id": "G1", "name": "MyGuild"}
+    chan = {"id": "C1", "name": "general"}
+    lines = format_grep_results(
+        msgs,
+        prefix="/discord",
+        guild_dirname=guild_dirname(guild),
+        channel_names={chan["id"]: channel_dirname(chan)})
     assert lines == [
-        "/discord/MyGuild/channels/general/2024-04-10.jsonl:[alice] hello"
+        "/discord/MyGuild__G1/channels/general__C1/"
+        "2024-04-10/chat.jsonl:[alice] hello"
     ]
 
 
@@ -42,8 +47,28 @@ def test_format_grep_results_falls_back_to_channel_id():
         },
         "content": "x",
     }]
-    lines = format_grep_results(msgs, "/discord", "G", channel_names={})
-    assert lines == ["/discord/G/channels/C2/2024-04-10.jsonl:[bob] x"]
+    lines = format_grep_results(msgs, "/discord", "G__G1", channel_names={})
+    assert lines == [
+        "/discord/G__G1/channels/C2/2024-04-10/chat.jsonl:[bob] x"
+    ]
+
+
+def test_format_grep_results_path_matches_vfs_layout():
+    msgs = [{
+        "timestamp": "2024-04-10T00:00:00+00:00",
+        "channel_id": "C1",
+        "author": {
+            "username": "alice"
+        },
+        "content": "hi",
+    }]
+    guild = {"id": "G1", "name": "S"}
+    chan = {"id": "C1", "name": "general"}
+    line = format_grep_results(msgs, "/discord", guild_dirname(guild),
+                               {chan["id"]: channel_dirname(chan)})[0]
+    expected_path = (f"/discord/{guild_dirname(guild)}/channels/"
+                     f"{channel_dirname(chan)}/2024-04-10/chat.jsonl")
+    assert line.startswith(expected_path + ":")
 
 
 def test_format_grep_results_replaces_newlines():
@@ -55,5 +80,7 @@ def test_format_grep_results_replaces_newlines():
         },
         "content": "line1\nline2",
     }]
-    lines = format_grep_results(msgs, "/discord", "G", channel_names={})
-    assert lines == ["/discord/G/channels/C/2024-01-02.jsonl:[u] line1 line2"]
+    lines = format_grep_results(msgs, "/discord", "G__G1", channel_names={})
+    assert lines == [
+        "/discord/G__G1/channels/C/2024-01-02/chat.jsonl:[u] line1 line2"
+    ]

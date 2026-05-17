@@ -22,6 +22,7 @@ from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.discord.channels import list_channels
+from mirage.core.discord.entry import channel_dirname
 from mirage.core.discord.formatters import format_grep_results
 from mirage.core.discord.glob import resolve_glob
 from mirage.core.discord.read import read as discord_read
@@ -114,10 +115,7 @@ async def rg(
                 file_prefix = paths[0].prefix or ""
                 resource_first = scope.resource_path.split("/", 1)[0]
                 channels = await list_channels(accessor.config, scope.guild_id)
-                channel_map = {
-                    c["id"]: c.get("name", c["id"])
-                    for c in channels
-                }
+                channel_map = {c["id"]: channel_dirname(c) for c in channels}
                 lines = format_grep_results(msgs, file_prefix, resource_first,
                                             channel_map)
                 if not lines:

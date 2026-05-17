@@ -62,6 +62,7 @@ async def test_discord_grep_with_many_concrete_paths_uses_native_search():
         "author": {
             "username": "alice"
         },
+        "timestamp": "2026-01-15T12:34:56.000000+00:00",
         "id": "1"
     }]
     fake_channels = [{"id": "ch_456", "name": "general"}]
@@ -79,7 +80,8 @@ async def test_discord_grep_with_many_concrete_paths_uses_native_search():
     assert fake_search.await_count == 1
     assert io.exit_code == 0
     assert b"hello" in out
-    assert b"/discord/myguild/channels/general/" in out
+    assert (b"/discord/myguild/channels/general__ch_456/"
+            b"2026-01-15/chat.jsonl:") in out
 
 
 @pytest.mark.asyncio
@@ -142,6 +144,7 @@ async def test_discord_rg_with_many_concrete_paths_uses_native_search():
         "author": {
             "username": "bob"
         },
+        "timestamp": "2026-01-15T08:00:00.000000+00:00",
         "id": "2"
     }]
     fake_channels = [{"id": "ch_456", "name": "general"}]
@@ -159,4 +162,5 @@ async def test_discord_rg_with_many_concrete_paths_uses_native_search():
     assert fake_search.await_count == 1
     assert io.exit_code == 0
     assert b"hello" in out
-    assert b"/discord/myguild/channels/general/" in out
+    assert (b"/discord/myguild/channels/general__ch_456/"
+            b"2026-01-15/chat.jsonl:") in out
