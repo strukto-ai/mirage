@@ -1,0 +1,101 @@
+---
+title: Daemon Auth
+description: How the Mirage daemon authenticates HTTP clients in local, token, and JWT modes.
+icon: shield-halved
+---
+
+## What It Does
+
+The daemon serves a local HTTP API on `127.0.0.1:8765`. Every request except `/v1/health` must present a bearer token. Which token is accepted is decided by `MIRAGE_AUTH_MODE`:
+
+| Mode | When to use | What the daemon accepts |
+| --- | --- | --- |
+| `local` (default) | One user, one machine. Zero config. | A random token the CLI mints into `~/.mirage/auth_token` (mode 0o600). |
+| `token` | Shared daemon, operator-issued PAT. | The exact string in `MIRAGE_AUTH_TOKEN`. |
+| `jwt` | Multi-tenant, external issuer (Clerk, Auth0, your own). | Any RS256-signed JWT that verifies against `MIRAGE_JWT_PUBKEY` / `_FILE`. |
+
+`/v1/health` is always reachable without a token so load balancers and process supervisors can probe it.
+
+## Local Mode (Default)
+
+You usually do nothing. The first time the CLI spawns the daemon it writes a random 32-byte token to `~/.mirage/auth_token` at mode 0o600 and uses it on every subsequent request.
+
+```bash
+mirage workspace create workspace.yaml --id demo
+cat ~/.mirage/auth_token   # the token the daemon expects
+```
+
+Probe it directly:
+
+```bash
+TOKEN=$(cat ~/.mirage/auth_token)
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8765/v1/workspaces   # 200
+curl                                          http://127.0.0.1:8765/v1/workspaces   # 401
+curl                                          http://127.0.0.1:8765/v1/health       # 200
+```
+
+## Token Mode (Operator PAT)
+
+For a daemon you run yourself (Docker, systemd, a shared dev box), pin one token across all clients.
+
+```bash
+export MIRAGE_AUTH_MODE=token
+export MIRAGE_AUTH_TOKEN=<your-pat>
+
+# Python
+python -m uvicorn mirage.cli.server_factory:app --host 127.0.0.1 --port 8765
+
+# TypeScript
+node typescript/packages/cli/dist/bin/daemon.js
+```
+
+Clients pass the same value:
+
+```bash
+curl -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN" http://127.0.0.1:8765/v1/workspaces
+```
+
+Both server and CLI use a constant-time compare, so timing leakage is not a concern.
+
+## JWT Mode (External Issuer)
+
+Hand the daemon a public key and it will accept any non-expired JWT signed by the matching private key. Verification is networkless: no JWKS fetch, no callback to the issuer.
+
+```bash
+export MIRAGE_AUTH_MODE=jwt
+export MIRAGE_JWT_PUBKEY_FILE=/etc/mirage/issuer-pub.pem
+export MIRAGE_JWT_ALG=RS256
+
+# Optional hardening
+export MIRAGE_JWT_ISSUER=https://your-issuer.example
+export MIRAGE_JWT_AUDIENCE=mirage-daemon
+export MIRAGE_JWT_AUTHORIZED_PARTIES=https://app.example,https://cli.example
+export MIRAGE_JWT_CLOCK_SKEW_SECONDS=5
+```
+
+Hard rules the daemon enforces:
+
+- `alg` is pinned to `MIRAGE_JWT_ALG`. A token signed with a different algorithm is rejected, which defeats alg-confusion attacks.
+- `alg=none` is always rejected.
+- `exp` is mandatory.
+- `typ`, if present, must be `JWT`.
+- Opaque (non-three-segment) values in `Authorization: Bearer` are rejected before key work, so probing is cheap.
+
+## Environment Reference
+
+| Variable | Modes | Purpose |
+| --- | --- | --- |
+| `MIRAGE_AUTH_MODE` | all | `local` (default), `token`, or `jwt`. |
+| `MIRAGE_AUTH_TOKEN` | local, token | Local-mode override; required in `token` mode. |
+| `MIRAGE_JWT_PUBKEY` | jwt | PEM string of the public key. |
+| `MIRAGE_JWT_PUBKEY_FILE` | jwt | Path to a PEM file (alternative to inline). |
+| `MIRAGE_JWT_ALG` | jwt | Signing algorithm to pin, e.g. `RS256`. |
+| `MIRAGE_JWT_ISSUER` | jwt | Required `iss` claim. |
+| `MIRAGE_JWT_AUDIENCE` | jwt | Required `aud` claim. |
+| `MIRAGE_JWT_AUTHORIZED_PARTIES` | jwt | Comma-separated allow-list for `azp`. |
+| `MIRAGE_JWT_CLOCK_SKEW_SECONDS` | jwt | Default `5`. |
+
+## Where to Go Next
+
+- [CLI](/home/cli) walks the daily Workspace flow that uses local-mode automatically.
+- [Architecture](/home/architecture) shows where the auth middleware sits in the request path.

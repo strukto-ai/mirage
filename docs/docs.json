@@ -81,7 +81,8 @@
               "home/architecture",
               "home/shell",
               "home/resource-matrix",
-              "home/snapshot"
+              "home/snapshot",
+              "home/auth"
             ]
           },
           {
