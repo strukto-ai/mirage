@@ -109,6 +109,7 @@ class ResourceName(str, Enum):
     REDIS = "redis"
     GITHUB_CI = "github_ci"
     GCS = "gcs"
+    DATABRICKS_VOLUME = "databricks_volume"
     EMAIL = "email"
     PAPERCLIP = "paperclip"
 

@@ -47,6 +47,9 @@ REGISTRY: dict[str, ResourceEntry] = {
     "gcs":
     ResourceEntry("mirage.resource.gcs:GCSResource",
                   "mirage.resource.gcs:GCSConfig"),
+    "databricks_volume":
+    ResourceEntry("mirage.resource.databricks_volume:DatabricksVolumeResource",
+                  "mirage.resource.databricks_volume:DatabricksVolumeConfig"),
     "github":
     ResourceEntry("mirage.resource.github:GitHubResource",
                   "mirage.resource.github:GitHubConfig"),

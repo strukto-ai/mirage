@@ -25,6 +25,7 @@ EXPECTED_RESOURCES = {
     "oci",
     "supabase",
     "gcs",
+    "databricks_volume",
     "github",
     "github_ci",
     "linear",

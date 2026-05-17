@@ -1,0 +1,78 @@
+---
+title: Databricks Volume
+icon: database
+---
+
+The Databricks Volume resource mounts a Unity Catalog volume into a Mirage
+workspace. It uses the Databricks SDK `WorkspaceClient.files` API and maps
+workspace paths to `/Volumes/<catalog>/<schema>/<volume>/...`.
+
+Install the optional dependency:
+
+```bash
+pip install "mirage-ai[databricks]"
+```
+
+## Config
+
+```python
+from mirage import MountMode, Workspace
+from mirage.resource.databricks_volume import (
+    DatabricksVolumeConfig,
+    DatabricksVolumeResource,
+)
+
+resource = DatabricksVolumeResource(
+    DatabricksVolumeConfig(
+        catalog="main",
+        schema="default",
+        volume="agent_files",
+    )
+)
+
+ws = Workspace({"/volume": resource}, mode=MountMode.READ)
+data = await ws.ops.read("/volume/reports/latest.md")
+```
+
+By default, `WorkspaceClient()` uses Databricks SDK unified authentication.
+This works in Databricks Apps and other environments where Databricks
+authentication is already configured.
+
+For explicit personal access token auth:
+
+```python
+import os
+
+resource = DatabricksVolumeResource(
+    DatabricksVolumeConfig(
+        catalog="main",
+        schema="default",
+        volume="agent_files",
+        host=os.environ["DATABRICKS_HOST"],
+        token=os.environ["DATABRICKS_TOKEN"],
+    )
+)
+```
+
+## Filesystem Layout
+
+If the Databricks volume path contains:
+
+```text
+/Volumes/main/default/agent_files/reports/latest.md
+/Volumes/main/default/agent_files/uploads/data.csv
+```
+
+Then mounting at `/volume` exposes:
+
+```text
+/volume/
+  reports/
+    latest.md
+  uploads/
+    data.csv
+```
+
+The resource supports Mirage workspace ops for reading, writing, listing,
+metadata, directory creation, file deletion, directory deletion, create,
+append, truncate, and file rename.
