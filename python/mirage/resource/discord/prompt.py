@@ -14,15 +14,26 @@
 
 PROMPT = """\
 {prefix}
-  <guild-name>/
+  <guild-name>__<guild-id>/
     channels/
-      <channel-name>/
-        <yyyy-mm-dd>.jsonl      # messages for that date
+      <channel-name>__<channel-id>/
+        <yyyy-mm-dd>/
+          chat.jsonl              # messages for that date
+          files/                  # attachments shared that day (may be empty)
+            <name>__<att-id>.<ext>  # cat to download bytes from Discord CDN
     members/
-      <username>.json            # member profile
-  <guild-name> and <channel-name> are sanitized — don't construct them.
-  Always ls directories first to discover exact names.
-  Messages are JSONL — use jq to extract .content, .author.username."""
+      <username>__<user-id>.json  # member profile
+  Naming: guild, channel, member, attachment names are `<sanitized-name>__<id>`.
+  Names are sanitized, don't construct them; always ls the parent dir
+  first to discover exact entry names (they include IDs).
+  Messages are JSONL; use jq to extract fields like .content, .author.username,
+  .attachments.
+  grep / rg at channel or guild scope uses Discord's `/messages/search` API
+  and ONLY searches message text. It does NOT index attachment content
+  (unlike Slack's `search.files`). To search inside text attachments
+  (.txt, .md, .log), target the date dir, files/ dir, or specific blob path
+  so grep falls back to per-file scan via CDN download. Binary attachments
+  (JPG, PDF) will produce noise."""
 
 WRITE_PROMPT = """\
   Write commands:
