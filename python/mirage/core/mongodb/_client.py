@@ -69,7 +69,8 @@ async def entity_exists(
     if not await database_exists(client, config, database, accessor):
         return False
     if accessor is not None:
-        key = f"list_collections:{database}:{kind.value if kind is not None else ''}"
+        suffix = kind.value if kind is not None else ""
+        key = f"list_collections:{database}:{suffix}"
         names = await accessor.cached_list(
             key,
             lambda: list_collections(client, database, kind),
