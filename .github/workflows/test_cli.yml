@@ -375,8 +375,45 @@ jobs:
           kill $TOKEN_PID 2>/dev/null || true
           sleep 2
 
+          echo
+          echo "===== auth: mode=jwt (TS daemon, RS256, external issuer) ====="
+          mkdir -p /tmp/jwt-test-ts
+          cat > packages/server/mint-jwt.mjs <<'NODEEOF'
+          import { writeFileSync } from 'node:fs'
+          import { generateKeyPair, SignJWT, exportSPKI } from 'jose'
+          const { publicKey, privateKey } = await generateKeyPair('RS256', { modulusLength: 2048 })
+          writeFileSync('/tmp/jwt-test-ts/pub.pem', await exportSPKI(publicKey))
+          const now = Math.floor(Date.now() / 1000)
+          const sign = (exp) => new SignJWT({ sub: 'agent' })
+            .setProtectedHeader({ alg: 'RS256' })
+            .setExpirationTime(exp)
+            .sign(privateKey)
+          writeFileSync('/tmp/jwt-test-ts/good.jwt', await sign(now + 60))
+          writeFileSync('/tmp/jwt-test-ts/expired.jwt', await sign(now - 60))
+          NODEEOF
+          node packages/server/mint-jwt.mjs
+          rm packages/server/mint-jwt.mjs
+
+          MIRAGE_AUTH_MODE=jwt \
+            MIRAGE_JWT_PUBKEY_FILE=/tmp/jwt-test-ts/pub.pem \
+            MIRAGE_JWT_ALG=RS256 \
+            node packages/server/dist/bin/daemon.js >/tmp/auth-jwt-ts.log 2>&1 &
+          JWT_PID=$!
+          sleep 2
+          GOOD=$(cat /tmp/jwt-test-ts/good.jwt)
+          EXPIRED=$(cat /tmp/jwt-test-ts/expired.jwt)
+          curl_check "valid signed JWT => 200" 200 \
+            -H "Authorization: Bearer $GOOD" http://127.0.0.1:8765/v1/workspaces
+          curl_check "expired JWT => 401" 401 \
+            -H "Authorization: Bearer $EXPIRED" http://127.0.0.1:8765/v1/workspaces
+          curl_check "opaque (not 3-part) => 401" 401 \
+            -H "Authorization: Bearer opaque-not-a-jwt" http://127.0.0.1:8765/v1/workspaces
+          curl_check "/v1/health bypass => 200" 200 http://127.0.0.1:8765/v1/health
+          kill $JWT_PID 2>/dev/null || true
+          sleep 2
+
           if [ "$fail" != "0" ]; then
             echo
-            echo "One or more exit-code propagation checks failed."
+            echo "One or more checks failed."
             exit 1
           fi
