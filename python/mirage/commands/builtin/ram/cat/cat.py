@@ -77,6 +77,10 @@ async def cat(
         io = IOResult(reads={p.strip_prefix: cachable
                              for p in paths},
                       cache=[p.strip_prefix for p in paths])
-        return generic_cat(cachable, number_lines=n), io
+        if n:
+            return generic_cat(cachable, number_lines=True), io
+        return cachable, io
     source = _resolve_source(stdin, "cat: missing operand")
-    return generic_cat(source, number_lines=n), IOResult()
+    if n:
+        return generic_cat(source, number_lines=True), IOResult()
+    return source, IOResult()
