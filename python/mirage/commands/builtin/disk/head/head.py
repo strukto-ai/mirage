@@ -16,39 +16,14 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.head import head as generic_head
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.disk.glob import resolve_glob
 from mirage.core.disk.stream import read_stream
-from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-async def _head_stream(
-    source: AsyncIterator[bytes],
-    lines: int = 10,
-    bytes_mode: int | None = None,
-) -> AsyncIterator[bytes]:
-    if bytes_mode is not None:
-        remaining = bytes_mode
-        async for chunk in source:
-            if len(chunk) <= remaining:
-                yield chunk
-                remaining -= len(chunk)
-                if remaining <= 0:
-                    return
-            else:
-                yield chunk[:remaining]
-                return
-        return
-    count = 0
-    async for line in AsyncLineIterator(source):
-        yield line + b"\n"
-        count += 1
-        if count >= lines:
-            return
 
 
 @command("head", resource="disk", spec=SPECS["head"])
@@ -62,11 +37,11 @@ async def head(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    lines = int(n) if n is not None else 10
-    bytes_mode = int(c) if c is not None else None
+    n_int = int(n) if n is not None else None
+    c_int = int(c) if c is not None else None
     if paths and accessor.root is not None:
         paths = await resolve_glob(accessor, paths, index)
         source = read_stream(accessor, paths[0])
-        return _head_stream(source, lines, bytes_mode), IOResult()
+        return generic_head(source, n=n_int, c=c_int), IOResult()
     source = _resolve_source(stdin, "head: missing operand")
-    return _head_stream(source, lines, bytes_mode), IOResult()
+    return generic_head(source, n=n_int, c=c_int), IOResult()
