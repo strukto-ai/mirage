@@ -17,25 +17,17 @@ from collections.abc import AsyncIterator
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.aggregators import concat_aggregate
+from mirage.commands.builtin.generic.cat import cat as generic_cat
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.ram.glob import resolve_glob
 from mirage.core.ram.stat import stat as _stat_async
 from mirage.core.ram.stream import stream as _stream_core
-from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision import ProvisionResult
 from mirage.types import PathSpec
-
-
-async def _number_lines_stream(
-        source: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
-    num = 1
-    async for line in AsyncLineIterator(source):
-        yield f"     {num}\t".encode() + line + b"\n"
-        num += 1
 
 
 async def cat_provision(
@@ -85,10 +77,6 @@ async def cat(
         io = IOResult(reads={p.strip_prefix: cachable
                              for p in paths},
                       cache=[p.strip_prefix for p in paths])
-        if n:
-            return _number_lines_stream(cachable), io
-        return cachable, io
+        return generic_cat(cachable, number_lines=n), io
     source = _resolve_source(stdin, "cat: missing operand")
-    if n:
-        return _number_lines_stream(source), IOResult()
-    return source, IOResult()
+    return generic_cat(source, number_lines=n), IOResult()
