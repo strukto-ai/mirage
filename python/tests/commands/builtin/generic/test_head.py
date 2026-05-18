@@ -104,3 +104,35 @@ async def test_head_no_trailing_newline_in_last_line():
 async def test_head_n_larger_than_available():
     out = await _drain(head(b"a\nb\n", n=10))
     assert out == b"a\nb\n"
+
+
+@pytest.mark.asyncio
+async def test_head_n_one():
+    out = await _drain(head(b"line1\nline2\nline3\n", n=1))
+    assert out == b"line1\n"
+
+
+@pytest.mark.asyncio
+async def test_head_empty_input():
+    out = await _drain(head(b""))
+    assert out == b""
+
+
+@pytest.mark.asyncio
+async def test_head_empty_input_with_c():
+    out = await _drain(head(b"", c=10))
+    assert out == b""
+
+
+@pytest.mark.asyncio
+async def test_head_single_line_no_newline_default_n():
+    """head on a single line without trailing newline returns it as-is."""
+    out = await _drain(head(b"hello"))
+    assert out == b"hello"
+
+
+@pytest.mark.asyncio
+async def test_head_c_negative_emits_nothing():
+    """POSIX head doesn't define -c with negative; we treat as empty."""
+    out = await _drain(head(b"hello", c=-3))
+    assert out == b""

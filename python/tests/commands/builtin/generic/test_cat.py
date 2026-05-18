@@ -115,6 +115,28 @@ async def test_cat_squeeze_blank_preserves_first_blank():
 
 
 @pytest.mark.asyncio
+async def test_cat_empty_input_passthrough():
+    out = await _drain(cat(b""))
+    assert out == b""
+
+
+@pytest.mark.asyncio
+async def test_cat_binary_passthrough_full_byte_range():
+    """Full 0..255 byte range must pass through unchanged (no flags)."""
+    data = bytes(range(256))
+    out = await _drain(cat(data))
+    assert out == data
+
+
+@pytest.mark.asyncio
+async def test_cat_binary_with_show_ends_marks_only_newlines():
+    """show_ends should only mark 0x0A bytes, not other binary bytes."""
+    data = b"\x00\x01\n\x02\x03\n"
+    out = await _drain(cat(data, show_ends=True))
+    assert out == b"\x00\x01$\n\x02\x03$\n"
+
+
+@pytest.mark.asyncio
 async def test_cat_number_lines_chunked_one_byte_at_a_time():
     """Worst-case chunking: every byte its own chunk. Result must match
     unbuffered input exactly."""
