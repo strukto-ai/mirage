@@ -35,5 +35,4 @@ async def cat(
     if buf:
         line_no += 1
         prefix = f"{line_no:6d}\t".encode() if number_lines else b""
-        suffix = b"$" if show_ends else b""
-        yield prefix + buf + suffix
+        yield prefix + buf
