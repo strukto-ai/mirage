@@ -47,7 +47,7 @@ def _find_sync(
 ) -> list[str]:
     p = _resolve(root, path)
     base = "/" + path.strip("/")
-    base_depth = base.count("/")
+    base_depth = 0 if base == "/" else base.count("/")
     results: list[str] = []
 
     for dirpath, dirnames, filenames in os.walk(p):

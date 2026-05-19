@@ -64,8 +64,9 @@ def _extract_or_names(
         names.append(name)
     i = 0
     while i < len(texts):
-        if texts[i] == "-or" and i + 2 < len(texts) and texts[i +
-                                                              1] == "-name":
+        if texts[i] in ("-or",
+                        "-o") and i + 2 < len(texts) and texts[i +
+                                                               1] == "-name":
             names.append(texts[i + 2])
             i += 3
         else:

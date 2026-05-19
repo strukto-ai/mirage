@@ -48,14 +48,14 @@ class TestIdentical:
 
 class TestDifferent:
 
-    def test_different_files_has_plus_minus(self, backend):
+    def test_different_files_normal_format(self, backend):
         _write(backend, "/tmp/a.txt", b"hello\n")
         _write(backend, "/tmp/b.txt", b"world\n")
         result = diff(backend, "/tmp/a.txt", "/tmp/b.txt")
         assert len(result) > 0
         texts = "".join(result)
-        assert "-hello" in texts
-        assert "+world" in texts
+        assert "< hello" in texts
+        assert "> world" in texts
 
 
 class TestIgnoreCase:

@@ -81,7 +81,7 @@ async def test_find_maxdepth(store):
                          type="f")
     assert "/readme.md" in results
     assert "/big.bin" in results
-    assert "/src/main.py" in results
+    assert "/src/main.py" not in results
     assert "/src/lib/helper.py" not in results
 
 
@@ -92,7 +92,7 @@ async def test_find_mindepth(store):
                          mindepth=2,
                          type="f")
     assert "/readme.md" not in results
-    assert "/src/main.py" not in results
+    assert "/src/main.py" in results
     assert "/src/lib/helper.py" in results
 
 

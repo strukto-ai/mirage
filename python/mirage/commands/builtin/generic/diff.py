@@ -2,7 +2,7 @@ import difflib
 import re
 from collections.abc import Awaitable, Callable
 
-from mirage.commands.builtin.diff_helper import _ed_script
+from mirage.commands.builtin.diff_helper import _ed_script, _normal_diff
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -16,6 +16,7 @@ async def _diff_pair(
     w: bool,
     b: bool,
     e: bool,
+    u: bool,
     q: bool,
 ) -> bytes:
     name1 = path1.original if isinstance(path1, PathSpec) else path1
@@ -39,12 +40,14 @@ async def _diff_pair(
     b_lines = text_b.splitlines(keepends=True)
     if e:
         result = _ed_script(a_lines, b_lines)
-    else:
+    elif u:
         result = list(
             difflib.unified_diff(a_lines,
                                  b_lines,
                                  fromfile=name1,
                                  tofile=name2))
+    else:
+        result = _normal_diff(a_lines, b_lines)
     return "".join(result).encode()
 
 
@@ -58,6 +61,7 @@ async def _diff_recursive(
     w: bool,
     b: bool,
     e: bool,
+    u: bool,
     q: bool,
 ) -> bytes:
     entries_a = sorted(await readdir_fn(accessor, paths[0], index))
@@ -75,7 +79,7 @@ async def _diff_recursive(
                       prefix=paths[1].prefix)
         if name in entries_a and name in entries_b:
             parts.append(await _diff_pair(accessor, p1, p2, read_bytes, i, w,
-                                          b, e, q))
+                                          b, e, u, q))
     return b"".join(parts)
 
 
@@ -98,10 +102,10 @@ async def diff(
         raise ValueError("diff: requires two paths")
     if r:
         output = await _diff_recursive(accessor, paths, read_bytes, readdir_fn,
-                                       index, i, w, b, e, q)
+                                       index, i, w, b, e, u, q)
     else:
         output = await _diff_pair(accessor, paths[0], paths[1], read_bytes, i,
-                                  w, b, e, q)
+                                  w, b, e, u, q)
     exit_code = 1 if output else 0
     return output, IOResult(exit_code=exit_code,
                             cache=[paths[0].original, paths[1].original])

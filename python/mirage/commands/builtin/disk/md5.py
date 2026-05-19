@@ -32,7 +32,11 @@ async def md5(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    if accessor.root is None or not paths:
-        raise ValueError("md5: missing operand")
-    paths = await resolve_glob(accessor, paths, index)
-    return await generic_md5(paths, read_bytes=read_bytes, accessor=accessor)
+    if paths and accessor.root is not None:
+        paths = await resolve_glob(accessor, paths, index)
+    else:
+        paths = []
+    return await generic_md5(paths,
+                             read_bytes=read_bytes,
+                             accessor=accessor,
+                             stdin=stdin)

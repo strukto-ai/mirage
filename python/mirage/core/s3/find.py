@@ -70,9 +70,10 @@ async def find(
                 if key == pfx:
                     continue
                 relative = key[len(pfx):]
-                if maxdepth is not None and relative.count("/") > maxdepth:
+                depth = relative.count("/") + 1
+                if maxdepth is not None and depth > maxdepth:
                     continue
-                if mindepth is not None and relative.count("/") < mindepth:
+                if mindepth is not None and depth < mindepth:
                     continue
                 entry_name = key.rsplit("/", 1)[-1]
                 if or_names:

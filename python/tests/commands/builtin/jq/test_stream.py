@@ -100,8 +100,9 @@ class TestJqJsonl:
             mode=MountMode.WRITE,
         )
         stdout, _ = run_raw(ws, "jq length /disk/data.jsonl")
-        result = json.loads(collect(stdout))
-        assert result == 3
+        raw = collect(stdout).decode().strip()
+        results = [json.loads(line) for line in raw.splitlines() if line]
+        assert results == [2, 2, 2]
 
 
 class TestJqStreamableDetection:

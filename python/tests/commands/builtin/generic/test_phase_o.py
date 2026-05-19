@@ -134,7 +134,7 @@ async def test_cmp_differing_reports_first_byte():
         [_spec("/a.txt"), _spec("/b.txt")], read_bytes=rb)
     decoded = output.decode()
     assert "differ" in decoded
-    assert "byte 2" in decoded
+    assert "char 2" in decoded
     assert io.exit_code == 1
 
 

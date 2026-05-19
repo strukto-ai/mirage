@@ -1,4 +1,5 @@
 import binascii
+import re
 from collections.abc import AsyncIterator, Callable
 
 from mirage.commands.builtin.utils.stream import _resolve_source
@@ -52,13 +53,32 @@ async def _xxd_plain_stream(source: AsyncIterator[bytes],
     yield b"\n"
 
 
+def _reverse_line(line: str) -> bytes:
+    if ":" in line:
+        line = line.split(":", 1)[1]
+    parts = re.split(r"  +", line, maxsplit=1)
+    hex_part = parts[0].replace(" ", "")
+    if not hex_part:
+        return b""
+    try:
+        return binascii.unhexlify(hex_part)
+    except binascii.Error:
+        return b""
+
+
 async def _xxd_reverse_stream(
         source: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
     buf = b""
     async for chunk in source:
         buf += chunk
-    text = buf.decode(errors="replace").replace("\n", "").replace(" ", "")
-    yield binascii.unhexlify(text)
+    text = buf.decode(errors="replace")
+    if ":" in text:
+        for line in text.splitlines():
+            if line:
+                yield _reverse_line(line)
+    else:
+        cleaned = re.sub(r"\s+", "", text)
+        yield binascii.unhexlify(cleaned) if cleaned else b""
 
 
 async def _apply_limits(source: AsyncIterator[bytes], skip: int,

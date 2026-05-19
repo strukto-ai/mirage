@@ -40,6 +40,11 @@ async def jq(
         outputs: list[bytes] = []
         for p in paths:
             data = parse_json_path(await read_bytes(accessor, p), p.original)
+            if is_jsonl_path(p.original) and isinstance(data, list) and not s:
+                for item in data:
+                    result = jq_eval(item, expression.strip())
+                    outputs.append(format_jq_output(result, r, c, spread))
+                continue
             if s and not isinstance(data, list):
                 data = [data]
             result = jq_eval(data, expression.strip())

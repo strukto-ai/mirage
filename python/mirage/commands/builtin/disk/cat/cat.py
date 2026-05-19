@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.aggregators import concat_aggregate
 from mirage.commands.builtin.generic.cat import cat as generic_cat
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
@@ -28,7 +29,14 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("cat", resource="disk", spec=SPECS["cat"])
+async def _chain_streams(accessor: DiskAccessor,
+                         paths: list[PathSpec]) -> AsyncIterator[bytes]:
+    for p in paths:
+        async for chunk in read_stream(accessor, p):
+            yield chunk
+
+
+@command("cat", resource="disk", spec=SPECS["cat"], aggregate=concat_aggregate)
 async def cat(
     accessor: DiskAccessor,
     paths: list[PathSpec],
@@ -40,11 +48,13 @@ async def cat(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths and accessor.root is not None:
         paths = await resolve_glob(accessor, paths, index)
-        await local_stat(accessor, paths[0], index)
-        source = read_stream(accessor, paths[0])
+        for p in paths:
+            await local_stat(accessor, p, index)
+        source = _chain_streams(accessor, paths)
         cachable = CachableAsyncIterator(source)
-        io = IOResult(reads={paths[0].strip_prefix: cachable},
-                      cache=[paths[0].strip_prefix])
+        io = IOResult(reads={p.strip_prefix: cachable
+                             for p in paths},
+                      cache=[p.strip_prefix for p in paths])
         if n:
             return generic_cat(cachable, number_lines=True), io
         return cachable, io

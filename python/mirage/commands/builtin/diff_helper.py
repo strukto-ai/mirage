@@ -15,6 +15,7 @@
 import difflib
 import re
 
+from mirage.commands.builtin.diff_types import DiffOpTag
 from mirage.commands.builtin.utils.types import _ReadBytes
 
 
@@ -22,23 +23,63 @@ def _ed_script(a_lines: list[str], b_lines: list[str]) -> list[str]:
     sm = difflib.SequenceMatcher(None, a_lines, b_lines)
     edits: list[str] = []
     for tag, i1, i2, j1, j2 in reversed(sm.get_opcodes()):
-        if tag == "equal":
+        if tag == DiffOpTag.EQUAL:
             continue
-        if tag == "delete":
+        if tag == DiffOpTag.DELETE:
             addr = f"{i1 + 1},{i2}" if i2 - i1 > 1 else f"{i1 + 1}"
             edits.append(f"{addr}d\n")
-        elif tag == "insert":
+        elif tag == DiffOpTag.INSERT:
             edits.append(f"{i1}a\n")
             for line in b_lines[j1:j2]:
                 edits.append(line if line.endswith("\n") else line + "\n")
             edits.append(".\n")
-        elif tag == "replace":
+        elif tag == DiffOpTag.REPLACE:
             addr = f"{i1 + 1},{i2}" if i2 - i1 > 1 else f"{i1 + 1}"
             edits.append(f"{addr}c\n")
             for line in b_lines[j1:j2]:
                 edits.append(line if line.endswith("\n") else line + "\n")
             edits.append(".\n")
     return edits
+
+
+def _addr(i1: int, i2: int) -> str:
+    return f"{i1 + 1},{i2}" if i2 - i1 > 1 else f"{i1 + 1}"
+
+
+def _addr_b(j1: int, j2: int) -> str:
+    if j2 - j1 > 1:
+        return f"{j1 + 1},{j2}"
+    if j2 - j1 == 1:
+        return f"{j1 + 1}"
+    return f"{j1}"
+
+
+def _normal_diff(a_lines: list[str], b_lines: list[str]) -> list[str]:
+    sm = difflib.SequenceMatcher(None, a_lines, b_lines)
+    out: list[str] = []
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == DiffOpTag.EQUAL:
+            continue
+        if tag == DiffOpTag.DELETE:
+            out.append(f"{_addr(i1, i2)}d{j1}\n")
+            for line in a_lines[i1:i2]:
+                out.append("< " +
+                           (line if line.endswith("\n") else line + "\n"))
+        elif tag == DiffOpTag.INSERT:
+            out.append(f"{i1}a{_addr_b(j1, j2)}\n")
+            for line in b_lines[j1:j2]:
+                out.append("> " +
+                           (line if line.endswith("\n") else line + "\n"))
+        elif tag == DiffOpTag.REPLACE:
+            out.append(f"{_addr(i1, i2)}c{_addr_b(j1, j2)}\n")
+            for line in a_lines[i1:i2]:
+                out.append("< " +
+                           (line if line.endswith("\n") else line + "\n"))
+            out.append("---\n")
+            for line in b_lines[j1:j2]:
+                out.append("> " +
+                           (line if line.endswith("\n") else line + "\n"))
+    return out
 
 
 def diff(
@@ -65,5 +106,4 @@ def diff(
     b_lines = text_b.splitlines(keepends=True)
     if ed_script:
         return _ed_script(a_lines, b_lines)
-    return list(
-        difflib.unified_diff(a_lines, b_lines, fromfile=path_a, tofile=path_b))
+    return _normal_diff(a_lines, b_lines)

@@ -41,7 +41,7 @@ async def cmp_cmd(
         if data1[idx] != data2[idx]:
             line = 1 + data1[:idx].count(ord(b"\n"))
             msg = (f"{p0.original} {p1.original}"
-                   f" differ: byte {idx + 1}, line {line}")
+                   f" differ: char {idx + 1}, line {line}")
             if print_bytes:
                 msg += (f" is {oct(data1[idx])} {chr(data1[idx])}"
                         f" {oct(data2[idx])} {chr(data2[idx])}")

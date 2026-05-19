@@ -41,12 +41,20 @@ def test_find_type_f(resource_ws):
 
 def test_find_maxdepth_0(resource_ws):
     result = run(resource_ws, "find /data -maxdepth 0 -type f | sort")
-    lines = result.strip().splitlines()
-    assert lines == ["/data/data.json"]
+    lines = [line for line in result.strip().splitlines() if line]
+    assert lines == []
 
 
 def test_find_maxdepth_1(resource_ws):
     result = run(resource_ws, "find /data -maxdepth 1 -type f | sort")
+    lines = result.strip().splitlines()
+    assert "/data/data.json" in lines
+    assert "/data/docs/notes.txt" not in lines
+    assert "/data/src/main.py" not in lines
+
+
+def test_find_maxdepth_2(resource_ws):
+    result = run(resource_ws, "find /data -maxdepth 2 -type f | sort")
     lines = result.strip().splitlines()
     assert "/data/data.json" in lines
     assert "/data/docs/notes.txt" in lines

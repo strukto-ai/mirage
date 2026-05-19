@@ -43,8 +43,10 @@ def test_diff_i(env):
 def test_diff_u(env):
     env.create_file("a.txt", b"hello\n")
     env.create_file("b.txt", b"world\n")
-    assert env.mirage("diff -u /data/a.txt /data/b.txt") == env.mirage(
-        "diff /data/a.txt /data/b.txt")
+    result = env.mirage("diff -u /data/a.txt /data/b.txt")
+    assert "@@" in result
+    assert "-hello" in result
+    assert "+world" in result
 
 
 def test_diff_q_differ(env):

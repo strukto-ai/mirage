@@ -23,10 +23,13 @@ def test_find_mindepth(env):
     env.create_file("a.txt", b"a")
     env.create_file("sub/b.txt", b"b")
     result_all = env.mirage("find /data -type f")
-    result_deep = env.mirage("find /data -mindepth 1 -type f")
+    result_md1 = env.mirage("find /data -mindepth 1 -type f")
+    result_md2 = env.mirage("find /data -mindepth 2 -type f")
     assert "a.txt" in result_all
-    assert "a.txt" not in result_deep
-    assert "b.txt" in result_deep
+    assert "a.txt" in result_md1
+    assert "b.txt" in result_md1
+    assert "a.txt" not in result_md2
+    assert "b.txt" in result_md2
 
 
 def test_find_path(env):

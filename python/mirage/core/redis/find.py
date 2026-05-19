@@ -43,7 +43,7 @@ async def find(
     store = accessor.store
     p = _norm(path)
     prefix = p.rstrip("/") + "/"
-    base_depth = p.count("/")
+    base_depth = 0 if p == "/" else p.count("/")
     results: list[str] = []
 
     candidates: list[tuple[str, str]] = []

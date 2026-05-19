@@ -2,6 +2,11 @@ import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.awk_types import (CMP_OP_PATTERN,
+                                                       FIELD_PREFIX,
+                                                       PRINT_STMT, AwkBlock,
+                                                       AwkBoolOp, AwkBuiltin,
+                                                       AwkCmpOp)
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
@@ -17,47 +22,67 @@ def _parse_program(program: str) -> tuple[str, str]:
         condition = program[:idx].strip()
         action = program[idx + 1:].rstrip("}").strip()
         return condition, action
-    return "", program
+    return program, ""
+
+
+def _resolve_token(tok: str, field_map: dict[str, str]) -> str:
+    if tok.startswith(FIELD_PREFIX):
+        inner = tok[1:]
+        if inner in field_map:
+            ref = field_map[inner]
+            return field_map.get(f"{FIELD_PREFIX}{ref}", "")
+        return field_map.get(tok, tok)
+    return field_map.get(tok, tok)
+
+
+def _eval_simple(expr: str, field_map: dict[str, str]) -> bool:
+    expr = expr.strip()
+    m = re.match(rf"(.+?)\s*({CMP_OP_PATTERN})\s*(.+)", expr)
+    if not m:
+        if expr.startswith("/") and expr.endswith("/"):
+            regex = expr[1:-1]
+            return bool(re.search(regex, field_map.get(AwkBuiltin.REC, "")))
+        val = _resolve_token(expr, field_map)
+        try:
+            return float(val) != 0
+        except ValueError:
+            return bool(val)
+    lhs_raw, op, rhs_raw = m.group(1).strip(), m.group(2), m.group(3).strip()
+    rhs_raw = rhs_raw.strip('"')
+    lhs = _resolve_token(lhs_raw, field_map)
+    rhs = _resolve_token(rhs_raw, field_map) if rhs_raw.startswith(
+        FIELD_PREFIX) or rhs_raw in field_map else rhs_raw
+    try:
+        lhs_n, rhs_n = float(lhs), float(rhs)
+        return {
+            AwkCmpOp.EQ: lhs_n == rhs_n,
+            AwkCmpOp.NE: lhs_n != rhs_n,
+            AwkCmpOp.GT: lhs_n > rhs_n,
+            AwkCmpOp.LT: lhs_n < rhs_n,
+            AwkCmpOp.GE: lhs_n >= rhs_n,
+            AwkCmpOp.LE: lhs_n <= rhs_n,
+        }[AwkCmpOp(op)]
+    except ValueError:
+        if op == AwkCmpOp.EQ:
+            return lhs == rhs
+        if op == AwkCmpOp.NE:
+            return lhs != rhs
+        return False
 
 
 def _eval_condition(condition: str, field_map: dict[str, str]) -> bool:
     condition = condition.strip()
-    if condition == "BEGIN" or condition == "END":
+    if condition == AwkBlock.BEGIN or condition == AwkBlock.END:
         return False
-    for pattern in [
-            r"(\$\d+|NR|NF)\s*==\s*(.+)", r"(\$\d+|NR|NF)\s*!=\s*(.+)",
-            r"(\$\d+|NR|NF)\s*>\s*(.+)", r"(\$\d+|NR|NF)\s*<\s*(.+)",
-            r"(\$\d+|NR|NF)\s*>=\s*(.+)", r"(\$\d+|NR|NF)\s*<=\s*(.+)"
-    ]:
-        m = re.match(pattern, condition)
-        if m:
-            lhs_key, rhs_raw = m.group(1), m.group(2).strip().strip('"')
-            lhs = field_map.get(lhs_key, "")
-            op = re.search(r"(==|!=|>=|<=|>|<)", condition).group(1)
-            try:
-                lhs_num, rhs_num = float(lhs), float(rhs_raw)
-                if op == "==":
-                    return lhs_num == rhs_num
-                if op == "!=":
-                    return lhs_num != rhs_num
-                if op == ">":
-                    return lhs_num > rhs_num
-                if op == "<":
-                    return lhs_num < rhs_num
-                if op == ">=":
-                    return lhs_num >= rhs_num
-                if op == "<=":
-                    return lhs_num <= rhs_num
-            except ValueError:
-                if op == "==":
-                    return lhs == rhs_raw
-                if op == "!=":
-                    return lhs != rhs_raw
-                return False
-    if condition.startswith("/") and condition.endswith("/"):
-        regex = condition[1:-1]
-        return bool(re.search(regex, field_map.get("$0", "")))
-    return True
+    if AwkBoolOp.OR in condition:
+        return any(
+            _eval_condition(p, field_map)
+            for p in condition.split(AwkBoolOp.OR))
+    if AwkBoolOp.AND in condition:
+        return all(
+            _eval_condition(p, field_map)
+            for p in condition.split(AwkBoolOp.AND))
+    return _eval_simple(condition, field_map)
 
 
 def _eval_action(action: str, field_map: dict[str, str], fs: str) -> str:
@@ -66,18 +91,37 @@ def _eval_action(action: str, field_map: dict[str, str], fs: str) -> str:
         stmt = stmt.strip()
         if not stmt:
             continue
-        if stmt.startswith("print"):
-            args = stmt[5:].strip()
+        if stmt.startswith(PRINT_STMT):
+            args = stmt[len(PRINT_STMT):].strip()
             if not args:
-                parts.append(field_map.get("$0", ""))
+                parts.append(field_map.get(AwkBuiltin.REC, ""))
             else:
                 tokens = re.split(r",\s*", args)
                 vals: list[str] = []
                 for tok in tokens:
-                    tok = tok.strip().strip('"')
-                    vals.append(field_map.get(tok, tok))
+                    tok = tok.strip()
+                    if tok.startswith('"') and tok.endswith('"'):
+                        vals.append(tok[1:-1])
+                    else:
+                        vals.append(_resolve_token(tok, field_map))
                 parts.append(" ".join(vals))
     return "\n".join(parts) if parts else ""
+
+
+def _build_field_map(line: str, fs: str, nr: int,
+                     variables: dict[str, str]) -> dict[str, str]:
+    fields = re.split(re.escape(fs) if len(fs) == 1 else fs,
+                      line) if fs else line.split()
+    field_map = {
+        AwkBuiltin.REC: line,
+        AwkBuiltin.NR: str(nr),
+        AwkBuiltin.NF: str(len(fields)),
+    }
+    for i, f in enumerate(fields, 1):
+        field_map[f"{FIELD_PREFIX}{i}"] = f
+    for k, v in variables.items():
+        field_map[k] = v
+    return field_map
 
 
 def _awk_eval_line(
@@ -87,15 +131,7 @@ def _awk_eval_line(
     variables: dict[str, str],
     nr: int,
 ) -> str | None:
-    fields = re.split(re.escape(fs) if len(fs) == 1 else fs,
-                      line) if fs else line.split()
-    nf = len(fields)
-    field_map = {"$0": line, "NR": str(nr), "NF": str(nf)}
-    for i, f in enumerate(fields, 1):
-        field_map[f"${i}"] = f
-    for k, v in variables.items():
-        field_map[k] = v
-
+    field_map = _build_field_map(line, fs, nr, variables)
     condition, action = _parse_program(program)
     if condition and not _eval_condition(condition, field_map):
         return None
@@ -104,17 +140,66 @@ def _awk_eval_line(
     return _eval_action(action, field_map, fs)
 
 
+def _eval_end_print(action: str, accum: dict, end_map: dict[str, str]) -> str:
+    parts = []
+    for stmt in action.split(";"):
+        stmt = stmt.strip()
+        if not stmt.startswith(PRINT_STMT):
+            continue
+        args = stmt[len(PRINT_STMT):].strip()
+        if not args:
+            continue
+        tokens = re.split(r",\s*", args)
+        vals = []
+        for tok in tokens:
+            tok = tok.strip()
+            if tok.startswith('"') and tok.endswith('"'):
+                vals.append(tok[1:-1])
+            elif tok in accum:
+                v = accum[tok]
+                vals.append(str(int(v)) if v == int(v) else str(v))
+            elif tok in end_map:
+                vals.append(end_map[tok])
+            else:
+                vals.append(tok)
+        parts.append(" ".join(vals))
+    return "\n".join(parts)
+
+
+def _eval_begin(action: str) -> str:
+    parts = []
+    for stmt in action.split(";"):
+        stmt = stmt.strip()
+        if not stmt.startswith(PRINT_STMT):
+            continue
+        args = stmt[len(PRINT_STMT):].strip()
+        if not args:
+            parts.append("")
+            continue
+        tokens = re.split(r",\s*", args)
+        vals = []
+        for tok in tokens:
+            tok = tok.strip()
+            if tok.startswith('"') and tok.endswith('"'):
+                vals.append(tok[1:-1])
+            else:
+                vals.append(tok)
+        parts.append(" ".join(vals))
+    return "\n".join(parts)
+
+
 def _parse_blocks(program: str) -> tuple[str, str, str]:
     begin = ""
     end = ""
     main = program
 
-    begin_match = re.match(r"BEGIN\s*\{([^}]*)\}\s*(.*)", program, re.DOTALL)
+    begin_match = re.match(rf"{AwkBlock.BEGIN}\s*\{{([^}}]*)\}}\s*(.*)",
+                           program, re.DOTALL)
     if begin_match:
         begin = begin_match.group(1).strip()
         main = begin_match.group(2).strip()
 
-    end_match = re.search(r"END\s*\{([^}]*)\}\s*$", main)
+    end_match = re.search(rf"{AwkBlock.END}\s*\{{([^}}]*)\}}\s*$", main)
     if end_match:
         end = end_match.group(1).strip()
         main = main[:end_match.start()].strip()
@@ -135,47 +220,26 @@ def _eval_accumulator(action: str, field_map: dict, accum: dict) -> None:
                 pass
 
 
-def _eval_end_action(action: str, accum: dict) -> str:
-    parts = []
-    for stmt in action.split(";"):
-        stmt = stmt.strip()
-        if stmt.startswith("print"):
-            args = stmt[5:].strip()
-            if not args:
-                continue
-            tokens = re.split(r",\s*", args)
-            vals = []
-            for tok in tokens:
-                tok = tok.strip().strip('"')
-                if tok in accum:
-                    v = accum[tok]
-                    vals.append(str(int(v)) if v == int(v) else str(v))
-                else:
-                    vals.append(tok)
-            parts.append(" ".join(vals))
-    return "\n".join(parts)
-
-
 async def _awk_stream(
     source: AsyncIterator[bytes],
     program: str,
     fs: str,
     variables: dict[str, str],
 ) -> AsyncIterator[bytes]:
-    _begin, main, end = _parse_blocks(program)
+    begin, main, end = _parse_blocks(program)
     accum: dict[str, float] = {}
     nr = 0
+
+    if begin:
+        result = _eval_begin(begin)
+        if result:
+            yield (result + "\n").encode()
 
     async for line_bytes in AsyncLineIterator(source):
         nr += 1
         line = line_bytes.decode(errors="replace")
         if main:
-            fields = re.split(re.escape(fs) if len(fs) == 1 else fs,
-                              line) if fs else line.split()
-            field_map = {"$0": line, "NR": str(nr), "NF": str(len(fields))}
-            for i, f in enumerate(fields, 1):
-                field_map[f"${i}"] = f
-
+            field_map = _build_field_map(line, fs, nr, variables)
             condition, action = _parse_program(main)
             if condition and not _eval_condition(condition, field_map):
                 continue
@@ -187,7 +251,8 @@ async def _awk_stream(
                 yield (result + "\n").encode()
 
     if end:
-        result = _eval_end_action(end, accum)
+        end_map = {AwkBuiltin.NR: str(nr), AwkBuiltin.NF: "0"}
+        result = _eval_end_print(end, accum, end_map)
         if result:
             yield (result + "\n").encode()
 

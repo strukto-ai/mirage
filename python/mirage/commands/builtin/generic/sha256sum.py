@@ -23,7 +23,15 @@ async def _sha256_multi(
         h = hashlib.sha256()
         async for chunk in read_stream(accessor, p):
             h.update(chunk)
-        yield (h.hexdigest() + "  " + p.strip_prefix + "\n").encode()
+        yield (h.hexdigest() + "  " + p.original + "\n").encode()
+
+
+def _resolve_check_target(filename: str, mount_prefix: str) -> str | PathSpec:
+    if mount_prefix and filename.startswith(mount_prefix + "/"):
+        return PathSpec(original=filename,
+                        directory=filename,
+                        prefix=mount_prefix)
+    return filename
 
 
 async def _sha256_check(
@@ -33,6 +41,7 @@ async def _sha256_check(
     read_stream: Callable[..., AsyncIterator[bytes]],
 ) -> tuple[bytes, int]:
     data = (await read_bytes(accessor, path)).decode(errors="replace")
+    mount_prefix = path.prefix if isinstance(path, PathSpec) else ""
     lines: list[str] = []
     failed = False
     for line in data.splitlines():
@@ -42,8 +51,9 @@ async def _sha256_check(
         if len(parts) != 2:
             continue
         expected_hash, filename = parts
+        target = _resolve_check_target(filename, mount_prefix)
         h = hashlib.sha256()
-        async for chunk in read_stream(accessor, filename):
+        async for chunk in read_stream(accessor, target):
             h.update(chunk)
         if h.hexdigest() == expected_hash:
             lines.append(f"{filename}: OK")

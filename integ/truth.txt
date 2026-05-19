@@ -1,0 +1,1109 @@
+=== cat_simple ===
+hello
+world
+foo
+bar
+baz
+=== cat_concat ===
+hello
+world
+foo
+bar
+baz
+1
+2
+3
+=== cat_n ===
+     1	hello
+     2	world
+     3	foo
+     4	bar
+     5	baz
+=== head_default ===
+hello
+world
+foo
+bar
+baz
+=== head_n1 ===
+hello
+=== head_n2 ===
+hello
+world
+=== head_c5 ===
+hello
+=== tail_default ===
+hello
+world
+foo
+bar
+baz
+=== tail_n1 ===
+baz
+=== tail_n2 ===
+bar
+baz
+=== wc ===
+5	5	24	/data/a.txt
+=== wc_l ===
+5	/data/a.txt
+=== wc_w ===
+5	/data/a.txt
+=== wc_c ===
+24	/data/a.txt
+=== grep_world ===
+world
+=== grep_n ===
+4:bar
+=== grep_v ===
+hello
+world
+bar
+baz
+=== grep_i ===
+Hello World
+HELLO world
+hello WORLD
+=== grep_c ===
+1
+=== grep_E_alt ===
+foo
+bar
+=== rg_basic ===
+world
+=== rg_i ===
+Hello World
+HELLO world
+hello WORLD
+=== jq_dot ===
+{
+  "name": "alice",
+  "age": 30
+}
+=== jq_name ===
+"alice"
+=== jq_age ===
+30
+=== jq_raw ===
+alice
+=== jq_array_iter ===
+"alice"
+"bob"
+=== jq_jsonl_id ===
+1
+2
+3
+=== sort ===
+bar
+baz
+foo
+hello
+world
+=== sort_r ===
+world
+hello
+foo
+baz
+bar
+=== sort_n ===
+2
+4
+5
+10
+30
+=== uniq ===
+a
+b
+c
+=== uniq_c ===
+      2 a
+      2 b
+      1 c
+=== uniq_d ===
+a
+b
+=== nl ===
+     1	hello
+     2	world
+     3	foo
+     4	bar
+     5	baz
+=== rev ===
+olleh
+dlrow
+oof
+rab
+zab
+=== tac ===
+baz
+bar
+foo
+world
+hello
+=== cut_f1 ===
+name
+alice
+bob
+=== cut_f2 ===
+age
+30
+25
+=== cut_c2_4 ===
+ell
+orl
+oo
+ar
+az
+=== cut_tab ===
+a
+b
+c
+=== paste ===
+hello	1
+world	2
+foo	3
+bar
+baz
+=== comm ===
+apple
+		banana
+cherry
+	date
+	elder
+=== tr_upper ===
+HELLO
+WORLD
+FOO
+BAR
+BAZ
+=== tr_delete ===
+hll
+wrld
+f
+br
+bz
+=== sed_sub ===
+hello
+UNIVERSE
+foo
+bar
+baz
+=== sed_global ===
+Hello World
+HELLO world
+HI WORLD
+=== awk_first_col ===
+name
+alice
+bob
+=== awk_nr ===
+world
+=== awk_sum ===
+51
+=== md5 ===
+191c53e00627438f88824862472a3f59  /data/a.txt
+=== md5_multi ===
+191c53e00627438f88824862472a3f59  /data/a.txt
+c0710d6b4f15dfa88f600b0e6b624077  /data/b.txt
+=== sha256sum ===
+1a88a6398be8b75991c1286e996ef9de20edc80b50dc704fd17b7e956c9a38ed  /data/a.txt
+=== base64 ===
+aGVsbG8Kd29ybGQKZm9vCmJhcgpiYXoK
+=== xxd ===
+00000000: 6865 6c6c 6f0a 776f                      hello.wo
+=== xxd_p ===
+68656c6c6f0a776f
+=== basename ===
+a.txt
+=== dirname ===
+/data
+=== realpath ===
+/data/a.txt
+=== find_name ===
+/data/a.txt
+/data/b.txt
+/data/c.txt
+/data/dup.txt
+/data/empty.txt
+/data/fields.txt
+/data/mixed.txt
+/data/no_nl.txt
+/data/numbers.txt
+/data/one_byte.txt
+/data/repeats.txt
+/data/sections.txt
+/data/sorted_a.txt
+/data/sorted_b.txt
+/data/sorted_c.txt
+/data/spaced.txt
+/data/sub/deep/deeper.txt
+/data/sub/nested.txt
+/data/tabbed.txt
+=== find_type_f ===
+/data/a.txt
+/data/abc.csv
+/data/b.txt
+/data/binary.bin
+/data/c.txt
+/data/csv.csv
+/data/data.jsonl
+/data/dup.txt
+/data/empty.txt
+/data/fields.txt
+/data/mixed.txt
+/data/no_nl.txt
+/data/numbers.txt
+/data/one_byte.txt
+/data/repeats.txt
+/data/sections.txt
+/data/sorted_a.txt
+/data/sorted_b.txt
+/data/sorted_c.txt
+/data/spaced.txt
+/data/sub/deep/deeper.txt
+/data/sub/nested.txt
+/data/tabbed.txt
+/data/user.json
+/data/users.json
+=== ls ===
+a.txt
+abc.csv
+b.txt
+binary.bin
+c.txt
+csv.csv
+data.jsonl
+dup.txt
+empty.txt
+fields.txt
+mixed.txt
+no_nl.txt
+numbers.txt
+one_byte.txt
+repeats.txt
+sections.txt
+sorted_a.txt
+sorted_b.txt
+sorted_c.txt
+spaced.txt
+sub
+tabbed.txt
+user.json
+users.json
+=== ls_1 ===
+a.txt
+abc.csv
+b.txt
+binary.bin
+c.txt
+csv.csv
+data.jsonl
+dup.txt
+empty.txt
+fields.txt
+mixed.txt
+no_nl.txt
+numbers.txt
+one_byte.txt
+repeats.txt
+sections.txt
+sorted_a.txt
+sorted_b.txt
+sorted_c.txt
+spaced.txt
+sub
+tabbed.txt
+user.json
+users.json
+=== expand ===
+a       1
+b       2
+c       3
+=== fold ===
+hel
+lo
+wor
+ld
+foo
+bar
+baz
+=== strings ===
+hello
+=== nl_ba ===
+     1	hello
+     2	world
+     3	foo
+     4	bar
+     5	baz
+=== fmt_w20 ===
+hello world foo bar
+baz
+=== unexpand ===
+a	1
+b	2
+c	3
+=== column_t ===
+name   age
+alice  30
+bob    25
+=== look ===
+hello
+=== join ===
+banana
+=== grep_A1 ===
+world
+foo
+=== grep_B1 ===
+world
+foo
+=== grep_o ===
+ll
+=== grep_l ===
+/data/mixed.txt
+=== file_text ===
+/data/a.txt: text
+=== file_json ===
+/data/user.json: json
+=== file_b ===
+text
+=== stat_size ===
+24
+=== stat_name ===
+a.txt
+=== gzip_gunzip_pipe ===
+hello
+world
+foo
+bar
+baz
+=== gzip_zcat_pipe ===
+hello
+world
+foo
+bar
+baz
+=== base64_roundtrip ===
+hello
+world
+foo
+bar
+baz
+=== xxd_roundtrip ===
+hello
+world
+foo
+bar
+baz
+=== find_mindepth ===
+/data/a.txt
+/data/abc.csv
+/data/b.txt
+/data/binary.bin
+/data/c.txt
+/data/csv.csv
+/data/data.jsonl
+/data/dup.txt
+/data/empty.txt
+/data/fields.txt
+/data/mixed.txt
+/data/no_nl.txt
+/data/numbers.txt
+/data/one_byte.txt
+/data/repeats.txt
+/data/sections.txt
+/data/sorted_a.txt
+/data/sorted_b.txt
+/data/sorted_c.txt
+/data/spaced.txt
+/data/sub/deep/deeper.txt
+/data/sub/nested.txt
+/data/tabbed.txt
+/data/user.json
+/data/users.json
+=== find_maxdepth ===
+/data/a.txt
+/data/abc.csv
+/data/b.txt
+/data/binary.bin
+/data/c.txt
+/data/csv.csv
+/data/data.jsonl
+/data/dup.txt
+/data/empty.txt
+/data/fields.txt
+/data/mixed.txt
+/data/no_nl.txt
+/data/numbers.txt
+/data/one_byte.txt
+/data/repeats.txt
+/data/sections.txt
+/data/sorted_a.txt
+/data/sorted_b.txt
+/data/sorted_c.txt
+/data/spaced.txt
+/data/tabbed.txt
+/data/user.json
+/data/users.json
+=== find_multi_name ===
+/data/user.json
+/data/users.json
+=== wc_multi ===
+5	5	24	/data/a.txt
+3	3	6	/data/b.txt
+8	8	30	total
+=== wc_l_multi ===
+5	/data/a.txt
+3	/data/b.txt
+8	total
+=== cat_multi3 ===
+hello
+world
+foo
+bar
+baz
+1
+2
+3
+a
+a
+b
+b
+c
+=== md5_multi3 ===
+191c53e00627438f88824862472a3f59  /data/a.txt
+c0710d6b4f15dfa88f600b0e6b624077  /data/b.txt
+aa824302994c716187326457c48e125e  /data/dup.txt
+=== grep_pipe_wc ===
+1
+=== sort_uniq ===
+a
+b
+c
+=== cat_pipe_head ===
+hello
+world
+=== cat_pipe_sort_pipe_uniq ===
+      2 a
+      2 b
+      1 c
+=== find_pipe_wc ===
+18
+=== jq_pipe_wc ===
+3
+=== cat_tr_sort ===
+BAR
+BAZ
+FOO
+HELLO
+WORLD
+=== cat_tr_wc ===
+17
+=== head_pipe_tail ===
+foo
+=== sort_head ===
+bar
+baz
+=== sort_tail ===
+hello
+world
+=== jq_sort ===
+1
+2
+3
+=== find_sort_head ===
+/data/a.txt
+/data/b.txt
+=== cat_empty ===
+
+=== wc_empty ===
+0	0	0	/data/empty.txt
+=== head_empty ===
+
+=== md5_empty ===
+d41d8cd98f00b204e9800998ecf8427e  /data/empty.txt
+=== sha256_empty ===
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  /data/empty.txt
+=== cat_no_nl ===
+no trailing newline
+=== wc_no_nl ===
+0	3	19	/data/no_nl.txt
+=== md5_one_byte ===
+9dd4e461268c8034f5c8564e155c67a6  /data/one_byte.txt
+=== wc_one_byte ===
+0	1	1	/data/one_byte.txt
+=== sort_u ===
+a
+b
+c
+=== sort_k_t ===
+bob,25
+alice,30
+name,age
+=== sort_f ===
+HELLO world
+Hello World
+hello WORLD
+=== sort_n_r ===
+30
+10
+5
+4
+2
+=== grep_w ===
+world
+=== grep_count_no_match ===
+0
+=== grep_n_v_combo ===
+1:hello
+2:world
+4:bar
+5:baz
+=== rg_c ===
+1
+=== find_d ===
+/data/sub
+/data/sub/deep
+=== find_iname ===
+/data/a.txt
+/data/b.txt
+/data/c.txt
+/data/dup.txt
+/data/empty.txt
+/data/fields.txt
+/data/mixed.txt
+/data/no_nl.txt
+/data/numbers.txt
+/data/one_byte.txt
+/data/repeats.txt
+/data/sections.txt
+/data/sorted_a.txt
+/data/sorted_b.txt
+/data/sorted_c.txt
+/data/spaced.txt
+/data/sub/deep/deeper.txt
+/data/sub/nested.txt
+/data/tabbed.txt
+=== find_size_gt ===
+/data/a.txt
+/data/abc.csv
+/data/binary.bin
+/data/c.txt
+/data/csv.csv
+/data/data.jsonl
+/data/dup.txt
+/data/fields.txt
+/data/mixed.txt
+/data/no_nl.txt
+/data/numbers.txt
+/data/repeats.txt
+/data/sections.txt
+/data/sorted_a.txt
+/data/sorted_b.txt
+/data/sorted_c.txt
+/data/spaced.txt
+/data/sub
+/data/sub/deep
+/data/sub/nested.txt
+/data/tabbed.txt
+/data/user.json
+/data/users.json
+=== find_recurse ===
+/data/a.txt
+/data/b.txt
+/data/c.txt
+/data/dup.txt
+/data/empty.txt
+/data/fields.txt
+/data/mixed.txt
+/data/no_nl.txt
+/data/numbers.txt
+/data/one_byte.txt
+/data/repeats.txt
+/data/sections.txt
+/data/sorted_a.txt
+/data/sorted_b.txt
+/data/sorted_c.txt
+/data/spaced.txt
+/data/sub/deep/deeper.txt
+/data/sub/nested.txt
+/data/tabbed.txt
+=== find_path_pattern ===
+/data/sub
+/data/sub/deep
+/data/sub/deep/deeper.txt
+/data/sub/nested.txt
+=== wc_m ===
+24	/data/a.txt
+=== wc_L ===
+5	/data/a.txt
+=== comm_12 ===
+banana
+=== comm_23 ===
+apple
+cherry
+=== comm_13 ===
+date
+elder
+=== tail_c ===
+
+baz
+=== sha256sum_multi ===
+1a88a6398be8b75991c1286e996ef9de20edc80b50dc704fd17b7e956c9a38ed  /data/a.txt
+14c5e74c4b96ccef41cd94db73a9ec3348038ac094feca4fd897cecffa07cdae  /data/b.txt
+=== ls_sub ===
+deep
+nested.txt
+=== cat_nested ===
+nested
+content
+=== find_depth2 ===
+/data/sub/deep/deeper.txt
+/data/sub/nested.txt
+=== pipe_grep_sort_uniq_wc ===
+2
+=== pipe_cat_cut_sort ===
+age
+25
+30
+=== pipe_jq_grep ===
+2
+=== pipe_find_grep_wc ===
+1
+=== pipe_cat_tr_sort_uniq ===
+      2 A
+      2 B
+      1 C
+=== pipe_head_pipe_tail2 ===
+4
+5
+=== pipe_tail_head ===
+hello
+=== md5_stdin ===
+b1946ac92492d2347c6235b4d2611184  -
+=== sha256_stdin ===
+5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03  -
+=== base64_stdin ===
+aGVsbG8K
+=== wc_stdin ===
+1	3	6
+=== awk_nf ===
+3
+3
+3
+=== awk_nr_total ===
+5
+=== awk_last_col ===
+engineer
+designer
+manager
+=== awk_if ===
+alice 30 engineer
+carol 40 manager
+=== awk_begin_end ===
+start
+1
+2
+3
+done
+=== awk_fs_comma ===
+age
+30
+25
+=== awk_ofs ===
+name age
+alice 30
+bob 25
+=== awk_range ===
+world
+foo
+bar
+=== sed_d_first ===
+world
+foo
+bar
+baz
+=== sed_d_last ===
+hello
+world
+foo
+bar
+=== sed_range_p ===
+world
+foo
+=== sed_print_only ===
+world
+=== sed_replace_n ===
+hellO
+world
+foo
+bar
+baz
+=== sed_delete_pattern ===
+hello
+world
+bar
+baz
+=== sed_append ===
+hello
+world
+
+INSERTED
+foo
+bar
+baz
+=== tr_squeeze ===
+abc
+=== tr_complement ===
+hello
+world
+foo
+bar
+baz
+=== tr_delete_digits ===
+abcdef
+=== tr_to_newlines ===
+a
+b
+c
+=== cut_c1 ===
+h
+w
+f
+b
+b
+=== cut_c_range_open ===
+
+=== cut_d_space ===
+30
+25
+40
+=== cut_f1_3 ===
+name,age
+alice,30
+bob,25
+=== sort_t_comma ===
+a,1
+b,2
+c,3
+d,4
+e,5
+=== sort_k2n ===
+bob 25 designer
+alice 30 engineer
+carol 40 manager
+=== sort_M ===
+Jan
+Feb
+Mar
+=== sort_b ===
+
+=== uniq_u ===
+c
+=== uniq_repeats ===
+x
+y
+z
+=== uniq_c_repeats ===
+      3 x
+      2 y
+      1 z
+=== grep_F ===
+
+=== grep_m1 ===
+hello
+=== grep_h ===
+/data/mixed.txt:hello WORLD
+/data/a.txt:hello
+=== grep_only_match_multi ===
+o
+o
+o
+o
+=== grep_recursive_dir ===
+
+=== grep_empty_pattern ===
+
+=== paste_s ===
+1	2	3
+=== paste_d_comma ===
+hello,1
+world,2
+foo,3
+bar,
+baz,
+=== file_empty ===
+/data/empty.txt: text
+=== file_binary ===
+/data/binary.bin: binary
+=== find_empty ===
+/data/a.txt
+/data/abc.csv
+/data/b.txt
+/data/binary.bin
+/data/c.txt
+/data/csv.csv
+/data/data.jsonl
+/data/dup.txt
+/data/empty.txt
+/data/fields.txt
+/data/mixed.txt
+/data/no_nl.txt
+/data/numbers.txt
+/data/one_byte.txt
+/data/repeats.txt
+/data/sections.txt
+/data/sorted_a.txt
+/data/sorted_b.txt
+/data/sorted_c.txt
+/data/spaced.txt
+/data/sub
+/data/sub/deep
+/data/sub/deep/deeper.txt
+/data/sub/nested.txt
+/data/tabbed.txt
+/data/user.json
+/data/users.json
+=== find_not_name ===
+/data/a.txt
+/data/b.txt
+/data/c.txt
+/data/dup.txt
+/data/empty.txt
+/data/fields.txt
+/data/mixed.txt
+/data/no_nl.txt
+/data/numbers.txt
+/data/one_byte.txt
+/data/repeats.txt
+/data/sections.txt
+/data/sorted_a.txt
+/data/sorted_b.txt
+/data/sorted_c.txt
+/data/spaced.txt
+/data/sub/deep/deeper.txt
+/data/sub/nested.txt
+/data/tabbed.txt
+=== find_size_lt ===
+/data/empty.txt
+/data/one_byte.txt
+/data/sub
+/data/sub/deep
+/data/sub/deep/deeper.txt
+=== find_depth ===
+/data/a.txt
+/data/abc.csv
+/data/b.txt
+/data/binary.bin
+/data/c.txt
+/data/csv.csv
+/data/data.jsonl
+/data/dup.txt
+/data/empty.txt
+/data/fields.txt
+/data/mixed.txt
+/data/no_nl.txt
+/data/numbers.txt
+/data/one_byte.txt
+/data/repeats.txt
+/data/sections.txt
+/data/sorted_a.txt
+/data/sorted_b.txt
+/data/sorted_c.txt
+/data/spaced.txt
+/data/sub/deep/deeper.txt
+/data/sub/nested.txt
+/data/tabbed.txt
+/data/user.json
+/data/users.json
+=== find_mtime ===
+/data/a.txt
+/data/abc.csv
+/data/b.txt
+/data/binary.bin
+/data/c.txt
+/data/csv.csv
+/data/dup.txt
+/data/empty.txt
+/data/fields.txt
+/data/mixed.txt
+/data/no_nl.txt
+/data/numbers.txt
+/data/one_byte.txt
+/data/repeats.txt
+/data/sections.txt
+/data/sorted_a.txt
+/data/sorted_b.txt
+/data/sorted_c.txt
+/data/spaced.txt
+/data/sub
+/data/sub/deep
+/data/sub/deep/deeper.txt
+/data/sub/nested.txt
+/data/tabbed.txt
+/data/user.json
+/data/users.json
+=== xxd_c4 ===
+00000000: 6865 6c6c  hell
+00000004: 6f0a 776f  o.wo
+00000008: 726c 640a  rld.
+=== xxd_g1 ===
+00000000: 68 65 6c 6c 6f 0a 77 6f                          hello.wo
+=== xxd_u ===
+00000000: 6865 6C6C 6F0A 776F                      hello.wo
+=== diff_same ===
+
+=== diff_differ ===
+1,5c1,3
+< hello
+< world
+< foo
+< bar
+< baz
+---
+> 1
+> 2
+> 3
+=== diff_u ===
+--- /data/sorted_a.txt
++++ /data/sorted_b.txt
+@@ -1,3 +1,3 @@
+-apple
+ banana
+-cherry
++date
++elder
+=== cmp_same ===
+
+=== cmp_differ ===
+/data/a.txt /data/b.txt differ: char 1, line 1
+=== du_file ===
+24	/data/a.txt
+=== du_dir ===
+545	/data
+=== du_h ===
+24B	/data/a.txt
+=== tree ===
+├── deep
+│   └── deeper.txt
+└── nested.txt
+=== iconv_id ===
+hello
+world
+foo
+bar
+baz
+=== cat_E ===
+
+=== cat_T ===
+
+=== cat_A ===
+
+=== nl_d_pipe ===
+
+=== nl_w3 ===
+  1	hello
+  2	world
+  3	foo
+  4	bar
+  5	baz
+=== column_n ===
+alice  30  engineer
+bob    25  designer
+carol  40  manager
+=== join_t ===
+a,1,1
+b,2,2
+c,3,3
+d,4,4
+e,5,5
+=== join_o ===
+apple
+cherry
+=== fmt_w10 ===
+alpha beta
+gamma
+delta
+=== fold_s ===
+hello
+world
+foo
+bar
+baz
+=== expand_t4 ===
+a   1
+b   2
+c   3
+=== unexpand_all ===
+    hi
+=== tac_nested ===
+content
+nested
+=== rev_b ===
+1
+2
+3
+=== ls_a ===
+deep
+nested.txt
+=== ls_R ===
+deep
+deeper.txt
+nested.txt
+=== ls_sub_deep ===
+deeper.txt
+=== zgrep_pipe ===
+world
+=== gzip_c_pipe ===
+1
+2
+3
+=== jq_keys ===
+[
+  "age",
+  "name"
+]
+=== jq_length ===
+1
+=== jq_select ===
+{
+  "name": "alice",
+  "age": 30
+}
+=== jq_jsonl_select ===
+{
+  "id": 2
+}
+{
+  "id": 3
+}
+=== pipe_awk_sort ===
+25
+30
+40
+=== pipe_grep_cut ===
+alice
+bob
+=== pipe_sed_wc ===
+3
+=== pipe_find_xargs_cat ===
+/data/sub/deep/deeper.txt
+=== pipe_tr_sort_uniq_c ===
+      1 C
+      2 A
+      2 B
+=== md5_stdin_multi ===
+191c53e00627438f88824862472a3f59  -
+=== sha256_stdin_multi ===
+1a88a6398be8b75991c1286e996ef9de20edc80b50dc704fd17b7e956c9a38ed  -
+=== wc_stdin_l ===
+5
+=== sort_stdin ===
+a
+a
+b
+b
+c
+=== rev_stdin ===
+olleh
+=== base64_stdin_d ===
+hello

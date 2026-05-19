@@ -79,5 +79,5 @@ async def test_find_with_maxdepth(tmp_path):
                         maxdepth=1)
     assert "/a.txt" in result
     assert "/sub" in result
-    assert "/sub/b.txt" in result
+    assert "/sub/b.txt" not in result
     assert "/sub/deep/c.txt" not in result

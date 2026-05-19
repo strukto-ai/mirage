@@ -1,0 +1,67 @@
+name: Integ (cross-backend)
+
+"on":
+  push:
+    branches: [main]
+    paths:
+      - integ/**
+      - python/**
+      - .github/workflows/test_integ.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - integ/**
+      - python/**
+      - .github/workflows/test_integ.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integ:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        working-directory: python
+        run: uv sync --all-extras --no-extra camel
+
+      - name: Run RAM backend and diff against truth
+        run: |
+          ./python/.venv/bin/python integ/ram.py > /tmp/ram.out
+          diff integ/truth.txt /tmp/ram.out
+
+      - name: Run Disk backend and diff against truth
+        run: |
+          ./python/.venv/bin/python integ/disk.py > /tmp/disk.out
+          diff integ/truth.txt /tmp/disk.out
+
+      - name: Run Redis backend and diff against truth
+        run: |
+          ./python/.venv/bin/python integ/redis.py > /tmp/redis.out
+          diff integ/truth.txt /tmp/redis.out

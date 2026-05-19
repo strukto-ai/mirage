@@ -316,7 +316,10 @@ async def test_diff_unified():
     async def rd(accessor, path, index=None):
         return []
 
-    out, _ = await diff([_spec("a"), _spec("b")], read_bytes=rb, readdir_fn=rd)
+    out, _ = await diff([_spec("a"), _spec("b")],
+                        read_bytes=rb,
+                        readdir_fn=rd,
+                        u=True)
     assert b"-world" in out
     assert b"+universe" in out
 
