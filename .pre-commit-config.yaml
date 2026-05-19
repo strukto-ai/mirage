@@ -12,14 +12,26 @@ repos:
         name: No commits to master
       - id: end-of-file-fixer
         name: End-of-file fixer
-        exclude: ^typescript/
+        exclude: |
+          (?x)^(
+              typescript/.*|
+              integ/truth\.txt
+          )$
       - name: mixed-line-ending
         id: mixed-line-ending
         args: [--fix, lf]
-        exclude: ^typescript/
+        exclude: |
+          (?x)^(
+              typescript/.*|
+              integ/truth\.txt
+          )$
       - id: trailing-whitespace
         name: Remove trailing whitespaces
-        exclude: ^typescript/
+        exclude: |
+          (?x)^(
+              typescript/.*|
+              integ/truth\.txt
+          )$
       - id: check-toml
         name: Check toml
       - id: check-yaml

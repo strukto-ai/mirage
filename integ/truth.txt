@@ -162,8 +162,8 @@ c
 hello	1
 world	2
 foo	3
-bar
-baz
+bar	
+baz	
 === comm ===
 apple
 		banana
