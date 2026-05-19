@@ -13,11 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
-from itertools import zip_longest
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.builtin.generic.paste import paste as generic_paste
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.disk.glob import resolve_glob
@@ -37,35 +36,11 @@ async def paste(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    delimiter = d if d else "\t"
-    file_lines: list[list[str]] = []
-
-    paths = await resolve_glob(accessor, paths, index)
-    for p in paths:
-        if p.original == "-":
-            raw = await _read_stdin_async(stdin)
-            data = raw.decode(errors="replace") if raw else ""
-            stdin = None
-        elif accessor.root is not None:
-            data = (await read_bytes(accessor, p)).decode(errors="replace")
-        else:
-            continue
-        file_lines.append(data.splitlines())
-
-    if not file_lines and stdin is not None:
-        raw = await _read_stdin_async(stdin)
-        if raw:
-            file_lines.append(raw.decode(errors="replace").splitlines())
-
-    if not file_lines:
-        raise ValueError("paste: missing operand")
-
-    if s:
-        out_lines = [delimiter.join(lines) for lines in file_lines]
-    else:
-        out_lines = [
-            delimiter.join(row)
-            for row in zip_longest(*file_lines, fillvalue="")
-        ]
-
-    return ("\n".join(out_lines) + "\n").encode(), IOResult()
+    if paths:
+        paths = await resolve_glob(accessor, paths, index)
+    return await generic_paste(paths,
+                               read_bytes=read_bytes,
+                               accessor=accessor,
+                               stdin=stdin,
+                               delimiter=d if d else "\t",
+                               serial=s)

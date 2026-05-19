@@ -12,49 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
 from collections.abc import AsyncIterator
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.builtin.generic.nl import nl as generic_nl
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.disk.glob import resolve_glob
 from mirage.core.disk.stream import read_stream
-from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-def _should_number(line: str, body_numbering: str,
-                   pattern: re.Pattern[str] | None) -> bool:
-    if body_numbering == "n":
-        return False
-    if body_numbering == "a":
-        return True
-    if body_numbering == "p" and pattern is not None:
-        return pattern.search(line) is not None
-    return bool(line.strip())
-
-
-async def _nl_stream(
-    source: AsyncIterator[bytes],
-    body_numbering: str = "t",
-    start: int = 1,
-    increment: int = 1,
-    width: int = 6,
-    separator: str = "\t",
-    pattern: re.Pattern[str] | None = None,
-) -> AsyncIterator[bytes]:
-    num = start
-    async for raw_line in AsyncLineIterator(source):
-        line = raw_line.decode(errors="replace")
-        if _should_number(line, body_numbering, pattern):
-            yield f"{num:{width}d}{separator}{line}\n".encode()
-            num += increment
-        else:
-            yield f"{' ' * width}{separator}{line}\n".encode()
 
 
 @command("nl", resource="disk", spec=SPECS["nl"])
@@ -71,22 +39,18 @@ async def nl(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    body_numbering_raw = b if b is not None else "t"
-    pattern: re.Pattern[str] | None = None
-    if body_numbering_raw.startswith("p"):
-        body_numbering = "p"
-        pattern = re.compile(body_numbering_raw[1:])
-    else:
-        body_numbering = body_numbering_raw
-    start = int(v) if v is not None else 1
-    increment = int(i) if i is not None else 1
-    width = int(w) if w is not None else 6
-    separator = s if s is not None else "\t"
     if paths and accessor.root is not None:
         paths = await resolve_glob(accessor, paths, index)
-        source = read_stream(accessor, paths[0])
-        return _nl_stream(source, body_numbering, start, increment, width,
-                          separator, pattern), IOResult()
-    source = _resolve_source(stdin, "nl: missing operand")
-    return _nl_stream(source, body_numbering, start, increment, width,
-                      separator, pattern), IOResult()
+    else:
+        paths = []
+    return await generic_nl(
+        paths,
+        read_stream=read_stream,
+        accessor=accessor,
+        stdin=stdin,
+        body_numbering_raw=b,
+        start_raw=v,
+        increment_raw=i,
+        width_raw=w,
+        separator=s,
+    )

@@ -12,82 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import fnmatch
+from functools import partial
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.tree import tree as generic_tree
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.disk.glob import resolve_glob
 from mirage.core.disk.readdir import readdir
-from mirage.core.disk.stat import stat as local_stat
+from mirage.core.disk.stat import stat
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileType, PathSpec
-
-
-async def _tree_async(
-    accessor: DiskAccessor,
-    path: PathSpec,
-    _prefix: str = "",
-    max_depth: int | None = None,
-    show_hidden: bool = False,
-    ignore_pattern: str | None = None,
-    dirs_only: bool = False,
-    match_pattern: str | None = None,
-    _depth: int = 0,
-    warnings: list[str] | None = None,
-    index: IndexCacheStore = None,
-) -> list[str]:
-    lines: list[str] = []
-    try:
-        entries = await readdir(accessor, path, index)
-    except (FileNotFoundError, ValueError) as exc:
-        if warnings is not None:
-            warnings.append(f"tree: '{path.original}': {exc}")
-        return lines
-    filtered = []
-    for entry in entries:
-        try:
-            entry_spec = PathSpec(original=entry,
-                                  directory=entry,
-                                  resolved=False,
-                                  prefix=path.prefix)
-            s = await local_stat(accessor, entry_spec)
-        except (FileNotFoundError, ValueError) as exc:
-            if warnings is not None:
-                warnings.append(f"tree: '{entry}': {exc}")
-            continue
-        if not show_hidden and s.name.startswith("."):
-            continue
-        if ignore_pattern and fnmatch.fnmatch(s.name, ignore_pattern):
-            continue
-        if dirs_only and s.type != FileType.DIRECTORY:
-            continue
-        not_dir = s.type != FileType.DIRECTORY
-        if match_pattern and not_dir and not fnmatch.fnmatch(
-                s.name, match_pattern):
-            continue
-        filtered.append((entry_spec, s))
-    for i, (entry_spec, s) in enumerate(filtered):
-        is_last = i == len(filtered) - 1
-        connector = "\u2514\u2500\u2500 " if is_last else "\u251c\u2500\u2500 "
-        lines.append(_prefix + connector + s.name)
-        if s.type == FileType.DIRECTORY:
-            if max_depth is not None and _depth >= max_depth:
-                continue
-            extension = "    " if is_last else "\u2502   "
-            lines.extend(await _tree_async(accessor,
-                                           entry_spec,
-                                           _prefix + extension,
-                                           max_depth=max_depth,
-                                           show_hidden=show_hidden,
-                                           ignore_pattern=ignore_pattern,
-                                           dirs_only=dirs_only,
-                                           match_pattern=match_pattern,
-                                           _depth=_depth + 1,
-                                           warnings=warnings,
-                                           index=index))
-    return lines
+from mirage.types import PathSpec
 
 
 @command("tree", resource="disk", spec=SPECS["tree"])
@@ -107,20 +43,14 @@ async def tree(
     if accessor.root is None:
         raise ValueError("tree: no resource")
     paths = await resolve_glob(accessor, paths, index)
-    p = paths[0]
-    max_depth = int(L) if L is not None else None
-    warnings: list[str] = []
-    results = await _tree_async(
-        accessor,
-        p,
-        max_depth=max_depth,
+    return await generic_tree(
+        paths[0],
+        readdir=partial(readdir, accessor),
+        stat=partial(stat, accessor),
+        max_depth=int(L) if L is not None else None,
         show_hidden=a,
         ignore_pattern=args_I,
         dirs_only=d,
         match_pattern=P,
-        warnings=warnings,
         index=index,
     )
-    output = "\n".join(results).encode()
-    stderr = "\n".join(warnings).encode() if warnings else None
-    return output, IOResult(stderr=stderr)

@@ -12,10 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
 from collections.abc import AsyncIterator
 
 from mirage.accessor.redis import RedisAccessor
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.readlink import \
+    readlink as generic_readlink
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.redis.glob import resolve_glob
@@ -33,20 +35,10 @@ async def readlink(
     e: bool = False,
     m: bool = False,
     n: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("readlink: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
-    normalize = f or e or m
-    results: list[str] = []
-    for p in paths:
-        vp = p.prefix + "/" + p.original.lstrip(
-            "/") if p.prefix else p.original
-        if normalize:
-            vp = posixpath.normpath(vp)
-        results.append(vp)
-    text = "\n".join(results)
-    if not n:
-        text += "\n"
-    return text.encode(), IOResult()
+    paths = await resolve_glob(accessor, paths, index)
+    return await generic_readlink(paths, f=f, e=e, m=m, n=n)

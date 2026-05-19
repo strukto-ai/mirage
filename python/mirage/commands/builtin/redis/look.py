@@ -15,11 +15,12 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.look import look as generic_look
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.redis.glob import resolve_glob
-from mirage.core.redis.read import read_bytes as _read_bytes
+from mirage.core.redis.read import read_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -31,27 +32,18 @@ async def look(
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     f: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not texts:
         raise ValueError("look: missing prefix")
-    prefix = texts[0]
     if paths and accessor.store is not None:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
-        raw = await _read_bytes(accessor, paths[0])
+        paths = await resolve_glob(accessor, paths, index)
     else:
-        raw = await _read_stdin_async(stdin)
-        if raw is None:
-            raise ValueError("look: missing input")
-    text = raw.decode(errors="replace")
-    lines = text.splitlines()
-    matched: list[str] = []
-    for line in lines:
-        cmp_line = line.lower() if f else line
-        cmp_prefix = prefix.lower() if f else prefix
-        if cmp_line.startswith(cmp_prefix):
-            matched.append(line)
-    if not matched:
-        return None, IOResult(exit_code=1)
-    output = "\n".join(matched) + "\n"
-    return output.encode(), IOResult()
+        paths = []
+    return await generic_look(paths,
+                              texts[0],
+                              read_bytes=read_bytes,
+                              accessor=accessor,
+                              stdin=stdin,
+                              fold_case=f)

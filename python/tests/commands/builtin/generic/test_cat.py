@@ -15,6 +15,7 @@ async def test_cat_passthrough_from_bytes():
 
 @pytest.mark.asyncio
 async def test_cat_passthrough_from_stream_preserves_chunks():
+
     async def src():
         yield b"hel"
         yield b"lo\nwo"
@@ -32,6 +33,7 @@ async def test_cat_number_lines():
 
 @pytest.mark.asyncio
 async def test_cat_number_lines_across_chunk_boundaries():
+
     async def src():
         yield b"a\nb"
         yield b"\nc\n"
@@ -81,7 +83,7 @@ async def test_cat_number_lines_multidigit_alignment():
 
 @pytest.mark.asyncio
 async def test_cat_show_ends_no_trailing_newline():
-    """cat -E on input without trailing newline must not emit a final `$\\n`."""
+    """cat -E on input without trailing newline must not emit final `$\\n`."""
     out = await _drain(cat(b"hello", show_ends=True))
     assert out == b"hello"
 
@@ -90,7 +92,10 @@ async def test_cat_show_ends_no_trailing_newline():
 async def test_cat_combined_n_E_s():
     """Combined flags: number all kept lines, show ends, squeeze blanks."""
     out = await _drain(
-        cat(b"a\n\n\n\nb\n", number_lines=True, show_ends=True, squeeze_blank=True))
+        cat(b"a\n\n\n\nb\n",
+            number_lines=True,
+            show_ends=True,
+            squeeze_blank=True))
     # Kept lines: "a", "" (first blank, kept), "b". Numbered 1, 2, 3.
     assert out == b"     1\ta$\n     2\t$\n     3\tb$\n"
 

@@ -12,12 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import gzip
 from collections.abc import AsyncIterator
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.builtin.generic.zcat import zcat as generic_zcat
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.disk.glob import resolve_glob
@@ -37,10 +36,9 @@ async def zcat(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths and accessor.root is not None:
         paths = await resolve_glob(accessor, paths, index)
-        raw = await read_bytes(accessor, paths[0])
     else:
-        raw = await _read_stdin_async(stdin)
-        if raw is None:
-            raise ValueError("zcat: missing input")
-    output = gzip.decompress(raw)
-    return output, IOResult()
+        paths = []
+    return await generic_zcat(paths,
+                              read_bytes=read_bytes,
+                              accessor=accessor,
+                              stdin=stdin)

@@ -155,10 +155,10 @@ We report a 100 MiB sentinel. The read handler returns 0 past the actual data le
 ```ts
 const ws = new Workspace({ '/slack/': new SlackResource({ apiKey }) }, { fuse: true })
 // ✅ Works, most channels have <100 MiB of daily history
-await readFile(`${ws.fuseMountpoint}/slack/channels/general/2026-04-12.jsonl`)
+await readFile(`${ws.fuseMountpoint}/slack/channels/general__C123/2026-04-12/chat.jsonl`)
 
 // ⚠️ Truncated to 100 MiB if the actual day exceeds it
-await readFile(`${ws.fuseMountpoint}/slack/channels/super-busy-channel/2026-04-12.jsonl`)
+await readFile(`${ws.fuseMountpoint}/slack/channels/super-busy-channel__C456/2026-04-12/chat.jsonl`)
 ```
 
 `ls -l` shows `100M` for any unfetched API-backed file. Once a file has been opened, the real size is cached and subsequent `ls -l` shows the actual byte count.
@@ -176,16 +176,16 @@ The cap exists because Node's `fs/promises.readFile` allocates a Buffer of the r
     The Mirage VFS doesn't go through FUSE at all (no sentinel, no truncation). Use this for any file that might exceed 100 MiB.
 
     ```ts
-    const bytes = await ws.fs.readFile('/slack/channels/super-busy-channel/2026-04-12.jsonl')
+    const bytes = await ws.fs.readFile('/slack/channels/super-busy-channel__C456/2026-04-12/chat.jsonl')
     // Or via shell:
-    const res = await ws.execute('cat /slack/channels/super-busy-channel/2026-04-12.jsonl')
+    const res = await ws.execute('cat /slack/channels/super-busy-channel__C456/2026-04-12/chat.jsonl')
     ```
   </Tab>
   <Tab title="Process incrementally">
     For Slack history specifically, narrow the date or use a more targeted command (`grep`, `jq`, line-count stats) so the result fits well under the cap.
 
     ```ts
-    await ws.execute('jq -r ".text" /slack/channels/general/2026-04-12.jsonl')
+    await ws.execute('jq -r ".[] | .text" /slack/channels/general__C123/2026-04-12/chat.jsonl')
     ```
   </Tab>
 </Tabs>

@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.builtin.generic.look import look as generic_look
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.disk.glob import resolve_glob
@@ -37,23 +37,13 @@ async def look(
 ) -> tuple[ByteSource | None, IOResult]:
     if not texts:
         raise ValueError("look: missing prefix")
-    prefix = texts[0]
     if paths and accessor.root is not None:
         paths = await resolve_glob(accessor, paths, index)
-        raw = await read_bytes(accessor, paths[0])
     else:
-        raw = await _read_stdin_async(stdin)
-        if raw is None:
-            raise ValueError("look: missing input")
-    text = raw.decode(errors="replace")
-    lines = text.splitlines()
-    matched: list[str] = []
-    for line in lines:
-        cmp_line = line.lower() if f else line
-        cmp_prefix = prefix.lower() if f else prefix
-        if cmp_line.startswith(cmp_prefix):
-            matched.append(line)
-    if not matched:
-        return None, IOResult(exit_code=1)
-    output = "\n".join(matched) + "\n"
-    return output.encode(), IOResult()
+        paths = []
+    return await generic_look(paths,
+                              texts[0],
+                              read_bytes=read_bytes,
+                              accessor=accessor,
+                              stdin=stdin,
+                              fold_case=f)

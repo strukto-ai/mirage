@@ -17,14 +17,34 @@ from collections.abc import AsyncIterator
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.aggregators import header_aggregate
-from mirage.commands.builtin.tail_helper import _parse_n, tail_bytes
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.builtin.generic.tail import tail as generic_tail
+from mirage.commands.builtin.tail_helper import _parse_n
+from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.ram.glob import resolve_glob
-from mirage.core.ram.read import read_bytes as _read_bytes
+from mirage.core.ram.stream import stream as _stream_core
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+
+
+async def _tail_multi(
+    accessor: RAMAccessor,
+    paths: list[PathSpec],
+    n: int | None,
+    c: int | None,
+    from_line: int | None,
+    show_headers: bool,
+) -> AsyncIterator[bytes]:
+    for i, p in enumerate(paths):
+        if show_headers:
+            header = f"==> {p.original} <==\n"
+            if i > 0:
+                header = "\n" + header
+            yield header.encode()
+        source = _stream_core(accessor, p)
+        async for chunk in generic_tail(source, n=n, c=c, from_line=from_line):
+            yield chunk
 
 
 @command("tail",
@@ -43,32 +63,20 @@ async def tail(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    lines, plus_mode = _parse_n(n)
-    bytes_mode = int(c) if c is not None else None
+    n_int: int | None = None
+    from_line: int | None = None
+    if n is not None:
+        lines, plus_mode = _parse_n(n)
+        if plus_mode:
+            from_line = lines
+        else:
+            n_int = lines
+    c_int = int(c) if c is not None else None
     if paths and accessor.store is not None:
         paths = await resolve_glob(accessor, paths, index)
-        chunks: list[bytes] = []
-        cache: list[str] = []
         show_headers = (v or len(paths) > 1) and not q
-        for i, p in enumerate(paths):
-            raw = await _read_bytes(accessor, p)
-            if show_headers:
-                header = f"==> {p.original} <==\n"
-                if i > 0:
-                    header = "\n" + header
-                chunks.append(header.encode())
-            if bytes_mode is not None:
-                chunks.append(raw[-bytes_mode:] if bytes_mode else b"")
-                if bytes_mode >= len(raw):
-                    cache.append(p.original)
-            else:
-                chunks.append(tail_bytes(raw, lines, plus_mode=plus_mode))
-                if not plus_mode and lines >= raw.count(b"\n"):
-                    cache.append(p.original)
-        return b"".join(chunks), IOResult(cache=cache)
-    raw = await _read_stdin_async(stdin)
-    if raw is None:
-        raise ValueError("tail: missing operand")
-    if bytes_mode is not None:
-        return raw[-bytes_mode:], IOResult()
-    return tail_bytes(raw, lines, plus_mode=plus_mode), IOResult()
+        return _tail_multi(accessor, paths, n_int, c_int, from_line,
+                           show_headers), IOResult()
+    source = _resolve_source(stdin, "tail: missing operand")
+    return generic_tail(source, n=n_int, c=c_int,
+                        from_line=from_line), IOResult()

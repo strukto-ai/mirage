@@ -12,12 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import zlib
 from collections.abc import AsyncIterator
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.builtin.generic.gzip import extract_level
+from mirage.commands.builtin.generic.gzip import gzip as generic_gzip
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.disk.glob import resolve_glob
@@ -26,39 +26,6 @@ from mirage.core.disk.unlink import unlink
 from mirage.core.disk.write import write_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-def _extract_level(extra: dict) -> int:
-    for n in range(9, 0, -1):
-        if extra.get(str(n)):
-            return n
-    return zlib.Z_DEFAULT_COMPRESSION
-
-
-async def _gzip_compress_stream(
-    source: AsyncIterator[bytes],
-    level: int = zlib.Z_DEFAULT_COMPRESSION,
-) -> AsyncIterator[bytes]:
-    compressor = zlib.compressobj(level, zlib.DEFLATED, zlib.MAX_WBITS | 16)
-    async for chunk in source:
-        compressed = compressor.compress(chunk)
-        if compressed:
-            yield compressed
-    tail = compressor.flush()
-    if tail:
-        yield tail
-
-
-async def _gzip_decompress_stream(
-        source: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
-    decompressor = zlib.decompressobj(zlib.MAX_WBITS | 16)
-    async for chunk in source:
-        decompressed = decompressor.decompress(chunk)
-        if decompressed:
-            yield decompressed
-    tail = decompressor.flush()
-    if tail:
-        yield tail
 
 
 @command("gzip", resource="disk", spec=SPECS["gzip"], write=True)
@@ -74,40 +41,17 @@ async def gzip(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    level = _extract_level(_extra)
-    if not paths:
-        source = _resolve_source(stdin, "gzip: missing input")
-        if d:
-            return _gzip_decompress_stream(source), IOResult()
-        return _gzip_compress_stream(source, level=level), IOResult()
-
-    paths = await resolve_glob(accessor, paths, index)
-    if c:
-        chunks: list[bytes] = []
-        for p in paths:
-            raw = await read_bytes(accessor, p)
-            if d:
-                chunks.append(zlib.decompress(raw, zlib.MAX_WBITS | 16))
-            else:
-                chunks.append(
-                    zlib.compress(raw, level=level, wbits=zlib.MAX_WBITS | 16))
-        return b"".join(chunks), IOResult()
-
-    writes: dict[str, bytes] = {}
-    for p in paths:
-        raw = await read_bytes(accessor, p)
-        stripped = p.strip_prefix
-        if d:
-            out_path = stripped.removesuffix(".gz") if stripped.endswith(
-                ".gz") else stripped + ".out"
-            out_data = zlib.decompress(raw, zlib.MAX_WBITS | 16)
-        else:
-            out_path = stripped + ".gz"
-            out_data = zlib.compress(raw,
-                                     level=level,
-                                     wbits=zlib.MAX_WBITS | 16)
-        await write_bytes(accessor, out_path, out_data)
-        writes[out_path] = out_data
-        if not k:
-            await unlink(accessor, p)
-    return None, IOResult(writes=writes)
+    level = extract_level(_extra)
+    if paths:
+        paths = await resolve_glob(accessor, paths, index)
+    return await generic_gzip(paths,
+                              read_bytes=read_bytes,
+                              write_bytes=write_bytes,
+                              unlink=unlink,
+                              accessor=accessor,
+                              stdin=stdin,
+                              decompress=d,
+                              keep=k,
+                              force=f,
+                              to_stdout=c,
+                              level=level)

@@ -12,10 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import hashlib
-
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.md5 import md5 as generic_md5
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.disk.glob import resolve_glob
@@ -36,6 +35,4 @@ async def md5(
     if accessor.root is None or not paths:
         raise ValueError("md5: missing operand")
     paths = await resolve_glob(accessor, paths, index)
-    data = await read_bytes(accessor, paths[0])
-    result = hashlib.md5(data).hexdigest()
-    return result.encode(), IOResult()
+    return await generic_md5(paths, read_bytes=read_bytes, accessor=accessor)

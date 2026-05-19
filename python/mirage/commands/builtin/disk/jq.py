@@ -16,15 +16,14 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.jq import jq as generic_jq
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.disk.glob import resolve_glob
 from mirage.core.disk.read import read_bytes
 from mirage.core.disk.stat import stat as _stat_async
 from mirage.core.disk.stream import read_stream as _stream
-from mirage.core.jq import (eval_jsonl_stream, format_jq_output, is_jsonl_path,
-                            is_streamable_jsonl_expr, jq_eval, parse_json_auto,
-                            parse_json_path)
+from mirage.core.jq import is_jsonl_path, is_streamable_jsonl_expr
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision import Precision, ProvisionResult
 from mirage.types import PathSpec
@@ -72,37 +71,16 @@ async def jq(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not texts:
-        raise ValueError("jq: usage: jq EXPRESSION [path]")
-    expression = texts[0]
     if paths and accessor.root is not None:
         paths = await resolve_glob(accessor, paths, index)
-        if is_jsonl_path(
-                paths[0].original) and is_streamable_jsonl_expr(expression):
-            source = _stream(accessor, paths[0])
-            return eval_jsonl_stream(source, expression), IOResult()
-        outputs: list[bytes] = []
-        for p in paths:
-            data = parse_json_path(await read_bytes(accessor, p), p.original)
-            if s:
-                data = [data] if not isinstance(data, list) else data
-            result = jq_eval(data, expression.strip())
-            spread = "[]" in expression
-            outputs.append(format_jq_output(result, r, c, spread))
-        return b"".join(outputs), IOResult()
-    if stdin is not None:
-        if isinstance(stdin, bytes):
-            raw_bytes = stdin
-        else:
-            raw_bytes = b""
-            async for chunk in stdin:
-                raw_bytes += chunk
-        if s:
-            data = parse_json_auto(raw_bytes)
-            if not isinstance(data, list):
-                data = [data]
-        else:
-            data = parse_json_auto(raw_bytes)
-        result = jq_eval(data, expression.strip())
-        spread = "[]" in expression
-        return format_jq_output(result, r, c, spread), IOResult()
+    else:
+        paths = []
+    return await generic_jq(paths,
+                            *texts,
+                            read_bytes=read_bytes,
+                            read_stream=_stream,
+                            accessor=accessor,
+                            stdin=stdin,
+                            r=r,
+                            c=c,
+                            s=s)

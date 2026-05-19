@@ -15,6 +15,13 @@
 PROMPT = """\
 {prefix}
   <database>/
-    <collection>.jsonl
-  Each .jsonl file is a collection. Documents are JSON objects, one per line.
-  Use jq to query fields. grep to search across documents."""
+    database.json                  collections, views, and document counts
+    collections/<collection>/
+      schema.json                  sampled field types, validator, indexes
+      documents.jsonl              streamed BSON Extended JSON documents
+    views/<view>/
+      schema.json
+      documents.jsonl
+  Read database.json first to discover entities. Use schema.json before
+  reading large document streams; head, tail, wc, grep, rg, and jq understand
+  documents.jsonl, with directory-scope grep/rg pushed down to MongoDB."""

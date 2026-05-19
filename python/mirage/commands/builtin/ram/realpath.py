@@ -12,23 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
-
 from mirage.accessor.ram import RAMAccessor
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.realpath import \
+    realpath as generic_realpath
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.ram.glob import resolve_glob
 from mirage.core.ram.stat import stat as stat_core
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-async def _exists(accessor: RAMAccessor, path: str) -> bool:
-    try:
-        await stat_core(accessor, path)
-        return True
-    except (FileNotFoundError, ValueError):
-        return False
 
 
 @command("realpath", resource="ram", spec=SPECS["realpath"])
@@ -39,14 +32,12 @@ async def realpath(
     stdin: bytes | None = None,
     e: bool = False,
     m: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    paths = await resolve_glob(accessor, paths or [], _extra.get("index"))
-    lines: list[str] = []
-    for p in paths:
-        resolved = posixpath.normpath(p.original)
-        if e and not await _exists(accessor, p.strip_prefix):
-            raise FileNotFoundError(
-                f"realpath: '{p.original}': No such file or directory")
-        lines.append(resolved)
-    return ("\n".join(lines) + "\n").encode(), IOResult()
+    paths = await resolve_glob(accessor, paths or [], index)
+    return await generic_realpath(paths,
+                                  stat_fn=stat_core,
+                                  accessor=accessor,
+                                  e=e,
+                                  m=m)

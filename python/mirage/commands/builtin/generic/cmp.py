@@ -1,0 +1,54 @@
+from collections.abc import Awaitable, Callable
+
+from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
+
+
+async def cmp_cmd(
+    paths: list[PathSpec],
+    *,
+    read_bytes: Callable[..., Awaitable[bytes]],
+    accessor: object = None,
+    silent: bool = False,
+    verbose: bool = False,
+    limit: int | None = None,
+    print_bytes: bool = False,
+    skip: int | None = None,
+) -> tuple[ByteSource | None, IOResult]:
+    if len(paths) < 2:
+        raise ValueError("cmp: requires two paths")
+    p0, p1 = paths[0], paths[1]
+    data1 = await read_bytes(accessor, p0)
+    data2 = await read_bytes(accessor, p1)
+    if skip is not None:
+        data1 = data1[skip:]
+        data2 = data2[skip:]
+    if limit is not None:
+        data1 = data1[:limit]
+        data2 = data2[:limit]
+    if data1 == data2:
+        return None, IOResult()
+    if silent:
+        return None, IOResult(exit_code=1)
+    if verbose:
+        out_lines: list[str] = []
+        for idx in range(min(len(data1), len(data2))):
+            if data1[idx] != data2[idx]:
+                out_lines.append(
+                    f"{idx + 1} {oct(data1[idx])} {oct(data2[idx])}")
+        return "\n".join(out_lines).encode(), IOResult(exit_code=1)
+    for idx in range(min(len(data1), len(data2))):
+        if data1[idx] != data2[idx]:
+            line = 1 + data1[:idx].count(ord(b"\n"))
+            msg = (f"{p0.original} {p1.original}"
+                   f" differ: byte {idx + 1}, line {line}")
+            if print_bytes:
+                msg += (f" is {oct(data1[idx])} {chr(data1[idx])}"
+                        f" {oct(data2[idx])} {chr(data2[idx])}")
+            return msg.encode(), IOResult(exit_code=1)
+    shorter = p0.original if len(data1) < len(data2) else p1.original
+    msg = f"cmp: EOF on {shorter}"
+    return msg.encode(), IOResult(exit_code=1)
+
+
+__all__ = ["cmp_cmd"]

@@ -12,15 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import io
-import zipfile
 from collections.abc import AsyncIterator
 
 from mirage.accessor.ram import RAMAccessor
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.unzip import unzip as generic_unzip
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.ram.glob import resolve_glob
-from mirage.core.ram.mkdir_p import mkdir_p as _mkdir_p
+from mirage.core.ram.mkdir import mkdir as _mkdir
 from mirage.core.ram.read import read_bytes as _read_bytes
 from mirage.core.ram.write import write_bytes as _write_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -39,58 +39,20 @@ async def unzip(
     q: bool = False,
     p: bool = False,
     t: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if accessor.store is None or not paths:
         raise ValueError("unzip: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
-    archive_path = paths[0]
-    data = await _read_bytes(accessor, archive_path)
-    with zipfile.ZipFile(io.BytesIO(data), "r") as zf:
-        if args_l:
-            lines = ["  Length      Name", "---------  ----"]
-            for info in zf.infolist():
-                lines.append(f"{info.file_size:>9}  {info.filename}")
-            return ("\n".join(lines) + "\n").encode(), IOResult()
-        if t:
-            bad = zf.testzip()
-            if bad is None:
-                msg = f"No errors detected in {archive_path.original}\n"
-            else:
-                msg = f"first bad file: {bad}\n"
-            return msg.encode(), IOResult()
-        if p:
-            chunks: list[bytes] = []
-            for info in zf.infolist():
-                if not info.is_dir():
-                    chunks.append(zf.read(info.filename))
-            return b"".join(chunks), IOResult()
-        d_str = d.original if isinstance(d, PathSpec) else d
-        dest_raw = d_str if d_str else "/"
-        mount_prefix = archive_path.prefix if isinstance(
-            archive_path, PathSpec) else ""
-        if mount_prefix and dest_raw.startswith(mount_prefix + "/"):
-            dest = dest_raw[len(mount_prefix):]
-        elif dest_raw == mount_prefix:
-            dest = "/"
-        else:
-            dest = dest_raw
-        writes: dict[str, bytes] = {}
-        output_lines: list[str] = []
-        for info in zf.infolist():
-            if not info.is_dir():
-                content = zf.read(info.filename)
-                entry_name = info.filename.lstrip("/")
-                out_path = dest.rstrip("/") + "/" + entry_name
-                parent = out_path.rsplit("/", 1)[0] or "/"
-                if parent != "/":
-                    await _mkdir_p(accessor, parent)
-                await _write_bytes(accessor, out_path, content)
-                report_path = (mount_prefix +
-                               out_path) if mount_prefix else out_path
-                writes[report_path] = content
-                if not q:
-                    output_lines.append(f"  inflating: {report_path}")
-    output = ("\n".join(output_lines) +
-              "\n").encode() if output_lines else None
-    return output, IOResult(writes=writes)
+    paths = await resolve_glob(accessor, paths, index)
+    return await generic_unzip(paths,
+                               read_bytes=_read_bytes,
+                               write_bytes=_write_bytes,
+                               mkdir_fn=_mkdir,
+                               accessor=accessor,
+                               o=o,
+                               args_l=args_l,
+                               d=d,
+                               q=q,
+                               p=p,
+                               t=t)

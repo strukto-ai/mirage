@@ -12,29 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import textwrap
 from collections.abc import AsyncIterator
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.fmt import fmt as generic_fmt
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.ram.glob import resolve_glob
-from mirage.core.ram.read import read_bytes as _read_bytes
+from mirage.core.ram.read import read_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-def _fmt_text(text: str, width: int) -> str:
-    paragraphs = text.split("\n\n")
-    formatted = []
-    for para in paragraphs:
-        para = para.strip()
-        if para:
-            formatted.append(textwrap.fill(para, width=width))
-        else:
-            formatted.append("")
-    return "\n\n".join(formatted) + "\n"
 
 
 @command("fmt", resource="ram", spec=SPECS["fmt"])
@@ -44,18 +32,15 @@ async def fmt(
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     w: str | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    width = int(w) if w is not None else 75
     if paths and accessor.store is not None:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
-        all_text: list[str] = []
-        for p in paths:
-            data = (await _read_bytes(accessor, p)).decode(errors="replace")
-            all_text.append(data)
-        return _fmt_text("".join(all_text), width).encode(), IOResult()
-    raw = await _read_stdin_async(stdin)
-    if raw is None:
-        raise ValueError("fmt: missing operand")
-    text = raw.decode(errors="replace")
-    return _fmt_text(text, width).encode(), IOResult()
+        paths = await resolve_glob(accessor, paths, index)
+    else:
+        paths = []
+    return await generic_fmt(paths,
+                             read_bytes=read_bytes,
+                             accessor=accessor,
+                             stdin=stdin,
+                             width=int(w) if w is not None else 75)

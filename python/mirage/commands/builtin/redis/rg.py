@@ -13,32 +13,19 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
-from functools import partial
 
 from mirage.accessor.redis import RedisAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.grep_helper import (compile_pattern, grep_lines,
-                                                 grep_stream)
-from mirage.commands.builtin.rg_helper import rg_folder_filetype, rg_full
-from mirage.commands.builtin.utils.stream import _resolve_source
-from mirage.commands.builtin.utils.wrap import call_readdir, call_stat
+from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.redis.glob import resolve_glob
 from mirage.core.redis.read import read as _read
-from mirage.core.redis.read import read_bytes as _read_bytes
 from mirage.core.redis.readdir import readdir as _readdir
 from mirage.core.redis.stat import stat as _stat
 from mirage.core.redis.stream import stream as _read_stream
-from mirage.io.stream import exit_on_empty
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileType, PathSpec
-
-
-async def _wrap_read(accessor, path, index: IndexCacheStore = None, prefix=""):
-    spec = (path if isinstance(path, PathSpec) else PathSpec(
-        original=path, directory=path, prefix=prefix))
-    return await _read(accessor, spec, index)
+from mirage.types import PathSpec
 
 
 @command("rg", resource="redis", spec=SPECS["rg"])
@@ -62,6 +49,7 @@ async def rg(
     hidden: bool = False,
     type: str | None = None,
     glob: str | None = None,
+    filetype_fns: dict | None = None,
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -74,144 +62,32 @@ async def rg(
     if C is not None:
         context_before = context_after = int(C)
 
-    filetype_fns = _extra.get("filetype_fns") or {}
-
     if paths and accessor.store is not None:
         paths = await resolve_glob(accessor, paths, index)
-        mount_prefix = paths[0].prefix if paths else ""
-        rd = partial(call_readdir,
-                     _readdir,
-                     accessor,
-                     index=index,
-                     prefix=mount_prefix)
-        st = partial(call_stat, _stat, accessor, prefix=mount_prefix)
-        rb = partial(_wrap_read, accessor, prefix=mount_prefix)
 
-        is_dir = False
-        try:
-            s = await _stat(accessor, paths[0])
-            is_dir = s.type == FileType.DIRECTORY
-        except (FileNotFoundError, ValueError):
-            try:
-                await _readdir(accessor, paths[0], index)
-                is_dir = True
-            except (FileNotFoundError, ValueError):
-                pass
-
-        if is_dir and filetype_fns:
-            bound_ft = {
-                ext: partial(fn, accessor)
-                for ext, fn in filetype_fns.items()
-            }
-            warnings: list[str] = []
-            results = await rg_folder_filetype(
-                rd,
-                st,
-                rb,
-                paths[0].original,
-                pattern,
-                bound_ft,
-                ignore_case=i,
-                invert=v,
-                line_numbers=n,
-                count_only=c,
-                files_only=args_l,
-                only_matching=o,
-                max_count=max_count,
-                fixed_string=F,
-                whole_word=w,
-                file_type=type,
-                glob_pattern=glob,
-                hidden=hidden,
-                warnings=warnings,
-            )
-            stderr = "\n".join(warnings).encode() if warnings else None
-            if not results:
-                return b"", IOResult(exit_code=1, stderr=stderr)
-            if mount_prefix and args_l:
-                results = [mount_prefix + "/" + r.lstrip("/") for r in results]
-            return "\n".join(results).encode(), IOResult(stderr=stderr)
-
-        needs_full = args_l or context_before or context_after or type or glob
-        if needs_full:
-            warnings_f: list[str] = []
-            results = await rg_full(
-                rd,
-                st,
-                rb,
-                paths[0].original,
-                pattern,
-                ignore_case=i,
-                invert=v,
-                line_numbers=n,
-                count_only=c,
-                files_only=args_l,
-                fixed_string=F,
-                only_matching=o,
-                max_count=max_count,
-                whole_word=w,
-                context_before=context_before,
-                context_after=context_after,
-                file_type=type,
-                glob_pattern=glob,
-                hidden=hidden,
-                warnings=warnings_f,
-            )
-            stderr = "\n".join(warnings_f).encode() if warnings_f else None
-            if not results:
-                return b"", IOResult(exit_code=1, stderr=stderr)
-            if mount_prefix and args_l:
-                results = [mount_prefix + "/" + r.lstrip("/") for r in results]
-            return "\n".join(results).encode(), IOResult(stderr=stderr)
-
-        pat = compile_pattern(pattern, i, F, w)
-
-        if len(paths) > 1:
-            all_results: list[str] = []
-            for p in paths:
-                data = (await
-                        _read_bytes(accessor,
-                                    p)).decode(errors="replace").splitlines()
-                hits = grep_lines(p.original, data, pat, v, n, c, args_l, o,
-                                  max_count)
-                if c:
-                    if hits:
-                        all_results.append(f"{p.original}:{hits[0]}")
-                elif args_l:
-                    all_results.extend(hits)
-                else:
-                    all_results.extend(f"{p.original}:{r}" for r in hits)
-            if not all_results:
-                return b"", IOResult(exit_code=1)
-            if mount_prefix:
-                all_results = [
-                    mount_prefix + "/" + r.lstrip("/") for r in all_results
-                ]
-            return "\n".join(all_results).encode(), IOResult()
-
-        source = _read_stream(accessor, paths[0])
-        rg_strm = grep_stream(
-            source,
-            pat,
-            invert=v,
-            line_numbers=n,
-            only_matching=o,
-            max_count=max_count,
-            count_only=c,
-        )
-        io = IOResult()
-        return exit_on_empty(rg_strm, io), io
-
-    source = _resolve_source(stdin, "rg: usage: rg [flags] pattern path")
-    pat = compile_pattern(pattern, i, F, w)
-    rg_strm = grep_stream(
-        source,
-        pat,
+    return await generic_rg(
+        paths,
+        pattern=pattern,
+        readdir=_readdir,
+        stat=_stat,
+        read_bytes=_read,
+        read_stream=_read_stream,
+        accessor=accessor,
+        filetype_fns=filetype_fns,
+        stdin=stdin,
+        ignore_case=i,
         invert=v,
         line_numbers=n,
+        count_only=c,
+        files_only=args_l,
+        whole_word=w,
+        fixed_string=F,
         only_matching=o,
         max_count=max_count,
-        count_only=c,
+        context_before=context_before,
+        context_after=context_after,
+        hidden=hidden,
+        file_type=type,
+        glob_pattern=glob,
+        index=index,
     )
-    io = IOResult()
-    return exit_on_empty(rg_strm, io), io

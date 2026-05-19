@@ -120,18 +120,22 @@ Calling `https://slack.com/api/*` directly from a browser fails CORS. The proxy 
 /slack/
   channels/
     <channel-name>__<channel-id>/
-      <yyyy-mm-dd>.jsonl
-      ...
+      <yyyy-mm-dd>/
+        chat.jsonl
+        files/
+          <name>__<F-id>.<ext>
   dms/
     <user-name>__<dm-id>/
-      <yyyy-mm-dd>.jsonl
-      ...
+      <yyyy-mm-dd>/
+        chat.jsonl
+        files/
+          <name>__<F-id>.<ext>
   users/
     <username>__<user-id>.json
     ...
 ```
 
-Each channel directory contains day-partitioned JSONL files for the last 90 days (or since channel creation). Each user file is the full profile JSON returned by `users.profile.get`. The Slack ID is embedded after `__` in directory and file names so you can extract it for the resource-specific commands without an extra lookup.
+Each channel or DM directory contains day-partitioned directories for the last 90 days (or since channel creation). Each date directory contains `chat.jsonl` plus a `files/` directory for attachments shared that day. Each user file is the full profile JSON returned by `users.profile.get`. The Slack ID is embedded after `__` in directory and file names so you can extract it for the resource-specific commands without an extra lookup.
 
 ## Shell commands
 
@@ -140,7 +144,7 @@ Every standard MIRAGE shell command works on the mounted Slack tree:
 | Command         | Notes                                      |
 | --------------- | ------------------------------------------ |
 | `ls`            | List channels, DMs, users, dates           |
-| `cat`           | Read `.jsonl` history or user `.json`      |
+| `cat`           | Read `chat.jsonl`, user `.json`, or files  |
 | `head` / `tail` | First/last N lines                         |
 | `grep` / `rg`   | Pattern search (file or directory level)   |
 | `jq`            | Query JSON; use `.[]` prefix for JSONL     |

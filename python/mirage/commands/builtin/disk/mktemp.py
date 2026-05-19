@@ -12,9 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import uuid
-
 from mirage.accessor.disk import DiskAccessor
+from mirage.commands.builtin.generic.mktemp import mktemp as generic_mktemp
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.disk.mkdir import mkdir as local_mkdir
@@ -34,15 +33,10 @@ async def mktemp(
     t: bool = False,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    parent = "/tmp" if t else (p if p else "/tmp")
-    suffix = str(uuid.uuid4())[:8]
-    template = texts[0] if texts else "tmp.XXXXXXXXXX"
-    name = template.replace(
-        "X" * template.count("X"),
-        suffix) if "X" in template else f"{template}.{suffix}"
-    path = f"{parent.rstrip('/')}/{name}"
-    if d:
-        await local_mkdir(accessor, path)
-    else:
-        await write_bytes(accessor, path, b"")
-    return (path + "\n").encode(), IOResult()
+    return await generic_mktemp(*texts,
+                                mkdir_fn=local_mkdir,
+                                write_bytes_fn=write_bytes,
+                                accessor=accessor,
+                                d=d,
+                                p=p,
+                                t=t)

@@ -15,27 +15,15 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.split import split as generic_split
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.redis.glob import resolve_glob
 from mirage.core.redis.stream import stream as _stream_core
-from mirage.core.redis.write import write_bytes as _write_bytes
-from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.core.redis.write import write_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-def _alpha_suffix(index: int, length: int) -> str:
-    chars: list[str] = []
-    for _ in range(length):
-        chars.append(chr(ord("a") + index % 26))
-        index //= 26
-    return "".join(reversed(chars))
-
-
-def _numeric_suffix(index: int, length: int) -> str:
-    return str(index).zfill(length)
 
 
 @command("split", resource="redis", spec=SPECS["split"], write=True)
@@ -49,73 +37,20 @@ async def split(
     n: str | None = None,
     d: bool = False,
     a: str | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths and accessor.store is not None:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
-    prefix_name = paths[1].strip_prefix if len(paths) >= 2 else "x"
-    lines_per_file = int(args_l) if args_l else (
-        1000 if not b and not n else 0)
-    byte_limit = int(b) if b else 0
-    n_chunks = int(n) if n else 0
-    suffix_len = int(a) if a else 2
-    suffix_fn = _numeric_suffix if d else _alpha_suffix
-
-    if paths and accessor.store is not None:
-        source: AsyncIterator[bytes] = _stream_core(accessor, paths[0])
-        [paths[0].original]
+        paths = await resolve_glob(accessor, paths, index)
     else:
-        source = _resolve_source(stdin, "split: missing input")
-
-    writes: dict[str, bytes] = {}
-    file_idx = 0
-
-    if n_chunks > 0:
-        all_data = bytearray()
-        async for chunk in source:
-            all_data.extend(chunk)
-        total = len(all_data)
-        chunk_size = max(1, (total + n_chunks - 1) // n_chunks)
-        offset = 0
-        for i in range(n_chunks):
-            part = bytes(all_data[offset:offset + chunk_size])
-            if not part:
-                break
-            out_path = prefix_name + suffix_fn(i, suffix_len)
-            await _write_bytes(accessor, out_path, part)
-            writes[out_path] = part
-            offset += chunk_size
-    elif byte_limit > 0:
-        buf = bytearray()
-        async for chunk in source:
-            buf.extend(chunk)
-            while len(buf) >= byte_limit:
-                out_path = prefix_name + suffix_fn(file_idx, suffix_len)
-                data = bytes(buf[:byte_limit])
-                await _write_bytes(accessor, out_path, data)
-                writes[out_path] = data
-                buf = buf[byte_limit:]
-                file_idx += 1
-        if buf:
-            out_path = prefix_name + suffix_fn(file_idx, suffix_len)
-            data = bytes(buf)
-            await _write_bytes(accessor, out_path, data)
-            writes[out_path] = data
-    else:
-        line_buf: list[bytes] = []
-        async for line in AsyncLineIterator(source):
-            line_buf.append(line)
-            if len(line_buf) >= lines_per_file:
-                out_path = prefix_name + suffix_fn(file_idx, suffix_len)
-                data = b"\n".join(line_buf) + b"\n"
-                await _write_bytes(accessor, out_path, data)
-                writes[out_path] = data
-                line_buf = []
-                file_idx += 1
-        if line_buf:
-            out_path = prefix_name + suffix_fn(file_idx, suffix_len)
-            data = b"\n".join(line_buf) + b"\n"
-            await _write_bytes(accessor, out_path, data)
-            writes[out_path] = data
-
-    return None, IOResult(writes=writes)
+        paths = []
+    return await generic_split(paths,
+                               read_stream=_stream_core,
+                               write_bytes=write_bytes,
+                               accessor=accessor,
+                               stdin=stdin,
+                               lines_per_file=int(args_l) if args_l else 0,
+                               byte_limit=int(b) if b else 0,
+                               n_chunks=int(n) if n else 0,
+                               suffix_len=int(a) if a else 2,
+                               numeric_suffix=d)

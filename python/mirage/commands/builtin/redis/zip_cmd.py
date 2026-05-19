@@ -12,12 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import io
-import posixpath
-import zipfile
 from collections.abc import AsyncIterator
 
 from mirage.accessor.redis import RedisAccessor
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.zip_cmd import zip_cmd as generic_zip
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.redis.glob import resolve_glob
@@ -36,25 +35,16 @@ async def zip_cmd(
     r: bool = False,
     j: bool = False,
     q: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if accessor.store is None or len(paths) < 2:
         raise ValueError("zip: usage: zip archive.zip file1 [file2 ...]")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
-    archive_path = paths[0]
-    file_paths = paths[1:]
-    buf = io.BytesIO()
-    output_lines: list[str] = []
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for p in file_paths:
-            data = await _read_bytes(accessor, p)
-            arcname = posixpath.basename(
-                p.original) if j else p.original.lstrip("/")
-            zf.writestr(arcname, data)
-            if not q:
-                output_lines.append(f"  adding: {arcname}")
-    archive = buf.getvalue()
-    await _write_bytes(accessor, archive_path, archive)
-    stdout = ("\n".join(output_lines) +
-              "\n").encode() if output_lines else None
-    return stdout, IOResult(writes={archive_path.original: archive})
+    paths = await resolve_glob(accessor, paths, index)
+    return await generic_zip(paths,
+                             read_bytes=_read_bytes,
+                             write_bytes=_write_bytes,
+                             accessor=accessor,
+                             r=r,
+                             j=j,
+                             q=q)

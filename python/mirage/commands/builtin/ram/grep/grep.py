@@ -13,35 +13,20 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
-from functools import partial
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.aggregators import prefix_aggregate
-from mirage.commands.builtin.grep_helper import (compile_pattern,
-                                                 grep_files_only,
-                                                 grep_folder_filetype,
-                                                 grep_lines, grep_recursive,
-                                                 grep_stream)
-from mirage.commands.builtin.utils.stream import _resolve_source
-from mirage.commands.builtin.utils.wrap import call_readdir, call_stat
+from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.ram.glob import resolve_glob
 from mirage.core.ram.read import read as _read
-from mirage.core.ram.read import read_bytes as _read_bytes
 from mirage.core.ram.readdir import readdir as _readdir
 from mirage.core.ram.stat import stat as _stat
 from mirage.core.ram.stream import read_stream as _read_stream
-from mirage.io.stream import exit_on_empty, quiet_match
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileType, PathSpec
-
-
-async def _wrap_read(accessor, path, index: IndexCacheStore = None, prefix=""):
-    spec = (path if isinstance(path, PathSpec) else PathSpec(
-        original=path, directory=path, prefix=prefix))
-    return await _read(accessor, spec, index)
+from mirage.types import PathSpec
 
 
 @command("grep",
@@ -84,167 +69,30 @@ async def grep(
     max_count = int(m) if m is not None else None
     after_ctx = int(A) if A is not None else (int(C) if C is not None else 0)
     before_ctx = int(B) if B is not None else (int(C) if C is not None else 0)
-
-    filetype_fns = _extra.get("filetype_fns") or {}
-
-    if paths and accessor.store is not None:
-        paths = await resolve_glob(accessor, paths, index)
-        mount_prefix = paths[0].prefix if paths else ""
-        rd = partial(call_readdir,
-                     _readdir,
-                     accessor,
-                     index=index,
-                     prefix=mount_prefix)
-        st = partial(call_stat, _stat, accessor, prefix=mount_prefix)
-        rb = partial(_wrap_read, accessor, prefix=mount_prefix)
-
-        if (r or R) and filetype_fns:
-            bound_ft = {
-                ext: partial(fn, accessor)
-                for ext, fn in filetype_fns.items()
-            }
-            warnings: list[str] = []
-            results = await grep_folder_filetype(
-                rd,
-                st,
-                rb,
-                paths[0].original,
-                pattern,
-                bound_ft,
-                ignore_case=i,
-                invert=v,
-                line_numbers=n,
-                count_only=c,
-                files_only=args_l,
-                only_matching=o,
-                max_count=max_count,
-                fixed_string=F,
-                whole_word=w,
-                warnings=warnings,
-                prefix=mount_prefix,
-            )
-            stderr = "\n".join(warnings).encode() if warnings else None
-            if not results:
-                return b"", IOResult(exit_code=1, stderr=stderr)
-            return "\n".join(results).encode(), IOResult(stderr=stderr)
-
-        if args_l:
-            warnings_l: list[str] = []
-            results = await grep_files_only(
-                rd,
-                st,
-                rb,
-                paths[0].original,
-                pattern,
-                recursive=r or R,
-                ignore_case=i,
-                invert=v,
-                line_numbers=n,
-                count_only=c,
-                fixed_string=F,
-                only_matching=o,
-                max_count=max_count,
-                whole_word=w,
-                warnings=warnings_l,
-            )
-            stderr = "\n".join(warnings_l).encode() if warnings_l else None
-            if not results:
-                return b"", IOResult(exit_code=1, stderr=stderr)
-            return "\n".join(results).encode(), IOResult(stderr=stderr)
-
-        if r or R:
-            pat = compile_pattern(pattern, i, F, w)
-            all_results: list[str] = []
-            warnings_r: list[str] = []
-            for p in paths:
-                s = await _stat(accessor, p)
-                if s.type == FileType.DIRECTORY:
-                    res = await grep_recursive(
-                        rd,
-                        st,
-                        rb,
-                        p.original,
-                        pat,
-                        invert=v,
-                        line_numbers=n,
-                        count_only=c,
-                        files_only=False,
-                        only_matching=o,
-                        max_count=max_count,
-                        warnings=warnings_r,
-                        read_stream_fn=partial(_read_stream, accessor),
-                    )
-                    all_results.extend(res)
-                else:
-                    data = (await _read_bytes(
-                        accessor, p)).decode(errors="replace").splitlines()
-                    hits = grep_lines(p.original, data, pat, v, n, c, args_l,
-                                      o, max_count)
-                    if c and hits:
-                        all_results.append(f"{p.original}:{hits[0]}")
-                    else:
-                        all_results.extend(
-                            f"{p.original}:{rl}" if len(paths) > 1 else rl
-                            for rl in hits)
-            stderr = ("\n".join(warnings_r).encode() if warnings_r else None)
-            if not all_results:
-                return b"", IOResult(exit_code=1, stderr=stderr)
-            return "\n".join(all_results).encode(), IOResult(stderr=stderr)
-
-        pat = compile_pattern(pattern, i, F, w)
-
-        if len(paths) > 1:
-            all_results: list[str] = []
-            for p in paths:
-                data = (await
-                        _read_bytes(accessor,
-                                    p)).decode(errors="replace").splitlines()
-                hits = grep_lines(p.original, data, pat, v, n, c, args_l, o,
-                                  max_count)
-                if c:
-                    if hits:
-                        all_results.append(f"{p.original}:{hits[0]}")
-                elif args_l:
-                    all_results.extend(hits)
-                else:
-                    all_results.extend(f"{p.original}:{r}" for r in hits)
-            if not all_results:
-                return b"", IOResult(exit_code=1)
-            return "\n".join(all_results).encode(), IOResult()
-
-        source = _read_stream(accessor, paths[0])
-        grep_strm = grep_stream(
-            source,
-            pat,
-            invert=v,
-            line_numbers=n,
-            only_matching=o,
-            max_count=max_count,
-            count_only=c,
-            after_context=after_ctx,
-            before_context=before_ctx,
-        )
-        if q:
-            io = IOResult(exit_code=1)
-            return quiet_match(grep_strm, io), io
-        io = IOResult()
-        return exit_on_empty(grep_strm, io), io
-
-    source = _resolve_source(stdin, "grep: usage: grep [flags] pattern [path]")
-    pat = compile_pattern(pattern, i, F, w)
-    grep_strm = grep_stream(
-        source,
-        pat,
+    resolved = (await resolve_glob(accessor, paths, index)
+                if paths and accessor.store is not None else [])
+    return await generic_grep(
+        resolved,
+        pattern=pattern,
+        readdir=_readdir,
+        stat=_stat,
+        read_bytes=_read,
+        read_stream=_read_stream,
+        accessor=accessor,
+        filetype_fns=_extra.get("filetype_fns"),
+        stdin=stdin,
+        ignore_case=i,
         invert=v,
         line_numbers=n,
-        only_matching=o,
-        max_count=max_count,
         count_only=c,
+        files_only=args_l,
+        whole_word=w,
+        fixed_string=F,
+        only_matching=o,
+        quiet=q,
+        recursive=r or R,
+        max_count=max_count,
         after_context=after_ctx,
         before_context=before_ctx,
+        index=index,
     )
-    if q:
-        io = IOResult(exit_code=1)
-        return quiet_match(grep_strm, io), io
-    io = IOResult()
-    return exit_on_empty(grep_strm, io), io

@@ -15,21 +15,14 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.tac import tac as generic_tac
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.redis.glob import resolve_glob
 from mirage.core.redis.stream import stream as _stream_core
-from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-async def _collect_lines(source: AsyncIterator[bytes]) -> list[bytes]:
-    lines: list[bytes] = []
-    async for line in AsyncLineIterator(source):
-        lines.append(line)
-    return lines
 
 
 @command("tac", resource="redis", spec=SPECS["tac"])
@@ -38,16 +31,14 @@ async def tac(
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    cache: list[str] = []
     if paths and accessor.store is not None:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
-        source: AsyncIterator[bytes] = _stream_core(accessor, paths[0])
-        cache = [paths[0].original]
+        paths = await resolve_glob(accessor, paths, index)
     else:
-        source = _resolve_source(stdin, "tac: missing input")
-
-    lines = await _collect_lines(source)
-    lines.reverse()
-    return b"\n".join(lines) + b"\n", IOResult(cache=cache)
+        paths = []
+    return await generic_tac(paths,
+                             read_stream=_stream_core,
+                             accessor=accessor,
+                             stdin=stdin)

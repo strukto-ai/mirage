@@ -15,6 +15,7 @@ async def test_head_first_c_bytes_fast_path():
 
 @pytest.mark.asyncio
 async def test_head_first_c_bytes_across_chunks():
+
     async def src():
         yield b"hel"
         yield b"lo wor"
@@ -44,6 +45,7 @@ async def test_head_first_n_lines_from_bytes():
 
 @pytest.mark.asyncio
 async def test_head_first_n_lines_from_stream():
+
     async def src():
         yield b"a\nb"
         yield b"\nc\nd\n"

@@ -12,9 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import hashlib
-
 from mirage.accessor.ram import RAMAccessor
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.md5 import md5 as generic_md5
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.ram.glob import resolve_glob
@@ -29,14 +29,10 @@ async def md5(
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if accessor.store is None or not paths:
         raise ValueError("md5: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
-    outputs: list[str] = []
-    for p in paths:
-        data = await read_bytes(accessor, p)
-        digest = hashlib.md5(data).hexdigest()
-        outputs.append(f"{digest}  {p.original}")
-    return "\n".join(outputs).encode(), IOResult()
+    paths = await resolve_glob(accessor, paths, index)
+    return await generic_md5(paths, read_bytes=read_bytes, accessor=accessor)

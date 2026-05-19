@@ -12,24 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
-
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.realpath import \
+    realpath as generic_realpath
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.disk.glob import resolve_glob
 from mirage.core.disk.stat import stat as stat_impl
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-async def _exists(accessor: DiskAccessor, path: str) -> bool:
-    try:
-        await stat_impl(accessor, path)
-        return True
-    except (FileNotFoundError, ValueError):
-        return False
 
 
 @command("realpath", resource="disk", spec=SPECS["realpath"])
@@ -46,13 +38,8 @@ async def realpath(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-    lines: list[str] = []
-    for p in (paths or []):
-        resolved_display = posixpath.normpath(p.original)
-        if e:
-            resolved_inner = posixpath.normpath(p.strip_prefix)
-            if not await _exists(accessor, resolved_inner):
-                raise FileNotFoundError(
-                    f"realpath: '{p.original}': No such file or directory")
-        lines.append(resolved_display)
-    return ("\n".join(lines) + "\n").encode(), IOResult()
+    return await generic_realpath(paths or [],
+                                  stat_fn=stat_impl,
+                                  accessor=accessor,
+                                  e=e,
+                                  m=m)

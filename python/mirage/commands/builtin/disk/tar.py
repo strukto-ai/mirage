@@ -12,29 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import io
-import tarfile
 from collections.abc import AsyncIterator
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.tar import tar as generic_tar
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.disk.glob import resolve_glob
+from mirage.core.disk.mkdir import mkdir as _mkdir
 from mirage.core.disk.read import read_bytes
 from mirage.core.disk.write import write_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-def _compression_suffix(z: bool, j: bool, J: bool) -> str:
-    if z:
-        return ":gz"
-    if j:
-        return ":bz2"
-    if J:
-        return ":xz"
-    return ""
 
 
 @command("tar", resource="disk", spec=SPECS["tar"], write=True)
@@ -60,57 +50,19 @@ async def tar(
     if accessor.root is None:
         raise ValueError("tar: missing operand")
     paths = await resolve_glob(accessor, paths, index)
-    archive_path = f.strip_prefix if f else None
-    dest_path = C.strip_prefix if C else "/"
-    mode_suffix = _compression_suffix(z, j, J)
-    strip_n = int(strip_components) if strip_components else 0
-    if c:
-        if not archive_path:
-            raise ValueError("tar: -f is required")
-        filtered_paths = paths
-        if exclude:
-            filtered_paths = [
-                p for p in paths if exclude not in p.original.split("/")[-1]
-            ]
-        buf = io.BytesIO()
-        with tarfile.open(fileobj=buf, mode=f"w{mode_suffix}") as tf:
-            for p in filtered_paths:
-                data = await read_bytes(accessor, p)
-                name = p.original.lstrip("/")
-                info = tarfile.TarInfo(name=name)
-                info.size = len(data)
-                tf.addfile(info, io.BytesIO(data))
-        archive = buf.getvalue()
-        await write_bytes(accessor, archive_path, archive)
-        return None, IOResult(writes={archive_path: archive})
-    if t:
-        if not archive_path:
-            raise ValueError("tar: -f is required")
-        data = await read_bytes(accessor, archive_path)
-        with tarfile.open(fileobj=io.BytesIO(data),
-                          mode=f"r{mode_suffix}") as tf:
-            names = tf.getnames()
-        return ("\n".join(names) + "\n").encode(), IOResult()
-    if x:
-        if not archive_path:
-            raise ValueError("tar: -f is required")
-        data = await read_bytes(accessor, archive_path)
-        writes: dict[str, bytes] = {}
-        with tarfile.open(fileobj=io.BytesIO(data),
-                          mode=f"r{mode_suffix}") as tf:
-            for member in tf.getmembers():
-                if member.isfile():
-                    extracted = tf.extractfile(member)
-                    if extracted:
-                        content = extracted.read()
-                        name_parts = member.name.split("/")
-                        if strip_n > 0:
-                            name_parts = name_parts[strip_n:]
-                        if not name_parts:
-                            continue
-                        out_path = dest_path.rstrip("/") + "/" + "/".join(
-                            name_parts)
-                        await write_bytes(accessor, out_path, content)
-                        writes[out_path] = content
-        return None, IOResult(writes=writes)
-    raise ValueError("tar: must specify -c, -x, or -t")
+    return await generic_tar(paths,
+                             read_bytes=read_bytes,
+                             write_bytes=write_bytes,
+                             mkdir_fn=_mkdir,
+                             accessor=accessor,
+                             c=c,
+                             x=x,
+                             t=t,
+                             z=z,
+                             j=j,
+                             J=J,
+                             v=v,
+                             f=f,
+                             C=C,
+                             strip_components=strip_components,
+                             exclude=exclude)

@@ -15,12 +15,13 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.iconv import iconv as generic_iconv
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.ram.glob import resolve_glob
-from mirage.core.ram.read import read_bytes as _read_bytes
-from mirage.core.ram.write import write_bytes as _write_bytes
+from mirage.core.ram.read import read_bytes
+from mirage.core.ram.write import write_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -35,22 +36,19 @@ async def iconv(
     t: str | None = None,
     c: bool = False,
     o: PathSpec | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    from_enc = f or "utf-8"
-    to_enc = t or "utf-8"
-    err_mode = "ignore" if c else "strict"
     if paths and accessor.store is not None:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
-        raw = await _read_bytes(accessor, paths[0])
+        paths = await resolve_glob(accessor, paths, index)
     else:
-        raw = await _read_stdin_async(stdin)
-        if raw is None:
-            raise ValueError("iconv: missing input")
-    decoded = raw.decode(from_enc, errors=err_mode)
-    encoded = decoded.encode(to_enc, errors=err_mode)
-    if o is not None:
-        o_path = o.strip_prefix
-        await _write_bytes(accessor, o_path, encoded)
-        return None, IOResult(writes={o_path: encoded})
-    return encoded, IOResult()
+        paths = []
+    return await generic_iconv(paths,
+                               read_bytes=read_bytes,
+                               write_bytes=write_bytes,
+                               accessor=accessor,
+                               stdin=stdin,
+                               from_enc=f or "utf-8",
+                               to_enc=t or "utf-8",
+                               ignore_errors=c,
+                               output_path=o)

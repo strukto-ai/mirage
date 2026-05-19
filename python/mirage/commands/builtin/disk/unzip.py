@@ -12,15 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import io
-import zipfile
 from collections.abc import AsyncIterator
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.unzip import unzip as generic_unzip
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.disk.glob import resolve_glob
+from mirage.core.disk.mkdir import mkdir as _mkdir
 from mirage.core.disk.read import read_bytes
 from mirage.core.disk.write import write_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -45,40 +45,14 @@ async def unzip(
     if accessor.root is None or not paths:
         raise ValueError("unzip: missing operand")
     paths = await resolve_glob(accessor, paths, index)
-    archive_path = paths[0].original
-    data = await read_bytes(accessor, paths[0])
-    with zipfile.ZipFile(io.BytesIO(data), "r") as zf:
-        if args_l:
-            lines = ["  Length      Name", "---------  ----"]
-            for info in zf.infolist():
-                lines.append(f"{info.file_size:>9}  {info.filename}")
-            return ("\n".join(lines) + "\n").encode(), IOResult()
-        if t:
-            bad = zf.testzip()
-            if bad is None:
-                msg = f"No errors detected in {archive_path}\n"
-            else:
-                msg = f"first bad file: {bad}\n"
-            return msg.encode(), IOResult()
-        if p:
-            chunks: list[bytes] = []
-            for info in zf.infolist():
-                if not info.is_dir():
-                    chunks.append(zf.read(info.filename))
-            return b"".join(chunks), IOResult()
-        dest = d if d else "/"
-        writes: dict[str, bytes] = {}
-        output_lines: list[str] = []
-        for info in zf.infolist():
-            if not info.is_dir():
-                content = zf.read(info.filename)
-                name = info.filename.split(
-                    "/")[-1] if "/" in info.filename else info.filename
-                out_path = dest.rstrip("/") + "/" + name
-                await write_bytes(accessor, out_path, content)
-                writes[out_path] = content
-                if not q:
-                    output_lines.append(f"  inflating: {out_path}")
-    output = ("\n".join(output_lines) +
-              "\n").encode() if output_lines else None
-    return output, IOResult(writes=writes)
+    return await generic_unzip(paths,
+                               read_bytes=read_bytes,
+                               write_bytes=write_bytes,
+                               mkdir_fn=_mkdir,
+                               accessor=accessor,
+                               o=o,
+                               args_l=args_l,
+                               d=d,
+                               q=q,
+                               p=p,
+                               t=t)

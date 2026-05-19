@@ -1,0 +1,122 @@
+import binascii
+from collections.abc import AsyncIterator, Callable
+
+from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
+
+
+async def _xxd_dump_stream(source: AsyncIterator[bytes], cols: int, group: int,
+                           uppercase: bool) -> AsyncIterator[bytes]:
+    fmt = "{:02X}" if uppercase else "{:02x}"
+    offset_fmt = "{:08X}: " if uppercase else "{:08x}: "
+    offset = 0
+    leftover = b""
+    async for chunk in source:
+        data = leftover + chunk
+        i = 0
+        while i + cols <= len(data):
+            row = data[i:i + cols]
+            hex_parts: list[str] = []
+            for g in range(0, len(row), group):
+                hex_parts.append("".join(
+                    fmt.format(b) for b in row[g:g + group]))
+            hex_part = " ".join(hex_parts)
+            ascii_part = "".join(chr(b) if 32 <= b < 127 else "." for b in row)
+            line = offset_fmt.format(
+                offset
+            ) + f"{hex_part:<{cols * 2 + (cols // group) - 1}}  {ascii_part}\n"
+            yield line.encode()
+            offset += cols
+            i += cols
+        leftover = data[i:]
+    if leftover:
+        hex_parts = []
+        for g in range(0, len(leftover), group):
+            hex_parts.append("".join(
+                fmt.format(b) for b in leftover[g:g + group]))
+        hex_part = " ".join(hex_parts)
+        ascii_part = "".join(
+            chr(b) if 32 <= b < 127 else "." for b in leftover)
+        line = offset_fmt.format(
+            offset
+        ) + f"{hex_part:<{cols * 2 + (cols // group) - 1}}  {ascii_part}\n"
+        yield line.encode()
+
+
+async def _xxd_plain_stream(source: AsyncIterator[bytes],
+                            uppercase: bool) -> AsyncIterator[bytes]:
+    async for chunk in source:
+        h = binascii.hexlify(chunk)
+        yield h.upper() if uppercase else h
+    yield b"\n"
+
+
+async def _xxd_reverse_stream(
+        source: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+    buf = b""
+    async for chunk in source:
+        buf += chunk
+    text = buf.decode(errors="replace").replace("\n", "").replace(" ", "")
+    yield binascii.unhexlify(text)
+
+
+async def _apply_limits(source: AsyncIterator[bytes], skip: int,
+                        limit: int) -> AsyncIterator[bytes]:
+    pos = 0
+    remaining = limit
+    async for chunk in source:
+        chunk_len = len(chunk)
+        if pos + chunk_len <= skip:
+            pos += chunk_len
+            continue
+        if pos < skip:
+            chunk = chunk[skip - pos:]
+            pos = skip
+        if remaining <= 0:
+            break
+        if len(chunk) > remaining:
+            chunk = chunk[:remaining]
+        yield chunk
+        remaining -= len(chunk)
+        pos += len(chunk)
+
+
+async def xxd(
+    paths: list[PathSpec],
+    *,
+    read_stream: Callable[..., AsyncIterator[bytes]],
+    accessor: object = None,
+    stdin: AsyncIterator[bytes] | bytes | None = None,
+    reverse: bool = False,
+    plain: bool = False,
+    uppercase: bool = False,
+    cols: int = 16,
+    group: int = 2,
+    skip: int = 0,
+    limit: int = 0,
+) -> tuple[ByteSource | None, IOResult]:
+    cache: list[str] = []
+    if paths:
+        source: AsyncIterator[bytes] = read_stream(accessor, paths[0])
+        cache = [paths[0].original]
+    else:
+        source = _resolve_source(stdin, "xxd: missing input")
+
+    if skip or limit:
+        if not limit:
+            limit = 2**63
+        source = _apply_limits(source, skip, limit)
+
+    if reverse:
+        return _xxd_reverse_stream(source), IOResult(cache=cache)
+    if plain:
+        return _xxd_plain_stream(source,
+                                 uppercase=uppercase), IOResult(cache=cache)
+    return _xxd_dump_stream(source,
+                            cols=cols,
+                            group=group,
+                            uppercase=uppercase), IOResult(cache=cache)
+
+
+__all__ = ["xxd"]

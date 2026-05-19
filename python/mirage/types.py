@@ -18,6 +18,19 @@ from enum import Enum, StrEnum
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class FindType(str, Enum):
+    """POSIX `find -type` flag values (`-type d`, `-type f`)."""
+    DIRECTORY = "d"
+    FILE = "f"
+
+
+class LsSortBy(str, Enum):
+    """`ls` sort keys. NAME is default, TIME is `-t`, SIZE is `-S`."""
+    NAME = "name"
+    TIME = "time"
+    SIZE = "size"
+
+
 class FileType(str, Enum):
     DIRECTORY = "directory"
     TEXT = "text"

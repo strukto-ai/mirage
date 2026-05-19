@@ -12,31 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import zlib
 from collections.abc import AsyncIterator
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.gunzip import gunzip as generic_gunzip
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.ram.glob import resolve_glob
-from mirage.core.ram.read import read_bytes as _read_bytes
-from mirage.core.ram.unlink import unlink as _unlink_async
-from mirage.core.ram.write import write_bytes as _write_bytes
+from mirage.core.ram.read import read_bytes
+from mirage.core.ram.unlink import unlink
+from mirage.core.ram.write import write_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-async def _gzip_decompress_stream(
-        source: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
-    decompressor = zlib.decompressobj(zlib.MAX_WBITS | 16)
-    async for chunk in source:
-        decompressed = decompressor.decompress(chunk)
-        if decompressed:
-            yield decompressed
-    tail = decompressor.flush()
-    if tail:
-        yield tail
 
 
 @command("gunzip", resource="ram", spec=SPECS["gunzip"], write=True)
@@ -49,35 +37,18 @@ async def gunzip(
     f: bool = False,
     c: bool = False,
     t: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not paths:
-        source = _resolve_source(stdin, "gunzip: missing input")
-        return _gzip_decompress_stream(source), IOResult()
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
-
-    if t:
-        for p in paths:
-            raw = await _read_bytes(accessor, p)
-            zlib.decompress(raw, zlib.MAX_WBITS | 16)
-        return None, IOResult()
-
-    if c:
-        chunks: list[bytes] = []
-        for p in paths:
-            raw = await _read_bytes(accessor, p)
-            chunks.append(zlib.decompress(raw, zlib.MAX_WBITS | 16))
-        return b"".join(chunks), IOResult()
-
-    writes: dict[str, bytes] = {}
-    for p in paths:
-        raw = await _read_bytes(accessor, p)
-        p_stripped = p.strip_prefix if isinstance(p, PathSpec) else p
-        out_path = p_stripped.removesuffix(".gz") if p_stripped.endswith(
-            ".gz") else p_stripped + ".out"
-        out_data = zlib.decompress(raw, zlib.MAX_WBITS | 16)
-        await _write_bytes(accessor, out_path, out_data)
-        writes[out_path] = out_data
-        if not k:
-            await _unlink_async(accessor, p)
-    return None, IOResult(writes=writes)
+    if paths:
+        paths = await resolve_glob(accessor, paths, index)
+    return await generic_gunzip(paths,
+                                read_bytes=read_bytes,
+                                write_bytes=write_bytes,
+                                unlink=unlink,
+                                accessor=accessor,
+                                stdin=stdin,
+                                keep=k,
+                                force=f,
+                                to_stdout=c,
+                                test_only=t)

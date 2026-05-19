@@ -2,8 +2,7 @@ from collections.abc import AsyncIterator
 
 
 async def ensure_stream(
-    src: bytes | AsyncIterator[bytes],
-) -> AsyncIterator[bytes]:
+        src: bytes | AsyncIterator[bytes]) -> AsyncIterator[bytes]:
     if isinstance(src, bytes):
         yield src
         return

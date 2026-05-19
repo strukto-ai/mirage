@@ -26,14 +26,18 @@ ws = Workspace({"/slack": resource}, mode=MountMode.READ)
 /slack/
   channels/
     <channel-name>__<channel-id>/
-      <yyyy-mm-dd>.jsonl
-      ...
+      <yyyy-mm-dd>/
+        chat.jsonl
+        files/
+          <name>__<F-id>.<ext>
   dms/
     <user-name>__<dm-id>/
-      <yyyy-mm-dd>.jsonl
-      ...
+      <yyyy-mm-dd>/
+        chat.jsonl
+        files/
+          <name>__<F-id>.<ext>
   users/
-    <username>.json
+    <username>__<user-id>.json
     ...
 ```
 
@@ -43,15 +47,25 @@ Example:
 /slack/
   channels/
     general__C04KEPWF6V7/
-      2026-04-04.jsonl
-      2026-04-05.jsonl
+      2026-04-04/
+        chat.jsonl
+        files/
+      2026-04-05/
+        chat.jsonl
+        files/
     random__C04JVGZM7UN/
-      2026-04-11.jsonl
+      2026-04-11/
+        chat.jsonl
+        files/
   dms/
     alice__D0AQDJ5FP9V/
-      2026-04-04.jsonl
+      2026-04-04/
+        chat.jsonl
+        files/
     slackbot__D0ARPA1QSPJ/
-      2026-04-04.jsonl
+      2026-04-04/
+        chat.jsonl
+        files/
   users/
     alice__U12345678.json
     bob__U87654321.json
@@ -65,8 +79,10 @@ resource without extra lookups.
 
 `/slack/channels/` lists public and private channels the bot has
 access to. The channel ID is appended after `__`. Each channel
-directory contains day-partitioned `.jsonl` history files for the
-last 90 days (or since channel creation, whichever is shorter).
+directory contains day-partitioned directories for the last 90 days
+(or since channel creation, whichever is shorter). Each date directory
+contains `chat.jsonl` plus a `files/` directory for attachments shared
+that day.
 
 The date range is derived from the channel's `created` timestamp.
 
@@ -74,7 +90,7 @@ The date range is derived from the channel's `created` timestamp.
 
 `/slack/dms/` lists direct message conversations. The DM ID is
 appended after `__`. Like channels, DM directories contain daily
-`.jsonl` history files.
+directories with `chat.jsonl` and `files/`.
 
 ### Users
 
@@ -122,16 +138,16 @@ async def main():
     base = f"/slack/channels/{ch}"
 
     # Read messages from a specific date
-    r = await ws.execute(f'cat "{base}/2026-04-04.jsonl" | head -n 3')
+    r = await ws.execute(f'cat "{base}/2026-04-04/chat.jsonl" | head -n 3')
     print(await r.stdout_str())
 
     # Read user profile
-    r = await ws.execute("cat /slack/users/alice.json")
+    r = await ws.execute("cat /slack/users/alice__U12345678.json")
     print(await r.stdout_str())
 
     # Extract message text with jq
     r = await ws.execute(
-        f'cat "{base}/2026-04-04.jsonl"'
+        f'cat "{base}/2026-04-04/chat.jsonl"'
         ' | jq -r ".[] | .text" | head -n 5')
     print(await r.stdout_str())
 
@@ -153,7 +169,7 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-See `examples/chat/slack.py` for the full working example.
+See `examples/python/slack/slack.py` for the full working example.
 
 ## Finding IDs
 
@@ -171,12 +187,12 @@ ls /slack/users/
 
 # Message timestamp (ts) - inside JSONL messages
 jq -r '.[] | "\(.ts) [\(.user)] \(.text)"' \
-  "/slack/channels/general__C04KEPWF6V7/2026-04-04.jsonl"
+  "/slack/channels/general__C04KEPWF6V7/2026-04-04/chat.jsonl"
 # → 1712345678.123456 [U04K21SEVR9] hello world
 
 # Find a specific message then reply
 jq -r '.[] | select(.text | test("hello")) | .ts' \
-  "/slack/channels/general__C04KEPWF6V7/2026-04-04.jsonl"
+  "/slack/channels/general__C04KEPWF6V7/2026-04-04/chat.jsonl"
 # → 1712345678.123456
 slack-reply-to-thread --channel_id C04KEPWF6V7 \
   --ts 1712345678.123456 --text "Reply to hello"
@@ -184,25 +200,25 @@ slack-reply-to-thread --channel_id C04KEPWF6V7 \
 
 ## Working with Large Channels
 
-Channels with many messages produce large `.jsonl` files per day.
+Channels with many messages produce large `chat.jsonl` files per day.
 Tips for efficient access:
 
 ```bash
 # Check message count per day
-wc -l "/slack/channels/general__C04KEPWF6V7/2026-04-04.jsonl"
+wc -l "/slack/channels/general__C04KEPWF6V7/2026-04-04/chat.jsonl"
 
 # Read only recent messages
-tail -n 10 "/slack/channels/general__C04KEPWF6V7/2026-04-04.jsonl"
+tail -n 10 "/slack/channels/general__C04KEPWF6V7/2026-04-04/chat.jsonl"
 
 # Search across all dates (scans each file)
 rg "keyword" "/slack/channels/general__C04KEPWF6V7/"
 
 # Extract specific fields to reduce output
 jq -r '.[] | "\(.ts) [\(.user)] \(.text)"' \
-  "/slack/channels/general__C04KEPWF6V7/2026-04-04.jsonl" | head -n 20
+  "/slack/channels/general__C04KEPWF6V7/2026-04-04/chat.jsonl" | head -n 20
 
 # Count messages per user
-cat "/slack/channels/general__C04KEPWF6V7/2026-04-04.jsonl" \
+cat "/slack/channels/general__C04KEPWF6V7/2026-04-04/chat.jsonl" \
   | jq -r '.[] | .user' | sort | uniq -c
 ```
 
@@ -213,7 +229,7 @@ Standard commands available on the mounted Slack tree:
 | Command         | Notes                                      |
 | --------------- | ------------------------------------------ |
 | `ls`            | List channels, DMs, users, dates           |
-| `cat`           | Read .jsonl history or user .json          |
+| `cat`           | Read `chat.jsonl`, user `.json`, or files  |
 | `head` / `tail` | First/last N lines                         |
 | `grep` / `rg`   | Pattern search (file or directory level)   |
 | `jq`            | Query JSON; use `.[]` prefix for JSONL     |

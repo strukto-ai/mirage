@@ -12,12 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import random
 from collections.abc import AsyncIterator
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.builtin.generic.shuf import shuf as generic_shuf
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.disk.glob import resolve_glob
@@ -39,48 +38,16 @@ async def shuf(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    sep = "\x00" if z else "\n"
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-    if e:
-        items = [p.strip_prefix for p in paths] if paths else list(texts)
-        if r:
-            count = int(n) if n is not None else len(items)
-            items = random.choices(items, k=count)
-        else:
-            random.shuffle(items)
-            if n is not None:
-                items = items[:int(n)]
-        return (sep.join(items) + sep).encode(), IOResult()
-    if paths and accessor.root is not None:
-        all_lines: list[str] = []
-        for p in paths:
-            data = (await read_bytes(accessor, p)).decode(errors="replace")
-            if z:
-                all_lines.extend(data.split("\x00"))
-            else:
-                all_lines.extend(data.splitlines())
-        if r:
-            count = int(n) if n is not None else len(all_lines)
-            all_lines = random.choices(all_lines, k=count)
-        else:
-            random.shuffle(all_lines)
-            if n is not None:
-                all_lines = all_lines[:int(n)]
-        return (sep.join(all_lines) + sep).encode(), IOResult()
-    raw = await _read_stdin_async(stdin)
-    if raw is None:
-        raise ValueError("shuf: missing operand")
-    text = raw.decode(errors="replace")
-    if z:
-        lines = text.split("\x00")
-    else:
-        lines = text.splitlines()
-    if r:
-        count = int(n) if n is not None else len(lines)
-        lines = random.choices(lines, k=count)
-    else:
-        random.shuffle(lines)
-        if n is not None:
-            lines = lines[:int(n)]
-    return (sep.join(lines) + sep).encode(), IOResult()
+    elif accessor.root is None:
+        paths = []
+    return await generic_shuf(paths,
+                              texts,
+                              read_bytes=read_bytes,
+                              accessor=accessor,
+                              stdin=stdin,
+                              count=int(n) if n is not None else None,
+                              echo=e,
+                              zero_terminated=z,
+                              with_replacement=r)

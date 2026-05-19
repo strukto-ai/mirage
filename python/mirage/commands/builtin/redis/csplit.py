@@ -12,43 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
 from collections.abc import AsyncIterator
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.csplit import csplit as generic_csplit
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.redis.glob import resolve_glob
-from mirage.core.redis.read import read_bytes as _read_bytes
-from mirage.core.redis.write import write_bytes as _write_bytes
+from mirage.core.redis.read import read_bytes
+from mirage.core.redis.write import write_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-def _split_by_patterns(
-    lines: list[str],
-    patterns: list[str],
-) -> list[list[str]]:
-    parts: list[list[str]] = []
-    current_start = 0
-    for pat in patterns:
-        if pat.startswith("/") and pat.endswith("/"):
-            regex = pat[1:-1]
-            for idx in range(current_start, len(lines)):
-                if re.search(regex, lines[idx]):
-                    parts.append(lines[current_start:idx])
-                    current_start = idx
-                    break
-        else:
-            line_num = int(pat)
-            split_at = line_num - 1
-            if split_at > current_start:
-                parts.append(lines[current_start:split_at])
-                current_start = split_at
-    if current_start < len(lines):
-        parts.append(lines[current_start:])
-    return parts
 
 
 @command("csplit", resource="redis", spec=SPECS["csplit"], write=True)
@@ -62,33 +37,21 @@ async def csplit(
     b: str | None = None,
     k: bool = False,
     s: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    prefix = f or "xx"
-    digits = int(n) if n else 2
-    suffix_fmt = b if b else f"%0{digits}d"
     if paths and accessor.store is not None:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
-        raw = await _read_bytes(accessor, paths[0])
+        paths = await resolve_glob(accessor, paths, index)
     else:
-        raw = await _read_stdin_async(stdin)
-        if raw is None:
-            raise ValueError("csplit: missing input")
-    text = raw.decode(errors="replace")
-    lines = text.splitlines()
-    patterns = list(texts)
-    parts = _split_by_patterns(lines, patterns)
-    writes: dict[str, bytes] = {}
-    sizes: list[str] = []
-    try:
-        for idx, part in enumerate(parts):
-            filename = prefix + (suffix_fmt % idx)
-            data = ("\n".join(part) + "\n").encode() if part else b""
-            await _write_bytes(accessor, filename, data)
-            writes[filename] = data
-            sizes.append(str(len(data)))
-    except Exception:
-        if not k:
-            raise
-    output = "" if s else "\n".join(sizes) + "\n"
-    return output.encode(), IOResult(writes=writes)
+        paths = []
+    return await generic_csplit(paths,
+                                texts,
+                                read_bytes=read_bytes,
+                                write_bytes=write_bytes,
+                                accessor=accessor,
+                                stdin=stdin,
+                                prefix=f or "xx",
+                                digits=int(n) if n else 2,
+                                suffix_format=b,
+                                keep_on_error=k,
+                                silent=s)

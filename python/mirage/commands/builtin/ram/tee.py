@@ -15,12 +15,13 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.tee import tee as generic_tee
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.ram.glob import resolve_glob
 from mirage.core.ram.stream import stream as _stream_core
-from mirage.core.ram.write import write_bytes as _write_bytes
+from mirage.core.ram.write import write_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -32,23 +33,16 @@ async def tee(
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     a: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("tee: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
-    raw = await _read_stdin_async(stdin)
-    if raw is None:
-        raw = (" ".join(texts)).encode() if texts else b""
-    write_data = raw
-    if a:
-        try:
-            existing = b""
-            async for chunk in _stream_core(accessor, paths[0]):
-                existing += chunk
-            write_data = existing + raw
-        except FileNotFoundError:
-            pass
-    await _write_bytes(accessor, paths[0], write_data)
-    return raw, IOResult(writes={paths[0].original: write_data},
-                         cache=[paths[0].strip_prefix])
+    paths = await resolve_glob(accessor, paths, index)
+    return await generic_tee(paths,
+                             texts,
+                             read_stream=_stream_core,
+                             write_bytes=write_bytes,
+                             accessor=accessor,
+                             stdin=stdin,
+                             append=a)

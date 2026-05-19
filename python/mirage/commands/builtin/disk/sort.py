@@ -16,8 +16,7 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.sort_helper import _sort_key
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.builtin.generic.sort import sort as generic_sort
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.disk.glob import resolve_glob
@@ -45,40 +44,22 @@ async def sort(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    key_field = int(k) if k is not None else None
     if paths and accessor.root is not None:
         paths = await resolve_glob(accessor, paths, index)
-        data = await read_bytes(accessor, paths[0])
-        lines = data.decode(errors="replace").splitlines()
-        lines.sort(
-            key=lambda x: _sort_key(x, key_field, t, f, n, h, V, M),
-            reverse=r,
-        )
-        if u:
-            seen: set[str] = set()
-            deduped: list[str] = []
-            for ln in lines:
-                if ln not in seen:
-                    seen.add(ln)
-                    deduped.append(ln)
-            lines = deduped
-        output = "\n".join(lines)
-        return (output + "\n").encode() if output else b"", IOResult()
-    raw = await _read_stdin_async(stdin)
-    if raw is None:
-        raise ValueError("sort: missing operand")
-    lines = raw.decode(errors="replace").splitlines()
-    lines.sort(
-        key=lambda x: _sort_key(x, key_field, t, f, n, h, V, M),
+    else:
+        paths = []
+    return await generic_sort(
+        paths,
+        read_bytes=read_bytes,
+        accessor=accessor,
+        stdin=stdin,
         reverse=r,
+        numeric=n,
+        unique=u,
+        fold_case=f,
+        key_field=int(k) if k is not None else None,
+        field_separator=t,
+        human_numeric=h,
+        version_sort=V,
+        month_sort=M,
     )
-    if u:
-        seen_s: set[str] = set()
-        deduped_s: list[str] = []
-        for ln in lines:
-            if ln not in seen_s:
-                seen_s.add(ln)
-                deduped_s.append(ln)
-        lines = deduped_s
-    output = "\n".join(lines)
-    return (output + "\n").encode() if output else b"", IOResult()

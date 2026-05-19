@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.builtin.generic.tee import tee as generic_tee
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.disk.glob import resolve_glob
@@ -39,19 +39,10 @@ async def tee(
     if not paths:
         raise ValueError("tee: missing operand")
     paths = await resolve_glob(accessor, paths, index)
-    p = paths[0]
-    raw = await _read_stdin_async(stdin)
-    if raw is None:
-        raw = (" ".join(texts)).encode() if texts else b""
-    write_data = raw
-    if a:
-        try:
-            existing = b""
-            async for chunk in read_stream(accessor, p):
-                existing += chunk
-            write_data = existing + raw
-        except FileNotFoundError:
-            pass
-    await write_bytes(accessor, p, write_data)
-    return raw, IOResult(writes={p.original: write_data},
-                         cache=[p.strip_prefix])
+    return await generic_tee(paths,
+                             texts,
+                             read_stream=read_stream,
+                             write_bytes=write_bytes,
+                             accessor=accessor,
+                             stdin=stdin,
+                             append=a)

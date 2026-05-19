@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.builtin.generic.iconv import iconv as generic_iconv
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.disk.glob import resolve_glob
@@ -39,20 +39,16 @@ async def iconv(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    from_enc = f or "utf-8"
-    to_enc = t or "utf-8"
-    err_mode = "ignore" if c else "strict"
     if paths and accessor.root is not None:
         paths = await resolve_glob(accessor, paths, index)
-        raw = await read_bytes(accessor, paths[0])
     else:
-        raw = await _read_stdin_async(stdin)
-        if raw is None:
-            raise ValueError("iconv: missing input")
-    decoded = raw.decode(from_enc, errors=err_mode)
-    encoded = decoded.encode(to_enc, errors=err_mode)
-    if o is not None:
-        o_path = o.strip_prefix
-        await write_bytes(accessor, o_path, encoded)
-        return None, IOResult(writes={o_path: encoded})
-    return encoded, IOResult()
+        paths = []
+    return await generic_iconv(paths,
+                               read_bytes=read_bytes,
+                               write_bytes=write_bytes,
+                               accessor=accessor,
+                               stdin=stdin,
+                               from_enc=f or "utf-8",
+                               to_enc=t or "utf-8",
+                               ignore_errors=c,
+                               output_path=o)

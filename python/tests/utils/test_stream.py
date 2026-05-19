@@ -11,6 +11,7 @@ async def test_ensure_stream_from_bytes():
 
 @pytest.mark.asyncio
 async def test_ensure_stream_from_iterator():
+
     async def src():
         yield b"foo"
         yield b"bar"
@@ -26,6 +27,7 @@ async def test_collect_bytes_from_bytes():
 
 @pytest.mark.asyncio
 async def test_collect_bytes_from_iterator():
+
     async def src():
         yield b"foo"
         yield b"bar"

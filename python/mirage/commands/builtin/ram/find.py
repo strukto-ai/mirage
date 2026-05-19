@@ -12,13 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from datetime import datetime, timezone
+from functools import partial
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.find_helper import (_extract_not_name,
-                                                 _extract_or_names,
-                                                 _parse_mtime, _parse_size)
+from mirage.commands.builtin.generic.find import find as generic_find
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.ram.find import find as find_core
@@ -48,72 +46,15 @@ async def find(
     if accessor.store is None:
         raise ValueError("find: no resource")
     paths = await resolve_glob(accessor, paths, index)
-    path_pattern = path
-    search_path = paths[0]
-    search_prefix = search_path.prefix
-    ftype = None
-    if type == "d":
-        ftype = "d"
-    elif type == "f":
-        ftype = "f"
-    elif type is not None:
-        ftype = type
-    md = int(maxdepth) if maxdepth is not None else None
-    min_size, max_size = (None, None)
-    if size is not None:
-        min_size, max_size = _parse_size(size)
-    mtime_min, mtime_max = (None, None)
-    if mtime is not None:
-        mtime_min, mtime_max = _parse_mtime(mtime)
-    name_exclude = _extract_not_name(texts)
-    or_names = _extract_or_names(name, texts)
-    warnings: list[str] = []
-    try:
-        await stat_core(accessor, search_path)
-    except (FileNotFoundError, ValueError) as exc:
-        warnings.append(f"find: '{search_path.original}': {exc}")
-        output = b""
-        stderr = "\n".join(warnings).encode()
-        return output, IOResult(stderr=stderr, exit_code=1)
-    md_min = int(mindepth) if mindepth is not None else None
-    results = await find_core(
-        accessor,
-        search_path,
-        name=name,
-        type=ftype,
-        min_size=min_size,
-        max_size=max_size,
-        maxdepth=md,
-        name_exclude=name_exclude,
-        or_names=or_names if len(or_names) > 1 else None,
-        iname=iname,
-        path_pattern=path_pattern,
-        mindepth=md_min,
-    )
-    if mtime_min is not None or mtime_max is not None:
-        filtered: list[str] = []
-        for r in results:
-            try:
-                r_spec = PathSpec(original=r,
-                                  directory=r,
-                                  resolved=False,
-                                  prefix=search_prefix)
-                s = await stat_core(accessor, r_spec)
-            except (FileNotFoundError, ValueError):
-                continue
-            if s.modified is None:
-                continue
-            mod_ts = datetime.fromisoformat(
-                s.modified).replace(tzinfo=timezone.utc).timestamp()
-            if mtime_min is not None and mod_ts < mtime_min:
-                continue
-            if mtime_max is not None and mod_ts > mtime_max:
-                continue
-            filtered.append(r)
-        results = filtered
-    if search_prefix:
-        results = [search_prefix + "/" + r.lstrip("/") for r in results]
-    output = "\n".join(results).encode()
-    stderr = "\n".join(warnings).encode() if warnings else None
-    exit_code = 1 if warnings and not results else 0
-    return output, IOResult(stderr=stderr, exit_code=exit_code)
+    return await generic_find(paths,
+                              texts,
+                              find_core=partial(find_core, accessor),
+                              stat=partial(stat_core, accessor),
+                              name=name,
+                              type=type,
+                              size=size,
+                              mtime=mtime,
+                              maxdepth=maxdepth,
+                              iname=iname,
+                              path=path,
+                              mindepth=mindepth)
