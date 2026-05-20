@@ -20,6 +20,15 @@ importers:
       '@eslint/js':
         specifier: ^9.39.4
         version: 9.39.4
+      '@struktoai/mirage-browser':
+        specifier: workspace:*
+        version: link:packages/browser
+      '@struktoai/mirage-core':
+        specifier: workspace:*
+        version: link:packages/core
+      '@struktoai/mirage-node':
+        specifier: workspace:*
+        version: link:packages/node
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.17
@@ -38,6 +47,9 @@ importers:
       tsup:
         specifier: ^8.5.0
         version: 8.5.1(postcss@8.5.10)(tsx@4.21.0)(typescript@6.0.3)(yaml@2.8.3)
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
       typescript:
         specifier: ^6.0.3
         version: 6.0.3

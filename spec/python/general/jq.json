@@ -1,0 +1,65 @@
+{
+  "_meta": {
+    "filetypes": [],
+    "has_aggregate": false,
+    "has_provision": true,
+    "has_write": false,
+    "resources": [
+      "discord",
+      "disk",
+      "email",
+      "gdocs",
+      "gdrive",
+      "github",
+      "gmail",
+      "gsheets",
+      "gslides",
+      "langfuse",
+      "linear",
+      "mongodb",
+      "notion",
+      "paperclip",
+      "postgres",
+      "ram",
+      "redis",
+      "s3",
+      "slack",
+      "ssh",
+      "telegram",
+      "trello"
+    ]
+  },
+  "description": null,
+  "ignore_tokens": [],
+  "options": [
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-r",
+      "value_kind": "none"
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-c",
+      "value_kind": "none"
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-s",
+      "value_kind": "none"
+    }
+  ],
+  "positional": [
+    {
+      "kind": "text"
+    }
+  ],
+  "rest": {
+    "kind": "path"
+  }
+}

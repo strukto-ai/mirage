@@ -1,0 +1,45 @@
+{
+  "_meta": {
+    "filetypes": [],
+    "has_aggregate": false,
+    "has_provision": false,
+    "has_write": false,
+    "resources": []
+  },
+  "description": "Print or set the system date and time.",
+  "ignore_tokens": [],
+  "options": [
+    {
+      "description": "Display the time described by the given date string.",
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-d",
+      "value_kind": "text"
+    },
+    {
+      "description": "Use Coordinated Universal Time (UTC).",
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-u",
+      "value_kind": "none"
+    },
+    {
+      "description": "Output date in ISO 8601 format.",
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-I",
+      "value_kind": "none"
+    },
+    {
+      "description": "Output date in RFC 5322 email format.",
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-R",
+      "value_kind": "none"
+    }
+  ],
+  "positional": [],
+  "rest": {
+    "kind": "text"
+  }
+}

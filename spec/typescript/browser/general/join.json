@@ -1,0 +1,70 @@
+{
+  "_meta": {
+    "filetypes": [],
+    "has_aggregate": false,
+    "has_provision": false,
+    "has_write": false,
+    "resources": [
+      "opfs",
+      "ram",
+      "s3"
+    ]
+  },
+  "description": null,
+  "ignore_tokens": [],
+  "options": [
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-t",
+      "value_kind": "text"
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-1",
+      "value_kind": "text"
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-2",
+      "value_kind": "text"
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-a",
+      "value_kind": "text"
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-v",
+      "value_kind": "text"
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-e",
+      "value_kind": "text"
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-o",
+      "value_kind": "text"
+    }
+  ],
+  "positional": [],
+  "rest": {
+    "kind": "path"
+  }
+}

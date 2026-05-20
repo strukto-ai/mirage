@@ -1,0 +1,42 @@
+{
+  "_meta": {
+    "filetypes": [],
+    "has_aggregate": false,
+    "has_provision": false,
+    "has_write": true,
+    "resources": [
+      "opfs",
+      "ram",
+      "s3"
+    ]
+  },
+  "description": null,
+  "ignore_tokens": [],
+  "options": [
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-c",
+      "value_kind": "none"
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-r",
+      "value_kind": "path"
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-d",
+      "value_kind": "text"
+    }
+  ],
+  "positional": [],
+  "rest": {
+    "kind": "path"
+  }
+}

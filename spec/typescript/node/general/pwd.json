@@ -1,0 +1,31 @@
+{
+  "_meta": {
+    "filetypes": [],
+    "has_aggregate": false,
+    "has_provision": false,
+    "has_write": false,
+    "resources": []
+  },
+  "description": null,
+  "ignore_tokens": [],
+  "options": [
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-P",
+      "value_kind": "none"
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-L",
+      "value_kind": "none"
+    }
+  ],
+  "positional": [],
+  "rest": {
+    "kind": "text"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "_meta": {
+    "filetypes": [],
+    "has_aggregate": false,
+    "has_provision": false,
+    "has_write": false,
+    "resources": [
+      "disk",
+      "email",
+      "gdocs",
+      "gdrive",
+      "github",
+      "gmail",
+      "gsheets",
+      "gslides",
+      "linear",
+      "notion",
+      "paperclip",
+      "ram",
+      "redis",
+      "s3",
+      "slack",
+      "ssh",
+      "telegram",
+      "trello"
+    ]
+  },
+  "description": null,
+  "ignore_tokens": [],
+  "options": [],
+  "positional": [],
+  "rest": {
+    "kind": "text"
+  }
+}

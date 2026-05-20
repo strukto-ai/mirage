@@ -1,0 +1,57 @@
+{
+  "_meta": {
+    "filetypes": [],
+    "has_aggregate": false,
+    "has_provision": false,
+    "has_write": false,
+    "resources": [
+      "disk",
+      "ram",
+      "redis",
+      "s3"
+    ]
+  },
+  "description": null,
+  "ignore_tokens": [],
+  "options": [
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-1",
+      "value_kind": "none"
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-2",
+      "value_kind": "none"
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-3",
+      "value_kind": "none"
+    },
+    {
+      "description": null,
+      "long": "--check-order",
+      "numeric_shorthand": false,
+      "short": null,
+      "value_kind": "none"
+    },
+    {
+      "description": null,
+      "long": "--nocheck-order",
+      "numeric_shorthand": false,
+      "short": null,
+      "value_kind": "none"
+    }
+  ],
+  "positional": [],
+  "rest": {
+    "kind": "path"
+  }
+}

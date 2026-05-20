@@ -1,0 +1,87 @@
+{
+  "_meta": {
+    "filetypes": [],
+    "has_aggregate": false,
+    "has_provision": false,
+    "has_write": false,
+    "resources": []
+  },
+  "description": "Transfer data from or to a server.",
+  "ignore_tokens": [],
+  "options": [
+    {
+      "description": "Add a custom header to the request.",
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-H",
+      "value_kind": "text"
+    },
+    {
+      "description": "Set the User-Agent header.",
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-A",
+      "value_kind": "text"
+    },
+    {
+      "description": "Specify the HTTP request method.",
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-X",
+      "value_kind": "text"
+    },
+    {
+      "description": "Send the given data as the request body.",
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-d",
+      "value_kind": "text"
+    },
+    {
+      "description": "Submit a multipart/form-data field.",
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-F",
+      "value_kind": "text"
+    },
+    {
+      "description": "Write response body to the given file.",
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-o",
+      "value_kind": "path"
+    },
+    {
+      "description": "Follow HTTP redirects.",
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-L",
+      "value_kind": "none"
+    },
+    {
+      "description": "Run silently with no progress or messages.",
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-s",
+      "value_kind": "none"
+    },
+    {
+      "description": "Show errors even when silent.",
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-S",
+      "value_kind": "none"
+    },
+    {
+      "description": "Fetch via the Jina Reader proxy.",
+      "long": "--jina",
+      "numeric_shorthand": false,
+      "short": null,
+      "value_kind": "none"
+    }
+  ],
+  "positional": [],
+  "rest": {
+    "kind": "text"
+  }
+}

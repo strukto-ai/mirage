@@ -1,0 +1,94 @@
+{
+  "_meta": {
+    "filetypes": [],
+    "has_aggregate": false,
+    "has_provision": false,
+    "has_write": false,
+    "resources": []
+  },
+  "description": "Run a command string through Mirage's shell. Only `-c` is meaningful; other flags are accepted and ignored. `bash` and `sh` are aliases.",
+  "ignore_tokens": [],
+  "options": [
+    {
+      "description": "Read commands from the next argument and execute them.",
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-c",
+      "value_kind": "text"
+    },
+    {
+      "description": "Read commands from stdin instead of from an argument.",
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-s",
+      "value_kind": "none"
+    },
+    {
+      "description": "(Ignored) Login shell. Mirage does not source profile files.",
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-l",
+      "value_kind": "none"
+    },
+    {
+      "description": "(Ignored) Interactive flag. Mirage shells are non-interactive.",
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-i",
+      "value_kind": "none"
+    },
+    {
+      "description": "(Ignored) Exit on first error.",
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-e",
+      "value_kind": "none"
+    },
+    {
+      "description": "(Ignored) Treat unset variables as errors.",
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-u",
+      "value_kind": "none"
+    },
+    {
+      "description": "(Ignored) Print commands as they execute.",
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-x",
+      "value_kind": "none"
+    },
+    {
+      "description": "(Ignored) Login shell.",
+      "long": "--login",
+      "numeric_shorthand": false,
+      "short": null,
+      "value_kind": "none"
+    },
+    {
+      "description": "(Ignored) Skip rc files.",
+      "long": "--norc",
+      "numeric_shorthand": false,
+      "short": null,
+      "value_kind": "none"
+    },
+    {
+      "description": "(Ignored) Skip profile files.",
+      "long": "--noprofile",
+      "numeric_shorthand": false,
+      "short": null,
+      "value_kind": "none"
+    },
+    {
+      "description": "(Ignored) POSIX-conformant mode.",
+      "long": "--posix",
+      "numeric_shorthand": false,
+      "short": null,
+      "value_kind": "none"
+    }
+  ],
+  "positional": [],
+  "rest": {
+    "kind": "text"
+  }
+}
