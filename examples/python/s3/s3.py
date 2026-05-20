@@ -655,8 +655,14 @@ async def main():
             print(f"  ✓ load() w/o resources raises: "
                   f"{str(e).splitlines()[0][:70]}…")
 
-        # Load with fresh creds
-        loaded = Workspace.load(snap, resources={"/s3/": S3Resource(config)})
+        # Load with fresh creds (both mounts were redacted)
+        loaded = Workspace.load(
+            snap,
+            resources={
+                "/s3/": S3Resource(config),
+                "/deep/": S3Resource(deep_config),
+            },
+        )
         r = await loaded.execute("ls /s3/")
         print(f"  loaded ws ls /s3/: "
               f"{(await r.stdout_str()).strip()[:60]}…")

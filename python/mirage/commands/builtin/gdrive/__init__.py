@@ -49,7 +49,7 @@ from mirage.commands.builtin.gdrive.rg import rg
 from mirage.commands.builtin.gdrive.sed import sed
 from mirage.commands.builtin.gdrive.sha256sum import sha256sum
 from mirage.commands.builtin.gdrive.shuf import shuf
-from mirage.commands.builtin.gdrive.sort import sort_cmd
+from mirage.commands.builtin.gdrive.sort import sort
 from mirage.commands.builtin.gdrive.stat import COMMANDS as _STAT_COMMANDS
 from mirage.commands.builtin.gdrive.strings import strings
 from mirage.commands.builtin.gdrive.tac import tac
@@ -108,7 +108,7 @@ COMMANDS = [
     sed,
     sha256sum,
     shuf,
-    sort_cmd,
+    sort,
     *_STAT_COMMANDS,
     strings,
     tac,

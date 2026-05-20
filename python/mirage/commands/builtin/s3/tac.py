@@ -16,21 +16,13 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.builtin.generic.tac import tac as generic_tac
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.s3.glob import resolve_glob
 from mirage.core.s3.stream import read_stream
-from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-async def _collect_lines(source: AsyncIterator[bytes]) -> list[bytes]:
-    lines: list[bytes] = []
-    async for line in AsyncLineIterator(source):
-        lines.append(line)
-    return lines
 
 
 @command("tac", resource="s3", spec=SPECS["tac"])
@@ -42,14 +34,11 @@ async def tac(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    cache: list[str] = []
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        source: AsyncIterator[bytes] = read_stream(accessor, paths[0])
-        cache = [paths[0].original]
     else:
-        source = _resolve_source(stdin, "tac: missing input")
-
-    lines = await _collect_lines(source)
-    lines.reverse()
-    return b"\n".join(lines) + b"\n", IOResult(cache=cache)
+        paths = []
+    return await generic_tac(paths,
+                             read_stream=read_stream,
+                             accessor=accessor,
+                             stdin=stdin)

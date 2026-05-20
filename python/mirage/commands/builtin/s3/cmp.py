@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.cmp import cmp_cmd as generic_cmp
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.s3.glob import resolve_glob
@@ -41,38 +42,11 @@ async def cmp_cmd(
     if len(paths) < 2:
         raise ValueError("cmp: requires two paths")
     paths = await resolve_glob(accessor, paths, index)
-    p0 = paths[0]
-    p1 = paths[1]
-    data1 = await read_bytes(accessor, p0)
-    data2 = await read_bytes(accessor, p1)
-    if i is not None:
-        skip = int(i)
-        data1 = data1[skip:]
-        data2 = data2[skip:]
-    if n is not None:
-        limit = int(n)
-        data1 = data1[:limit]
-        data2 = data2[:limit]
-    if data1 == data2:
-        return None, IOResult()
-    if s:
-        return None, IOResult(exit_code=1)
-    if args_l:
-        out_lines: list[str] = []
-        for idx in range(min(len(data1), len(data2))):
-            if data1[idx] != data2[idx]:
-                out_lines.append(
-                    f"{idx + 1} {oct(data1[idx])} {oct(data2[idx])}")
-        return "\n".join(out_lines).encode(), IOResult(exit_code=1)
-    for idx in range(min(len(data1), len(data2))):
-        if data1[idx] != data2[idx]:
-            line = 1 + data1[:idx].count(ord(b"\n"))
-            msg = (f"{p0.original} {p1.original}"
-                   f" differ: byte {idx + 1}, line {line}")
-            if b:
-                msg += (f" is {oct(data1[idx])} {chr(data1[idx])}"
-                        f" {oct(data2[idx])} {chr(data2[idx])}")
-            return msg.encode(), IOResult(exit_code=1)
-    shorter = p0.original if len(data1) < len(data2) else p1.original
-    msg = f"cmp: EOF on {shorter}"
-    return msg.encode(), IOResult(exit_code=1)
+    return await generic_cmp(paths,
+                             read_bytes=read_bytes,
+                             accessor=accessor,
+                             silent=s,
+                             verbose=args_l,
+                             limit=int(n) if n is not None else None,
+                             print_bytes=b,
+                             skip=int(i) if i is not None else None)

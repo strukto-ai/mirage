@@ -12,13 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import hashlib
-
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.md5 import md5 as generic_md5
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
-from mirage.core.gdrive.read import read as gdrive_read
+from mirage.core.gdrive.read import read as read_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -29,12 +29,14 @@ async def md5(
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not paths:
-        raise ValueError("md5: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
-    p = paths[0]
-    data = await gdrive_read(accessor, p, _extra.get("index"))
-    result = hashlib.md5(data).hexdigest()
-    return result.encode(), IOResult()
+    if paths:
+        paths = await resolve_glob(accessor, paths, index)
+    else:
+        paths = []
+    return await generic_md5(paths,
+                             read_bytes=read_bytes,
+                             accessor=accessor,
+                             stdin=stdin)

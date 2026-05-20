@@ -14,6 +14,7 @@
 
 import asyncio
 import os
+import time
 
 from dotenv import load_dotenv
 
@@ -305,7 +306,7 @@ async def main():
     # IS populated. Drain tasks are awaited explicitly (vs sleeping)
     # so we don't race the network.
     target = "/gcs/data/example.jsonl"
-    await ws.reset()
+    await ws.cache.clear()
     print("\n=== max_drain_bytes=1MB then cat | head (drain cancelled) ===")
     ws.max_drain_bytes = 1_000_000
     r = await ws.execute(f"cat {target} | head -n 3")
@@ -323,7 +324,7 @@ async def main():
         status = "EMPTY (drain cancelled, as expected)"
     print(f"  cache after small budget: {status}")
 
-    await ws.reset()
+    await ws.cache.clear()
     print("\n=== max_drain_bytes=None then cat | head (drain completes) ===")
     ws.max_drain_bytes = None
     r = await ws.execute(f"cat {target} | head -n 3")
@@ -340,6 +341,51 @@ async def main():
     else:
         status = "EMPTY"
     print(f"  cache after unbounded: {status}")
+
+    # ── chunk-level streaming + multi-stage pipe backpressure ─────────
+    print("\n=== STREAMING (single command) ===")
+    target = "/gcs/data/example.jsonl"
+    r = await ws.execute(f"stat -c '%s' {target}")
+    size = int((await r.stdout_str()).strip())
+    print(f"  object size: {size:,} bytes")
+
+    async def measure(label: str, cmd: str) -> None:
+        before = sum(rec.bytes for rec in ws.ops.records)
+        t0 = time.monotonic()
+        r = await ws.execute(cmd)
+        dt = time.monotonic() - t0
+        net = sum(rec.bytes for rec in ws.ops.records) - before
+        head = (await r.stdout_str()).strip().splitlines()
+        first = head[0][:48] if head else ""
+        print(f"  {label:42s} bytes={net:>10,}  t={dt:4.2f}s  "
+              f"lines={len(head):>4}  out0={first!r}")
+
+    await ws.cache.clear()
+    await measure("head -n 1 (line-streamed)", f"head -n 1 {target}")
+    await ws.cache.clear()
+    await measure("head -c 100 (byte-range)", f"head -c 100 {target}")
+    await ws.cache.clear()
+    await measure("grep -m 1 (early-exit)", f"grep -m 1 mirage {target}")
+
+    print("\n=== STREAMING CHAIN (multi-stage pipe backpressure) ===")
+    await ws.cache.clear()
+    await measure("cat | head -n 1", f"cat {target} | head -n 1")
+    await ws.cache.clear()
+    await measure("cat | tr A-Z a-z | head -n 1",
+                  f"cat {target} | tr A-Z a-z | head -n 1")
+    await ws.cache.clear()
+    await measure("cat | grep mirage | head -n 1",
+                  f"cat {target} | grep mirage | head -n 1")
+    await ws.cache.clear()
+    await measure("4-stage: cat|tr|grep|head -n 1",
+                  f"cat {target} | tr A-Z a-z | grep mirage | head -n 1")
+    await ws.cache.clear()
+    await measure(
+        "5-stage: cat|tr|grep|head|wc -l",
+        f"cat {target} | tr A-Z a-z | grep mirage | head -n 1 "
+        "| wc -l")
+    await ws.cache.clear()
+    await measure("non-cancellable: cat | wc -l", f"cat {target} | wc -l")
 
     print(f"\nStats: {ops_summary()}")
 

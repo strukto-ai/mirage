@@ -12,9 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
-
 from mirage.accessor.s3 import S3Accessor
+from mirage.commands.builtin.generic.basename import \
+    basename as generic_basename
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
@@ -23,11 +23,10 @@ from mirage.types import PathSpec
 
 @command("basename", resource="s3", spec=SPECS["basename"])
 async def basename(
-    accessor: S3Accessor = None,
+    accessor: S3Accessor,
     paths: list[PathSpec] | None = None,
     *texts: str,
     stdin: bytes | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    lines = [posixpath.basename(t) for t in texts]
-    return ("\n".join(lines) + "\n").encode(), IOResult()
+    return await generic_basename(*texts)
