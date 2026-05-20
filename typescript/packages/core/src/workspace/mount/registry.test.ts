@@ -271,7 +271,7 @@ describe('MountRegistry.resolveMount: cross-mount fallback', () => {
     expect(mount).toBe(b)
   })
 
-  it('skips fallback mount when cmd is write-only and target mount is READ', async () => {
+  it('resolves write command on READ fallback mount so execution reports read-only', async () => {
     const reg = new MountRegistry(
       { '/a': new RAMStubResource(), '/b': new RAMStubResource() },
       MountMode.READ,
@@ -288,6 +288,12 @@ describe('MountRegistry.resolveMount: cross-mount fallback', () => {
     if (writeCmd === undefined) throw new Error('missing write cmd')
     b.register(writeCmd)
     const mount = await reg.resolveMount('mutate', [], '/a/x')
-    expect(mount).toBeNull()
+    expect(mount).toBe(b)
+    if (mount === null) throw new Error('missing mutate mount')
+    const [, io] = await mount.executeCmd('mutate', [], [], {})
+    expect(io.exitCode).toBe(1)
+    expect(new TextDecoder().decode(io.stderr as Uint8Array)).toContain(
+      'mutate: read-only mount at /b/',
+    )
   })
 })
