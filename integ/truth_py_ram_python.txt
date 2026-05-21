@@ -1,0 +1,4 @@
+argv after -c: ['alpha', 'beta']
+argv after script: ['one', 'two']
+hello from vfs
+hello_mirage

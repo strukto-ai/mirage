@@ -67,11 +67,54 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
         run: pnpm test
 
-      - name: Redis examples (output checked against integ/ truth files)
+      - name: Examples (output checked against integ/ truth files)
         env:
           REDIS_URL: redis://localhost:6379/0
         run: |
-          run() { pnpm -C examples/typescript exec tsx "$1" 2>&1 | bash integ/check_lines.sh "$2"; }
+          run() { echo "## $1"; pnpm -C examples/typescript exec tsx "$1" 2>&1 | bash integ/check_lines.sh "$2"; }
+          run ram/ram.ts integ/truth_ts_ram.txt
+          run ram/ram_vfs.ts integ/truth_ts_ram_vfs.txt
+          run disk/disk.ts integ/truth_ts_disk.txt
+          run other/custom_command.ts integ/truth_ts_custom_command.txt
+          run python/python_basic.ts integ/truth_ts_python_basic.txt
+          run python/python_env.ts integ/truth_ts_python_env.txt
+          run python/python_heredoc.ts integ/truth_ts_python_heredoc.txt
+          run python/python_script.ts integ/truth_ts_python_script.txt
+          run python/python_ram.ts integ/truth_ts_python_ram.txt
           run redis/redis.ts integ/truth_ts_redis.txt
           run redis/redis_index.ts integ/truth_ts_redis_index.txt
           run redis/redis_cache.ts integ/truth_ts_redis_cache.txt
+
+  python-fs-shim:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.32.1
+
+      - name: Set up Node 24 (for --experimental-wasm-jspi)
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: typescript/pnpm-lock.yaml
+
+      - name: Install node-gyp
+        run: npm install -g node-gyp
+
+      - name: Install TypeScript dependencies
+        working-directory: typescript
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        working-directory: typescript
+        run: pnpm -r --filter './packages/*' build
+
+      - name: Python FS shim example (output checked against integ/ truth file)
+        working-directory: examples/typescript
+        run: |
+          node --experimental-wasm-jspi --import tsx/esm python/vfs.ts 2>&1 \
+            | bash ../../integ/check_lines.sh ../../integ/truth_ts_python_vfs.txt

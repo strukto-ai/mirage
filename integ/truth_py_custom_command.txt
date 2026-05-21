@@ -1,0 +1,2 @@
+hello from RAMAccessor: /ram/note.txt
+hello from DiskAccessor: /disk/note.txt

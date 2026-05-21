@@ -1,0 +1,5 @@
+hello, world!
+sum(1..10): 55
+args: ['alice', 'bob']
+alice: 2
+python3: /ram/missing.py: No such file

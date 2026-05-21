@@ -1,0 +1,3 @@
+['alpha', 'beta']
+exit: 3 (expect 3)
+RuntimeError: boom
