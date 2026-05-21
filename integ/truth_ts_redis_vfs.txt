@@ -1,0 +1,6 @@
+VFS MODE (via require
+hello world
+hello.txt: true
+nope.txt: false
+/data/sub: true
+nested.txt
