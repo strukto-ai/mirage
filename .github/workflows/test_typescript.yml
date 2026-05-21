@@ -20,6 +20,16 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - uses: actions/checkout@v6
@@ -49,4 +59,6 @@ jobs:
 
       - name: Run TypeScript tests
         working-directory: typescript
+        env:
+          REDIS_URL: redis://localhost:6379/0
         run: pnpm test
