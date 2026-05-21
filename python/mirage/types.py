@@ -124,7 +124,9 @@ class PathSpec:
     @property
     def strip_prefix(self) -> str:
         if self.prefix and self.original.startswith(self.prefix):
-            return self.original[len(self.prefix):] or "/"
+            rest = self.original[len(self.prefix):]
+            if self.prefix.endswith("/") or rest == "" or rest.startswith("/"):
+                return rest or "/"
         return self.original
 
     @property

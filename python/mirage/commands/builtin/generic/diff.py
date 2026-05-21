@@ -3,6 +3,7 @@ import re
 from collections.abc import Awaitable, Callable
 
 from mirage.commands.builtin.diff_helper import _ed_script, _normal_diff
+from mirage.commands.builtin.utils.lines import split_lines_keepends
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -36,8 +37,8 @@ async def _diff_pair(
         if text_a != text_b:
             return f"Files {name1} and {name2} differ\n".encode()
         return b""
-    a_lines = text_a.splitlines(keepends=True)
-    b_lines = text_b.splitlines(keepends=True)
+    a_lines = split_lines_keepends(text_a)
+    b_lines = split_lines_keepends(text_b)
     if e:
         result = _ed_script(a_lines, b_lines)
     elif u:

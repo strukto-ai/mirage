@@ -13,11 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.sort_helper import _sort_key
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.builtin.generic.sort import sort as generic_sort
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.github.glob import resolve_glob
@@ -45,31 +45,22 @@ async def sort_cmd(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    key_field = int(k) if k is not None else None
-    if paths and index is not None:
+    if paths:
         paths = await resolve_glob(accessor, paths, index)
-        p = paths[0]
-        data = await github_read(accessor, p, index)
-        text = data.decode(errors="replace")
     else:
-        raw = await _read_stdin_async(stdin)
-        if raw is None:
-            raise ValueError("sort: missing operand")
-        text = raw.decode(errors="replace")
-    lines = text.splitlines()
-    result = sorted(
-        lines,
-        key=lambda line: _sort_key(line, key_field, t, f, n, h, V, M),
+        paths = []
+    return await generic_sort(
+        paths,
+        read_bytes=partial(github_read, index=index),
+        accessor=accessor,
+        stdin=stdin,
         reverse=r,
+        numeric=n,
+        unique=u,
+        fold_case=f,
+        key_field=int(k) if k is not None else None,
+        field_separator=t,
+        human_numeric=h,
+        version_sort=V,
+        month_sort=M,
     )
-    if u:
-        seen: set[object] = set()
-        deduped: list[str] = []
-        for line in result:
-            ky = _sort_key(line, key_field, t, f, n, h, V, M)
-            if ky not in seen:
-                seen.add(ky)
-                deduped.append(line)
-        result = deduped
-    output = "\n".join(result)
-    return (output + "\n").encode() if output else b"", IOResult()

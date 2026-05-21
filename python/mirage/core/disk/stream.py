@@ -40,7 +40,9 @@ async def read_stream(accessor: DiskAccessor,
         prefix = path.prefix
         path = path.original
     if prefix and path.startswith(prefix):
-        path = path[len(prefix):] or "/"
+        rest = path[len(prefix):]
+        if prefix.endswith("/") or rest == "" or rest.startswith("/"):
+            path = rest or "/"
     root = accessor.root
     rec = record_stream("read", path, "disk")
     p = _resolve(root, path)

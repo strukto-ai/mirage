@@ -137,9 +137,9 @@ async def test_tail_c_zero_emits_nothing():
 
 
 @pytest.mark.asyncio
-async def test_tail_c_negative_emits_nothing():
+async def test_tail_c_negative_is_last_abs():
     out = await _drain(tail(b"hello", c=-3))
-    assert out == b""
+    assert out == b"llo"
 
 
 @pytest.mark.asyncio

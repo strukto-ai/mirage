@@ -22,9 +22,9 @@ async def test_basename_single():
 
 
 @pytest.mark.asyncio
-async def test_basename_multiple():
-    out, _ = await basename("/a/b.txt", "x/y")
-    assert out == b"b.txt\ny\n"
+async def test_basename_suffix():
+    out, _ = await basename("/a/b.txt", ".txt")
+    assert out == b"b\n"
 
 
 @pytest.mark.asyncio
@@ -42,7 +42,7 @@ async def test_dirname_single():
 @pytest.mark.asyncio
 async def test_dirname_no_slash():
     out, _ = await dirname("foo")
-    assert out == b"\n"
+    assert out == b".\n"
 
 
 @pytest.mark.asyncio
@@ -213,4 +213,4 @@ async def test_mktemp_custom_template():
                           t=True)
     text = out.decode().rstrip("\n")
     assert text.startswith("/tmp/session_")
-    assert len(text) == len("/tmp/session_") + 8
+    assert len(text) == len("/tmp/session_") + 6

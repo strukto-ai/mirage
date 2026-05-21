@@ -1,5 +1,6 @@
 from collections.abc import Awaitable, Callable
 
+from mirage.commands.builtin.utils.lines import split_lines
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -64,8 +65,8 @@ async def comm(
         raise ValueError("comm: requires two paths")
     data1 = (await read_bytes(accessor, paths[0])).decode(errors="replace")
     data2 = (await read_bytes(accessor, paths[1])).decode(errors="replace")
-    lines1 = data1.splitlines()
-    lines2 = data2.splitlines()
+    lines1 = split_lines(data1)
+    lines2 = split_lines(data2)
     stderr = ""
     if check_order:
         if lines1 != sorted(lines1):

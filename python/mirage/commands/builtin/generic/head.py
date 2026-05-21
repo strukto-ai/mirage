@@ -11,17 +11,26 @@ async def head(
     c: int | None = None,
 ) -> AsyncIterator[bytes]:
     if c is not None:
-        if c <= 0:
+        if c == 0:
             return
-        emitted = 0
+        if c > 0:
+            emitted = 0
+            async for chunk in ensure_stream(src):
+                remaining = c - emitted
+                if len(chunk) >= remaining:
+                    if remaining > 0:
+                        yield chunk[:remaining]
+                    return
+                yield chunk
+                emitted += len(chunk)
+            return
+        keep = -c
+        buf = b""
         async for chunk in ensure_stream(src):
-            remaining = c - emitted
-            if len(chunk) >= remaining:
-                if remaining > 0:
-                    yield chunk[:remaining]
-                return
-            yield chunk
-            emitted += len(chunk)
+            buf += chunk
+            if len(buf) > keep:
+                yield buf[:-keep]
+                buf = buf[-keep:]
         return
 
     target = n if n is not None else 10

@@ -32,7 +32,9 @@ async def stream(accessor: RAMAccessor,
         prefix = path.prefix
         path = path.original
         if prefix and path.startswith(prefix):
-            path = path[len(prefix):] or "/"
+            rest = path[len(prefix):]
+            if prefix.endswith("/") or rest == "" or rest.startswith("/"):
+                path = rest or "/"
     store = accessor.store
     key = _norm(path)
     if key not in store.files:
@@ -53,6 +55,8 @@ async def read_stream(accessor: RAMAccessor,
         prefix = path.prefix
         path = path.original
     if prefix and path.startswith(prefix):
-        path = path[len(prefix):] or "/"
+        rest = path[len(prefix):]
+        if prefix.endswith("/") or rest == "" or rest.startswith("/"):
+            path = rest or "/"
     async for chunk in stream(accessor, path):
         yield chunk

@@ -37,7 +37,9 @@ async def readdir(accessor: DiskAccessor, path: PathSpec,
         prefix = path.prefix
         path = path.directory if path.pattern else path.original
     if prefix and path.startswith(prefix):
-        path = path[len(prefix):] or "/"
+        rest = path[len(prefix):]
+        if prefix.endswith("/") or rest == "" or rest.startswith("/"):
+            path = rest or "/"
     root = accessor.root
     virtual_key = prefix + path if prefix else path
     listing = await index.list_dir(virtual_key)

@@ -29,7 +29,7 @@ async def _walk(
 ) -> list[str]:
     lines: list[str] = []
     try:
-        entries = await readdir(path, index)
+        entries = sorted(await readdir(path, index))
     except (FileNotFoundError, ValueError) as exc:
         warnings.append(f"tree: '{path.original}': {exc}")
         return lines

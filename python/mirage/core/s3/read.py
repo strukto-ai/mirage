@@ -61,7 +61,9 @@ async def read_bytes(accessor: S3Accessor,
         prefix = path.prefix
         path = path.original
     if prefix and path.startswith(prefix):
-        path = path[len(prefix):] or "/"
+        rest = path[len(prefix):]
+        if prefix.endswith("/") or rest == "" or rest.startswith("/"):
+            path = rest or "/"
     config = accessor.config
     key = _key(path, config)
     kwargs = {"Bucket": config.bucket, "Key": key}

@@ -7,6 +7,7 @@ from mirage.commands.builtin.grep_helper import (compile_pattern,
                                                  grep_folder_filetype,
                                                  grep_lines, grep_recursive,
                                                  grep_stream)
+from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
                                                 call_stat)
@@ -89,25 +90,28 @@ async def grep(
 
         if files_only:
             warnings = []
-            results = await grep_files_only(
-                rd,
-                st,
-                rb,
-                paths[0].original,
-                pattern,
-                recursive=recursive,
-                ignore_case=ignore_case,
-                invert=invert,
-                line_numbers=line_numbers,
-                count_only=count_only,
-                fixed_string=fixed_string,
-                only_matching=only_matching,
-                max_count=max_count,
-                whole_word=whole_word,
-                warnings=warnings,
-                read_stream_fn=partial(read_stream, accessor)
-                if read_stream else None,
-            )
+            results: list[str] = []
+            for p in paths:
+                hits = await grep_files_only(
+                    rd,
+                    st,
+                    rb,
+                    p.original,
+                    pattern,
+                    recursive=recursive,
+                    ignore_case=ignore_case,
+                    invert=invert,
+                    line_numbers=line_numbers,
+                    count_only=count_only,
+                    fixed_string=fixed_string,
+                    only_matching=only_matching,
+                    max_count=max_count,
+                    whole_word=whole_word,
+                    warnings=warnings,
+                    read_stream_fn=partial(read_stream, accessor)
+                    if read_stream else None,
+                )
+                results.extend(hits)
             stderr = "\n".join(warnings).encode() if warnings else None
             if not results:
                 return b"", IOResult(exit_code=1, stderr=stderr)
@@ -139,8 +143,9 @@ async def grep(
                     )
                     all_results.extend(res)
                 else:
-                    data = (await read_bytes(
-                        accessor, p)).decode(errors="replace").splitlines()
+                    data = split_lines(
+                        (await read_bytes(accessor,
+                                          p)).decode(errors="replace"))
                     hits = grep_lines(p.original, data, pat, invert,
                                       line_numbers, count_only, files_only,
                                       only_matching, max_count)
@@ -160,9 +165,8 @@ async def grep(
         if len(paths) > 1:
             all_results = []
             for p in paths:
-                data = (await
-                        read_bytes(accessor,
-                                   p)).decode(errors="replace").splitlines()
+                data = split_lines(
+                    (await read_bytes(accessor, p)).decode(errors="replace"))
                 hits = grep_lines(p.original, data, pat, invert, line_numbers,
                                   count_only, files_only, only_matching,
                                   max_count)

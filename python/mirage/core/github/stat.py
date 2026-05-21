@@ -26,7 +26,9 @@ async def stat(accessor, path: PathSpec, index: IndexCacheStore) -> FileStat:
         path = path.original
 
     if prefix and path.startswith(prefix):
-        path = path[len(prefix):] or "/"
+        rest = path[len(prefix):]
+        if prefix.endswith("/") or rest == "" or rest.startswith("/"):
+            path = rest or "/"
     if path == "/" or path == "":
         return FileStat(name="/", type=FileType.DIRECTORY)
     key = "/" + path.strip("/") if path.strip("/") else "/"

@@ -2,6 +2,7 @@ import gzip as gziplib
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 
+from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -27,7 +28,7 @@ def _zgrep_search(
     max_count: int | None,
 ) -> tuple[list[str], bool]:
     text = data.decode(errors="replace")
-    lines = text.splitlines()
+    lines = split_lines(text)
     flags = re.IGNORECASE if ignore_case else 0
     matched: list[tuple[int, str]] = []
     for idx, line in enumerate(lines, 1):
@@ -65,7 +66,7 @@ def _files_only_match(data: bytes, pattern: str, ignore_case: bool,
                       invert: bool) -> bool:
     text = data.decode(errors="replace")
     flags = re.IGNORECASE if ignore_case else 0
-    for line in text.splitlines():
+    for line in split_lines(text):
         hit = bool(re.search(pattern, line, flags))
         if invert:
             hit = not hit

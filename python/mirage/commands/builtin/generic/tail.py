@@ -39,13 +39,14 @@ async def tail(
         return
 
     if c is not None:
-        if c <= 0:
+        target_c = abs(c)
+        if target_c == 0:
             return
         buf = b""
         async for chunk in ensure_stream(src):
             buf += chunk
-            if len(buf) > c:
-                buf = buf[-c:]
+            if len(buf) > target_c:
+                buf = buf[-target_c:]
         if buf:
             yield buf
         return

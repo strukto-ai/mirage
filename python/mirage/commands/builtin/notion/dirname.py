@@ -12,9 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
-
 from mirage.accessor.notion import NotionAccessor
+from mirage.commands.builtin.generic.dirname import dirname as generic_dirname
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
@@ -29,5 +28,4 @@ async def dirname(
     stdin: bytes | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    lines = [posixpath.dirname(t) for t in texts]
-    return ("\n".join(lines) + "\n").encode(), IOResult()
+    return await generic_dirname(*texts)

@@ -1,10 +1,9 @@
-import posixpath
-
+from mirage.commands.builtin.path_helper import gnu_dirname
 from mirage.io.types import ByteSource, IOResult
 
 
 async def dirname(*texts: str) -> tuple[ByteSource | None, IOResult]:
-    lines = [posixpath.dirname(t) for t in texts]
+    lines = [gnu_dirname(t) for t in texts]
     return ("\n".join(lines) + "\n").encode(), IOResult()
 
 

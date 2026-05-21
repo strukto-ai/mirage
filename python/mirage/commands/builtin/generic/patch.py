@@ -1,6 +1,7 @@
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 
+from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -56,7 +57,7 @@ def _parse_patch(patch_text: str,
     current_hunk_lines: list[str] = []
     current_start = 0
 
-    for line in patch_text.splitlines():
+    for line in split_lines(patch_text):
         if line.startswith("--- "):
             continue
         if line.startswith("+++ "):
@@ -147,7 +148,7 @@ async def patch(
                                          file_path)).decode(errors="replace")
         except FileNotFoundError:
             original = ""
-        original_lines = original.splitlines()
+        original_lines = split_lines(original)
         if R:
             hunks = _reverse_hunks(hunks)
         patched_lines = _apply_hunks(original_lines, hunks, forward_only=N)

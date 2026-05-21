@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator, Awaitable, Callable
 from itertools import zip_longest
 
+from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -24,12 +25,12 @@ async def paste(
             remaining_stdin = None
         else:
             data = (await read_bytes(accessor, p)).decode(errors="replace")
-        file_lines.append(data.splitlines())
+        file_lines.append(split_lines(data))
 
     if not file_lines and remaining_stdin is not None:
         raw = await _read_stdin_async(remaining_stdin)
         if raw:
-            file_lines.append(raw.decode(errors="replace").splitlines())
+            file_lines.append(split_lines(raw.decode(errors="replace")))
 
     if not file_lines:
         raise ValueError("paste: missing operand")

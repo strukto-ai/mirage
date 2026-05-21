@@ -134,7 +134,7 @@ async def test_head_single_line_no_newline_default_n():
 
 
 @pytest.mark.asyncio
-async def test_head_c_negative_emits_nothing():
-    """POSIX head doesn't define -c with negative; we treat as empty."""
+async def test_head_c_negative_is_all_but_last_abs():
+    """GNU head: -c -N emits all but the last N bytes."""
     out = await _drain(head(b"hello", c=-3))
-    assert out == b""
+    assert out == b"he"

@@ -53,7 +53,9 @@ async def read(
         path = path.original
 
     if prefix and path.startswith(prefix):
-        path = path[len(prefix):] or "/"
+        rest = path[len(prefix):]
+        if prefix.endswith("/") or rest == "" or rest.startswith("/"):
+            path = rest or "/"
     key = path.strip("/")
 
     if any(p.startswith(".") for p in key.split("/")):

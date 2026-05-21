@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator, Awaitable, Callable
 
+from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -23,7 +24,7 @@ async def look(
     text = raw.decode(errors="replace")
     cmp_prefix = prefix.lower() if fold_case else prefix
     matched: list[str] = []
-    for line in text.splitlines():
+    for line in split_lines(text):
         cmp_line = line.lower() if fold_case else line
         if cmp_line.startswith(cmp_prefix):
             matched.append(line)

@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator, Awaitable, Callable
 
+from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -39,14 +40,14 @@ async def fold(
         all_lines: list[str] = []
         for p in paths:
             data = (await read_bytes(accessor, p)).decode(errors="replace")
-            for line in data.splitlines():
+            for line in split_lines(data):
                 all_lines.append(_fold_line(line, width, break_spaces))
         return ("\n".join(all_lines) + "\n").encode(), IOResult()
 
     raw = await _read_stdin_async(stdin)
     if raw is None:
         raise ValueError("fold: missing operand")
-    lines = raw.decode(errors="replace").splitlines()
+    lines = split_lines(raw.decode(errors="replace"))
     result = [_fold_line(ln, width, break_spaces) for ln in lines]
     return ("\n".join(result) + "\n").encode(), IOResult()
 
