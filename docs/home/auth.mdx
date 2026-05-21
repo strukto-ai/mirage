@@ -43,7 +43,7 @@ export MIRAGE_AUTH_MODE=token
 export MIRAGE_AUTH_TOKEN=<your-pat>
 
 # Python
-python -m uvicorn mirage.cli.server_factory:app --host 127.0.0.1 --port 8765
+python -m uvicorn mirage.server.daemon:app --host 127.0.0.1 --port 8765
 
 # TypeScript
 node typescript/packages/cli/dist/bin/daemon.js

@@ -14,8 +14,8 @@
 
 import os
 
-from mirage.cli.env import ENV_IDLE_GRACE_SECONDS, ENV_PERSIST_DIR
-from mirage.server import build_app
+from mirage.server.app import build_app
+from mirage.server.env import ENV_IDLE_GRACE_SECONDS, ENV_PERSIST_DIR
 
 _persist_dir = os.environ.get(ENV_PERSIST_DIR) or None
 _idle_grace = float(os.environ.get(ENV_IDLE_GRACE_SECONDS, "30"))

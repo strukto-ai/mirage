@@ -58,7 +58,7 @@ def daemon(tmp_path):
             sys.executable,
             "-m",
             "uvicorn",
-            "mirage.cli.server_factory:app",
+            "mirage.server.daemon:app",
             "--host",
             "127.0.0.1",
             "--port",

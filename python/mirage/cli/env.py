@@ -17,15 +17,12 @@ from mirage.server.auth.config import (ENV_AUTH_MODE, ENV_AUTH_TOKEN,
                                        ENV_JWT_AUTHORIZED_PARTIES,
                                        ENV_JWT_CLOCK_SKEW, ENV_JWT_ISSUER,
                                        ENV_JWT_PUBKEY, ENV_JWT_PUBKEY_FILE)
-from mirage.server.env import ENV_ALLOWED_HOSTS
+from mirage.server.env import ENV_IDLE_GRACE_SECONDS, ENV_PERSIST_DIR
 
 ENV_DAEMON_URL = "MIRAGE_DAEMON_URL"
 ENV_TOKEN = "MIRAGE_TOKEN"
-ENV_PERSIST_DIR = "MIRAGE_PERSIST_DIR"
-ENV_IDLE_GRACE_SECONDS = "MIRAGE_IDLE_GRACE_SECONDS"
 
 __all__ = [
-    "ENV_ALLOWED_HOSTS",
     "ENV_AUTH_MODE",
     "ENV_AUTH_TOKEN",
     "ENV_DAEMON_URL",

@@ -162,7 +162,7 @@ jobs:
           echo
           echo "===== auth: mode=token (operator PAT) ====="
           MIRAGE_AUTH_MODE=token MIRAGE_AUTH_TOKEN=operator-pat-xyz \
-            .venv/bin/python -m uvicorn mirage.cli.server_factory:app \
+            .venv/bin/python -m uvicorn mirage.server.daemon:app \
             --host 127.0.0.1 --port 8765 --log-level warning >/tmp/auth-token.log 2>&1 &
           TOKEN_PID=$!
           sleep 2
@@ -202,7 +202,7 @@ jobs:
           MIRAGE_AUTH_MODE=jwt \
             MIRAGE_JWT_PUBKEY_FILE=/tmp/jwt-test/pub.pem \
             MIRAGE_JWT_ALG=RS256 \
-            .venv/bin/python -m uvicorn mirage.cli.server_factory:app \
+            .venv/bin/python -m uvicorn mirage.server.daemon:app \
             --host 127.0.0.1 --port 8765 --log-level warning >/tmp/auth-jwt.log 2>&1 &
           JWT_PID=$!
           sleep 2
