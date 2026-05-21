@@ -21,7 +21,7 @@ from mirage.workspace import Workspace
 
 class _FakeRemote(RAMResource):
     is_remote = True
-    _index_ttl = 600
+    index_ttl = 600
 
 
 def _seed_remote() -> _FakeRemote:

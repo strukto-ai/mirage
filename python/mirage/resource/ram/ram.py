@@ -65,7 +65,7 @@ _RAM_OPS = {
 class RAMResource(BaseResource):
 
     name: str = ResourceName.RAM
-    _index_ttl: float = 0
+    index_ttl: float = 0
     _ops: dict = _RAM_OPS
     PROMPT: str = PROMPT
 

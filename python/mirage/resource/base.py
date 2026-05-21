@@ -34,7 +34,7 @@ class BaseResource:
     PROMPT: str = ""
     WRITE_PROMPT: str = ""
 
-    _index_ttl: float = 600
+    index_ttl: float = 600
 
     # Whether this resource carries enough version information for
     # snapshot+replay drift detection. When True, the resource's stat()
@@ -56,7 +56,7 @@ class BaseResource:
         self.set_index(index)
 
     def set_index(self, config: IndexConfig | None = None) -> None:
-        cfg = config or IndexConfig(ttl=self._index_ttl)
+        cfg = config or IndexConfig(ttl=self.index_ttl)
         if isinstance(cfg, RedisIndexConfig):
             if RedisIndexCacheStore is None:
                 raise ImportError(

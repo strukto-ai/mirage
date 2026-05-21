@@ -44,7 +44,7 @@ def _stdout(io):
 def test_ram_resource_has_index():
     p = RAMResource()
     assert p.index is not None
-    assert p._index_ttl == 0
+    assert p.index_ttl == 0
 
 
 def test_s3_resource_has_index():
@@ -53,7 +53,7 @@ def test_s3_resource_has_index():
                      region_name="us-east-1").create_bucket(Bucket="test-idx")
         p = S3Resource(S3Config(bucket="test-idx", region="us-east-1"))
         assert p.index is not None
-        assert p._index_ttl == 600
+        assert p.index_ttl == 600
 
 
 # ── RAM index integration ─────────────────────
@@ -106,7 +106,7 @@ def test_s3_resource_index_ttl():
                      region_name="us-east-1").create_bucket(Bucket="test-ttl")
         prov = S3Resource(S3Config(bucket="test-ttl", region="us-east-1"))
         assert prov.index is not None
-        assert prov._index_ttl == 600
+        assert prov.index_ttl == 600
 
 
 def test_s3_index_can_store_entries():
@@ -152,7 +152,7 @@ def test_index_per_resource():
 
 def test_ram_index_ttl_zero():
     p = RAMResource()
-    assert p._index_ttl == 0
+    assert p.index_ttl == 0
 
 
 def test_index_expired_refetches():

@@ -66,7 +66,7 @@ Path mapping: virtual `/s3/data/file.txt` maps to S3 key `data/file.txt`.
 
 ## Cache
 
-The S3 resource uses `IndexCacheStore` with `_index_ttl = 600` (10 minutes).
+The S3 resource uses `IndexCacheStore` with `index_ttl = 600` (10 minutes).
 Directory listings are cached for up to 600 seconds before being refreshed
 from S3. This reduces API calls for repeated directory traversals.
 
