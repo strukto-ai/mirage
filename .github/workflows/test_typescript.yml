@@ -81,7 +81,7 @@ jobs:
           run python/python_env.ts integ/truth_ts_python_env.txt
           run python/python_heredoc.ts integ/truth_ts_python_heredoc.txt
           run python/python_script.ts integ/truth_ts_python_script.txt
-          run python/python_ram.ts integ/truth_ts_python_ram.txt
+          run python/pyodide_ram.ts integ/truth_ts_pyodide_ram.txt
           run redis/redis.ts integ/truth_ts_redis.txt
           run redis/redis_index.ts integ/truth_ts_redis_index.txt
           run redis/redis_cache.ts integ/truth_ts_redis_cache.txt
