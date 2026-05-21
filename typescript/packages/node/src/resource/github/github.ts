@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  BaseResource,
   fetchGitHubRepoInfo,
   fetchGitHubTree,
   type FileStat,
@@ -48,18 +49,18 @@ export interface GitHubResourceState {
   truncated: boolean
 }
 
-export class GitHubResource implements Resource {
+export class GitHubResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.GITHUB
   readonly isRemote: boolean = true
   readonly indexTtl: number = 86_400
   readonly config: GitHubConfig
   readonly accessor: GitHubAccessor
-  readonly index: IndexCacheStore
 
   private constructor(config: GitHubConfig, accessor: GitHubAccessor, index: IndexCacheStore) {
+    super()
     this.config = config
     this.accessor = accessor
-    this.index = index
+    this._index = index
   }
 
   static async create(config: GitHubConfig): Promise<GitHubResource> {

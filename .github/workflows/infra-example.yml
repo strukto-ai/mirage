@@ -231,6 +231,38 @@ jobs:
           echo "$output" | grep -q '"alice"' || (echo "FAIL: missing jq output" && exit 1)
           echo "$output" | grep -q "goodbye world" || (echo "FAIL: missing sed output" && exit 1)
 
+      - name: Run Redis index example (TypeScript)
+        env:
+          REDIS_URL: redis://localhost:6379/0
+        run: |
+          output=$(pnpm -C examples/typescript exec tsx redis/redis_index.ts 2>&1)
+          echo "$output"
+          echo "$output" | grep -q "index store A is redis-backed: true" || (echo "FAIL: index not redis-backed" && exit 1)
+          echo "$output" | grep -q "shared index entry: hello.txt" || (echo "FAIL: missing shared index entry" && exit 1)
+          echo "$output" | grep -q "shared index listing: /data/hello.txt, /data/notes.md" || (echo "FAIL: missing shared index listing" && exit 1)
+
+      - name: Run Redis file-cache example (TypeScript)
+        env:
+          REDIS_URL: redis://localhost:6379/0
+        run: |
+          output=$(pnpm -C examples/typescript exec tsx redis/redis_cache.ts 2>&1)
+          echo "$output"
+          echo "$output" | grep -q "cache2.get: hello from redis cache" || (echo "FAIL: missing cross-process cache read" && exit 1)
+
+      - name: Run Redis index example (Python)
+        run: |
+          output=$(./python/.venv/bin/python examples/python/redis_resource/example_redis_index.py 2>&1)
+          echo "$output"
+          echo "$output" | grep -q "index store A is redis-backed: True" || (echo "FAIL: index not redis-backed" && exit 1)
+          echo "$output" | grep -q "shared index entry: hello.txt" || (echo "FAIL: missing shared index entry" && exit 1)
+          echo "$output" | grep -q "shared index listing: /data/hello.txt, /data/notes.md" || (echo "FAIL: missing shared index listing" && exit 1)
+
+      - name: Run Redis file-cache example (Python)
+        run: |
+          output=$(./python/.venv/bin/python examples/python/redis_resource/example_redis_cache.py 2>&1)
+          echo "$output"
+          echo "$output" | grep -q "cache2.get: hello from redis cache" || (echo "FAIL: missing cross-process cache read" && exit 1)
+
       - name: Run Redis VFS example (Python)
         run: ./python/.venv/bin/python examples/python/redis_resource/example_redis_vfs.py
 

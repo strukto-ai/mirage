@@ -13,15 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  BaseResource,
   BOX_COMMANDS,
   BOX_PROMPT,
   BOX_VFS_OPS,
   BoxAccessor,
   BoxTokenManager,
   type FileStat,
-  type IndexCacheStore,
   PathSpec,
-  RAMIndexCacheStore,
   type RegisteredCommand,
   type RegisteredOp,
   type Resource,
@@ -40,16 +39,16 @@ export interface BoxResourceState {
   config: BoxConfigRedacted
 }
 
-export class BoxResource implements Resource {
+export class BoxResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.BOX
   readonly isRemote: boolean = true
   readonly indexTtl: number = 86_400
   readonly prompt: string = BOX_PROMPT
   readonly config: BoxConfig
   readonly accessor: BoxAccessor
-  readonly index: IndexCacheStore
 
   constructor(config: BoxConfig) {
+    super()
     this.config = config
     const tm = new BoxTokenManager({
       ...(config.clientId !== undefined ? { clientId: config.clientId } : {}),
@@ -62,7 +61,6 @@ export class BoxResource implements Resource {
         : {}),
     })
     this.accessor = new BoxAccessor({ tokenManager: tm })
-    this.index = new RAMIndexCacheStore({ ttl: 86_400 })
   }
 
   open(): Promise<void> {

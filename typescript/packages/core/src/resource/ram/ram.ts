@@ -33,11 +33,10 @@ import { truncate as truncateCore } from '../../core/ram/truncate.ts'
 import { unlink as unlinkCore } from '../../core/ram/unlink.ts'
 import { writeBytes as writeCore } from '../../core/ram/write.ts'
 import { RAMAccessor } from '../../accessor/ram.ts'
-import { type IndexCacheStore, RAMIndexCacheStore } from '../../cache/index/index.ts'
 import { RAM_OPS } from '../../ops/ram/index.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
 import { PathSpec, ResourceName, type FileStat } from '../../types.ts'
-import type { FindOptions, Resource } from '../base.ts'
+import { BaseResource, type FindOptions, type Resource } from '../base.ts'
 import { RAM_PROMPT } from './prompt.ts'
 import { RAMStore } from './store.ts'
 
@@ -50,13 +49,12 @@ export interface RAMResourceState {
   modified: Record<string, string>
 }
 
-export class RAMResource implements Resource {
+export class RAMResource extends BaseResource implements Resource {
   readonly kind = ResourceName.RAM
   readonly isRemote: boolean = false
   readonly indexTtl: number = 0
   readonly store = new RAMStore()
   readonly accessor = new RAMAccessor(this.store)
-  readonly index: IndexCacheStore = new RAMIndexCacheStore({ ttl: this.indexTtl })
   readonly prompt = RAM_PROMPT
   readonly opsMap: Record<string, unknown> = {
     read_bytes: readCore,

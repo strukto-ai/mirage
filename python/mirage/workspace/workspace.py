@@ -23,6 +23,7 @@ from typing import Any
 from mirage.cache.file import io as cache_io
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.file.ram import RAMFileCacheStore
+from mirage.cache.index import IndexConfig
 from mirage.commands.builtin.general import HISTORY_COMMANDS
 
 try:
@@ -85,6 +86,7 @@ class Workspace:
         resources: dict[str, BaseResource | tuple],
         cache_limit: str | int = "512MB",
         cache: CacheConfig | None = None,
+        index: IndexConfig | None = None,
         mode: MountMode = MountMode.READ,
         consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY,
         history: int | None = 100,
@@ -136,6 +138,8 @@ class Workspace:
             else:
                 prov = value
                 mount_mode = mode
+            if index is not None:
+                prov.set_index(index)
             self._registry.mount(prefix, prov, mount_mode)
 
         self._fuse = FuseManager()

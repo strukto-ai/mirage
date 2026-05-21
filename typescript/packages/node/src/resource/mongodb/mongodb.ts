@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  BaseResource,
   detectMongoScope,
   type FileStat,
-  type IndexCacheStore,
   MONGODB_COMMANDS,
   MONGODB_OPS,
   MONGODB_PROMPT,
@@ -26,7 +26,6 @@ import {
   mongoReaddir,
   mongoStat,
   PathSpec,
-  RAMIndexCacheStore,
   type RegisteredCommand,
   type RegisteredOp,
   type Resource,
@@ -43,7 +42,7 @@ export interface MongoDBResourceOptions {
   prefix?: string
 }
 
-export class MongoDBResource implements Resource {
+export class MongoDBResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.MONGODB
   readonly isRemote: boolean = true
   readonly indexTtl: number = 0
@@ -51,15 +50,14 @@ export class MongoDBResource implements Resource {
   readonly config: MongoDBConfigResolved
   readonly store: MongoDBStore
   readonly accessor: MongoDBAccessor
-  readonly index: IndexCacheStore
 
   constructor(options: MongoDBResourceOptions | MongoDBConfig) {
+    super()
     const { config, prefix } =
       'config' in options ? options : { config: options, prefix: undefined }
     this.config = resolveMongoDBConfig(config)
     this.store = new MongoDBStore(this.config.uri)
     this.accessor = new MongoDBAccessor(this.store, this.config)
-    this.index = new RAMIndexCacheStore({ ttl: this.indexTtl })
     this.prompt = MONGODB_PROMPT.replace('{prefix}', prefix ?? '')
   }
 

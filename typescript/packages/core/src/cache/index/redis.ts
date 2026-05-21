@@ -12,41 +12,63 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { loadOptionalPeer } from '../../utils/optional_peer.ts'
 import {
-  IndexCacheStore,
   IndexEntry,
+  LookupStatus,
   type IndexConfig,
   type ListResult,
   type LookupResult,
-  LookupStatus,
-} from '@struktoai/mirage-core'
-import type { RedisClientType } from 'redis'
-import { loadOptionalPeer } from '../../optional_peer.ts'
+} from './config.ts'
+import { IndexCacheStore } from './store.ts'
 
 const ENTRY_PREFIX = 'mirage:idx:entry:'
 const CHILDREN_PREFIX = 'mirage:idx:children:'
+const DEFAULT_KEY_PREFIX = 'mirage:index:'
+
+interface RedisPipeline {
+  set: (key: string, value: string) => RedisPipeline
+  del: (key: string) => RedisPipeline
+  rPush: (key: string, values: string[]) => RedisPipeline
+  expire: (key: string, seconds: number) => RedisPipeline
+  exec: () => Promise<unknown>
+}
+
+export interface RedisClientLike {
+  connect: () => Promise<unknown>
+  get: (key: string) => Promise<string | null>
+  set: (key: string, value: string) => Promise<unknown>
+  exists: (key: string) => Promise<number>
+  ttl: (key: string) => Promise<number>
+  lRange: (key: string, start: number, stop: number) => Promise<string[]>
+  del: (key: string | string[]) => Promise<unknown>
+  multi: () => RedisPipeline
+  scanIterator: (options: { MATCH: string }) => AsyncIterable<string | string[]>
+  isOpen: boolean
+  quit: () => Promise<unknown>
+}
 
 export interface RedisIndexCacheOptions {
   ttl?: number
   url?: string
-  client?: RedisClientType
+  client?: RedisClientLike
   keyPrefix?: string
 }
 
 export class RedisIndexCacheStore extends IndexCacheStore {
   private readonly ttl: number
   private readonly url: string
-  private readonly providedClient: RedisClientType | null
+  private readonly providedClient: RedisClientLike | null
   private readonly entryPrefix: string
   private readonly childrenPrefix: string
-  private clientPromise: Promise<RedisClientType> | null = null
+  private clientPromise: Promise<RedisClientLike> | null = null
 
   constructor(options: RedisIndexCacheOptions = {}) {
     super()
     this.ttl = options.ttl ?? 600
     this.url = options.url ?? 'redis://localhost:6379/0'
     this.providedClient = options.client ?? null
-    const prefix = options.keyPrefix ?? ''
+    const prefix = options.keyPrefix ?? DEFAULT_KEY_PREFIX
     this.entryPrefix = `${prefix}${ENTRY_PREFIX}`
     this.childrenPrefix = `${prefix}${CHILDREN_PREFIX}`
   }
@@ -66,20 +88,20 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     return `${this.childrenPrefix}${path}`
   }
 
-  private client(): Promise<RedisClientType> {
+  private client(): Promise<RedisClientLike> {
     if (this.providedClient !== null) return Promise.resolve(this.providedClient)
     this.clientPromise ??= (async () => {
-      const mod = await loadOptionalPeer(
-        () =>
-          import('redis') as unknown as Promise<{
-            createClient: (o: { url: string }) => RedisClientType
-          }>,
-        { feature: 'RedisIndexCacheStore', packageName: 'redis' },
-      )
+      const spec = 'redis'
+      const mod = (await loadOptionalPeer(() => import(/* @vite-ignore */ spec), {
+        feature: 'RedisIndexCacheStore',
+        packageName: 'redis',
+      })) as {
+        createClient: (o: { url: string; socket?: unknown }) => RedisClientLike
+      }
       const c = mod.createClient({
         url: this.url,
         socket: { reconnectStrategy: false },
-      } as Parameters<typeof mod.createClient>[0])
+      })
       await c.connect()
       return c
     })()

@@ -58,4 +58,4 @@ class IndexConfig(BaseModel):
 class RedisIndexConfig(IndexConfig):
     type: IndexType = IndexType.REDIS
     url: str = "redis://localhost:6379/0"
-    key_prefix: str = ""
+    key_prefix: str = "mirage:index:"

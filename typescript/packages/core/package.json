@@ -52,6 +52,7 @@
     "@modelcontextprotocol/sdk": "^1.0.0",
     "hyparquet-writer": "^0.13.0",
     "pyodide": "^0.29.3",
+    "redis": "^5.0.0",
     "tree-sitter-bash": "^0.25.1",
     "tsup": "^8.5.0",
     "typescript": "^6.0.0",
@@ -68,10 +69,14 @@
     "web-tree-sitter": "^0.26.8"
   },
   "peerDependencies": {
-    "pyodide": "^0.29.0"
+    "pyodide": "^0.29.0",
+    "redis": "^5.0.0"
   },
   "peerDependenciesMeta": {
     "pyodide": {
+      "optional": true
+    },
+    "redis": {
       "optional": true
     }
   }

@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  BaseResource,
   type FileStat,
   HttpLinearTransport,
-  type IndexCacheStore,
   LINEAR_COMMANDS,
   LINEAR_PROMPT,
   LINEAR_VFS_OPS,
@@ -26,7 +26,6 @@ import {
   linearReaddir,
   linearStat,
   PathSpec,
-  RAMIndexCacheStore,
   type RegisteredCommand,
   type RegisteredOp,
   type Resource,
@@ -42,7 +41,7 @@ export interface LinearResourceState {
   config: LinearConfigRedacted
 }
 
-export class LinearResource implements Resource {
+export class LinearResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.LINEAR
   readonly isRemote: boolean = true
   readonly indexTtl: number = 600
@@ -50,14 +49,13 @@ export class LinearResource implements Resource {
   readonly writePrompt: string = LINEAR_WRITE_PROMPT
   readonly config: LinearConfig
   readonly accessor: LinearAccessor
-  readonly index: IndexCacheStore
 
   constructor(config: LinearConfig) {
+    super()
     this.config = config
     const transportOpts: { apiKey: string; baseUrl?: string } = { apiKey: config.apiKey }
     if (config.baseUrl !== undefined) transportOpts.baseUrl = config.baseUrl
     this.accessor = new LinearAccessor(new HttpLinearTransport(transportOpts))
-    this.index = new RAMIndexCacheStore({ ttl: this.indexTtl })
   }
 
   open(): Promise<void> {

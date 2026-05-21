@@ -13,11 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  BaseResource,
   type FileStat,
   type FindOptions,
-  type IndexCacheStore,
   PathSpec,
-  RAMIndexCacheStore,
   type RegisteredCommand,
   type RegisteredOp,
   type Resource,
@@ -54,14 +53,13 @@ export interface SSHResourceState {
   config: SSHConfigRedacted
 }
 
-export class SSHResource implements Resource {
+export class SSHResource extends BaseResource implements Resource {
   readonly kind = ResourceName.SSH
   readonly isRemote: boolean = true
   readonly indexTtl: number = 60
   readonly prompt = SSH_PROMPT
   readonly config: SSHConfig
   readonly accessor: SSHAccessor
-  readonly index: IndexCacheStore
   readonly opsMap: Record<string, unknown> = {
     read_bytes: readCoreFn,
     write: writeCore,
@@ -85,9 +83,9 @@ export class SSHResource implements Resource {
   }
 
   constructor(config: SSHConfig) {
+    super()
     this.config = config
     this.accessor = new SSHAccessor(config)
-    this.index = new RAMIndexCacheStore({ ttl: this.indexTtl })
   }
 
   open(): Promise<void> {

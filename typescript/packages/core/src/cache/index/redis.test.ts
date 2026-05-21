@@ -12,9 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IndexEntry, LookupStatus } from '@struktoai/mirage-core'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { RedisIndexCacheStore } from './index_cache.ts'
+import { IndexEntry, LookupStatus } from './config.ts'
+import { RedisIndexCacheStore } from './redis.ts'
+
+describe('RedisIndexCacheStore default keyPrefix', () => {
+  it('namespaces keys under mirage:index: by default', () => {
+    const store = new RedisIndexCacheStore()
+    const prefix = (store as unknown as { entryPrefix: string }).entryPrefix
+    expect(prefix).toBe('mirage:index:mirage:idx:entry:')
+  })
+})
 
 const REDIS_URL = process.env.REDIS_URL
 const skip = REDIS_URL === undefined

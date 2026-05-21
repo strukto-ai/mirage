@@ -21,6 +21,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
+from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.resource.registry import build_resource
 from mirage.types import ConsistencyPolicy, MountMode
 
@@ -124,6 +125,28 @@ CacheBlock = Annotated[
 ]
 
 
+class RamIndexBlock(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["ram"] = "ram"
+    ttl: float = 600
+
+
+class RedisIndexBlock(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["redis"]
+    ttl: float = 600
+    url: str = "redis://localhost:6379/0"
+    key_prefix: str = "mirage:index:"
+
+
+IndexBlock = Annotated[
+    RamIndexBlock | RedisIndexBlock,
+    Field(discriminator="type"),
+]
+
+
 class MountBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -152,6 +175,7 @@ class WorkspaceConfig(BaseModel):
     history: int | None = 100
     history_path: str | None = None
     cache: CacheBlock | None = None
+    index: IndexBlock | None = None
 
     @field_validator("mode", mode="before")
     @classmethod
@@ -189,6 +213,8 @@ class WorkspaceConfig(BaseModel):
         }
         if self.cache is not None:
             kwargs["cache"] = _build_cache_config(self.cache)
+        if self.index is not None:
+            kwargs["index"] = _build_index_config(self.index)
         return kwargs
 
 
@@ -204,6 +230,16 @@ def _build_cache_config(block: RamCacheBlock | RedisCacheBlock) -> CacheConfig:
         limit=block.limit,
         max_drain_bytes=block.max_drain_bytes,
     )
+
+
+def _build_index_config(block: RamIndexBlock | RedisIndexBlock) -> IndexConfig:
+    if isinstance(block, RedisIndexBlock):
+        return RedisIndexConfig(
+            ttl=block.ttl,
+            url=block.url,
+            key_prefix=block.key_prefix,
+        )
+    return IndexConfig(ttl=block.ttl)
 
 
 def load_config(source: str | Path | dict,

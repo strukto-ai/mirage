@@ -33,7 +33,7 @@ export {
   type FingerprintEntry,
   liveOnlyMountPrefixes,
 } from './workspace/snapshot/drift.ts'
-export { type FindOptions, type Resource, throwUnsupported } from './resource/base.ts'
+export { BaseResource, type FindOptions, type Resource, throwUnsupported } from './resource/base.ts'
 export { RAMResource } from './resource/ram/ram.ts'
 export { RAMStore } from './resource/ram/store.ts'
 export { DevResource } from './resource/dev/dev.ts'
@@ -307,9 +307,15 @@ export {
   type IndexConfig,
   type ListResult,
   type LookupResult,
+  type RedisIndexConfig,
 } from './cache/index/config.ts'
 export { IndexCacheStore } from './cache/index/store.ts'
 export { RAMIndexCacheStore } from './cache/index/ram.ts'
+export {
+  RedisIndexCacheStore,
+  type RedisClientLike,
+  type RedisIndexCacheOptions,
+} from './cache/index/redis.ts'
 export { ExecutionHistory, type ExecutionHistoryOptions } from './workspace/history.ts'
 export {
   ExecutionNode,

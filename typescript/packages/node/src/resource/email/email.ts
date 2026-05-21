@@ -13,11 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  BaseResource,
   PathSpec,
-  RAMIndexCacheStore,
   ResourceName,
   type FileStat,
-  type IndexCacheStore,
   type RegisteredCommand,
   type RegisteredOp,
   type Resource,
@@ -39,19 +38,18 @@ export interface EmailResourceState {
   config: EmailConfigRedacted
 }
 
-export class EmailResource implements Resource {
+export class EmailResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.EMAIL
   readonly isRemote: boolean = true
   readonly indexTtl: number = 86_400
   readonly prompt: string = EMAIL_PROMPT
   readonly config: EmailConfig
   readonly accessor: EmailAccessor
-  readonly index: IndexCacheStore
 
   constructor(config: EmailConfig) {
+    super()
     this.config = config
     this.accessor = new EmailAccessor(config)
-    this.index = new RAMIndexCacheStore({ ttl: 86_400 })
   }
 
   open(): Promise<void> {

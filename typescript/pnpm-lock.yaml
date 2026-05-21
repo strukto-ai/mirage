@@ -308,6 +308,9 @@ importers:
       pyodide:
         specifier: ^0.29.3
         version: 0.29.3
+      redis:
+        specifier: ^5.0.0
+        version: 5.12.1(@opentelemetry/api@1.9.0)
       tree-sitter-bash:
         specifier: ^0.25.1
         version: 0.25.1
@@ -7966,6 +7969,14 @@ snapshots:
     optionalDependencies:
       vite: 7.3.2(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.8.3)
 
+  '@vitest/mocker@3.2.4(vite@7.3.2(@types/node@24.12.2)(tsx@4.21.0)(yaml@2.8.3))':
+    dependencies:
+      '@vitest/spy': 3.2.4
+      estree-walker: 3.0.3
+      magic-string: 0.30.21
+    optionalDependencies:
+      vite: 7.3.2(@types/node@24.12.2)(tsx@4.21.0)(yaml@2.8.3)
+
   '@vitest/pretty-format@3.2.4':
     dependencies:
       tinyrainbow: 2.0.0
@@ -11069,7 +11080,7 @@ snapshots:
     dependencies:
       '@types/chai': 5.2.3
       '@vitest/expect': 3.2.4
-      '@vitest/mocker': 3.2.4(vite@7.3.2(@types/node@22.19.17)(tsx@4.21.0)(yaml@2.8.3))
+      '@vitest/mocker': 3.2.4(vite@7.3.2(@types/node@24.12.2)(tsx@4.21.0)(yaml@2.8.3))
       '@vitest/pretty-format': 3.2.4
       '@vitest/runner': 3.2.4
       '@vitest/snapshot': 3.2.4

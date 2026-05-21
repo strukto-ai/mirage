@@ -76,7 +76,12 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         resourceMap[prefix] = resource
         modeOverrides[prefix] = mode
       }
-      const ws = new Workspace(resourceMap, { mode: args.options.mode, modeOverrides })
+      const ws = new Workspace(resourceMap, {
+        mode: args.options.mode,
+        modeOverrides,
+        ...(args.options.cache !== undefined ? { cache: args.options.cache } : {}),
+        ...(args.options.index !== undefined ? { index: args.options.index } : {}),
+      })
       let entry
       try {
         entry = deps.registry.add(ws, body.id)
