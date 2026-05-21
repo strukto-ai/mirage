@@ -1,0 +1,15 @@
+=== ls /data/ ===
+hello world
+revenue,100\nexpense,80
+name=hello.txt size=12
+"alice"
+└── user.json
+/data/hello.txt
+HELLO WORLD
+goodbye world
+dlrow olleh
+6f5902ac237024bdd0c176cb93063dc4
+aGVsbG8gd29ybGQK
+Precision.EXACT
+deepcopy raises:
+copy() mounts:

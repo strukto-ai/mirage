@@ -5,11 +5,15 @@ name: Test (TypeScript)
     branches: [main]
     paths:
       - typescript/**
+      - examples/typescript/**
+      - integ/**
       - .github/workflows/test_typescript.yml
   pull_request:
     branches: [main]
     paths:
       - typescript/**
+      - examples/typescript/**
+      - integ/**
       - .github/workflows/test_typescript.yml
   workflow_dispatch:
 
@@ -62,3 +66,12 @@ jobs:
         env:
           REDIS_URL: redis://localhost:6379/0
         run: pnpm test
+
+      - name: Redis examples (output checked against integ/ truth files)
+        env:
+          REDIS_URL: redis://localhost:6379/0
+        run: |
+          run() { pnpm -C examples/typescript exec tsx "$1" 2>&1 | bash integ/check_lines.sh "$2"; }
+          run redis/redis.ts integ/truth_ts_redis.txt
+          run redis/redis_index.ts integ/truth_ts_redis_index.txt
+          run redis/redis_cache.ts integ/truth_ts_redis_cache.txt
