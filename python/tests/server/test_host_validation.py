@@ -16,9 +16,10 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from mirage.server import build_app
-from mirage.server.host_validation import (DEFAULT_ALLOWED_HOSTS,
+from mirage.server.host_validation import (is_host_allowed,
                                            parse_allowed_hosts,
-                                           resolve_allowed_hosts)
+                                           resolve_allowed_hosts, strip_port)
+from mirage.server.host_validation_constants import DEFAULT_ALLOWED_HOSTS
 
 
 def test_parse_allowed_hosts_defaults_when_missing():
@@ -35,6 +36,50 @@ def test_parse_allowed_hosts_csv():
 def test_parse_allowed_hosts_wildcard_passthrough():
     assert parse_allowed_hosts("*") == ["*"]
     assert parse_allowed_hosts("*,localhost") == ["*", "localhost"]
+
+
+def test_strip_port_well_formed():
+    assert strip_port("127.0.0.1") == "127.0.0.1"
+    assert strip_port("127.0.0.1:8765") == "127.0.0.1"
+    assert strip_port("localhost:8765") == "localhost"
+
+
+def test_strip_port_ipv6_brackets():
+    assert strip_port("[::1]") == "::1"
+    assert strip_port("[::1]:8765") == "::1"
+
+
+def test_strip_port_malformed_bracketed_returns_raw():
+    assert strip_port("[::1]evil") == "[::1]evil"
+    assert strip_port("[::1]:8765x") == "[::1]:8765x"
+    assert strip_port("[::1].attacker.tld") == "[::1].attacker.tld"
+
+
+def test_strip_port_unclosed_bracket_returns_raw():
+    assert strip_port("[::1") == "[::1"
+
+
+def test_strip_port_non_digit_port_returns_raw():
+    assert strip_port("127.0.0.1:8765x") == "127.0.0.1:8765x"
+
+
+def test_strip_port_empty_host_returns_raw():
+    assert strip_port(":8765") == ":8765"
+    assert strip_port("[]") == "[]"
+
+
+def test_is_host_allowed_malformed_fail_closed():
+    allowed = list(DEFAULT_ALLOWED_HOSTS)
+    assert is_host_allowed("[::1]evil", allowed) is False
+    assert is_host_allowed("[::1]:8765x", allowed) is False
+    assert is_host_allowed("[::1].attacker.tld", allowed) is False
+
+
+def test_is_host_allowed_accepts_loopback():
+    allowed = list(DEFAULT_ALLOWED_HOSTS)
+    assert is_host_allowed("[::1]", allowed) is True
+    assert is_host_allowed("[::1]:8765", allowed) is True
+    assert is_host_allowed("127.0.0.1:8765", allowed) is True
 
 
 def test_resolve_allowed_hosts_explicit_wins(monkeypatch):
@@ -79,6 +124,43 @@ async def test_default_accepts_loopback_host(monkeypatch):
                            base_url="http://localhost") as client:
         r = await client.get("/v1/workspaces")
         assert r.status_code == 200
+
+
+@pytest.mark.no_host_override
+@pytest.mark.asyncio
+async def test_default_accepts_ipv6_loopback_host(monkeypatch):
+    monkeypatch.delenv("MIRAGE_ALLOWED_HOSTS", raising=False)
+    app = build_app(idle_grace_seconds=10.0)
+    transport = ASGITransport(app=app)
+    for base in ("http://[::1]", "http://[::1]:8765"):
+        async with AsyncClient(transport=transport, base_url=base) as client:
+            r = await client.get("/v1/workspaces")
+            assert r.status_code == 200
+
+
+@pytest.mark.no_host_override
+@pytest.mark.asyncio
+async def test_default_rejects_malformed_bracketed_host(monkeypatch):
+    monkeypatch.delenv("MIRAGE_ALLOWED_HOSTS", raising=False)
+    app = build_app(idle_grace_seconds=10.0)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport,
+                           base_url="http://127.0.0.1") as client:
+        r = await client.get("/v1/workspaces", headers={"host": "[::1]evil"})
+        assert r.status_code == 400
+
+
+@pytest.mark.no_host_override
+@pytest.mark.asyncio
+async def test_default_rejects_non_digit_port(monkeypatch):
+    monkeypatch.delenv("MIRAGE_ALLOWED_HOSTS", raising=False)
+    app = build_app(idle_grace_seconds=10.0)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport,
+                           base_url="http://127.0.0.1") as client:
+        r = await client.get("/v1/workspaces",
+                             headers={"host": "127.0.0.1:8765x"})
+        assert r.status_code == 400
 
 
 @pytest.mark.no_host_override

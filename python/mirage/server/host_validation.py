@@ -19,9 +19,9 @@ from collections.abc import Iterable
 from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-DEFAULT_ALLOWED_HOSTS: tuple[str, ...] = ("127.0.0.1", "localhost", "::1")
-
-ENV_ALLOWED_HOSTS = "MIRAGE_ALLOWED_HOSTS"
+from mirage.server.env import ENV_ALLOWED_HOSTS
+from mirage.server.host_validation_constants import (DEFAULT_ALLOWED_HOSTS,
+                                                     HOST_PATTERN)
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,43 @@ def resolve_allowed_hosts(
     return parse_allowed_hosts(os.environ.get(ENV_ALLOWED_HOSTS))
 
 
+def strip_port(raw_host: str) -> str:
+    """Strip the port (and IPv6 brackets) from a Host header value.
+
+    Returns the bare host only when the value matches one of
+    ``host`` / ``host:digits`` / ``[host]`` / ``[host]:digits``; any
+    other (malformed) input is returned unchanged so the allowlist
+    comparison fails closed.
+
+    Args:
+        raw_host (str): raw Host header value.
+
+    Returns:
+        str: bare host, or the raw input when malformed.
+    """
+    match = HOST_PATTERN.match(raw_host)
+    if match is None:
+        return raw_host
+    return match.group(1) or match.group(2) or raw_host
+
+
+def is_host_allowed(raw_host: str | None, allowed: list[str]) -> bool:
+    """Decide whether a Host header value is in the allowlist.
+
+    Args:
+        raw_host (str | None): raw Host header value.
+        allowed (list[str]): allowlist; ``"*"`` accepts any host.
+
+    Returns:
+        bool: True when the port-stripped host is allowed.
+    """
+    if "*" in allowed:
+        return True
+    if not raw_host:
+        return False
+    return strip_port(raw_host) in allowed
+
+
 class HostHeaderMiddleware:
     """ASGI middleware that 400s requests with disallowed Host headers.
 
@@ -85,8 +122,7 @@ class HostHeaderMiddleware:
             return
         headers = dict(scope.get("headers") or [])
         raw_host = headers.get(b"host", b"").decode("latin-1")
-        host = raw_host.split(":")[0]
-        if host in self.allowed_hosts:
+        if is_host_allowed(raw_host, self.allowed_hosts):
             await self.app(scope, receive, send)
             return
         client = scope.get("client") or ("?", 0)

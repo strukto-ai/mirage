@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const ENV_ALLOWED_HOSTS = 'MIRAGE_ALLOWED_HOSTS'
-export const ENV_DAEMON_PORT = 'MIRAGE_DAEMON_PORT'
-export const ENV_IDLE_GRACE_SECONDS = 'MIRAGE_IDLE_GRACE_SECONDS'
-export const ENV_PERSIST_DIR = 'MIRAGE_PERSIST_DIR'
+export const DEFAULT_ALLOWED_HOSTS: readonly string[] = ['127.0.0.1', 'localhost', '::1']
+
+export const HOST_PATTERN = /^(?:\[([^\]]+)\]|([^:]+))(?::\d+)?$/

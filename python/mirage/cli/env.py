@@ -17,7 +17,7 @@ from mirage.server.auth.config import (ENV_AUTH_MODE, ENV_AUTH_TOKEN,
                                        ENV_JWT_AUTHORIZED_PARTIES,
                                        ENV_JWT_CLOCK_SKEW, ENV_JWT_ISSUER,
                                        ENV_JWT_PUBKEY, ENV_JWT_PUBKEY_FILE)
-from mirage.server.host_validation import ENV_ALLOWED_HOSTS
+from mirage.server.env import ENV_ALLOWED_HOSTS
 
 ENV_DAEMON_URL = "MIRAGE_DAEMON_URL"
 ENV_TOKEN = "MIRAGE_TOKEN"
