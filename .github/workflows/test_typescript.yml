@@ -72,20 +72,20 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
         run: |
           run() { echo "## $1"; pnpm -C examples/typescript exec tsx "$1" 2>&1 | bash integ/check_lines.sh "$2"; }
-          run ram/ram.ts integ/truth_ts_ram.txt
-          run ram/ram_vfs.ts integ/truth_ts_ram_vfs.txt
-          run disk/disk.ts integ/truth_ts_disk.txt
-          run disk/disk_vfs.ts integ/truth_ts_disk_vfs.txt
-          run other/custom_command.ts integ/truth_ts_custom_command.txt
-          run python/python_basic.ts integ/truth_ts_python_basic.txt
-          run python/python_env.ts integ/truth_ts_python_env.txt
-          run python/python_heredoc.ts integ/truth_ts_python_heredoc.txt
-          run python/python_script.ts integ/truth_ts_python_script.txt
-          run python/pyodide_ram.ts integ/truth_ts_pyodide_ram.txt
-          run redis/redis.ts integ/truth_ts_redis.txt
-          run redis/redis_index.ts integ/truth_ts_redis_index.txt
-          run redis/redis_cache.ts integ/truth_ts_redis_cache.txt
-          run redis/redis_vfs.ts integ/truth_ts_redis_vfs.txt
+          run ram/ram.ts integ/truth/typescript/ram.txt
+          run ram/ram_vfs.ts integ/truth/typescript/ram_vfs.txt
+          run disk/disk.ts integ/truth/typescript/disk.txt
+          run disk/disk_vfs.ts integ/truth/typescript/disk_vfs.txt
+          run other/custom_command.ts integ/truth/typescript/custom_command.txt
+          run python/python_basic.ts integ/truth/typescript/python_basic.txt
+          run python/python_env.ts integ/truth/typescript/python_env.txt
+          run python/python_heredoc.ts integ/truth/typescript/python_heredoc.txt
+          run python/python_script.ts integ/truth/typescript/python_script.txt
+          run python/pyodide_ram.ts integ/truth/typescript/pyodide_ram.txt
+          run redis/redis.ts integ/truth/typescript/redis.txt
+          run redis/redis_index.ts integ/truth/typescript/redis_index.txt
+          run redis/redis_cache.ts integ/truth/typescript/redis_cache.txt
+          run redis/redis_vfs.ts integ/truth/typescript/redis_vfs.txt
 
   python-fs-shim:
     runs-on: ubuntu-latest
@@ -119,4 +119,4 @@ jobs:
         working-directory: examples/typescript
         run: |
           node --experimental-wasm-jspi --import tsx/esm python/vfs.ts 2>&1 \
-            | bash ../../integ/check_lines.sh ../../integ/truth_ts_python_vfs.txt
+            | bash ../../integ/check_lines.sh ../../integ/truth/typescript/python_vfs.txt
