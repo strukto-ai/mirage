@@ -12,8 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.workspace.version.mapping import (META_PATH, meta_to_blob,
-                                              to_tree_inputs)
+from mirage.workspace.version.mapping import (META_PATH, blob_to_meta,
+                                              meta_to_blob, to_tree_inputs)
 from mirage.workspace.version.store import VersionStore
 
 
@@ -42,6 +42,24 @@ async def branch(store: VersionStore,
                  from_branch: str = "main") -> None:
     head = await store.head(from_branch)
     await store.set_branch(name, head)
+
+
+async def materialize(store: VersionStore,
+                      version: bytes) -> tuple[dict[str, bytes], dict]:
+    tree = (await store.read_commit(version)).tree
+    contents = await store.read_tree(tree)
+    meta_oid = contents.pop(META_PATH, None)
+    meta = (blob_to_meta(await store.read_blob(meta_oid))
+            if meta_oid is not None else {
+                "mounts": [],
+                "pins": {}
+            })
+    pins = meta.get("pins", {})
+    entries: dict[str, bytes] = {}
+    for path, oid in contents.items():
+        if path not in pins:
+            entries[path] = await store.read_blob(oid)
+    return entries, meta
 
 
 def _strip_meta(changes: dict[str, list[str]]) -> dict[str, list[str]]:

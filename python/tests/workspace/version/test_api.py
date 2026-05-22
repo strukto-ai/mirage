@@ -17,8 +17,9 @@ import pytest
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
-from mirage.workspace.version.api import (branch, commit, snapshot_tree,
-                                          status, version_diff, version_log)
+from mirage.workspace.version.api import (branch, commit, materialize,
+                                          snapshot_tree, status, version_diff,
+                                          version_log)
 from mirage.workspace.version.mapping import META_PATH
 from mirage.workspace.version.store import VersionStore
 
@@ -109,3 +110,18 @@ async def test_branch_creates_line_at_current(tmp_path):
 
     assert await store.head("exp") == c1
     assert "exp" in await store.branches()
+
+
+@pytest.mark.asyncio
+async def test_materialize_reads_back_files_and_meta(tmp_path):
+    ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    store = await VersionStore.open(tmp_path / ".mirage")
+    await ws.execute("echo hello > /m/a.txt")
+    version = await commit(store, ws, message="first")
+
+    entries, meta = await materialize(store, version)
+
+    assert entries["m/a.txt"] == b"hello\n"
+    assert META_PATH not in entries
+    assert "/m/" in [m["prefix"] for m in meta["mounts"]]
