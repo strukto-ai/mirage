@@ -12,8 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.types import DriftPolicy, StateKey
+from mirage.workspace.snapshot import apply_state_dict, install_fingerprints
 from mirage.workspace.version.mapping import (META_PATH, blob_to_meta,
-                                              meta_to_blob, to_tree_inputs)
+                                              meta_to_blob, to_state,
+                                              to_tree_inputs)
 from mirage.workspace.version.store import VersionStore
 
 
@@ -60,6 +63,27 @@ async def read_version(store: VersionStore,
         if path not in pins:
             entries[path] = await store.read_blob(oid)
     return entries, meta
+
+
+async def _resolve_version(store: VersionStore, ref) -> bytes:
+    if isinstance(ref, str):
+        if ref in await store.branches():
+            return await store.head(ref)
+        return ref.encode()
+    return ref
+
+
+async def checkout(store: VersionStore,
+                   ws,
+                   ref,
+                   drift_policy: DriftPolicy = DriftPolicy.STRICT) -> None:
+    version = await _resolve_version(store, ref)
+    entries, meta = await read_version(store, version)
+    state = to_state(entries, meta)
+    await ws._cache.clear()
+    apply_state_dict(ws, state)
+    install_fingerprints(ws, state.get(StateKey.FINGERPRINTS) or [],
+                         drift_policy)
 
 
 def _strip_meta(changes: dict[str, list[str]]) -> dict[str, list[str]]:

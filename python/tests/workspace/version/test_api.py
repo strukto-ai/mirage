@@ -17,9 +17,9 @@ import pytest
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
-from mirage.workspace.version.api import (branch, commit, read_version,
-                                          snapshot_tree, status, version_diff,
-                                          version_log)
+from mirage.workspace.version.api import (branch, checkout, commit,
+                                          read_version, snapshot_tree, status,
+                                          version_diff, version_log)
 from mirage.workspace.version.mapping import META_PATH
 from mirage.workspace.version.store import VersionStore
 
@@ -125,3 +125,25 @@ async def test_read_version_reads_back_files_and_meta(tmp_path):
     assert entries["m/a.txt"] == b"hello\n"
     assert META_PATH not in entries
     assert "/m/" in [m["prefix"] for m in meta["mounts"]]
+
+
+@pytest.mark.asyncio
+async def test_checkout_rebuilds_content_in_place(tmp_path):
+    ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    store = await VersionStore.open(tmp_path / ".mirage")
+    await ws.execute("echo original > /m/a.txt")
+    await commit(store, ws, branch="main", message="first")
+
+    await ws.execute("echo mutated > /m/a.txt")
+    await ws.execute("echo extra > /m/b.txt")
+
+    await checkout(store, ws, "main")
+
+    result = await ws.execute("cat /m/a.txt")
+    assert (await result.stdout_str()) == "original\n"
+    assert await status(store, ws, "main") == {
+        "added": [],
+        "modified": [],
+        "deleted": [],
+    }
