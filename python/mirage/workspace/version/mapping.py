@@ -12,8 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
+
 from mirage.types import MountKey, ResourceStateKey, StateKey
 from mirage.workspace.snapshot.state import to_state_dict
+from mirage.workspace.snapshot.tar_io import _json_default
 from mirage.workspace.snapshot.utils import FORMAT_VERSION
 
 META_FORMAT = 1
@@ -35,6 +38,14 @@ def _belongs(tree_prefix: str, tree_path: str) -> bool:
     if not tree_prefix:
         return True
     return tree_path == tree_prefix or tree_path.startswith(tree_prefix + "/")
+
+
+def meta_to_blob(meta: dict) -> bytes:
+    return json.dumps(meta, default=_json_default).encode("utf-8")
+
+
+def blob_to_meta(data: bytes) -> dict:
+    return json.loads(data.decode("utf-8"))
 
 
 def to_tree_inputs(ws) -> tuple[dict[str, bytes], dict]:

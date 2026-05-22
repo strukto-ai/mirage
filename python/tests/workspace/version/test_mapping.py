@@ -18,7 +18,8 @@ from mirage.resource.ram import RAMResource
 from mirage.types import MountKey, MountMode
 from mirage.workspace import Workspace
 from mirage.workspace.snapshot.state import to_state_dict
-from mirage.workspace.version.mapping import to_state, to_tree_inputs
+from mirage.workspace.version.mapping import (blob_to_meta, meta_to_blob,
+                                              to_state, to_tree_inputs)
 
 
 def _mount_files(state: dict, prefix: str) -> dict:
@@ -56,3 +57,17 @@ async def test_to_state_round_trips_files():
     state = to_state(entries, meta)
 
     assert _mount_files(state, "/m/") == original_files
+
+
+def test_meta_blob_round_trip():
+    meta = {
+        "format": 1,
+        "mounts": [],
+        "pins": {"/s3/a.txt": {"rev": "v123", "fp": "etag-abc"}},
+    }
+
+    parsed = blob_to_meta(meta_to_blob(meta))
+
+    assert parsed["format"] == 1
+    assert parsed["pins"]["/s3/a.txt"] == {"rev": "v123", "fp": "etag-abc"}
+
