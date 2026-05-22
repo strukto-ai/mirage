@@ -48,3 +48,30 @@ async def test_identical_blobs_dedup(tmp_path: Path):
     first = await store.write_blob(b"same-bytes")
     second = await store.write_blob(b"same-bytes")
     assert first == second
+
+
+@pytest.mark.asyncio
+async def test_tree_roundtrip(tmp_path: Path):
+    store = await VersionStore.open(tmp_path / ".mirage")
+    a = await store.write_blob(b"aaa")
+    b = await store.write_blob(b"bbb")
+    tree = await store.write_tree({"a.txt": a, "dir/b.txt": b})
+    assert await store.read_tree(tree) == {"a.txt": a, "dir/b.txt": b}
+
+
+@pytest.mark.asyncio
+async def test_tree_nested_paths(tmp_path: Path):
+    store = await VersionStore.open(tmp_path / ".mirage")
+    x = await store.write_blob(b"x")
+    y = await store.write_blob(b"y")
+    z = await store.write_blob(b"z")
+    tree = await store.write_tree({
+        "top.txt": x,
+        "d/one.txt": y,
+        "d/sub/two.txt": z,
+    })
+    assert await store.read_tree(tree) == {
+        "top.txt": x,
+        "d/one.txt": y,
+        "d/sub/two.txt": z,
+    }
