@@ -103,3 +103,30 @@ async def test_branches_and_log(tmp_path: Path):
 
     assert await store.branches() == ["main"]
     assert await store.log("main") == [c2, c1]
+
+
+@pytest.mark.asyncio
+async def test_tree_diff(tmp_path: Path):
+    store = await VersionStore.open(tmp_path / ".mirage")
+    keep = await store.write_blob(b"keep")
+    before = await store.write_blob(b"before")
+    after = await store.write_blob(b"after")
+    gone = await store.write_blob(b"gone")
+    new = await store.write_blob(b"new")
+
+    tree_a = await store.write_tree({
+        "keep.txt": keep,
+        "change.txt": before,
+        "gone.txt": gone,
+    })
+    tree_b = await store.write_tree({
+        "keep.txt": keep,
+        "change.txt": after,
+        "new.txt": new,
+    })
+
+    assert await store.diff(tree_a, tree_b) == {
+        "added": ["new.txt"],
+        "modified": ["change.txt"],
+        "deleted": ["gone.txt"],
+    }

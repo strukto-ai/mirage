@@ -17,6 +17,8 @@ import stat
 import time
 from pathlib import Path
 
+from dulwich.diff_tree import (CHANGE_ADD, CHANGE_DELETE, CHANGE_MODIFY,
+                               tree_changes)
 from dulwich.objects import Blob, Commit, Tree
 from dulwich.repo import Repo
 
@@ -109,6 +111,24 @@ def _log(repo: Repo, branch: str) -> list[bytes]:
     return [entry.commit.id for entry in repo.get_walker(include=[head])]
 
 
+def _diff(repo: Repo, tree_a: bytes, tree_b: bytes) -> dict[str, list[str]]:
+    added: list[str] = []
+    modified: list[str] = []
+    deleted: list[str] = []
+    for change in tree_changes(repo.object_store, tree_a, tree_b):
+        if change.type == CHANGE_ADD:
+            added.append(change.new.path.decode())
+        elif change.type == CHANGE_DELETE:
+            deleted.append(change.old.path.decode())
+        elif change.type == CHANGE_MODIFY:
+            modified.append(change.new.path.decode())
+    return {
+        "added": sorted(added),
+        "modified": sorted(modified),
+        "deleted": sorted(deleted),
+    }
+
+
 class VersionStore:
 
     def __init__(self, repo: Repo, path: Path) -> None:
@@ -149,3 +169,7 @@ class VersionStore:
 
     async def log(self, branch: str) -> list[bytes]:
         return await asyncio.to_thread(_log, self._repo, branch)
+
+    async def diff(self, tree_a: bytes,
+                   tree_b: bytes) -> dict[str, list[str]]:
+        return await asyncio.to_thread(_diff, self._repo, tree_a, tree_b)
