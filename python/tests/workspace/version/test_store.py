@@ -91,3 +91,15 @@ async def test_commit_advances_branch(tmp_path: Path):
     commit = await store.read_commit(c2)
     assert commit.parents == [c1]
     assert commit.message == b"second"
+
+
+@pytest.mark.asyncio
+async def test_branches_and_log(tmp_path: Path):
+    store = await VersionStore.open(tmp_path / ".mirage")
+    t1 = await store.write_tree({"a.txt": await store.write_blob(b"v1")})
+    c1 = await store.commit(t1, parents=[], branch="main", message="first")
+    t2 = await store.write_tree({"a.txt": await store.write_blob(b"v2")})
+    c2 = await store.commit(t2, parents=[c1], branch="main", message="second")
+
+    assert await store.branches() == ["main"]
+    assert await store.log("main") == [c2, c1]

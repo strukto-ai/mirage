@@ -95,6 +95,20 @@ def _read_commit(repo: Repo, oid: bytes) -> Commit:
     return repo.object_store[oid]
 
 
+def _branches(repo: Repo) -> list[str]:
+    prefix = b"refs/heads/"
+    names = [
+        name[len(prefix):].decode() for name in repo.get_refs()
+        if name.startswith(prefix)
+    ]
+    return sorted(names)
+
+
+def _log(repo: Repo, branch: str) -> list[bytes]:
+    head = repo.refs[b"refs/heads/" + branch.encode()]
+    return [entry.commit.id for entry in repo.get_walker(include=[head])]
+
+
 class VersionStore:
 
     def __init__(self, repo: Repo, path: Path) -> None:
@@ -129,3 +143,9 @@ class VersionStore:
 
     async def read_commit(self, oid: bytes) -> Commit:
         return await asyncio.to_thread(_read_commit, self._repo, oid)
+
+    async def branches(self) -> list[str]:
+        return await asyncio.to_thread(_branches, self._repo)
+
+    async def log(self, branch: str) -> list[bytes]:
+        return await asyncio.to_thread(_log, self._repo, branch)
