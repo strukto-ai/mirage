@@ -1,6 +1,7 @@
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 
+from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -53,7 +54,7 @@ async def csplit(
         if raw is None:
             raise ValueError("csplit: missing input")
     text = raw.decode(errors="replace")
-    lines = text.splitlines()
+    lines = split_lines(text)
     parts = _split_by_patterns(lines, list(patterns))
     writes: dict[str, bytes] = {}
     sizes: list[str] = []

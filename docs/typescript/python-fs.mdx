@@ -128,7 +128,7 @@ print(json.load(open("/ram/in.json"))["hello"])
 console.log(r.stdoutText)  // "world"
 ```
 
-See the full demo at [`examples/typescript/python/vfs.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/python/vfs.ts).
+See the full demo at [`examples/typescript/pyodide/vfs.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/pyodide/vfs.ts).
 
 ## Python packages (PIL, numpy, pandas, …)
 
@@ -167,7 +167,7 @@ Without JSPI, **reads** of preloaded files still work but **writes** throw `Runt
 To run examples directly:
 
 ```bash
-node --experimental-wasm-jspi --import tsx/esm examples/typescript/python/vfs.ts
+node --experimental-wasm-jspi --import tsx/esm examples/typescript/pyodide/vfs.ts
 ```
 
 ## Errors you might see
@@ -182,4 +182,4 @@ node --experimental-wasm-jspi --import tsx/esm examples/typescript/python/vfs.ts
 ## See also
 
 - [`python`](/typescript/python): broader `python3` builtin behavior (env, argv, stdin, exit codes)
-- [`examples/typescript/python/vfs.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/python/vfs.ts): runnable demo across RAM, S3, GDocs, Linear
+- [`examples/typescript/pyodide/vfs.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/pyodide/vfs.ts): runnable demo across RAM, S3, GDocs, Linear

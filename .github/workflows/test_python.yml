@@ -5,11 +5,15 @@ name: Test (Python)
     branches: [main]
     paths:
       - python/**
+      - examples/python/**
+      - integ/**
       - .github/workflows/test_python.yml
   pull_request:
     branches: [main]
     paths:
       - python/**
+      - examples/python/**
+      - integ/**
       - .github/workflows/test_python.yml
   workflow_dispatch:
 
@@ -57,6 +61,22 @@ jobs:
         env:
           REDIS_URL: redis://localhost:6379/0
         run: uv run pytest --ignore=tests/agents/camel
+
+      - name: Examples (output checked against integ/ truth files)
+        env:
+          REDIS_URL: redis://localhost:6379/0
+        run: |
+          run() { echo "## $1"; ./python/.venv/bin/python "$1" 2>&1 | bash integ/check_lines.sh "$2"; }
+          run examples/python/ram/ram.py integ/truth/python/ram.txt
+          run examples/python/ram/ram_vfs.py integ/truth/python/ram_vfs.txt
+          run examples/python/ram/ram_python.py integ/truth/python/ram_python.txt
+          run examples/python/disk/disk.py integ/truth/python/disk.txt
+          run examples/python/disk/disk_vfs.py integ/truth/python/disk_vfs.txt
+          run examples/python/other/custom_command.py integ/truth/python/custom_command.txt
+          run examples/python/redis_resource/example_redis.py integ/truth/python/redis.txt
+          run examples/python/redis_resource/example_redis_index.py integ/truth/python/redis_index.txt
+          run examples/python/redis_resource/example_redis_cache.py integ/truth/python/redis_cache.txt
+          run examples/python/redis_resource/example_redis_vfs.py integ/truth/python/redis_vfs.txt
 
       - name: Sync Python dependencies for camel
         working-directory: python

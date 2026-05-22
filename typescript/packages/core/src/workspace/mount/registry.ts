@@ -288,7 +288,6 @@ export class MountRegistry {
       if (m.prefix === DEV_PREFIX) continue
       const cmd = m.resolveCommand(cmdName)
       if (cmd === null) continue
-      if (cmd.write && m.mode === MountMode.READ) continue
       return m
     }
     return null

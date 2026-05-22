@@ -5,11 +5,15 @@ name: Test (TypeScript)
     branches: [main]
     paths:
       - typescript/**
+      - examples/typescript/**
+      - integ/**
       - .github/workflows/test_typescript.yml
   pull_request:
     branches: [main]
     paths:
       - typescript/**
+      - examples/typescript/**
+      - integ/**
       - .github/workflows/test_typescript.yml
   workflow_dispatch:
 
@@ -20,6 +24,16 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - uses: actions/checkout@v6
@@ -49,4 +63,60 @@ jobs:
 
       - name: Run TypeScript tests
         working-directory: typescript
+        env:
+          REDIS_URL: redis://localhost:6379/0
         run: pnpm test
+
+      - name: Examples (output checked against integ/ truth files)
+        env:
+          REDIS_URL: redis://localhost:6379/0
+        run: |
+          run() { echo "## $1"; pnpm -C examples/typescript exec tsx "$1" 2>&1 | bash integ/check_lines.sh "$2"; }
+          run ram/ram.ts integ/truth/typescript/ram.txt
+          run ram/ram_vfs.ts integ/truth/typescript/ram_vfs.txt
+          run disk/disk.ts integ/truth/typescript/disk.txt
+          run disk/disk_vfs.ts integ/truth/typescript/disk_vfs.txt
+          run other/custom_command.ts integ/truth/typescript/custom_command.txt
+          run pyodide/basic.ts integ/truth/typescript/pyodide_basic.txt
+          run pyodide/env.ts integ/truth/typescript/pyodide_env.txt
+          run pyodide/heredoc.ts integ/truth/typescript/pyodide_heredoc.txt
+          run pyodide/script.ts integ/truth/typescript/pyodide_script.txt
+          run pyodide/ram.ts integ/truth/typescript/pyodide_ram.txt
+          run redis/redis.ts integ/truth/typescript/redis.txt
+          run redis/redis_index.ts integ/truth/typescript/redis_index.txt
+          run redis/redis_cache.ts integ/truth/typescript/redis_cache.txt
+          run redis/redis_vfs.ts integ/truth/typescript/redis_vfs.txt
+
+  python-fs-shim:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.32.1
+
+      - name: Set up Node 24 (for --experimental-wasm-jspi)
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: typescript/pnpm-lock.yaml
+
+      - name: Install node-gyp
+        run: npm install -g node-gyp
+
+      - name: Install TypeScript dependencies
+        working-directory: typescript
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        working-directory: typescript
+        run: pnpm -r --filter './packages/*' build
+
+      - name: Python FS shim example (output checked against integ/ truth file)
+        working-directory: examples/typescript
+        run: |
+          node --experimental-wasm-jspi --import tsx/esm pyodide/vfs.ts 2>&1 \
+            | bash ../../integ/check_lines.sh ../../integ/truth/typescript/pyodide_vfs.txt

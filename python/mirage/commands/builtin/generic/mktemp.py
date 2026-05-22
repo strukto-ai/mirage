@@ -1,19 +1,29 @@
-import uuid
+import random
+import string
 from collections.abc import Awaitable, Callable
 
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+
+_ALPHABET = string.ascii_letters + string.digits
+
+
+def _rand_suffix(length: int) -> str:
+    return "".join(random.choices(_ALPHABET, k=length))
 
 
 def _build_path(p: str | PathSpec | None, t: bool,
                 texts: tuple[str, ...]) -> tuple[str, str]:
     p_str = p.original if isinstance(p, PathSpec) else p
     parent = "/tmp" if t else (p_str if p_str else "/tmp")
-    suffix = str(uuid.uuid4())[:8]
     template = texts[0] if texts else "tmp.XXXXXXXXXX"
-    name = template.replace(
-        "X" * template.count("X"),
-        suffix) if "X" in template else f"{template}.{suffix}"
+    i = len(template)
+    while i > 0 and template[i - 1] == "X":
+        i -= 1
+    if i < len(template):
+        name = template[:i] + _rand_suffix(len(template) - i)
+    else:
+        name = f"{template}.{_rand_suffix(8)}"
     return f"{parent.rstrip('/')}/{name}", parent
 
 

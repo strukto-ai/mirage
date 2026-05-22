@@ -1,0 +1,38 @@
+{
+  "_meta": {
+    "filetypes": [],
+    "has_aggregate": false,
+    "has_provision": false,
+    "has_write": false,
+    "resources": []
+  },
+  "description": "Print a sequence of numbers.",
+  "ignore_tokens": [],
+  "options": [
+    {
+      "description": "Use the given separator between numbers.",
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-s",
+      "value_kind": "text"
+    },
+    {
+      "description": "Pad numbers with zeros to equal width.",
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-w",
+      "value_kind": "text"
+    },
+    {
+      "description": "Format each number with a printf-style format string.",
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-f",
+      "value_kind": "text"
+    }
+  ],
+  "positional": [],
+  "rest": {
+    "kind": "text"
+  }
+}

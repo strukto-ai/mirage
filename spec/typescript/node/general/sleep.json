@@ -1,0 +1,16 @@
+{
+  "_meta": {
+    "filetypes": [],
+    "has_aggregate": false,
+    "has_provision": false,
+    "has_write": false,
+    "resources": []
+  },
+  "description": "Delay for a specified amount of time.",
+  "ignore_tokens": [],
+  "options": [],
+  "positional": [],
+  "rest": {
+    "kind": "text"
+  }
+}

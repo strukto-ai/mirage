@@ -12,6 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import os
+import tempfile
+
+from mirage import Workspace
+
 SEED_FILES = {
     "/data/a.txt":
     "hello\nworld\nfoo\nbar\nbaz\n",
@@ -419,7 +424,7 @@ CASES: list[tuple[str, str]] = [
 ]
 
 
-async def run_cases(ws) -> None:
+async def run_cases(ws, reload_resources: dict | None = None) -> None:
     for path, content in SEED_FILES.items():
         await ws.execute(f"mkdir -p {path.rsplit('/', 1)[0]}")
         await ws.execute(
@@ -430,3 +435,15 @@ async def run_cases(ws) -> None:
         out = await result.stdout_str()
         print(f"=== {name} ===")
         print(out, end="" if out.endswith("\n") else "\n")
+
+    fd, tar = tempfile.mkstemp(suffix=".tar")
+    os.close(fd)
+    try:
+        await ws.snapshot(tar)
+        loaded = Workspace.load(tar, resources=reload_resources)
+        result = await loaded.execute("cat /data/a.txt")
+        out = await result.stdout_str()
+        print("=== snapshot_load_cache ===")
+        print(out, end="" if out.endswith("\n") else "\n")
+    finally:
+        os.unlink(tar)

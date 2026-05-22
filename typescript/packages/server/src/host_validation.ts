@@ -12,9 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const DEFAULT_ALLOWED_HOSTS: readonly string[] = ['127.0.0.1', 'localhost', '::1']
-
-export const ENV_VAR = 'MIRAGE_ALLOWED_HOSTS'
+import { ENV_ALLOWED_HOSTS } from './env.ts'
+import { DEFAULT_ALLOWED_HOSTS, HOST_PATTERN } from './host_validation_constants.ts'
 
 export function parseAllowedHosts(value: string | undefined): string[] {
   if (value === undefined) return [...DEFAULT_ALLOWED_HOSTS]
@@ -27,17 +26,13 @@ export function parseAllowedHosts(value: string | undefined): string[] {
 
 export function resolveAllowedHosts(allowedHosts?: readonly string[]): string[] {
   if (allowedHosts !== undefined) return [...allowedHosts]
-  return parseAllowedHosts(process.env[ENV_VAR])
+  return parseAllowedHosts(process.env[ENV_ALLOWED_HOSTS])
 }
 
 export function stripPort(rawHost: string): string {
-  if (rawHost.startsWith('[')) {
-    const close = rawHost.indexOf(']')
-    if (close !== -1) return rawHost.slice(1, close)
-  }
-  const parts = rawHost.split(':')
-  if (parts.length <= 2) return parts[0] ?? ''
-  return rawHost
+  const match = HOST_PATTERN.exec(rawHost)
+  if (match === null) return rawHost
+  return match[1] ?? match[2] ?? rawHost
 }
 
 export function isHostAllowed(rawHost: string | undefined, allowed: readonly string[]): boolean {

@@ -36,7 +36,7 @@ async def main() -> None:
     prefix = f"mirage-integ-{uuid.uuid4().hex[:8]}/"
     resource = RedisResource(url=REDIS_URL, key_prefix=prefix)
     ws = Workspace({"/data": resource}, mode=MountMode.WRITE)
-    await run_cases(ws)
+    await run_cases(ws, reload_resources={"/data": resource})
 
 
 if __name__ == "__main__":

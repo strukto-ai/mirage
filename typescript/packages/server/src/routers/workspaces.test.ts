@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { buildApp } from '../app.ts'
 
@@ -125,7 +128,9 @@ describe('workspaces router', () => {
     await app.close()
   })
 
-  it('POST /v1/workspaces/load creates a workspace from a tar buffer', async () => {
+  it('POST /v1/workspaces/:id/snapshot writes a tar to the path and load round-trips', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-ws-'))
+    const tar = join(dir, 'seed.tar')
     const app1 = buildApp()
     try {
       await app1.inject({
@@ -133,40 +138,42 @@ describe('workspaces router', () => {
         url: '/v1/workspaces',
         payload: { id: 'seed', config: { mounts: { '/': { resource: 'ram', mode: 'write' } } } },
       })
-      const snap = await app1.inject({ method: 'GET', url: '/v1/workspaces/seed/snapshot' })
+      const snap = await app1.inject({
+        method: 'POST',
+        url: '/v1/workspaces/seed/snapshot',
+        payload: { path: tar },
+      })
       expect(snap.statusCode).toBe(200)
-      const tarBuf = snap.rawPayload
+      const snapBody = snap.json<{ path: string; size: number }>()
+      expect(snapBody.path).toBe(tar)
+      expect(snapBody.size).toBeGreaterThan(0)
+      expect(existsSync(tar)).toBe(true)
 
       const app2 = buildApp()
       try {
-        const form = new FormData()
-        form.append('tar', new Blob([tarBuf], { type: 'application/x-tar' }), 'ws.tar')
-        form.append('id', 'loaded')
         const res = await app2.inject({
           method: 'POST',
           url: '/v1/workspaces/load',
-          payload: form,
+          payload: { path: tar, id: 'loaded' },
         })
         expect(res.statusCode).toBe(201)
-        const body = res.json<{ id: string }>()
-        expect(body.id).toBe('loaded')
+        expect(res.json<{ id: string }>().id).toBe('loaded')
       } finally {
         await app2.close().catch(() => undefined)
       }
     } finally {
       await app1.close().catch(() => undefined)
+      rmSync(dir, { recursive: true, force: true })
     }
   })
 
-  it('POST /v1/workspaces/load returns 400 when tar field is missing', async () => {
+  it('POST /v1/workspaces/load returns 400 when the snapshot path does not exist', async () => {
     const app = buildApp()
     try {
-      const form = new FormData()
-      form.append('id', 'no-tar')
       const res = await app.inject({
         method: 'POST',
         url: '/v1/workspaces/load',
-        payload: form,
+        payload: { path: '/no/such/file.tar' },
       })
       expect(res.statusCode).toBe(400)
     } finally {
@@ -175,6 +182,8 @@ describe('workspaces router', () => {
   })
 
   it('POST /v1/workspaces/load returns 409 on id conflict', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-ws-'))
+    const tar = join(dir, 'taken.tar')
     const app = buildApp()
     try {
       await app.inject({
@@ -182,18 +191,20 @@ describe('workspaces router', () => {
         url: '/v1/workspaces',
         payload: { id: 'taken', config: { mounts: { '/': { resource: 'ram', mode: 'write' } } } },
       })
-      const snap = await app.inject({ method: 'GET', url: '/v1/workspaces/taken/snapshot' })
-      const form = new FormData()
-      form.append('tar', new Blob([snap.rawPayload], { type: 'application/x-tar' }), 'ws.tar')
-      form.append('id', 'taken')
+      await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/taken/snapshot',
+        payload: { path: tar },
+      })
       const res = await app.inject({
         method: 'POST',
         url: '/v1/workspaces/load',
-        payload: form,
+        payload: { path: tar, id: 'taken' },
       })
       expect(res.statusCode).toBe(409)
     } finally {
       await app.close().catch(() => undefined)
+      rmSync(dir, { recursive: true, force: true })
     }
   })
 

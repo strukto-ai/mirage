@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { RedisFileCacheStore } from '@struktoai/mirage-node'
 import { describe, expect, it } from 'vitest'
 import { interpolateEnv, loadWorkspaceConfig, configToWorkspaceArgs } from './config.ts'
 
@@ -66,5 +67,27 @@ describe('configToWorkspaceArgs', () => {
       mode: 'writ',
     })
     await expect(configToWorkspaceArgs(bad)).rejects.toThrow(/invalid mount mode/)
+  })
+
+  it('builds a redis index config from an index block', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      index: { type: 'redis', url: 'redis://localhost:6379/0', keyPrefix: 'x:' },
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    expect(args.options.index).toEqual({
+      type: 'redis',
+      url: 'redis://localhost:6379/0',
+      keyPrefix: 'x:',
+    })
+  })
+
+  it('builds a redis file cache from a cache block', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      cache: { type: 'redis', keyPrefix: 'c:' },
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    expect(args.options.cache).toBeInstanceOf(RedisFileCacheStore)
   })
 })

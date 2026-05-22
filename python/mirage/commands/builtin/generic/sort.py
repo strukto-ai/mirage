@@ -1,19 +1,10 @@
 from collections.abc import AsyncIterator, Awaitable, Callable
 
-from mirage.commands.builtin.sort_helper import _sort_key
+from mirage.commands.builtin.sort_helper import _sort_key, _unique_key
+from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-def _dedupe(lines: list[str]) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for ln in lines:
-        if ln not in seen:
-            seen.add(ln)
-            out.append(ln)
-    return out
 
 
 async def sort(
@@ -36,21 +27,25 @@ async def sort(
         all_lines: list[str] = []
         for p in paths:
             data = (await read_bytes(accessor, p)).decode(errors="replace")
-            all_lines.extend(data.splitlines())
+            all_lines.extend(split_lines(data))
     else:
         raw = await _read_stdin_async(stdin)
         if raw is None:
             raise ValueError("sort: missing operand")
-        all_lines = raw.decode(errors="replace").splitlines()
+        all_lines = split_lines(raw.decode(errors="replace"))
 
-    all_lines.sort(
-        key=lambda x:
-        _sort_key(x, key_field, field_separator, fold_case, numeric,
-                  human_numeric, version_sort, month_sort),
-        reverse=reverse,
-    )
+    key_args = (key_field, field_separator, fold_case, numeric, human_numeric,
+                version_sort, month_sort)
+    all_lines.sort(key=lambda x: _sort_key(x, *key_args), reverse=reverse)
     if unique:
-        all_lines = _dedupe(all_lines)
+        seen: set[object] = set()
+        deduped: list[str] = []
+        for line in all_lines:
+            dk = _unique_key(_sort_key(line, *key_args))
+            if dk not in seen:
+                seen.add(dk)
+                deduped.append(line)
+        all_lines = deduped
     output = "\n".join(all_lines)
     return (output + "\n").encode() if output else b"", IOResult()
 

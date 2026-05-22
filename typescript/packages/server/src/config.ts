@@ -14,7 +14,16 @@
 
 import { readFileSync } from 'node:fs'
 import { parse as parseYaml } from 'yaml'
-import { buildResource, MountMode, type Resource } from '@struktoai/mirage-node'
+import {
+  buildResource,
+  MountMode,
+  RAMFileCacheStore,
+  RedisFileCacheStore,
+  type FileCache,
+  type IndexConfig,
+  type RedisIndexConfig,
+  type Resource,
+} from '@struktoai/mirage-node'
 
 const VALID_MODES = new Set<string>([MountMode.READ, MountMode.WRITE, MountMode.EXEC])
 
@@ -67,6 +76,32 @@ export interface MountBlock {
   config?: Record<string, unknown>
 }
 
+export interface RamCacheBlock {
+  type?: 'ram'
+  limit?: string | number
+  maxDrainBytes?: number | null
+}
+
+export interface RedisCacheBlock {
+  type: 'redis'
+  limit?: string | number
+  maxDrainBytes?: number | null
+  url?: string
+  keyPrefix?: string
+}
+
+export interface RamIndexBlock {
+  type?: 'ram'
+  ttl?: number
+}
+
+export interface RedisIndexBlock {
+  type: 'redis'
+  ttl?: number
+  url?: string
+  keyPrefix?: string
+}
+
 export interface WorkspaceConfigRaw {
   mounts: Record<string, MountBlock>
   mode?: string
@@ -75,6 +110,8 @@ export interface WorkspaceConfigRaw {
   defaultAgentId?: string
   history?: number | null
   fuse?: boolean
+  cache?: RamCacheBlock | RedisCacheBlock | null
+  index?: RamIndexBlock | RedisIndexBlock | null
 }
 
 function readProcessEnv(): Record<string, string> {
@@ -120,7 +157,43 @@ export interface WorkspaceArgs {
     mode: MountMode
     sessionId: string
     agentId: string
+    cache?: FileCache & Resource
+    index?: IndexConfig
   }
+}
+
+function buildCache(
+  block: RamCacheBlock | RedisCacheBlock | null | undefined,
+): (FileCache & Resource) | undefined {
+  if (block === null || block === undefined) return undefined
+  if (block.type === 'redis') {
+    return new RedisFileCacheStore({
+      ...(block.limit !== undefined ? { cacheLimit: block.limit } : {}),
+      ...(block.maxDrainBytes !== undefined ? { maxDrainBytes: block.maxDrainBytes } : {}),
+      ...(block.url !== undefined ? { url: block.url } : {}),
+      ...(block.keyPrefix !== undefined ? { keyPrefix: block.keyPrefix } : {}),
+    })
+  }
+  return new RAMFileCacheStore({
+    ...(block.limit !== undefined ? { limit: block.limit } : {}),
+    ...(block.maxDrainBytes !== undefined ? { maxDrainBytes: block.maxDrainBytes } : {}),
+  })
+}
+
+function buildIndex(
+  block: RamIndexBlock | RedisIndexBlock | null | undefined,
+): IndexConfig | undefined {
+  if (block === null || block === undefined) return undefined
+  if (block.type === 'redis') {
+    const cfg: RedisIndexConfig = { type: 'redis' }
+    if (block.ttl !== undefined) cfg.ttl = block.ttl
+    if (block.url !== undefined) cfg.url = block.url
+    if (block.keyPrefix !== undefined) cfg.keyPrefix = block.keyPrefix
+    return cfg
+  }
+  const cfg: IndexConfig = { type: 'ram' }
+  if (block.ttl !== undefined) cfg.ttl = block.ttl
+  return cfg
 }
 
 export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<WorkspaceArgs> {
@@ -131,12 +204,16 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
     const m = coerceMountMode(block.mode, wsMode)
     resources[prefix] = [r, m]
   }
+  const cache = buildCache(cfg.cache)
+  const index = buildIndex(cfg.index)
   return {
     resources,
     options: {
       mode: wsMode,
       sessionId: cfg.defaultSessionId ?? 'default',
       agentId: cfg.defaultAgentId ?? 'default',
+      ...(cache !== undefined ? { cache } : {}),
+      ...(index !== undefined ? { index } : {}),
     },
   }
 }

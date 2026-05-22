@@ -12,85 +12,89 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.cut_helper import cut as _cut_impl
+from mirage.commands.builtin.cut_helper import (OPEN_END, cut_record,
+                                                parse_ranges, select_positions,
+                                                split_records)
 
 
-def _norm(path):
-    return "/" + path.strip("/")
+class TestParseRanges:
+
+    def test_single(self):
+        assert parse_ranges("3") == [(3, 3)]
+
+    def test_closed_range(self):
+        assert parse_ranges("2-5") == [(2, 5)]
+
+    def test_open_high(self):
+        assert parse_ranges("2-") == [(2, OPEN_END)]
+
+    def test_open_low(self):
+        assert parse_ranges("-3") == [(1, 3)]
+
+    def test_multiple(self):
+        assert parse_ranges("1,3-4,7") == [(1, 1), (3, 4), (7, 7)]
 
 
-def _write(backend, path, data):
-    backend.accessor.store.files[_norm(path)] = data
+class TestSelectPositions:
+
+    def test_ascending_dedup(self):
+        assert select_positions([(3, 3), (1, 1)], 4, False) == [1, 3]
+
+    def test_overlap_dedup(self):
+        assert select_positions([(1, 3), (2, 4)], 6, False) == [1, 2, 3, 4]
+
+    def test_open_clamped_to_n(self):
+        assert select_positions([(2, OPEN_END)], 4, False) == [2, 3, 4]
+
+    def test_complement(self):
+        assert select_positions([(2, 3)], 5, True) == [1, 4, 5]
 
 
-def _read(backend, path):
-    return backend.accessor.store.files[_norm(path)]
+class TestCutRecordChars:
+
+    def test_char_range(self):
+        assert cut_record(b"abcdefgh", "\t", None, [(2, 5)], False) == b"bcde"
+
+    def test_char_overlap_dedup(self):
+        assert cut_record(b"abcdef", "\t", None, [(1, 3), (2, 4)],
+                          False) == b"abcd"
+
+    def test_char_open(self):
+        assert cut_record(b"abcdef", "\t", None, [(3, OPEN_END)],
+                          False) == b"cdef"
 
 
-def cut(backend, path, **kwargs):
-    return _cut_impl(lambda p: _read(backend, p), path, **kwargs)
+class TestCutRecordFields:
+
+    def test_single_field(self):
+        assert cut_record(b"a\tb\tc", "\t", [(2, 2)], None, False) == b"b"
+
+    def test_field_order_is_file_order(self):
+        assert cut_record(b"a\tb\tc", "\t", [(3, 3), (1, 1)], None,
+                          False) == b"a\tc"
+
+    def test_open_field_range(self):
+        assert cut_record(b"a\tb\tc\td", "\t", [(2, OPEN_END)], None,
+                          False) == b"b\tc\td"
+
+    def test_no_delimiter_passthrough(self):
+        assert cut_record(b"nodelim", "\t", [(2, 2)], None,
+                          False) == b"nodelim"
+
+    def test_custom_delimiter(self):
+        assert cut_record(b"root:x:0", ":", [(1, 1)], None, False) == b"root"
+
+    def test_complement(self):
+        assert cut_record(b"a\tb\tc", "\t", [(2, 2)], None, True) == b"a\tc"
 
 
-class TestCutFieldsDefaultDelimiter:
+class TestSplitRecords:
 
-    def test_single_field(self, backend):
-        _write(backend, "/tmp/f.txt", b"a\tb\tc\n")
-        result = cut(backend, "/tmp/f.txt", fields=[2])
-        assert result == ["b"]
+    def test_drops_trailing_empty(self):
+        assert split_records(b"a\nb\n", False) == [b"a", b"b"]
 
-    def test_multiple_fields(self, backend):
-        _write(backend, "/tmp/f.txt", b"a\tb\tc\n")
-        result = cut(backend, "/tmp/f.txt", fields=[1, 3])
-        assert result == ["a\tc"]
+    def test_keeps_final_without_newline(self):
+        assert split_records(b"a\nb", False) == [b"a", b"b"]
 
-    def test_multiline(self, backend):
-        _write(backend, "/tmp/f.txt", b"x\ty\nw\tz\n")
-        result = cut(backend, "/tmp/f.txt", fields=[2])
-        assert result == ["y", "z"]
-
-
-class TestCutCustomDelimiter:
-
-    def test_colon_delimiter(self, backend):
-        _write(backend, "/tmp/f.txt", b"root:x:0:0\n")
-        result = cut(backend, "/tmp/f.txt", delimiter=":", fields=[1])
-        assert result == ["root"]
-
-    def test_comma_delimiter(self, backend):
-        _write(backend, "/tmp/f.txt", b"a,b,c\n")
-        result = cut(backend, "/tmp/f.txt", delimiter=",", fields=[2, 3])
-        assert result == ["b,c"]
-
-
-class TestCutChars:
-
-    def test_char_range(self, backend):
-        _write(backend, "/tmp/f.txt", b"abcdefgh\n")
-        result = cut(backend, "/tmp/f.txt", chars=[(2, 5)])
-        assert result == ["bcde"]
-
-    def test_single_char(self, backend):
-        _write(backend, "/tmp/f.txt", b"abcdefgh\n")
-        result = cut(backend, "/tmp/f.txt", chars=[(3, 3)])
-        assert result == ["c"]
-
-    def test_multiple_ranges(self, backend):
-        _write(backend, "/tmp/f.txt", b"abcdefgh\n")
-        result = cut(backend, "/tmp/f.txt", chars=[(1, 2), (5, 6)])
-        assert result == ["abef"]
-
-
-class TestCutFieldOutOfRange:
-
-    def test_field_beyond_columns(self, backend):
-        _write(backend, "/tmp/f.txt", b"a\tb\n")
-        result = cut(backend, "/tmp/f.txt", fields=[5])
-        assert result == [""]
-
-
-class TestCutNoFieldsOrChars:
-
-    def test_returns_full_lines(self, backend):
-        _write(backend, "/tmp/f.txt", b"hello world\nfoo bar\n")
-        result = cut(backend, "/tmp/f.txt")
-        assert result == ["hello world", "foo bar"]
+    def test_zero_terminated(self):
+        assert split_records(b"a\x00b\x00", True) == [b"a", b"b"]

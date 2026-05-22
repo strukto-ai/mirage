@@ -1,12 +1,13 @@
 from collections.abc import AsyncIterator, Awaitable, Callable
 
+from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
 def _table_format(text: str, separator: str | None, output_sep: str) -> str:
-    lines = text.splitlines()
+    lines = split_lines(text)
     if not lines:
         return ""
     rows: list[list[str]] = []

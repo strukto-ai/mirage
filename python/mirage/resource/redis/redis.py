@@ -71,7 +71,7 @@ _REDIS_OPS = {
 class RedisResource(BaseResource):
 
     name: str = ResourceName.REDIS
-    _index_ttl: float = 0
+    index_ttl: float = 0
     _ops: dict = _REDIS_OPS
     PROMPT: str = PROMPT
 

@@ -16,6 +16,7 @@ import { NOOPAccessor } from '../accessor/base.ts'
 import { applyIo } from '../cache/file/io.ts'
 import { CacheEntry } from '../cache/file/entry.ts'
 import type { FileCache } from '../cache/file/mixin.ts'
+import type { IndexConfig } from '../cache/index/config.ts'
 import { RAMFileCacheStore } from '../cache/file/ram.ts'
 import type { ByteSource } from '../io/types.ts'
 import { IOResult, materialize } from '../io/types.ts'
@@ -148,6 +149,7 @@ export interface WorkspaceOptions {
   sessionId?: string
   cacheLimit?: string | number
   cache?: FileCache & Resource
+  index?: IndexConfig
   observerResource?: Resource
   observerPrefix?: string
   python?: {
@@ -268,6 +270,11 @@ export class Workspace {
       ...(options.modeOverrides ?? {}),
       [observerPrefix]: MountMode.READ,
     })
+    if (options.index !== undefined) {
+      for (const resource of Object.values(resources)) {
+        resource.setIndex?.(options.index)
+      }
+    }
     this.sessionManager = new SessionManager(options.sessionId ?? 'default')
     this.opsRegistry = options.ops ?? new OpsRegistry()
     this.shellParser = options.shellParser ?? null

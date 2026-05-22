@@ -1,6 +1,7 @@
 import random
 from collections.abc import AsyncIterator, Awaitable, Callable
 
+from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -44,7 +45,7 @@ async def shuf(
             if zero_terminated:
                 all_lines.extend(data.split("\x00"))
             else:
-                all_lines.extend(data.splitlines())
+                all_lines.extend(split_lines(data))
         result = _sample(all_lines, count, with_replacement)
         return (sep.join(result) + sep).encode(), IOResult()
 
@@ -52,7 +53,7 @@ async def shuf(
     if raw is None:
         raise ValueError("shuf: missing operand")
     text = raw.decode(errors="replace")
-    lines = text.split("\x00") if zero_terminated else text.splitlines()
+    lines = text.split("\x00") if zero_terminated else split_lines(text)
     result = _sample(lines, count, with_replacement)
     return (sep.join(result) + sep).encode(), IOResult()
 

@@ -13,11 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  BaseResource,
   type FileStat,
   HttpPostHogDriver,
-  type IndexCacheStore,
   PathSpec,
-  RAMIndexCacheStore,
   type RegisteredCommand,
   type RegisteredOp,
   type Resource,
@@ -42,7 +41,7 @@ export interface PostHogResourceOptions {
   driver?: PostHogDriver
 }
 
-export class PostHogResource implements Resource {
+export class PostHogResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.POSTHOG
   readonly isRemote: boolean = true
   readonly indexTtl: number = 60
@@ -50,9 +49,9 @@ export class PostHogResource implements Resource {
   readonly config: PostHogConfigResolved
   readonly driver: PostHogDriver
   readonly accessor: PostHogAccessor
-  readonly index: IndexCacheStore
 
   constructor(options: PostHogResourceOptions | PostHogConfig = {}) {
+    super()
     const opts: PostHogResourceOptions =
       'config' in options || 'driver' in options || 'prefix' in options
         ? options
@@ -62,7 +61,6 @@ export class PostHogResource implements Resource {
       opts.driver ??
       new HttpPostHogDriver({ baseUrl: this.config.baseUrl, apiKey: this.config.apiKey })
     this.accessor = new PostHogAccessor(this.driver, this.config)
-    this.index = new RAMIndexCacheStore({ ttl: this.indexTtl })
     this.prompt = POSTHOG_PROMPT.replace('{prefix}', opts.prefix ?? '')
   }
 

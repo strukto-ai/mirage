@@ -1,0 +1,45 @@
+{
+  "_meta": {
+    "filetypes": [
+      ".feather",
+      ".h5",
+      ".parquet"
+    ],
+    "has_aggregate": false,
+    "has_provision": false,
+    "has_write": false,
+    "resources": [
+      "box",
+      "disk",
+      "dropbox",
+      "gdrive",
+      "github",
+      "ram",
+      "redis",
+      "s3",
+      "ssh"
+    ]
+  },
+  "description": null,
+  "ignore_tokens": [],
+  "options": [
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-b",
+      "value_kind": "none"
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-i",
+      "value_kind": "none"
+    }
+  ],
+  "positional": [],
+  "rest": {
+    "kind": "path"
+  }
+}

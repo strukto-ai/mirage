@@ -12,7 +12,11 @@ def _fmt_text(text: str, width: int) -> str:
     for para in paragraphs:
         para = para.strip()
         if para:
-            formatted.append(textwrap.fill(para, width=width))
+            formatted.append(
+                textwrap.fill(para,
+                              width=width,
+                              break_long_words=False,
+                              break_on_hyphens=False))
         else:
             formatted.append("")
     return "\n\n".join(formatted) + "\n"

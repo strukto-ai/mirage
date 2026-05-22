@@ -1,0 +1,5 @@
+stdout: $X
+stdout: shellval
+item-0
+keep 1
+hello, alice!

@@ -1,0 +1,4 @@
+index store A is redis-backed: true
+shared index entry: hello.txt
+shared index listing: /data/hello.txt, /data/notes.md
+wiped test keys from Redis

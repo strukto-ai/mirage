@@ -13,7 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../accessor/base.ts'
-import type { IndexCacheStore } from '../cache/index/index.ts'
+import { IndexType, type IndexConfig, type RedisIndexConfig } from '../cache/index/config.ts'
+import { RAMIndexCacheStore } from '../cache/index/ram.ts'
+import { RedisIndexCacheStore } from '../cache/index/redis.ts'
+import type { IndexCacheStore } from '../cache/index/store.ts'
 import type { RegisteredCommand } from '../commands/config.ts'
 import type { RegisteredOp } from '../ops/registry.ts'
 import type { FileStat, PathSpec } from '../types.ts'
@@ -52,6 +55,7 @@ export interface Resource {
   readonly index?: IndexCacheStore
   readonly accessor?: Accessor
   readonly opsMap?: Record<string, unknown>
+  setIndex?(config?: IndexConfig): void
   open(): Promise<void>
   close(): Promise<void>
   ops?(): readonly RegisteredOp[]
@@ -79,4 +83,35 @@ export interface Resource {
 
 export function throwUnsupported(op: string): never {
   throw new Error(`resource has no ${op} support`)
+}
+
+export abstract class BaseResource {
+  readonly indexTtl: number = 600
+  protected _index?: IndexCacheStore
+
+  get index(): IndexCacheStore {
+    let store = this._index
+    if (store === undefined) {
+      store = this.makeIndex()
+      this._index = store
+    }
+    return store
+  }
+
+  setIndex(config?: IndexConfig): void {
+    this._index = this.makeIndex(config)
+  }
+
+  private makeIndex(config?: IndexConfig): IndexCacheStore {
+    if (config?.type === IndexType.REDIS) {
+      const redis = config as RedisIndexConfig
+      return new RedisIndexCacheStore({
+        ttl: redis.ttl ?? 600,
+        ...(redis.url !== undefined ? { url: redis.url } : {}),
+        ...(redis.keyPrefix !== undefined ? { keyPrefix: redis.keyPrefix } : {}),
+      })
+    }
+    const ttl = config === undefined ? this.indexTtl : (config.ttl ?? 600)
+    return new RAMIndexCacheStore({ ttl })
+  }
 }

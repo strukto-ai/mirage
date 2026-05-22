@@ -33,7 +33,9 @@ async def stat(
         prefix = path.prefix
         path = path.original
     if prefix and path.startswith(prefix):
-        path = path[len(prefix):] or "/"
+        rest = path[len(prefix):]
+        if prefix.endswith("/") or rest == "" or rest.startswith("/"):
+            path = rest or "/"
     store = accessor.store
     p = _norm(path)
     if await store.has_dir(p):

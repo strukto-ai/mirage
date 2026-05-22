@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  BaseResource,
   type FileStat,
-  type IndexCacheStore,
   PathSpec,
   POSTGRES_COMMANDS,
   POSTGRES_OPS,
@@ -25,7 +25,6 @@ import {
   postgresRead,
   postgresReaddir,
   postgresStat,
-  RAMIndexCacheStore,
   type RegisteredCommand,
   type RegisteredOp,
   type Resource,
@@ -40,7 +39,7 @@ export interface PostgresResourceOptions {
   prefix?: string
 }
 
-export class PostgresResource implements Resource {
+export class PostgresResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.POSTGRES
   readonly isRemote: boolean = true
   readonly indexTtl: number = 0
@@ -48,15 +47,14 @@ export class PostgresResource implements Resource {
   readonly config: PostgresConfigResolved
   readonly store: PostgresStore
   readonly accessor: PostgresAccessor
-  readonly index: IndexCacheStore
 
   constructor(options: PostgresResourceOptions | PostgresConfig) {
+    super()
     const { config, prefix } =
       'config' in options ? options : { config: options, prefix: undefined }
     this.config = resolvePostgresConfig(config)
     this.store = new PostgresStore(this.config)
     this.accessor = new PostgresAccessor(this.store, this.config)
-    this.index = new RAMIndexCacheStore({ ttl: this.indexTtl })
     this.prompt = POSTGRES_PROMPT.replace('{prefix}', prefix ?? '')
   }
 

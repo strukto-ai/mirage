@@ -13,11 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  BaseResource,
   type FileStat,
   HttpSSCholarDriver,
-  type IndexCacheStore,
   PathSpec,
-  RAMIndexCacheStore,
   type RegisteredCommand,
   type RegisteredOp,
   type Resource,
@@ -42,7 +41,7 @@ export interface SSCholarAuthorResourceOptions {
   driver?: SSCholarDriver
 }
 
-export class SSCholarAuthorResource implements Resource {
+export class SSCholarAuthorResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.SSCHOLAR_AUTHOR
   readonly isRemote: boolean = true
   readonly indexTtl: number = 0
@@ -50,9 +49,9 @@ export class SSCholarAuthorResource implements Resource {
   readonly config: SSCholarConfigResolved
   readonly driver: SSCholarDriver
   readonly accessor: SSCholarAccessor
-  readonly index: IndexCacheStore
 
   constructor(options: SSCholarAuthorResourceOptions | SSCholarConfig = {}) {
+    super()
     const opts: SSCholarAuthorResourceOptions =
       'config' in options || 'driver' in options || 'prefix' in options
         ? options
@@ -62,7 +61,6 @@ export class SSCholarAuthorResource implements Resource {
       opts.driver ??
       new HttpSSCholarDriver({ baseUrl: this.config.baseUrl, apiKey: this.config.apiKey })
     this.accessor = new SSCholarAccessor(this.driver, this.config)
-    this.index = new RAMIndexCacheStore({ ttl: this.indexTtl })
     this.prompt = SSCHOLAR_AUTHOR_PROMPT.replace('{prefix}', opts.prefix ?? '')
   }
 

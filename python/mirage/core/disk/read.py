@@ -39,7 +39,9 @@ async def read_bytes(accessor: DiskAccessor,
         prefix = path.prefix
         path = path.original
     if prefix and path.startswith(prefix):
-        path = path[len(prefix):] or "/"
+        rest = path[len(prefix):]
+        if prefix.endswith("/") or rest == "" or rest.startswith("/"):
+            path = rest or "/"
     root = accessor.root
     start_ms = int(time.monotonic() * 1000)
     p = _resolve(root, path)

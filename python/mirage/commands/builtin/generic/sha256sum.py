@@ -1,6 +1,7 @@
 import hashlib
 from collections.abc import AsyncIterator, Awaitable, Callable
 
+from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -44,7 +45,7 @@ async def _sha256_check(
     mount_prefix = path.prefix if isinstance(path, PathSpec) else ""
     lines: list[str] = []
     failed = False
-    for line in data.splitlines():
+    for line in split_lines(data):
         if not line.strip():
             continue
         parts = line.split("  ", 1)

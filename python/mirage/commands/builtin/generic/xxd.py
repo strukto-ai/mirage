@@ -2,6 +2,7 @@ import binascii
 import re
 from collections.abc import AsyncIterator, Callable
 
+from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -73,7 +74,7 @@ async def _xxd_reverse_stream(
         buf += chunk
     text = buf.decode(errors="replace")
     if ":" in text:
-        for line in text.splitlines():
+        for line in split_lines(text):
             if line:
                 yield _reverse_line(line)
     else:

@@ -44,7 +44,9 @@ async def read_stream(
         prefix = path.prefix
         path = path.original
     if prefix and path.startswith(prefix):
-        path = path[len(prefix):] or "/"
+        rest = path[len(prefix):]
+        if prefix.endswith("/") or rest == "" or rest.startswith("/"):
+            path = rest or "/"
     pinned_revision = revision_for(virtual)
     config = accessor.config
     rec = record_stream("read", path, "s3")

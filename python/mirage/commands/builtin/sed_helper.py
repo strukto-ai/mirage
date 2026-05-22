@@ -13,10 +13,46 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
+from functools import partial
 
 from mirage.commands.builtin.utils.types import _ReadBytes, _WriteBytes
 
 _SIMPLE_CMDS = frozenset("dDpPhHgGxNq")
+
+
+def _apply_repl(m: "re.Match[str]", repl: str) -> str:
+    """Expand a GNU sed replacement against a match.
+
+    `&` is the whole match, `\\1`..`\\9` are groups, `\\&` is a literal `&`,
+    `\\n`/`\\t` are newline/tab, and `\\X` is a literal X.
+
+    Args:
+        m (re.Match): The regex match for the current substitution.
+        repl (str): The sed replacement template.
+    """
+    out: list[str] = []
+    i = 0
+    while i < len(repl):
+        ch = repl[i]
+        if ch == "\\" and i + 1 < len(repl):
+            nxt = repl[i + 1]
+            if nxt.isdigit():
+                grp = m.group(int(nxt))
+                out.append(grp if grp is not None else "")
+            elif nxt == "n":
+                out.append("\n")
+            elif nxt == "t":
+                out.append("\t")
+            else:
+                out.append(nxt)
+            i += 2
+        elif ch == "&":
+            out.append(m.group(0))
+            i += 1
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
 
 
 def _parse_address(addr: str) -> tuple[str, str] | None:
@@ -247,7 +283,7 @@ def _execute_program(text: str,
                 re_flags = re.IGNORECASE if "i" in eflags else 0
                 count = 0 if "g" in eflags else 1
                 new_pattern = re.sub(pat,
-                                     repl,
+                                     partial(_apply_repl, repl=repl),
                                      pattern,
                                      flags=re_flags,
                                      count=count)
@@ -328,5 +364,9 @@ def sed(
     count: int = 0,
 ) -> None:
     data = read_bytes(path).decode(errors="replace")
-    new_data = re.sub(pattern, replacement, data, flags=flags, count=count)
+    new_data = re.sub(pattern,
+                      partial(_apply_repl, repl=replacement),
+                      data,
+                      flags=flags,
+                      count=count)
     write_bytes(path, new_data.encode())

@@ -128,6 +128,9 @@ openhands   = ["openhands-sdk>=1.18.0", "openhands-tools>=1.18.0"]
 # --- camel ---
 camel       = ["camel-ai>=0.2.40,<0.3", "markitdown>=0.1.5"]
 
+# --- sandboxes ---
+daytona     = ["daytona>=0.176.0"]
+
 # --- meta: install everything ---
 all = [
     "mirage-ai[s3]",
@@ -150,6 +153,7 @@ all = [
     "mirage-ai[pydantic-ai]",
     "mirage-ai[deepagents]",
     "mirage-ai[openhands]",
+    "mirage-ai[daytona]",
 ]
 
 [tool.uv]

@@ -69,6 +69,26 @@ class CloneWorkspaceRequest(BaseModel):
     override: dict[str, Any] | None = None
 
 
+class SnapshotWorkspaceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+
+
+class SnapshotWorkspaceResponse(BaseModel):
+    id: str
+    path: str
+    size: int
+
+
+class LoadWorkspaceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    id: str | None = None
+    override: dict[str, Any] | None = None
+
+
 class DeleteWorkspaceResponse(BaseModel):
     id: str
     closed_at: float

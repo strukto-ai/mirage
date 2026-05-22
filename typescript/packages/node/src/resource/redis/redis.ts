@@ -13,11 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  BaseResource,
   type FileStat,
   type FindOptions,
-  type IndexCacheStore,
   PathSpec,
-  RAMIndexCacheStore,
   type RegisteredCommand,
   type RegisteredOp,
   type Resource,
@@ -67,7 +66,7 @@ export interface RedisResourceState {
   dirs: string[]
 }
 
-export class RedisResource implements Resource {
+export class RedisResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.REDIS
   readonly isRemote: boolean = false
   readonly indexTtl: number = 0
@@ -76,7 +75,6 @@ export class RedisResource implements Resource {
   readonly keyPrefix: string
   readonly store: RedisStore
   readonly accessor: RedisAccessor
-  readonly index: IndexCacheStore
 
   readonly opsMap: Record<string, unknown> = {
     read_bytes: readCore,
@@ -100,11 +98,11 @@ export class RedisResource implements Resource {
   }
 
   constructor(options: RedisResourceOptions = {}) {
+    super()
     this.url = options.url ?? 'redis://localhost:6379/0'
     this.keyPrefix = options.keyPrefix ?? 'mirage:fs:'
     this.store = new RedisStore({ url: this.url, keyPrefix: this.keyPrefix })
     this.accessor = new RedisAccessor(this.store)
-    this.index = new RAMIndexCacheStore({ ttl: this.indexTtl })
   }
 
   async open(): Promise<void> {

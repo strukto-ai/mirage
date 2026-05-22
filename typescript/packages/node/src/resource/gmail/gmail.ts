@@ -13,15 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  BaseResource,
   type FileStat,
   GMAIL_COMMANDS,
   GMAIL_PROMPT,
   GMAIL_WRITE_PROMPT,
   GMAIL_VFS_OPS,
   GmailAccessor,
-  type IndexCacheStore,
   PathSpec,
-  RAMIndexCacheStore,
   type RegisteredCommand,
   type RegisteredOp,
   type Resource,
@@ -41,7 +40,7 @@ export interface GmailResourceState {
   config: GmailConfigRedacted
 }
 
-export class GmailResource implements Resource {
+export class GmailResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.GMAIL
   readonly isRemote: boolean = true
   readonly indexTtl: number = 86_400
@@ -49,9 +48,9 @@ export class GmailResource implements Resource {
   readonly writePrompt: string = GMAIL_WRITE_PROMPT
   readonly config: GmailConfig
   readonly accessor: GmailAccessor
-  readonly index: IndexCacheStore
 
   constructor(config: GmailConfig) {
+    super()
     this.config = config
     const tm = new TokenManager({
       clientId: config.clientId,
@@ -59,7 +58,6 @@ export class GmailResource implements Resource {
       refreshToken: config.refreshToken,
     })
     this.accessor = new GmailAccessor({ tokenManager: tm })
-    this.index = new RAMIndexCacheStore({ ttl: 86_400 })
   }
 
   open(): Promise<void> {

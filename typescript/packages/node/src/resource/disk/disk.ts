@@ -15,11 +15,10 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
+  BaseResource,
   type FileStat,
   type FindOptions,
-  type IndexCacheStore,
   PathSpec,
-  RAMIndexCacheStore,
   type RegisteredCommand,
   type RegisteredOp,
   type Resource,
@@ -71,14 +70,13 @@ async function walkFiles(root: string, current: string, out: string[]): Promise<
   }
 }
 
-export class DiskResource implements Resource {
+export class DiskResource extends BaseResource implements Resource {
   readonly kind = ResourceName.DISK
   readonly isRemote: boolean = false
   readonly indexTtl: number = 60
   readonly prompt = DISK_PROMPT
   readonly root: string
   readonly accessor: DiskAccessor
-  readonly index: IndexCacheStore
   readonly opsMap: Record<string, unknown> = {
     read_bytes: readCoreFn,
     write: writeCore,
@@ -101,9 +99,9 @@ export class DiskResource implements Resource {
   }
 
   constructor(options: DiskResourceOptions) {
+    super()
     this.root = path.resolve(options.root)
     this.accessor = new DiskAccessor(this.root)
-    this.index = new RAMIndexCacheStore({ ttl: this.indexTtl })
   }
 
   async open(): Promise<void> {

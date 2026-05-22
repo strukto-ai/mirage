@@ -1,0 +1,62 @@
+{
+  "_meta": {
+    "filetypes": [
+      ".feather",
+      ".h5",
+      ".mp3",
+      ".ogg",
+      ".parquet",
+      ".wav"
+    ],
+    "has_aggregate": true,
+    "has_provision": true,
+    "has_write": false,
+    "resources": [
+      "box",
+      "discord",
+      "disk",
+      "dropbox",
+      "email",
+      "gdocs",
+      "gdrive",
+      "github",
+      "github_ci",
+      "gmail",
+      "gsheets",
+      "gslides",
+      "langfuse",
+      "linear",
+      "mongodb",
+      "notion",
+      "postgres",
+      "ram",
+      "redis",
+      "s3",
+      "slack",
+      "ssh",
+      "trello"
+    ]
+  },
+  "description": null,
+  "ignore_tokens": [],
+  "options": [
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": true,
+      "short": "-n",
+      "value_kind": "text"
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "short": "-c",
+      "value_kind": "text"
+    }
+  ],
+  "positional": [],
+  "rest": {
+    "kind": "path"
+  }
+}

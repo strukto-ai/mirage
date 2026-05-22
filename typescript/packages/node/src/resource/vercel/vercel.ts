@@ -13,11 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  BaseResource,
   type FileStat,
   HttpVercelDriver,
-  type IndexCacheStore,
   PathSpec,
-  RAMIndexCacheStore,
   type RegisteredCommand,
   type RegisteredOp,
   type Resource,
@@ -42,7 +41,7 @@ export interface VercelResourceOptions {
   driver?: VercelDriver
 }
 
-export class VercelResource implements Resource {
+export class VercelResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.VERCEL
   readonly isRemote: boolean = true
   readonly indexTtl: number = 60
@@ -50,9 +49,9 @@ export class VercelResource implements Resource {
   readonly config: VercelConfigResolved
   readonly driver: VercelDriver
   readonly accessor: VercelAccessor
-  readonly index: IndexCacheStore
 
   constructor(options: VercelResourceOptions | VercelConfig = {}) {
+    super()
     const opts: VercelResourceOptions =
       'config' in options || 'driver' in options || 'prefix' in options
         ? options
@@ -66,7 +65,6 @@ export class VercelResource implements Resource {
         teamId: this.config.teamId,
       })
     this.accessor = new VercelAccessor(this.driver, this.config)
-    this.index = new RAMIndexCacheStore({ ttl: this.indexTtl })
     this.prompt = VERCEL_PROMPT.replace('{prefix}', opts.prefix ?? '')
   }
 

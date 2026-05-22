@@ -27,7 +27,6 @@ from mirage.server.auth import (AuthConfig, AuthMiddleware, AuthMode,
 from mirage.server.host_validation import (HostHeaderMiddleware,
                                            resolve_allowed_hosts)
 from mirage.server.jobs import JobTable
-from mirage.server.persist import restore_all, snapshot_all
 from mirage.server.registry import WorkspaceRegistry
 from mirage.server.routers import execute, health, jobs, sessions, workspaces
 
@@ -68,43 +67,23 @@ async def _watch_exit(exit_event: asyncio.Event) -> None:
 async def _lifespan(app: FastAPI):
     _write_pid_file()
     exit_task = asyncio.create_task(_watch_exit(app.state.exit_event))
-    persist_dir = getattr(app.state, "persist_dir", None)
-    if persist_dir is not None:
-        try:
-            restored, skipped = restore_all(app.state.registry,
-                                            Path(persist_dir))
-            logger.info("restored %d workspaces (%d skipped) from %s",
-                        restored, skipped, persist_dir)
-        except Exception:
-            logger.exception("restore_all failed; starting empty")
     try:
         yield
     finally:
         exit_task.cancel()
-        if persist_dir is not None:
-            try:
-                saved = await snapshot_all(app.state.registry,
-                                           Path(persist_dir))
-                logger.info("snapshotted %d workspaces to %s", saved,
-                            persist_dir)
-            except Exception:
-                logger.exception("snapshot_all failed")
         await app.state.registry.close_all()
         _remove_pid_file()
 
 
 def build_app(idle_grace_seconds: float = 30.0,
               exit_event: asyncio.Event | None = None,
-              persist_dir: str | Path | None = None,
               allowed_hosts: list[str] | None = None,
               auth_config: AuthConfig | None = None) -> FastAPI:
     """Construct a daemon FastAPI app.
 
     The workspace registry is created eagerly so the app is usable
     even without ASGI lifespan events firing (e.g. inside an
-    ``httpx.ASGITransport`` test client). The lifespan handles
-    persist-on-shutdown / restore-on-start when ``persist_dir`` is
-    supplied.
+    ``httpx.ASGITransport`` test client).
 
     Args:
         idle_grace_seconds (float): seconds to wait after the last
@@ -112,9 +91,6 @@ def build_app(idle_grace_seconds: float = 30.0,
         exit_event (asyncio.Event | None): event the registry trips
             when the idle timer fires. The runner of this app should
             await it and shut uvicorn down. Defaults to a fresh event.
-        persist_dir (str | Path | None): directory for snapshot /
-            restore. When set, the daemon snapshots every workspace
-            on graceful shutdown and rehydrates them on next start.
         allowed_hosts (list[str] | None): host allowlist for the
             ``Host`` header. ``None`` (default) reads
             ``$MIRAGE_ALLOWED_HOSTS`` (CSV) or falls back to
@@ -148,7 +124,6 @@ def build_app(idle_grace_seconds: float = 30.0,
         exit_event=app.state.exit_event,
     )
     app.state.jobs = JobTable()
-    app.state.persist_dir = persist_dir
     app.include_router(workspaces.router)
     app.include_router(sessions.router)
     app.include_router(execute.router)

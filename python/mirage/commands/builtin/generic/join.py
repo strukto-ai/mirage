@@ -1,5 +1,6 @@
 from collections.abc import Awaitable, Callable
 
+from mirage.commands.builtin.utils.lines import split_lines
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -126,8 +127,8 @@ async def join_cmd(
         raise ValueError("join: requires two paths")
     data1 = (await read_bytes(accessor, paths[0])).decode(errors="replace")
     data2 = (await read_bytes(accessor, paths[1])).decode(errors="replace")
-    lines1 = data1.splitlines()
-    lines2 = data2.splitlines()
+    lines1 = split_lines(data1)
+    lines2 = split_lines(data2)
     out_lines = _join_lines(lines1, lines2, field1, field2, separator,
                             also_unpairable, only_unpairable, empty_value,
                             output_format)

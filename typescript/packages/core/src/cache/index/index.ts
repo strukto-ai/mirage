@@ -23,4 +23,5 @@ export {
   type RedisIndexConfig,
 } from './config.ts'
 export { RAMIndexCacheStore } from './ram.ts'
+export { RedisIndexCacheStore, type RedisClientLike, type RedisIndexCacheOptions } from './redis.ts'
 export { IndexCacheStore } from './store.ts'

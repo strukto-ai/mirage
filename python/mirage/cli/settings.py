@@ -27,7 +27,6 @@ DEFAULT_DAEMON_URL = "http://127.0.0.1:8765"
 class DaemonSettings:
     url: str = DEFAULT_DAEMON_URL
     socket: str = ""
-    persist_dir: str = ""
     auth_token: str = ""
     idle_grace_seconds: float = 30.0
 
@@ -64,7 +63,6 @@ def load_daemon_settings(path: Path | None = None) -> DaemonSettings:
     settings = DaemonSettings(
         url=str(table.get("url", DEFAULT_DAEMON_URL)),
         socket=str(table.get("socket", "")),
-        persist_dir=str(table.get("persist_dir", "")),
         auth_token=str(table.get("auth_token", "")),
         idle_grace_seconds=float(table.get("idle_grace_seconds", 30.0)),
     )

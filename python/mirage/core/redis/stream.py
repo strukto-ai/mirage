@@ -32,7 +32,9 @@ async def stream(accessor: RedisAccessor,
         prefix = path.prefix
         path = path.original
         if prefix and path.startswith(prefix):
-            path = path[len(prefix):] or "/"
+            rest = path[len(prefix):]
+            if prefix.endswith("/") or rest == "" or rest.startswith("/"):
+                path = rest or "/"
     store = accessor.store
     key = _norm(path)
     data = await store.get_file(key)
@@ -55,6 +57,8 @@ async def read_stream(
         prefix = path.prefix
         path = path.original
     if prefix and path.startswith(prefix):
-        path = path[len(prefix):] or "/"
+        rest = path[len(prefix):]
+        if prefix.endswith("/") or rest == "" or rest.startswith("/"):
+            path = rest or "/"
     async for chunk in stream(accessor, path):
         yield chunk

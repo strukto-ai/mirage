@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator, Awaitable, Callable
 
+from mirage.commands.builtin.utils.lines import split_lines_keepends
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -48,7 +49,7 @@ async def unexpand(
         all_text: list[str] = []
         for p in paths:
             data = (await read_bytes(accessor, p)).decode(errors="replace")
-            lines = data.splitlines(True)
+            lines = split_lines_keepends(data)
             all_text.extend(
                 _unexpand_line(ln, tabsize, all_spaces) for ln in lines)
         return "".join(all_text).encode(), IOResult()
@@ -56,7 +57,7 @@ async def unexpand(
     raw = await _read_stdin_async(stdin)
     if raw is None:
         raise ValueError("unexpand: missing operand")
-    lines = raw.decode(errors="replace").splitlines(True)
+    lines = split_lines_keepends(raw.decode(errors="replace"))
     result = [_unexpand_line(ln, tabsize, all_spaces) for ln in lines]
     return "".join(result).encode(), IOResult()
 

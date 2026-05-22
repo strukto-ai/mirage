@@ -133,6 +133,81 @@ async def render_long_entry(
     return await _drain_filetype_output(stdout)
 
 
+async def walk_grouped(
+    path: PathSpec,
+    *,
+    readdir: Callable[[PathSpec, IndexCacheStore | None],
+                      Awaitable[list[str]]],
+    stat: Callable[[PathSpec], Awaitable[FileStat]],
+    all_files: bool = False,
+    sort_by: LsSortBy = LsSortBy.NAME,
+    reverse: bool = False,
+    index: IndexCacheStore | None = None,
+) -> tuple[list[tuple[PathSpec, list[FileStat]]], list[str]]:
+    """Recursive walk that returns one (dir, entries) group per directory
+    visited, in pre-order. Mirrors GNU `ls -R` output structure.
+    """
+    groups: list[tuple[PathSpec, list[FileStat]]] = []
+    warnings: list[str] = []
+    here, sub_ws = await walk(path,
+                              readdir=readdir,
+                              stat=stat,
+                              all_files=all_files,
+                              sort_by=sort_by,
+                              reverse=reverse,
+                              recursive=False,
+                              list_dir=False,
+                              index=index)
+    warnings.extend(sub_ws)
+    groups.append((path, here))
+    for s in here:
+        if s.type == FileType.DIRECTORY:
+            child_path = path.child(s.name)
+            child_spec = PathSpec(original=child_path,
+                                  directory=child_path,
+                                  resolved=False,
+                                  prefix=path.prefix)
+            sub_groups, sub_ws2 = await walk_grouped(child_spec,
+                                                     readdir=readdir,
+                                                     stat=stat,
+                                                     all_files=all_files,
+                                                     sort_by=sort_by,
+                                                     reverse=reverse,
+                                                     index=index)
+            groups.extend(sub_groups)
+            warnings.extend(sub_ws2)
+    return groups, warnings
+
+
+async def _render_group(
+    results: list[str],
+    dir_spec: PathSpec,
+    entries: list[FileStat],
+    *,
+    long: bool,
+    one_per_line: bool,
+    human: bool,
+    classify: bool,
+    accessor: object,
+    filetype_fns: dict | None,
+) -> None:
+    if long and not one_per_line:
+        standard_stats: list[FileStat] = []
+        for e in entries:
+            rendered = await render_long_entry(e,
+                                               dir_spec,
+                                               accessor=accessor,
+                                               filetype_fns=filetype_fns)
+            if rendered is not None:
+                results.append(rendered)
+                continue
+            standard_stats.append(e)
+        if standard_stats:
+            results.extend(format_ls_long(standard_stats, human=human))
+    else:
+        results.extend(format_simple(entries, classify=classify))
+
+
 async def ls(
     paths: list[PathSpec],
     *,
@@ -155,32 +230,51 @@ async def ls(
 ) -> tuple[bytes, IOResult]:
     results: list[str] = []
     warnings: list[str] = []
-    for p in paths:
-        entries, sub_ws = await walk(p,
-                                     readdir=readdir,
-                                     stat=stat,
-                                     all_files=all_files,
-                                     sort_by=sort_by,
-                                     reverse=reverse,
-                                     recursive=recursive,
-                                     list_dir=list_dir,
-                                     index=index)
-        warnings.extend(sub_ws)
-        if long and not one_per_line:
-            standard_stats: list[FileStat] = []
-            for e in entries:
-                rendered = await render_long_entry(e,
-                                                   p,
-                                                   accessor=accessor,
-                                                   filetype_fns=filetype_fns)
-                if rendered is not None:
-                    results.append(rendered)
-                    continue
-                standard_stats.append(e)
-            if standard_stats:
-                results.extend(format_ls_long(standard_stats, human=human))
-        else:
-            results.extend(format_simple(entries, classify=classify))
+
+    if recursive and not list_dir:
+        for p_idx, p in enumerate(paths):
+            groups, sub_ws = await walk_grouped(p,
+                                                readdir=readdir,
+                                                stat=stat,
+                                                all_files=all_files,
+                                                sort_by=sort_by,
+                                                reverse=reverse,
+                                                index=index)
+            warnings.extend(sub_ws)
+            for g_idx, (dir_spec, entries) in enumerate(groups):
+                if p_idx > 0 or g_idx > 0:
+                    results.append("")
+                results.append(f"{dir_spec.original}:")
+                await _render_group(results,
+                                    dir_spec,
+                                    entries,
+                                    long=long,
+                                    one_per_line=one_per_line,
+                                    human=human,
+                                    classify=classify,
+                                    accessor=accessor,
+                                    filetype_fns=filetype_fns)
+    else:
+        for p in paths:
+            entries, sub_ws = await walk(p,
+                                         readdir=readdir,
+                                         stat=stat,
+                                         all_files=all_files,
+                                         sort_by=sort_by,
+                                         reverse=reverse,
+                                         recursive=False,
+                                         list_dir=list_dir,
+                                         index=index)
+            warnings.extend(sub_ws)
+            await _render_group(results,
+                                p,
+                                entries,
+                                long=long,
+                                one_per_line=one_per_line,
+                                human=human,
+                                classify=classify,
+                                accessor=accessor,
+                                filetype_fns=filetype_fns)
 
     body = "\n".join(results)
     if trailing_newline and results:
@@ -197,4 +291,5 @@ __all__ = [
     "ls",
     "render_long_entry",
     "walk",
+    "walk_grouped",
 ]

@@ -103,6 +103,14 @@ def _sort_key(
     return field
 
 
+def _unique_key(key: object) -> object:
+    if isinstance(key, tuple):
+        return key[0]
+    if isinstance(key, list):
+        return tuple(key)
+    return key
+
+
 def sort_lines(
     read_bytes: _ReadBytes,
     path: str,

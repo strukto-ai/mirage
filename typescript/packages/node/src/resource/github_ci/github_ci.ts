@@ -13,15 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  BaseResource,
   type FileStat,
   GITHUB_CI_COMMANDS,
   GITHUB_CI_PROMPT,
   GITHUB_CI_VFS_OPS,
   GitHubCIAccessor,
   HttpCITransport,
-  type IndexCacheStore,
   PathSpec,
-  RAMIndexCacheStore,
   type RegisteredCommand,
   type RegisteredOp,
   type Resource,
@@ -40,16 +39,16 @@ export interface GitHubCIResourceState {
   config: GitHubCIConfigRedacted
 }
 
-export class GitHubCIResource implements Resource {
+export class GitHubCIResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.GITHUB_CI
   readonly isRemote: boolean = true
   readonly indexTtl: number = 86_400
   readonly prompt: string = GITHUB_CI_PROMPT
   readonly config: GitHubCIConfig
   readonly accessor: GitHubCIAccessor
-  readonly index: IndexCacheStore
 
   constructor(config: GitHubCIConfig) {
+    super()
     this.config = config
     const transportOpts: { token: string; baseUrl?: string } = { token: config.token }
     if (config.baseUrl !== undefined) transportOpts.baseUrl = config.baseUrl
@@ -60,7 +59,6 @@ export class GitHubCIResource implements Resource {
       days: config.days ?? 30,
       maxRuns: config.maxRuns ?? 300,
     })
-    this.index = new RAMIndexCacheStore({ ttl: 86_400 })
   }
 
   open(): Promise<void> {

@@ -5,6 +5,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.grep_helper import (compile_pattern, grep_lines,
                                                  grep_stream)
 from mirage.commands.builtin.rg_helper import rg_folder_filetype, rg_full
+from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
                                                 call_stat)
@@ -138,9 +139,8 @@ async def rg(
         if len(paths) > 1:
             all_results: list[str] = []
             for p in paths:
-                data = (await
-                        read_bytes(accessor,
-                                   p)).decode(errors="replace").splitlines()
+                data = split_lines(
+                    (await read_bytes(accessor, p)).decode(errors="replace"))
                 hits = grep_lines(p.original, data, pat, invert, line_numbers,
                                   count_only, files_only, only_matching,
                                   max_count)

@@ -1,0 +1,10 @@
+=== RedisFileCacheStore: FileCache backed by Redis ===
+get: hello from redis cache
+matches same fp: true
+matches other fp: false
+add existing: false
+add new: true
+immediate: true
+after 1.1s: false
+cache2.get: hello from redis cache
+wiped cache keys from Redis
