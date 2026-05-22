@@ -1,5 +1,5 @@
-from mirage.commands.builtin.path_helper import gnu_dirname
 from mirage.io.types import ByteSource, IOResult
+from mirage.utils.path import gnu_dirname
 
 
 async def dirname(*texts: str) -> tuple[ByteSource | None, IOResult]:

@@ -1,5 +1,5 @@
-from mirage.commands.builtin.path_helper import gnu_basename
 from mirage.io.types import ByteSource, IOResult
+from mirage.utils.path import gnu_basename
 
 
 async def basename(*texts: str) -> tuple[ByteSource | None, IOResult]:
