@@ -18,6 +18,7 @@ from urllib.request import Request, urlopen
 
 import aiohttp
 
+from mirage.resource.secrets import reveal_secret
 from mirage.types import PathSpec
 
 API_BASE = "https://api.github.com"
@@ -26,7 +27,7 @@ API_VERSION = "2022-11-28"
 
 def github_headers(token: str) -> dict[str, str]:
     return {
-        "Authorization": f"Bearer {token}",
+        "Authorization": f"Bearer {reveal_secret(token)}",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": API_VERSION,
     }

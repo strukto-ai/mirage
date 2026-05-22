@@ -15,6 +15,7 @@
 import aiohttp
 
 from mirage.resource.notion.config import NotionConfig
+from mirage.resource.secrets import reveal_secret
 
 API_VERSION = "2022-06-28"
 
@@ -35,7 +36,7 @@ class NotionAPIError(RuntimeError):
 
 def notion_headers(config: NotionConfig) -> dict[str, str]:
     return {
-        "Authorization": f"Bearer {config.api_key}",
+        "Authorization": f"Bearer {reveal_secret(config.api_key)}",
         "Notion-Version": API_VERSION,
         "Content-Type": "application/json",
     }

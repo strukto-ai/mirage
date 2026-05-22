@@ -16,6 +16,7 @@ import asyncio
 
 import aiohttp
 
+from mirage.resource.secrets import reveal_secret
 from mirage.resource.telegram.config import TelegramConfig
 
 TELEGRAM_API = "https://api.telegram.org"
@@ -27,7 +28,7 @@ async def telegram_get(
     method: str,
     params: dict | None = None,
 ) -> dict:
-    url = f"{TELEGRAM_API}/bot{config.token}/{method}"
+    url = f"{TELEGRAM_API}/bot{reveal_secret(config.token)}/{method}"
     for attempt in range(MAX_RETRIES):
         async with aiohttp.ClientSession() as session:
             async with session.get(url, params=params) as resp:
@@ -53,7 +54,7 @@ async def telegram_post(
     method: str,
     body: dict | None = None,
 ) -> dict:
-    url = f"{TELEGRAM_API}/bot{config.token}/{method}"
+    url = f"{TELEGRAM_API}/bot{reveal_secret(config.token)}/{method}"
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=body or {}) as resp:
             if resp.status == 429:

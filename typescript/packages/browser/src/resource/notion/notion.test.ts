@@ -62,8 +62,8 @@ describe('NotionResource (browser)', () => {
     const r = new NotionResource({ authProvider: makeAuthProvider() })
     const state = await r.getState()
     expect(state.type).toBe(ResourceName.NOTION)
-    expect(state.needsOverride).toBe(true)
-    expect(state.redactedFields).toEqual(['authProvider'])
+    expect(state).not.toHaveProperty('needsOverride')
+    expect(state).not.toHaveProperty('redactedFields')
     expect(state.config).toEqual({ authProvider: '<REDACTED>' })
   })
 

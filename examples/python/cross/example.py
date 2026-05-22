@@ -128,7 +128,8 @@ async def main():
     print(f"  tar:      {SNAPSHOT_TAR} "
           f"({os.path.getsize(SNAPSHOT_TAR)} bytes)")
     print(f"  expected: {EXPECTED_JSON}")
-    print("\nNow run: uv run python examples/cross/load_check.py")
+    print("\nNow run: ./python/.venv/bin/python "
+          "examples/python/cross/load_check.py")
 
 
 if __name__ == "__main__":

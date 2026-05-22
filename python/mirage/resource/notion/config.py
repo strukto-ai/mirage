@@ -12,9 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 
 
 class NotionConfig(BaseModel):
-    api_key: str
+    api_key: SecretStr
     base_url: str = "https://api.notion.com/v1"

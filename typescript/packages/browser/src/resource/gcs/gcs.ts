@@ -19,8 +19,6 @@ import { GCS_BROWSER_PROMPT } from './prompt.ts'
 
 export interface GCSResourceState {
   type: string
-  needsOverride: boolean
-  redactedFields: readonly string[]
   config: GCSConfigRedacted
 }
 
@@ -66,8 +64,6 @@ export class GCSResource extends S3Resource {
   override getState(): Promise<GCSResourceState> {
     return Promise.resolve({
       type: this.kind,
-      needsOverride: true,
-      redactedFields: ['presignedUrlProvider'],
       config: redactGcsConfig(this.gcsConfig),
     })
   }

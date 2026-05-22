@@ -17,13 +17,14 @@ import asyncio
 import aiohttp
 
 from mirage.resource.discord.config import DiscordConfig
+from mirage.resource.secrets import reveal_secret
 
 DISCORD_API = "https://discord.com/api/v10"
 MAX_RETRIES = 3
 
 
 def discord_headers(config: DiscordConfig) -> dict[str, str]:
-    return {"Authorization": f"Bot {config.token}"}
+    return {"Authorization": f"Bot {reveal_secret(config.token)}"}
 
 
 async def discord_get(

@@ -33,8 +33,7 @@ def test_ram_get_state_shape():
     p._store.dirs.add("/sub")
     state = p.get_state()
     assert state["type"] == "ram"
-    assert state["needs_override"] is False
-    assert state["redacted_fields"] == []
+    assert "redacted_fields" not in state
     assert state["files"] == {"/a.txt": b"hello"}
     assert "/sub" in state["dirs"]
 
@@ -64,8 +63,7 @@ def test_disk_get_state_walks_tree(tmp_path):
     p = DiskResource(root=str(root))
     state = p.get_state()
     assert state["type"] == "disk"
-    assert state["needs_override"] is False
-    assert state["redacted_fields"] == []
+    assert "redacted_fields" not in state
     assert state["files"] == {"a.txt": b"hello", "sub/b.txt": b"world"}
 
 
@@ -103,8 +101,8 @@ def test_redis_round_trip():
 
     state = src.get_state()
     assert state["type"] == "redis"
-    assert state["needs_override"] is True
-    assert state["redacted_fields"] == ["url"]
+    assert state["config"]["url"] == "<REDACTED>"
+    assert state["config"]["key_prefix"] == src_prefix
     assert state["files"] == {"/a.txt": b"hello", "/sub/b.txt": b"world"}
     assert "/sub" in state["dirs"]
 
@@ -136,12 +134,10 @@ def test_s3_get_state_redacts_creds():
     p = S3Resource(cfg)
     state = p.get_state()
     assert state["type"] == "s3"
-    assert state["needs_override"] is True
     assert state["config"]["bucket"] == "my-bucket"
     assert state["config"]["aws_access_key_id"] == "<REDACTED>"
     assert state["config"]["aws_secret_access_key"] == "<REDACTED>"
-    assert "aws_access_key_id" in state["redacted_fields"]
-    assert "aws_secret_access_key" in state["redacted_fields"]
+    assert "redacted_fields" not in state
 
 
 def test_s3_no_real_creds_in_state():
@@ -157,6 +153,14 @@ def test_s3_no_real_creds_in_state():
     assert secret not in blob
     assert "AKIA-OBVIOUS" not in blob
     assert "<REDACTED>" in blob
+
+
+def test_s3_get_state_without_inline_creds_has_no_redactions():
+    cfg = S3Config(bucket="b", region="us-east-1", aws_profile="dev")
+    state = S3Resource(cfg).get_state()
+    assert "<REDACTED>" not in repr(state)
+    assert "redacted_fields" not in state
+    assert state["config"]["aws_profile"] == "dev"
 
 
 def test_s3_load_state_is_noop():
@@ -263,7 +267,7 @@ REDACTION_CASES = [
 def test_resource_get_state_redacts(mod, cls, cfg_cls, kwargs, leaks):
     p = _build(mod, cls, cfg_cls, **kwargs)
     state = p.get_state()
-    assert state["needs_override"] is True
+    assert "redacted_fields" not in state
     blob = repr(state)
     for leaked in leaks:
         assert leaked not in blob, (f"{cls}: leaked {leaked!r} in state")
@@ -280,7 +284,8 @@ def test_github_resource_get_state_redacts(monkeypatch):
     cfg = GitHubConfig(token="GH-TOKEN-LEAK")
     p = GitHubResource(cfg, owner="o", repo="r", ref="main")
     state = p.get_state()
-    assert state["needs_override"] is True
+    assert state["config"]["token"] == "<REDACTED>"
+    assert "redacted_fields" not in state
     blob = repr(state)
     assert "GH-TOKEN-LEAK" not in blob
     assert "<REDACTED>" in blob
@@ -294,8 +299,8 @@ def test_ssh_no_redaction_no_override():
     cfg = SSHConfig(host="example.com", username="me")
     p = SSHResource(cfg)
     state = p.get_state()
-    assert state["needs_override"] is False
-    assert state["redacted_fields"] == []
+    assert "redacted_fields" not in state
+    assert "<REDACTED>" not in repr(state)
     # Plain config preserved
     assert state["config"]["host"] == "example.com"
     assert state["config"]["username"] == "me"

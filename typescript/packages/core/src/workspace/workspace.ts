@@ -27,6 +27,7 @@ import { type OpKwargs, OpsRegistry } from '../ops/registry.ts'
 import { assertMountAllowed, runWithSession } from '../runtime/session_context.ts'
 import type { Resource } from '../resource/base.ts'
 import { RAMResource, type RAMResourceState } from '../resource/ram/ram.ts'
+import { resourceStateRequiresOverride } from '../resource/secrets.ts'
 import { GENERAL_COMMANDS, HISTORY_COMMANDS } from '../commands/builtin/general/index.ts'
 import { applyBarrier, BarrierPolicy } from '../shell/barrier.ts'
 import { JobTable } from '../shell/job_table.ts'
@@ -43,10 +44,10 @@ import {
   type FingerprintEntrySnapshot,
   type MountSnapshot,
   type ResourceState,
-  SNAPSHOT_FORMAT_VERSION,
   type WorkspaceStateDict,
 } from '../snapshot/state.ts'
 import { captureFingerprints, checkDrift, liveOnlyMountPrefixes } from './snapshot/drift.ts'
+import { FORMAT_VERSION } from './snapshot/utils.ts'
 import { DEFAULT_AGENT_ID, DriftPolicy, FileType, MountMode, type PathSpec } from '../types.ts'
 import type { TSNodeLike } from './expand/variable.ts'
 import type { ExecuteFn } from './expand/node.ts'
@@ -914,7 +915,7 @@ export class Workspace {
     )
     const liveOnly = liveOnlyMountPrefixes(this.registry)
     return {
-      version: SNAPSHOT_FORMAT_VERSION,
+      version: FORMAT_VERSION,
       mounts: mountSnapshots,
       cache: { limit: this.cache.cacheLimit, entries: cacheEntries },
       history: historyRecords,
@@ -925,7 +926,7 @@ export class Workspace {
 
   async restore(state: WorkspaceStateDict): Promise<void> {
     for (const m of state.mounts) {
-      if (m.resourceState.needsOverride === true) continue
+      if (resourceStateRequiresOverride(m.resourceState)) continue
       const mount = this.registry.mountFor(m.prefix)
       if (mount === null) continue
       const resource = mount.resource as unknown as {
@@ -979,11 +980,11 @@ export class Workspace {
     const resources: Record<string, Resource> = {}
     const needsRestore: MountSnapshot[] = []
     for (const m of state.mounts) {
-      if (m.resourceState.needsOverride === true) {
+      if (resourceStateRequiresOverride(m.resourceState)) {
         const override = overrides[m.prefix]
         if (override === undefined) {
           throw new Error(
-            `Workspace.fromState: resource for mount '${m.prefix}' has needsOverride=true; pass it via overrides['${m.prefix}']`,
+            `Workspace.fromState: resource for mount '${m.prefix}' has redacted secrets; pass it via overrides['${m.prefix}']`,
           )
         }
         resources[m.prefix] = override
@@ -1013,7 +1014,7 @@ export class Workspace {
 
   async copy(options: WorkspaceOptions = {}): Promise<this> {
     // Mirrors Python's Workspace.copy(): remote-backed resources (Redis, S3,
-    // GDrive — marked needsOverride) are reused; local resources (RAM, Disk)
+    // GDrive — with redacted config) are reused; local resources (RAM, Disk)
     // are reconstructed from snapshot state.
     const state = await this.toStateDict()
     const bytes = encodeSnapshot(state)
@@ -1028,7 +1029,7 @@ export class Workspace {
     const overrides: Record<string, Resource> = {}
     for (const mount of this.registry.allMounts()) {
       for (const snap of cloned.mounts) {
-        if (snap.prefix === mount.prefix && snap.resourceState.needsOverride === true) {
+        if (snap.prefix === mount.prefix && resourceStateRequiresOverride(snap.resourceState)) {
           overrides[mount.prefix] = mount.resource
         }
       }

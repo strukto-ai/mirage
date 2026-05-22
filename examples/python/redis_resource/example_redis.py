@@ -193,9 +193,9 @@ async def main() -> None:
     print(f"    read_ops       = {meta_cost.read_ops}")
 
     # ── persistence: save / load / copy / deepcopy ──────────────────
-    # Redis has needs_override=True — saved state contains the full
-    # key+value dump but the connection URL is redacted; caller must
-    # supply a fresh RedisResource (often pointed at a different
+    # Redis has redacted connection config: saved state contains the full
+    # key+value dump, but caller must supply a fresh RedisResource (often
+    # pointed at a different
     # Redis instance / different key prefix) at load time.
     print("\n=== PERSISTENCE ===\n")
     with tempfile.NamedTemporaryFile(suffix=".tar", delete=False) as f:

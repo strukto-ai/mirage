@@ -95,21 +95,7 @@ class S3Resource(BaseResource):
             return None
 
     def get_state(self) -> dict:
-        redacted = [
-            "aws_access_key_id",
-            "aws_secret_access_key",
-            "aws_session_token",
-        ]
-        cfg = self.config.model_dump()
-        for f in redacted:
-            if cfg.get(f) is not None:
-                cfg[f] = "<REDACTED>"
-        return {
-            "type": self.name,
-            "needs_override": True,
-            "redacted_fields": redacted,
-            "config": cfg,
-        }
+        return self.config_state(self.config)
 
     def load_state(self, state: dict) -> None:
         # No-op: S3Resource holds no local content. Reconstruction

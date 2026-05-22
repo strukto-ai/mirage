@@ -54,8 +54,8 @@ describe('TrelloResource (browser)', () => {
     const r = new TrelloResource({ apiKey: 'k', apiToken: 't', workspaceId: 'w1' })
     const state = await r.getState()
     expect(state.type).toBe(ResourceName.TRELLO)
-    expect(state.needsOverride).toBe(true)
-    expect(state.redactedFields).toEqual(['apiKey', 'apiToken'])
+    expect(state).not.toHaveProperty('needsOverride')
+    expect(state).not.toHaveProperty('redactedFields')
     expect(state.config).toEqual({
       apiKey: '<REDACTED>',
       apiToken: '<REDACTED>',

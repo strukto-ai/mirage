@@ -34,8 +34,6 @@ import { redactGitHubCIConfig, type GitHubCIConfig, type GitHubCIConfigRedacted 
 
 export interface GitHubCIResourceState {
   type: string
-  needsOverride: boolean
-  redactedFields: readonly string[]
   config: GitHubCIConfigRedacted
 }
 
@@ -115,8 +113,6 @@ export class GitHubCIResource extends BaseResource implements Resource {
   getState(): Promise<GitHubCIResourceState> {
     return Promise.resolve({
       type: this.kind,
-      needsOverride: true,
-      redactedFields: ['token'],
       config: redactGitHubCIConfig(this.config),
     })
   }

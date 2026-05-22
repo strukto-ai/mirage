@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields } from '@struktoai/mirage-core'
+import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
 
 export interface DiscordConfig {
   token: string
@@ -22,8 +22,12 @@ export interface DiscordConfigRedacted {
   token: '<REDACTED>'
 }
 
-export function redactDiscordConfig(_config: DiscordConfig): DiscordConfigRedacted {
-  return { token: '<REDACTED>' }
+export const DiscordConfigSchema = z.object({
+  token: secretStr(),
+})
+
+export function redactDiscordConfig(config: DiscordConfig): DiscordConfigRedacted {
+  return redactConfigWithSchema(DiscordConfigSchema, config) as unknown as DiscordConfigRedacted
 }
 
 export function normalizeDiscordConfig(input: Record<string, unknown>): DiscordConfig {

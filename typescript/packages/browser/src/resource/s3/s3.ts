@@ -55,8 +55,6 @@ export const S3_BROWSER_PROMPT = `{prefix}
 
 export interface S3ResourceState {
   type: string
-  needsOverride: boolean
-  redactedFields: readonly string[]
   config: S3ConfigRedacted
 }
 
@@ -200,8 +198,6 @@ export class S3Resource implements Resource {
   getState(): Promise<S3ResourceState> {
     return Promise.resolve({
       type: this.kind,
-      needsOverride: true,
-      redactedFields: ['presignedUrlProvider'],
       config: redactConfig(this.config),
     })
   }

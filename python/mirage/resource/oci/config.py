@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, SecretStr
 
 from mirage.resource.s3 import S3Config
 
@@ -24,8 +24,8 @@ class OCIConfig(BaseModel):
     namespace: str
     region: str
     endpoint_url: str | None = None
-    access_key_id: str
-    secret_access_key: str
+    access_key_id: SecretStr
+    secret_access_key: SecretStr
     timeout: int = 30
     proxy: str | None = None
 

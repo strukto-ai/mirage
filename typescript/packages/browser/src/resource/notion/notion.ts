@@ -37,8 +37,6 @@ import { redactNotionConfig, type NotionConfig, type NotionConfigRedacted } from
 
 export interface NotionResourceState {
   type: string
-  needsOverride: boolean
-  redactedFields: readonly string[]
   config: NotionConfigRedacted
 }
 
@@ -114,8 +112,6 @@ export class NotionResource implements Resource {
   getState(): Promise<NotionResourceState> {
     return Promise.resolve({
       type: this.kind,
-      needsOverride: true,
-      redactedFields: ['authProvider'],
       config: redactNotionConfig(this.config),
     })
   }

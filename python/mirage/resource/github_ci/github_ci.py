@@ -46,17 +46,7 @@ class GitHubCIResource(BaseResource):
         return lookup.entry.remote_time if lookup.entry else None
 
     def get_state(self) -> dict:
-        redacted = ['token']
-        cfg = self.config.model_dump()
-        for f in redacted:
-            if cfg.get(f) is not None:
-                cfg[f] = "<REDACTED>"
-        return {
-            "type": self.name,
-            "needs_override": True,
-            "redacted_fields": redacted,
-            "config": cfg,
-        }
+        return self.config_state(self.config)
 
     def load_state(self, state: dict) -> None:
         pass

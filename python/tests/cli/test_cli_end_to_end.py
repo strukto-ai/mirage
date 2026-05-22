@@ -149,7 +149,7 @@ def test_save_then_load_round_trip(daemon, tmp_path):
     assert tar_path.exists()
 
     loaded = _run_cli(daemon["env"], "workspace", "load", str(tar_path),
-                      "--id", "loaded-ws")
+                      str(cfg), "--id", "loaded-ws")
     assert loaded["id"] == "loaded-ws"
 
     result = _run_cli(daemon["env"], "execute", "--workspace_id", "loaded-ws",
@@ -157,6 +157,31 @@ def test_save_then_load_round_trip(daemon, tmp_path):
     assert "persisted" in result["stdout"]
     _run_cli(daemon["env"], "workspace", "delete", "save-test")
     _run_cli(daemon["env"], "workspace", "delete", "loaded-ws")
+
+
+def test_workspace_clone_round_trip(daemon, tmp_path):
+    cfg = _write_config(tmp_path)
+    _run_cli(daemon["env"], "workspace", "create", str(cfg), "--id",
+             "clone-src")
+    _run_cli(daemon["env"], "execute", "--workspace_id", "clone-src",
+             "--command", "echo source > /report.txt")
+
+    cloned = _run_cli(daemon["env"], "workspace", "clone", "clone-src", "--id",
+                      "clone-dst")
+    assert cloned["id"] == "clone-dst"
+
+    result = _run_cli(daemon["env"], "execute", "--workspace_id", "clone-dst",
+                      "--command", "cat /report.txt")
+    assert "source" in result["stdout"]
+
+    _run_cli(daemon["env"], "execute", "--workspace_id", "clone-dst",
+             "--command", "echo clone > /report.txt")
+    original = _run_cli(daemon["env"], "execute", "--workspace_id",
+                        "clone-src", "--command", "cat /report.txt")
+    assert "source" in original["stdout"]
+
+    _run_cli(daemon["env"], "workspace", "delete", "clone-src")
+    _run_cli(daemon["env"], "workspace", "delete", "clone-dst")
 
 
 def test_workspace_get_verbose_includes_internals(daemon, tmp_path):

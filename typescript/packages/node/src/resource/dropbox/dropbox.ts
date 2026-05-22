@@ -34,8 +34,6 @@ import { redactDropboxConfig, type DropboxConfig, type DropboxConfigRedacted } f
 
 export interface DropboxResourceState {
   type: string
-  needsOverride: boolean
-  redactedFields: readonly string[]
   config: DropboxConfigRedacted
 }
 
@@ -113,8 +111,6 @@ export class DropboxResource extends BaseResource implements Resource {
   getState(): Promise<DropboxResourceState> {
     return Promise.resolve({
       type: this.kind,
-      needsOverride: true,
-      redactedFields: ['clientSecret', 'refreshToken'],
       config: redactDropboxConfig(this.config),
     })
   }

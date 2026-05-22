@@ -50,8 +50,6 @@ import { redactConfig, type S3Config, type S3ConfigRedacted } from './config.ts'
 
 export interface S3ResourceState {
   type: string
-  needsOverride: boolean
-  redactedFields: readonly string[]
   config: S3ConfigRedacted
 }
 
@@ -221,8 +219,6 @@ export class S3Resource extends BaseResource implements Resource {
   getState(): Promise<S3ResourceState> {
     return Promise.resolve({
       type: this.kind,
-      needsOverride: true,
-      redactedFields: ['accessKeyId', 'secretAccessKey', 'sessionToken'],
       config: redactConfig(this.config),
     })
   }

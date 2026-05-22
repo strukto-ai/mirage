@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, SecretStr
 
 from mirage.resource.s3 import S3Config
 
@@ -23,8 +23,8 @@ class GCSConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     bucket: str
-    access_key_id: str
-    secret_access_key: str
+    access_key_id: SecretStr
+    secret_access_key: SecretStr
     endpoint_url: str = GCS_ENDPOINT
     region: str = "auto"
     timeout: int = 30

@@ -16,6 +16,7 @@ import type { CacheEntry } from '../../cache/file/entry.ts'
 import type { RAMFileCacheStore } from '../../cache/file/ram.ts'
 import type { Resource } from '../../resource/base.ts'
 import type { RAMResourceState } from '../../resource/ram/ram.ts'
+import { resourceStateRequiresOverride } from '../../resource/secrets.ts'
 import { ConsistencyPolicy, ResourceName, type MountMode } from '../../types.ts'
 import type { MountArgs } from './config.ts'
 import { CacheKey, MountKey, ResourceStateKey, StateKey } from './keys.ts'
@@ -109,7 +110,7 @@ export function buildMountArgs(
   for (const m of mounts) {
     const resState = (m[MountKey.RESOURCE_STATE] as AnyDict | undefined) ?? {}
     if (
-      resState[ResourceStateKey.NEEDS_OVERRIDE] === true &&
+      resourceStateRequiresOverride(resState) &&
       !(normMountPrefix(m[MountKey.PREFIX] as string) in overrides)
     ) {
       missing.push(m[MountKey.PREFIX] as string)

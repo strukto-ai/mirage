@@ -301,6 +301,9 @@ importers:
       web-tree-sitter:
         specifier: ^0.26.8
         version: 0.26.8
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
     devDependencies:
       hyparquet-writer:
         specifier: ^0.13.0

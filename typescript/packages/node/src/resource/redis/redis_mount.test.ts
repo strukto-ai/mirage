@@ -104,8 +104,9 @@ describe.skipIf(skip)('RedisResource as mount', () => {
     const state = await resource.getState()
     expect(Object.keys(state.files).sort()).toEqual(['/one.txt', '/sub/nested.txt'])
     expect(state.dirs).toContain('/sub')
-    expect(state.needsOverride).toBe(true)
-    expect(state.redactedFields).toEqual(['url'])
+    expect(state).not.toHaveProperty('needsOverride')
+    expect(state).not.toHaveProperty('redactedFields')
+    expect(state.config).toEqual({ url: '<REDACTED>', keyPrefix: resource.keyPrefix })
 
     await resource.store.clear()
     await resource.store.addDir('/')

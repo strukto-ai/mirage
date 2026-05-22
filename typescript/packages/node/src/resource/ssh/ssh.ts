@@ -48,8 +48,6 @@ import { SSH_PROMPT } from './prompt.ts'
 
 export interface SSHResourceState {
   type: string
-  needsOverride: boolean
-  redactedFields: readonly string[]
   config: SSHConfigRedacted
 }
 
@@ -201,8 +199,6 @@ export class SSHResource extends BaseResource implements Resource {
   async getState(): Promise<SSHResourceState> {
     return {
       type: this.kind,
-      needsOverride: false,
-      redactedFields: ['password', 'passphrase'],
       config: redactSshConfig(this.config),
     }
   }

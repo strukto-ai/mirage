@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields } from '@struktoai/mirage-core'
+import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
 
 export interface SlackConfig {
   token: string
@@ -24,10 +24,13 @@ export interface SlackConfigRedacted {
   searchToken?: '<REDACTED>'
 }
 
+export const SlackConfigSchema = z.object({
+  token: secretStr(),
+  searchToken: secretStr().optional(),
+})
+
 export function redactSlackConfig(config: SlackConfig): SlackConfigRedacted {
-  const out: SlackConfigRedacted = { token: '<REDACTED>' }
-  if (config.searchToken !== undefined) out.searchToken = '<REDACTED>'
-  return out
+  return redactConfigWithSchema(SlackConfigSchema, config) as unknown as SlackConfigRedacted
 }
 
 export function normalizeSlackConfig(input: Record<string, unknown>): SlackConfig {

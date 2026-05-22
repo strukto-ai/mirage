@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields } from '@struktoai/mirage-core'
+import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
 
 export interface GSlidesConfig {
   clientId: string
@@ -27,12 +27,14 @@ export interface GSlidesConfigRedacted {
   refreshToken: '<REDACTED>'
 }
 
+export const GSlidesConfigSchema = z.object({
+  clientId: z.string(),
+  clientSecret: secretStr().optional(),
+  refreshToken: secretStr(),
+})
+
 export function redactGSlidesConfig(config: GSlidesConfig): GSlidesConfigRedacted {
-  return {
-    clientId: config.clientId,
-    ...(config.clientSecret !== undefined ? { clientSecret: '<REDACTED>' as const } : {}),
-    refreshToken: '<REDACTED>',
-  }
+  return redactConfigWithSchema(GSlidesConfigSchema, config) as unknown as GSlidesConfigRedacted
 }
 
 export function normalizeGSlidesConfig(input: Record<string, unknown>): GSlidesConfig {

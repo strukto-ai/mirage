@@ -12,8 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 
 
 class TelegramConfig(BaseModel):
-    token: str
+    token: SecretStr

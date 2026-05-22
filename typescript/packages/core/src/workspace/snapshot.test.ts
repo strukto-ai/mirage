@@ -80,7 +80,7 @@ describe('Workspace.toStateDict / restore', () => {
     await loaded.close()
   })
 
-  it('restores cache entries even when every mount is needsOverride', async () => {
+  it('restores cache entries even when every mount has redacted config', async () => {
     const ram = new RAMResource()
     ;(ram as unknown as { isRemote: boolean }).isRemote = true
     const ops = new OpsRegistry()
@@ -90,7 +90,9 @@ describe('Workspace.toStateDict / restore', () => {
     await ws.execute('cat /data/x.txt > /dev/null')
     const state = await ws.toStateDict()
     expect(state.cache.entries.length).toBeGreaterThan(0)
-    for (const m of state.mounts) m.resourceState.needsOverride = true
+    for (const m of state.mounts) {
+      Object.assign(m.resourceState, { config: { token: '<REDACTED>' } })
+    }
 
     const overrides: Record<string, RAMResource> = {}
     for (const m of state.mounts) overrides[m.prefix] = new RAMResource()
@@ -144,7 +146,7 @@ describe('Workspace.snapshot / Workspace.load', () => {
     const path = join(tempDir, 'bad.json')
     await ws.snapshot(path)
     const { readFileSync: rfs, writeFileSync } = await import('node:fs')
-    const content = rfs(path, 'utf-8').replace('"version": 1', '"version": 999')
+    const content = rfs(path, 'utf-8').replace('"version": 2', '"version": 999')
     writeFileSync(path, content)
     await expect(
       Workspace.load(path, { mode: MountMode.WRITE, ops: new OpsRegistry(), shellParser: parser }),

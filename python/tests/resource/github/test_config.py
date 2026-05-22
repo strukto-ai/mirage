@@ -17,6 +17,7 @@ from pydantic import ValidationError
 
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.tree_entry import TreeEntry
+from mirage.resource.secrets import reveal_secret
 
 
 def test_github_config_requires_token():
@@ -26,7 +27,7 @@ def test_github_config_requires_token():
 
 def test_github_config_with_token():
     cfg = GitHubConfig(token="ghp_abc123")
-    assert cfg.token == "ghp_abc123"
+    assert reveal_secret(cfg.token) == "ghp_abc123"
 
 
 def test_tree_entry_fields():

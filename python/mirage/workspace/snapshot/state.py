@@ -16,6 +16,7 @@ import importlib
 import importlib.metadata
 import tempfile
 
+from mirage.resource.secrets import has_redacted_secret
 from mirage.shell.job_table import Job, JobStatus
 from mirage.types import (CacheKey, ConsistencyPolicy, JobKey, MountKey,
                           MountMode, NodeKey, RecordKey, ResourceName,
@@ -96,11 +97,12 @@ def to_state_dict(ws) -> dict:
 def build_mount_args(state: dict, resources: dict | None = None) -> MountArgs:
     """Translate a state dict into Workspace constructor inputs.
 
-    Validates that every needs_override mount has a resource override.
+    Validates that every mount with redacted secrets has a resource
+    override.
     Does NOT construct a Workspace — that's the caller's job.
 
     Raises:
-        ValueError: if any needs_override mount lacks an override, or
+        ValueError: if any redacted mount lacks an override, or
             if the snapshot is from an unsupported format version.
     """
     saved_version = state.get(StateKey.VERSION)
@@ -113,7 +115,7 @@ def build_mount_args(state: dict, resources: dict | None = None) -> MountArgs:
 
     missing = [
         m[MountKey.PREFIX] for m in state[StateKey.MOUNTS]
-        if m[MountKey.RESOURCE_STATE].get(ResourceStateKey.NEEDS_OVERRIDE)
+        if requires_resource_override(m)
         and norm_mount_prefix(m[MountKey.PREFIX]) not in overrides
     ]
     if missing:
@@ -298,9 +300,7 @@ def _job_from_dict(d: dict):
 
 
 def _construct_resource(mount_state: dict):
-    cls_path = mount_state[MountKey.RESOURCE_CLASS]
-    mod_name, cls_name = cls_path.rsplit(".", 1)
-    cls = getattr(importlib.import_module(mod_name), cls_name)
+    cls = _resource_class_for(mount_state)
     resource_state = mount_state[MountKey.RESOURCE_STATE]
     ptype = resource_state.get(ResourceStateKey.TYPE, "")
 
@@ -322,11 +322,23 @@ def _construct_resource(mount_state: dict):
     return cls()
 
 
+def requires_resource_override(mount_state: dict) -> bool:
+    resource_state = mount_state[MountKey.RESOURCE_STATE]
+    config = resource_state.get(ResourceStateKey.CONFIG)
+    config_cls = _config_class_for(_resource_class_for(mount_state))
+    return has_redacted_secret(config, config_cls)
+
+
+def _resource_class_for(mount_state: dict):
+    cls_path = mount_state[MountKey.RESOURCE_CLASS]
+    mod_name, cls_name = cls_path.rsplit(".", 1)
+    return getattr(importlib.import_module(mod_name), cls_name)
+
+
 def _config_class_for(resource_cls):
     mod = importlib.import_module(resource_cls.__module__)
     for name in dir(mod):
         obj = getattr(mod, name)
-        if (isinstance(obj, type) and name.endswith("Config")
-                and obj.__module__ == resource_cls.__module__):
+        if isinstance(obj, type) and name.endswith("Config"):
             return obj
     return None

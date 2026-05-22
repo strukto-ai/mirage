@@ -95,8 +95,6 @@ class DiskResource(BaseResource):
                 files[rel] = p.read_bytes()
         return {
             "type": self.name,
-            "needs_override": False,
-            "redacted_fields": [],
             "files": files,
         }
 

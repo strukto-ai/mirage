@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields } from '@struktoai/mirage-core'
+import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
 
 export interface GDriveConfig {
   clientId: string
@@ -27,12 +27,14 @@ export interface GDriveConfigRedacted {
   refreshToken: '<REDACTED>'
 }
 
+export const GDriveConfigSchema = z.object({
+  clientId: z.string(),
+  clientSecret: secretStr(),
+  refreshToken: secretStr(),
+})
+
 export function redactGDriveConfig(config: GDriveConfig): GDriveConfigRedacted {
-  return {
-    clientId: config.clientId,
-    clientSecret: '<REDACTED>',
-    refreshToken: '<REDACTED>',
-  }
+  return redactConfigWithSchema(GDriveConfigSchema, config) as unknown as GDriveConfigRedacted
 }
 
 export function normalizeGDriveConfig(input: Record<string, unknown>): GDriveConfig {

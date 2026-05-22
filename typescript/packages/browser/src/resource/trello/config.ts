@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
+
 export interface TrelloConfig {
   apiKey: string
   apiToken: string
@@ -28,10 +30,14 @@ export interface TrelloConfigRedacted {
   baseUrl?: string
 }
 
+export const TrelloConfigSchema = z.object({
+  apiKey: secretStr(),
+  apiToken: secretStr(),
+  workspaceId: z.string().optional(),
+  boardIds: z.array(z.string()).optional(),
+  baseUrl: z.string().optional(),
+})
+
 export function redactTrelloConfig(config: TrelloConfig): TrelloConfigRedacted {
-  const out: TrelloConfigRedacted = { apiKey: '<REDACTED>', apiToken: '<REDACTED>' }
-  if (config.workspaceId !== undefined) out.workspaceId = config.workspaceId
-  if (config.boardIds !== undefined) out.boardIds = config.boardIds
-  if (config.baseUrl !== undefined) out.baseUrl = config.baseUrl
-  return out
+  return redactConfigWithSchema(TrelloConfigSchema, config) as unknown as TrelloConfigRedacted
 }

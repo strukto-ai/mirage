@@ -48,8 +48,6 @@ class NodeDiscordTransport extends HttpDiscordTransport {
 
 export interface DiscordResourceState {
   type: string
-  needsOverride: boolean
-  redactedFields: readonly string[]
   config: DiscordConfigRedacted
 }
 
@@ -122,8 +120,6 @@ export class DiscordResource extends BaseResource implements Resource {
   getState(): Promise<DiscordResourceState> {
     return Promise.resolve({
       type: this.kind,
-      needsOverride: true,
-      redactedFields: ['token'],
       config: redactDiscordConfig(this.config),
     })
   }

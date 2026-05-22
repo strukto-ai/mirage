@@ -14,6 +14,7 @@
 
 import aiohttp
 
+from mirage.resource.secrets import reveal_secret
 from mirage.resource.slack.config import SlackConfig
 from mirage.utils.sanitize import path_safe_name
 
@@ -46,7 +47,7 @@ async def download_file(config: SlackConfig, url: str) -> bytes:
     Returns:
         bytes: raw file content.
     """
-    headers = {"Authorization": f"Bearer {config.token}"}
+    headers = {"Authorization": f"Bearer {reveal_secret(config.token)}"}
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers) as resp:
             resp.raise_for_status()

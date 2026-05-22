@@ -161,7 +161,7 @@ async def main():
     print("\n[get_state]")
     state = deep_backend.get_state()
     print(f"  config.key_prefix = {state['config'].get('key_prefix')!r}")
-    print(f"  redacted_fields  = {state['redacted_fields']}")
+    print(f"  access key        = {state['config']['aws_access_key_id']}")
 
     # ── root listing (tests stat on directory prefixes) ──
     print("\n=== ROOT LISTING ===\n")
@@ -628,8 +628,8 @@ async def main():
         print(f"  S3 read after rm: exit={r.exit_code} (expect non-zero)")
 
     # ── persistence: save / load / copy / deepcopy ──────────────────
-    # S3 has needs_override=True — creds are redacted at save time;
-    # caller must re-supply a fresh S3Resource via resources={...}.
+    # S3 with inline creds has redacted config at save time; caller must
+    # re-supply a fresh S3Resource via resources={...}.
     print("\n=== PERSISTENCE ===\n")
     with tempfile.NamedTemporaryFile(suffix=".tar", delete=False) as f:
         snap = f.name

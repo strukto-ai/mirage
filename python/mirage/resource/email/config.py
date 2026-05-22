@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 
 
 class EmailConfig(BaseModel):
@@ -21,6 +21,6 @@ class EmailConfig(BaseModel):
     smtp_host: str
     smtp_port: int = 587
     username: str
-    password: str
+    password: SecretStr
     use_ssl: bool = True
     max_messages: int = 200

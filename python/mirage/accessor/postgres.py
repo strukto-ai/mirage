@@ -16,6 +16,7 @@ import asyncpg
 
 from mirage.accessor.base import Accessor
 from mirage.resource.postgres.config import PostgresConfig
+from mirage.resource.secrets import reveal_secret
 
 
 class PostgresAccessor(Accessor):
@@ -27,7 +28,7 @@ class PostgresAccessor(Accessor):
     async def pool(self) -> asyncpg.Pool:
         if self._pool is None:
             self._pool = await asyncpg.create_pool(
-                self.config.dsn,
+                reveal_secret(self.config.dsn),
                 server_settings={"default_transaction_read_only": "on"},
                 min_size=1,
                 max_size=4,

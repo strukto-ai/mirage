@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { HttpSlackTransport, SlackApiError } from './_client.ts'
+import { HttpSlackTransport, NodeSlackTransport, SlackApiError } from './_client.ts'
 
 class TestTransport extends HttpSlackTransport {
   constructor(
@@ -28,7 +28,7 @@ class TestTransport extends HttpSlackTransport {
   protected baseUrl(): string {
     return this.base
   }
-  protected authHeaders(): Record<string, string> {
+  protected authHeaders(_endpoint?: string): Record<string, string> {
     return this.auth
   }
 }
@@ -146,5 +146,21 @@ describe('HttpSlackTransport', () => {
     expect(h.get('Authorization')).toBe('Bearer xyz')
     expect(h.get('X-User')).toBe('u1')
     expect(h.get('Content-Type')).toMatch(/application\/json/)
+  })
+
+  it('uses the configured search token only for search endpoints', async () => {
+    const observedHeaders: string[] = []
+    const fakeFetch: typeof fetch = (_url, init) => {
+      const h = new Headers(init?.headers)
+      observedHeaders.push(h.get('Authorization') ?? '')
+      return Promise.resolve(jsonResponse({ ok: true }))
+    }
+    const t = new NodeSlackTransport('main-token', 'search-token')
+    ;(t as unknown as { fetch: typeof fetch }).fetch = fakeFetch
+
+    await t.call('search.messages')
+    await t.call('conversations.list')
+
+    expect(observedHeaders).toEqual(['Bearer search-token', 'Bearer main-token'])
   })
 })

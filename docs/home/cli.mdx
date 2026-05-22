@@ -176,12 +176,11 @@ mirage workspace snapshot demo /tmp/demo.tar
 ### 10. Restore from snapshot
 
 Snapshots redact cloud creds at save time, so loading needs fresh
-creds via `--override`. The same workspace YAML is a valid override.
+creds via a config file. The same workspace YAML used for create works.
 
 ```bash
-mirage workspace load /tmp/demo.tar \
-  --id demo_loaded \
-  --override workspace.yaml
+mirage workspace load /tmp/demo.tar workspace.yaml \
+  --id demo_loaded
 
 mirage workspace get demo_loaded --verbose
 mirage execute --workspace_id demo_loaded \
@@ -189,12 +188,12 @@ mirage execute --workspace_id demo_loaded \
 ```
 
 <Note>
-  `--override` is required for any mount whose resource declares
-  `needs_override=True` (S3, GDrive, Slack, Discord, Redis, ...).
-  The snapshot stores `"<REDACTED>"` in place of secrets at save
-  time. Loading without `--override` 400s with the list of prefixes
-  that need fresh creds. Local resources (RAM, Disk) restore as-is
-  with no override needed.
+  A config file is required for any mount whose snapshot config contains
+  redacted secrets (S3 with inline keys, GDrive, Slack, Discord, Redis,
+  ...). The snapshot stores `"<REDACTED>"` in place of those secrets at
+  save time. Loading without the config 400s with the list of prefixes
+  that need fresh creds. Local resources (RAM, Disk) restore as-is with
+  no extra config needed.
 </Note>
 
 ### 11. Clean up
@@ -214,9 +213,9 @@ mirage workspace delete demo_loaded
 | `mirage workspace list` | Brief one-line summary per active workspace. |
 | `mirage workspace get ID [--verbose]` | Full detail (mounts, sessions, optionally cache / dirty / history internals). |
 | `mirage workspace delete ID` | Stop the workspace; daemon may exit on the idle timer. |
-| `mirage workspace clone ID [--id NAME] [--override FILE]` | Fresh local backings, shared remote resources; partial-config override swaps creds or buckets. |
+| `mirage workspace clone ID [--id NAME]` | Fresh local backings, shared remote resources. |
 | `mirage workspace snapshot ID PATH.tar` | Snapshot to a tar file. |
-| `mirage workspace load PATH.tar [--id NAME] [--override FILE]` | Restore from tar; override re-supplies redacted creds. |
+| `mirage workspace load PATH.tar [CONFIG] [--id NAME]` | Restore from tar; optional config re-supplies redacted creds. |
 | `mirage session create WS [--id NAME]` | Add a named session (own cwd + env). |
 | `mirage session list WS` | List sessions for a workspace. |
 | `mirage session delete WS SESSION` | Close a session. |

@@ -16,6 +16,7 @@ import pytest
 from pydantic import ValidationError
 
 from mirage.resource.gcs import GCSConfig, GCSResource
+from mirage.resource.secrets import reveal_secret
 
 
 def test_gcs_config_defaults():
@@ -58,8 +59,8 @@ def test_gcs_to_s3_config():
     )
     s3c = c.to_s3_config()
     assert s3c.bucket == "my-bucket"
-    assert s3c.aws_access_key_id == "GOOG123"
-    assert s3c.aws_secret_access_key == "secret"
+    assert reveal_secret(s3c.aws_access_key_id) == "GOOG123"
+    assert reveal_secret(s3c.aws_secret_access_key) == "secret"
     assert s3c.endpoint_url == "https://storage.googleapis.com"
     assert s3c.region == "auto"
 

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields } from '@struktoai/mirage-core'
+import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
 
 export interface SSHConfig {
   host: string
@@ -40,18 +40,21 @@ export interface SSHConfigRedacted {
   knownHosts?: string
 }
 
+export const SSHConfigSchema = z.object({
+  host: z.string(),
+  hostname: z.string().optional(),
+  port: z.number().optional(),
+  username: z.string().optional(),
+  password: secretStr().optional(),
+  identityFile: z.string().optional(),
+  passphrase: secretStr().optional(),
+  root: z.string().optional(),
+  timeout: z.number().optional(),
+  knownHosts: z.string().optional(),
+})
+
 export function redactSshConfig(config: SSHConfig): SSHConfigRedacted {
-  const out: SSHConfigRedacted = { host: config.host }
-  if (config.hostname !== undefined) out.hostname = config.hostname
-  if (config.port !== undefined) out.port = config.port
-  if (config.username !== undefined) out.username = config.username
-  if (config.password !== undefined) out.password = '<REDACTED>'
-  if (config.identityFile !== undefined) out.identityFile = config.identityFile
-  if (config.passphrase !== undefined) out.passphrase = '<REDACTED>'
-  if (config.root !== undefined) out.root = config.root
-  if (config.timeout !== undefined) out.timeout = config.timeout
-  if (config.knownHosts !== undefined) out.knownHosts = config.knownHosts
-  return out
+  return redactConfigWithSchema(SSHConfigSchema, config) as unknown as SSHConfigRedacted
 }
 
 export function normalizeSshConfig(input: Record<string, unknown>): SSHConfig {

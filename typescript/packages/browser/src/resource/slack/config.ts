@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { redactConfigWithSchema, secretSchema, z } from '@struktoai/mirage-core'
+
 export interface SlackConfig {
   proxyUrl: string
   getHeaders?: () => Promise<Record<string, string>> | Record<string, string>
@@ -22,8 +24,13 @@ export interface SlackConfigRedacted {
   getHeaders?: '<REDACTED>'
 }
 
+export const SlackConfigSchema = z.object({
+  proxyUrl: z.string(),
+  getHeaders: secretSchema(
+    z.custom<SlackConfig['getHeaders']>((value) => typeof value === 'function'),
+  ).optional(),
+})
+
 export function redactSlackConfig(config: SlackConfig): SlackConfigRedacted {
-  const out: SlackConfigRedacted = { proxyUrl: config.proxyUrl }
-  if (config.getHeaders !== undefined) out.getHeaders = '<REDACTED>'
-  return out
+  return redactConfigWithSchema(SlackConfigSchema, config) as unknown as SlackConfigRedacted
 }

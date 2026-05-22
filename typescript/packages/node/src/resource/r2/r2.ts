@@ -19,8 +19,6 @@ import { R2_PROMPT } from './prompt.ts'
 
 export interface R2ResourceState {
   type: string
-  needsOverride: boolean
-  redactedFields: readonly string[]
   config: R2ConfigRedacted
 }
 
@@ -66,8 +64,6 @@ export class R2Resource extends S3Resource {
   override getState(): Promise<R2ResourceState> {
     return Promise.resolve({
       type: this.kind,
-      needsOverride: true,
-      redactedFields: ['accessKeyId', 'secretAccessKey'],
       config: redactR2Config(this.r2Config),
     })
   }

@@ -12,10 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 
 
 class GoogleConfig(BaseModel):
     client_id: str
-    client_secret: str | None = None
-    refresh_token: str
+    client_secret: SecretStr | None = None
+    refresh_token: SecretStr

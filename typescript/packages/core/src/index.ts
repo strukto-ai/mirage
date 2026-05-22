@@ -34,6 +34,16 @@ export {
   liveOnlyMountPrefixes,
 } from './workspace/snapshot/drift.ts'
 export { BaseResource, type FindOptions, type Resource, throwUnsupported } from './resource/base.ts'
+export {
+  hasRedactedSecret,
+  REDACTED_SECRET,
+  redactConfigWithSchema,
+  resourceStateRequiresOverride,
+  secretSchema,
+  secretStr,
+  type SecretStr,
+} from './resource/secrets.ts'
+export { z } from 'zod'
 export { RAMResource } from './resource/ram/ram.ts'
 export { RAMStore } from './resource/ram/store.ts'
 export { DevResource } from './resource/dev/dev.ts'
@@ -448,6 +458,7 @@ export { S3Accessor, type S3ResourceLike } from './accessor/s3.ts'
 export {
   normalizeKeyPrefix,
   redactConfig as redactS3Config,
+  S3ConfigSchema,
   type S3BrowserOperation,
   type S3BrowserPresignedUrlProvider,
   type S3BrowserSignOptions,

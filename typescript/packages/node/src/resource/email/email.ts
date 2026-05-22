@@ -33,8 +33,6 @@ import { EMAIL_PROMPT } from './prompt.ts'
 
 export interface EmailResourceState {
   type: string
-  needsOverride: boolean
-  redactedFields: readonly string[]
   config: EmailConfigRedacted
 }
 
@@ -106,8 +104,6 @@ export class EmailResource extends BaseResource implements Resource {
   getState(): Promise<EmailResourceState> {
     return Promise.resolve({
       type: this.kind,
-      needsOverride: true,
-      redactedFields: ['password'],
       config: redactEmailConfig(this.config),
     })
   }

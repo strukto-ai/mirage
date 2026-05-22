@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields } from '@struktoai/mirage-core'
+import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
 
 export interface LinearConfig {
   apiKey: string
@@ -28,12 +28,15 @@ export interface LinearConfigRedacted {
   baseUrl?: string
 }
 
+export const LinearConfigSchema = z.object({
+  apiKey: secretStr(),
+  workspace: z.string().optional(),
+  teamIds: z.array(z.string()).optional(),
+  baseUrl: z.string().optional(),
+})
+
 export function redactLinearConfig(config: LinearConfig): LinearConfigRedacted {
-  const out: LinearConfigRedacted = { apiKey: '<REDACTED>' }
-  if (config.workspace !== undefined) out.workspace = config.workspace
-  if (config.teamIds !== undefined) out.teamIds = config.teamIds
-  if (config.baseUrl !== undefined) out.baseUrl = config.baseUrl
-  return out
+  return redactConfigWithSchema(LinearConfigSchema, config) as unknown as LinearConfigRedacted
 }
 
 export function normalizeLinearConfig(input: Record<string, unknown>): LinearConfig {

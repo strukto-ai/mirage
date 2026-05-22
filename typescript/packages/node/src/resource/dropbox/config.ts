@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields } from '@struktoai/mirage-core'
+import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
 
 export interface DropboxConfig {
   clientId: string
@@ -27,12 +27,14 @@ export interface DropboxConfigRedacted {
   refreshToken: '<REDACTED>'
 }
 
+export const DropboxConfigSchema = z.object({
+  clientId: z.string(),
+  clientSecret: secretStr(),
+  refreshToken: secretStr(),
+})
+
 export function redactDropboxConfig(config: DropboxConfig): DropboxConfigRedacted {
-  return {
-    clientId: config.clientId,
-    clientSecret: '<REDACTED>',
-    refreshToken: '<REDACTED>',
-  }
+  return redactConfigWithSchema(DropboxConfigSchema, config) as unknown as DropboxConfigRedacted
 }
 
 export function normalizeDropboxConfig(input: Record<string, unknown>): DropboxConfig {

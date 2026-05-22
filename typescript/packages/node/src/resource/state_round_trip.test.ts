@@ -32,8 +32,8 @@ describe('RAM state round-trip', () => {
     src.store.dirs.add('/sub')
     const state = src.getState()
     expect(state.type).toBe('ram')
-    expect(state.needsOverride).toBe(false)
-    expect(state.redactedFields).toEqual([])
+    expect(state).not.toHaveProperty('needsOverride')
+    expect(state).not.toHaveProperty('redactedFields')
     expect(state.files['/a.txt']).toBeInstanceOf(Uint8Array)
     expect(state.dirs).toContain('/sub')
   })
@@ -72,8 +72,8 @@ describe('Disk state round-trip', () => {
     const p = new DiskResource({ root: src })
     const state = await p.getState()
     expect(state.type).toBe('disk')
-    expect(state.needsOverride).toBe(false)
-    expect(state.redactedFields).toEqual([])
+    expect(state).not.toHaveProperty('needsOverride')
+    expect(state).not.toHaveProperty('redactedFields')
     expect(state.files['a.txt']).toBeInstanceOf(Uint8Array)
     expect(state.files['sub/b.txt']).toBeInstanceOf(Uint8Array)
   })
@@ -106,12 +106,11 @@ describe('S3 state redaction', () => {
     })
     const state = await p.getState()
     expect(state.type).toBe('s3')
-    expect(state.needsOverride).toBe(true)
     expect(state.config.bucket).toBe('my-bucket')
     expect(state.config.accessKeyId).toBe('<REDACTED>')
     expect(state.config.secretAccessKey).toBe('<REDACTED>')
-    expect(state.redactedFields).toContain('accessKeyId')
-    expect(state.redactedFields).toContain('secretAccessKey')
+    expect(state).not.toHaveProperty('needsOverride')
+    expect(state).not.toHaveProperty('redactedFields')
   })
 
   it('no real creds leak into state repr', async () => {
@@ -133,7 +132,7 @@ describe('S3 state redaction', () => {
 describe('S3-derived backends redact creds (GCS/OCI/R2)', () => {
   const REDACTION_CASES: {
     name: string
-    build: () => { getState(): Promise<{ needsOverride: boolean; config: unknown }> }
+    build: () => { getState(): Promise<{ config: unknown }> }
     leaks: string[]
   }[] = [
     {
@@ -175,7 +174,8 @@ describe('S3-derived backends redact creds (GCS/OCI/R2)', () => {
     it(`${c.name}: getState redacts creds and does not leak`, async () => {
       const p = c.build()
       const state = await p.getState()
-      expect(state.needsOverride).toBe(true)
+      expect(state).not.toHaveProperty('needsOverride')
+      expect(state).not.toHaveProperty('redactedFields')
       const blob = JSON.stringify(state)
       for (const leaked of c.leaks) {
         expect(blob.includes(leaked)).toBe(false)

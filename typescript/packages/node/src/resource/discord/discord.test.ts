@@ -65,8 +65,8 @@ describe('DiscordResource (node)', () => {
     const r = new DiscordResource({ token: 'bot-secret' })
     const state = await r.getState()
     expect(state.type).toBe(ResourceName.DISCORD)
-    expect(state.needsOverride).toBe(true)
-    expect(state.redactedFields).toEqual(['token'])
+    expect(state).not.toHaveProperty('needsOverride')
+    expect(state).not.toHaveProperty('redactedFields')
     expect(state.config).toEqual({ token: '<REDACTED>' })
   })
 

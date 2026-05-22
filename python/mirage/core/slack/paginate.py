@@ -24,7 +24,6 @@ async def cursor_pages(
     endpoint: str,
     base_params: dict,
     items_key: str,
-    token: str | None = None,
 ) -> AsyncIterator[list[dict]]:
     """Walk a cursor-paginated Slack endpoint, one page per round-trip.
 
@@ -34,8 +33,6 @@ async def cursor_pages(
         base_params (dict): per-request params; "cursor" is set here.
         items_key (str): top-level response key holding the page list
             (e.g. "channels", "members", "messages").
-        token (str | None): override token; falls back to config.token.
-
     Yields:
         list[dict]: items in each page. Generator returns when Slack
         signals last page (empty next_cursor).
@@ -45,7 +42,7 @@ async def cursor_pages(
         params = dict(base_params)
         if cursor:
             params["cursor"] = cursor
-        data = await slack_get(config, endpoint, params=params, token=token)
+        data = await slack_get(config, endpoint, params=params)
         yield data.get(items_key, []) or []
         cursor = data.get("response_metadata", {}).get("next_cursor") or None
         if cursor is None:
@@ -69,7 +66,6 @@ async def offset_pages(
     items_path: tuple[str, ...],
     start_page: int = 1,
     max_pages: int | None = None,
-    token: str | None = None,
 ) -> AsyncIterator[list[dict]]:
     """Walk a page-paginated Slack endpoint (search, files.list, ...).
 
@@ -84,8 +80,6 @@ async def offset_pages(
             ("messages", "matches").
         start_page (int): page number to start from (1-based).
         max_pages (int | None): cap on pages fetched; None = unbounded.
-        token (str | None): override token.
-
     Yields:
         list[dict]: items from each page.
     """
@@ -95,7 +89,7 @@ async def offset_pages(
     while True:
         params = dict(base_params)
         params["page"] = str(page)
-        data = await slack_get(config, endpoint, params=params, token=token)
+        data = await slack_get(config, endpoint, params=params)
         items = _get_nested(data, items_path) or []
         yield items
         fetched += 1

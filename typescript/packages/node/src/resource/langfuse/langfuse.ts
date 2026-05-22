@@ -34,8 +34,6 @@ import { redactLangfuseConfig, type LangfuseConfig, type LangfuseConfigRedacted 
 
 export interface LangfuseResourceState {
   type: string
-  needsOverride: boolean
-  redactedFields: readonly string[]
   config: LangfuseConfigRedacted
 }
 
@@ -125,8 +123,6 @@ export class LangfuseResource extends BaseResource implements Resource {
   getState(): Promise<LangfuseResourceState> {
     return Promise.resolve({
       type: this.kind,
-      needsOverride: true,
-      redactedFields: ['secretKey'],
       config: redactLangfuseConfig(this.config),
     })
   }

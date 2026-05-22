@@ -16,7 +16,7 @@ from typing import Any
 
 from mirage import Workspace
 from mirage.resource.registry import build_resource
-from mirage.workspace.snapshot import to_state_dict
+from mirage.workspace.snapshot import requires_resource_override, to_state_dict
 from mirage.workspace.snapshot.utils import norm_mount_prefix
 
 
@@ -37,19 +37,22 @@ def _build_override_resources(override: dict[str, Any] | None) -> dict:
     return out
 
 
-def _existing_needs_override_resources(ws: Workspace, skip: set[str]) -> dict:
+def _existing_redacted_resources(ws: Workspace, state: dict,
+                                 skip: set[str]) -> dict:
     auto_prefixes = {"/dev/"}
     if ws.observer is not None:
         auto_prefixes.add(norm_mount_prefix(ws.observer.prefix))
+    prefix_to_resource = {
+        m.prefix: m.resource
+        for m in ws._registry.mounts() if m.prefix not in auto_prefixes
+    }
     out: dict = {}
-    for m in ws._registry.mounts():
-        if m.prefix in auto_prefixes:
+    for m in state["mounts"]:
+        prefix = m["prefix"]
+        if norm_mount_prefix(prefix) in skip:
             continue
-        if m.prefix in skip:
-            continue
-        state = m.resource.get_state()
-        if state.get("needs_override"):
-            out[m.prefix] = m.resource
+        if requires_resource_override(m) and prefix in prefix_to_resource:
+            out[prefix] = prefix_to_resource[prefix]
     return out
 
 
@@ -61,9 +64,9 @@ async def clone_workspace_with_override(src_ws: Workspace,
     Behavior:
         * Local resources (RAM, Disk) are reconstructed fresh, so the
           clone's writes never touch the original's data.
-        * Remote resources (S3, Redis, GDrive, ...) that declare
-          ``needs_override=True`` are reused from the original by
-          default -- they share connection pools and bucket data.
+        * Remote resources (S3, Redis, GDrive, ...) that redact secrets
+          or connection material are reused from the original by default
+          -- they share connection pools and bucket data.
         * If ``override`` supplies a fresh resource for a prefix, that
           resource replaces the reused one -- e.g. point the clone at
           a different S3 bucket.
@@ -79,7 +82,8 @@ async def clone_workspace_with_override(src_ws: Workspace,
     """
     state = to_state_dict(src_ws)
     override_resources = _build_override_resources(override)
-    existing = _existing_needs_override_resources(src_ws,
-                                                  skip=set(override_resources))
+    existing = _existing_redacted_resources(src_ws,
+                                            state,
+                                            skip=set(override_resources))
     merged = {**existing, **override_resources}
     return Workspace._from_state(state, resources=merged)

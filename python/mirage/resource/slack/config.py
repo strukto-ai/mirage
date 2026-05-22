@@ -12,9 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 
 
 class SlackConfig(BaseModel):
-    token: str
-    search_token: str | None = None
+    token: SecretStr
+    search_token: SecretStr | None = None

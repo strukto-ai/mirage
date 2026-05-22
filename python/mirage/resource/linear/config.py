@@ -12,11 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 
 
 class LinearConfig(BaseModel):
-    api_key: str
+    api_key: SecretStr
     workspace: str | None = None
     team_ids: list[str] | None = None
     base_url: str = "https://api.linear.app/graphql"

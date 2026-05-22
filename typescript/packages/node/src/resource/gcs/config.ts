@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields } from '@struktoai/mirage-core'
+import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
 import type { S3Config } from '../s3/config.ts'
 
 export const GCS_ENDPOINT = 'https://storage.googleapis.com'
@@ -35,6 +35,15 @@ export interface GCSConfigRedacted {
   timeoutMs?: number
 }
 
+export const GCSConfigSchema = z.object({
+  bucket: z.string(),
+  accessKeyId: secretStr(),
+  secretAccessKey: secretStr(),
+  endpoint: z.string(),
+  region: z.string(),
+  timeoutMs: z.number().optional(),
+})
+
 export function gcsToS3Config(config: GCSConfig): S3Config {
   return {
     bucket: config.bucket,
@@ -47,14 +56,11 @@ export function gcsToS3Config(config: GCSConfig): S3Config {
 }
 
 export function redactGcsConfig(config: GCSConfig): GCSConfigRedacted {
-  return {
-    bucket: config.bucket,
-    accessKeyId: '<REDACTED>',
-    secretAccessKey: '<REDACTED>',
+  return redactConfigWithSchema(GCSConfigSchema, {
+    ...config,
     endpoint: config.endpoint ?? GCS_ENDPOINT,
     region: config.region ?? 'auto',
-    ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
-  }
+  }) as unknown as GCSConfigRedacted
 }
 
 export function normalizeGcsConfig(input: Record<string, unknown>): GCSConfig {

@@ -87,8 +87,6 @@ export const SessionKey = Object.freeze({
 
 export const ResourceStateKey = Object.freeze({
   TYPE: 'type',
-  NEEDS_OVERRIDE: 'needs_override',
-  REDACTED_FIELDS: 'redacted_fields',
   CONFIG: 'config',
   FILES: 'files',
   DIRS: 'dirs',

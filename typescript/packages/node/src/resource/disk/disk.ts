@@ -53,8 +53,6 @@ export interface DiskResourceOptions {
 
 export interface DiskResourceState {
   type: string
-  needsOverride: boolean
-  redactedFields: string[]
   files: Record<string, Uint8Array>
 }
 
@@ -222,8 +220,6 @@ export class DiskResource extends BaseResource implements Resource {
     }
     return {
       type: this.kind,
-      needsOverride: false,
-      redactedFields: [],
       files,
     }
   }

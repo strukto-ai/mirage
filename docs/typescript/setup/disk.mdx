@@ -38,6 +38,6 @@ await ws.execute('cat /disk/note.txt')
 
 ## Snapshot behavior
 
-`DiskResource.toState()` captures the file tree as bytes. Loading a snapshot back doesn't re-create the directory; pass an override config with a fresh `root` if the original location changed.
+`DiskResource.toState()` captures the file tree as bytes. Loading a snapshot back doesn't re-create the directory; pass a config file with a fresh `root` if the original location changed.
 
 For behavior shared with Python (filesystem layout, supported shell commands), see the [Python Disk docs](/python/resource/disk).

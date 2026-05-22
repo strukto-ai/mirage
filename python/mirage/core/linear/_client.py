@@ -15,6 +15,7 @@
 import aiohttp
 
 from mirage.resource.linear.config import LinearConfig
+from mirage.resource.secrets import reveal_secret
 
 
 class LinearAPIError(RuntimeError):
@@ -33,7 +34,7 @@ class LinearAPIError(RuntimeError):
 
 def linear_headers(config: LinearConfig) -> dict[str, str]:
     return {
-        "Authorization": config.api_key,
+        "Authorization": reveal_secret(config.api_key),
         "Content-Type": "application/json",
     }
 

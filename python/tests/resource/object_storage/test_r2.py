@@ -17,6 +17,7 @@ from pydantic import ValidationError
 
 from mirage.resource.r2 import R2Config, R2Resource
 from mirage.resource.s3 import S3Config
+from mirage.resource.secrets import reveal_secret
 from mirage.types import ResourceName
 
 
@@ -48,8 +49,8 @@ def test_r2config_to_s3_config():
     assert s3_config.region == "auto"
     assert s3_config.endpoint_url == (
         "https://account-123.r2.cloudflarestorage.com")
-    assert s3_config.aws_access_key_id == "access-key"
-    assert s3_config.aws_secret_access_key == "secret-key"
+    assert reveal_secret(s3_config.aws_access_key_id) == "access-key"
+    assert reveal_secret(s3_config.aws_secret_access_key) == "secret-key"
     assert s3_config.proxy == "http://localhost:8080"
 
 

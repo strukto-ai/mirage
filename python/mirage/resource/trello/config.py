@@ -12,12 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 
 
 class TrelloConfig(BaseModel):
-    api_key: str
-    api_token: str
+    api_key: SecretStr
+    api_token: SecretStr
     workspace_id: str | None = None
     board_ids: list[str] | None = None
     base_url: str = "https://api.trello.com/1"

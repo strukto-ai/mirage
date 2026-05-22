@@ -101,8 +101,8 @@ class FakeRemoteResource implements Resource {
     )
   }
 
-  getState(): { type: string; needsOverride: boolean } {
-    return { type: this.kind, needsOverride: true }
+  getState(): { type: string; config: { token: string } } {
+    return { type: this.kind, config: { token: '<REDACTED>' } }
   }
 }
 

@@ -17,6 +17,7 @@ from email.message import EmailMessage
 import aiosmtplib
 
 from mirage.resource.email.config import EmailConfig
+from mirage.resource.secrets import reveal_secret
 
 
 async def _smtp_send(config: EmailConfig, msg: EmailMessage) -> None:
@@ -25,7 +26,7 @@ async def _smtp_send(config: EmailConfig, msg: EmailMessage) -> None:
         hostname=config.smtp_host,
         port=config.smtp_port,
         username=config.username,
-        password=config.password,
+        password=reveal_secret(config.password),
         start_tls=True,
     )
 

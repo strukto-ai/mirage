@@ -20,6 +20,7 @@ from mirage.core.google._client import refresh_access_token
 from mirage.core.google.config import GoogleConfig
 from mirage.resource.gdocs.config import GDocsConfig
 from mirage.resource.gdrive.config import GoogleDriveConfig
+from mirage.resource.secrets import reveal_secret
 
 
 def test_google_config_creation():
@@ -29,8 +30,8 @@ def test_google_config_creation():
         refresh_token="token",
     )
     assert config.client_id == "id"
-    assert config.client_secret == "secret"
-    assert config.refresh_token == "token"
+    assert reveal_secret(config.client_secret) == "secret"
+    assert reveal_secret(config.refresh_token) == "token"
 
 
 def test_google_config_omits_client_secret_for_pkce():
@@ -38,7 +39,7 @@ def test_google_config_omits_client_secret_for_pkce():
     config = GoogleConfig(client_id="id", refresh_token="token")
     assert config.client_id == "id"
     assert config.client_secret is None
-    assert config.refresh_token == "token"
+    assert reveal_secret(config.refresh_token) == "token"
 
 
 @pytest.mark.asyncio

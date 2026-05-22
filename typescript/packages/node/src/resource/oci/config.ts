@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields } from '@struktoai/mirage-core'
+import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
 import type { S3Config } from '../s3/config.ts'
 
 export interface OCIConfig {
@@ -35,6 +35,16 @@ export interface OCIConfigRedacted {
   timeoutMs?: number
 }
 
+export const OCIConfigSchema = z.object({
+  bucket: z.string(),
+  namespace: z.string(),
+  region: z.string(),
+  accessKeyId: secretStr(),
+  secretAccessKey: secretStr(),
+  endpoint: z.string(),
+  timeoutMs: z.number().optional(),
+})
+
 export function resolvedOciEndpoint(config: OCIConfig): string {
   if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint
   return `https://${config.namespace}.compat.objectstorage.${config.region}.oci.customer-oci.com`
@@ -53,15 +63,10 @@ export function ociToS3Config(config: OCIConfig): S3Config {
 }
 
 export function redactOciConfig(config: OCIConfig): OCIConfigRedacted {
-  return {
-    bucket: config.bucket,
-    namespace: config.namespace,
-    region: config.region,
-    accessKeyId: '<REDACTED>',
-    secretAccessKey: '<REDACTED>',
+  return redactConfigWithSchema(OCIConfigSchema, {
+    ...config,
     endpoint: resolvedOciEndpoint(config),
-    ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
-  }
+  }) as unknown as OCIConfigRedacted
 }
 
 export function normalizeOciConfig(input: Record<string, unknown>): OCIConfig {

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields } from '@struktoai/mirage-core'
+import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
 
 export interface LangfuseConfig {
   publicKey: string
@@ -32,18 +32,17 @@ export interface LangfuseConfigRedacted {
   defaultFromTimestamp?: string
 }
 
+export const LangfuseConfigSchema = z.object({
+  publicKey: z.string(),
+  secretKey: secretStr(),
+  host: z.string().optional(),
+  defaultTraceLimit: z.number().optional(),
+  defaultSearchLimit: z.number().optional(),
+  defaultFromTimestamp: z.string().optional(),
+})
+
 export function redactLangfuseConfig(config: LangfuseConfig): LangfuseConfigRedacted {
-  const out: LangfuseConfigRedacted = {
-    publicKey: config.publicKey,
-    secretKey: '<REDACTED>',
-  }
-  if (config.host !== undefined) out.host = config.host
-  if (config.defaultTraceLimit !== undefined) out.defaultTraceLimit = config.defaultTraceLimit
-  if (config.defaultSearchLimit !== undefined) out.defaultSearchLimit = config.defaultSearchLimit
-  if (config.defaultFromTimestamp !== undefined) {
-    out.defaultFromTimestamp = config.defaultFromTimestamp
-  }
-  return out
+  return redactConfigWithSchema(LangfuseConfigSchema, config) as unknown as LangfuseConfigRedacted
 }
 
 export function normalizeLangfuseConfig(input: Record<string, unknown>): LangfuseConfig {

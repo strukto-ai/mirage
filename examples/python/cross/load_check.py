@@ -93,7 +93,8 @@ def _first_diff(a, b):
 async def main():
     if not os.path.exists(EXPECTED_JSON):
         print(f"ERROR: {EXPECTED_JSON} not found.")
-        print("Run examples/cross/example.py first to create the snapshot.")
+        print("Run examples/python/cross/example.py first to create "
+              "the snapshot.")
         sys.exit(1)
 
     with open(EXPECTED_JSON) as f:

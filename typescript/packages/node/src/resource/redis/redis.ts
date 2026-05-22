@@ -19,6 +19,7 @@ import {
   PathSpec,
   type RegisteredCommand,
   type RegisteredOp,
+  REDACTED_SECRET,
   type Resource,
   ResourceName,
 } from '@struktoai/mirage-core'
@@ -59,8 +60,10 @@ export interface RedisModule {
 
 export interface RedisResourceState {
   type: string
-  needsOverride: boolean
-  redactedFields: string[]
+  config: {
+    url: typeof REDACTED_SECRET
+    keyPrefix: string
+  }
   keyPrefix: string
   files: Record<string, Uint8Array>
   dirs: string[]
@@ -219,8 +222,10 @@ export class RedisResource extends BaseResource implements Resource {
     const dirs = [...(await this.store.listDirs())].sort()
     return {
       type: this.kind,
-      needsOverride: true,
-      redactedFields: ['url'],
+      config: {
+        url: REDACTED_SECRET,
+        keyPrefix: this.keyPrefix,
+      },
       keyPrefix: this.keyPrefix,
       files,
       dirs,

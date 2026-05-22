@@ -36,8 +36,6 @@ import { redactGDocsConfig, type GDocsConfig, type GDocsConfigRedacted } from '.
 
 export interface GDocsResourceState {
   type: string
-  needsOverride: boolean
-  redactedFields: readonly string[]
   config: GDocsConfigRedacted
 }
 
@@ -117,8 +115,6 @@ export class GDocsResource implements Resource {
   getState(): Promise<GDocsResourceState> {
     return Promise.resolve({
       type: this.kind,
-      needsOverride: true,
-      redactedFields: ['clientSecret', 'refreshToken'],
       config: redactGDocsConfig(this.config),
     })
   }

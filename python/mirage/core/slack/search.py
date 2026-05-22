@@ -15,15 +15,13 @@
 import json
 from collections.abc import AsyncIterator
 
-from mirage.core.slack._client import slack_get
+from mirage.core.slack._client import slack_get, slack_search_available
 from mirage.core.slack.paginate import offset_pages
 from mirage.resource.slack.config import SlackConfig
 
 
 def search_available(config: SlackConfig) -> bool:
-    if config.search_token:
-        return True
-    return config.token.startswith("xoxp-")
+    return slack_search_available(config)
 
 
 async def search_messages(
@@ -53,7 +51,6 @@ async def search_messages(
         config,
         "search.messages",
         params=params,
-        token=config.search_token,
     )
     return json.dumps(data, ensure_ascii=False).encode()
 
@@ -89,7 +86,6 @@ def search_messages_stream(
         items_path=("messages", "matches"),
         start_page=start_page,
         max_pages=max_pages,
-        token=config.search_token,
     )
 
 
@@ -120,7 +116,6 @@ async def search_files(
         config,
         "search.files",
         params=params,
-        token=config.search_token,
     )
     return json.dumps(data, ensure_ascii=False).encode()
 
@@ -156,5 +151,4 @@ def search_files_stream(
         items_path=("files", "matches"),
         start_page=start_page,
         max_pages=max_pages,
-        token=config.search_token,
     )

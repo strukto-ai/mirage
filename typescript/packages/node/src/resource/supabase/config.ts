@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields } from '@struktoai/mirage-core'
+import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
 import type { S3Config } from '../s3/config.ts'
 
 export interface SupabaseConfig {
@@ -37,6 +37,17 @@ export interface SupabaseConfigRedacted {
   timeoutMs?: number
 }
 
+export const SupabaseConfigSchema = z.object({
+  bucket: z.string(),
+  region: z.string(),
+  projectRef: z.string().optional(),
+  endpoint: z.string(),
+  accessKeyId: secretStr(),
+  secretAccessKey: secretStr(),
+  sessionToken: secretStr().optional(),
+  timeoutMs: z.number().optional(),
+})
+
 export function resolvedSupabaseEndpoint(config: SupabaseConfig): string {
   if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint
   if (config.projectRef !== undefined && config.projectRef !== '') {
@@ -59,16 +70,10 @@ export function supabaseToS3Config(config: SupabaseConfig): S3Config {
 }
 
 export function redactSupabaseConfig(config: SupabaseConfig): SupabaseConfigRedacted {
-  return {
-    bucket: config.bucket,
-    region: config.region,
-    ...(config.projectRef !== undefined ? { projectRef: config.projectRef } : {}),
+  return redactConfigWithSchema(SupabaseConfigSchema, {
+    ...config,
     endpoint: resolvedSupabaseEndpoint(config),
-    accessKeyId: '<REDACTED>',
-    secretAccessKey: '<REDACTED>',
-    ...(config.sessionToken !== undefined ? { sessionToken: '<REDACTED>' } : {}),
-    ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
-  }
+  }) as unknown as SupabaseConfigRedacted
 }
 
 export function normalizeSupabaseConfig(input: Record<string, unknown>): SupabaseConfig {

@@ -16,6 +16,7 @@ import aioboto3
 from botocore.config import Config
 
 from mirage.accessor.s3 import S3Config
+from mirage.resource.secrets import reveal_secret
 from mirage.utils import key_prefix as kp
 
 
@@ -37,11 +38,14 @@ def _client_kwargs(config: S3Config) -> dict:
         kwargs["region_name"] = config.region
     if config.endpoint_url:
         kwargs["endpoint_url"] = config.endpoint_url
-    if config.aws_access_key_id and config.aws_secret_access_key:
-        kwargs["aws_access_key_id"] = config.aws_access_key_id
-        kwargs["aws_secret_access_key"] = config.aws_secret_access_key
-    if config.aws_session_token:
-        kwargs["aws_session_token"] = config.aws_session_token
+    access_key_id = reveal_secret(config.aws_access_key_id)
+    secret_access_key = reveal_secret(config.aws_secret_access_key)
+    session_token = reveal_secret(config.aws_session_token)
+    if access_key_id and secret_access_key:
+        kwargs["aws_access_key_id"] = access_key_id
+        kwargs["aws_secret_access_key"] = secret_access_key
+    if session_token:
+        kwargs["aws_session_token"] = session_token
     cfg_kwargs: dict = {
         "connect_timeout": config.timeout,
         "read_timeout": config.timeout,

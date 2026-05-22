@@ -12,11 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 
 
 class GitHubCIConfig(BaseModel):
-    token: str
+    token: SecretStr
     owner: str
     repo: str
     days: int = 30

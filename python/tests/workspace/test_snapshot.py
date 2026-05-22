@@ -109,10 +109,10 @@ def test_save_load_disk_with_override_root(tmp_path):
     assert _read(dst, "/m/a.txt") == "hello\n"
 
 
-# ── needs_override enforcement ──────────────────────────────────────
+# ── redacted secret override enforcement ─────────────────────────────
 
 
-def test_needs_override_missing_raises(tmp_path):
+def test_redacted_secret_missing_resource_raises(tmp_path):
     cfg = S3Config(bucket="b",
                    region="us-east-1",
                    aws_access_key_id="AKIA-LEAK",
@@ -126,7 +126,7 @@ def test_needs_override_missing_raises(tmp_path):
         Workspace.load(snap)
 
 
-def test_needs_override_lists_all_missing(tmp_path):
+def test_redacted_secret_lists_all_missing(tmp_path):
     src = Workspace(
         {
             "/ram": (RAMResource(), MountMode.WRITE),
@@ -150,6 +150,19 @@ def test_needs_override_lists_all_missing(tmp_path):
     msg = str(ei.value)
     assert "/s3a" in msg
     assert "/s3b" in msg
+
+
+def test_s3_without_inline_secret_loads_without_override(tmp_path):
+    cfg = S3Config(bucket="b", region="us-east-1", aws_profile="dev")
+    src = Workspace({"/s3": (S3Resource(cfg), MountMode.WRITE)},
+                    mode=MountMode.WRITE)
+    snap = tmp_path / "s3-profile.tar"
+    asyncio.run(src.snapshot(snap))
+
+    dst = Workspace.load(snap)
+    mount = dst._registry.mount_for("/s3/")
+    assert isinstance(mount.resource, S3Resource)
+    assert mount.resource.config.aws_profile == "dev"
 
 
 # ── cred redaction in raw bytes ─────────────────────────────────────
@@ -236,8 +249,6 @@ def test_load_rejects_path_traversal_in_blob_ref(tmp_path):
             "resource_class": "mirage.resource.ram.RAMResource",
             "resource_state": {
                 "type": "ram",
-                "needs_override": False,
-                "redacted_fields": [],
                 "files": {
                     "/x": {
                         "__file": "../../etc/passwd"

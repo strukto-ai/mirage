@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { redactConfigWithSchema, secretSchema, z } from '@struktoai/mirage-core'
 import type { S3BrowserPresignedUrlProvider, S3Config } from '../s3/config.ts'
 
 export interface OCIConfig {
@@ -26,6 +27,17 @@ export interface OCIConfig {
 export interface OCIConfigRedacted extends Omit<OCIConfig, 'presignedUrlProvider'> {
   presignedUrlProvider: '<REDACTED>'
 }
+
+export const OCIConfigSchema = z.object({
+  bucket: z.string(),
+  presignedUrlProvider: secretSchema(
+    z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),
+  ),
+  namespace: z.string().optional(),
+  region: z.string().optional(),
+  endpoint: z.string().optional(),
+  defaultContentType: z.string().optional(),
+})
 
 export function resolvedOciEndpoint(config: OCIConfig): string | undefined {
   if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint
@@ -54,5 +66,5 @@ export function ociToS3Config(config: OCIConfig): S3Config {
 }
 
 export function redactOciConfig(config: OCIConfig): OCIConfigRedacted {
-  return { ...config, presignedUrlProvider: '<REDACTED>' }
+  return redactConfigWithSchema(OCIConfigSchema, config) as unknown as OCIConfigRedacted
 }

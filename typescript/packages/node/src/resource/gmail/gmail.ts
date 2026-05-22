@@ -35,8 +35,6 @@ import { redactGmailConfig, type GmailConfig, type GmailConfigRedacted } from '.
 
 export interface GmailResourceState {
   type: string
-  needsOverride: boolean
-  redactedFields: readonly string[]
   config: GmailConfigRedacted
 }
 
@@ -114,8 +112,6 @@ export class GmailResource extends BaseResource implements Resource {
   getState(): Promise<GmailResourceState> {
     return Promise.resolve({
       type: this.kind,
-      needsOverride: true,
-      redactedFields: ['clientSecret', 'refreshToken'],
       config: redactGmailConfig(this.config),
     })
   }

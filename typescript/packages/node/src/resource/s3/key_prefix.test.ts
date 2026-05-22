@@ -138,9 +138,10 @@ describe('S3Resource getState with keyPrefix', () => {
     expect(state.config.keyPrefix).toBe('users/abc/')
   })
 
-  it('redactedFields does not include keyPrefix', async () => {
+  it('does not redact keyPrefix', async () => {
     const res = new S3Resource({ bucket: BUCKET, keyPrefix: 'users/abc/' })
     const state = await res.getState()
-    expect(state.redactedFields).not.toContain('keyPrefix')
+    expect(state.config.keyPrefix).toBe('users/abc/')
+    expect(state.config.keyPrefix).not.toBe('<REDACTED>')
   })
 })

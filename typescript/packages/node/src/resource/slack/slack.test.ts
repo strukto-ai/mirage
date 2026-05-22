@@ -61,8 +61,8 @@ describe('SlackResource (node)', () => {
     const r = new SlackResource({ token: 'xoxb-x', searchToken: 'xoxp-y' })
     const state = await r.getState()
     expect(state.type).toBe(ResourceName.SLACK)
-    expect(state.needsOverride).toBe(true)
-    expect(state.redactedFields).toEqual(['token', 'searchToken'])
+    expect(state).not.toHaveProperty('needsOverride')
+    expect(state).not.toHaveProperty('redactedFields')
     expect(state.config).toEqual({ token: '<REDACTED>', searchToken: '<REDACTED>' })
   })
 

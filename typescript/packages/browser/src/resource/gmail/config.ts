@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields } from '@struktoai/mirage-core'
+import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
 
 export interface GmailConfig {
   clientId: string
@@ -27,12 +27,14 @@ export interface GmailConfigRedacted {
   refreshToken: '<REDACTED>'
 }
 
+export const GmailConfigSchema = z.object({
+  clientId: z.string(),
+  clientSecret: secretStr().optional(),
+  refreshToken: secretStr(),
+})
+
 export function redactGmailConfig(config: GmailConfig): GmailConfigRedacted {
-  return {
-    clientId: config.clientId,
-    ...(config.clientSecret !== undefined ? { clientSecret: '<REDACTED>' as const } : {}),
-    refreshToken: '<REDACTED>',
-  }
+  return redactConfigWithSchema(GmailConfigSchema, config) as unknown as GmailConfigRedacted
 }
 
 export function normalizeGmailConfig(input: Record<string, unknown>): GmailConfig {

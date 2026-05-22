@@ -17,6 +17,7 @@ from pydantic import ValidationError
 
 from mirage.core.s3._client import _client_kwargs
 from mirage.resource.s3 import S3Config
+from mirage.resource.secrets import reveal_secret
 from mirage.resource.supabase import SupabaseConfig, SupabaseResource
 from mirage.types import ResourceName
 
@@ -62,9 +63,9 @@ def test_supabase_config_to_s3_config():
     assert s3_config.region == "us-west-2"
     assert (
         s3_config.endpoint_url == "https://example.supabase.co/storage/v1/s3")
-    assert s3_config.aws_access_key_id == "access-key"
-    assert s3_config.aws_secret_access_key == "secret-key"
-    assert s3_config.aws_session_token == "session-token"
+    assert reveal_secret(s3_config.aws_access_key_id) == "access-key"
+    assert reveal_secret(s3_config.aws_secret_access_key) == "secret-key"
+    assert reveal_secret(s3_config.aws_session_token) == "session-token"
     assert s3_config.path_style is True
     assert s3_config.proxy == "http://localhost:8080"
 
