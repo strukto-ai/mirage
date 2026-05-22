@@ -12,27 +12,24 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 from pathlib import Path
 
-from dulwich.repo import Repo
+import pytest
+
+from mirage.workspace.version.store import VersionStore
 
 
-def _open_repo(path: Path) -> Repo:
-    if (path / "objects").is_dir():
-        return Repo(str(path))
-    path.mkdir(parents=True, exist_ok=True)
-    return Repo.init_bare(str(path))
+@pytest.mark.asyncio
+async def test_open_creates_bare_repo(tmp_path: Path):
+    store = await VersionStore.open(tmp_path / ".mirage")
+    assert store is not None
+    assert (tmp_path / ".mirage" / "objects").is_dir()
+    assert (tmp_path / ".mirage" / "HEAD").is_file()
 
 
-class VersionStore:
-
-    def __init__(self, repo: Repo, path: Path) -> None:
-        self._repo = repo
-        self._path = path
-
-    @classmethod
-    async def open(cls, path: str | Path) -> "VersionStore":
-        p = Path(path)
-        repo = await asyncio.to_thread(_open_repo, p)
-        return cls(repo, p)
+@pytest.mark.asyncio
+async def test_open_reuses_existing_repo(tmp_path: Path):
+    path = tmp_path / ".mirage"
+    await VersionStore.open(path)
+    reopened = await VersionStore.open(path)
+    assert reopened is not None
