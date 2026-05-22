@@ -283,7 +283,10 @@ export class MirageFS {
           return
         }
         let size = s.size
-        size ??= this.cachedSize(path) ?? UNKNOWN_SIZE_SENTINEL
+        if (size === null) {
+          await this.prefetch(path)
+          size = this.cachedSize(path) ?? UNKNOWN_SIZE_SENTINEL
+        }
         cb(0, this.fileStat(size))
       } catch (err) {
         cb(classifyError(err))
