@@ -44,8 +44,8 @@ async def branch(store: VersionStore,
     await store.set_branch(name, head)
 
 
-async def materialize(store: VersionStore,
-                      version: bytes) -> tuple[dict[str, bytes], dict]:
+async def read_version(store: VersionStore,
+                       version: bytes) -> tuple[dict[str, bytes], dict]:
     tree = (await store.read_commit(version)).tree
     contents = await store.read_tree(tree)
     meta_oid = contents.pop(META_PATH, None)
