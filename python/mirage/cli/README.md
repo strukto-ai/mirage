@@ -40,6 +40,5 @@ Other command groups: `session`, `provision`, `daemon`, plus
 | `MIRAGE_TOKEN`              | (none)                    | Bearer token the CLI sends to the daemon                                          |
 | `MIRAGE_AUTH_MODE`          | `local`                   | Daemon auth mode: `local`, `token`, or `jwt`                                      |
 | `MIRAGE_AUTH_TOKEN`         | (auto-minted in `local`)  | Token the daemon accepts                                                          |
-| `MIRAGE_PERSIST_DIR`        | (none)                    | Directory the daemon persists workspaces to / restores from                       |
 | `MIRAGE_IDLE_GRACE_SECONDS` | `30`                      | Seconds the daemon waits after its last workspace is removed before shutting down |
 | `MIRAGE_ALLOWED_HOSTS`      | `127.0.0.1,localhost,::1` | Daemon Host-header allowlist (CSV; `*` disables the check)                        |

@@ -1107,3 +1107,9 @@ c
 olleh
 === base64_stdin_d ===
 hello
+=== snapshot_load_cache ===
+hello
+world
+foo
+bar
+baz

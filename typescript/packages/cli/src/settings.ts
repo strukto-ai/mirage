@@ -23,7 +23,6 @@ export const DEFAULT_DAEMON_URL = 'http://127.0.0.1:8765'
 
 export interface DaemonSettings {
   url: string
-  persistDir: string
   authToken: string
   idleGraceSeconds: number
 }
@@ -74,7 +73,6 @@ export function loadDaemonSettings(options: LoadOptions = {}): DaemonSettings {
   const table = readDaemonTable(path)
   const settings: DaemonSettings = {
     url: table.url ?? DEFAULT_DAEMON_URL,
-    persistDir: table.persist_dir ?? '',
     authToken: table.auth_token ?? '',
     idleGraceSeconds: Number(table.idle_grace_seconds ?? '30'),
   }

@@ -42,9 +42,4 @@ export {
   type AuthConfig,
   type JWTConfig,
 } from './auth/index.ts'
-export {
-  ENV_ALLOWED_HOSTS,
-  ENV_DAEMON_PORT,
-  ENV_IDLE_GRACE_SECONDS,
-  ENV_PERSIST_DIR,
-} from './env.ts'
+export { ENV_ALLOWED_HOSTS, ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS } from './env.ts'

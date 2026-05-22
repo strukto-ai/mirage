@@ -12,23 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import io
-import json
-from typing import Annotated, Any
+from pathlib import Path
+from typing import Any
 
-from fastapi import (APIRouter, File, Form, HTTPException, Query, Request,
-                     UploadFile)
-from fastapi.responses import Response
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from mirage import Workspace
 from mirage.resource.registry import build_resource
 from mirage.server.clone import clone_workspace_with_override
-from mirage.server.schemas import (CloneWorkspaceRequest,
-                                   CreateWorkspaceRequest,
-                                   DeleteWorkspaceResponse, WorkspaceBrief,
-                                   WorkspaceDetail)
 from mirage.server.summary import make_brief, make_detail
 from mirage.workspace.snapshot.utils import norm_mount_prefix
+
+from mirage.server.schemas import (  # isort: skip
+    CloneWorkspaceRequest, CreateWorkspaceRequest, DeleteWorkspaceResponse,
+    LoadWorkspaceRequest, SnapshotWorkspaceRequest, SnapshotWorkspaceResponse,
+    WorkspaceBrief, WorkspaceDetail)
 
 router = APIRouter(prefix="/v1/workspaces")
 
@@ -96,56 +94,43 @@ async def clone_workspace(workspace_id: str, req: CloneWorkspaceRequest,
     return make_detail(entry)
 
 
-@router.get("/{workspace_id}/snapshot")
-async def snapshot_workspace(workspace_id: str, request: Request) -> Response:
+@router.post("/{workspace_id}/snapshot",
+             response_model=SnapshotWorkspaceResponse)
+async def snapshot_workspace(workspace_id: str, req: SnapshotWorkspaceRequest,
+                             request: Request) -> SnapshotWorkspaceResponse:
     registry = request.app.state.registry
     if workspace_id not in registry:
         raise HTTPException(status_code=404, detail="workspace not found")
     entry = registry.get(workspace_id)
-    buf = io.BytesIO()
-    await entry.runner.call(_run_snapshot(entry.runner.ws, buf))
-    body = buf.getvalue()
-    return Response(
-        content=body,
-        media_type="application/x-tar",
-        headers={
-            "Content-Disposition":
-            f'attachment; filename="{workspace_id}.tar"',
-        },
-    )
+    target = Path(req.path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    await entry.runner.call(_run_snapshot(entry.runner.ws, str(target)))
+    return SnapshotWorkspaceResponse(id=workspace_id,
+                                     path=str(target),
+                                     size=target.stat().st_size)
 
 
-async def _run_snapshot(ws: Workspace, buf: io.BytesIO) -> None:
-    await ws.snapshot(buf)
+async def _run_snapshot(ws: Workspace, target: str) -> None:
+    await ws.snapshot(target)
 
 
 @router.post("/load", response_model=WorkspaceDetail, status_code=201)
-async def load_workspace(
-    request: Request,
-    tar: Annotated[UploadFile, File()],
-    override: Annotated[str | None, Form()] = None,
-    workspace_id: Annotated[str | None, Form(alias="id")] = None,
-) -> WorkspaceDetail:
+async def load_workspace(req: LoadWorkspaceRequest,
+                         request: Request) -> WorkspaceDetail:
     registry = request.app.state.registry
-    if workspace_id is not None and workspace_id in registry:
-        raise HTTPException(
-            status_code=409,
-            detail=f"workspace id already exists: {workspace_id!r}")
-    raw = await tar.read()
-    override_data: dict[str, Any] | None = None
-    if override:
-        try:
-            override_data = json.loads(override)
-        except json.JSONDecodeError as e:
-            raise HTTPException(status_code=400,
-                                detail=f"override must be JSON: {e}")
-    resources = _build_load_resources(override_data)
+    if req.id is not None and req.id in registry:
+        raise HTTPException(status_code=409,
+                            detail=f"workspace id already exists: {req.id!r}")
+    resources = _build_load_resources(req.override)
     try:
-        ws = Workspace.load(io.BytesIO(raw), resources=resources)
+        ws = Workspace.load(req.path, resources=resources)
+    except FileNotFoundError:
+        raise HTTPException(status_code=400,
+                            detail=f"snapshot not found: {req.path}")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     try:
-        entry = registry.add(ws, workspace_id=workspace_id)
+        entry = registry.add(ws, workspace_id=req.id)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
     return make_detail(entry)

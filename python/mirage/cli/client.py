@@ -20,7 +20,7 @@ from pathlib import Path
 
 import httpx
 
-from mirage.cli.env import ENV_AUTH_MODE, ENV_AUTH_TOKEN, ENV_PERSIST_DIR
+from mirage.cli.env import ENV_AUTH_MODE, ENV_AUTH_TOKEN
 from mirage.cli.settings import DaemonSettings, load_daemon_settings
 from mirage.server.auth import AuthMode
 from mirage.server.auth import storage as auth_storage
@@ -101,8 +101,6 @@ class DaemonClient:
     def _spawn_daemon(self) -> None:
         port = self._port_from_url()
         env = dict(os.environ)
-        if self.settings.persist_dir:
-            env[ENV_PERSIST_DIR] = self.settings.persist_dir
         if not self.settings.auth_token:
             self.settings.auth_token = auth_storage.ensure_token_file(
                 auth_storage.DEFAULT_TOKEN_FILE)

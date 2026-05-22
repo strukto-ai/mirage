@@ -12,9 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { mkdirSync, readFileSync, statSync } from 'node:fs'
+import { dirname } from 'node:path'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { MountMode } from '@struktoai/mirage-node'
 import { Workspace, type Resource } from '@struktoai/mirage-node'
@@ -46,6 +45,16 @@ interface WorkspaceGetQuery {
 }
 
 interface CloneWorkspaceBody {
+  id?: string
+  override?: OverrideShape
+}
+
+interface SnapshotWorkspaceBody {
+  path: string
+}
+
+interface LoadWorkspaceBody {
+  path: string
   id?: string
   override?: OverrideShape
 }
@@ -94,30 +103,23 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
 
   app.get('/v1/workspaces', () => deps.registry.list().map(makeBrief))
 
-  app.post('/v1/workspaces/load', async (req, reply) => {
-    let tarBuf: Buffer | null = null
-    let workspaceId: string | undefined
-    let override: unknown = null
-    for await (const part of req.parts()) {
-      if (part.type === 'file' && part.fieldname === 'tar') {
-        tarBuf = await part.toBuffer()
-      } else if (part.type === 'field' && part.fieldname === 'id') {
-        workspaceId = String(part.value)
-      } else if (part.type === 'field' && part.fieldname === 'override') {
-        try {
-          override = JSON.parse(String(part.value))
-        } catch {
-          return reply.status(400).send({ detail: 'override must be JSON' })
-        }
-      }
+  app.post<{ Body: LoadWorkspaceBody }>('/v1/workspaces/load', async (req, reply) => {
+    const { path, id: workspaceId, override } = req.body
+    if (typeof path !== 'string' || path === '') {
+      return reply.status(400).send({ detail: 'path is required' })
     }
-    if (tarBuf === null) return reply.status(400).send({ detail: 'missing tar field' })
     if (workspaceId !== undefined && deps.registry.has(workspaceId)) {
       return reply.status(409).send({ detail: `workspace id already exists: ${workspaceId}` })
     }
+    let tarBuf: Buffer
+    try {
+      tarBuf = readFileSync(path)
+    } catch {
+      return reply.status(400).send({ detail: `snapshot not found: ${path}` })
+    }
     let overrides: Record<string, Resource>
     try {
-      overrides = await buildOverrideResources(override as OverrideShape | null)
+      overrides = await buildOverrideResources(override ?? null)
     } catch (e) {
       return reply.status(400).send({ detail: `override build failed: ${(e as Error).message}` })
     }
@@ -174,19 +176,18 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
     },
   )
 
-  app.get<{ Params: WorkspaceIdParams }>('/v1/workspaces/:id/snapshot', async (req, reply) => {
-    const { id } = req.params
-    if (!deps.registry.has(id)) return reply.status(404).send({ detail: 'workspace not found' })
-    const tmp = mkdtempSync(join(tmpdir(), 'mirage-snap-'))
-    const out = join(tmp, `${id}.tar`)
-    try {
-      await deps.registry.get(id).runner.ws.snapshot(out)
-      const buf = readFileSync(out)
-      reply.header('Content-Type', 'application/x-tar')
-      reply.header('Content-Disposition', `attachment; filename="${id}.tar"`)
-      return await reply.send(buf)
-    } finally {
-      rmSync(tmp, { recursive: true, force: true })
-    }
-  })
+  app.post<{ Params: WorkspaceIdParams; Body: SnapshotWorkspaceBody }>(
+    '/v1/workspaces/:id/snapshot',
+    async (req, reply) => {
+      const { id } = req.params
+      if (!deps.registry.has(id)) return reply.status(404).send({ detail: 'workspace not found' })
+      const { path } = req.body
+      if (typeof path !== 'string' || path === '') {
+        return reply.status(400).send({ detail: 'path is required' })
+      }
+      mkdirSync(dirname(path), { recursive: true })
+      await deps.registry.get(id).runner.ws.snapshot(path)
+      return reply.status(200).send({ id, path, size: statSync(path).size })
+    },
+  )
 }

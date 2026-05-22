@@ -245,8 +245,8 @@ mirage daemon kill                # SIGKILL via PID file -- last resort
 | Verb | What it does |
 | --- | --- |
 | `mirage daemon status` | Daemon health, PID, uptime, workspace count. Exit 1 if daemon not reachable. |
-| `mirage daemon stop` | `POST /v1/shutdown` to trip the daemon's exit event. Daemon snapshots active workspaces (if `persist_dir` set), closes them, exits. Falls back to SIGTERM on `--timeout`. |
-| `mirage daemon restart` | Stop, then either wait for next `workspace create` to auto-spawn (default) or `--eager` to spawn immediately. Workspaces are LOST unless `persist_dir` is configured. |
+| `mirage daemon stop` | `POST /v1/shutdown` to trip the daemon's exit event. Daemon closes active workspaces and exits. Falls back to SIGTERM on `--timeout`. |
+| `mirage daemon restart` | Stop, then either wait for next `workspace create` to auto-spawn (default) or `--eager` to spawn immediately. Workspaces are LOST on restart -- save any you want to keep first with `mirage workspace snapshot <id> <path>` and reload with `mirage workspace load <path>`. |
 | `mirage daemon kill` | SIGKILL via PID file at `~/.mirage/daemon.pid`. Skips graceful shutdown -- use only when `stop` hangs. |
 
 <Note>

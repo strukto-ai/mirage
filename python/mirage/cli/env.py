@@ -17,7 +17,7 @@ from mirage.server.auth.config import (ENV_AUTH_MODE, ENV_AUTH_TOKEN,
                                        ENV_JWT_AUTHORIZED_PARTIES,
                                        ENV_JWT_CLOCK_SKEW, ENV_JWT_ISSUER,
                                        ENV_JWT_PUBKEY, ENV_JWT_PUBKEY_FILE)
-from mirage.server.env import ENV_IDLE_GRACE_SECONDS, ENV_PERSIST_DIR
+from mirage.server.env import ENV_IDLE_GRACE_SECONDS
 
 ENV_DAEMON_URL = "MIRAGE_DAEMON_URL"
 ENV_TOKEN = "MIRAGE_TOKEN"
@@ -34,6 +34,5 @@ __all__ = [
     "ENV_JWT_ISSUER",
     "ENV_JWT_PUBKEY",
     "ENV_JWT_PUBKEY_FILE",
-    "ENV_PERSIST_DIR",
     "ENV_TOKEN",
 ]

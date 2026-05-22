@@ -20,7 +20,6 @@ describe('buildDaemonOpts', () => {
     const { port, opts } = buildDaemonOpts({})
     expect(port).toBe(8765)
     expect(opts.idleGraceSeconds).toBe(30)
-    expect(opts.persistDir).toBeUndefined()
   })
 
   it('reads MIRAGE_DAEMON_PORT', () => {
@@ -31,15 +30,5 @@ describe('buildDaemonOpts', () => {
   it('reads MIRAGE_IDLE_GRACE_SECONDS', () => {
     const { opts } = buildDaemonOpts({ MIRAGE_IDLE_GRACE_SECONDS: '7' })
     expect(opts.idleGraceSeconds).toBe(7)
-  })
-
-  it('populates persistDir when MIRAGE_PERSIST_DIR is set', () => {
-    const { opts } = buildDaemonOpts({ MIRAGE_PERSIST_DIR: '/tmp/mirage-persist' })
-    expect(opts.persistDir).toBe('/tmp/mirage-persist')
-  })
-
-  it('omits persistDir when MIRAGE_PERSIST_DIR is empty string', () => {
-    const { opts } = buildDaemonOpts({ MIRAGE_PERSIST_DIR: '' })
-    expect(opts.persistDir).toBeUndefined()
   })
 })

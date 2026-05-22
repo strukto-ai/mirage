@@ -145,7 +145,7 @@ def test_save_then_load_round_trip(daemon, tmp_path):
     tar_path = tmp_path / "snap.tar"
     saved = _run_cli(daemon["env"], "workspace", "snapshot", "save-test",
                      str(tar_path))
-    assert saved["bytes"] > 0
+    assert saved["size"] > 0
     assert tar_path.exists()
 
     loaded = _run_cli(daemon["env"], "workspace", "load", str(tar_path),

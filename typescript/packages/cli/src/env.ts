@@ -24,7 +24,6 @@ export {
   ENV_JWT_ISSUER,
   ENV_JWT_PUBKEY,
   ENV_JWT_PUBKEY_FILE,
-  ENV_PERSIST_DIR,
 } from '@struktoai/mirage-server'
 
 export const ENV_DAEMON_URL = 'MIRAGE_DAEMON_URL'
