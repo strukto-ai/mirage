@@ -17,7 +17,7 @@ import pytest
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
-from mirage.workspace.version.api import snapshot_tree
+from mirage.workspace.version.api import commit, snapshot_tree
 from mirage.workspace.version.mapping import META_PATH
 from mirage.workspace.version.store import VersionStore
 
@@ -34,3 +34,19 @@ async def test_snapshot_tree_contains_files_and_meta(tmp_path):
 
     assert META_PATH in contents
     assert await store.read_blob(contents["m/a.txt"]) == b"hello\n"
+
+
+@pytest.mark.asyncio
+async def test_commit_advances_branch_and_links_parent(tmp_path):
+    ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    store = await VersionStore.open(tmp_path / ".mirage")
+
+    await ws.execute("echo one > /m/a.txt")
+    c1 = await commit(store, ws, branch="main", message="first")
+    await ws.execute("echo two > /m/a.txt")
+    c2 = await commit(store, ws, branch="main", message="second")
+
+    assert await store.head("main") == c2
+    assert (await store.read_commit(c2)).parents == [c1]
+    assert await store.log("main") == [c2, c1]
