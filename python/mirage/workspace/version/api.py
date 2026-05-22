@@ -35,3 +35,36 @@ async def commit(store: VersionStore,
     if branch in await store.branches():
         parents = [await store.head(branch)]
     return await store.commit(tree, parents, branch, message)
+
+
+def _strip_meta(changes: dict[str, list[str]]) -> dict[str, list[str]]:
+    return {
+        kind: [p for p in paths if p != META_PATH]
+        for kind, paths in changes.items()
+    }
+
+
+async def version_log(store: VersionStore, branch: str) -> list[dict]:
+    out: list[dict] = []
+    for oid in await store.log(branch):
+        commit_obj = await store.read_commit(oid)
+        out.append({
+            "id": oid.decode(),
+            "message": commit_obj.message.decode(),
+        })
+    return out
+
+
+async def version_diff(store: VersionStore, version_a: bytes,
+                       version_b: bytes) -> dict[str, list[str]]:
+    tree_a = (await store.read_commit(version_a)).tree
+    tree_b = (await store.read_commit(version_b)).tree
+    return _strip_meta(await store.diff(tree_a, tree_b))
+
+
+async def status(store: VersionStore,
+                 ws,
+                 branch: str = "main") -> dict[str, list[str]]:
+    live_tree = await snapshot_tree(store, ws)
+    head_tree = (await store.read_commit(await store.head(branch))).tree
+    return _strip_meta(await store.diff(head_tree, live_tree))
