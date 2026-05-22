@@ -20,6 +20,7 @@ from mirage.workspace.snapshot.tar_io import _json_default
 from mirage.workspace.snapshot.utils import FORMAT_VERSION
 
 META_FORMAT = 1
+META_PATH = ".mirage-meta.json"
 
 
 def _tree_path(prefix: str, rel: str) -> str:
