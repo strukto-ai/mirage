@@ -12,14 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import io as _io
-
-import pyarrow.feather as feather
-
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.core.filetype.feather import ls as feather_ls
 from mirage.core.gdrive.glob import resolve_glob
 from mirage.core.gdrive.read import read as gdrive_read
 from mirage.core.gdrive.stat import stat
@@ -54,9 +51,7 @@ async def ls_feather(
     try:
         s = await stat(accessor, p, index)
         raw = await gdrive_read(accessor, p, index)
-        table = feather.read_table(_io.BytesIO(raw))
-        rows = table.num_rows
-        cols = len(table.schema)
+        rows, cols = feather_ls(raw)
         size = s.size or 0
         line = (f"feather\t{size}\t{rows} rows\t{cols} cols"
                 f"\t{s.modified or ''}\t{s.name}")

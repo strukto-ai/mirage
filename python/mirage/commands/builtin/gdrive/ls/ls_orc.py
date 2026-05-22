@@ -12,14 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import io as _io
-
-import pyarrow.orc as orc
-
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.core.filetype.orc import ls as orc_ls
 from mirage.core.gdrive.glob import resolve_glob
 from mirage.core.gdrive.read import read as gdrive_read
 from mirage.core.gdrive.stat import stat
@@ -52,9 +49,7 @@ async def ls_orc(
     try:
         s = await stat(accessor, p, index)
         raw = await gdrive_read(accessor, p, index)
-        f = orc.ORCFile(_io.BytesIO(raw))
-        rows = f.nrows
-        cols = len(f.schema)
+        rows, cols = orc_ls(raw)
         size = s.size or 0
         line = (f"orc\t{size}\t{rows} rows\t{cols} cols"
                 f"\t{s.modified or ''}\t{s.name}")

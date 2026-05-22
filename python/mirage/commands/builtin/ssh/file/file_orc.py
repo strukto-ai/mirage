@@ -12,14 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import io as _io
-
-import pyarrow.orc as orc
-
 from mirage.accessor.ssh import SSHAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.core.filetype.orc import file as orc_file
 from mirage.core.ssh.glob import resolve_glob
 from mirage.core.ssh.read import read_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -40,13 +37,9 @@ async def file_orc(
     paths = await resolve_glob(accessor, paths, index)
     try:
         raw = await read_bytes(accessor, paths[0])
-        f = orc.ORCFile(_io.BytesIO(raw))
-        schema = f.schema
-        cols = ", ".join(f"{field.name}: {field.type}" for field in schema)
-        result = (f"orc, {f.nrows} rows, {len(schema)} columns, "
-                  f"{f.nstripes} stripes ({cols})")
-        return result.encode(), IOResult(reads={paths[0].strip_prefix: raw},
-                                         cache=[paths[0].strip_prefix])
+        result = orc_file(raw)
+        return result, IOResult(reads={paths[0].strip_prefix: raw},
+                                cache=[paths[0].strip_prefix])
     except Exception as e:
         return None, IOResult(
             exit_code=1,
