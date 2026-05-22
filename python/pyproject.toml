@@ -155,6 +155,9 @@ all = [
     "mirage-ai[openhands]",
     "mirage-ai[daytona]",
 ]
+version = [
+    "dulwich>=1.2.4",
+]
 
 [tool.uv]
 conflicts = [
