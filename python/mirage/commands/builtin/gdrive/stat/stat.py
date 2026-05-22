@@ -15,6 +15,7 @@
 import re
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.gdrive._provision import metadata_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -57,12 +58,13 @@ async def stat_provision(
     accessor: GDriveAccessor,
     paths: list[PathSpec],
     *texts: str,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> ProvisionResult:
     return await metadata_provision(
         "stat " + " ".join(p.original if isinstance(p, PathSpec) else p
                            for p in paths),
-        index=_extra.get("index"))
+        index=index)
 
 
 @command("stat",
@@ -76,15 +78,16 @@ async def stat(
     stdin: bytes | None = None,
     c: str | None = None,
     f: str | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("stat: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     fmt = c if c is not None else f
     lines: list[str] = []
     for p in paths:
-        s = await stat_impl(accessor, p, _extra.get("index"))
+        s = await stat_impl(accessor, p, index)
         if fmt is not None:
             lines.append(_format_stat(fmt, s))
         else:

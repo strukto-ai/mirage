@@ -95,9 +95,10 @@ async def find(
     path: str | None = None,
     mindepth: str | None = None,
     prefix: str = "",
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    index = _extra.get("index")
+    index = index
     paths = await resolve_glob(accessor, paths, index)
     p0 = paths[0] if paths else None
     search_path = p0.original if p0 else "/"

@@ -15,6 +15,7 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.ram import RAMAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.filetype.parquet import cat as parquet_cat
@@ -31,11 +32,12 @@ async def cat_parquet(
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     n: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if accessor.store is None or not paths:
         raise ValueError("cat: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     try:
         raw = await _read_bytes(accessor, paths[0])
         result = parquet_cat(raw)

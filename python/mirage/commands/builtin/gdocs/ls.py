@@ -92,12 +92,13 @@ async def ls_provision(
     accessor: GDocsAccessor,
     paths: list[PathSpec],
     *texts: str,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> ProvisionResult:
     return await metadata_provision(
         "ls " + " ".join(p.original if isinstance(p, PathSpec) else p
                          for p in paths),
-        index=_extra.get("index"))
+        index=index)
 
 
 @command("ls", resource="gdocs", spec=SPECS["ls"], provision=ls_provision)
@@ -117,6 +118,7 @@ async def ls(
     R: bool = False,
     d: bool = False,
     F: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     all_files = a or A
@@ -125,7 +127,7 @@ async def ls(
         sort_by = "size"
     warnings: list[str] = []
     results: list[str] = []
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     for p in paths:
         try:
             entries = await _ls_async(
@@ -138,7 +140,7 @@ async def ls(
                 recursive=R,
                 list_dir=d,
                 warnings=warnings,
-                index=_extra.get("index"),
+                index=index,
             )
         except (FileNotFoundError, ValueError) as exc:
             warnings.append(f"ls: cannot access '{p.original}': {exc}")

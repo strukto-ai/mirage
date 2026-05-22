@@ -16,6 +16,7 @@ import re
 from collections.abc import AsyncIterator
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.sed_helper import (_execute_program,
                                                 _parse_one_command,
                                                 _parse_program)
@@ -38,6 +39,7 @@ async def sed(
     e: bool = False,
     n: bool = False,
     E: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if i:
@@ -60,7 +62,7 @@ async def sed(
         count = 0 if "g" in parsed["expr_flags"] else 1
         outputs: list[str] = []
         for p in paths:
-            data = await gdrive_read(accessor, p, _extra.get("index"))
+            data = await gdrive_read(accessor, p, index)
             text = data.decode(errors="replace")
             new_text = re.sub(parsed["pattern"],
                               parsed["replacement"],
@@ -71,9 +73,9 @@ async def sed(
         return "".join(outputs).encode(), IOResult()
 
     if paths:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
+        paths = await resolve_glob(accessor, paths, index)
         p = paths[0]
-        data = await gdrive_read(accessor, p, _extra.get("index"))
+        data = await gdrive_read(accessor, p, index)
         text = data.decode(errors="replace")
         result = _execute_program(text, commands, suppress=n)
         return result.encode(), IOResult()

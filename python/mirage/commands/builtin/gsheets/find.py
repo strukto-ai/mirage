@@ -59,12 +59,13 @@ async def find_provision(
     accessor: GSheetsAccessor,
     paths: list[PathSpec],
     *texts: str,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> ProvisionResult:
     return await metadata_provision(
         "find " + " ".join(p.original if isinstance(p, PathSpec) else p
                            for p in paths),
-        index=_extra.get("index"))
+        index=index)
 
 
 @command("find",
@@ -85,9 +86,10 @@ async def find(
     path: str | None = None,
     mindepth: str | None = None,
     prefix: str = "",
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    index = _extra.get("index")
+    index = index
     paths = await resolve_glob(accessor, paths, index)
     p0 = paths[0] if paths else None
     search_path = p0.original if p0 else "/"

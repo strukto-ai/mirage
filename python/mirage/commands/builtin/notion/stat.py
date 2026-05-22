@@ -15,6 +15,7 @@
 import json
 
 from mirage.accessor.notion import NotionAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.notion._provision import metadata_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -44,9 +45,10 @@ async def stat(
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    index = _extra.get("index")
+    index = index
     paths = await resolve_glob(accessor, paths, index)
     payload = []
     for p in paths:

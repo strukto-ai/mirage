@@ -44,14 +44,14 @@ async def realpath(
     e: bool = False,
     m: bool = False,
     prefix: str = "",
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     full = [prefix + p if prefix else p for p in (paths or [])]
     lines: list[str] = []
     for p in full:
         resolved = posixpath.normpath(p)
-        if e and not await _exists(
-                accessor, resolved, _extra.get("index"), prefix=prefix):
+        if e and not await _exists(accessor, resolved, index, prefix=prefix):
             raise FileNotFoundError(
                 f"realpath: '{p.original}': No such file or directory")
         lines.append(resolved)

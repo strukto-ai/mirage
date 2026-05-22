@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.redis import RedisAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.redis.copy import copy
@@ -43,11 +44,12 @@ async def cp(
     f: bool = False,
     n: bool = False,
     v: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if accessor.store is None or len(paths) < 2:
         raise ValueError("cp: requires src and dst")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     recursive = r or R or a
     verbose_lines: list[str] = []
     if recursive:

@@ -42,13 +42,14 @@ async def grep_provision(
     accessor: EmailAccessor,
     paths: list[PathSpec],
     *texts: str,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> ProvisionResult:
     return await file_read_provision(
         accessor,
         paths,
         "grep " + " ".join(texts + tuple(str(p) for p in paths)),
-        index=_extra.get("index"))
+        index=index)
 
 
 @command("grep",

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.filetype.hdf5 import _read_df
@@ -39,15 +40,16 @@ async def ls_hdf5(
     r: bool = False,
     R: bool = False,
     d: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("ls: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     p = paths[0]
     try:
-        s = await stat(accessor, p, _extra.get("index"))
-        raw = await gdrive_read(accessor, p, _extra.get("index"))
+        s = await stat(accessor, p, index)
+        raw = await gdrive_read(accessor, p, index)
         df = _read_df(raw)
         rows = len(df)
         cols = len(df.columns)
@@ -57,7 +59,7 @@ async def ls_hdf5(
         return line.encode(), IOResult(reads={p.strip_prefix: raw},
                                        cache=[p.strip_prefix])
     except Exception:
-        s = await stat(accessor, p, _extra.get("index"))
+        s = await stat(accessor, p, index)
         line = (f"hdf5\t{s.size or 0}\t\t"
                 f"\t{s.modified or ''}\t{s.name}")
         return line.encode(), IOResult()

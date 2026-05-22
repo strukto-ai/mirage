@@ -15,6 +15,7 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.email import EmailAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.email._provision import file_read_provision
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
@@ -30,6 +31,7 @@ async def wc_provision(
     accessor: EmailAccessor,
     paths: list[PathSpec],
     *texts: str,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> ProvisionResult:
     return await file_read_provision(
@@ -37,7 +39,7 @@ async def wc_provision(
         paths,
         "wc " + " ".join(p.original if isinstance(p, PathSpec) else p
                          for p in paths),
-        index=_extra.get("index"))
+        index=index)
 
 
 @command("wc", resource="email", spec=SPECS["wc"], provision=wc_provision)
@@ -51,12 +53,13 @@ async def wc(
     c: bool = False,
     m: bool = False,
     L: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
+        paths = await resolve_glob(accessor, paths, index)
         p = paths[0]
-        data = await email_read(accessor, p, _extra.get("index"))
+        data = await email_read(accessor, p, index)
     else:
         data = await _read_stdin_async(stdin)
         if data is None:

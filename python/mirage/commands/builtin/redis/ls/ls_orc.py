@@ -17,6 +17,7 @@ import io as _io
 import pyarrow.orc as orc
 
 from mirage.accessor.redis import RedisAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.redis.glob import resolve_glob
@@ -41,11 +42,12 @@ async def ls_orc(
     r: bool = False,
     R: bool = False,
     d: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if accessor.store is None or not paths:
         raise ValueError("ls: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     try:
         s = await _stat_async(accessor, paths[0])
         raw = await _read_bytes(accessor, paths[0])

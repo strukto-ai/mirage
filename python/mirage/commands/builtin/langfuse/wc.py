@@ -15,6 +15,7 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.langfuse import LangfuseAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.langfuse._provision import file_read_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -49,6 +50,7 @@ async def wc(
     c: bool = False,
     m: bool = False,
     L: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if w or m or L:
@@ -69,7 +71,7 @@ async def wc(
         data = await langfuse_read(
             accessor,
             p,
-            _extra.get("index"),
+            index,
         )
         if c:
             return str(len(data)).encode(), IOResult()

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.filetype.feather import stat as feather_stat
@@ -61,11 +62,12 @@ async def stat_feather(
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if accessor.accessor.store is None or not paths:
         raise ValueError("stat: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     try:
         raw = await _read_bytes(accessor, paths[0])
         result = feather_stat(raw)

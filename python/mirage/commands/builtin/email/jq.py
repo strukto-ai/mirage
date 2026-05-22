@@ -15,6 +15,7 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.email import EmailAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.email.glob import resolve_glob
@@ -34,16 +35,17 @@ async def jq(
     r: bool = False,
     c: bool = False,
     s: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not texts:
         raise ValueError("jq: usage: jq EXPRESSION [path]")
     expression = texts[0]
     if paths:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
+        paths = await resolve_glob(accessor, paths, index)
         outputs: list[bytes] = []
         for p in paths:
-            raw = await email_read(accessor, p, _extra.get("index"))
+            raw = await email_read(accessor, p, index)
             data = parse_json_path(raw, p.original)
             if s:
                 data = [data] if not isinstance(data, list) else data

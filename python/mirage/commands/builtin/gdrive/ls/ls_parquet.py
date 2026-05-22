@@ -17,6 +17,7 @@ import io as _io
 import pyarrow.parquet as pq
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
@@ -41,15 +42,16 @@ async def ls_parquet(
     r: bool = False,
     R: bool = False,
     d: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("ls: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     p = paths[0]
     try:
-        s = await stat(accessor, p, _extra.get("index"))
-        raw = await gdrive_read(accessor, p, _extra.get("index"))
+        s = await stat(accessor, p, index)
+        raw = await gdrive_read(accessor, p, index)
         pf = pq.ParquetFile(_io.BytesIO(raw))
         rows = pf.metadata.num_rows
         cols = len(pf.schema_arrow)
@@ -59,7 +61,7 @@ async def ls_parquet(
         return line.encode(), IOResult(reads={p.strip_prefix: raw},
                                        cache=[p.strip_prefix])
     except Exception:
-        s = await stat(accessor, p, _extra.get("index"))
+        s = await stat(accessor, p, index)
         line = (f"parquet\t{s.size or 0}\t\t"
                 f"\t{s.modified or ''}\t{s.name}")
         return line.encode(), IOResult()

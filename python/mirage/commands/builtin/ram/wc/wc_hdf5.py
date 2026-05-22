@@ -15,6 +15,7 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.ram import RAMAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.filetype.hdf5 import wc as hdf5_wc
@@ -62,11 +63,12 @@ async def wc_hdf5(
     w: bool = False,
     c: bool = False,
     m: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if accessor.accessor.store is None or not paths:
         raise ValueError("wc: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     if w or c or m:
         return None, IOResult(
             exit_code=1,

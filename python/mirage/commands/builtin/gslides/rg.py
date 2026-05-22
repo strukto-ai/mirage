@@ -73,6 +73,7 @@ async def rg(
     type: str | None = None,
     glob: str | None = None,
     prefix: str = "",
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not texts:
@@ -80,7 +81,7 @@ async def rg(
     pattern_str = texts[0]
     max_count = int(m) if m is not None else None
     pat = compile_pattern(pattern_str, i, F, w)
-    index = _extra.get("index")
+    index = index
 
     if paths:
         paths = await resolve_glob(accessor, paths, index)

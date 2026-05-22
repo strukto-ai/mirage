@@ -15,6 +15,7 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.redis import RedisAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -53,11 +54,12 @@ async def fold(
     stdin: AsyncIterator[bytes] | bytes | None = None,
     w: str | None = None,
     s: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     width = int(w) if w is not None else 80
     if paths and accessor.store is not None:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
+        paths = await resolve_glob(accessor, paths, index)
         all_lines: list[str] = []
         for p in paths:
             data = (await _read_bytes(accessor, p)).decode(errors="replace")

@@ -15,6 +15,7 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.gdrive._provision import file_read_provision
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
@@ -33,6 +34,7 @@ async def cat_provision(
     accessor: GDriveAccessor,
     paths: list[PathSpec],
     *texts: str,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> ProvisionResult:
     return await file_read_provision(
@@ -40,7 +42,7 @@ async def cat_provision(
         paths,
         "cat " + " ".join(p.original if isinstance(p, PathSpec) else p
                           for p in paths),
-        index=_extra.get("index"))
+        index=index)
 
 
 async def _number_lines_stream(
@@ -58,12 +60,13 @@ async def cat(
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     n: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
+        paths = await resolve_glob(accessor, paths, index)
         p = paths[0]
-        result = await gdrive_read_stream(accessor, p, _extra.get("index"))
+        result = await gdrive_read_stream(accessor, p, index)
         if isinstance(result, bytes):
             io = IOResult(reads={p.strip_prefix: result},
                           cache=[p.strip_prefix])

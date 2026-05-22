@@ -15,6 +15,7 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.redis import RedisAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.filetype.orc import cut as orc_cut
@@ -33,11 +34,12 @@ async def cut_orc(
     f: str | None = None,
     d: str | None = None,
     c: str | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if accessor.store is None or not paths:
         raise ValueError("cut: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     if f is None:
         return None, IOResult(
             exit_code=1,

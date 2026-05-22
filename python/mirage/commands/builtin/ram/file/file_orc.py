@@ -17,6 +17,7 @@ import io as _io
 import pyarrow.orc as orc
 
 from mirage.accessor.ram import RAMAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.ram.glob import resolve_glob
@@ -31,11 +32,12 @@ async def file_orc(
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if accessor.store is None or not paths:
         raise ValueError("file: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     try:
         raw = await _read_bytes(accessor, paths[0])
         f = orc.ORCFile(_io.BytesIO(raw))

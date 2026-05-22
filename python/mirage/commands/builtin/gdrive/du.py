@@ -59,12 +59,13 @@ async def du_provision(
     accessor: GDriveAccessor,
     paths: list[PathSpec],
     *texts: str,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> ProvisionResult:
     return await metadata_provision(
         "du " + " ".join(p.original if isinstance(p, PathSpec) else p
                          for p in paths),
-        index=_extra.get("index"))
+        index=index)
 
 
 @command("du", resource="gdrive", spec=SPECS["du"], provision=du_provision)
@@ -78,11 +79,12 @@ async def du(
     a: bool = False,
     max_depth: str | None = None,
     c: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     p0 = paths[0]
-    total = await _du_walk(accessor, p0, _extra.get("index"))
+    total = await _du_walk(accessor, p0, index)
     if s:
         output = _format_size(total, h) + "\t" + p0.original
         if c:

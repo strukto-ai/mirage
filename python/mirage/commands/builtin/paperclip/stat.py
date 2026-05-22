@@ -15,6 +15,7 @@
 import re
 
 from mirage.accessor.paperclip import PaperclipAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.paperclip.glob import resolve_glob
@@ -59,6 +60,7 @@ async def stat(
     stdin: bytes | None = None,
     c: str | None = None,
     f: str | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
@@ -67,7 +69,7 @@ async def stat(
     fmt = c if c is not None else f
     lines: list[str] = []
     for p in paths:
-        s = await stat_impl(accessor, p, _extra.get("index"))
+        s = await stat_impl(accessor, p, index)
         if fmt is not None:
             lines.append(_format_stat(fmt, s))
         else:

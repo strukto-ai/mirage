@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.local_audio.utils import (_METADATA_RANGE,
                                                estimate_byte_range, metadata,
                                                transcribe)
@@ -56,11 +57,12 @@ async def head_mp3(
     stdin: AsyncIterator[bytes] | bytes | None = None,
     n: str | None = None,
     c: str | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("head: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     if c is not None:
         return None, IOResult(
             exit_code=1,

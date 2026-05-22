@@ -15,6 +15,7 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.postgres import PostgresAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.postgres._provision import file_read_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -50,6 +51,7 @@ async def wc(
     c: bool = False,
     m: bool = False,
     L: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if w or m or L:
@@ -67,7 +69,7 @@ async def wc(
     if scope.level == "entity_rows":
         if c:
             paths = await resolve_glob(accessor, paths)
-            data = await postgres_read(accessor, paths[0], _extra.get("index"))
+            data = await postgres_read(accessor, paths[0], index)
             return str(len(data)).encode(), IOResult()
         pool = await accessor.pool()
         async with pool.acquire() as conn:

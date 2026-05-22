@@ -15,6 +15,7 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.email import EmailAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.email._provision import file_read_provision
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
@@ -30,6 +31,7 @@ async def head_provision(
     accessor: EmailAccessor,
     paths: list[PathSpec],
     *texts: str,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> ProvisionResult:
     return await file_read_provision(
@@ -37,7 +39,7 @@ async def head_provision(
         paths,
         "head " + " ".join(p.original if isinstance(p, PathSpec) else p
                            for p in paths),
-        index=_extra.get("index"))
+        index=index)
 
 
 async def _head_bytes(data: bytes, lines: int,
@@ -60,14 +62,15 @@ async def head(
     stdin: AsyncIterator[bytes] | bytes | None = None,
     n: str | None = None,
     c: str | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     lines = int(n) if n is not None else 10
     bytes_mode = int(c) if c is not None else None
     if paths:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
+        paths = await resolve_glob(accessor, paths, index)
         p = paths[0]
-        data = await email_read(accessor, p, _extra.get("index"))
+        data = await email_read(accessor, p, index)
         return _head_bytes(data, lines, bytes_mode), IOResult()
     raw = await _read_stdin_async(stdin)
     if raw is None:

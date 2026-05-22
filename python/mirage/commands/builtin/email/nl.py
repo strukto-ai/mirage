@@ -16,6 +16,7 @@ import re
 from collections.abc import AsyncIterator
 
 from mirage.accessor.email import EmailAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -47,6 +48,7 @@ async def nl(
     i: str | None = None,
     w: str | None = None,
     s: str | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     body_numbering_raw = b if b is not None else "t"
@@ -62,9 +64,9 @@ async def nl(
     separator = s if s is not None else "\t"
 
     if paths:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
+        paths = await resolve_glob(accessor, paths, index)
         p = paths[0]
-        raw = await email_read(accessor, p, _extra.get("index"))
+        raw = await email_read(accessor, p, index)
     else:
         raw = await _read_stdin_async(stdin)
         if raw is None:

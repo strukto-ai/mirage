@@ -35,11 +35,12 @@ async def head_provision(
     *texts: str,
     n: str | None = None,
     c: str | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> ProvisionResult:
     if not paths or accessor.store is None:
         return ProvisionResult(command="head")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     s = await _stat_async(accessor, paths[0])
     file_size = s.size
     lines = int(n) if n is not None else 10

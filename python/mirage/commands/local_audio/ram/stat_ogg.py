@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.local_audio.utils import format_metadata, metadata
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -27,11 +28,12 @@ async def stat_ogg(
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if accessor.store is None or not paths:
         raise ValueError("stat: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     try:
         raw = await read_bytes(accessor, paths[0])
         meta = metadata(raw)

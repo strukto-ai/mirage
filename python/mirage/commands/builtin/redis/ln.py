@@ -15,6 +15,7 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.redis import RedisAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.redis.exists import exists
@@ -35,11 +36,12 @@ async def ln(
     f: bool = False,
     n: bool = False,
     v: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if accessor.store is None or len(paths) < 2:
         raise ValueError("ln: usage: ln [-s] [-f] source dest")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     source_path = paths[0]
     dest_path = paths[1]
     if n and await exists(accessor, dest_path):
