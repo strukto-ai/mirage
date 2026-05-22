@@ -33,3 +33,18 @@ async def test_open_reuses_existing_repo(tmp_path: Path):
     await VersionStore.open(path)
     reopened = await VersionStore.open(path)
     assert reopened is not None
+
+
+@pytest.mark.asyncio
+async def test_blob_roundtrip(tmp_path: Path):
+    store = await VersionStore.open(tmp_path / ".mirage")
+    oid = await store.write_blob(b"hello")
+    assert await store.read_blob(oid) == b"hello"
+
+
+@pytest.mark.asyncio
+async def test_identical_blobs_dedup(tmp_path: Path):
+    store = await VersionStore.open(tmp_path / ".mirage")
+    first = await store.write_blob(b"same-bytes")
+    second = await store.write_blob(b"same-bytes")
+    assert first == second

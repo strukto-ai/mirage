@@ -15,6 +15,7 @@
 import asyncio
 from pathlib import Path
 
+from dulwich.objects import Blob
 from dulwich.repo import Repo
 
 
@@ -23,6 +24,16 @@ def _open_repo(path: Path) -> Repo:
         return Repo(str(path))
     path.mkdir(parents=True, exist_ok=True)
     return Repo.init_bare(str(path))
+
+
+def _add_blob(repo: Repo, data: bytes) -> bytes:
+    blob = Blob.from_string(data)
+    repo.object_store.add_object(blob)
+    return blob.id
+
+
+def _read_blob(repo: Repo, oid: bytes) -> bytes:
+    return repo.object_store[oid].as_raw_string()
 
 
 class VersionStore:
@@ -36,3 +47,9 @@ class VersionStore:
         p = Path(path)
         repo = await asyncio.to_thread(_open_repo, p)
         return cls(repo, p)
+
+    async def write_blob(self, data: bytes) -> bytes:
+        return await asyncio.to_thread(_add_blob, self._repo, data)
+
+    async def read_blob(self, oid: bytes) -> bytes:
+        return await asyncio.to_thread(_read_blob, self._repo, oid)
