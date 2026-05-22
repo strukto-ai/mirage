@@ -17,7 +17,15 @@ import pytest
 from mirage.resource.ram import RAMResource
 from mirage.types import MountKey, MountMode
 from mirage.workspace import Workspace
-from mirage.workspace.version.mapping import to_tree_inputs
+from mirage.workspace.snapshot.state import to_state_dict
+from mirage.workspace.version.mapping import to_state, to_tree_inputs
+
+
+def _mount_files(state: dict, prefix: str) -> dict:
+    for mount in state["mounts"]:
+        if mount["prefix"] == prefix:
+            return mount["resource_state"]["files"]
+    raise KeyError(prefix)
 
 
 @pytest.mark.asyncio
@@ -34,3 +42,17 @@ async def test_to_tree_inputs_ram_files():
 
     prefixes = [m[MountKey.PREFIX] for m in meta["mounts"]]
     assert "/m/" in prefixes
+
+
+@pytest.mark.asyncio
+async def test_to_state_round_trips_files():
+    ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    await ws.execute("echo hello > /m/a.txt")
+    await ws.execute("mkdir -p /m/sub && echo world > /m/sub/b.txt")
+
+    original_files = _mount_files(to_state_dict(ws), "/m/")
+    entries, meta = to_tree_inputs(ws)
+    state = to_state(entries, meta)
+
+    assert _mount_files(state, "/m/") == original_files

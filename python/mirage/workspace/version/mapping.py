@@ -14,6 +14,7 @@
 
 from mirage.types import MountKey, ResourceStateKey, StateKey
 from mirage.workspace.snapshot.state import to_state_dict
+from mirage.workspace.snapshot.utils import FORMAT_VERSION
 
 META_FORMAT = 1
 
@@ -22,6 +23,18 @@ def _tree_path(prefix: str, rel: str) -> str:
     p = prefix.strip("/")
     r = rel.lstrip("/")
     return f"{p}/{r}" if p else r
+
+
+def _rel_path(prefix: str, tree_path: str) -> str:
+    p = prefix.strip("/")
+    rest = tree_path[len(p) + 1:] if p else tree_path
+    return "/" + rest
+
+
+def _belongs(tree_prefix: str, tree_path: str) -> bool:
+    if not tree_prefix:
+        return True
+    return tree_path == tree_prefix or tree_path.startswith(tree_prefix + "/")
 
 
 def to_tree_inputs(ws) -> tuple[dict[str, bytes], dict]:
@@ -44,3 +57,37 @@ def to_tree_inputs(ws) -> tuple[dict[str, bytes], dict]:
         })
     meta = {"format": META_FORMAT, "mounts": mounts_meta, "pins": {}}
     return entries, meta
+
+
+def to_state(entries: dict[str, bytes], meta: dict) -> dict:
+    mounts: list[dict] = []
+    for mount in meta["mounts"]:
+        prefix = mount[MountKey.PREFIX]
+        tree_prefix = prefix.strip("/")
+        resource_state = dict(mount[MountKey.RESOURCE_STATE])
+        files: dict[str, bytes] = {}
+        for tree_path, data in entries.items():
+            if _belongs(tree_prefix, tree_path):
+                files[_rel_path(prefix, tree_path)] = data
+        resource_state[ResourceStateKey.FILES] = files
+        mounts.append({
+            MountKey.INDEX: mount[MountKey.INDEX],
+            MountKey.PREFIX: prefix,
+            MountKey.MODE: mount[MountKey.MODE],
+            MountKey.CONSISTENCY: mount[MountKey.CONSISTENCY],
+            MountKey.RESOURCE_CLASS: mount[MountKey.RESOURCE_CLASS],
+            MountKey.RESOURCE_STATE: resource_state,
+        })
+    return {
+        StateKey.VERSION: FORMAT_VERSION,
+        StateKey.MOUNTS: mounts,
+        StateKey.SESSIONS: [],
+        StateKey.DEFAULT_SESSION_ID: "default",
+        StateKey.DEFAULT_AGENT_ID: "default",
+        StateKey.CURRENT_AGENT_ID: "default",
+        StateKey.CACHE: {},
+        StateKey.HISTORY: None,
+        StateKey.JOBS: [],
+        StateKey.FINGERPRINTS: [],
+        StateKey.LIVE_ONLY_MOUNTS: [],
+    }
