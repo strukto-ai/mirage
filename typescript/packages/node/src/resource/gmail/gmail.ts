@@ -50,11 +50,7 @@ export class GmailResource extends BaseResource implements Resource {
   constructor(config: GmailConfig) {
     super()
     this.config = config
-    const tm = new TokenManager({
-      clientId: config.clientId,
-      clientSecret: config.clientSecret,
-      refreshToken: config.refreshToken,
-    })
+    const tm = new TokenManager(config)
     this.accessor = new GmailAccessor({ tokenManager: tm })
   }
 

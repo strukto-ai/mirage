@@ -669,7 +669,13 @@ export {
   googlePut,
   refreshAccessToken,
 } from './core/google/_client.ts'
-export type { GoogleConfig } from './core/google/config.ts'
+export {
+  GoogleConfigSchema,
+  normalizeGoogleConfig,
+  redactGoogleConfig,
+  type GoogleConfig,
+  type GoogleConfigRedacted,
+} from './core/google/config.ts'
 export {
   MIME_TO_EXT,
   WORKSPACE_MIMES,
