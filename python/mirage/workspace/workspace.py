@@ -43,8 +43,8 @@ from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
 from mirage.types import (DEFAULT_AGENT_ID, DEFAULT_SESSION_ID,
-                          ConsistencyPolicy, DriftPolicy, FileStat,
-                          FingerprintKey, MountMode, PathSpec, StateKey)
+                          ConsistencyPolicy, DriftPolicy, FileStat, MountMode,
+                          PathSpec, StateKey)
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.fuse import FuseManager
 from mirage.workspace.history import ExecutionHistory
@@ -58,7 +58,8 @@ from mirage.workspace.session import (Session, SessionManager,
                                       set_current_session)
 from mirage.workspace.snapshot import (ContentDriftError, apply_state_dict,
                                        build_mount_args, check_drift,
-                                       norm_mount_prefix, read_tar)
+                                       install_fingerprints, norm_mount_prefix,
+                                       read_tar)
 from mirage.workspace.snapshot import snapshot as _write_snapshot
 from mirage.workspace.snapshot import to_state_dict
 from mirage.workspace.types import ExecutionNode, ExecutionRecord
@@ -380,27 +381,9 @@ class Workspace:
         """
         state = read_tar(source)
         ws = cls._from_state(state, resources=resources)
-        fingerprint_entries = state.get(StateKey.FINGERPRINTS) or []
-        ws._drift_policy = drift_policy
-        if drift_policy == DriftPolicy.OFF:
-            if fingerprint_entries:
-                ws._cache.evict_paths(f[FingerprintKey.PATH]
-                                      for f in fingerprint_entries)
-        else:
-            for f in fingerprint_entries:
-                path = f[FingerprintKey.PATH]
-                try:
-                    mount = ws._registry.mount_for(path)
-                except ValueError:
-                    continue
-                revision = f.get(FingerprintKey.REVISION)
-                if revision is not None:
-                    mount.revisions[path] = revision
-                    continue
-                fingerprint = f.get(FingerprintKey.FINGERPRINT)
-                if fingerprint is not None:
-                    ws._pending_drift.append((mount, path, fingerprint))
-            ws._drift_check_pending = bool(ws._pending_drift)
+        install_fingerprints(ws,
+                             state.get(StateKey.FINGERPRINTS) or [],
+                             drift_policy)
         live_only = state.get(StateKey.LIVE_ONLY_MOUNTS) or []
         if live_only:
             logger.warning(
