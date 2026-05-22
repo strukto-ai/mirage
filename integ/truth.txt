@@ -360,6 +360,7 @@ foo
 ll
 === grep_l ===
 /data/mixed.txt
+/data/a.txt
 === file_text ===
 /data/a.txt: text
 === file_json ===
@@ -772,7 +773,11 @@ f
 b
 b
 === cut_c_range_open ===
-
+llo
+rld
+o
+r
+z
 === cut_d_space ===
 30
 25
@@ -922,6 +927,7 @@ baz,
 /data/binary.bin
 /data/c.txt
 /data/csv.csv
+/data/data.jsonl
 /data/dup.txt
 /data/empty.txt
 /data/fields.txt
@@ -1046,9 +1052,12 @@ nested
 deep
 nested.txt
 === ls_R ===
+/data/sub:
 deep
-deeper.txt
 nested.txt
+
+/data/sub/deep:
+deeper.txt
 === ls_sub_deep ===
 deeper.txt
 === zgrep_pipe ===
