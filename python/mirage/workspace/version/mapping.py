@@ -19,7 +19,6 @@ from mirage.workspace.snapshot.state import to_state_dict
 from mirage.workspace.snapshot.tar_io import _json_default
 from mirage.workspace.snapshot.utils import FORMAT_VERSION
 
-META_FORMAT = 1
 META_PATH = ".mirage-meta.json"
 
 
@@ -67,7 +66,7 @@ def to_tree_inputs(ws) -> tuple[dict[str, bytes], dict]:
             MountKey.RESOURCE_CLASS: mount[MountKey.RESOURCE_CLASS],
             MountKey.RESOURCE_STATE: resource_state,
         })
-    meta = {"format": META_FORMAT, "mounts": mounts_meta, "pins": {}}
+    meta = {"mounts": mounts_meta, "pins": {}}
     return entries, meta
 
 

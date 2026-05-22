@@ -61,13 +61,11 @@ async def test_to_state_round_trips_files():
 
 def test_meta_blob_round_trip():
     meta = {
-        "format": 1,
         "mounts": [],
         "pins": {"/s3/a.txt": {"rev": "v123", "fp": "etag-abc"}},
     }
 
     parsed = blob_to_meta(meta_to_blob(meta))
 
-    assert parsed["format"] == 1
     assert parsed["pins"]["/s3/a.txt"] == {"rev": "v123", "fp": "etag-abc"}
 
