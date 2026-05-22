@@ -93,6 +93,10 @@ def _head(repo: Repo, branch: str) -> bytes:
     return repo.refs[b"refs/heads/" + branch.encode()]
 
 
+def _set_branch(repo: Repo, name: str, oid: bytes) -> None:
+    repo.refs[b"refs/heads/" + name.encode()] = oid
+
+
 def _read_commit(repo: Repo, oid: bytes) -> Commit:
     return repo.object_store[oid]
 
@@ -160,6 +164,9 @@ class VersionStore:
 
     async def head(self, branch: str) -> bytes:
         return await asyncio.to_thread(_head, self._repo, branch)
+
+    async def set_branch(self, name: str, oid: bytes) -> None:
+        await asyncio.to_thread(_set_branch, self._repo, name, oid)
 
     async def read_commit(self, oid: bytes) -> Commit:
         return await asyncio.to_thread(_read_commit, self._repo, oid)

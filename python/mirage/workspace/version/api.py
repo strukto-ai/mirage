@@ -37,6 +37,13 @@ async def commit(store: VersionStore,
     return await store.commit(tree, parents, branch, message)
 
 
+async def branch(store: VersionStore,
+                 name: str,
+                 from_branch: str = "main") -> None:
+    head = await store.head(from_branch)
+    await store.set_branch(name, head)
+
+
 def _strip_meta(changes: dict[str, list[str]]) -> dict[str, list[str]]:
     return {
         kind: [p for p in paths if p != META_PATH]
