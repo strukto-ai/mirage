@@ -180,7 +180,7 @@ conflicts = [
 dev = [
     "grpcio>=1.78.0",
     "grpcio-tools>=1.78.0",
-    "moto[s3]>=5.1.22",
+    "moto[s3,server]>=5.1.22",
     "pre-commit",
     "pytest",
     "pytest-asyncio>=0.24.0",

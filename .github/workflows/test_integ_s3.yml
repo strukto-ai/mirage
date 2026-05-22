@@ -1,0 +1,47 @@
+name: Integ (s3 + gcs via moto)
+
+"on":
+  push:
+    branches: [main]
+    paths:
+      - integ/**
+      - data/**
+      - python/**
+      - .github/workflows/test_integ_s3.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - integ/**
+      - data/**
+      - python/**
+      - .github/workflows/test_integ_s3.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integ-s3:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        working-directory: python
+        run: uv sync --all-extras --no-extra camel
+
+      - name: Run s3 + gcs integ (moto) and diff against truth
+        run: |
+          ./python/.venv/bin/python integ/s3.py > /tmp/s3.out
+          diff integ/truth_s3.txt /tmp/s3.out
