@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import IndexCacheStore
@@ -77,8 +78,8 @@ async def jq(
         paths = []
     return await generic_jq(paths,
                             *texts,
-                            read_bytes=read_bytes,
-                            read_stream=_stream,
+                            read_bytes=partial(read_bytes, index=index),
+                            read_stream=partial(_stream, index=index),
                             accessor=accessor,
                             stdin=stdin,
                             r=r,

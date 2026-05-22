@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import IndexCacheStore
@@ -50,7 +51,7 @@ async def sort(
         paths = []
     return await generic_sort(
         paths,
-        read_bytes=read_bytes,
+        read_bytes=partial(read_bytes, index=index),
         accessor=accessor,
         stdin=stdin,
         reverse=r,

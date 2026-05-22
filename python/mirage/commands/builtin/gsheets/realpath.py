@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.accessor.gsheets import GSheetsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.realpath import \
@@ -39,7 +41,7 @@ async def realpath(
     if paths:
         paths = await resolve_glob(accessor, paths, index)
     return await generic_realpath(paths or [],
-                                  stat_fn=stat_impl,
+                                  stat_fn=partial(stat_impl, index=index),
                                   accessor=accessor,
                                   e=e,
                                   m=m)

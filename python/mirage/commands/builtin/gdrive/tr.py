@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import IndexCacheStore
@@ -44,7 +45,7 @@ async def tr(
     return await generic_tr(
         paths,
         texts,
-        read_stream=read_stream,
+        read_stream=partial(read_stream, index=index),
         accessor=accessor,
         stdin=stdin,
         delete=d,

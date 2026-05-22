@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.md5 import md5 as generic_md5
@@ -37,6 +39,6 @@ async def md5(
     else:
         paths = []
     return await generic_md5(paths,
-                             read_bytes=read_bytes,
+                             read_bytes=partial(read_bytes, index=index),
                              accessor=accessor,
                              stdin=stdin)

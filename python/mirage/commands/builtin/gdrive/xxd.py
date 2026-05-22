@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import IndexCacheStore
@@ -50,7 +51,7 @@ async def xxd(
     cols = int(c) if c and c is not True else 16
     group = int(g) if g and g is not True else 2
     return await generic_xxd(paths,
-                             read_stream=read_stream,
+                             read_stream=partial(read_stream, index=index),
                              accessor=accessor,
                              stdin=stdin,
                              reverse=r,

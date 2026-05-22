@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import IndexCacheStore
@@ -55,7 +56,7 @@ async def zgrep(
         paths = []
     return await generic_zgrep(paths,
                                pattern=raw_pattern,
-                               read_bytes=read_bytes,
+                               read_bytes=partial(read_bytes, index=index),
                                accessor=accessor,
                                stdin=stdin,
                                ignore_case=i,

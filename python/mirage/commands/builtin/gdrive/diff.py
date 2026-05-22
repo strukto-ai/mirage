@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.diff import diff as generic_diff
@@ -42,7 +44,7 @@ async def diff(
 ) -> tuple[ByteSource | None, IOResult]:
     paths = await resolve_glob(accessor, paths, index)
     return await generic_diff(paths,
-                              read_bytes=read_bytes,
+                              read_bytes=partial(read_bytes, index=index),
                               readdir_fn=readdir,
                               accessor=accessor,
                               index=index,
