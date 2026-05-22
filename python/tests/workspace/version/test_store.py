@@ -75,3 +75,19 @@ async def test_tree_nested_paths(tmp_path: Path):
         "d/one.txt": y,
         "d/sub/two.txt": z,
     }
+
+
+@pytest.mark.asyncio
+async def test_commit_advances_branch(tmp_path: Path):
+    store = await VersionStore.open(tmp_path / ".mirage")
+    t1 = await store.write_tree({"a.txt": await store.write_blob(b"v1")})
+    c1 = await store.commit(t1, parents=[], branch="main", message="first")
+    assert await store.head("main") == c1
+
+    t2 = await store.write_tree({"a.txt": await store.write_blob(b"v2")})
+    c2 = await store.commit(t2, parents=[c1], branch="main", message="second")
+    assert await store.head("main") == c2
+
+    commit = await store.read_commit(c2)
+    assert commit.parents == [c1]
+    assert commit.message == b"second"

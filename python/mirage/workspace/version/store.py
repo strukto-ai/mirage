@@ -14,13 +14,15 @@
 
 import asyncio
 import stat
+import time
 from pathlib import Path
 
-from dulwich.objects import Blob, Tree
+from dulwich.objects import Blob, Commit, Tree
 from dulwich.repo import Repo
 
 FILE_MODE = 0o100644
 DIR_MODE = 0o40000
+AUTHOR = b"mirage <mirage@local>"
 
 
 def _open_repo(path: Path) -> Repo:
@@ -67,6 +69,32 @@ def _read_tree(repo: Repo, oid: bytes, prefix: str = "") -> dict[str, bytes]:
     return out
 
 
+def _commit(repo: Repo, tree_oid: bytes, parents: list[bytes], branch: str,
+            message: str) -> bytes:
+    commit = Commit()
+    commit.tree = tree_oid
+    commit.parents = list(parents)
+    commit.author = commit.committer = AUTHOR
+    now = int(time.time())
+    commit.author_time = commit.commit_time = now
+    commit.author_timezone = commit.commit_timezone = 0
+    commit.encoding = b"UTF-8"
+    commit.message = message.encode()
+    repo.object_store.add_object(commit)
+    ref = b"refs/heads/" + branch.encode()
+    repo.refs[ref] = commit.id
+    repo.refs.set_symbolic_ref(b"HEAD", ref)
+    return commit.id
+
+
+def _head(repo: Repo, branch: str) -> bytes:
+    return repo.refs[b"refs/heads/" + branch.encode()]
+
+
+def _read_commit(repo: Repo, oid: bytes) -> Commit:
+    return repo.object_store[oid]
+
+
 class VersionStore:
 
     def __init__(self, repo: Repo, path: Path) -> None:
@@ -90,3 +118,14 @@ class VersionStore:
 
     async def read_tree(self, oid: bytes) -> dict[str, bytes]:
         return await asyncio.to_thread(_read_tree, self._repo, oid)
+
+    async def commit(self, tree_oid: bytes, parents: list[bytes], branch: str,
+                     message: str) -> bytes:
+        return await asyncio.to_thread(_commit, self._repo, tree_oid, parents,
+                                       branch, message)
+
+    async def head(self, branch: str) -> bytes:
+        return await asyncio.to_thread(_head, self._repo, branch)
+
+    async def read_commit(self, oid: bytes) -> Commit:
+        return await asyncio.to_thread(_read_commit, self._repo, oid)
