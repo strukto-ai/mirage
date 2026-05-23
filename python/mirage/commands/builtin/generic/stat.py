@@ -1,6 +1,7 @@
 import re
 from collections.abc import Awaitable, Callable
 
+from mirage.cache.index import IndexCacheStore
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
 
@@ -39,13 +40,14 @@ async def stat(
     accessor: object = None,
     c: str | None = None,
     f: str | None = None,
+    index: IndexCacheStore | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("stat: missing operand")
     fmt = c if c is not None else f
     lines: list[str] = []
     for p in paths:
-        s = await stat_fn(accessor, p)
+        s = await stat_fn(accessor, p, index)
         if fmt is not None:
             lines.append(_format_stat(fmt, s))
         else:

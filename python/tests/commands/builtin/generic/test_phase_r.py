@@ -92,7 +92,7 @@ async def test_cut_missing_operand():
 @pytest.mark.asyncio
 async def test_stat_default_format():
 
-    async def stat_fn(accessor, path):
+    async def stat_fn(accessor, path, index=None):
         return FileStat(name=path.original,
                         size=42,
                         modified="2026-01-01",
@@ -107,7 +107,7 @@ async def test_stat_default_format():
 @pytest.mark.asyncio
 async def test_stat_custom_format():
 
-    async def stat_fn(accessor, path):
+    async def stat_fn(accessor, path, index=None):
         return FileStat(name="foo", size=10, type=FileType.TEXT)
 
     out, _ = await generic_stat([_spec("foo")], stat_fn=stat_fn, c="%n=%s")
@@ -117,7 +117,7 @@ async def test_stat_custom_format():
 @pytest.mark.asyncio
 async def test_stat_format_F_directory():
 
-    async def stat_fn(accessor, path):
+    async def stat_fn(accessor, path, index=None):
         return FileStat(name="d", type=FileType.DIRECTORY)
 
     out, _ = await generic_stat([_spec("d")], stat_fn=stat_fn, c="%F")
@@ -127,7 +127,7 @@ async def test_stat_format_F_directory():
 @pytest.mark.asyncio
 async def test_stat_format_F_regular():
 
-    async def stat_fn(accessor, path):
+    async def stat_fn(accessor, path, index=None):
         return FileStat(name="x", type=FileType.JSON)
 
     out, _ = await generic_stat([_spec("x")], stat_fn=stat_fn, f="%F")
@@ -137,7 +137,7 @@ async def test_stat_format_F_regular():
 @pytest.mark.asyncio
 async def test_stat_multiple_paths():
 
-    async def stat_fn(accessor, path):
+    async def stat_fn(accessor, path, index=None):
         return FileStat(name=path.original, size=1, type=FileType.TEXT)
 
     out, _ = await generic_stat([_spec("a"), _spec("b")],
@@ -149,7 +149,7 @@ async def test_stat_multiple_paths():
 @pytest.mark.asyncio
 async def test_stat_missing_operand():
 
-    async def stat_fn(accessor, path):
+    async def stat_fn(accessor, path, index=None):
         return FileStat(name="x")
 
     with pytest.raises(ValueError, match="missing operand"):

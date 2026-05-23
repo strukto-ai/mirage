@@ -28,7 +28,7 @@ async def walk(
     *,
     readdir: Callable[[PathSpec, IndexCacheStore | None],
                       Awaitable[list[str]]],
-    stat: Callable[[PathSpec], Awaitable[FileStat]],
+    stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
     all_files: bool = False,
     sort_by: LsSortBy = LsSortBy.NAME,
     reverse: bool = False,
@@ -39,7 +39,7 @@ async def walk(
     warnings: list[str] = []
     if list_dir:
         try:
-            return [await stat(path)], warnings
+            return [await stat(path, index)], warnings
         except (FileNotFoundError, ValueError) as exc:
             warnings.append(f"ls: cannot access '{path.original}': {exc}")
             return [], warnings
@@ -57,7 +57,7 @@ async def walk(
                               resolved=False,
                               prefix=path.prefix)
         try:
-            s = await stat(entry_spec)
+            s = await stat(entry_spec, index)
         except (FileNotFoundError, ValueError) as exc:
             warnings.append(f"ls: cannot access '{entry}': {exc}")
             continue
@@ -138,7 +138,7 @@ async def walk_grouped(
     *,
     readdir: Callable[[PathSpec, IndexCacheStore | None],
                       Awaitable[list[str]]],
-    stat: Callable[[PathSpec], Awaitable[FileStat]],
+    stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
     all_files: bool = False,
     sort_by: LsSortBy = LsSortBy.NAME,
     reverse: bool = False,
@@ -213,7 +213,7 @@ async def ls(
     *,
     readdir: Callable[[PathSpec, IndexCacheStore | None],
                       Awaitable[list[str]]],
-    stat: Callable[[PathSpec], Awaitable[FileStat]],
+    stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
     long: bool = False,
     one_per_line: bool = False,
     all_files: bool = False,

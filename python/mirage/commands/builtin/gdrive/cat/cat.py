@@ -17,12 +17,12 @@ from collections.abc import AsyncIterator
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.gdrive._provision import file_read_provision
+from mirage.commands.builtin.generic.cat import cat as generic_cat
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
 from mirage.core.gdrive.stream import read_stream as gdrive_read_stream
-from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -45,14 +45,6 @@ async def cat_provision(
         index=index)
 
 
-async def _number_lines_stream(
-        source: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
-    num = 1
-    async for line in AsyncLineIterator(source):
-        yield f"     {num}\t".encode() + line + b"\n"
-        num += 1
-
-
 @command("cat", resource="gdrive", spec=SPECS["cat"], provision=cat_provision)
 async def cat(
     accessor: GDriveAccessor,
@@ -71,14 +63,14 @@ async def cat(
             io = IOResult(reads={p.strip_prefix: result},
                           cache=[p.strip_prefix])
             if n:
-                return _number_lines_stream(yield_bytes(result)), io
+                return generic_cat(result, number_lines=True), io
             return yield_bytes(result), io
         cachable = CachableAsyncIterator(result)
         io = IOResult(reads={p.strip_prefix: cachable}, cache=[p.strip_prefix])
         if n:
-            return _number_lines_stream(cachable), io
+            return generic_cat(cachable, number_lines=True), io
         return cachable, io
     source = _resolve_source(stdin, "cat: missing operand")
     if n:
-        return _number_lines_stream(source), IOResult()
+        return generic_cat(source, number_lines=True), IOResult()
     return source, IOResult()

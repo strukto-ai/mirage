@@ -18,7 +18,7 @@ def _make_fs_backend(tree: dict[str, FileStat]):
     type == FileType.DIRECTORY. readdir lists direct children of the path.
     """
 
-    async def stat(p: PathSpec) -> FileStat:
+    async def stat(p: PathSpec, index=None) -> FileStat:
         if p.original not in tree:
             raise FileNotFoundError(p.original)
         return tree[p.original]
