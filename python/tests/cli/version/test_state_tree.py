@@ -16,8 +16,9 @@ import io
 
 import pytest
 
-from mirage.cli.version.mapping import (blob_to_meta, meta_to_blob, to_state,
-                                        to_tree_inputs, tree_inputs_from_state)
+from mirage.cli.version.state_tree import (blob_to_meta, meta_to_blob,
+                                           to_state, to_tree_inputs,
+                                           tree_inputs_from_state)
 from mirage.resource.ram import RAMResource
 from mirage.types import (CacheKey, FingerprintKey, MountKey, MountMode,
                           SessionKey, StateKey)

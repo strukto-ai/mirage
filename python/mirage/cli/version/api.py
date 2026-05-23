@@ -12,9 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.cli.version.mapping import (CACHE_PREFIX, META_PATH, blob_to_meta,
-                                        meta_to_blob, to_state,
-                                        tree_inputs_from_state)
+from mirage.cli.version.state_tree import (CACHE_PREFIX, META_PATH,
+                                           blob_to_meta, meta_to_blob,
+                                           to_state, tree_inputs_from_state)
 from mirage.cli.version.store import VersionStore
 from mirage.types import DriftPolicy, StateKey
 from mirage.workspace.snapshot import (apply_state_dict, install_fingerprints,

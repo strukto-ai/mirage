@@ -27,7 +27,7 @@ from mirage.cli.output import (emit, fail, format_age, format_table,
 from mirage.cli.version.api import branch as version_branch
 from mirage.cli.version.api import (commit_state, read_version, resolve_ref,
                                     status_state, version_diff, version_log)
-from mirage.cli.version.mapping import to_state
+from mirage.cli.version.state_tree import to_state
 from mirage.cli.version.store import VersionStore
 from mirage.config import _interpolate_env, load_config
 from mirage.workspace.snapshot import read_tar, write_tar

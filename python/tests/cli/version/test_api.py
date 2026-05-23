@@ -18,7 +18,7 @@ from mirage.cli.version.api import (branch, checkout, commit, commit_state,
                                     read_version, resolve_ref, snapshot_tree,
                                     status, status_state, version_diff,
                                     version_log)
-from mirage.cli.version.mapping import META_PATH
+from mirage.cli.version.state_tree import META_PATH
 from mirage.cli.version.store import VersionStore
 from mirage.resource.ram import RAMResource
 from mirage.types import CacheKey, MountMode, StateKey
