@@ -28,6 +28,7 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 SEED_OBJECTS = ["example.jsonl", "example.json"]
 S3_BUCKET = "mirage-integ-s3"
 GCS_BUCKET = "mirage-integ-gcs"
+MOUNTS = ["/s3", "/gcs"]
 CREDS = dict(aws_access_key_id="testing",
              aws_secret_access_key="testing",
              region_name="us-east-1")
@@ -144,16 +145,17 @@ async def main() -> None:
     try:
         _seed(endpoint)
         ws = _build_workspace(endpoint)
-        for name, tmpl in PER_MOUNT_CASES:
-            await _run(ws, f"s3:{name}", tmpl.format(m="/s3"))
-        for name, tmpl in PER_MOUNT_CASES:
-            await _run(ws, f"gcs:{name}", tmpl.format(m="/gcs"))
+        for mount in MOUNTS:
+            tag = mount.lstrip("/")
+            for name, tmpl in PER_MOUNT_CASES:
+                await _run(ws, f"{tag}:{name}", tmpl.format(m=mount))
         for name, cmd in CROSS_CASES:
             await _run(ws, f"cross:{name}", cmd)
-        for name, tmpl in STREAMING_CASES:
-            await _measure(ws, f"s3:stream:{name}", tmpl.format(m="/s3"))
-        for name, tmpl in STREAMING_CASES:
-            await _measure(ws, f"gcs:stream:{name}", tmpl.format(m="/gcs"))
+        for mount in MOUNTS:
+            tag = mount.lstrip("/")
+            for name, tmpl in STREAMING_CASES:
+                await _measure(ws, f"{tag}:stream:{name}",
+                               tmpl.format(m=mount))
     finally:
         server.stop()
 
