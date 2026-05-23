@@ -20,6 +20,11 @@ from mirage.workspace.snapshot.tar_io import _json_default
 from mirage.workspace.snapshot.utils import FORMAT_VERSION
 
 META_PATH = ".mirage-meta.json"
+CACHE_PREFIX = ".mirage-cache/"
+
+
+def _is_reserved(tree_path: str) -> bool:
+    return tree_path == META_PATH or tree_path.startswith(CACHE_PREFIX)
 
 
 def _tree_path(prefix: str, rel: str) -> str:
@@ -84,7 +89,25 @@ def tree_inputs_from_state(state: dict) -> tuple[dict[str, bytes], dict]:
         CacheKey.LIMIT: cache[CacheKey.LIMIT],
         CacheKey.MAX_DRAIN_BYTES: cache[CacheKey.MAX_DRAIN_BYTES],
     }
-    meta = {"mounts": mounts_meta, "pins": {}, "config": config}
+    cache_meta: list[dict] = []
+    for i, entry in enumerate(cache[CacheKey.ENTRIES]):
+        ref = f"{CACHE_PREFIX}{i}"
+        entries[ref] = entry[CacheKey.DATA]
+        cache_meta.append({
+            CacheKey.KEY: entry[CacheKey.KEY],
+            CacheKey.FINGERPRINT: entry.get(CacheKey.FINGERPRINT),
+            CacheKey.TTL: entry.get(CacheKey.TTL),
+            CacheKey.CACHED_AT: entry.get(CacheKey.CACHED_AT),
+            CacheKey.SIZE: entry.get(CacheKey.SIZE),
+            "ref": ref,
+        })
+    meta = {
+        "mounts": mounts_meta,
+        "config": config,
+        "cache": cache_meta,
+        "fingerprints": state.get(StateKey.FINGERPRINTS) or [],
+        "sessions": state.get(StateKey.SESSIONS) or [],
+    }
     return entries, meta
 
 
@@ -96,6 +119,8 @@ def to_state(entries: dict[str, bytes], meta: dict) -> dict:
         resource_state = dict(mount[MountKey.RESOURCE_STATE])
         files: dict[str, bytes] = {}
         for tree_path, data in entries.items():
+            if _is_reserved(tree_path):
+                continue
             if _belongs(tree_prefix, tree_path):
                 files[_rel_path(prefix, tree_path)] = data
         resource_state[ResourceStateKey.FILES] = files
@@ -108,6 +133,16 @@ def to_state(entries: dict[str, bytes], meta: dict) -> dict:
             MountKey.RESOURCE_STATE: resource_state,
         })
     config = meta.get("config", {})
+    cache_entries: list[dict] = []
+    for c in meta.get("cache", []):
+        cache_entries.append({
+            CacheKey.KEY: c[CacheKey.KEY],
+            CacheKey.DATA: entries[c["ref"]],
+            CacheKey.FINGERPRINT: c.get(CacheKey.FINGERPRINT),
+            CacheKey.TTL: c.get(CacheKey.TTL),
+            CacheKey.CACHED_AT: c.get(CacheKey.CACHED_AT),
+            CacheKey.SIZE: c.get(CacheKey.SIZE),
+        })
     return {
         StateKey.VERSION:
         FORMAT_VERSION,
@@ -115,7 +150,8 @@ def to_state(entries: dict[str, bytes], meta: dict) -> dict:
         config.get(StateKey.MIRAGE_VERSION, "unknown"),
         StateKey.MOUNTS:
         mounts,
-        StateKey.SESSIONS: [],
+        StateKey.SESSIONS:
+        meta.get("sessions", []),
         StateKey.DEFAULT_SESSION_ID:
         config.get(StateKey.DEFAULT_SESSION_ID, "default"),
         StateKey.DEFAULT_AGENT_ID:
@@ -125,11 +161,12 @@ def to_state(entries: dict[str, bytes], meta: dict) -> dict:
         StateKey.CACHE: {
             CacheKey.LIMIT: config.get(CacheKey.LIMIT, "512MB"),
             CacheKey.MAX_DRAIN_BYTES: config.get(CacheKey.MAX_DRAIN_BYTES),
-            CacheKey.ENTRIES: [],
+            CacheKey.ENTRIES: cache_entries,
         },
         StateKey.HISTORY:
         None,
         StateKey.JOBS: [],
-        StateKey.FINGERPRINTS: [],
+        StateKey.FINGERPRINTS:
+        meta.get("fingerprints", []),
         StateKey.LIVE_ONLY_MOUNTS: [],
     }

@@ -21,9 +21,20 @@ from mirage.cli.version.api import (branch, checkout, commit, commit_state,
 from mirage.cli.version.mapping import META_PATH
 from mirage.cli.version.store import VersionStore
 from mirage.resource.ram import RAMResource
-from mirage.types import MountMode
+from mirage.types import CacheKey, MountMode, StateKey
 from mirage.workspace import Workspace
 from mirage.workspace.snapshot import to_state_dict
+
+
+def _cache_entry(data: bytes) -> dict:
+    return {
+        CacheKey.KEY: "k",
+        CacheKey.DATA: data,
+        CacheKey.FINGERPRINT: None,
+        CacheKey.TTL: None,
+        CacheKey.CACHED_AT: 0.0,
+        CacheKey.SIZE: len(data),
+    }
 
 
 @pytest.mark.asyncio
@@ -98,6 +109,28 @@ async def test_status_reports_uncommitted_changes(tmp_path):
 
     st = await status(store, ws, "main")
     assert st["modified"] == ["m/a.txt"]
+
+
+@pytest.mark.asyncio
+async def test_diff_ignores_cache_churn(tmp_path):
+    ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    store = await VersionStore.open(tmp_path / ".mirage")
+    await ws.execute("echo one > /m/a.txt")
+
+    s1 = to_state_dict(ws)
+    s1[StateKey.CACHE][CacheKey.ENTRIES] = [_cache_entry(b"AAA")]
+    c1 = await commit_state(store, s1, message="first")
+
+    s2 = to_state_dict(ws)
+    s2[StateKey.CACHE][CacheKey.ENTRIES] = [_cache_entry(b"BBB")]
+    c2 = await commit_state(store, s2, message="second")
+
+    assert await version_diff(store, c1, c2) == {
+        "added": [],
+        "modified": [],
+        "deleted": [],
+    }
 
 
 @pytest.mark.asyncio

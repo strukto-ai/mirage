@@ -19,7 +19,8 @@ import pytest
 from mirage.cli.version.mapping import (blob_to_meta, meta_to_blob, to_state,
                                         to_tree_inputs, tree_inputs_from_state)
 from mirage.resource.ram import RAMResource
-from mirage.types import MountKey, MountMode
+from mirage.types import (CacheKey, FingerprintKey, MountKey, MountMode,
+                          SessionKey, StateKey)
 from mirage.workspace import Workspace
 from mirage.workspace.snapshot.manifest import split_manifest_and_blobs
 from mirage.workspace.snapshot.state import to_state_dict
@@ -92,6 +93,98 @@ async def test_to_state_is_tar_loadable():
     restored = read_tar(buf)
 
     assert _mount_files(restored, "/m/")["/a.txt"] == b"hello\n"
+
+
+@pytest.mark.asyncio
+async def test_cache_fingerprints_sessions_round_trip():
+    ws = Workspace({"/": (RAMResource(), MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    await ws.execute("echo hi > /a.txt")
+    state = to_state_dict(ws)
+    state[StateKey.CACHE][CacheKey.ENTRIES] = [{
+        CacheKey.KEY: "/a.txt",
+        CacheKey.DATA: b"cached-bytes",
+        CacheKey.FINGERPRINT: "etag-1",
+        CacheKey.TTL: None,
+        CacheKey.CACHED_AT: 123.0,
+        CacheKey.SIZE: 12,
+    }]
+    state[StateKey.FINGERPRINTS] = [{
+        FingerprintKey.PATH: "/a.txt",
+        FingerprintKey.MOUNT_PREFIX: "/",
+        FingerprintKey.FINGERPRINT: "etag-1",
+        FingerprintKey.REVISION: "v1",
+    }]
+    state[StateKey.SESSIONS] = [{
+        SessionKey.SESSION_ID: "agent_a",
+        SessionKey.CWD: "/sub",
+        SessionKey.ENV: {
+            "FOO": "bar"
+        },
+    }]
+
+    entries, meta = tree_inputs_from_state(state)
+    meta = blob_to_meta(meta_to_blob(meta))
+    restored = to_state(entries, meta)
+
+    cache_entries = restored[StateKey.CACHE][CacheKey.ENTRIES]
+    assert len(cache_entries) == 1
+    assert cache_entries[0][CacheKey.DATA] == b"cached-bytes"
+    assert cache_entries[0][CacheKey.KEY] == "/a.txt"
+    assert restored[StateKey.FINGERPRINTS][0][FingerprintKey.REVISION] == "v1"
+    assert restored[StateKey.SESSIONS][0][SessionKey.CWD] == "/sub"
+    assert restored[StateKey.SESSIONS][0][SessionKey.ENV] == {"FOO": "bar"}
+
+    files = _mount_files(restored, "/")
+    assert files["/a.txt"] == b"hi\n"
+    assert all(".mirage-cache" not in k for k in files)
+
+
+@pytest.mark.asyncio
+async def test_cache_and_pins_survive_tar():
+    ws = Workspace({"/": (RAMResource(), MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    await ws.execute("echo hi > /a.txt")
+    state = to_state_dict(ws)
+    state[StateKey.CACHE][CacheKey.ENTRIES] = [{
+        CacheKey.KEY: "/a.txt",
+        CacheKey.DATA: b"cached-bytes",
+        CacheKey.FINGERPRINT: "etag-1",
+        CacheKey.TTL: None,
+        CacheKey.CACHED_AT: 1.0,
+        CacheKey.SIZE: 12,
+    }]
+    state[StateKey.FINGERPRINTS] = [{
+        FingerprintKey.PATH: "/a.txt",
+        FingerprintKey.MOUNT_PREFIX: "/",
+        FingerprintKey.REVISION: "v1",
+    }]
+    state[StateKey.SESSIONS] = [{
+        SessionKey.SESSION_ID: "agent_a",
+        SessionKey.CWD: "/sub",
+        SessionKey.ENV: {
+            "FOO": "bar"
+        },
+    }]
+
+    entries, meta = tree_inputs_from_state(state)
+    meta = blob_to_meta(meta_to_blob(meta))
+    rebuilt = to_state(entries, meta)
+
+    manifest, blobs = split_manifest_and_blobs(rebuilt)
+    buf = io.BytesIO()
+    write_tar(buf, manifest, blobs)
+    buf.seek(0)
+    restored = read_tar(buf)
+
+    ce = restored[StateKey.CACHE][CacheKey.ENTRIES]
+    assert ce[0][CacheKey.DATA] == b"cached-bytes"
+    assert restored[StateKey.FINGERPRINTS][0][FingerprintKey.REVISION] == "v1"
+    sessions = {
+        s[SessionKey.SESSION_ID]: s
+        for s in restored[StateKey.SESSIONS]
+    }
+    assert sessions["agent_a"][SessionKey.CWD] == "/sub"
 
 
 def test_meta_blob_round_trip():

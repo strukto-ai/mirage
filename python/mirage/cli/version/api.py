@@ -12,8 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.cli.version.mapping import (META_PATH, blob_to_meta, meta_to_blob,
-                                        to_state, tree_inputs_from_state)
+from mirage.cli.version.mapping import (CACHE_PREFIX, META_PATH, blob_to_meta,
+                                        meta_to_blob, to_state,
+                                        tree_inputs_from_state)
 from mirage.cli.version.store import VersionStore
 from mirage.types import DriftPolicy, StateKey
 from mirage.workspace.snapshot import (apply_state_dict, install_fingerprints,
@@ -65,14 +66,11 @@ async def read_version(store: VersionStore,
     meta_oid = contents.pop(META_PATH, None)
     meta = (blob_to_meta(await store.read_blob(meta_oid))
             if meta_oid is not None else {
-                "mounts": [],
-                "pins": {}
+                "mounts": []
             })
-    pins = meta.get("pins", {})
     entries: dict[str, bytes] = {}
     for path, oid in contents.items():
-        if path not in pins:
-            entries[path] = await store.read_blob(oid)
+        entries[path] = await store.read_blob(oid)
     return entries, meta
 
 
@@ -99,7 +97,10 @@ async def checkout(store: VersionStore,
 
 def _strip_meta(changes: dict[str, list[str]]) -> dict[str, list[str]]:
     return {
-        kind: [p for p in paths if p != META_PATH]
+        kind: [
+            p for p in paths
+            if p != META_PATH and not p.startswith(CACHE_PREFIX)
+        ]
         for kind, paths in changes.items()
     }
 
