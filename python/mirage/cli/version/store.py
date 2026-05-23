@@ -35,6 +35,15 @@ _CLI_EXTRA = ("workspace versioning requires the 'cli' extra: "
               "pip install mirage-ai[cli]")
 
 
+class HeadMovedError(Exception):
+
+    def __init__(self, branch: str) -> None:
+        self.branch = branch
+        super().__init__(
+            f"branch {branch!r} moved since this commit was prepared; "
+            "refusing to overwrite (re-read the head and retry)")
+
+
 def _open_repo(path: Path) -> Repo:
     if (path / "objects").is_dir():
         return Repo(str(path))
@@ -92,7 +101,13 @@ def _commit(repo: Repo, tree_oid: bytes, parents: list[bytes], branch: str,
     commit.message = message.encode()
     repo.object_store.add_object(commit)
     ref = b"refs/heads/" + branch.encode()
-    repo.refs[ref] = commit.id
+    expected_old = parents[0] if parents else None
+    if expected_old is None:
+        ok = repo.refs.add_if_new(ref, commit.id)
+    else:
+        ok = repo.refs.set_if_equals(ref, expected_old, commit.id)
+    if not ok:
+        raise HeadMovedError(branch)
     repo.refs.set_symbolic_ref(b"HEAD", ref)
     return commit.id
 

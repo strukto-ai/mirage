@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from mirage.cli.version.store import VersionStore
+from mirage.cli.version.store import HeadMovedError, VersionStore
 
 
 @pytest.mark.asyncio
@@ -100,6 +100,30 @@ async def test_commit_advances_branch(tmp_path: Path):
     commit = await store.read_commit(c2)
     assert commit.parents == [c1]
     assert commit.message == b"second"
+
+
+@pytest.mark.asyncio
+async def test_commit_rejects_stale_head(tmp_path: Path):
+    store = await VersionStore.open(tmp_path / ".mirage")
+    c1 = await store.commit(await store.write_tree(
+        {"a.txt": await store.write_blob(b"v1")}),
+                            parents=[],
+                            branch="main",
+                            message="first")
+    c2 = await store.commit(await store.write_tree(
+        {"a.txt": await store.write_blob(b"v2")}),
+                            parents=[c1],
+                            branch="main",
+                            message="second")
+    assert await store.head("main") == c2
+
+    with pytest.raises(HeadMovedError):
+        await store.commit(await store.write_tree(
+            {"a.txt": await store.write_blob(b"v3")}),
+                           parents=[c1],
+                           branch="main",
+                           message="stale")
+    assert await store.head("main") == c2
 
 
 @pytest.mark.asyncio

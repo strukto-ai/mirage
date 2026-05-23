@@ -28,7 +28,7 @@ from mirage.cli.version.api import branch as version_branch
 from mirage.cli.version.api import (commit_state, read_version, resolve_ref,
                                     status_state, version_diff, version_log)
 from mirage.cli.version.state_tree import to_state
-from mirage.cli.version.store import VersionStore
+from mirage.cli.version.store import HeadMovedError, VersionStore
 from mirage.config import _interpolate_env, load_config
 from mirage.workspace.snapshot import read_tar, write_tar
 from mirage.workspace.snapshot.manifest import split_manifest_and_blobs
@@ -342,8 +342,11 @@ def commit_cmd(
     with tempfile.TemporaryDirectory() as td:
         tar_path = Path(td) / "snapshot.tar"
         _daemon_snapshot(workspace_id, tar_path)
-        version = asyncio.run(_do_commit(store_path, tar_path, branch,
-                                         message))
+        try:
+            version = asyncio.run(
+                _do_commit(store_path, tar_path, branch, message))
+        except HeadMovedError as e:
+            fail(str(e), exit_code=2)
     emit({
         "version": version,
         "branch": branch
