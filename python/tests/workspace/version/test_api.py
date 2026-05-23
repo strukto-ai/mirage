@@ -17,9 +17,11 @@ import pytest
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
+from mirage.workspace.snapshot import to_state_dict
 from mirage.workspace.version.api import (branch, checkout, commit,
-                                          read_version, snapshot_tree, status,
-                                          version_diff, version_log)
+                                          commit_state, read_version,
+                                          snapshot_tree, status, version_diff,
+                                          version_log)
 from mirage.workspace.version.mapping import META_PATH
 from mirage.workspace.version.store import VersionStore
 
@@ -96,6 +98,22 @@ async def test_status_reports_uncommitted_changes(tmp_path):
 
     st = await status(store, ws, "main")
     assert st["modified"] == ["m/a.txt"]
+
+
+@pytest.mark.asyncio
+async def test_commit_state_creates_version_from_state(tmp_path):
+    ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    store = await VersionStore.open(tmp_path / ".mirage")
+    await ws.execute("echo hi > /m/a.txt")
+
+    version = await commit_state(store,
+                                 to_state_dict(ws),
+                                 branch="main",
+                                 message="from state")
+
+    entries, _ = await read_version(store, version)
+    assert entries["m/a.txt"] == b"hi\n"
 
 
 @pytest.mark.asyncio

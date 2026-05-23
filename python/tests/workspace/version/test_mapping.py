@@ -19,7 +19,8 @@ from mirage.types import MountKey, MountMode
 from mirage.workspace import Workspace
 from mirage.workspace.snapshot.state import to_state_dict
 from mirage.workspace.version.mapping import (blob_to_meta, meta_to_blob,
-                                              to_state, to_tree_inputs)
+                                              to_state, to_tree_inputs,
+                                              tree_inputs_from_state)
 
 
 def _mount_files(state: dict, prefix: str) -> dict:
@@ -57,6 +58,19 @@ async def test_to_state_round_trips_files():
     state = to_state(entries, meta)
 
     assert _mount_files(state, "/m/") == original_files
+
+
+@pytest.mark.asyncio
+async def test_tree_inputs_from_state_matches_ws_path():
+    ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    await ws.execute("echo hi > /m/a.txt")
+
+    entries_ws, _ = to_tree_inputs(ws)
+    entries_state, _ = tree_inputs_from_state(to_state_dict(ws))
+
+    assert entries_ws == entries_state
+    assert entries_state["m/a.txt"] == b"hi\n"
 
 
 def test_meta_blob_round_trip():

@@ -13,15 +13,20 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.types import DriftPolicy, StateKey
-from mirage.workspace.snapshot import apply_state_dict, install_fingerprints
+from mirage.workspace.snapshot import (apply_state_dict, install_fingerprints,
+                                       to_state_dict)
 from mirage.workspace.version.mapping import (META_PATH, blob_to_meta,
                                               meta_to_blob, to_state,
-                                              to_tree_inputs)
+                                              tree_inputs_from_state)
 from mirage.workspace.version.store import VersionStore
 
 
 async def snapshot_tree(store: VersionStore, ws) -> bytes:
-    entries, meta = to_tree_inputs(ws)
+    return await snapshot_tree_from_state(store, to_state_dict(ws))
+
+
+async def snapshot_tree_from_state(store: VersionStore, state: dict) -> bytes:
+    entries, meta = tree_inputs_from_state(state)
     tree_entries: dict[str, bytes] = {}
     for path, data in entries.items():
         tree_entries[path] = await store.write_blob(data)
@@ -33,7 +38,14 @@ async def commit(store: VersionStore,
                  ws,
                  branch: str = "main",
                  message: str = "") -> bytes:
-    tree = await snapshot_tree(store, ws)
+    return await commit_state(store, to_state_dict(ws), branch, message)
+
+
+async def commit_state(store: VersionStore,
+                       state: dict,
+                       branch: str = "main",
+                       message: str = "") -> bytes:
+    tree = await snapshot_tree_from_state(store, state)
     parents: list[bytes] = []
     if branch in await store.branches():
         parents = [await store.head(branch)]

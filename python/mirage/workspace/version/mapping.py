@@ -49,7 +49,10 @@ def blob_to_meta(data: bytes) -> dict:
 
 
 def to_tree_inputs(ws) -> tuple[dict[str, bytes], dict]:
-    state = to_state_dict(ws)
+    return tree_inputs_from_state(to_state_dict(ws))
+
+
+def tree_inputs_from_state(state: dict) -> tuple[dict[str, bytes], dict]:
     entries: dict[str, bytes] = {}
     mounts_meta: list[dict] = []
     for mount in state[StateKey.MOUNTS]:
