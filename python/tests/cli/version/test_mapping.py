@@ -14,13 +14,12 @@
 
 import pytest
 
+from mirage.cli.version.mapping import (blob_to_meta, meta_to_blob, to_state,
+                                        to_tree_inputs, tree_inputs_from_state)
 from mirage.resource.ram import RAMResource
 from mirage.types import MountKey, MountMode
 from mirage.workspace import Workspace
 from mirage.workspace.snapshot.state import to_state_dict
-from mirage.workspace.version.mapping import (blob_to_meta, meta_to_blob,
-                                              to_state, to_tree_inputs,
-                                              tree_inputs_from_state)
 
 
 def _mount_files(state: dict, prefix: str) -> dict:
@@ -76,10 +75,14 @@ async def test_tree_inputs_from_state_matches_ws_path():
 def test_meta_blob_round_trip():
     meta = {
         "mounts": [],
-        "pins": {"/s3/a.txt": {"rev": "v123", "fp": "etag-abc"}},
+        "pins": {
+            "/s3/a.txt": {
+                "rev": "v123",
+                "fp": "etag-abc"
+            }
+        },
     }
 
     parsed = blob_to_meta(meta_to_blob(meta))
 
     assert parsed["pins"]["/s3/a.txt"] == {"rev": "v123", "fp": "etag-abc"}
-

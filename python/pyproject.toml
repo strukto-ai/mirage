@@ -155,7 +155,8 @@ all = [
     "mirage-ai[openhands]",
     "mirage-ai[daytona]",
 ]
-version = [
+# --- cli (workspace versioning) ---
+cli = [
     "dulwich>=1.2.4",
 ]
 

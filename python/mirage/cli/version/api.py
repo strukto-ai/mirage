@@ -12,13 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.cli.version.mapping import (META_PATH, blob_to_meta, meta_to_blob,
+                                        to_state, tree_inputs_from_state)
+from mirage.cli.version.store import VersionStore
 from mirage.types import DriftPolicy, StateKey
 from mirage.workspace.snapshot import (apply_state_dict, install_fingerprints,
                                        to_state_dict)
-from mirage.workspace.version.mapping import (META_PATH, blob_to_meta,
-                                              meta_to_blob, to_state,
-                                              tree_inputs_from_state)
-from mirage.workspace.version.store import VersionStore
 
 
 async def snapshot_tree(store: VersionStore, ws) -> bytes:
@@ -94,8 +93,8 @@ async def checkout(store: VersionStore,
     state = to_state(entries, meta)
     await ws._cache.clear()
     apply_state_dict(ws, state)
-    install_fingerprints(ws, state.get(StateKey.FINGERPRINTS) or [],
-                         drift_policy)
+    install_fingerprints(ws,
+                         state.get(StateKey.FINGERPRINTS) or [], drift_policy)
 
 
 def _strip_meta(changes: dict[str, list[str]]) -> dict[str, list[str]]:

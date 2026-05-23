@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from mirage.workspace.version.store import VersionStore
+from mirage.cli.version.store import VersionStore
 
 
 @pytest.mark.asyncio
@@ -38,9 +38,9 @@ async def test_open_reuses_existing_repo(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_open_without_dulwich_raises_clear_error(tmp_path: Path,
                                                        monkeypatch):
-    from mirage.workspace.version import store as store_mod
+    from mirage.cli.version import store as store_mod
     monkeypatch.setattr(store_mod, "Repo", None)
-    with pytest.raises(ImportError, match="version"):
+    with pytest.raises(ImportError, match="cli"):
         await VersionStore.open(tmp_path / ".mirage")
 
 

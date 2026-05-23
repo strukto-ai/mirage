@@ -14,16 +14,15 @@
 
 import pytest
 
+from mirage.cli.version.api import (branch, checkout, commit, commit_state,
+                                    read_version, snapshot_tree, status,
+                                    version_diff, version_log)
+from mirage.cli.version.mapping import META_PATH
+from mirage.cli.version.store import VersionStore
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
 from mirage.workspace.snapshot import to_state_dict
-from mirage.workspace.version.api import (branch, checkout, commit,
-                                          commit_state, read_version,
-                                          snapshot_tree, status, version_diff,
-                                          version_log)
-from mirage.workspace.version.mapping import META_PATH
-from mirage.workspace.version.store import VersionStore
 
 
 @pytest.mark.asyncio

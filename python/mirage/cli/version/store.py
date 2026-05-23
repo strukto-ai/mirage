@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from __future__ import annotations
-
 import asyncio
 import stat
 import time
@@ -33,8 +31,8 @@ except ImportError:
 FILE_MODE = 0o100644
 DIR_MODE = 0o40000
 AUTHOR = b"mirage <mirage@local>"
-_VERSION_EXTRA = ("workspace versioning requires the 'version' extra: "
-                  "pip install mirage-ai[version]")
+_CLI_EXTRA = ("workspace versioning requires the 'cli' extra: "
+              "pip install mirage-ai[cli]")
 
 
 def _open_repo(path: Path) -> Repo:
@@ -152,7 +150,7 @@ class VersionStore:
     @classmethod
     async def open(cls, path: str | Path) -> "VersionStore":
         if Repo is None:
-            raise ImportError(_VERSION_EXTRA)
+            raise ImportError(_CLI_EXTRA)
         p = Path(path)
         repo = await asyncio.to_thread(_open_repo, p)
         return cls(repo, p)
@@ -189,6 +187,5 @@ class VersionStore:
     async def log(self, branch: str) -> list[bytes]:
         return await asyncio.to_thread(_log, self._repo, branch)
 
-    async def diff(self, tree_a: bytes,
-                   tree_b: bytes) -> dict[str, list[str]]:
+    async def diff(self, tree_a: bytes, tree_b: bytes) -> dict[str, list[str]]:
         return await asyncio.to_thread(_diff, self._repo, tree_a, tree_b)
