@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import io
+
 import pytest
 
 from mirage.cli.version.mapping import (blob_to_meta, meta_to_blob, to_state,
@@ -19,7 +21,9 @@ from mirage.cli.version.mapping import (blob_to_meta, meta_to_blob, to_state,
 from mirage.resource.ram import RAMResource
 from mirage.types import MountKey, MountMode
 from mirage.workspace import Workspace
+from mirage.workspace.snapshot.manifest import split_manifest_and_blobs
 from mirage.workspace.snapshot.state import to_state_dict
+from mirage.workspace.snapshot.tar_io import read_tar, write_tar
 
 
 def _mount_files(state: dict, prefix: str) -> dict:
@@ -70,6 +74,24 @@ async def test_tree_inputs_from_state_matches_ws_path():
 
     assert entries_ws == entries_state
     assert entries_state["m/a.txt"] == b"hi\n"
+
+
+@pytest.mark.asyncio
+async def test_to_state_is_tar_loadable():
+    ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    await ws.execute("echo hello > /m/a.txt")
+
+    entries, meta = to_tree_inputs(ws)
+    state = to_state(entries, meta)
+
+    manifest, blobs = split_manifest_and_blobs(state)
+    buf = io.BytesIO()
+    write_tar(buf, manifest, blobs)
+    buf.seek(0)
+    restored = read_tar(buf)
+
+    assert _mount_files(restored, "/m/")["/a.txt"] == b"hello\n"
 
 
 def test_meta_blob_round_trip():

@@ -14,7 +14,7 @@
 
 import json
 
-from mirage.types import MountKey, ResourceStateKey, StateKey
+from mirage.types import CacheKey, MountKey, ResourceStateKey, StateKey
 from mirage.workspace.snapshot.state import to_state_dict
 from mirage.workspace.snapshot.tar_io import _json_default
 from mirage.workspace.snapshot.utils import FORMAT_VERSION
@@ -75,7 +75,16 @@ def tree_inputs_from_state(state: dict) -> tuple[dict[str, bytes], dict]:
             MountKey.RESOURCE_STATE:
             resource_state,
         })
-    meta = {"mounts": mounts_meta, "pins": {}}
+    cache = state[StateKey.CACHE]
+    config = {
+        StateKey.MIRAGE_VERSION: state[StateKey.MIRAGE_VERSION],
+        StateKey.DEFAULT_SESSION_ID: state[StateKey.DEFAULT_SESSION_ID],
+        StateKey.DEFAULT_AGENT_ID: state[StateKey.DEFAULT_AGENT_ID],
+        StateKey.CURRENT_AGENT_ID: state[StateKey.CURRENT_AGENT_ID],
+        CacheKey.LIMIT: cache[CacheKey.LIMIT],
+        CacheKey.MAX_DRAIN_BYTES: cache[CacheKey.MAX_DRAIN_BYTES],
+    }
+    meta = {"mounts": mounts_meta, "pins": {}, "config": config}
     return entries, meta
 
 
@@ -98,15 +107,28 @@ def to_state(entries: dict[str, bytes], meta: dict) -> dict:
             MountKey.RESOURCE_CLASS: mount[MountKey.RESOURCE_CLASS],
             MountKey.RESOURCE_STATE: resource_state,
         })
+    config = meta.get("config", {})
     return {
-        StateKey.VERSION: FORMAT_VERSION,
-        StateKey.MOUNTS: mounts,
+        StateKey.VERSION:
+        FORMAT_VERSION,
+        StateKey.MIRAGE_VERSION:
+        config.get(StateKey.MIRAGE_VERSION, "unknown"),
+        StateKey.MOUNTS:
+        mounts,
         StateKey.SESSIONS: [],
-        StateKey.DEFAULT_SESSION_ID: "default",
-        StateKey.DEFAULT_AGENT_ID: "default",
-        StateKey.CURRENT_AGENT_ID: "default",
-        StateKey.CACHE: {},
-        StateKey.HISTORY: None,
+        StateKey.DEFAULT_SESSION_ID:
+        config.get(StateKey.DEFAULT_SESSION_ID, "default"),
+        StateKey.DEFAULT_AGENT_ID:
+        config.get(StateKey.DEFAULT_AGENT_ID, "default"),
+        StateKey.CURRENT_AGENT_ID:
+        config.get(StateKey.CURRENT_AGENT_ID, "default"),
+        StateKey.CACHE: {
+            CacheKey.LIMIT: config.get(CacheKey.LIMIT, "512MB"),
+            CacheKey.MAX_DRAIN_BYTES: config.get(CacheKey.MAX_DRAIN_BYTES),
+            CacheKey.ENTRIES: [],
+        },
+        StateKey.HISTORY:
+        None,
         StateKey.JOBS: [],
         StateKey.FINGERPRINTS: [],
         StateKey.LIVE_ONLY_MOUNTS: [],

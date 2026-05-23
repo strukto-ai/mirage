@@ -76,7 +76,7 @@ async def read_version(store: VersionStore,
     return entries, meta
 
 
-async def _resolve_version(store: VersionStore, ref) -> bytes:
+async def resolve_ref(store: VersionStore, ref) -> bytes:
     if isinstance(ref, str):
         if ref in await store.branches():
             return await store.head(ref)
@@ -88,7 +88,7 @@ async def checkout(store: VersionStore,
                    ws,
                    ref,
                    drift_policy: DriftPolicy = DriftPolicy.STRICT) -> None:
-    version = await _resolve_version(store, ref)
+    version = await resolve_ref(store, ref)
     entries, meta = await read_version(store, version)
     state = to_state(entries, meta)
     await ws._cache.clear()
@@ -125,6 +125,12 @@ async def version_diff(store: VersionStore, version_a: bytes,
 async def status(store: VersionStore,
                  ws,
                  branch: str = "main") -> dict[str, list[str]]:
-    live_tree = await snapshot_tree(store, ws)
+    return await status_state(store, to_state_dict(ws), branch)
+
+
+async def status_state(store: VersionStore,
+                       state: dict,
+                       branch: str = "main") -> dict[str, list[str]]:
+    live_tree = await snapshot_tree_from_state(store, state)
     head_tree = (await store.read_commit(await store.head(branch))).tree
     return _strip_meta(await store.diff(head_tree, live_tree))
