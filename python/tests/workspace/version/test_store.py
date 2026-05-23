@@ -36,6 +36,15 @@ async def test_open_reuses_existing_repo(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_open_without_dulwich_raises_clear_error(tmp_path: Path,
+                                                       monkeypatch):
+    from mirage.workspace.version import store as store_mod
+    monkeypatch.setattr(store_mod, "Repo", None)
+    with pytest.raises(ImportError, match="version"):
+        await VersionStore.open(tmp_path / ".mirage")
+
+
+@pytest.mark.asyncio
 async def test_blob_roundtrip(tmp_path: Path):
     store = await VersionStore.open(tmp_path / ".mirage")
     oid = await store.write_blob(b"hello")

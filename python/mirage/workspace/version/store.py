@@ -12,19 +12,29 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from __future__ import annotations
+
 import asyncio
 import stat
 import time
 from pathlib import Path
 
-from dulwich.diff_tree import (CHANGE_ADD, CHANGE_DELETE, CHANGE_MODIFY,
-                               tree_changes)
-from dulwich.objects import Blob, Commit, Tree
-from dulwich.repo import Repo
+try:
+    from dulwich.diff_tree import (CHANGE_ADD, CHANGE_DELETE, CHANGE_MODIFY,
+                                   tree_changes)
+    from dulwich.objects import Blob, Commit, Tree
+    from dulwich.repo import Repo
+except ImportError:
+    Repo = None
+    Blob = Commit = Tree = None
+    tree_changes = None
+    CHANGE_ADD = CHANGE_DELETE = CHANGE_MODIFY = None
 
 FILE_MODE = 0o100644
 DIR_MODE = 0o40000
 AUTHOR = b"mirage <mirage@local>"
+_VERSION_EXTRA = ("workspace versioning requires the 'version' extra: "
+                  "pip install mirage-ai[version]")
 
 
 def _open_repo(path: Path) -> Repo:
@@ -141,6 +151,8 @@ class VersionStore:
 
     @classmethod
     async def open(cls, path: str | Path) -> "VersionStore":
+        if Repo is None:
+            raise ImportError(_VERSION_EXTRA)
         p = Path(path)
         repo = await asyncio.to_thread(_open_repo, p)
         return cls(repo, p)
