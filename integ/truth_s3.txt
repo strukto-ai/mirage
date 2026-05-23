@@ -128,3 +128,19 @@ ca04d1f4b6a5f1a774fb076af00a791e7f7ef70958300e314c4eafc563ac3bb9  /gcs/data/exam
 5678
 === cross:concat_wc ===
 11532
+=== s3:stream:head_c100 ===
+bytes=8192 lines=1 out0='{"type":"queue-operation","operation":"enqueue",'
+=== s3:stream:head_n1 ===
+bytes=8192 lines=1 out0='{"type":"queue-operation","operation":"enqueue",'
+=== s3:stream:grep_m1 ===
+bytes=8192 lines=1 out0='{"parentUuid":null,"isSidechain":false,"userType'
+=== s3:stream:cat_wc_full ===
+bytes=10414430 lines=1 out0='5766'
+=== gcs:stream:head_c100 ===
+bytes=8192 lines=1 out0='{"type":"queue-operation","operation":"enqueue",'
+=== gcs:stream:head_n1 ===
+bytes=8192 lines=1 out0='{"type":"queue-operation","operation":"enqueue",'
+=== gcs:stream:grep_m1 ===
+bytes=8192 lines=1 out0='{"parentUuid":null,"isSidechain":false,"userType'
+=== gcs:stream:cat_wc_full ===
+bytes=10414430 lines=1 out0='5766'

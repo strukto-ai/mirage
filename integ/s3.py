@@ -74,6 +74,17 @@ CROSS_CASES: list[tuple[str, str]] = [
      "cat /s3/data/example.jsonl /gcs/data/example.jsonl | wc -l"),
 ]
 
+# Streaming byte accounting mirroring examples/python/gcs/gcs.py: clear the
+# cache, run, and report bytes pulled from the backend. Early-exit commands
+# transfer far less than the full object, and the count is identical across
+# both mounts (parity). Timing is omitted so output stays deterministic.
+STREAMING_CASES: list[tuple[str, str]] = [
+    ("head_c100", "head -c 100 {m}/data/example.jsonl"),
+    ("head_n1", "head -n 1 {m}/data/example.jsonl"),
+    ("grep_m1", "grep -m 1 mirage {m}/data/example.jsonl"),
+    ("cat_wc_full", "cat {m}/data/example.jsonl | wc -l"),
+]
+
 
 def _seed(endpoint: str) -> None:
     client = boto3.client("s3", endpoint_url=endpoint, **CREDS)
@@ -112,6 +123,18 @@ async def _run(ws: Workspace, name: str, cmd: str) -> None:
     print(out, end="" if out.endswith("\n") else "\n")
 
 
+async def _measure(ws: Workspace, name: str, cmd: str) -> None:
+    await ws.cache.clear()
+    before = sum(rec.bytes for rec in ws.ops.records)
+    result = await ws.execute(cmd)
+    out = await result.stdout_str()
+    net = sum(rec.bytes for rec in ws.ops.records) - before
+    lines = out.strip().splitlines()
+    first = lines[0][:48] if lines else ""
+    print(f"=== {name} ===")
+    print(f"bytes={net} lines={len(lines)} out0={first!r}")
+
+
 async def main() -> None:
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
     server = ThreadedMotoServer(ip_address="127.0.0.1", port=0, verbose=False)
@@ -127,6 +150,10 @@ async def main() -> None:
             await _run(ws, f"gcs:{name}", tmpl.format(m="/gcs"))
         for name, cmd in CROSS_CASES:
             await _run(ws, f"cross:{name}", cmd)
+        for name, tmpl in STREAMING_CASES:
+            await _measure(ws, f"s3:stream:{name}", tmpl.format(m="/s3"))
+        for name, tmpl in STREAMING_CASES:
+            await _measure(ws, f"gcs:stream:{name}", tmpl.format(m="/gcs"))
     finally:
         server.stop()
 
