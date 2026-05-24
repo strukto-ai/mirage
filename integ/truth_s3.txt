@@ -1,12 +1,18 @@
 === s3:ls ===
 data
 === s3:ls_data ===
+example.feather
 example.json
 example.jsonl
+example.orc
+example.parquet
 === s3:tree ===
 └── data
+    ├── example.feather
     ├── example.json
-    └── example.jsonl
+    ├── example.jsonl
+    ├── example.orc
+    └── example.parquet
 === s3:stat ===
 15533 example.json
 === s3:cat_head ===
@@ -41,8 +47,11 @@ example.jsonl
 === s3:find_json ===
 /s3/data/example.json
 === s3:find_type_f ===
+/s3/data/example.feather
 /s3/data/example.json
 /s3/data/example.jsonl
+/s3/data/example.orc
+/s3/data/example.parquet
 === s3:jq_version ===
 "3.0"
 === s3:jq_team_names ===
@@ -56,15 +65,33 @@ example.jsonl
 f249ee110320adc2975cb6c7436c9a45  /s3/data/example.json
 === s3:sha256_json ===
 ca04d1f4b6a5f1a774fb076af00a791e7f7ef70958300e314c4eafc563ac3bb9  /s3/data/example.json
+=== s3:ls_l_data ===
+feather	2514	10 rows	3 cols		example.feather
+orc	631	10 rows	3 cols		example.orc
+parquet	2401	10 rows	3 cols		example.parquet
+-rw-r--r-- 1 user user    15533 Jan  1 00:00 example.json
+-rw-r--r-- 1 user user 10414430 Jan  1 00:00 example.jsonl
+=== s3:file_parquet ===
+parquet, 10 rows, 3 columns (id: int64, value: double, label: large_string)
+=== s3:file_orc ===
+orc, 10 rows, 3 columns, 1 stripes (id: int64, value: double, label: string)
+=== s3:file_feather ===
+feather, 10 rows, 3 columns (id: int64, value: double, label: large_string)
 === gcs:ls ===
 data
 === gcs:ls_data ===
+example.feather
 example.json
 example.jsonl
+example.orc
+example.parquet
 === gcs:tree ===
 └── data
+    ├── example.feather
     ├── example.json
-    └── example.jsonl
+    ├── example.jsonl
+    ├── example.orc
+    └── example.parquet
 === gcs:stat ===
 15533 example.json
 === gcs:cat_head ===
@@ -99,8 +126,11 @@ example.jsonl
 === gcs:find_json ===
 /gcs/data/example.json
 === gcs:find_type_f ===
+/gcs/data/example.feather
 /gcs/data/example.json
 /gcs/data/example.jsonl
+/gcs/data/example.orc
+/gcs/data/example.parquet
 === gcs:jq_version ===
 "3.0"
 === gcs:jq_team_names ===
@@ -114,6 +144,18 @@ example.jsonl
 f249ee110320adc2975cb6c7436c9a45  /gcs/data/example.json
 === gcs:sha256_json ===
 ca04d1f4b6a5f1a774fb076af00a791e7f7ef70958300e314c4eafc563ac3bb9  /gcs/data/example.json
+=== gcs:ls_l_data ===
+feather	2514	10 rows	3 cols		example.feather
+orc	631	10 rows	3 cols		example.orc
+parquet	2401	10 rows	3 cols		example.parquet
+-rw-r--r-- 1 user user    15533 Jan  1 00:00 example.json
+-rw-r--r-- 1 user user 10414430 Jan  1 00:00 example.jsonl
+=== gcs:file_parquet ===
+parquet, 10 rows, 3 columns (id: int64, value: double, label: large_string)
+=== gcs:file_orc ===
+orc, 10 rows, 3 columns, 1 stripes (id: int64, value: double, label: string)
+=== gcs:file_feather ===
+feather, 10 rows, 3 columns (id: int64, value: double, label: large_string)
 === cross:head1_s3 ===
 {"type":"queue-operation","operation":"enqueue","timestamp":"2026-03-17T13:35:35.319Z","sessionId":"664396f7-55a4-4604-8289-aa7142480db4"}
 === cross:head1_gcs ===

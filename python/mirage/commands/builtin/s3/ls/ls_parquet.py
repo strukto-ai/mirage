@@ -46,7 +46,7 @@ async def ls_parquet(
         raise ValueError("ls: missing operand")
     paths = await resolve_glob(accessor, paths, index)
     try:
-        s = await stat(accessor, paths[0])
+        s = await stat(accessor, paths[0], index)
         raw = await read_bytes(accessor, paths[0])
         rows, cols = parquet_ls(raw)
         size = s.size or 0
@@ -55,7 +55,7 @@ async def ls_parquet(
         return line.encode(), IOResult(reads={paths[0].strip_prefix: raw},
                                        cache=[paths[0].strip_prefix])
     except Exception:
-        s = await stat(accessor, paths[0])
+        s = await stat(accessor, paths[0], index)
         line = (f"parquet\t{s.size or 0}\t\t"
                 f"\t{s.modified or ''}\t{s.name}")
         return line.encode(), IOResult()

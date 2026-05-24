@@ -27,7 +27,10 @@ from mirage.resource.gcs import GCSConfig, GCSResource
 from mirage.resource.s3 import S3Config, S3Resource
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-SEED_OBJECTS = ["example.jsonl", "example.json"]
+SEED_OBJECTS = [
+    "example.jsonl", "example.json", "example.parquet", "example.orc",
+    "example.feather"
+]
 S3_BUCKET = "mirage-integ-s3"
 GCS_BUCKET = "mirage-integ-gcs"
 MOUNTS = ["/s3", "/gcs"]
@@ -77,6 +80,10 @@ PER_MOUNT_CASES: list[tuple[str, str]] = [
      " | grep queue-operation | sort | uniq | wc -l"),
     ("md5_json", "md5 {m}/data/example.json"),
     ("sha256_json", "sha256sum {m}/data/example.json"),
+    ("ls_l_data", "ls -l {m}/data/"),
+    ("file_parquet", "file {m}/data/example.parquet"),
+    ("file_orc", "file {m}/data/example.orc"),
+    ("file_feather", "file {m}/data/example.feather"),
 ]
 
 # Cross-mount fingerprints mirroring examples/python/cross/example.py: read the
