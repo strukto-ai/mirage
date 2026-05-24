@@ -16,7 +16,7 @@ from mirage.commands.builtin.paperclip.basename import basename
 from mirage.commands.builtin.paperclip.cat import cat
 from mirage.commands.builtin.paperclip.dirname import dirname
 from mirage.commands.builtin.paperclip.find import find
-from mirage.commands.builtin.paperclip.grep import COMMANDS as _GREP_COMMANDS
+from mirage.commands.builtin.paperclip.grep import grep
 from mirage.commands.builtin.paperclip.head import head
 from mirage.commands.builtin.paperclip.jq import jq
 from mirage.commands.builtin.paperclip.lookup import lookup
@@ -36,7 +36,7 @@ COMMANDS = [
     cat,
     dirname,
     find,
-    *_GREP_COMMANDS,
+    grep,
     head,
     jq,
     lookup,

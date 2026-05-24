@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.commands.builtin.github.grep.grep import grep
+from mirage.commands.builtin.github.grep import grep
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
 from tests.fixtures.github_mock import MOCK_BLOBS

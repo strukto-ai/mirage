@@ -16,7 +16,7 @@ from mirage.commands.builtin.telegram.basename import basename
 from mirage.commands.builtin.telegram.cat import cat
 from mirage.commands.builtin.telegram.dirname import dirname
 from mirage.commands.builtin.telegram.find import find
-from mirage.commands.builtin.telegram.grep import COMMANDS as _GREP_COMMANDS
+from mirage.commands.builtin.telegram.grep import grep
 from mirage.commands.builtin.telegram.head import head
 from mirage.commands.builtin.telegram.jq import jq
 from mirage.commands.builtin.telegram.ls import ls
@@ -34,7 +34,7 @@ COMMANDS = [
     cat,
     dirname,
     find,
-    *_GREP_COMMANDS,
+    grep,
     head,
     jq,
     ls,

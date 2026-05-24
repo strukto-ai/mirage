@@ -16,31 +16,31 @@ from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.ram.awk import awk
 from mirage.commands.builtin.ram.base64_cmd import base64_cmd
 from mirage.commands.builtin.ram.basename import basename
-from mirage.commands.builtin.ram.cat import COMMANDS as _CAT_COMMANDS
+from mirage.commands.builtin.ram.cat import cat
 from mirage.commands.builtin.ram.cmp import cmp_cmd
 from mirage.commands.builtin.ram.column import column
 from mirage.commands.builtin.ram.comm import comm
 from mirage.commands.builtin.ram.cp import cp
 from mirage.commands.builtin.ram.csplit import csplit
-from mirage.commands.builtin.ram.cut import COMMANDS as _CUT_COMMANDS
+from mirage.commands.builtin.ram.cut import cut
 from mirage.commands.builtin.ram.diff import diff
 from mirage.commands.builtin.ram.dirname import dirname
 from mirage.commands.builtin.ram.du import du
 from mirage.commands.builtin.ram.expand import expand
-from mirage.commands.builtin.ram.file import COMMANDS as _FILE_COMMANDS
+from mirage.commands.builtin.ram.file import file
 from mirage.commands.builtin.ram.find import find
 from mirage.commands.builtin.ram.fmt import fmt
 from mirage.commands.builtin.ram.fold import fold
-from mirage.commands.builtin.ram.grep import COMMANDS as _GREP_COMMANDS
+from mirage.commands.builtin.ram.grep import grep
 from mirage.commands.builtin.ram.gunzip import gunzip
 from mirage.commands.builtin.ram.gzip import gzip
-from mirage.commands.builtin.ram.head import COMMANDS as _HEAD_COMMANDS
+from mirage.commands.builtin.ram.head import head
 from mirage.commands.builtin.ram.iconv import iconv
 from mirage.commands.builtin.ram.join import join
 from mirage.commands.builtin.ram.jq import jq
 from mirage.commands.builtin.ram.ln import ln
 from mirage.commands.builtin.ram.look import look
-from mirage.commands.builtin.ram.ls import COMMANDS as _LS_COMMANDS
+from mirage.commands.builtin.ram.ls import ls
 from mirage.commands.builtin.ram.md5 import md5
 from mirage.commands.builtin.ram.mkdir import mkdir
 from mirage.commands.builtin.ram.mktemp import mktemp
@@ -58,10 +58,10 @@ from mirage.commands.builtin.ram.sha256sum import sha256sum
 from mirage.commands.builtin.ram.shuf import shuf
 from mirage.commands.builtin.ram.sort import sort
 from mirage.commands.builtin.ram.split import split
-from mirage.commands.builtin.ram.stat import COMMANDS as _STAT_COMMANDS
+from mirage.commands.builtin.ram.stat import stat
 from mirage.commands.builtin.ram.strings import strings
 from mirage.commands.builtin.ram.tac import tac
-from mirage.commands.builtin.ram.tail import COMMANDS as _TAIL_COMMANDS
+from mirage.commands.builtin.ram.tail import tail
 from mirage.commands.builtin.ram.tar import tar
 from mirage.commands.builtin.ram.tee import tee
 from mirage.commands.builtin.ram.touch import touch
@@ -71,7 +71,7 @@ from mirage.commands.builtin.ram.tsort import tsort
 from mirage.commands.builtin.ram.unexpand import unexpand
 from mirage.commands.builtin.ram.uniq import uniq
 from mirage.commands.builtin.ram.unzip import unzip as unzip_cmd
-from mirage.commands.builtin.ram.wc import COMMANDS as _WC_COMMANDS
+from mirage.commands.builtin.ram.wc import wc
 from mirage.commands.builtin.ram.xxd import xxd
 from mirage.commands.builtin.ram.zcat import zcat
 from mirage.commands.builtin.ram.zgrep import zgrep
@@ -84,31 +84,31 @@ COMMANDS = [
     awk,
     base64_cmd,
     basename,
-    *_CAT_COMMANDS,
+    cat,
     cmp_cmd,
     column,
     comm,
     cp,
     csplit,
-    *_CUT_COMMANDS,
+    cut,
     diff,
     dirname,
     du,
     expand,
-    *_FILE_COMMANDS,
+    file,
     find,
     fmt,
     fold,
-    *_GREP_COMMANDS,
+    grep,
     gunzip,
     gzip,
-    *_HEAD_COMMANDS,
+    head,
     iconv,
     join,
     jq,
     ln,
     look,
-    *_LS_COMMANDS,
+    ls,
     md5,
     mkdir,
     mktemp,
@@ -126,10 +126,10 @@ COMMANDS = [
     shuf,
     sort,
     split,
-    *_STAT_COMMANDS,
+    stat,
     strings,
     tac,
-    *_TAIL_COMMANDS,
+    tail,
     tar,
     tee,
     touch,
@@ -139,7 +139,7 @@ COMMANDS = [
     unexpand,
     uniq,
     unzip_cmd,
-    *_WC_COMMANDS,
+    wc,
     xxd,
     zcat,
     zgrep,

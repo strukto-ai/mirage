@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage.accessor.paperclip import PaperclipAccessor
-from mirage.commands.builtin.paperclip.grep.grep import grep
+from mirage.commands.builtin.paperclip.grep import grep
 from mirage.commands.builtin.paperclip.lookup import lookup
 from mirage.commands.builtin.paperclip.map import map_cmd
 from mirage.commands.builtin.paperclip.scan import scan

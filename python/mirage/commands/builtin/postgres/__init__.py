@@ -14,7 +14,7 @@
 
 from mirage.commands.builtin.postgres.cat import cat
 from mirage.commands.builtin.postgres.find import find
-from mirage.commands.builtin.postgres.grep import COMMANDS as _GREP_COMMANDS
+from mirage.commands.builtin.postgres.grep import grep
 from mirage.commands.builtin.postgres.head import head
 from mirage.commands.builtin.postgres.jq import jq
 from mirage.commands.builtin.postgres.ls import ls
@@ -24,4 +24,4 @@ from mirage.commands.builtin.postgres.tail import tail
 from mirage.commands.builtin.postgres.tree import tree
 from mirage.commands.builtin.postgres.wc import wc
 
-COMMANDS = [cat, find, head, jq, ls, stat, tail, tree, wc, *_GREP_COMMANDS, rg]
+COMMANDS = [cat, find, head, jq, ls, stat, tail, tree, wc, grep, rg]

@@ -16,7 +16,7 @@ from mirage.commands.builtin.gdocs.basename import basename
 from mirage.commands.builtin.gdocs.cat import cat
 from mirage.commands.builtin.gdocs.dirname import dirname
 from mirage.commands.builtin.gdocs.find import find
-from mirage.commands.builtin.gdocs.grep import COMMANDS as _GREP_COMMANDS
+from mirage.commands.builtin.gdocs.grep import grep
 from mirage.commands.builtin.gdocs.gws_docs_documents_batchUpdate import \
     gws_docs_documents_batchUpdate
 from mirage.commands.builtin.gdocs.gws_docs_documents_create import \
@@ -53,5 +53,5 @@ COMMANDS = [
     gws_docs_documents_batchUpdate,
     gws_docs_documents_create,
     gws_docs_write,
-    *_GREP_COMMANDS,
+    grep,
 ]

@@ -21,7 +21,7 @@ from mirage.commands.builtin.github.dirname import dirname
 from mirage.commands.builtin.github.du import du
 from mirage.commands.builtin.github.file import file
 from mirage.commands.builtin.github.find import find
-from mirage.commands.builtin.github.grep import COMMANDS as _GREP_COMMANDS
+from mirage.commands.builtin.github.grep import grep
 from mirage.commands.builtin.github.head import head
 from mirage.commands.builtin.github.jq import jq
 from mirage.commands.builtin.github.ls import ls
@@ -65,5 +65,5 @@ COMMANDS = [
     tree,
     uniq,
     wc,
-    *_GREP_COMMANDS,
+    grep,
 ]

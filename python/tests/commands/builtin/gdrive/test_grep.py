@@ -18,7 +18,7 @@ import pytest
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.commands.builtin.gdrive.grep.grep import grep
+from mirage.commands.builtin.gdrive.grep import grep
 from mirage.core.google._client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.io.stream import materialize
@@ -61,7 +61,7 @@ def _scope(path: str, prefix: str = "") -> PathSpec:
 @pytest.mark.asyncio
 async def test_grep_match(accessor, index):
     with patch(
-            "mirage.commands.builtin.gdrive.grep.grep.gdrive_read",
+            "mirage.commands.builtin.gdrive.grep.gdrive_read",
             new_callable=AsyncMock,
             return_value=b"hello world\ngoodbye world\nfoo bar\n",
     ):
@@ -79,7 +79,7 @@ async def test_grep_match(accessor, index):
 @pytest.mark.asyncio
 async def test_grep_no_match(accessor, index):
     with patch(
-            "mirage.commands.builtin.gdrive.grep.grep.gdrive_read",
+            "mirage.commands.builtin.gdrive.grep.gdrive_read",
             new_callable=AsyncMock,
             return_value=b"hello world\ngoodbye world\nfoo bar\n",
     ):
@@ -96,7 +96,7 @@ async def test_grep_no_match(accessor, index):
 @pytest.mark.asyncio
 async def test_grep_max_count(accessor, index):
     with patch(
-            "mirage.commands.builtin.gdrive.grep.grep.gdrive_read",
+            "mirage.commands.builtin.gdrive.grep.gdrive_read",
             new_callable=AsyncMock,
             return_value=b"aaa\naaa\naaa\n",
     ):
@@ -115,7 +115,7 @@ async def test_grep_max_count(accessor, index):
 @pytest.mark.asyncio
 async def test_grep_case_insensitive(accessor, index):
     with patch(
-            "mirage.commands.builtin.gdrive.grep.grep.gdrive_read",
+            "mirage.commands.builtin.gdrive.grep.gdrive_read",
             new_callable=AsyncMock,
             return_value=b"hello world\ngoodbye world\nfoo bar\n",
     ):
@@ -134,7 +134,7 @@ async def test_grep_case_insensitive(accessor, index):
 @pytest.mark.asyncio
 async def test_grep_invert(accessor, index):
     with patch(
-            "mirage.commands.builtin.gdrive.grep.grep.gdrive_read",
+            "mirage.commands.builtin.gdrive.grep.gdrive_read",
             new_callable=AsyncMock,
             return_value=b"hello world\ngoodbye world\nfoo bar\n",
     ):
@@ -154,7 +154,7 @@ async def test_grep_invert(accessor, index):
 @pytest.mark.asyncio
 async def test_grep_count(accessor, index):
     with patch(
-            "mirage.commands.builtin.gdrive.grep.grep.gdrive_read",
+            "mirage.commands.builtin.gdrive.grep.gdrive_read",
             new_callable=AsyncMock,
             return_value=b"apple\nbanana\napple pie\n",
     ):

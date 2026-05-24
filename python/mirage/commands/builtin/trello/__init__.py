@@ -16,7 +16,7 @@ from mirage.commands.builtin.trello.basename import basename
 from mirage.commands.builtin.trello.cat import cat
 from mirage.commands.builtin.trello.dirname import dirname
 from mirage.commands.builtin.trello.find import find
-from mirage.commands.builtin.trello.grep import COMMANDS as _GREP_COMMANDS
+from mirage.commands.builtin.trello.grep import grep
 from mirage.commands.builtin.trello.head import head
 from mirage.commands.builtin.trello.jq import jq
 from mirage.commands.builtin.trello.ls import ls
@@ -47,7 +47,7 @@ COMMANDS = [
     cat,
     dirname,
     find,
-    *_GREP_COMMANDS,
+    grep,
     head,
     jq,
     ls,

@@ -16,7 +16,7 @@ from mirage.commands.builtin.slack.basename import basename
 from mirage.commands.builtin.slack.cat import cat
 from mirage.commands.builtin.slack.dirname import dirname
 from mirage.commands.builtin.slack.find import find
-from mirage.commands.builtin.slack.grep import COMMANDS as _GREP_COMMANDS
+from mirage.commands.builtin.slack.grep import grep
 from mirage.commands.builtin.slack.head import head
 from mirage.commands.builtin.slack.jq import jq
 from mirage.commands.builtin.slack.ls import ls
@@ -39,7 +39,7 @@ COMMANDS = [
     cat,
     dirname,
     find,
-    *_GREP_COMMANDS,
+    grep,
     head,
     jq,
     ls,

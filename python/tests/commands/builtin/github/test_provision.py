@@ -16,7 +16,7 @@ import pytest
 
 from mirage.commands.builtin.github.cat import cat_provision
 from mirage.commands.builtin.github.find import find_provision
-from mirage.commands.builtin.github.grep.grep import grep_provision
+from mirage.commands.builtin.github.grep import grep_provision
 from mirage.commands.builtin.github.head import head_provision
 from mirage.commands.builtin.github.ls import ls_provision
 from mirage.provision.types import Precision

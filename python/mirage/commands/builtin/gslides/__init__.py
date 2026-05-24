@@ -16,7 +16,7 @@ from mirage.commands.builtin.gslides.basename import basename
 from mirage.commands.builtin.gslides.cat import cat
 from mirage.commands.builtin.gslides.dirname import dirname
 from mirage.commands.builtin.gslides.find import find
-from mirage.commands.builtin.gslides.grep import COMMANDS as _GREP_COMMANDS
+from mirage.commands.builtin.gslides.grep import grep
 from mirage.commands.builtin.gslides.gws_slides_presentations_batchUpdate import \
     gws_slides_presentations_batchUpdate  # noqa: E501
 from mirage.commands.builtin.gslides.gws_slides_presentations_create import \
@@ -51,5 +51,5 @@ COMMANDS = [
     wc,
     gws_slides_presentations_create,
     gws_slides_presentations_batchUpdate,
-    *_GREP_COMMANDS,
+    grep,
 ]

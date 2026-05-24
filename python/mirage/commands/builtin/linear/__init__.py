@@ -16,7 +16,7 @@ from mirage.commands.builtin.linear.basename import basename
 from mirage.commands.builtin.linear.cat import cat
 from mirage.commands.builtin.linear.dirname import dirname
 from mirage.commands.builtin.linear.find import find
-from mirage.commands.builtin.linear.grep import COMMANDS as _GREP_COMMANDS
+from mirage.commands.builtin.linear.grep import grep
 from mirage.commands.builtin.linear.head import head
 from mirage.commands.builtin.linear.jq import jq
 from mirage.commands.builtin.linear.linear_issue_add_label import \
@@ -51,7 +51,7 @@ COMMANDS = [
     cat,
     dirname,
     find,
-    *_GREP_COMMANDS,
+    grep,
     head,
     jq,
     ls,

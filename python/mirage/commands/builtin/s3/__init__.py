@@ -18,31 +18,31 @@ from mirage.commands.builtin.s3._provision import \
 from mirage.commands.builtin.s3.awk import awk
 from mirage.commands.builtin.s3.base64_cmd import base64_cmd
 from mirage.commands.builtin.s3.basename import basename
-from mirage.commands.builtin.s3.cat import COMMANDS as _CAT_COMMANDS
+from mirage.commands.builtin.s3.cat import cat
 from mirage.commands.builtin.s3.cmp import cmp_cmd
 from mirage.commands.builtin.s3.column import column
 from mirage.commands.builtin.s3.comm import comm
 from mirage.commands.builtin.s3.cp import cp
 from mirage.commands.builtin.s3.csplit import csplit
-from mirage.commands.builtin.s3.cut import COMMANDS as _CUT_COMMANDS
+from mirage.commands.builtin.s3.cut import cut
 from mirage.commands.builtin.s3.diff import diff
 from mirage.commands.builtin.s3.dirname import dirname
 from mirage.commands.builtin.s3.du import du
 from mirage.commands.builtin.s3.expand import expand
-from mirage.commands.builtin.s3.file import COMMANDS as _FILE_COMMANDS
+from mirage.commands.builtin.s3.file import file
 from mirage.commands.builtin.s3.find import find
 from mirage.commands.builtin.s3.fmt import fmt
 from mirage.commands.builtin.s3.fold import fold
-from mirage.commands.builtin.s3.grep import COMMANDS as _GREP_COMMANDS
+from mirage.commands.builtin.s3.grep import grep
 from mirage.commands.builtin.s3.gunzip import gunzip
 from mirage.commands.builtin.s3.gzip import gzip
-from mirage.commands.builtin.s3.head import COMMANDS as _HEAD_COMMANDS
+from mirage.commands.builtin.s3.head import head
 from mirage.commands.builtin.s3.iconv import iconv
 from mirage.commands.builtin.s3.join import join
 from mirage.commands.builtin.s3.jq import jq
 from mirage.commands.builtin.s3.ln import ln
 from mirage.commands.builtin.s3.look import look
-from mirage.commands.builtin.s3.ls import COMMANDS as _LS_COMMANDS
+from mirage.commands.builtin.s3.ls import ls
 from mirage.commands.builtin.s3.md5 import md5
 from mirage.commands.builtin.s3.mkdir import mkdir
 from mirage.commands.builtin.s3.mktemp import mktemp
@@ -60,10 +60,10 @@ from mirage.commands.builtin.s3.sha256sum import sha256sum
 from mirage.commands.builtin.s3.shuf import shuf
 from mirage.commands.builtin.s3.sort import sort
 from mirage.commands.builtin.s3.split import split
-from mirage.commands.builtin.s3.stat import COMMANDS as _STAT_COMMANDS
+from mirage.commands.builtin.s3.stat import stat
 from mirage.commands.builtin.s3.strings import strings
 from mirage.commands.builtin.s3.tac import tac
-from mirage.commands.builtin.s3.tail import COMMANDS as _TAIL_COMMANDS
+from mirage.commands.builtin.s3.tail import tail
 from mirage.commands.builtin.s3.tar import tar
 from mirage.commands.builtin.s3.tee import tee
 from mirage.commands.builtin.s3.touch import touch
@@ -73,7 +73,7 @@ from mirage.commands.builtin.s3.tsort import tsort
 from mirage.commands.builtin.s3.unexpand import unexpand
 from mirage.commands.builtin.s3.uniq import uniq
 from mirage.commands.builtin.s3.unzip import unzip as unzip_cmd
-from mirage.commands.builtin.s3.wc import COMMANDS as _WC_COMMANDS
+from mirage.commands.builtin.s3.wc import wc
 from mirage.commands.builtin.s3.xxd import xxd
 from mirage.commands.builtin.s3.zcat import zcat
 from mirage.commands.builtin.s3.zgrep import zgrep
@@ -87,31 +87,31 @@ COMMANDS = [
     awk,
     base64_cmd,
     basename,
-    *_CAT_COMMANDS,
+    cat,
     cmp_cmd,
     column,
     comm,
     cp,
     csplit,
-    *_CUT_COMMANDS,
+    cut,
     diff,
     dirname,
     du,
     expand,
-    *_FILE_COMMANDS,
+    file,
     find,
     fmt,
     fold,
-    *_GREP_COMMANDS,
+    grep,
     gunzip,
     gzip,
-    *_HEAD_COMMANDS,
+    head,
     iconv,
     join,
     jq,
     ln,
     look,
-    *_LS_COMMANDS,
+    ls,
     md5,
     mkdir,
     mktemp,
@@ -129,10 +129,10 @@ COMMANDS = [
     shuf,
     sort,
     split,
-    *_STAT_COMMANDS,
+    stat,
     strings,
     tac,
-    *_TAIL_COMMANDS,
+    tail,
     tar,
     tee,
     touch,
@@ -142,7 +142,7 @@ COMMANDS = [
     unexpand,
     uniq,
     unzip_cmd,
-    *_WC_COMMANDS,
+    wc,
     xxd,
     zcat,
     zgrep,

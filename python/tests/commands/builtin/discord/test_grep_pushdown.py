@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage.commands.builtin.discord.grep.grep import grep
+from mirage.commands.builtin.discord.grep import grep
 from mirage.commands.builtin.discord.rg import rg
 from mirage.types import PathSpec
 
@@ -67,10 +67,10 @@ async def test_discord_grep_with_many_concrete_paths_uses_native_search():
     }]
     fake_channels = [{"id": "ch_456", "name": "general"}]
     with patch(
-            "mirage.commands.builtin.discord.grep.grep.search_guild",
+            "mirage.commands.builtin.discord.grep.search_guild",
             new=AsyncMock(return_value=fake_msgs),
     ) as fake_search, patch(
-            "mirage.commands.builtin.discord.grep.grep.list_channels",
+            "mirage.commands.builtin.discord.grep.list_channels",
             new=AsyncMock(return_value=fake_channels),
     ):
         out, io = await grep(accessor,
@@ -95,13 +95,13 @@ async def test_discord_grep_falls_back_when_native_raises():
                  prefix="/discord"),
     ]
     with patch(
-            "mirage.commands.builtin.discord.grep.grep.search_guild",
+            "mirage.commands.builtin.discord.grep.search_guild",
             new=AsyncMock(side_effect=RuntimeError("rate limited")),
     ), patch(
-            "mirage.commands.builtin.discord.grep.grep.resolve_glob",
+            "mirage.commands.builtin.discord.grep.resolve_glob",
             new=AsyncMock(return_value=paths),
     ) as fake_resolve, patch(
-            "mirage.commands.builtin.discord.grep.grep.discord_read",
+            "mirage.commands.builtin.discord.grep.discord_read",
             new=AsyncMock(return_value=b""),
     ):
         out, io = await grep(accessor, paths, "hello", index=_fake_index())
@@ -115,13 +115,13 @@ async def test_discord_grep_native_empty_does_not_trigger_fallback():
     accessor = AsyncMock()
     accessor.config = AsyncMock()
     with patch(
-            "mirage.commands.builtin.discord.grep.grep.search_guild",
+            "mirage.commands.builtin.discord.grep.search_guild",
             new=AsyncMock(return_value=[]),
     ) as fake_search, patch(
-            "mirage.commands.builtin.discord.grep.grep.list_channels",
+            "mirage.commands.builtin.discord.grep.list_channels",
             new=AsyncMock(return_value=[]),
     ), patch(
-            "mirage.commands.builtin.discord.grep.grep.discord_read",
+            "mirage.commands.builtin.discord.grep.discord_read",
             new=AsyncMock(return_value=b""),
     ) as fake_read:
         out, io = await grep(accessor,

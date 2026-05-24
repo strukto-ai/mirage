@@ -14,7 +14,7 @@
 
 from mirage.commands.builtin.langfuse.cat import cat
 from mirage.commands.builtin.langfuse.find import find
-from mirage.commands.builtin.langfuse.grep import COMMANDS as _GREP_COMMANDS
+from mirage.commands.builtin.langfuse.grep import grep
 from mirage.commands.builtin.langfuse.head import head
 from mirage.commands.builtin.langfuse.jq import jq
 from mirage.commands.builtin.langfuse.ls import ls
@@ -34,6 +34,6 @@ COMMANDS = [
     tail,
     tree,
     wc,
-    *_GREP_COMMANDS,
+    grep,
     rg,
 ]

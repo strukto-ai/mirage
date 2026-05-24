@@ -14,7 +14,7 @@
 
 from mirage.commands.builtin.mongodb.cat import cat
 from mirage.commands.builtin.mongodb.find import find
-from mirage.commands.builtin.mongodb.grep import COMMANDS as _GREP_COMMANDS
+from mirage.commands.builtin.mongodb.grep import grep
 from mirage.commands.builtin.mongodb.head import head
 from mirage.commands.builtin.mongodb.jq import jq
 from mirage.commands.builtin.mongodb.ls import ls
@@ -34,6 +34,6 @@ COMMANDS = [
     tail,
     tree,
     wc,
-    *_GREP_COMMANDS,
+    grep,
     rg,
 ]

@@ -17,9 +17,10 @@ from collections.abc import AsyncIterator
 from mirage.accessor.langfuse import LangfuseAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.grep_helper import compile_pattern, grep_lines
-from mirage.commands.builtin.langfuse.grep.grep import (
-    _filter_traces, _format_dataset_results, _format_prompt_results,
-    _format_session_results)
+from mirage.commands.builtin.langfuse.grep import (_filter_traces,
+                                                   _format_dataset_results,
+                                                   _format_prompt_results,
+                                                   _format_session_results)
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS

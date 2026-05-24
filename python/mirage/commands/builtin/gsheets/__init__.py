@@ -16,7 +16,7 @@ from mirage.commands.builtin.gsheets.basename import basename
 from mirage.commands.builtin.gsheets.cat import cat
 from mirage.commands.builtin.gsheets.dirname import dirname
 from mirage.commands.builtin.gsheets.find import find
-from mirage.commands.builtin.gsheets.grep import COMMANDS as _GREP_COMMANDS
+from mirage.commands.builtin.gsheets.grep import grep
 from mirage.commands.builtin.gsheets.gws_sheets_append import gws_sheets_append
 from mirage.commands.builtin.gsheets.gws_sheets_read import gws_sheets_read
 from mirage.commands.builtin.gsheets.gws_sheets_spreadsheets_batchUpdate import \
@@ -57,5 +57,5 @@ COMMANDS = [
     gws_sheets_spreadsheets_batchUpdate,
     gws_sheets_spreadsheets_create,
     gws_sheets_write,
-    *_GREP_COMMANDS,
+    grep,
 ]

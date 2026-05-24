@@ -22,7 +22,7 @@ from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.discord.cat import cat
 from mirage.commands.builtin.discord.find import find
-from mirage.commands.builtin.discord.grep.grep import grep
+from mirage.commands.builtin.discord.grep import grep
 from mirage.commands.builtin.discord.head import head
 from mirage.commands.builtin.discord.jq import jq
 from mirage.commands.builtin.discord.ls import ls
@@ -212,10 +212,10 @@ async def test_tail(accessor):
 @pytest.mark.asyncio
 async def test_grep(accessor):
     with (
-            patch("mirage.commands.builtin.discord.grep.grep.resolve_glob",
+            patch("mirage.commands.builtin.discord.grep.resolve_glob",
                   new_callable=AsyncMock,
                   return_value=_glob_result(ABS_FILE)),
-            patch("mirage.commands.builtin.discord.grep.grep.discord_read",
+            patch("mirage.commands.builtin.discord.grep.discord_read",
                   new_callable=AsyncMock,
                   return_value=FAKE_JSONL),
     ):
@@ -229,10 +229,10 @@ async def test_grep(accessor):
 @pytest.mark.asyncio
 async def test_grep_invert(accessor):
     with (
-            patch("mirage.commands.builtin.discord.grep.grep.resolve_glob",
+            patch("mirage.commands.builtin.discord.grep.resolve_glob",
                   new_callable=AsyncMock,
                   return_value=_glob_result(ABS_FILE)),
-            patch("mirage.commands.builtin.discord.grep.grep.discord_read",
+            patch("mirage.commands.builtin.discord.grep.discord_read",
                   new_callable=AsyncMock,
                   return_value=FAKE_JSONL),
     ):

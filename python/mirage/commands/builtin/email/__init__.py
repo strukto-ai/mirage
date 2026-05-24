@@ -22,7 +22,7 @@ from mirage.commands.builtin.email.email_reply_all import email_reply_all
 from mirage.commands.builtin.email.email_send import email_send
 from mirage.commands.builtin.email.email_triage import email_triage
 from mirage.commands.builtin.email.find import find
-from mirage.commands.builtin.email.grep import COMMANDS as _GREP_COMMANDS
+from mirage.commands.builtin.email.grep import grep
 from mirage.commands.builtin.email.head import head
 from mirage.commands.builtin.email.jq import jq
 from mirage.commands.builtin.email.ls import ls
@@ -55,5 +55,5 @@ COMMANDS = [
     email_forward,
     email_triage,
     email_read,
-    *_GREP_COMMANDS,
+    grep,
 ]

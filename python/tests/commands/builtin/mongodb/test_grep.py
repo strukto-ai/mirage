@@ -18,7 +18,7 @@ import pytest
 from bson import ObjectId
 
 from mirage.accessor.mongodb import MongoDBAccessor
-from mirage.commands.builtin.mongodb.grep.grep import grep
+from mirage.commands.builtin.mongodb.grep import grep
 from mirage.resource.mongodb.config import MongoDBConfig
 from mirage.types import PathSpec
 
@@ -54,7 +54,7 @@ async def test_grep_streams_and_finds_match(accessor):
             yield d
 
     with patch("mirage.core.mongodb.stream.iter_documents", new=_fake), patch(
-            "mirage.commands.builtin.mongodb.grep.grep.resolve_glob",
+            "mirage.commands.builtin.mongodb.grep.resolve_glob",
             new=AsyncMock(return_value=[_path()])):
         source, io = await grep(accessor, [_path()], "target")
         data = await _drain(source)
@@ -74,7 +74,7 @@ async def test_grep_m1_short_circuits_after_first_match(accessor):
             yield {"_id": ObjectId(), "i": i, "tag": tag}
 
     with patch("mirage.core.mongodb.stream.iter_documents", new=_fake), patch(
-            "mirage.commands.builtin.mongodb.grep.grep.resolve_glob",
+            "mirage.commands.builtin.mongodb.grep.resolve_glob",
             new=AsyncMock(return_value=[_path()])):
         source, _ = await grep(accessor, [_path()], "FOUND", m="1")
         data = await _drain(source)
@@ -91,7 +91,7 @@ async def test_grep_no_match_returns_exit_code_1(accessor):
             yield d
 
     with patch("mirage.core.mongodb.stream.iter_documents", new=_fake), patch(
-            "mirage.commands.builtin.mongodb.grep.grep.resolve_glob",
+            "mirage.commands.builtin.mongodb.grep.resolve_glob",
             new=AsyncMock(return_value=[_path()])):
         source, io = await grep(accessor, [_path()], "absent_pattern_xyz")
         _ = await _drain(source)

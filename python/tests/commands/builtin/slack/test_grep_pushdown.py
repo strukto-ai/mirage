@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage.commands.builtin.slack.grep.grep import grep
+from mirage.commands.builtin.slack.grep import grep
 from mirage.commands.builtin.slack.rg import rg
 from mirage.types import PathSpec
 
@@ -40,7 +40,7 @@ async def test_grep_with_many_concrete_paths_uses_native_search():
     fake_payload = (b'{"messages":{"matches":[{"channel":{"name":"general",'
                     b'"id":"C1"},"ts":"1700000000.0","text":"hello there"}]}}')
     with patch(
-            "mirage.commands.builtin.slack.grep.grep.search_messages",
+            "mirage.commands.builtin.slack.grep.search_messages",
             new=AsyncMock(return_value=fake_payload),
     ) as fake_search:
         out, io = await grep(accessor, _concrete_paths(7), "hello", i=True)
@@ -76,14 +76,14 @@ async def test_grep_falls_back_when_native_search_raises():
                  prefix="/slack"),
     ]
     with patch(
-            "mirage.commands.builtin.slack.grep.grep.search_messages",
+            "mirage.commands.builtin.slack.grep.search_messages",
             new=AsyncMock(
                 side_effect=RuntimeError("missing search:read scope")),
     ), patch(
-            "mirage.commands.builtin.slack.grep.grep.resolve_glob",
+            "mirage.commands.builtin.slack.grep.resolve_glob",
             new=AsyncMock(return_value=paths),
     ), patch(
-            "mirage.commands.builtin.slack.grep.grep.slack_read",
+            "mirage.commands.builtin.slack.grep.slack_read",
             new=AsyncMock(return_value=b""),
     ):
         out, io = await grep(accessor, paths, "hello", i=True)
@@ -96,10 +96,10 @@ async def test_grep_native_empty_does_not_trigger_fallback():
     accessor.config = AsyncMock()
     empty_payload = b'{"messages":{"matches":[]}}'
     with patch(
-            "mirage.commands.builtin.slack.grep.grep.search_messages",
+            "mirage.commands.builtin.slack.grep.search_messages",
             new=AsyncMock(return_value=empty_payload),
     ) as fake_search, patch(
-            "mirage.commands.builtin.slack.grep.grep.slack_read",
+            "mirage.commands.builtin.slack.grep.slack_read",
             new=AsyncMock(return_value=b""),
     ) as fake_read:
         out, io = await grep(accessor, _concrete_paths(7), "missing")

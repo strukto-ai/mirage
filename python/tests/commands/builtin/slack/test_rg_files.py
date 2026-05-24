@@ -117,13 +117,13 @@ async def test_rg_both_when_channel_or_day_root(accessor, index):
 async def test_grep_messages_only_when_chat_jsonl(accessor, index):
     msgs_payload = b'{"messages":{"matches":[]}}'
     with (
-            patch("mirage.commands.builtin.slack.grep.grep.search_messages",
+            patch("mirage.commands.builtin.slack.grep.search_messages",
                   new_callable=AsyncMock,
                   return_value=msgs_payload) as mock_msgs,
-            patch("mirage.commands.builtin.slack.grep.grep.search_files",
+            patch("mirage.commands.builtin.slack.grep.search_files",
                   new_callable=AsyncMock) as mock_files,
     ):
-        from mirage.commands.builtin.slack.grep.grep import grep
+        from mirage.commands.builtin.slack.grep import grep
         await grep(
             accessor,
             [
@@ -144,13 +144,13 @@ async def test_grep_messages_only_when_chat_jsonl(accessor, index):
 async def test_grep_files_only_when_files_dir(accessor, index):
     files_payload = b'{"files":{"matches":[]}}'
     with (
-            patch("mirage.commands.builtin.slack.grep.grep.search_messages",
+            patch("mirage.commands.builtin.slack.grep.search_messages",
                   new_callable=AsyncMock) as mock_msgs,
-            patch("mirage.commands.builtin.slack.grep.grep.search_files",
+            patch("mirage.commands.builtin.slack.grep.search_files",
                   new_callable=AsyncMock,
                   return_value=files_payload) as mock_files,
     ):
-        from mirage.commands.builtin.slack.grep.grep import grep
+        from mirage.commands.builtin.slack.grep import grep
         await grep(
             accessor,
             [

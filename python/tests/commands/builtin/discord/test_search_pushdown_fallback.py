@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage.commands.builtin.discord.grep.grep import grep
+from mirage.commands.builtin.discord.grep import grep
 from mirage.commands.builtin.discord.rg import rg
 from mirage.types import PathSpec
 
@@ -48,13 +48,13 @@ async def test_grep_emits_token_hint_on_forbidden():
     accessor.config = AsyncMock()
     paths = [_path("/discord/myguild/channels/general/2026-01-01/chat.jsonl")]
     with patch(
-            "mirage.commands.builtin.discord.grep.grep.search_guild",
+            "mirage.commands.builtin.discord.grep.search_guild",
             new=AsyncMock(side_effect=RuntimeError("403 Forbidden")),
     ), patch(
-            "mirage.commands.builtin.discord.grep.grep.resolve_glob",
+            "mirage.commands.builtin.discord.grep.resolve_glob",
             new=AsyncMock(return_value=paths),
     ), patch(
-            "mirage.commands.builtin.discord.grep.grep.discord_read",
+            "mirage.commands.builtin.discord.grep.discord_read",
             new=AsyncMock(return_value=b""),
     ):
         _out, io = await grep(accessor,

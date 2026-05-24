@@ -32,7 +32,7 @@ async def test_slack_grep_glob_expanded_to_60_paths_is_one_native_call():
         for m in range(1, 5) for d in range(1, 16))
     try:
         with patch(
-                "mirage.commands.builtin.slack.grep.grep.search_messages",
+                "mirage.commands.builtin.slack.grep.search_messages",
                 new=AsyncMock(return_value=fake_payload),
         ) as fake_search:
             result = await ws.execute(f"grep -i hello {expanded}")

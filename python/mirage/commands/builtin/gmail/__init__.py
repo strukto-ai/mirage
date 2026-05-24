@@ -16,7 +16,7 @@ from mirage.commands.builtin.gmail.basename import basename
 from mirage.commands.builtin.gmail.cat import cat
 from mirage.commands.builtin.gmail.dirname import dirname
 from mirage.commands.builtin.gmail.find import find
-from mirage.commands.builtin.gmail.grep import COMMANDS as _GREP_COMMANDS
+from mirage.commands.builtin.gmail.grep import grep
 from mirage.commands.builtin.gmail.gws_gmail_forward import gws_gmail_forward
 from mirage.commands.builtin.gmail.gws_gmail_read import gws_gmail_read
 from mirage.commands.builtin.gmail.gws_gmail_reply import gws_gmail_reply
@@ -58,5 +58,5 @@ COMMANDS = [
     gws_gmail_forward,
     gws_gmail_triage,
     gws_gmail_read,
-    *_GREP_COMMANDS,
+    grep,
 ]
