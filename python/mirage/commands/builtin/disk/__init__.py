@@ -75,8 +75,12 @@ from mirage.commands.builtin.disk.xxd import xxd
 from mirage.commands.builtin.disk.zcat import zcat
 from mirage.commands.builtin.disk.zgrep import zgrep
 from mirage.commands.builtin.disk.zip_cmd import zip_cmd
+from mirage.commands.builtin.filetype_factory import make_filetype_commands
+from mirage.core.disk.glob import resolve_glob as _ft_resolve_glob
+from mirage.core.disk.read import read_bytes as _ft_read
 
 COMMANDS = [
+    *make_filetype_commands("disk", _ft_resolve_glob, _ft_read),
     awk,
     base64_cmd,
     basename,

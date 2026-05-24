@@ -12,11 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.gdocs.gws_docs_documents_batchUpdate import \
     gws_docs_documents_batchUpdate
 from mirage.commands.builtin.gdocs.gws_docs_documents_create import \
     gws_docs_documents_create
 from mirage.commands.builtin.gdocs.gws_docs_write import gws_docs_write
+from mirage.commands.builtin.gdrive._provision import \
+    file_read_provision as _ft_provision
 from mirage.commands.builtin.gdrive.awk import awk
 from mirage.commands.builtin.gdrive.base64_cmd import base64_cmd
 from mirage.commands.builtin.gdrive.basename import basename
@@ -74,8 +77,15 @@ from mirage.commands.builtin.gslides.gws_slides_presentations_batchUpdate import
     gws_slides_presentations_batchUpdate  # noqa: E501
 from mirage.commands.builtin.gslides.gws_slides_presentations_create import \
     gws_slides_presentations_create  # noqa: E501
+from mirage.core.gdrive.glob import resolve_glob as _ft_resolve_glob
+from mirage.core.gdrive.read import read as _ft_read
 
 COMMANDS = [
+    *make_filetype_commands("gdrive",
+                            _ft_resolve_glob,
+                            _ft_read,
+                            read_takes_index=True,
+                            provision=_ft_provision),
     awk,
     base64_cmd,
     basename,

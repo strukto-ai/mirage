@@ -18,6 +18,7 @@ from collections.abc import AsyncIterator
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.discord._provision import file_read_provision
+from mirage.commands.builtin.generic.head import head as generic_head
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -43,15 +44,6 @@ async def head_provision(
                            for p in paths))
 
 
-async def _head_bytes(data: bytes, lines: int,
-                      bytes_mode: int | None) -> AsyncIterator[bytes]:
-    if bytes_mode is not None:
-        yield data[:bytes_mode]
-        return
-    parts = data.split(b"\n", lines)
-    yield b"\n".join(parts[:lines])
-
-
 @command("head",
          resource="discord",
          spec=SPECS["head"],
@@ -66,14 +58,15 @@ async def head(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    lines = int(n) if n is not None else 10
-    bytes_mode = int(c) if c is not None else None
+    n_int = int(n) if n is not None else None
+    c_int = int(c) if c is not None else None
+    lines = n_int if n_int is not None else 10
     if paths:
         scope = await detect_scope(paths[0], index)
 
         # Smart head: fetch only first N messages for a date
         if (scope.level == "file" and scope.channel_id and scope.date_str
-                and not bytes_mode):
+                and c_int is None):
             after = date_to_snowflake(scope.date_str)
             msgs = await discord_get(
                 accessor.config,
@@ -86,13 +79,13 @@ async def head(
             msgs.sort(key=lambda m: int(m["id"]))
             jsonl = "\n".join(json.dumps(m, ensure_ascii=False)
                               for m in msgs) + "\n"
-            return _head_bytes(jsonl.encode(), lines, None), IOResult()
+            return generic_head(jsonl.encode(), n=lines), IOResult()
 
-        paths = await resolve_glob(accessor, paths, index=index)
+        paths = await resolve_glob(accessor, paths, index)
         p = paths[0]
         data = await discord_read(accessor, p, index)
-        return _head_bytes(data, lines, bytes_mode), IOResult()
+        return generic_head(data, n=n_int, c=c_int), IOResult()
     raw = await _read_stdin_async(stdin)
     if raw is None:
         raise ValueError("head: missing operand")
-    return _head_bytes(raw, lines, bytes_mode), IOResult()
+    return generic_head(raw, n=n_int, c=c_int), IOResult()

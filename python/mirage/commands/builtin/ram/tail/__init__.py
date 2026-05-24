@@ -12,23 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import logging
-
 from mirage.commands.builtin.ram.tail.tail import tail
-from mirage.commands.optional import try_load_command
 
-_logger = logging.getLogger(__name__)
-
-tail_feather = try_load_command(
-    "mirage.commands.builtin.ram.tail.tail_feather", "tail_feather", "parquet")
-tail_hdf5 = try_load_command("mirage.commands.builtin.ram.tail.tail_hdf5",
-                             "tail_hdf5", "hdf5")
-tail_orc = try_load_command("mirage.commands.builtin.ram.tail.tail_orc",
-                            "tail_orc", "parquet")
-tail_parquet = try_load_command(
-    "mirage.commands.builtin.ram.tail.tail_parquet", "tail_parquet", "parquet")
-
-COMMANDS = [
-    c for c in (tail, tail_parquet, tail_orc, tail_feather, tail_hdf5)
-    if c is not None
-]
+COMMANDS = [tail]

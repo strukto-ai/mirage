@@ -257,7 +257,7 @@ async def test_wc(accessor):
     ):
         stream, io = await wc(accessor, _make_glob(ABS_FILE), args_l=True)
     data = await _collect(stream)
-    assert data == b"3"
+    assert data == b"3\t" + ABS_FILE.encode()
 
 
 @pytest.mark.asyncio
@@ -272,7 +272,7 @@ async def test_wc_words(accessor):
     ):
         stream, io = await wc(accessor, _make_glob(ABS_FILE), w=True)
     data = await _collect(stream)
-    count = int(data.decode())
+    count = int(data.decode().split("\t")[0])
     assert count > 0
 
 

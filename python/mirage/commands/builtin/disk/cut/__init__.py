@@ -12,23 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import logging
-
 from mirage.commands.builtin.disk.cut.cut import cut
-from mirage.commands.optional import try_load_command
 
-_logger = logging.getLogger(__name__)
-
-cut_feather = try_load_command("mirage.commands.builtin.disk.cut.cut_feather",
-                               "cut_feather", "parquet")
-cut_hdf5 = try_load_command("mirage.commands.builtin.disk.cut.cut_hdf5",
-                            "cut_hdf5", "hdf5")
-cut_orc = try_load_command("mirage.commands.builtin.disk.cut.cut_orc",
-                           "cut_orc", "parquet")
-cut_parquet = try_load_command("mirage.commands.builtin.disk.cut.cut_parquet",
-                               "cut_parquet", "parquet")
-
-COMMANDS = [
-    c for c in (cut, cut_parquet, cut_orc, cut_feather, cut_hdf5)
-    if c is not None
-]
+COMMANDS = [cut]

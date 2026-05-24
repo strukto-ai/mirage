@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.ram.awk import awk
 from mirage.commands.builtin.ram.base64_cmd import base64_cmd
 from mirage.commands.builtin.ram.basename import basename
@@ -75,8 +76,11 @@ from mirage.commands.builtin.ram.xxd import xxd
 from mirage.commands.builtin.ram.zcat import zcat
 from mirage.commands.builtin.ram.zgrep import zgrep
 from mirage.commands.builtin.ram.zip_cmd import zip_cmd
+from mirage.core.ram.glob import resolve_glob as _ft_resolve_glob
+from mirage.core.ram.read import read_bytes as _ft_read
 
 COMMANDS = [
+    *make_filetype_commands("ram", _ft_resolve_glob, _ft_read),
     awk,
     base64_cmd,
     basename,

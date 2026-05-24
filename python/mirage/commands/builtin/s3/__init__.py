@@ -12,6 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.filetype_factory import make_filetype_commands
+from mirage.commands.builtin.s3._provision import \
+    file_read_provision as _ft_provision
 from mirage.commands.builtin.s3.awk import awk
 from mirage.commands.builtin.s3.base64_cmd import base64_cmd
 from mirage.commands.builtin.s3.basename import basename
@@ -75,8 +78,12 @@ from mirage.commands.builtin.s3.xxd import xxd
 from mirage.commands.builtin.s3.zcat import zcat
 from mirage.commands.builtin.s3.zgrep import zgrep
 from mirage.commands.builtin.s3.zip_cmd import zip_cmd
+from mirage.core.s3.glob import resolve_glob as _ft_resolve_glob
+from mirage.core.s3.read import read_bytes as _ft_read
 
 COMMANDS = [
+    *make_filetype_commands(
+        "s3", _ft_resolve_glob, _ft_read, provision=_ft_provision),
     awk,
     base64_cmd,
     basename,

@@ -12,23 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import logging
-
 from mirage.commands.builtin.ssh.head.head import head
-from mirage.commands.optional import try_load_command
 
-_logger = logging.getLogger(__name__)
-
-head_feather = try_load_command(
-    "mirage.commands.builtin.ssh.head.head_feather", "head_feather", "parquet")
-head_hdf5 = try_load_command("mirage.commands.builtin.ssh.head.head_hdf5",
-                             "head_hdf5", "hdf5")
-head_orc = try_load_command("mirage.commands.builtin.ssh.head.head_orc",
-                            "head_orc", "parquet")
-head_parquet = try_load_command(
-    "mirage.commands.builtin.ssh.head.head_parquet", "head_parquet", "parquet")
-
-COMMANDS = [
-    c for c in (head, head_parquet, head_orc, head_feather, head_hdf5)
-    if c is not None
-]
+COMMANDS = [head]

@@ -12,6 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.filetype_factory import make_filetype_commands
+from mirage.commands.builtin.ssh._provision import \
+    file_read_provision as _ft_provision
 from mirage.commands.builtin.ssh.awk import awk
 from mirage.commands.builtin.ssh.base64_cmd import base64_cmd
 from mirage.commands.builtin.ssh.basename import basename
@@ -75,8 +78,12 @@ from mirage.commands.builtin.ssh.xxd import xxd
 from mirage.commands.builtin.ssh.zcat import zcat
 from mirage.commands.builtin.ssh.zgrep import zgrep
 from mirage.commands.builtin.ssh.zip_cmd import zip_cmd
+from mirage.core.ssh.glob import resolve_glob as _ft_resolve_glob
+from mirage.core.ssh.read import read_bytes as _ft_read
 
 COMMANDS = [
+    *make_filetype_commands(
+        "ssh", _ft_resolve_glob, _ft_read, provision=_ft_provision),
     awk,
     base64_cmd,
     basename,

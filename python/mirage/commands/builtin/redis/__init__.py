@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.redis.awk import awk
 from mirage.commands.builtin.redis.base64_cmd import base64_cmd
 from mirage.commands.builtin.redis.basename import basename
@@ -75,8 +76,11 @@ from mirage.commands.builtin.redis.xxd import xxd
 from mirage.commands.builtin.redis.zcat import zcat
 from mirage.commands.builtin.redis.zgrep import zgrep
 from mirage.commands.builtin.redis.zip_cmd import zip_cmd
+from mirage.core.redis.glob import resolve_glob as _ft_resolve_glob
+from mirage.core.redis.read import read_bytes as _ft_read
 
 COMMANDS = [
+    *make_filetype_commands("redis", _ft_resolve_glob, _ft_read),
     awk,
     base64_cmd,
     basename,

@@ -12,23 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import logging
-
 from mirage.commands.builtin.gdrive.cat.cat import cat
-from mirage.commands.optional import try_load_command
 
-_logger = logging.getLogger(__name__)
-
-cat_feather = try_load_command(
-    "mirage.commands.builtin.gdrive.cat.cat_feather", "cat_feather", "parquet")
-cat_hdf5 = try_load_command("mirage.commands.builtin.gdrive.cat.cat_hdf5",
-                            "cat_hdf5", "hdf5")
-cat_orc = try_load_command("mirage.commands.builtin.gdrive.cat.cat_orc",
-                           "cat_orc", "parquet")
-cat_parquet = try_load_command(
-    "mirage.commands.builtin.gdrive.cat.cat_parquet", "cat_parquet", "parquet")
-
-COMMANDS = [
-    c for c in (cat, cat_parquet, cat_orc, cat_feather, cat_hdf5)
-    if c is not None
-]
+COMMANDS = [cat]

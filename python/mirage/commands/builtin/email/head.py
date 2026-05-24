@@ -17,6 +17,7 @@ from collections.abc import AsyncIterator
 from mirage.accessor.email import EmailAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.email._provision import file_read_provision
+from mirage.commands.builtin.generic.head import head as generic_head
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -42,15 +43,6 @@ async def head_provision(
         index=index)
 
 
-async def _head_bytes(data: bytes, lines: int,
-                      bytes_mode: int | None) -> AsyncIterator[bytes]:
-    if bytes_mode is not None:
-        yield data[:bytes_mode]
-        return
-    parts = data.split(b"\n", lines)
-    yield b"\n".join(parts[:lines])
-
-
 @command("head",
          resource="email",
          spec=SPECS["head"],
@@ -65,14 +57,14 @@ async def head(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    lines = int(n) if n is not None else 10
-    bytes_mode = int(c) if c is not None else None
+    n_int = int(n) if n is not None else None
+    c_int = int(c) if c is not None else None
     if paths:
         paths = await resolve_glob(accessor, paths, index)
         p = paths[0]
         data = await email_read(accessor, p, index)
-        return _head_bytes(data, lines, bytes_mode), IOResult()
+        return generic_head(data, n=n_int, c=c_int), IOResult()
     raw = await _read_stdin_async(stdin)
     if raw is None:
         raise ValueError("head: missing operand")
-    return _head_bytes(raw, lines, bytes_mode), IOResult()
+    return generic_head(raw, n=n_int, c=c_int), IOResult()
