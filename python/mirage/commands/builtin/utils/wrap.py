@@ -62,3 +62,13 @@ async def stream_from_bytes(
     prefix: str = "",
 ) -> AsyncIterator[bytes]:
     yield await read_fn(accessor, to_pathspec(path, prefix), index)
+
+
+def call_read_stream(
+    read_fn: Callable,
+    accessor: Any,
+    path: Any,
+    index: Any = None,
+    prefix: str = "",
+):
+    return read_fn(accessor, to_pathspec(path, prefix), index)

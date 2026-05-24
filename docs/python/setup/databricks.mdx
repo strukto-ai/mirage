@@ -1,0 +1,83 @@
+---
+title: Databricks Volume
+icon: folder-open
+description: Set up the Databricks Unity Catalog volume resource in Python.
+---
+
+## Dependencies
+
+```bash
+uv add 'mirage-ai[databricks]'
+```
+
+For credential setup, see the [Databricks Volume Setup](/home/setup/databricks)
+guide.
+
+## Configuration
+
+### Databricks Apps or SDK-default auth
+
+```python
+from mirage import Workspace, MountMode
+from mirage.resource.databricks_volume import (
+    DatabricksVolumeConfig,
+    DatabricksVolumeResource,
+)
+
+config = DatabricksVolumeConfig(
+    catalog="main",
+    schema="default",
+    volume="agent_files",
+)
+resource = DatabricksVolumeResource(config=config)
+ws = Workspace({"/dbx/": resource}, mode=MountMode.READ)
+```
+
+### Explicit host and token
+
+```python
+import os
+
+config = DatabricksVolumeConfig(
+    catalog="main",
+    schema="default",
+    volume="agent_files",
+    host=os.environ["DATABRICKS_HOST"],
+    token=os.environ["DATABRICKS_TOKEN"],
+    root_path="/reports",
+)
+resource = DatabricksVolumeResource(config=config)
+ws = Workspace({"/dbx/": resource}, mode=MountMode.READ)
+```
+
+### Profile-based auth
+
+```python
+config = DatabricksVolumeConfig(
+    catalog="main",
+    schema="default",
+    volume="agent_files",
+    profile="DEV",
+)
+resource = DatabricksVolumeResource(config=config)
+ws = Workspace({"/dbx/": resource}, mode=MountMode.READ)
+```
+
+## Config Reference
+
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `catalog` | Yes |  | Unity Catalog catalog name. |
+| `schema` | Yes |  | Unity Catalog schema name. |
+| `volume` | Yes |  | Unity Catalog volume name. |
+| `root_path` | No | `/` | Subdirectory inside the volume to expose. |
+| `host` | No |  | Databricks workspace host. |
+| `token` | No |  | Databricks personal access token. Redacted in snapshots. |
+| `profile` | No |  | Databricks SDK profile name. |
+| `timeout` | No | `30` | Request timeout in seconds. |
+
+## Notes
+
+- The resource is read-only in this branch.
+- Auth falls through to the Databricks SDK defaults when `host`, `token`, and `profile` are omitted.
+- `root_path` is normalized and cannot contain `..`.

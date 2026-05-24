@@ -44,6 +44,7 @@ EXPECTED_RESOURCES = {
     "ssh",
     "email",
     "paperclip",
+    "databricks_volume",
 }
 
 

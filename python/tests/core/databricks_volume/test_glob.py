@@ -1,0 +1,44 @@
+import pytest
+
+from mirage.core.databricks_volume.glob import resolve_glob
+from mirage.types import PathSpec
+
+from .conftest import file_entry
+
+
+@pytest.mark.asyncio
+async def test_resolve_file_path(accessor, index):
+    scope = PathSpec.from_str_path("/volume/readme.md", "/volume")
+    result = await resolve_glob(accessor, [scope], index)
+    assert result == [scope]
+
+
+@pytest.mark.asyncio
+async def test_resolve_glob_pattern(accessor, files, index, remote_root):
+    files.directories[f"{remote_root}/src"] = [
+        file_entry(f"{remote_root}/src/main.py"),
+        file_entry(f"{remote_root}/src/util.py"),
+        file_entry(f"{remote_root}/src/data.json"),
+    ]
+    scope = PathSpec(
+        original="/volume/src/*.py",
+        directory="/volume/src",
+        pattern="*.py",
+        resolved=False,
+        prefix="/volume",
+    )
+    result = await resolve_glob(accessor, [scope], index)
+    originals = sorted(path.original for path in result)
+    assert originals == ["/volume/src/main.py", "/volume/src/util.py"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_directory_path(accessor, index):
+    scope = PathSpec(
+        original="/volume/src",
+        directory="/volume/src",
+        resolved=False,
+        prefix="/volume",
+    )
+    result = await resolve_glob(accessor, [scope], index)
+    assert result == [scope]
