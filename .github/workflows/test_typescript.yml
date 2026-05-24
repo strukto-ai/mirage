@@ -61,17 +61,11 @@ jobs:
         working-directory: typescript
         run: pnpm -r build
 
-      - name: Run TypeScript tests (libraries)
+      - name: Run TypeScript tests
         working-directory: typescript
         env:
           REDIS_URL: redis://localhost:6379/0
-        run: pnpm --filter "./packages/*" --filter "!@struktoai/mirage-cli" -r test
-
-      - name: Run TypeScript tests (CLI e2e, isolated)
-        working-directory: typescript
-        env:
-          REDIS_URL: redis://localhost:6379/0
-        run: pnpm --filter "@struktoai/mirage-cli" test
+        run: pnpm test
 
       - name: Examples (output checked against integ/ truth files)
         env:
