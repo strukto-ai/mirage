@@ -12,13 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import io as _io
-
-import pyarrow.orc as orc
-
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.core.filetype.orc import file as orc_file
 from mirage.core.gdrive.glob import resolve_glob
 from mirage.core.gdrive.read import read as gdrive_read
 from mirage.io.types import ByteSource, IOResult
@@ -31,21 +29,18 @@ async def file_orc(
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("file: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     p = paths[0]
     try:
-        raw = await gdrive_read(accessor, p, _extra.get("index"))
-        f = orc.ORCFile(_io.BytesIO(raw))
-        schema = f.schema
-        cols = ", ".join(f"{field.name}: {field.type}" for field in schema)
-        result = (f"orc, {f.nrows} rows, {len(schema)} columns, "
-                  f"{f.nstripes} stripes ({cols})")
-        return result.encode(), IOResult(reads={p.strip_prefix: raw},
-                                         cache=[p.strip_prefix])
+        raw = await gdrive_read(accessor, p, index)
+        result = orc_file(raw)
+        return result, IOResult(reads={p.strip_prefix: raw},
+                                cache=[p.strip_prefix])
     except Exception as e:
         return None, IOResult(
             exit_code=1,

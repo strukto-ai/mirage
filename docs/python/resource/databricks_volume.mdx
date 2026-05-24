@@ -1,0 +1,157 @@
+---
+title: Databricks Volume
+icon: folder-open
+description: Mount a Databricks Unity Catalog volume as a read-only filesystem.
+---
+
+`DatabricksVolumeResource` exposes files from a Unity Catalog volume through
+Mirage's standard filesystem interface. The current branch is read-only:
+agents can list, stat, read, stream, and glob files under the configured
+volume root.
+
+For auth and environment setup, see [Databricks Volume Setup](/python/setup/databricks).
+
+## Config
+
+```python
+from mirage import MountMode, Workspace
+from mirage.resource.databricks_volume import (
+    DatabricksVolumeConfig,
+    DatabricksVolumeResource,
+)
+
+resource = DatabricksVolumeResource(DatabricksVolumeConfig(
+    catalog="main",
+    schema="default",
+    volume="agent_files",
+    root_path="/reports",
+))
+ws = Workspace({"/dbx": resource}, mode=MountMode.READ)
+```
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| `catalog` | required | Unity Catalog catalog name. |
+| `schema` | required | Unity Catalog schema name. |
+| `volume` | required | Unity Catalog volume name. |
+| `root_path` | `/` | Subdirectory inside the volume to expose. |
+| `host` | `None` | Optional workspace host override. |
+| `token` | `None` | Optional PAT override. Redacted in snapshots. |
+| `profile` | `None` | Optional Databricks SDK profile name. |
+| `timeout` | `30` | Request timeout in seconds. |
+
+## Mount mode
+
+`read` only.
+
+## Filesystem layout
+
+Mirage maps the configured mount prefix onto the configured volume subtree.
+
+Given:
+
+```python
+DatabricksVolumeConfig(
+    catalog="main",
+    schema="default",
+    volume="agent_files",
+    root_path="/reports/2026",
+)
+```
+
+and mount prefix `/dbx/`, the volume path:
+
+```text
+/Volumes/main/default/agent_files/reports/2026/q1/summary.md
+```
+
+appears in Mirage as:
+
+```text
+/dbx/q1/summary.md
+```
+
+`root_path` is normalized before use, and Mirage rejects any virtual path that
+would escape above that configured subtree.
+
+## Supported operations
+
+This branch wires the core read surface:
+
+- `readdir`
+- `stat`
+- `exists`
+- `read_bytes`
+- `read_stream`
+- `range_read`
+- glob resolution
+
+Standard shell commands like `ls`, `cat`, `head`, `tail`, `grep`, `rg`,
+`find`, and `tree` work through those primitives.
+
+## Snapshot behavior
+
+`token` is redacted in resource state. Loading a snapshot back requires an
+override config that provides fresh credentials if the runtime auth chain does
+not already supply them.
+
+## Databricks Apps
+
+For Databricks Apps, prefer SDK-default auth and keep Mirage in-process:
+
+```python
+config = DatabricksVolumeConfig(
+    catalog="main",
+    schema="default",
+    volume="agent_files",
+)
+resource = DatabricksVolumeResource(config)
+ws = Workspace({"/dbx/": resource}, mode=MountMode.READ)
+```
+
+This does not require FUSE. The agent can access the mounted workspace through
+Mirage's backend adapters or `Workspace.execute(...)`.
+
+## Example
+
+```python
+import asyncio
+
+from mirage import MountMode, Workspace
+from mirage.resource.databricks_volume import (
+    DatabricksVolumeConfig,
+    DatabricksVolumeResource,
+)
+
+resource = DatabricksVolumeResource(DatabricksVolumeConfig(
+    catalog="main",
+    schema="default",
+    volume="agent_files",
+    root_path="/reports",
+))
+
+
+async def main() -> None:
+    ws = Workspace({"/dbx/": resource}, mode=MountMode.READ)
+
+    r = await ws.execute("ls /dbx/")
+    print(await r.stdout_str())
+
+    r = await ws.execute("find /dbx/ -name '*.md'")
+    print(await r.stdout_str())
+
+    r = await ws.execute('head -n 20 "/dbx/q1/summary.md"')
+    print(await r.stdout_str())
+
+    r = await ws.execute('stat "/dbx/q1/summary.md"')
+    print(await r.stdout_str())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+See:
+
+- `examples/python/databricks_volume/databricks_volume.py`
+- `examples/python/agents/langchain/databricks_volume_deepagent.py`

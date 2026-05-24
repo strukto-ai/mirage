@@ -15,6 +15,7 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.gsheets import GSheetsAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.gsheets._provision import file_read_provision
 from mirage.commands.builtin.tail_helper import _parse_n, tail_bytes
 from mirage.commands.builtin.utils.stream import _read_stdin_async
@@ -31,6 +32,7 @@ async def tail_provision(
     accessor: GSheetsAccessor,
     paths: list[PathSpec],
     *texts: str,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> ProvisionResult:
     return await file_read_provision(
@@ -38,7 +40,7 @@ async def tail_provision(
         paths,
         "tail " + " ".join(p.original if isinstance(p, PathSpec) else p
                            for p in paths),
-        index=_extra.get("index"))
+        index=index)
 
 
 async def _tail_result(raw: bytes, lines: int, plus_mode: bool,
@@ -62,14 +64,15 @@ async def tail(
     c: str | None = None,
     q: bool = False,
     v: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     lines, plus_mode = _parse_n(n)
     bytes_mode = int(c) if c is not None else None
     if paths:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
+        paths = await resolve_glob(accessor, paths, index)
         p = paths[0]
-        raw = await gsheets_read(accessor, p, _extra.get("index"))
+        raw = await gsheets_read(accessor, p, index)
         return _tail_result(raw, lines, plus_mode, bytes_mode), IOResult()
     raw = await _read_stdin_async(stdin)
     if raw is None:

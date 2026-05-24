@@ -35,8 +35,6 @@ import { redactGSlidesConfig, type GSlidesConfig, type GSlidesConfigRedacted } f
 
 export interface GSlidesResourceState {
   type: string
-  needsOverride: boolean
-  redactedFields: readonly string[]
   config: GSlidesConfigRedacted
 }
 
@@ -114,8 +112,6 @@ export class GSlidesResource extends BaseResource implements Resource {
   getState(): Promise<GSlidesResourceState> {
     return Promise.resolve({
       type: this.kind,
-      needsOverride: true,
-      redactedFields: ['clientSecret', 'refreshToken'],
       config: redactGSlidesConfig(this.config),
     })
   }

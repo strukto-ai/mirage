@@ -12,13 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import io as _io
-
-import pyarrow.feather as feather
-
 from mirage.accessor.redis import RedisAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.core.filetype.feather import ls as feather_ls
 from mirage.core.redis.glob import resolve_glob
 from mirage.core.redis.read import read_bytes as _read_bytes
 from mirage.core.redis.stat import stat as _stat_async
@@ -43,17 +41,16 @@ async def ls_feather(
     r: bool = False,
     R: bool = False,
     d: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if accessor.store is None or not paths:
         raise ValueError("ls: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     try:
         s = await _stat_async(accessor, paths[0])
         raw = await _read_bytes(accessor, paths[0])
-        table = feather.read_table(_io.BytesIO(raw))
-        rows = table.num_rows
-        cols = len(table.schema)
+        rows, cols = feather_ls(raw)
         size = s.size or 0
         line = (f"feather\t{size}\t{rows} rows\t{cols} cols"
                 f"\t{s.modified or ''}\t{s.name}")

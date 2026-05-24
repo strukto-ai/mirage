@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.resource.gdocs.config import GDocsConfig
+from mirage.resource.secrets import reveal_secret
 
 
 def test_config_creation():
@@ -22,5 +23,5 @@ def test_config_creation():
         refresh_token="1//0abc",
     )
     assert config.client_id == "xxx.apps.googleusercontent.com"
-    assert config.client_secret == "GOCSPx-xxx"
-    assert config.refresh_token == "1//0abc"
+    assert reveal_secret(config.client_secret) == "GOCSPx-xxx"
+    assert reveal_secret(config.refresh_token) == "1//0abc"

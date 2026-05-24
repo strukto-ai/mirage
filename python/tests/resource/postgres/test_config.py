@@ -13,11 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.resource.postgres.config import PostgresConfig
+from mirage.resource.secrets import reveal_secret
 
 
 def test_defaults():
     cfg = PostgresConfig(dsn="postgres://localhost/db")
-    assert cfg.dsn == "postgres://localhost/db"
+    assert reveal_secret(cfg.dsn) == "postgres://localhost/db"
     assert cfg.schemas is None
     assert cfg.default_row_limit == 1000
     assert cfg.max_read_rows == 10_000

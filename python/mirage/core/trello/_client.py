@@ -14,6 +14,7 @@
 
 import aiohttp
 
+from mirage.resource.secrets import reveal_secret
 from mirage.resource.trello.config import TrelloConfig
 from mirage.types import PathSpec
 
@@ -32,8 +33,8 @@ class TrelloAPIError(RuntimeError):
 
 def _auth_params(config: TrelloConfig) -> dict[str, str]:
     return {
-        "key": config.api_key,
-        "token": config.api_token,
+        "key": reveal_secret(config.api_key),
+        "token": reveal_secret(config.api_token),
     }
 
 

@@ -15,6 +15,7 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.slack import SlackAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.slack._provision import file_read_provision
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
@@ -51,12 +52,13 @@ async def cat(
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     n: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
+        paths = await resolve_glob(accessor, paths, index)
         p = paths[0]
-        data = await slack_read(accessor, p, _extra.get("index"))
+        data = await slack_read(accessor, p, index)
         io = IOResult(reads={p.strip_prefix: data}, cache=[p.strip_prefix])
         if n:
             return _number_lines(data), io

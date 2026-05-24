@@ -12,11 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
 from collections.abc import AsyncIterator
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.readlink import \
+    readlink as generic_readlink
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.s3.glob import resolve_glob
@@ -41,14 +42,4 @@ async def readlink(
     if not paths:
         raise ValueError("readlink: missing operand")
     paths = await resolve_glob(accessor, paths, index)
-    normalize = f or e or m
-    results: list[str] = []
-    for p in paths:
-        vp = p.original
-        if normalize:
-            vp = posixpath.normpath(vp)
-        results.append(vp)
-    text = "\n".join(results)
-    if not n:
-        text += "\n"
-    return text.encode(), IOResult()
+    return await generic_readlink(paths, f=f, e=e, m=m, n=n)

@@ -12,7 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normMountPrefix, type Workspace as CoreWorkspace } from '@struktoai/mirage-core'
+import {
+  normMountPrefix,
+  resourceStateRequiresOverride,
+  type Workspace as CoreWorkspace,
+} from '@struktoai/mirage-core'
 import { buildResource, Workspace, type Resource } from '@struktoai/mirage-node'
 
 export interface OverrideMountBlock {
@@ -36,19 +40,23 @@ export async function buildOverrideResources(
   return out
 }
 
-function existingNeedsOverrideResources(
+function existingRedactedResources(
   src: CoreWorkspace,
+  state: Awaited<ReturnType<CoreWorkspace['toStateDict']>>,
   skip: Set<string>,
 ): Record<string, Resource> {
-  const out: Record<string, Resource> = {}
+  const prefixToResource: Record<string, Resource> = {}
   for (const m of src.mounts()) {
-    if (skip.has(m.prefix)) continue
-    const resource = m.resource as unknown as {
-      getState?: () => { needsOverride?: boolean }
+    prefixToResource[normMountPrefix(m.prefix)] = m.resource
+  }
+  const out: Record<string, Resource> = {}
+  for (const m of state.mounts) {
+    const prefix = normMountPrefix(m.prefix)
+    if (skip.has(prefix)) continue
+    const resource = prefixToResource[prefix]
+    if (resource !== undefined && resourceStateRequiresOverride(m.resourceState)) {
+      out[prefix] = resource
     }
-    if (resource.getState === undefined) continue
-    const state = resource.getState()
-    if (state.needsOverride === true) out[m.prefix] = m.resource
   }
   return out
 }
@@ -58,8 +66,8 @@ export async function cloneWorkspaceWithOverride(
   override: OverrideShape | null,
 ): Promise<Workspace> {
   const overrideResources = await buildOverrideResources(override)
-  const existing = existingNeedsOverrideResources(src, new Set(Object.keys(overrideResources)))
-  const merged = { ...existing, ...overrideResources }
   const state = await src.toStateDict()
+  const existing = existingRedactedResources(src, state, new Set(Object.keys(overrideResources)))
+  const merged = { ...existing, ...overrideResources }
   return Workspace.fromState(state, {}, merged)
 }

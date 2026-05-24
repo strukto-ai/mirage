@@ -54,7 +54,9 @@ export abstract class HttpSlackTransport implements SlackTransport {
   protected readonly fetch: typeof fetch = globalThis.fetch.bind(globalThis)
 
   protected abstract baseUrl(): string
-  protected abstract authHeaders(): Promise<Record<string, string>> | Record<string, string>
+  protected abstract authHeaders(
+    endpoint?: string,
+  ): Promise<Record<string, string>> | Record<string, string>
 
   async call(
     endpoint: string,
@@ -66,7 +68,7 @@ export abstract class HttpSlackTransport implements SlackTransport {
     if (params) {
       for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v)
     }
-    const auth = await this.authHeaders()
+    const auth = await this.authHeaders(endpoint)
     const init: RequestInit = {
       method: body === undefined ? 'GET' : 'POST',
       headers: { 'Content-Type': 'application/json; charset=utf-8', ...auth },
@@ -106,11 +108,13 @@ export class NodeSlackTransport extends HttpSlackTransport {
   protected baseUrl(): string {
     return 'https://slack.com/api'
   }
-  protected authHeaders(): Record<string, string> {
-    return { Authorization: `Bearer ${this.token}` }
-  }
-  // searchToken is read by core/slack/search.ts at call time, not here.
-  getSearchToken(): string | undefined {
-    return this.searchToken
+  protected authHeaders(endpoint?: string): Record<string, string> {
+    const token =
+      endpoint?.startsWith('search.') === true &&
+      this.searchToken !== undefined &&
+      this.searchToken !== ''
+        ? this.searchToken
+        : this.token
+    return { Authorization: `Bearer ${token}` }
   }
 }

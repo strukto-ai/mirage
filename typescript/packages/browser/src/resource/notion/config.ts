@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js'
+import { redactConfigWithSchema, secretSchema, z } from '@struktoai/mirage-core'
 
 export interface NotionConfig {
   authProvider: OAuthClientProvider
@@ -24,8 +25,13 @@ export interface NotionConfigRedacted {
   serverUrl?: string
 }
 
+export const NotionConfigSchema = z.object({
+  authProvider: secretSchema(
+    z.custom<OAuthClientProvider>((value) => value !== null && typeof value === 'object'),
+  ),
+  serverUrl: z.string().optional(),
+})
+
 export function redactNotionConfig(config: NotionConfig): NotionConfigRedacted {
-  const out: NotionConfigRedacted = { authProvider: '<REDACTED>' }
-  if (config.serverUrl !== undefined) out.serverUrl = config.serverUrl
-  return out
+  return redactConfigWithSchema(NotionConfigSchema, config) as unknown as NotionConfigRedacted
 }

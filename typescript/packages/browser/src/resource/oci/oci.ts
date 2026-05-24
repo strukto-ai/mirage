@@ -19,8 +19,6 @@ import { OCI_BROWSER_PROMPT } from './prompt.ts'
 
 export interface OCIResourceState {
   type: string
-  needsOverride: boolean
-  redactedFields: readonly string[]
   config: OCIConfigRedacted
 }
 
@@ -66,8 +64,6 @@ export class OCIResource extends S3Resource {
   override getState(): Promise<OCIResourceState> {
     return Promise.resolve({
       type: this.kind,
-      needsOverride: true,
-      redactedFields: ['presignedUrlProvider'],
       config: redactOciConfig(this.ociConfig),
     })
   }

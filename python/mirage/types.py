@@ -111,6 +111,7 @@ class ResourceName(str, Enum):
     GCS = "gcs"
     EMAIL = "email"
     PAPERCLIP = "paperclip"
+    DATABRICKS_VOLUME = "databricks_volume"
 
 
 @dataclass(frozen=True)
@@ -271,8 +272,6 @@ class SessionKey(StrEnum):
 
 class ResourceStateKey(StrEnum):
     TYPE = "type"
-    NEEDS_OVERRIDE = "needs_override"
-    REDACTED_FIELDS = "redacted_fields"
     CONFIG = "config"
     FILES = "files"
     DIRS = "dirs"

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields } from '@struktoai/mirage-core'
+import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
 
 export interface GDocsConfig {
   clientId: string
@@ -27,12 +27,14 @@ export interface GDocsConfigRedacted {
   refreshToken: '<REDACTED>'
 }
 
+export const GDocsConfigSchema = z.object({
+  clientId: z.string(),
+  clientSecret: secretStr().optional(),
+  refreshToken: secretStr(),
+})
+
 export function redactGDocsConfig(config: GDocsConfig): GDocsConfigRedacted {
-  return {
-    clientId: config.clientId,
-    ...(config.clientSecret !== undefined ? { clientSecret: '<REDACTED>' as const } : {}),
-    refreshToken: '<REDACTED>',
-  }
+  return redactConfigWithSchema(GDocsConfigSchema, config) as unknown as GDocsConfigRedacted
 }
 
 export function normalizeGDocsConfig(input: Record<string, unknown>): GDocsConfig {

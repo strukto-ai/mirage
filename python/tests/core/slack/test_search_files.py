@@ -39,7 +39,7 @@ async def test_search_files_calls_correct_endpoint():
     args, kwargs = mock.call_args
     assert args[1] == "search.files"
     assert kwargs["params"]["query"] == "report"
-    assert kwargs["token"] == "xoxp"
+    assert "token" not in kwargs
 
 
 def test_format_file_grep_results_renders_paths():

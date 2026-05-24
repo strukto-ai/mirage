@@ -15,6 +15,7 @@
 import re
 from collections.abc import AsyncIterator
 
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.local_audio.utils import transcribe
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -42,11 +43,12 @@ async def grep_wav(
     E: bool = False,
     o: bool = False,
     m: str | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if accessor.store is None or not paths or not texts:
         raise ValueError("grep: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     try:
         pattern = texts[0]
         raw = await read_bytes(accessor, paths[0])

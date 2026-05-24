@@ -24,8 +24,6 @@ import { SUPABASE_BROWSER_PROMPT } from './prompt.ts'
 
 export interface SupabaseResourceState {
   type: string
-  needsOverride: boolean
-  redactedFields: readonly string[]
   config: SupabaseConfigRedacted
 }
 
@@ -71,8 +69,6 @@ export class SupabaseResource extends S3Resource {
   override getState(): Promise<SupabaseResourceState> {
     return Promise.resolve({
       type: this.kind,
-      needsOverride: true,
-      redactedFields: ['presignedUrlProvider'],
       config: redactSupabaseConfig(this.supabaseConfig),
     })
   }

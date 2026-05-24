@@ -12,10 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import io as _io
-
-import pyarrow.parquet as pq
-
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
@@ -23,6 +19,7 @@ from mirage.commands.spec import SPECS
 from mirage.core.disk.glob import resolve_glob
 from mirage.core.disk.read import read_bytes
 from mirage.core.disk.stat import stat as local_stat
+from mirage.core.filetype.parquet import ls as parquet_ls
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -51,9 +48,7 @@ async def ls_parquet(
     try:
         s = await local_stat(accessor, paths[0])
         raw = await read_bytes(accessor, paths[0])
-        pf = pq.ParquetFile(_io.BytesIO(raw))
-        rows = pf.metadata.num_rows
-        cols = len(pf.schema_arrow)
+        rows, cols = parquet_ls(raw)
         size = s.size or 0
         line = (f"parquet\t{size}\t{rows} rows\t{cols} cols"
                 f"\t{s.modified or ''}\t{s.name}")

@@ -90,8 +90,6 @@ class RAMResource(BaseResource):
     def get_state(self) -> dict:
         return {
             "type": self.name,
-            "needs_override": False,
-            "redacted_fields": [],
             "files": dict(self._store.files),
             "dirs": list(self._store.dirs),
             "modified": dict(self._store.modified),

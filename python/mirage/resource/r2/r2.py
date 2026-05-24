@@ -26,17 +26,7 @@ class R2Resource(S3Resource):
         super().__init__(config.to_s3_config())
 
     def get_state(self) -> dict:
-        redacted = ['access_key_id', 'secret_access_key']
-        cfg = self.r2_config.model_dump()
-        for f in redacted:
-            if cfg.get(f) is not None:
-                cfg[f] = "<REDACTED>"
-        return {
-            "type": self.name,
-            "needs_override": True,
-            "redacted_fields": redacted,
-            "config": cfg,
-        }
+        return self.config_state(self.r2_config)
 
     def load_state(self, state: dict) -> None:
         pass

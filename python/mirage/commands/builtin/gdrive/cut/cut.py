@@ -15,6 +15,7 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.cut_helper import (cut_record, parse_ranges,
                                                 split_records)
 from mirage.commands.builtin.utils.stream import _read_stdin_async
@@ -37,14 +38,15 @@ async def cut(
     c: str | None = None,
     complement: bool = False,
     z: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     field_ranges = parse_ranges(f) if f is not None else None
     char_ranges = parse_ranges(c) if c is not None else None
     delim = d if d is not None else "\t"
     if paths:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
-        raw = await gdrive_read(accessor, paths[0], _extra.get("index"))
+        paths = await resolve_glob(accessor, paths, index)
+        raw = await gdrive_read(accessor, paths[0], index)
     else:
         raw = await _read_stdin_async(stdin)
         if raw is None:

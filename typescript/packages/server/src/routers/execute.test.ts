@@ -41,6 +41,25 @@ describe('execute router', () => {
     await app.close()
   })
 
+  it('passes base64 stdin to command execution', async () => {
+    const app = buildApp()
+    await createWs(app, 'estdin')
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces/estdin/execute',
+      payload: {
+        command: 'wc -l',
+        stdinBase64: Buffer.from('a\nb\nc\n').toString('base64'),
+      },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json<{ kind: string; stdout: string; exitCode: number }>()
+    expect(body.kind).toBe('io')
+    expect(body.stdout.trim()).toMatch(/^3\b/)
+    expect(body.exitCode).toBe(0)
+    await app.close()
+  })
+
   it('POST /v1/jobs/:id/wait accepts an empty body', async () => {
     const app = buildApp()
     await createWs(app, 'ewait')

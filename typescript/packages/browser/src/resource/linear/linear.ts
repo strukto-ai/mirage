@@ -37,8 +37,6 @@ import { redactLinearConfig, type LinearConfig, type LinearConfigRedacted } from
 
 export interface LinearResourceState {
   type: string
-  needsOverride: boolean
-  redactedFields: readonly string[]
   config: LinearConfigRedacted
 }
 
@@ -120,8 +118,6 @@ export class LinearResource implements Resource {
   getState(): Promise<LinearResourceState> {
     return Promise.resolve({
       type: this.kind,
-      needsOverride: true,
-      redactedFields: ['apiKey'],
       config: redactLinearConfig(this.config),
     })
   }

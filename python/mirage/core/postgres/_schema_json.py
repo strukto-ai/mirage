@@ -14,6 +14,7 @@
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.core.postgres import _client
+from mirage.resource.secrets import reveal_secret
 
 
 async def build_database_json(accessor: PostgresAccessor) -> dict:
@@ -40,7 +41,7 @@ async def build_database_json(accessor: PostgresAccessor) -> dict:
                 views.append({"schema": s, "name": v, "kind": "materialized"})
         relationships = await _client.fetch_all_relationships(conn, schemas)
     return {
-        "database": _db_name_from_dsn(accessor.config.dsn),
+        "database": _db_name_from_dsn(reveal_secret(accessor.config.dsn)),
         "schemas": schemas,
         "tables": tables,
         "views": views,

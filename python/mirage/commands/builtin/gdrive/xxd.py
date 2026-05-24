@@ -12,45 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import binascii
 from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.xxd import xxd as generic_xxd
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
-from mirage.core.gdrive.read import read as gdrive_read
+from mirage.core.gdrive.stream import read_stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-def _xxd_dump(data: bytes, cols: int, group: int, uppercase: bool) -> bytes:
-    fmt = "{:02X}" if uppercase else "{:02x}"
-    offset_fmt = "{:08X}: " if uppercase else "{:08x}: "
-    lines: list[str] = []
-    for offset in range(0, len(data), cols):
-        row = data[offset:offset + cols]
-        hex_parts: list[str] = []
-        for g in range(0, len(row), group):
-            hex_parts.append("".join(fmt.format(b) for b in row[g:g + group]))
-        hex_part = " ".join(hex_parts)
-        ascii_part = "".join(chr(b) if 32 <= b < 127 else "." for b in row)
-        line = offset_fmt.format(
-            offset
-        ) + f"{hex_part:<{cols * 2 + (cols // group) - 1}}  {ascii_part}"
-        lines.append(line)
-    return ("\n".join(lines) + "\n").encode() if lines else b""
-
-
-def _xxd_plain(data: bytes, uppercase: bool) -> bytes:
-    h = binascii.hexlify(data)
-    return (h.upper() if uppercase else h) + b"\n"
-
-
-def _xxd_reverse(data: bytes) -> bytes:
-    text = data.decode(errors="replace").replace("\n", "").replace(" ", "")
-    return binascii.unhexlify(text)
 
 
 @command("xxd", resource="gdrive", spec=SPECS["xxd"])
@@ -66,33 +39,25 @@ async def xxd(
     s: str | bool = False,
     g: str | bool = False,
     u: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
-        p0 = paths[0]
-        raw = await gdrive_read(
-            accessor,
-            p0.original,
-            _extra.get("index"),
-        )
+        paths = await resolve_glob(accessor, paths, index)
     else:
-        raw = await _read_stdin_async(stdin)
-        if raw is None:
-            raise ValueError("xxd: missing input")
-
+        paths = []
     skip = int(s) if s and s is not True else 0
     limit = int(args_l) if args_l and args_l is not True else 0
-    if skip:
-        raw = raw[skip:]
-    if limit:
-        raw = raw[:limit]
-
-    if r:
-        return _xxd_reverse(raw), IOResult()
-    if p:
-        return _xxd_plain(raw, uppercase=u), IOResult()
-
     cols = int(c) if c and c is not True else 16
     group = int(g) if g and g is not True else 2
-    return _xxd_dump(raw, cols=cols, group=group, uppercase=u), IOResult()
+    return await generic_xxd(paths,
+                             read_stream=partial(read_stream, index=index),
+                             accessor=accessor,
+                             stdin=stdin,
+                             reverse=r,
+                             plain=p,
+                             uppercase=u,
+                             cols=cols,
+                             group=group,
+                             skip=skip,
+                             limit=limit)

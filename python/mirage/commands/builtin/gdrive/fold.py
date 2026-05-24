@@ -13,36 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.fold import fold as generic_fold
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
-from mirage.core.gdrive.read import read as gdrive_read
+from mirage.core.gdrive.read import read as read_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-def _fold_line(line: str, width: int, break_spaces: bool) -> str:
-    if len(line) <= width:
-        return line
-    parts: list[str] = []
-    while len(line) > width:
-        if break_spaces:
-            idx = line.rfind(" ", 0, width)
-            if idx > 0:
-                parts.append(line[:idx + 1])
-                line = line[idx + 1:]
-            else:
-                parts.append(line[:width])
-                line = line[width:]
-        else:
-            parts.append(line[:width])
-            line = line[width:]
-    if line:
-        parts.append(line)
-    return "\n".join(parts)
 
 
 @command("fold", resource="gdrive", spec=SPECS["fold"])
@@ -53,22 +34,16 @@ async def fold(
     stdin: AsyncIterator[bytes] | bytes | None = None,
     w: str | None = None,
     s: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    width = int(w) if w is not None else 80
     if paths:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
-        all_lines: list[str] = []
-        for p in paths:
-            data = (await
-                    gdrive_read(accessor, p,
-                                _extra.get("index"))).decode(errors="replace")
-            for line in data.splitlines():
-                all_lines.append(_fold_line(line, width, s))
-        return ("\n".join(all_lines) + "\n").encode(), IOResult()
-    raw = await _read_stdin_async(stdin)
-    if raw is None:
-        raise ValueError("fold: missing operand")
-    lines = raw.decode(errors="replace").splitlines()
-    result = [_fold_line(ln, width, s) for ln in lines]
-    return ("\n".join(result) + "\n").encode(), IOResult()
+        paths = await resolve_glob(accessor, paths, index)
+    else:
+        paths = []
+    return await generic_fold(paths,
+                              read_bytes=partial(read_bytes, index=index),
+                              accessor=accessor,
+                              stdin=stdin,
+                              width=int(w) if w is not None else 80,
+                              break_spaces=s)

@@ -14,47 +14,40 @@
 
 from collections.abc import AsyncIterator
 
-from mirage.accessor.ssh import SSHAccessor
+from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.builtin.tail_helper import _parse_n, tail_bytes
+from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.core.ssh.glob import resolve_glob
-from mirage.core.ssh.stat import stat
-from mirage.core.ssh.stream import read_stream
-from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.core.databricks_volume.glob import resolve_glob
+from mirage.core.databricks_volume.read import read_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def _number_lines_stream(
-        source: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
-    num = 1
-    async for line in AsyncLineIterator(source):
-        yield f"     {num}\t".encode() + line + b"\n"
-        num += 1
-
-
-@command("cat", resource="ssh", spec=SPECS["cat"])
-async def cat(
-    accessor: SSHAccessor,
+@command("tail", resource="databricks_volume", spec=SPECS["tail"])
+async def tail(
+    accessor: DatabricksVolumeAccessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
-    n: bool = False,
+    n: str | None = None,
+    c: str | None = None,
+    q: bool = False,
+    v: bool = False,
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
+    lines, plus_mode = _parse_n(n)
+    bytes_mode = int(c) if c is not None else None
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        p = paths[0]
-        await stat(accessor, p)
-        source = read_stream(accessor, p)
-        io = IOResult(reads={p.strip_prefix: source}, cache=[p.strip_prefix])
-        if n:
-            return _number_lines_stream(source), io
-        return source, io
-    source = _resolve_source(stdin, "cat: missing operand")
-    if n:
-        return _number_lines_stream(source), IOResult()
-    return source, IOResult()
+        raw = await read_bytes(accessor, paths[0], index)
+    else:
+        raw = await _read_stdin_async(stdin)
+        if raw is None:
+            raise ValueError("tail: missing operand")
+    if bytes_mode is not None:
+        return raw[-bytes_mode:] if bytes_mode else b"", IOResult()
+    return tail_bytes(raw, lines, plus_mode=plus_mode), IOResult()

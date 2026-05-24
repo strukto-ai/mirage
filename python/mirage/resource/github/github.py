@@ -99,22 +99,14 @@ class GitHubResource(BaseResource):
         return result.entry.id if result.entry else None
 
     def get_state(self) -> dict:
-        redacted = ['token']
-        cfg = self.accessor.config.model_dump()
-        for f in redacted:
-            if cfg.get(f) is not None:
-                cfg[f] = "<REDACTED>"
-        return {
-            "type": self.name,
-            "needs_override": True,
-            "redacted_fields": redacted,
-            "config": cfg,
-            "owner": self.accessor.owner,
-            "repo": self.accessor.repo,
-            "ref": self.accessor.ref,
-            "default_branch": self.accessor.default_branch,
-            "truncated": self.accessor.truncated,
-        }
+        return self.config_state(
+            self.accessor.config,
+            owner=self.accessor.owner,
+            repo=self.accessor.repo,
+            ref=self.accessor.ref,
+            default_branch=self.accessor.default_branch,
+            truncated=self.accessor.truncated,
+        )
 
     def load_state(self, state: dict) -> None:
         pass

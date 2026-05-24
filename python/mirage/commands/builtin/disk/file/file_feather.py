@@ -12,16 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import io as _io
-
-import pyarrow.feather as feather
-
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.disk.glob import resolve_glob
 from mirage.core.disk.read import read_bytes
+from mirage.core.filetype.feather import file as feather_file
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -42,13 +39,9 @@ async def file_feather(
     paths = await resolve_glob(accessor, paths, index)
     try:
         raw = await read_bytes(accessor, paths[0])
-        table = feather.read_table(_io.BytesIO(raw))
-        schema = table.schema
-        cols = ", ".join(f"{f.name}: {f.type}" for f in schema)
-        result = (f"feather, {table.num_rows} rows, {len(schema)} columns"
-                  f" ({cols})")
-        return result.encode(), IOResult(reads={paths[0].strip_prefix: raw},
-                                         cache=[paths[0].strip_prefix])
+        result = feather_file(raw)
+        return result, IOResult(reads={paths[0].strip_prefix: raw},
+                                cache=[paths[0].strip_prefix])
     except Exception as e:
         return None, IOResult(
             exit_code=1,

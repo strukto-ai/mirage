@@ -161,7 +161,7 @@ async def main():
     print("\n[get_state]")
     state = deep_backend.get_state()
     print(f"  config.key_prefix = {state['config'].get('key_prefix')!r}")
-    print(f"  redacted_fields  = {state['redacted_fields']}")
+    print(f"  access key        = {state['config']['aws_access_key_id']}")
 
     # ── root listing (tests stat on directory prefixes) ──
     print("\n=== ROOT LISTING ===\n")
@@ -628,8 +628,8 @@ async def main():
         print(f"  S3 read after rm: exit={r.exit_code} (expect non-zero)")
 
     # ── persistence: save / load / copy / deepcopy ──────────────────
-    # S3 has needs_override=True — creds are redacted at save time;
-    # caller must re-supply a fresh S3Resource via resources={...}.
+    # S3 with inline creds has redacted config at save time; caller must
+    # re-supply a fresh S3Resource via resources={...}.
     print("\n=== PERSISTENCE ===\n")
     with tempfile.NamedTemporaryFile(suffix=".tar", delete=False) as f:
         snap = f.name
@@ -655,8 +655,14 @@ async def main():
             print(f"  ✓ load() w/o resources raises: "
                   f"{str(e).splitlines()[0][:70]}…")
 
-        # Load with fresh creds
-        loaded = Workspace.load(snap, resources={"/s3/": S3Resource(config)})
+        # Load with fresh creds (both mounts were redacted)
+        loaded = Workspace.load(
+            snap,
+            resources={
+                "/s3/": S3Resource(config),
+                "/deep/": S3Resource(deep_config),
+            },
+        )
         r = await loaded.execute("ls /s3/")
         print(f"  loaded ws ls /s3/: "
               f"{(await r.stdout_str()).strip()[:60]}…")

@@ -12,92 +12,34 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections import deque
 from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.commands.builtin.gdrive._provision import file_read_provision
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.tsort import tsort as generic_tsort
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
-from mirage.core.gdrive.read import read as gdrive_read
+from mirage.core.gdrive.read import read as read_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
 
 
-def _topological_sort(pairs: list[tuple[str, str]]) -> tuple[list[str], bool]:
-    graph: dict[str, set[str]] = {}
-    in_degree: dict[str, int] = {}
-    for a, b in pairs:
-        if a not in graph:
-            graph[a] = set()
-            in_degree.setdefault(a, 0)
-        if b not in graph:
-            graph[b] = set()
-            in_degree.setdefault(b, 0)
-        if b not in graph[a]:
-            graph[a].add(b)
-            in_degree[b] = in_degree.get(b, 0) + 1
-    queue: deque[str] = deque()
-    for node in in_degree:
-        if in_degree[node] == 0:
-            queue.append(node)
-    result: list[str] = []
-    while queue:
-        node = queue.popleft()
-        result.append(node)
-        for neighbor in sorted(graph[node]):
-            in_degree[neighbor] -= 1
-            if in_degree[neighbor] == 0:
-                queue.append(neighbor)
-    has_cycle = len(result) != len(graph)
-    return result, has_cycle
-
-
-async def tsort_provision(
-    accessor: GDriveAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    **_extra: object,
-) -> ProvisionResult:
-    return await file_read_provision(
-        accessor,
-        paths,
-        "tsort " + " ".join(p.original if isinstance(p, PathSpec) else p
-                            for p in paths),
-        index=_extra.get("index"))
-
-
-@command("tsort",
-         resource="gdrive",
-         spec=SPECS["tsort"],
-         provision=tsort_provision)
+@command("tsort", resource="gdrive", spec=SPECS["tsort"])
 async def tsort(
     accessor: GDriveAccessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
-        p = paths[0]
-        raw = await gdrive_read(accessor, p, _extra.get("index"))
+        paths = await resolve_glob(accessor, paths, index)
     else:
-        raw = await _read_stdin_async(stdin)
-        if raw is None:
-            raise ValueError("tsort: missing input")
-    text = raw.decode(errors="replace")
-    tokens = text.split()
-    if len(tokens) % 2 != 0:
-        return b"tsort: odd number of tokens\n", IOResult(exit_code=1)
-    pairs: list[tuple[str, str]] = []
-    for idx in range(0, len(tokens), 2):
-        pairs.append((tokens[idx], tokens[idx + 1]))
-    result, has_cycle = _topological_sort(pairs)
-    if has_cycle:
-        return b"tsort: cycle detected\n", IOResult(exit_code=1)
-    output = "\n".join(result) + "\n"
-    return output.encode(), IOResult()
+        paths = []
+    return await generic_tsort(paths,
+                               read_bytes=partial(read_bytes, index=index),
+                               accessor=accessor,
+                               stdin=stdin)

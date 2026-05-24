@@ -22,7 +22,7 @@ from mirage.types import PathSpec
 
 @command("dirname", resource="s3", spec=SPECS["dirname"])
 async def dirname(
-    accessor: S3Accessor = None,
+    accessor: S3Accessor,
     paths: list[PathSpec] | None = None,
     *texts: str,
     stdin: bytes | None = None,

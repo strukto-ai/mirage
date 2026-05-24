@@ -13,65 +13,38 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.commands.builtin.gdrive._provision import file_read_provision
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.look import look as generic_look
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
-from mirage.core.gdrive.read import read as gdrive_read
+from mirage.core.gdrive.read import read as read_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
 
 
-async def look_provision(
-    accessor: GDriveAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    **_extra: object,
-) -> ProvisionResult:
-    return await file_read_provision(
-        accessor,
-        paths,
-        "look " + " ".join(p.original if isinstance(p, PathSpec) else p
-                           for p in paths),
-        index=_extra.get("index"))
-
-
-@command("look",
-         resource="gdrive",
-         spec=SPECS["look"],
-         provision=look_provision)
+@command("look", resource="gdrive", spec=SPECS["look"])
 async def look(
     accessor: GDriveAccessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     f: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not texts:
         raise ValueError("look: missing prefix")
-    prefix = texts[0]
     if paths:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
-        p = paths[0]
-        raw = await gdrive_read(accessor, p, _extra.get("index"))
+        paths = await resolve_glob(accessor, paths, index)
     else:
-        raw = await _read_stdin_async(stdin)
-        if raw is None:
-            raise ValueError("look: missing input")
-    text = raw.decode(errors="replace")
-    lines = text.splitlines()
-    matched: list[str] = []
-    for line in lines:
-        cmp_line = line.lower() if f else line
-        cmp_prefix = prefix.lower() if f else prefix
-        if cmp_line.startswith(cmp_prefix):
-            matched.append(line)
-    if not matched:
-        return None, IOResult(exit_code=1)
-    output = "\n".join(matched) + "\n"
-    return output.encode(), IOResult()
+        paths = []
+    return await generic_look(paths,
+                              texts[0],
+                              read_bytes=partial(read_bytes, index=index),
+                              accessor=accessor,
+                              stdin=stdin,
+                              fold_case=f)

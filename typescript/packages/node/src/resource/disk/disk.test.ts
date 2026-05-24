@@ -154,8 +154,8 @@ describe('DiskResource — getState / loadState round-trip', () => {
 
     const state = await res.getState()
     expect(Object.keys(state.files).sort()).toEqual(['a.txt', 'd/b.txt'])
-    expect(state.needsOverride).toBe(false)
-    expect(state.redactedFields).toEqual([])
+    expect(state).not.toHaveProperty('needsOverride')
+    expect(state).not.toHaveProperty('redactedFields')
 
     const { root: root2, cleanup: c2 } = tmpRoot('mirage-diskresource-load-')
     try {

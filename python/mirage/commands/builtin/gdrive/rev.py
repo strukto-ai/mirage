@@ -13,13 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.rev import rev as generic_rev
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
-from mirage.core.gdrive.read import read as gdrive_read
+from mirage.core.gdrive.read import read as read_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -30,21 +32,14 @@ async def rev(
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
-        all_lines: list[str] = []
-        for p in paths:
-            data = (await
-                    gdrive_read(accessor, p,
-                                _extra.get("index"))).decode(errors="replace")
-            all_lines.extend(data.splitlines())
-        reversed_lines = [line[::-1] for line in all_lines]
-        return ("\n".join(reversed_lines) + "\n").encode(), IOResult()
-    raw = await _read_stdin_async(stdin)
-    if raw is None:
-        raise ValueError("rev: missing operand")
-    lines = raw.decode(errors="replace").splitlines()
-    reversed_lines = [line[::-1] for line in lines]
-    return ("\n".join(reversed_lines) + "\n").encode(), IOResult()
+        paths = await resolve_glob(accessor, paths, index)
+    else:
+        paths = []
+    return await generic_rev(paths,
+                             read_bytes=partial(read_bytes, index=index),
+                             accessor=accessor,
+                             stdin=stdin)

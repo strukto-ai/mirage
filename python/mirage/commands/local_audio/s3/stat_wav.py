@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.local_audio.utils import (_METADATA_RANGE,
                                                format_metadata, metadata)
 from mirage.commands.registry import command
@@ -50,11 +51,12 @@ async def stat_wav(
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("stat: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     try:
         head_bytes = await read_bytes(accessor,
                                       paths[0],

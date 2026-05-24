@@ -114,6 +114,7 @@ async def ls(
     R: bool = False,
     d: bool = False,
     F: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     all_files = a or A
@@ -151,7 +152,7 @@ async def ls(
                 recursive=R,
                 list_dir=d,
                 warnings=warnings,
-                index=_extra.get("index"),
+                index=index,
             )
         except (FileNotFoundError, ValueError) as exc:
             warnings.append(f"ls: cannot access '{p.original}': {exc}")

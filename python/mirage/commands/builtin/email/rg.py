@@ -16,6 +16,7 @@ import json
 from collections.abc import AsyncIterator
 
 from mirage.accessor.email import EmailAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.grep_helper import compile_pattern, grep_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
@@ -49,6 +50,7 @@ async def rg(
     type: str | None = None,
     glob: str | None = None,
     prefix: str = "",
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not texts:
@@ -56,7 +58,6 @@ async def rg(
     pattern_str = texts[0]
     max_count = int(m) if m is not None else None
     pat = compile_pattern(pattern_str, i, F, w)
-    _extra.get("index")
 
     if paths:
         folder = extract_folder(paths)

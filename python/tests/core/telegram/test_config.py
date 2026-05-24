@@ -12,9 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.resource.secrets import reveal_secret
 from mirage.resource.telegram.config import TelegramConfig
 
 
 def test_config():
     c = TelegramConfig(token="123:ABC")
-    assert c.token == "123:ABC"
+    assert reveal_secret(c.token) == "123:ABC"

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields } from '@struktoai/mirage-core'
+import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
 
 export interface BoxConfig {
   clientId?: string
@@ -32,13 +32,15 @@ export interface BoxConfigRedacted {
   accessToken?: '<REDACTED>'
 }
 
+export const BoxConfigSchema = z.object({
+  clientId: z.string().optional(),
+  clientSecret: secretStr().optional(),
+  refreshToken: secretStr().optional(),
+  accessToken: secretStr().optional(),
+})
+
 export function redactBoxConfig(config: BoxConfig): BoxConfigRedacted {
-  const out: BoxConfigRedacted = {}
-  if (config.clientId !== undefined) out.clientId = config.clientId
-  if (config.clientSecret !== undefined) out.clientSecret = '<REDACTED>'
-  if (config.refreshToken !== undefined) out.refreshToken = '<REDACTED>'
-  if (config.accessToken !== undefined) out.accessToken = '<REDACTED>'
-  return out
+  return redactConfigWithSchema(BoxConfigSchema, config) as unknown as BoxConfigRedacted
 }
 
 export function normalizeBoxConfig(input: Record<string, unknown>): BoxConfig {

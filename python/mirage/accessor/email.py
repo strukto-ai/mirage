@@ -16,6 +16,7 @@ import aioimaplib
 
 from mirage.accessor.base import Accessor
 from mirage.resource.email.config import EmailConfig
+from mirage.resource.secrets import reveal_secret
 
 
 class EmailAccessor(Accessor):
@@ -37,5 +38,6 @@ class EmailAccessor(Accessor):
                     port=self.config.imap_port,
                 )
             await self._imap.wait_hello_from_server()
-            await self._imap.login(self.config.username, self.config.password)
+            await self._imap.login(self.config.username,
+                                   reveal_secret(self.config.password))
         return self._imap

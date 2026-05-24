@@ -12,6 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { z } from 'zod'
+import { redactConfigWithSchema, secretStr } from '../../resource/secrets.ts'
+import { normalizeFields } from '../../utils/normalize.ts'
+
 export interface GoogleConfig {
   clientId: string
   // Optional: omit in browser PKCE flows. The PKCE verifier authenticates
@@ -23,4 +27,30 @@ export interface GoogleConfig {
   // token endpoint directly. Useful when the client_secret must stay on a
   // backend (e.g. a Vercel function proxy).
   refreshFn?: (refreshToken: string) => Promise<{ accessToken: string; expiresIn: number }>
+}
+
+export interface GoogleConfigRedacted {
+  clientId: string
+  clientSecret?: '<REDACTED>'
+  refreshToken: '<REDACTED>'
+}
+
+export const GoogleConfigSchema = z.object({
+  clientId: z.string(),
+  clientSecret: secretStr().optional(),
+  refreshToken: secretStr(),
+})
+
+export function redactGoogleConfig(config: GoogleConfig): GoogleConfigRedacted {
+  return redactConfigWithSchema(GoogleConfigSchema, config) as unknown as GoogleConfigRedacted
+}
+
+export function normalizeGoogleConfig(input: Record<string, unknown>): GoogleConfig {
+  return normalizeFields(input, {
+    rename: {
+      client_id: 'clientId',
+      client_secret: 'clientSecret',
+      refresh_token: 'refreshToken',
+    },
+  }) as unknown as GoogleConfig
 }

@@ -110,7 +110,7 @@ async def main() -> None:
     print(await result.stdout_str())
 
     # ── persistence: save / load / copy / deepcopy ──────────────────
-    # Disk has needs_override=False — full file tree is in the snapshot.
+    # Disk has no redacted config: full file tree is in the snapshot.
     # Default load behavior creates a fresh tmpdir. Caller can override
     # by supplying DiskResource(root=...) in resources={...}.
     print("\n=== PERSISTENCE ===\n")

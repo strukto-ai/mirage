@@ -42,8 +42,6 @@ import { RAMStore } from './store.ts'
 
 export interface RAMResourceState {
   type: string
-  needsOverride: boolean
-  redactedFields: string[]
   files: Record<string, Uint8Array>
   dirs: string[]
   modified: Record<string, string>
@@ -181,8 +179,6 @@ export class RAMResource extends BaseResource implements Resource {
     for (const [k, v] of this.store.modified) modified[k] = v
     return {
       type: this.kind,
-      needsOverride: false,
-      redactedFields: [],
       files,
       dirs: [...this.store.dirs],
       modified,

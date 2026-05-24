@@ -277,9 +277,9 @@ def merge_override(base: WorkspaceConfig,
                    env: dict[str, str] | None = None) -> WorkspaceConfig:
     """Apply a partial config on top of an existing one.
 
-    Used by ``--clone --override`` and ``--load --override`` to swap
-    selected fields (typically resource creds, occasionally a bucket
-    or URL) without rewriting the whole config.
+    Used by clone/load override config files to swap selected fields
+    (typically resource creds, occasionally a bucket or URL) without
+    rewriting the whole config.
 
     Merge semantics: nested dicts merge by key recursively; leaf
     values replace. Mounts not mentioned in the override survive

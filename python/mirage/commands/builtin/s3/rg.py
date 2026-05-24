@@ -79,7 +79,11 @@ async def rg(
                      accessor,
                      index=index,
                      prefix=mount_prefix)
-        st = partial(call_stat, _stat, accessor, prefix=mount_prefix)
+        st = partial(call_stat,
+                     _stat,
+                     accessor,
+                     index=index,
+                     prefix=mount_prefix)
         rb = partial(call_read_bytes,
                      _read_bytes,
                      accessor,

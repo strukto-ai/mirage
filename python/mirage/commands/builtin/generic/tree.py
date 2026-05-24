@@ -15,7 +15,7 @@ async def _walk(
     path: PathSpec,
     readdir: Callable[[PathSpec, IndexCacheStore | None],
                       Awaitable[list[str]]],
-    stat: Callable[[PathSpec], Awaitable[FileStat]],
+    stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
     *,
     prefix: str,
     depth: int,
@@ -41,7 +41,7 @@ async def _walk(
                               resolved=False,
                               prefix=path.prefix)
         try:
-            s = await stat(entry_spec)
+            s = await stat(entry_spec, index)
         except (FileNotFoundError, ValueError) as exc:
             warnings.append(f"tree: '{entry}': {exc}")
             continue
@@ -87,7 +87,7 @@ async def tree(
     *,
     readdir: Callable[[PathSpec, IndexCacheStore | None],
                       Awaitable[list[str]]],
-    stat: Callable[[PathSpec], Awaitable[FileStat]],
+    stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
     max_depth: int | None = None,
     show_hidden: bool = False,
     ignore_pattern: str | None = None,

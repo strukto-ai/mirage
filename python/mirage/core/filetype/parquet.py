@@ -159,3 +159,16 @@ def cut(raw: bytes, columns: list[str]) -> bytes:
             raise ValueError(f"column not found: {col}")
     table = pf.read(columns=columns)
     return table.to_pandas().to_csv(index=False).encode()
+
+
+def file(raw: bytes) -> bytes:
+    pf = _open(raw)
+    meta = pf.metadata
+    cols = ", ".join(f"{f.name}: {f.type}" for f in pf.schema_arrow)
+    return (f"parquet, {meta.num_rows} rows, {meta.num_columns} columns"
+            f" ({cols})").encode()
+
+
+def ls(raw: bytes) -> tuple[int, int]:
+    pf = _open(raw)
+    return pf.metadata.num_rows, len(pf.schema_arrow)

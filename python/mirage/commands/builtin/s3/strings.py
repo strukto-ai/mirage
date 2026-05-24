@@ -12,12 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
 from collections.abc import AsyncIterator
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.builtin.generic.strings import strings as generic_strings
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.s3.glob import resolve_glob
@@ -36,15 +35,12 @@ async def strings(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    min_len = int(n) if n else 4
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        raw = await read_bytes(accessor, paths[0])
     else:
-        raw = await _read_stdin_async(stdin)
-        if raw is None:
-            raise ValueError("strings: missing input")
-    pattern = rb"[\x20-\x7e]{" + str(min_len).encode() + rb",}"
-    matches = re.findall(pattern, raw)
-    output = b"\n".join(matches) + b"\n" if matches else b""
-    return output, IOResult()
+        paths = []
+    return await generic_strings(paths,
+                                 read_bytes=read_bytes,
+                                 accessor=accessor,
+                                 stdin=stdin,
+                                 min_len=int(n) if n else 4)

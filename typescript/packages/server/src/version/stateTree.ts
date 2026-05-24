@@ -105,7 +105,7 @@ export function treeInputsFromState(state: WorkspaceStateDict): TreeInputs {
     mounts: mountsMeta,
     cache: { limit: cache.limit, entries: cacheMeta },
     fingerprints: (state.fingerprints as unknown[] | undefined) ?? [],
-    liveOnlyMounts: (state.liveOnlyMounts) ?? [],
+    liveOnlyMounts: state.liveOnlyMounts ?? [],
   }
   return { entries, meta }
 }

@@ -14,8 +14,11 @@
 
 import {
   normalizeFields,
+  redactConfigWithSchema,
+  S3ConfigSchema as S3CoreConfigSchema,
   type S3Config as S3CoreConfig,
   type S3ConfigRedacted as S3CoreConfigRedacted,
+  z,
 } from '@struktoai/mirage-core'
 
 export interface S3Config extends S3CoreConfig {
@@ -26,14 +29,12 @@ export interface S3ConfigRedacted extends S3CoreConfigRedacted {
   profile?: string
 }
 
+export const S3ConfigSchema = S3CoreConfigSchema.extend({
+  profile: z.string().optional(),
+})
+
 export function redactConfig(config: S3Config): S3ConfigRedacted {
-  const { presignedUrlProvider, ...rest } = config
-  const out: S3ConfigRedacted = { ...rest }
-  if (config.accessKeyId !== undefined) out.accessKeyId = '<REDACTED>'
-  if (config.secretAccessKey !== undefined) out.secretAccessKey = '<REDACTED>'
-  if (config.sessionToken !== undefined) out.sessionToken = '<REDACTED>'
-  if (presignedUrlProvider !== undefined) out.presignedUrlProvider = '<REDACTED>'
-  return out
+  return redactConfigWithSchema(S3ConfigSchema, config) as unknown as S3ConfigRedacted
 }
 
 /**

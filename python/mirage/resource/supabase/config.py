@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, SecretStr
 
 from mirage.resource.s3 import S3Config
 
@@ -24,9 +24,9 @@ class SupabaseConfig(BaseModel):
     region: str
     project_ref: str | None = None
     endpoint_url: str | None = None
-    access_key_id: str
-    secret_access_key: str
-    session_token: str | None = None
+    access_key_id: SecretStr
+    secret_access_key: SecretStr
+    session_token: SecretStr | None = None
     timeout: int = 30
     proxy: str | None = None
 

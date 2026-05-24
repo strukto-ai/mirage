@@ -13,47 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.column import column as generic_column
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
-from mirage.core.gdrive.read import read as gdrive_read
+from mirage.core.gdrive.read import read as read_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-def _table_format(text: str,
-                  separator: str | None,
-                  output_sep: str = "  ") -> str:
-    lines = text.splitlines()
-    if not lines:
-        return ""
-    rows: list[list[str]] = []
-    for line in lines:
-        if separator:
-            rows.append(line.split(separator))
-        else:
-            rows.append(line.split())
-    if not rows:
-        return ""
-    max_cols = max(len(r) for r in rows)
-    widths = [0] * max_cols
-    for row in rows:
-        for idx, cell in enumerate(row):
-            if len(cell) > widths[idx]:
-                widths[idx] = len(cell)
-    out: list[str] = []
-    for row in rows:
-        parts: list[str] = []
-        for idx, cell in enumerate(row):
-            if idx < len(row) - 1:
-                parts.append(cell.ljust(widths[idx]))
-            else:
-                parts.append(cell)
-        out.append(output_sep.join(parts))
-    return "\n".join(out) + "\n"
 
 
 @command("column", resource="gdrive", spec=SPECS["column"])
@@ -65,19 +35,17 @@ async def column(
     t: bool = False,
     s: str | None = None,
     o: str | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
-        p = paths[0]
-        raw = await gdrive_read(accessor, p, _extra.get("index"))
+        paths = await resolve_glob(accessor, paths, index)
     else:
-        raw = await _read_stdin_async(stdin)
-        if raw is None:
-            raise ValueError("column: missing input")
-    text = raw.decode(errors="replace")
-    if t:
-        output = _table_format(text, s, o if o is not None else "  ")
-    else:
-        output = text
-    return output.encode(), IOResult()
+        paths = []
+    return await generic_column(paths,
+                                read_bytes=partial(read_bytes, index=index),
+                                accessor=accessor,
+                                stdin=stdin,
+                                table=t,
+                                separator=s,
+                                output_separator=o)

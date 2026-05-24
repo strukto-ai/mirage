@@ -46,9 +46,10 @@ def _resolve_config(path: Path) -> dict:
     return cfg.model_dump()
 
 
-def _resolve_override(path: Path) -> dict:
-    """Read a partial-config YAML and interpolate ``${VAR}`` from the
-    CLI's env. Skips validation -- overrides are intentionally partial.
+def _resolve_config_arg(path: Path) -> dict:
+    """Read a workspace YAML/JSON config and interpolate ``${VAR}`` from
+    the CLI's env. Skips validation because load/clone may only need a
+    subset of mounts.
     """
     raw = _load_yaml(path)
     try:
@@ -221,15 +222,14 @@ def snapshot_cmd(
 @app.command("load")
 def load_cmd(
     tar_path: Path = typer.Argument(..., exists=True, readable=True),
-    new_id: str | None = typer.Option(
-        None, "--id", help="Explicit id for the restored workspace."),
-    override: Path | None = typer.Option(
+    config_path: Path | None = typer.Argument(
         None,
-        "--override",
         exists=True,
         readable=True,
-        help="Partial config YAML/JSON for swapping creds.",
+        help="Optional workspace YAML/JSON config.",
     ),
+    new_id: str | None = typer.Option(
+        None, "--id", help="Explicit id for the restored workspace."),
 ) -> None:
     """Load a workspace from a tar file.
 
@@ -239,8 +239,8 @@ def load_cmd(
     body: dict = {"path": str(tar_path.expanduser().resolve())}
     if new_id:
         body["id"] = new_id
-    if override:
-        body["override"] = _resolve_override(override)
+    if config_path:
+        body["override"] = _resolve_config_arg(config_path)
     with make_client() as client:
         client.ensure_running()
         r = client.request("POST", "/v1/workspaces/load", json=body)

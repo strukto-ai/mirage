@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.file_helper import _detect
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -62,18 +63,19 @@ async def file(
     stdin: bytes | None = None,
     b: bool = False,
     i: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("file: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     p = paths[0]
-    s = await stat_impl(accessor, p, _extra.get("index"))
+    s = await stat_impl(accessor, p, index)
     if s.type == FileType.DIRECTORY:
         result = FileType.DIRECTORY
     else:
         try:
-            data = await gdrive_read(accessor, p, _extra.get("index"))
+            data = await gdrive_read(accessor, p, index)
             header = data[:512]
         except Exception:
             header = b""

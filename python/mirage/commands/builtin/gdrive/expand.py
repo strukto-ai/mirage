@@ -12,25 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
 from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.expand import expand as generic_expand
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
-from mirage.core.gdrive.read import read as gdrive_read
+from mirage.core.gdrive.read import read as read_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-def _expand_leading_tabs(text: str, tabsize: int) -> str:
-    return re.sub(
-        r"(?m)^\t+",
-        lambda m: m.group().expandtabs(tabsize),
-        text,
-    )
 
 
 @command("expand", resource="gdrive", spec=SPECS["expand"])
@@ -41,22 +34,16 @@ async def expand(
     stdin: AsyncIterator[bytes] | bytes | None = None,
     t: str | None = None,
     i: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    tabsize = int(t) if t is not None else 8
-    expander = _expand_leading_tabs if i else lambda txt, ts: txt.expandtabs(ts
-                                                                             )
     if paths:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
-        all_text: list[str] = []
-        for p in paths:
-            data = (await
-                    gdrive_read(accessor, p,
-                                _extra.get("index"))).decode(errors="replace")
-            all_text.append(expander(data, tabsize))
-        return "".join(all_text).encode(), IOResult()
-    raw = await _read_stdin_async(stdin)
-    if raw is None:
-        raise ValueError("expand: missing operand")
-    text = raw.decode(errors="replace")
-    return expander(text, tabsize).encode(), IOResult()
+        paths = await resolve_glob(accessor, paths, index)
+    else:
+        paths = []
+    return await generic_expand(paths,
+                                read_bytes=partial(read_bytes, index=index),
+                                accessor=accessor,
+                                stdin=stdin,
+                                tabsize=int(t) if t is not None else 8,
+                                initial_only=i)

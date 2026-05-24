@@ -123,3 +123,16 @@ def cut(raw: bytes, columns: list[str]) -> bytes:
             raise ValueError(f"column not found: {col}")
     result = table.select(columns)
     return result.to_pandas().to_csv(index=False).encode()
+
+
+def file(raw: bytes) -> bytes:
+    table = _read_table(raw)
+    schema = table.schema
+    cols = ", ".join(f"{f.name}: {f.type}" for f in schema)
+    return (f"feather, {table.num_rows} rows, {len(schema)} columns"
+            f" ({cols})").encode()
+
+
+def ls(raw: bytes) -> tuple[int, int]:
+    table = _read_table(raw)
+    return table.num_rows, len(table.schema)

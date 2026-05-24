@@ -13,13 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.tac import tac as generic_tac
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
-from mirage.core.gdrive.read import read as gdrive_read
+from mirage.core.gdrive.stream import read_stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -30,16 +32,14 @@ async def tac(
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
-        p = paths[0]
-        data = await gdrive_read(accessor, p, _extra.get("index"))
+        paths = await resolve_glob(accessor, paths, index)
     else:
-        data = await _read_stdin_async(stdin)
-        if data is None:
-            raise ValueError("tac: missing input")
-    lines = data.decode(errors="replace").splitlines()
-    lines.reverse()
-    return ("\n".join(lines) + "\n").encode(), IOResult()
+        paths = []
+    return await generic_tac(paths,
+                             read_stream=partial(read_stream, index=index),
+                             accessor=accessor,
+                             stdin=stdin)

@@ -12,13 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import io as _io
-
-import pyarrow.orc as orc
-
 from mirage.accessor.ram import RAMAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.core.filetype.orc import file as orc_file
 from mirage.core.ram.glob import resolve_glob
 from mirage.core.ram.read import read_bytes as _read_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -31,20 +29,17 @@ async def file_orc(
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if accessor.store is None or not paths:
         raise ValueError("file: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     try:
         raw = await _read_bytes(accessor, paths[0])
-        f = orc.ORCFile(_io.BytesIO(raw))
-        schema = f.schema
-        cols = ", ".join(f"{field.name}: {field.type}" for field in schema)
-        result = (f"orc, {f.nrows} rows, {len(schema)} columns, "
-                  f"{f.nstripes} stripes ({cols})")
-        return result.encode(), IOResult(reads={paths[0].strip_prefix: raw},
-                                         cache=[paths[0].strip_prefix])
+        result = orc_file(raw)
+        return result, IOResult(reads={paths[0].strip_prefix: raw},
+                                cache=[paths[0].strip_prefix])
     except Exception as e:
         return None, IOResult(
             exit_code=1,

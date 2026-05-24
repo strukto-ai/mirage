@@ -12,15 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
 from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.strings import strings as generic_strings
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
-from mirage.core.gdrive.read import read as gdrive_read
+from mirage.core.gdrive.read import read as read_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -32,18 +33,15 @@ async def strings(
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     n: str | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    min_len = int(n) if n else 4
     if paths:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
-        p = paths[0]
-        raw = await gdrive_read(accessor, p, _extra.get("index"))
+        paths = await resolve_glob(accessor, paths, index)
     else:
-        raw = await _read_stdin_async(stdin)
-        if raw is None:
-            raise ValueError("strings: missing input")
-    pattern = rb"[\x20-\x7e]{" + str(min_len).encode() + rb",}"
-    matches = re.findall(pattern, raw)
-    output = b"\n".join(matches) + b"\n" if matches else b""
-    return output, IOResult()
+        paths = []
+    return await generic_strings(paths,
+                                 read_bytes=partial(read_bytes, index=index),
+                                 accessor=accessor,
+                                 stdin=stdin,
+                                 min_len=int(n) if n else 4)

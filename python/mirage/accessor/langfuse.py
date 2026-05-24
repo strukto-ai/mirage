@@ -16,6 +16,7 @@ from langfuse import Langfuse
 
 from mirage.accessor.base import Accessor
 from mirage.resource.langfuse.config import LangfuseConfig
+from mirage.resource.secrets import reveal_secret
 
 
 class LangfuseAccessor(Accessor):
@@ -24,7 +25,7 @@ class LangfuseAccessor(Accessor):
         self.config = config
         self.client = Langfuse(
             public_key=config.public_key,
-            secret_key=config.secret_key,
+            secret_key=reveal_secret(config.secret_key),
             host=config.host,
             timeout=30,
         )

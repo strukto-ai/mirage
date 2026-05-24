@@ -35,8 +35,6 @@ import { redactGSheetsConfig, type GSheetsConfig, type GSheetsConfigRedacted } f
 
 export interface GSheetsResourceState {
   type: string
-  needsOverride: boolean
-  redactedFields: readonly string[]
   config: GSheetsConfigRedacted
 }
 
@@ -114,8 +112,6 @@ export class GSheetsResource extends BaseResource implements Resource {
   getState(): Promise<GSheetsResourceState> {
     return Promise.resolve({
       type: this.kind,
-      needsOverride: true,
-      redactedFields: ['clientSecret', 'refreshToken'],
       config: redactGSheetsConfig(this.config),
     })
   }

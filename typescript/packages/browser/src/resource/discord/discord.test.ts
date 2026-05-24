@@ -67,8 +67,8 @@ describe('DiscordResource (browser)', () => {
     const r = new DiscordResource({ proxyUrl: '/api/discord', getHeaders: headers })
     const state = await r.getState()
     expect(state.type).toBe(ResourceName.DISCORD)
-    expect(state.needsOverride).toBe(true)
-    expect(state.redactedFields).toEqual(['getHeaders'])
+    expect(state).not.toHaveProperty('needsOverride')
+    expect(state).not.toHaveProperty('redactedFields')
     expect(state.config).toEqual({ proxyUrl: '/api/discord', getHeaders: '<REDACTED>' })
   })
 

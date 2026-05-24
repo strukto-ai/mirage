@@ -15,6 +15,7 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.redis import RedisAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.filetype.feather import grep as feather_grep
@@ -75,11 +76,12 @@ async def grep_feather(
     E: bool = False,
     o: bool = False,
     m: str | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if accessor.accessor.store is None or not paths or not texts:
         raise ValueError("grep: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     try:
         pattern = texts[0]
         raw = await _read_bytes(accessor, paths[0])

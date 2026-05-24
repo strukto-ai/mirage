@@ -15,6 +15,7 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.discord import DiscordAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.discord._provision import file_read_provision
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
@@ -49,12 +50,13 @@ async def wc(
     c: bool = False,
     m: bool = False,
     L: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         paths = await resolve_glob(accessor, paths)
         p = paths[0]
-        data = await discord_read(accessor, p, _extra.get("index"))
+        data = await discord_read(accessor, p, index)
     else:
         data = await _read_stdin_async(stdin)
         if data is None:

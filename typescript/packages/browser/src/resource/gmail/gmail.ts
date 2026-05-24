@@ -36,8 +36,6 @@ import { redactGmailConfig, type GmailConfig, type GmailConfigRedacted } from '.
 
 export interface GmailResourceState {
   type: string
-  needsOverride: boolean
-  redactedFields: readonly string[]
   config: GmailConfigRedacted
 }
 
@@ -53,12 +51,7 @@ export class GmailResource implements Resource {
 
   constructor(config: GmailConfig) {
     this.config = config
-    const tm = new TokenManager({
-      clientId: config.clientId,
-      ...(config.clientSecret !== undefined ? { clientSecret: config.clientSecret } : {}),
-      refreshToken: config.refreshToken,
-      ...(config.refreshFn !== undefined ? { refreshFn: config.refreshFn } : {}),
-    })
+    const tm = new TokenManager(config)
     this.accessor = new GmailAccessor({ tokenManager: tm })
     this.index = new RAMIndexCacheStore({ ttl: 86_400 })
   }
@@ -117,8 +110,6 @@ export class GmailResource implements Resource {
   getState(): Promise<GmailResourceState> {
     return Promise.resolve({
       type: this.kind,
-      needsOverride: true,
-      redactedFields: ['clientSecret', 'refreshToken'],
       config: redactGmailConfig(this.config),
     })
   }

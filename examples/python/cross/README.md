@@ -3,18 +3,18 @@
 Drive a multi-mount workspace (`/s3`, `/gdrive`, `/gmail`, `/slack`,
 `/discord`) end-to-end from the shell using `workspace.yaml`.
 
-Two CLIs talk to the same daemon over the same HTTP API. Each
+The two CLIs expose the same workspace HTTP API. Each
 example below shows the **Python** CLI (`mirage`, on `$PATH`) and
 the **TypeScript** CLI (`./mirage-ts`, a symlink to
 `typescript/packages/cli/dist/bin/mirage.js` from the repo root).
-Pick whichever is convenient — they're interchangeable.
+Pick whichever CLI is convenient for the run; the command shapes match.
 
 ## Prereqs
 
 - `.env.development` at the repo root with `AWS_`\*, `GOOGLE_*`,
   `SLACK_BOT_TOKEN`, `DISCORD_BOT_TOKEN`.
 - Python: `mirage` CLI on `$PATH` (e.g. `./python/.venv/bin/mirage`).
-- TypeScript: `pnpm --filter @mirage-ai/cli build` then
+- TypeScript: `pnpm --filter @struktoai/mirage-cli build` then
   `ln -sf typescript/packages/cli/dist/bin/mirage.js mirage-ts`
   at the repo root (already gitignored).
 
@@ -94,7 +94,7 @@ mirage       provision --workspace_id cross --command "cat /s3/data/example.json
 ## 5. Snapshot and restore
 
 Snapshots redact cloud creds at snapshot time, so loading needs fresh
-creds via `--override`. The same workspace YAML is a valid override.
+creds via a config file. The same workspace YAML used for create works.
 
 ```bash
 mirage       workspace snapshot cross /tmp/cross.tar
@@ -102,10 +102,10 @@ mirage       workspace snapshot cross /tmp/cross.tar
 ```
 
 ```bash
-mirage       workspace load /tmp/cross.tar --id cross_loaded \
-  --override examples/python/cross/workspace.yaml
-./mirage-ts  workspace load /tmp/cross.tar --id cross_loaded \
-  --override examples/python/cross/workspace.yaml
+mirage       workspace load /tmp/cross.tar examples/python/cross/workspace.yaml \
+  --id cross_loaded
+./mirage-ts  workspace load /tmp/cross.tar examples/python/cross/workspace.yaml \
+  --id cross_loaded
 ```
 
 ```bash

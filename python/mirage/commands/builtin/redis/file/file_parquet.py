@@ -12,13 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import io as _io
-
-import pyarrow.parquet as pq
-
 from mirage.accessor.redis import RedisAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.core.filetype.parquet import file as parquet_file
 from mirage.core.redis.glob import resolve_glob
 from mirage.core.redis.read import read_bytes as _read_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -31,21 +29,17 @@ async def file_parquet(
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if accessor.store is None or not paths:
         raise ValueError("file: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     try:
         raw = await _read_bytes(accessor, paths[0])
-        pf = pq.ParquetFile(_io.BytesIO(raw))
-        schema = pf.schema_arrow
-        meta = pf.metadata
-        cols = ", ".join(f"{f.name}: {f.type}" for f in schema)
-        result = (f"parquet, {meta.num_rows} rows, {meta.num_columns} columns"
-                  f" ({cols})")
-        return result.encode(), IOResult(reads={paths[0].strip_prefix: raw},
-                                         cache=[paths[0].strip_prefix])
+        result = parquet_file(raw)
+        return result, IOResult(reads={paths[0].strip_prefix: raw},
+                                cache=[paths[0].strip_prefix])
     except Exception as e:
         return None, IOResult(
             exit_code=1,

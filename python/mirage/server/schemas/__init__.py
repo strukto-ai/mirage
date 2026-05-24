@@ -18,14 +18,10 @@ from mirage.server.schemas.versions import (BranchRequest, BranchResponse,
                                             CheckoutRequest, CloneRequest,
                                             CommitRequest, CommitResponse,
                                             DiffResponse, VersionLogItem)
-from mirage.server.schemas.workspaces import (CloneWorkspaceRequest,
-                                              CreateWorkspaceRequest,
-                                              DeleteWorkspaceResponse,
-                                              LoadWorkspaceRequest,
-                                              SnapshotWorkspaceRequest,
-                                              SnapshotWorkspaceResponse,
-                                              WorkspaceBrief, WorkspaceDetail,
-                                              WorkspaceInternals)
+from mirage.server.schemas.workspaces import (  # yapf: disable
+    CloneWorkspaceRequest, CreateWorkspaceRequest, DeleteWorkspaceResponse,
+    LoadWorkspaceRequest, SnapshotWorkspaceRequest, SnapshotWorkspaceResponse,
+    WorkspaceBrief, WorkspaceDetail, WorkspaceInternals)
 
 __all__ = [
     "MountSummary",

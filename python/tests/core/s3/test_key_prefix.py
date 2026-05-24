@@ -151,4 +151,4 @@ def test_get_state_includes_key_prefix():
     resource = S3Resource(config)
     state = resource.get_state()
     assert state["config"]["key_prefix"] == PREFIX
-    assert "key_prefix" not in state["redacted_fields"]
+    assert state["config"]["key_prefix"] != "<REDACTED>"

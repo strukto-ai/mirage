@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.local_audio.utils import transcribe
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -31,11 +32,12 @@ async def head_ogg(
     stdin: AsyncIterator[bytes] | bytes | None = None,
     n: str | None = None,
     c: str | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if accessor.store is None or not paths:
         raise ValueError("head: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     if c is not None:
         return None, IOResult(
             exit_code=1,

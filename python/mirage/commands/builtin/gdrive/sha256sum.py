@@ -12,14 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import hashlib
 from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.sha256sum import \
+    sha256sum as generic_sha256sum
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
-from mirage.core.gdrive.read import read as gdrive_read
+from mirage.core.gdrive.read import read as read_bytes
+from mirage.core.gdrive.stream import read_stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -31,23 +35,17 @@ async def sha256sum(
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     c: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
-        lines: list[str] = []
-        for p in paths:
-            data = await gdrive_read(accessor, p, _extra.get("index"))
-            h = hashlib.sha256(data).hexdigest()
-            lines.append(h + "  " + p.original)
-        return ("\n".join(lines) + "\n").encode(), IOResult()
-    if stdin is not None:
-        if isinstance(stdin, bytes):
-            raw = stdin
-        else:
-            raw = b""
-            async for chunk in stdin:
-                raw += chunk
-        h = hashlib.sha256(raw).hexdigest()
-        return (h + "  -\n").encode(), IOResult()
-    raise ValueError("sha256sum: missing input")
+        paths = await resolve_glob(accessor, paths, index)
+    else:
+        paths = []
+    return await generic_sha256sum(paths,
+                                   read_bytes=partial(read_bytes, index=index),
+                                   read_stream=partial(read_stream,
+                                                       index=index),
+                                   accessor=accessor,
+                                   stdin=stdin,
+                                   check=c)

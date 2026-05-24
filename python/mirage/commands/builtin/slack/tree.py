@@ -101,9 +101,10 @@ async def tree(
     args_I: str | None = None,
     d: bool = False,
     P: str | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     p0 = paths[0]
     max_depth = int(L) if L is not None else None
     warnings: list[str] = []
@@ -116,7 +117,7 @@ async def tree(
         dirs_only=d,
         match_pattern=P,
         warnings=warnings,
-        index=_extra.get("index"),
+        index=index,
     )
     stderr = "\n".join(warnings).encode() if warnings else None
     output = "\n".join(results).encode()

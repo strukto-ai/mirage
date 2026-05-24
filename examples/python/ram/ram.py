@@ -173,7 +173,7 @@ async def main() -> None:
     print(await result.stdout_str())
 
     # ── persistence: save / load / copy / deepcopy ──────────────────
-    # RAM has needs_override=False — full content is in the snapshot,
+    # RAM has no redacted config: full content is in the snapshot, so
     # no resources= needed at load time.
     print("\n=== PERSISTENCE ===\n")
     with tempfile.NamedTemporaryFile(suffix=".tar", delete=False) as f:

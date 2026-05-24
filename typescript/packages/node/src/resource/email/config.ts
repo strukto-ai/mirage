@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields } from '@struktoai/mirage-core'
+import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
 
 function asString(v: unknown): string {
   return typeof v === 'string' ? v : ''
@@ -33,8 +33,19 @@ export interface EmailConfigRedacted extends Omit<EmailConfig, 'password'> {
   password: '<REDACTED>'
 }
 
+export const EmailConfigSchema = z.object({
+  imapHost: z.string(),
+  imapPort: z.number(),
+  smtpHost: z.string(),
+  smtpPort: z.number(),
+  username: z.string(),
+  password: secretStr(),
+  useSsl: z.boolean(),
+  maxMessages: z.number(),
+})
+
 export function redactEmailConfig(config: EmailConfig): EmailConfigRedacted {
-  return { ...config, password: '<REDACTED>' }
+  return redactConfigWithSchema(EmailConfigSchema, config) as unknown as EmailConfigRedacted
 }
 
 export interface EmailConfigInput {

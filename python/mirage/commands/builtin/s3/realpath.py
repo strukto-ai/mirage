@@ -12,10 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
-
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.realpath import \
+    realpath as generic_realpath
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.s3.glob import resolve_glob
@@ -24,17 +24,9 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def _exists(accessor: S3Accessor, path: PathSpec | str) -> bool:
-    try:
-        await stat_impl(accessor, path)
-        return True
-    except (FileNotFoundError, ValueError, Exception):
-        return False
-
-
 @command("realpath", resource="s3", spec=SPECS["realpath"])
 async def realpath(
-    accessor: S3Accessor = None,
+    accessor: S3Accessor,
     paths: list[PathSpec] | None = None,
     *texts: str,
     stdin: bytes | None = None,
@@ -46,12 +38,8 @@ async def realpath(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-    full = [p.original for p in (paths or [])]
-    lines: list[str] = []
-    for p in full:
-        resolved = posixpath.normpath(p)
-        if e and not await _exists(accessor, resolved):
-            raise FileNotFoundError(
-                f"realpath: '{p.original}': No such file or directory")
-        lines.append(resolved)
-    return ("\n".join(lines) + "\n").encode(), IOResult()
+    return await generic_realpath(paths or [],
+                                  stat_fn=stat_impl,
+                                  accessor=accessor,
+                                  e=e,
+                                  m=m)

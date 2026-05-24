@@ -77,6 +77,7 @@ s3       = ["aioboto3>=13.0"]
 r2       = ["aioboto3>=13.0"]
 gcs      = ["aioboto3>=13.0"]
 oci      = ["aioboto3>=13.0"]
+databricks = ["databricks-sdk>=0.72.0"]
 
 # --- network / remote ---
 ssh      = ["asyncssh>=2.22.0", "paramiko>=4.0.0"]
@@ -138,6 +139,7 @@ all = [
     "mirage-ai[r2]",
     "mirage-ai[gcs]",
     "mirage-ai[oci]",
+    "mirage-ai[databricks]",
     "mirage-ai[ssh]",
     "mirage-ai[fuse]",
     "mirage-ai[mongodb]",
@@ -181,7 +183,7 @@ conflicts = [
 dev = [
     "grpcio>=1.78.0",
     "grpcio-tools>=1.78.0",
-    "moto[s3]>=5.1.22",
+    "moto[s3,server]>=5.1.22",
     "pre-commit",
     "pytest",
     "pytest-asyncio>=0.24.0",

@@ -28,7 +28,7 @@ async def walk(
     *,
     readdir: Callable[[PathSpec, IndexCacheStore | None],
                       Awaitable[list[str]]],
-    stat: Callable[[PathSpec], Awaitable[FileStat]],
+    stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
     all_files: bool = False,
     sort_by: LsSortBy = LsSortBy.NAME,
     reverse: bool = False,
@@ -39,7 +39,7 @@ async def walk(
     warnings: list[str] = []
     if list_dir:
         try:
-            return [await stat(path)], warnings
+            return [await stat(path, index)], warnings
         except (FileNotFoundError, ValueError) as exc:
             warnings.append(f"ls: cannot access '{path.original}': {exc}")
             return [], warnings
@@ -57,7 +57,7 @@ async def walk(
                               resolved=False,
                               prefix=path.prefix)
         try:
-            s = await stat(entry_spec)
+            s = await stat(entry_spec, index)
         except (FileNotFoundError, ValueError) as exc:
             warnings.append(f"ls: cannot access '{entry}': {exc}")
             continue
@@ -113,6 +113,7 @@ async def render_long_entry(
     *,
     accessor: object,
     filetype_fns: dict | None,
+    index: IndexCacheStore | None = None,
 ) -> str | None:
     """Try to render one entry via a registered filetype handler (e.g. parquet
     metadata). Returns formatted string or None if no handler / handler failed.
@@ -123,9 +124,15 @@ async def render_long_entry(
     if ext not in filetype_fns:
         return None
     fn = filetype_fns[ext]
+    child = parent.child(entry.name)
+    entry_spec = PathSpec(original=child,
+                          directory=child,
+                          resolved=False,
+                          prefix=parent.prefix)
     try:
-        path_for_entry = parent.child(entry.name)
-        stdout, _io = await fn(accessor, [path_for_entry], args_l=True)
+        stdout, _io = await fn(accessor, [entry_spec],
+                               args_l=True,
+                               index=index)
     except Exception:
         return None
     if not stdout:
@@ -138,7 +145,7 @@ async def walk_grouped(
     *,
     readdir: Callable[[PathSpec, IndexCacheStore | None],
                       Awaitable[list[str]]],
-    stat: Callable[[PathSpec], Awaitable[FileStat]],
+    stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
     all_files: bool = False,
     sort_by: LsSortBy = LsSortBy.NAME,
     reverse: bool = False,
@@ -190,6 +197,7 @@ async def _render_group(
     classify: bool,
     accessor: object,
     filetype_fns: dict | None,
+    index: IndexCacheStore | None = None,
 ) -> None:
     if long and not one_per_line:
         standard_stats: list[FileStat] = []
@@ -197,7 +205,8 @@ async def _render_group(
             rendered = await render_long_entry(e,
                                                dir_spec,
                                                accessor=accessor,
-                                               filetype_fns=filetype_fns)
+                                               filetype_fns=filetype_fns,
+                                               index=index)
             if rendered is not None:
                 results.append(rendered)
                 continue
@@ -213,7 +222,7 @@ async def ls(
     *,
     readdir: Callable[[PathSpec, IndexCacheStore | None],
                       Awaitable[list[str]]],
-    stat: Callable[[PathSpec], Awaitable[FileStat]],
+    stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
     long: bool = False,
     one_per_line: bool = False,
     all_files: bool = False,
@@ -253,7 +262,8 @@ async def ls(
                                     human=human,
                                     classify=classify,
                                     accessor=accessor,
-                                    filetype_fns=filetype_fns)
+                                    filetype_fns=filetype_fns,
+                                    index=index)
     else:
         for p in paths:
             entries, sub_ws = await walk(p,
@@ -274,7 +284,8 @@ async def ls(
                                 human=human,
                                 classify=classify,
                                 accessor=accessor,
-                                filetype_fns=filetype_fns)
+                                filetype_fns=filetype_fns,
+                                index=index)
 
     body = "\n".join(results)
     if trailing_newline and results:

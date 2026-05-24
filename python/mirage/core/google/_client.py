@@ -19,6 +19,7 @@ from collections.abc import AsyncIterator
 import aiohttp
 
 from mirage.core.google.config import GoogleConfig
+from mirage.resource.secrets import reveal_secret
 
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 DRIVE_API_BASE = "https://www.googleapis.com/drive/v3"
@@ -40,11 +41,12 @@ async def refresh_access_token(config: GoogleConfig, ) -> tuple[str, int]:
     """
     data = {
         "client_id": config.client_id,
-        "refresh_token": config.refresh_token,
+        "refresh_token": reveal_secret(config.refresh_token),
         "grant_type": "refresh_token",
     }
-    if config.client_secret:
-        data["client_secret"] = config.client_secret
+    client_secret = reveal_secret(config.client_secret)
+    if client_secret:
+        data["client_secret"] = client_secret
     async with aiohttp.ClientSession() as session:
         async with session.post(TOKEN_URL, data=data) as resp:
             resp.raise_for_status()

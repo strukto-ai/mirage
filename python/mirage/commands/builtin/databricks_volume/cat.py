@@ -14,59 +14,52 @@
 
 from collections.abc import AsyncIterator
 
-from mirage.accessor.ssh import SSHAccessor
+from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.core.ssh.glob import resolve_glob
-from mirage.core.ssh.stream import read_stream
+from mirage.core.databricks_volume.glob import resolve_glob
+from mirage.core.databricks_volume.stat import stat
+from mirage.core.databricks_volume.stream import read_stream
 from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def _head_stream(
-    source: AsyncIterator[bytes],
-    lines: int = 10,
-    bytes_mode: int | None = None,
-) -> AsyncIterator[bytes]:
-    if bytes_mode is not None:
-        remaining = bytes_mode
-        async for chunk in source:
-            if len(chunk) <= remaining:
-                yield chunk
-                remaining -= len(chunk)
-                if remaining <= 0:
-                    return
-            else:
-                yield chunk[:remaining]
-                return
-        return
-    count = 0
+async def _number_lines_stream(
+        source: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+    line_number = 1
     async for line in AsyncLineIterator(source):
-        yield line + b"\n"
-        count += 1
-        if count >= lines:
-            return
+        yield f"     {line_number}\t".encode() + line + b"\n"
+        line_number += 1
 
 
-@command("head", resource="ssh", spec=SPECS["head"])
-async def head(
-    accessor: SSHAccessor,
+@command("cat", resource="databricks_volume", spec=SPECS["cat"])
+async def cat(
+    accessor: DatabricksVolumeAccessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
-    n: str | None = None,
-    c: str | None = None,
+    n: bool = False,
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    lines = int(n) if n is not None else 10
-    bytes_mode = int(c) if c is not None else None
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        source = read_stream(accessor, paths[0])
-        return _head_stream(source, lines, bytes_mode), IOResult()
-    source = _resolve_source(stdin, "head: missing operand")
-    return _head_stream(source, lines, bytes_mode), IOResult()
+        path = paths[0]
+        await stat(accessor, path, index)
+        source = read_stream(accessor, path, index)
+        cachable = CachableAsyncIterator(source)
+        key = path.strip_prefix
+        if n:
+            return _number_lines_stream(cachable), IOResult(
+                reads={key: cachable},
+                cache=[key],
+            )
+        return cachable, IOResult(reads={key: cachable}, cache=[key])
+    source = _resolve_source(stdin, "cat: missing operand")
+    if n:
+        return _number_lines_stream(source), IOResult()
+    return source, IOResult()

@@ -13,20 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SlackAccessor } from '../../accessor/slack.ts'
-import { NodeSlackTransport, type SlackTransport } from './_client.ts'
 import { offsetPages } from './paginate.ts'
 
 const ENC = new TextEncoder()
-
-function searchTransport(accessor: SlackAccessor): SlackTransport {
-  if (accessor.transport instanceof NodeSlackTransport) {
-    const searchToken = accessor.transport.getSearchToken()
-    if (searchToken !== undefined && searchToken !== '') {
-      return new NodeSlackTransport(searchToken)
-    }
-  }
-  return accessor.transport
-}
 
 export async function searchMessages(
   accessor: SlackAccessor,
@@ -40,7 +29,7 @@ export async function searchMessages(
     page: String(page),
     sort: 'timestamp',
   }
-  const data = await searchTransport(accessor).call('search.messages', params)
+  const data = await accessor.transport.call('search.messages', params)
   return ENC.encode(JSON.stringify(data))
 }
 
@@ -59,7 +48,7 @@ export function searchMessagesStream(
   if (options.startPage !== undefined) opts.startPage = options.startPage
   if (options.maxPages !== undefined) opts.maxPages = options.maxPages
   return offsetPages(
-    searchTransport(accessor),
+    accessor.transport,
     'search.messages',
     baseParams,
     ['messages', 'pagination', 'page_count'],
@@ -80,7 +69,7 @@ export async function searchFiles(
     page: String(page),
     sort: 'timestamp',
   }
-  const data = await searchTransport(accessor).call('search.files', params)
+  const data = await accessor.transport.call('search.files', params)
   return ENC.encode(JSON.stringify(data))
 }
 
@@ -99,7 +88,7 @@ export function searchFilesStream(
   if (options.startPage !== undefined) opts.startPage = options.startPage
   if (options.maxPages !== undefined) opts.maxPages = options.maxPages
   return offsetPages(
-    searchTransport(accessor),
+    accessor.transport,
     'search.files',
     baseParams,
     ['files', 'pagination', 'page_count'],

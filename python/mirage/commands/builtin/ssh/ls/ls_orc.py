@@ -12,14 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import io as _io
-
-import pyarrow.orc as orc
-
 from mirage.accessor.ssh import SSHAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.core.filetype.orc import ls as orc_ls
 from mirage.core.ssh.glob import resolve_glob
 from mirage.core.ssh.read import read_bytes
 from mirage.core.ssh.stat import stat
@@ -51,9 +48,7 @@ async def ls_orc(
     try:
         s = await stat(accessor, paths[0])
         raw = await read_bytes(accessor, paths[0])
-        f = orc.ORCFile(_io.BytesIO(raw))
-        rows = f.nrows
-        cols = len(f.schema)
+        rows, cols = orc_ls(raw)
         size = s.size or 0
         line = (f"orc\t{size}\t{rows} rows\t{cols} cols"
                 f"\t{s.modified or ''}\t{s.name}")

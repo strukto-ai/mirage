@@ -14,15 +14,31 @@
 
 import aiohttp
 
+from mirage.resource.secrets import reveal_secret
 from mirage.resource.slack.config import SlackConfig
 
 SLACK_API = "https://slack.com/api"
 
 
-def slack_headers(config: SlackConfig,
-                  token: str | None = None) -> dict[str, str]:
+def _auth_token(config: SlackConfig, method: str) -> str:
+    if method.startswith("search."):
+        search_token = reveal_secret(config.search_token)
+        if search_token:
+            return search_token
+    return reveal_secret(config.token)
+
+
+def slack_search_available(config: SlackConfig) -> bool:
+    if reveal_secret(config.search_token):
+        return True
+    token = reveal_secret(config.token)
+    return token.startswith("xoxp-")
+
+
+def slack_headers(config: SlackConfig, method: str) -> dict[str, str]:
+    auth_token = _auth_token(config, method)
     return {
-        "Authorization": f"Bearer {token or config.token}",
+        "Authorization": f"Bearer {auth_token}",
         "Content-Type": "application/json; charset=utf-8",
     }
 
@@ -43,10 +59,9 @@ async def slack_get(
     config: SlackConfig,
     method: str,
     params: dict | None = None,
-    token: str | None = None,
 ) -> dict:
     url = f"{SLACK_API}/{method}"
-    headers = slack_headers(config, token=token)
+    headers = slack_headers(config, method)
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers, params=params) as resp:
             data = await resp.json()
@@ -61,7 +76,7 @@ async def slack_post(
     body: dict | None = None,
 ) -> dict:
     url = f"{SLACK_API}/{method}"
-    headers = slack_headers(config)
+    headers = slack_headers(config, method)
     async with aiohttp.ClientSession() as session:
         async with session.post(url, headers=headers, json=body or {}) as resp:
             data = await resp.json()

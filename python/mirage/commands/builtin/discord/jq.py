@@ -15,6 +15,7 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.discord import DiscordAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.discord.glob import resolve_glob
@@ -34,6 +35,7 @@ async def jq(
     r: bool = False,
     c: bool = False,
     s: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not texts:
@@ -43,7 +45,7 @@ async def jq(
         paths = await resolve_glob(accessor, paths)
         outputs: list[bytes] = []
         for p in paths:
-            raw = await discord_read(accessor, p, _extra.get("index"))
+            raw = await discord_read(accessor, p, index)
             data = parse_json_path(raw, p.original)
             if s:
                 data = [data] if not isinstance(data, list) else data

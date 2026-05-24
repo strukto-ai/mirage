@@ -15,6 +15,7 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.mongodb import MongoDBAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.mongodb._provision import file_read_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -51,6 +52,7 @@ async def wc(
     c: bool = False,
     m: bool = False,
     L: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if w or m or L:
@@ -71,7 +73,7 @@ async def wc(
             data = await mongodb_read(
                 accessor,
                 paths[0],
-                _extra.get("index"),
+                index,
             )
             return str(len(data)).encode(), IOResult()
         count = await count_documents(

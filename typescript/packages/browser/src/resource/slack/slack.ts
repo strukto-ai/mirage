@@ -36,8 +36,6 @@ import { redactSlackConfig, type SlackConfig, type SlackConfigRedacted } from '.
 
 export interface SlackResourceState {
   type: string
-  needsOverride: boolean
-  redactedFields: readonly string[]
   config: SlackConfigRedacted
 }
 
@@ -116,8 +114,6 @@ export class SlackResource implements Resource {
   getState(): Promise<SlackResourceState> {
     return Promise.resolve({
       type: this.kind,
-      needsOverride: true,
-      redactedFields: ['getHeaders'],
       config: redactSlackConfig(this.config),
     })
   }

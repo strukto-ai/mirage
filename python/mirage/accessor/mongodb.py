@@ -21,6 +21,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 from mirage.accessor.base import Accessor
 from mirage.resource.mongodb.config import MongoDBConfig
+from mirage.resource.secrets import reveal_secret
 
 
 class MongoDBAccessor(Accessor):
@@ -47,7 +48,7 @@ class MongoDBAccessor(Accessor):
         key = id(loop) if loop is not None else 0
         client = self._clients.get(key)
         if client is None:
-            client = AsyncIOMotorClient(self.config.uri)
+            client = AsyncIOMotorClient(reveal_secret(self.config.uri))
             self._clients[key] = client
         return client
 

@@ -12,14 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import io as _io
-
-import pyarrow.feather as feather
-
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.core.filetype.feather import ls as feather_ls
 from mirage.core.s3.glob import resolve_glob
 from mirage.core.s3.read import read_bytes
 from mirage.core.s3.stat import stat
@@ -51,18 +48,16 @@ async def ls_feather(
         raise ValueError("ls: missing operand")
     paths = await resolve_glob(accessor, paths, index)
     try:
-        s = await stat(accessor, paths[0])
+        s = await stat(accessor, paths[0], index)
         raw = await read_bytes(accessor, paths[0])
-        table = feather.read_table(_io.BytesIO(raw))
-        rows = table.num_rows
-        cols = len(table.schema)
+        rows, cols = feather_ls(raw)
         size = s.size or 0
         line = (f"feather\t{size}\t{rows} rows\t{cols} cols"
                 f"\t{s.modified or ''}\t{s.name}")
         return line.encode(), IOResult(reads={paths[0].strip_prefix: raw},
                                        cache=[paths[0].strip_prefix])
     except Exception:
-        s = await stat(accessor, paths[0])
+        s = await stat(accessor, paths[0], index)
         line = (f"feather\t{s.size or 0}\t\t"
                 f"\t{s.modified or ''}\t{s.name}")
         return line.encode(), IOResult()

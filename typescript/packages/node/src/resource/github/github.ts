@@ -42,8 +42,6 @@ import { redactGitHubConfig, type GitHubConfig, type GitHubConfigRedacted } from
 
 export interface GitHubResourceState {
   type: string
-  needsOverride: boolean
-  redactedFields: readonly string[]
   config: GitHubConfigRedacted
   defaultBranch: string
   truncated: boolean
@@ -140,8 +138,6 @@ export class GitHubResource extends BaseResource implements Resource {
   getState(): Promise<GitHubResourceState> {
     return Promise.resolve({
       type: this.kind,
-      needsOverride: true,
-      redactedFields: ['token'],
       config: redactGitHubConfig(this.config),
       defaultBranch: this.accessor.defaultBranch,
       truncated: this.accessor.truncated,

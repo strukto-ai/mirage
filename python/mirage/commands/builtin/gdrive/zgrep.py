@@ -12,77 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import gzip
-import re
 from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.zgrep import zgrep as generic_zgrep
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
-from mirage.core.gdrive.read import read as gdrive_read
+from mirage.core.gdrive.read import read as read_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-def _build_pattern(
-    pattern: str,
-    extended: bool,
-    fixed: bool,
-    whole_word: bool,
-) -> str:
-    if fixed:
-        pattern = re.escape(pattern)
-    if whole_word:
-        pattern = r"\b" + pattern + r"\b"
-    return pattern
-
-
-def _zgrep_search(
-    data: bytes,
-    pattern: str,
-    ignore_case: bool,
-    invert: bool,
-    count: bool,
-    line_numbers: bool,
-    filename: str | None,
-    only_matching: bool = False,
-    max_count: int | None = None,
-) -> tuple[list[str], bool]:
-    text = data.decode(errors="replace")
-    lines = text.splitlines()
-    flags = re.IGNORECASE if ignore_case else 0
-    matched: list[tuple[int, str]] = []
-    for idx, line in enumerate(lines, 1):
-        if only_matching and not invert:
-            hits = list(re.finditer(pattern, line, flags))
-            if hits:
-                for m in hits:
-                    matched.append((idx, m.group()))
-                    if max_count is not None and len(matched) >= max_count:
-                        break
-            elif invert:
-                matched.append((idx, line))
-        else:
-            hit = bool(re.search(pattern, line, flags))
-            if invert:
-                hit = not hit
-            if hit:
-                matched.append((idx, line))
-        if max_count is not None and len(matched) >= max_count:
-            break
-    if count:
-        return [str(len(matched))], len(matched) > 0
-    result: list[str] = []
-    for idx, line in matched:
-        pfx = ""
-        if filename:
-            pfx = filename + ":"
-        if line_numbers:
-            pfx += str(idx) + ":"
-        result.append(pfx + line)
-    return result, len(matched) > 0
 
 
 @command("zgrep", resource="gdrive", spec=SPECS["zgrep"])
@@ -105,65 +46,29 @@ async def zgrep(
     o: bool = False,
     q: bool = False,
     w: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     raw_pattern = e if e is not None else (texts[0] if texts else "")
-    pattern = _build_pattern(raw_pattern, E, F, w)
-    max_count = int(m) if m is not None else None
-    multi = len(paths) > 1
-    show_filename = H or (multi and not h)
-    any_match = False
-    all_results: list[str] = []
     if paths:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
-        for p in paths:
-            raw = await gdrive_read(accessor, p, _extra.get("index"))
-            data = gzip.decompress(raw)
-            fname = p.original if show_filename else None
-            if args_l:
-                text = data.decode(errors="replace")
-                lines = text.splitlines()
-                flags = re.IGNORECASE if i else 0
-                for line in lines:
-                    hit = bool(re.search(pattern, line, flags))
-                    if v:
-                        hit = not hit
-                    if hit:
-                        all_results.append(p.original)
-                        any_match = True
-                        break
-            else:
-                result, had_match = _zgrep_search(data, pattern, i, v, c, n,
-                                                  fname, o, max_count)
-                if had_match:
-                    any_match = True
-                all_results.extend(result)
+        paths = await resolve_glob(accessor, paths, index)
     else:
-        raw = await _read_stdin_async(stdin)
-        if raw is None:
-            raise ValueError("zgrep: missing input")
-        data = gzip.decompress(raw)
-        if args_l:
-            text = data.decode(errors="replace")
-            lines = text.splitlines()
-            flags = re.IGNORECASE if i else 0
-            for line in lines:
-                hit = bool(re.search(pattern, line, flags))
-                if v:
-                    hit = not hit
-                if hit:
-                    all_results.append("(standard input)")
-                    any_match = True
-                    break
-        else:
-            result, had_match = _zgrep_search(data, pattern, i, v, c, n, None,
-                                              o, max_count)
-            if had_match:
-                any_match = True
-            all_results.extend(result)
-    if q:
-        return None, IOResult(exit_code=0 if any_match else 1)
-    if not any_match:
-        return None, IOResult(exit_code=1)
-    output = "\n".join(all_results) + "\n"
-    return output.encode(), IOResult()
+        paths = []
+    return await generic_zgrep(paths,
+                               pattern=raw_pattern,
+                               read_bytes=partial(read_bytes, index=index),
+                               accessor=accessor,
+                               stdin=stdin,
+                               ignore_case=i,
+                               invert=v,
+                               count=c,
+                               files_only=args_l,
+                               line_numbers=n,
+                               extended=E,
+                               fixed=F,
+                               force_filename=H,
+                               suppress_filename=h,
+                               max_count=int(m) if m is not None else None,
+                               only_matching=o,
+                               quiet=q,
+                               whole_word=w)

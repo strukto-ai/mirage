@@ -50,7 +50,6 @@ export interface OPFSResourceOptions {
 
 export interface OPFSResourceState {
   type: string
-  needsOverride: boolean
   files: Record<string, Uint8Array>
   dirs: string[]
 }
@@ -234,7 +233,6 @@ export class OPFSResource implements Resource {
     dirs.sort()
     return {
       type: this.kind,
-      needsOverride: false,
       files,
       dirs,
     }

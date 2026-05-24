@@ -15,13 +15,14 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.gdrive._provision import file_read_provision
+from mirage.commands.builtin.generic.cat import cat as generic_cat
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
 from mirage.core.gdrive.stream import read_stream as gdrive_read_stream
-from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -33,6 +34,7 @@ async def cat_provision(
     accessor: GDriveAccessor,
     paths: list[PathSpec],
     *texts: str,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> ProvisionResult:
     return await file_read_provision(
@@ -40,15 +42,7 @@ async def cat_provision(
         paths,
         "cat " + " ".join(p.original if isinstance(p, PathSpec) else p
                           for p in paths),
-        index=_extra.get("index"))
-
-
-async def _number_lines_stream(
-        source: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
-    num = 1
-    async for line in AsyncLineIterator(source):
-        yield f"     {num}\t".encode() + line + b"\n"
-        num += 1
+        index=index)
 
 
 @command("cat", resource="gdrive", spec=SPECS["cat"], provision=cat_provision)
@@ -58,24 +52,25 @@ async def cat(
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     n: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
+        paths = await resolve_glob(accessor, paths, index)
         p = paths[0]
-        result = await gdrive_read_stream(accessor, p, _extra.get("index"))
+        result = await gdrive_read_stream(accessor, p, index)
         if isinstance(result, bytes):
             io = IOResult(reads={p.strip_prefix: result},
                           cache=[p.strip_prefix])
             if n:
-                return _number_lines_stream(yield_bytes(result)), io
+                return generic_cat(result, number_lines=True), io
             return yield_bytes(result), io
         cachable = CachableAsyncIterator(result)
         io = IOResult(reads={p.strip_prefix: cachable}, cache=[p.strip_prefix])
         if n:
-            return _number_lines_stream(cachable), io
+            return generic_cat(cachable, number_lines=True), io
         return cachable, io
     source = _resolve_source(stdin, "cat: missing operand")
     if n:
-        return _number_lines_stream(source), IOResult()
+        return generic_cat(source, number_lines=True), IOResult()
     return source, IOResult()

@@ -12,47 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import base64 as b64lib
 from collections.abc import AsyncIterator
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.builtin.generic.base64_cmd import \
+    base64_cmd as generic_base64
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.s3.glob import resolve_glob
 from mirage.core.s3.stream import read_stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-_ENCODE_BLOCK = 57
-
-
-async def _base64_encode_stream(
-    source: AsyncIterator[bytes],
-    wrap: int | None = None,
-) -> AsyncIterator[bytes]:
-    buf = b""
-    async for chunk in source:
-        buf += chunk
-    encoded = b64lib.b64encode(buf).decode()
-    if wrap is not None and wrap == 0:
-        yield encoded.encode() + b"\n"
-        return
-    line_len = wrap if wrap is not None else 76
-    lines: list[str] = []
-    for i in range(0, len(encoded), line_len):
-        lines.append(encoded[i:i + line_len])
-    yield "\n".join(lines).encode() + b"\n"
-
-
-async def _base64_decode_stream(
-        source: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
-    buf = b""
-    async for chunk in source:
-        buf += chunk
-    text = buf.replace(b"\n", b"").replace(b"\r", b"").replace(b" ", b"")
-    yield b64lib.b64decode(text)
 
 
 @command("base64", resource="s3", spec=SPECS["base64"])
@@ -67,15 +38,13 @@ async def base64_cmd(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    decode = d or D
-    cache: list[str] = []
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        source: AsyncIterator[bytes] = read_stream(accessor, paths[0])
-        cache = [paths[0].original]
     else:
-        source = _resolve_source(stdin, "base64: missing input")
-    if decode:
-        return _base64_decode_stream(source), IOResult(cache=cache)
-    wrap = int(w) if w is not None else None
-    return _base64_encode_stream(source, wrap=wrap), IOResult(cache=cache)
+        paths = []
+    return await generic_base64(paths,
+                                read_stream=read_stream,
+                                accessor=accessor,
+                                stdin=stdin,
+                                decode=d or D,
+                                wrap=int(w) if w is not None else None)

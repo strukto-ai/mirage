@@ -49,9 +49,8 @@ def test_resource_get_state_redacts_dsn():
     res = PostgresResource(PostgresConfig(dsn="postgres://user:pw@host/db"))
     state = res.get_state()
     assert state["type"] == "postgres"
-    assert state["needs_override"] is True
     assert state["config"]["dsn"] == "<REDACTED>"
-    assert "dsn" in state["redacted_fields"]
+    assert "redacted_fields" not in state
 
 
 def test_resource_load_state_noop():

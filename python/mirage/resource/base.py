@@ -15,9 +15,12 @@
 from functools import partial
 from typing import Any, Callable
 
+from pydantic import BaseModel
+
 from mirage.accessor.base import Accessor
 from mirage.cache.index import (IndexCacheStore, IndexConfig,
                                 RAMIndexCacheStore, RedisIndexConfig)
+from mirage.resource.secrets import redacted_config_dump
 
 try:
     from mirage.cache.index import RedisIndexCacheStore
@@ -112,8 +115,14 @@ class BaseResource:
     def get_state(self) -> dict:
         return {
             "type": self.name,
-            "needs_override": False,
-            "redacted_fields": [],
+        }
+
+    def config_state(self, config: BaseModel, **extra: Any) -> dict:
+        cfg = redacted_config_dump(config)
+        return {
+            "type": self.name,
+            "config": cfg,
+            **extra,
         }
 
     def load_state(self, state: dict) -> None:

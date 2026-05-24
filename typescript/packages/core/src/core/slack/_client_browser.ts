@@ -38,7 +38,7 @@ export class BrowserSlackTransport extends HttpSlackTransport {
       (globalThis as { location?: { origin?: string } }).location?.origin ?? 'http://localhost'
     return `${origin}${trimmed.startsWith('/') ? trimmed : `/${trimmed}`}`
   }
-  protected async authHeaders(): Promise<Record<string, string>> {
+  protected async authHeaders(_endpoint?: string): Promise<Record<string, string>> {
     const cb = this.opts.getHeaders
     if (cb === undefined) return {}
     return await cb()

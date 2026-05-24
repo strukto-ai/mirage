@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.gdrive._provision import file_read_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -28,12 +29,13 @@ async def stat_feather_provision(
     accessor: GDriveAccessor,
     paths: list[PathSpec],
     *texts: str,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> ProvisionResult:
     return await file_read_provision(accessor,
                                      paths,
                                      f"stat {paths[0]}" if paths else "stat",
-                                     index=_extra.get("index"))
+                                     index=index)
 
 
 @command("stat",
@@ -56,14 +58,15 @@ async def stat_feather(
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("stat: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     p = paths[0]
     try:
-        raw = await gdrive_read(accessor, p, _extra.get("index"))
+        raw = await gdrive_read(accessor, p, index)
         result = feather_stat(raw)
         return result, IOResult(reads={p.strip_prefix: raw},
                                 cache=[p.strip_prefix])

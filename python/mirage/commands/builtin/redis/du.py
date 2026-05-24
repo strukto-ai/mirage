@@ -15,6 +15,7 @@
 from functools import partial
 
 from mirage.accessor.redis import RedisAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.du import du as generic_du
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -36,11 +37,12 @@ async def du(
     a: bool = False,
     max_depth: str | None = None,
     c: bool = False,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if accessor.store is None:
         raise ValueError("du: no resource")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     if not paths:
         raise ValueError("du: missing operand")
     out = await generic_du(

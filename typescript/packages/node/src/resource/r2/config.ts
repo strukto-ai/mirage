@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields } from '@struktoai/mirage-core'
+import { normalizeFields, redactConfigWithSchema, secretStr, z } from '@struktoai/mirage-core'
 import type { S3Config } from '../s3/config.ts'
 
 export interface R2Config {
@@ -37,6 +37,17 @@ export interface R2ConfigRedacted {
   timeoutMs?: number
 }
 
+export const R2ConfigSchema = z.object({
+  bucket: z.string(),
+  accessKeyId: secretStr(),
+  secretAccessKey: secretStr(),
+  accountId: z.string().optional(),
+  endpoint: z.string(),
+  region: z.string(),
+  profile: z.string().optional(),
+  timeoutMs: z.number().optional(),
+})
+
 export function resolvedR2Endpoint(config: R2Config): string {
   if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint
   if (config.accountId !== undefined && config.accountId !== '') {
@@ -58,16 +69,11 @@ export function r2ToS3Config(config: R2Config): S3Config {
 }
 
 export function redactR2Config(config: R2Config): R2ConfigRedacted {
-  return {
-    bucket: config.bucket,
-    accessKeyId: '<REDACTED>',
-    secretAccessKey: '<REDACTED>',
-    ...(config.accountId !== undefined ? { accountId: config.accountId } : {}),
+  return redactConfigWithSchema(R2ConfigSchema, {
+    ...config,
     endpoint: resolvedR2Endpoint(config),
     region: config.region ?? 'auto',
-    ...(config.profile !== undefined ? { profile: config.profile } : {}),
-    ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
-  }
+  }) as unknown as R2ConfigRedacted
 }
 
 export function normalizeR2Config(input: Record<string, unknown>): R2Config {

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { redactConfigWithSchema, secretSchema, z } from '@struktoai/mirage-core'
 import type { S3BrowserPresignedUrlProvider, S3Config } from '../s3/config.ts'
 
 export interface R2Config {
@@ -26,6 +27,17 @@ export interface R2Config {
 export interface R2ConfigRedacted extends Omit<R2Config, 'presignedUrlProvider'> {
   presignedUrlProvider: '<REDACTED>'
 }
+
+export const R2ConfigSchema = z.object({
+  bucket: z.string(),
+  presignedUrlProvider: secretSchema(
+    z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),
+  ),
+  accountId: z.string().optional(),
+  region: z.string().optional(),
+  endpoint: z.string().optional(),
+  defaultContentType: z.string().optional(),
+})
 
 export function resolvedR2Endpoint(config: R2Config): string | undefined {
   if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint
@@ -49,5 +61,5 @@ export function r2ToS3Config(config: R2Config): S3Config {
 }
 
 export function redactR2Config(config: R2Config): R2ConfigRedacted {
-  return { ...config, presignedUrlProvider: '<REDACTED>' }
+  return redactConfigWithSchema(R2ConfigSchema, config) as unknown as R2ConfigRedacted
 }

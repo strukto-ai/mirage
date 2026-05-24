@@ -12,28 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
 from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.gslides import GSlidesAccessor
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.nl import nl as generic_nl
+from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gslides.glob import resolve_glob
 from mirage.core.gslides.read import read as gslides_read
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-def _should_number(line: str, body_numbering: str,
-                   pattern: re.Pattern[str] | None) -> bool:
-    if body_numbering == "n":
-        return False
-    if body_numbering == "a":
-        return True
-    if body_numbering == "p" and pattern is not None:
-        return pattern.search(line) is not None
-    return bool(line.strip())
 
 
 @command("nl", resource="gslides", spec=SPECS["nl"])
@@ -47,35 +38,21 @@ async def nl(
     i: str | None = None,
     w: str | None = None,
     s: str | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    body_numbering_raw = b if b is not None else "t"
-    pattern: re.Pattern[str] | None = None
-    if body_numbering_raw.startswith("p"):
-        body_numbering = "p"
-        pattern = re.compile(body_numbering_raw[1:])
-    else:
-        body_numbering = body_numbering_raw
-    start = int(v) if v is not None else 1
-    increment = int(i) if i is not None else 1
-    width = int(w) if w is not None else 6
-    separator = s if s is not None else "\t"
-
     if paths:
-        paths = await resolve_glob(accessor, paths, _extra.get("index"))
-        p = paths[0]
-        raw = await gslides_read(accessor, p, _extra.get("index"))
+        paths = await resolve_glob(accessor, paths, index)
     else:
-        raw = await _read_stdin_async(stdin)
-        if raw is None:
-            raise ValueError("nl: missing operand")
-
-    num = start
-    out_lines: list[str] = []
-    for line in raw.decode(errors="replace").splitlines():
-        if _should_number(line, body_numbering, pattern):
-            out_lines.append(f"{num:{width}d}{separator}{line}")
-            num += increment
-        else:
-            out_lines.append(f"{' ' * width}{separator}{line}")
-    return ("\n".join(out_lines) + "\n").encode(), IOResult()
+        paths = []
+    return await generic_nl(
+        paths,
+        read_stream=partial(stream_from_bytes, gslides_read, index=index),
+        accessor=accessor,
+        stdin=stdin,
+        body_numbering_raw=b,
+        start_raw=v,
+        increment_raw=i,
+        width_raw=w,
+        separator=s,
+    )

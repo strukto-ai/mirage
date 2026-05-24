@@ -58,7 +58,7 @@ async def file_read_provision(
     if not paths:
         return ProvisionResult(command=command, precision=Precision.UNKNOWN)
     if index is None:
-        index = _extra.get("index")
+        index = index
     resolved, missing = await _resolve_sizes(accessor, paths, index)
     if missing > 0 or not resolved:
         return ProvisionResult(command=command, precision=Precision.UNKNOWN)

@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, SecretStr
 
 from mirage.resource.s3 import S3Config
 
@@ -23,8 +23,8 @@ class R2Config(BaseModel):
     bucket: str
     account_id: str | None = None
     endpoint_url: str | None = None
-    access_key_id: str | None = None
-    secret_access_key: str | None = None
+    access_key_id: SecretStr | None = None
+    secret_access_key: SecretStr | None = None
     aws_profile: str | None = None
     region: str = "auto"
     timeout: int = 30

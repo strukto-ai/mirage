@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { decodeBase64, encodeBase64 } from '../utils/base64.ts'
-import { SNAPSHOT_FORMAT_VERSION, type WorkspaceStateDict } from './state.ts'
+import { FORMAT_VERSION } from '../workspace/snapshot/utils.ts'
+import type { WorkspaceStateDict } from './state.ts'
 
 const BLOB_MARKER = '__bytes_b64'
 
@@ -66,10 +67,10 @@ export function decodeSnapshot(bytes: Uint8Array): WorkspaceStateDict {
   const parsed = JSON.parse(json) as JsonValue
   const decoded = decodeBlobs(parsed) as Record<string, unknown>
   const version = decoded.version
-  if (version !== SNAPSHOT_FORMAT_VERSION) {
+  if (version !== FORMAT_VERSION) {
     throw new Error(
       `snapshot format v${String(version)} not supported ` +
-        `(loader expects v${String(SNAPSHOT_FORMAT_VERSION)})`,
+        `(loader expects v${String(FORMAT_VERSION)})`,
     )
   }
   return decoded as unknown as WorkspaceStateDict

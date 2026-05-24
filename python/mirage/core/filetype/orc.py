@@ -156,3 +156,16 @@ def cut(raw: bytes, columns: list[str]) -> bytes:
             raise ValueError(f"column not found: {col}")
     table = f.read(columns=columns)
     return table.to_pandas().to_csv(index=False).encode()
+
+
+def file(raw: bytes) -> bytes:
+    f = _open(raw)
+    schema = f.schema
+    cols = ", ".join(f"{field.name}: {field.type}" for field in schema)
+    return (f"orc, {f.nrows} rows, {len(schema)} columns, "
+            f"{f.nstripes} stripes ({cols})").encode()
+
+
+def ls(raw: bytes) -> tuple[int, int]:
+    f = _open(raw)
+    return f.nrows, len(f.schema)

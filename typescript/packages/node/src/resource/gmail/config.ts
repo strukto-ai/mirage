@@ -12,35 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeFields } from '@struktoai/mirage-core'
-
-export interface GmailConfig {
-  clientId: string
-  clientSecret: string
-  refreshToken: string
-  refreshFn?: (refreshToken: string) => Promise<{ accessToken: string; expiresIn: number }>
-}
-
-export interface GmailConfigRedacted {
-  clientId: string
-  clientSecret: '<REDACTED>'
-  refreshToken: '<REDACTED>'
-}
-
-export function redactGmailConfig(config: GmailConfig): GmailConfigRedacted {
-  return {
-    clientId: config.clientId,
-    clientSecret: '<REDACTED>',
-    refreshToken: '<REDACTED>',
-  }
-}
-
-export function normalizeGmailConfig(input: Record<string, unknown>): GmailConfig {
-  return normalizeFields(input, {
-    rename: {
-      client_id: 'clientId',
-      client_secret: 'clientSecret',
-      refresh_token: 'refreshToken',
-    },
-  }) as unknown as GmailConfig
-}
+export {
+  GoogleConfigSchema as GmailConfigSchema,
+  normalizeGoogleConfig as normalizeGmailConfig,
+  redactGoogleConfig as redactGmailConfig,
+  type GoogleConfig as GmailConfig,
+  type GoogleConfigRedacted as GmailConfigRedacted,
+} from '@struktoai/mirage-core'

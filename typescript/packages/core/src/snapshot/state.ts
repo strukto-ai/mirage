@@ -14,11 +14,9 @@
 
 import type { RAMResourceState } from '../resource/ram/ram.ts'
 
-export const SNAPSHOT_FORMAT_VERSION = 1
-
 export interface ResourceStateBase {
   type: string
-  needsOverride?: boolean
+  config?: unknown
 }
 
 export type ResourceState = RAMResourceState | (ResourceStateBase & Record<string, unknown>)

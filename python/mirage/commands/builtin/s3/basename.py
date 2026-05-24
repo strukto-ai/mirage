@@ -23,7 +23,7 @@ from mirage.types import PathSpec
 
 @command("basename", resource="s3", spec=SPECS["basename"])
 async def basename(
-    accessor: S3Accessor = None,
+    accessor: S3Accessor,
     paths: list[PathSpec] | None = None,
     *texts: str,
     stdin: bytes | None = None,

@@ -15,6 +15,7 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.gdrive._provision import file_read_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -30,12 +31,13 @@ async def cut_hdf5_provision(
     accessor: GDriveAccessor,
     paths: list[PathSpec],
     *texts: str,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> ProvisionResult:
     return await file_read_provision(accessor,
                                      paths,
                                      f"cut {paths[0]}" if paths else "cut",
-                                     index=_extra.get("index"))
+                                     index=index)
 
 
 @command("cut",
@@ -56,11 +58,12 @@ async def cut_hdf5(
     f: str | None = None,
     d: str | None = None,
     c: str | None = None,
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("cut: missing operand")
-    paths = await resolve_glob(accessor, paths, _extra.get("index"))
+    paths = await resolve_glob(accessor, paths, index)
     p = paths[0]
     if f is None:
         return None, IOResult(
@@ -74,7 +77,7 @@ async def cut_hdf5(
         )
     try:
         columns = [col.strip() for col in f.split(",")]
-        raw = await gdrive_read(accessor, p, _extra.get("index"))
+        raw = await gdrive_read(accessor, p, index)
         result = hdf5_cut(raw, columns=columns)
         return result, IOResult(reads={p.strip_prefix: raw},
                                 cache=[p.strip_prefix])

@@ -12,27 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
+from functools import partial
 
 from mirage.accessor.gslides import GSlidesAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.realpath import \
+    realpath as generic_realpath
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.core.gslides.glob import resolve_glob
 from mirage.core.gslides.stat import stat as stat_impl
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-async def _exists(accessor: GSlidesAccessor,
-                  path: str,
-                  index: IndexCacheStore = None,
-                  prefix="") -> bool:
-    try:
-        spec = PathSpec(original=path, directory=path, prefix=prefix)
-        await stat_impl(accessor, spec, index)
-        return True
-    except (FileNotFoundError, ValueError, Exception):
-        return False
 
 
 @command("realpath", resource="gslides", spec=SPECS["realpath"])
@@ -44,15 +35,13 @@ async def realpath(
     e: bool = False,
     m: bool = False,
     prefix: str = "",
+    index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    full = [prefix + p if prefix else p for p in (paths or [])]
-    lines: list[str] = []
-    for p in full:
-        resolved = posixpath.normpath(p)
-        if e and not await _exists(
-                accessor, resolved, index=_extra.get("index"), prefix=prefix):
-            raise FileNotFoundError(
-                f"realpath: '{p.original}': No such file or directory")
-        lines.append(resolved)
-    return ("\n".join(lines) + "\n").encode(), IOResult()
+    if paths:
+        paths = await resolve_glob(accessor, paths, index)
+    return await generic_realpath(paths or [],
+                                  stat_fn=partial(stat_impl, index=index),
+                                  accessor=accessor,
+                                  e=e,
+                                  m=m)

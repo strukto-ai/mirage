@@ -36,8 +36,6 @@ import { redactDiscordConfig, type DiscordConfig, type DiscordConfigRedacted } f
 
 export interface DiscordResourceState {
   type: string
-  needsOverride: boolean
-  redactedFields: readonly string[]
   config: DiscordConfigRedacted
 }
 
@@ -116,8 +114,6 @@ export class DiscordResource implements Resource {
   getState(): Promise<DiscordResourceState> {
     return Promise.resolve({
       type: this.kind,
-      needsOverride: true,
-      redactedFields: ['getHeaders'],
       config: redactDiscordConfig(this.config),
     })
   }
