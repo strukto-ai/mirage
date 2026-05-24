@@ -44,7 +44,7 @@ async def tree(
     return await generic_tree(
         paths[0],
         readdir=partial(readdir, accessor),
-        stat=partial(stat, accessor, index=index),
+        stat=partial(stat, accessor),
         max_depth=int(L) if L is not None else None,
         show_hidden=a,
         ignore_pattern=args_I,

@@ -14,8 +14,10 @@
 
 import asyncio
 import logging
+from collections import Counter
 from pathlib import Path
 
+import aiobotocore.client
 import boto3
 from moto.server import ThreadedMotoServer
 
@@ -32,6 +34,21 @@ MOUNTS = ["/s3", "/gcs"]
 CREDS = dict(aws_access_key_id="testing",
              aws_secret_access_key="testing",
              region_name="us-east-1")
+
+# Count backend API calls so the index fast-path is observable: readdir issues
+# one ListObjectsV2 and populates the index, after which per-entry stat
+# resolves from the index with zero HeadObject calls. A regression that stops
+# threading index would show up here as HeadObject calls.
+API_CALLS: Counter = Counter()
+_orig_make_api_call = aiobotocore.client.AioBaseClient._make_api_call
+
+
+async def _counting_make_api_call(self, operation_name, api_params):
+    API_CALLS[operation_name] += 1
+    return await _orig_make_api_call(self, operation_name, api_params)
+
+
+aiobotocore.client.AioBaseClient._make_api_call = _counting_make_api_call
 
 # Read-only, deterministic commands drawn from examples/python/s3/s3.py and
 # examples/python/gcs/gcs.py. {m} is the mount root (/s3 or /gcs) and the same
@@ -86,6 +103,15 @@ STREAMING_CASES: list[tuple[str, str]] = [
     ("cat_wc_full", "cat {m}/data/example.jsonl | wc -l"),
 ]
 
+# Index fast-path accounting: run from a fresh workspace (empty index) and
+# count backend API calls. readdir populates the index, so per-entry stat
+# issues zero HeadObject calls. GetObject reads are dropped from the report so
+# the assertion focuses on the stat/list pattern the index governs.
+INDEX_CASES: list[tuple[str, str]] = [
+    ("ls_l", "ls -l {m}/data/"),
+    ("tree", "tree {m}/"),
+]
+
 
 def _seed(endpoint: str) -> None:
     client = boto3.client("s3", endpoint_url=endpoint, **CREDS)
@@ -136,6 +162,16 @@ async def _measure(ws: Workspace, name: str, cmd: str) -> None:
     print(f"bytes={net} lines={len(lines)} out0={first!r}")
 
 
+async def _measure_calls(endpoint: str, name: str, cmd: str) -> None:
+    ws = _build_workspace(endpoint)
+    API_CALLS.clear()
+    await ws.execute(cmd)
+    lists = API_CALLS.get("ListObjectsV2", 0)
+    heads = API_CALLS.get("HeadObject", 0)
+    print(f"=== {name} ===")
+    print(f"ListObjectsV2={lists} HeadObject={heads}")
+
+
 async def main() -> None:
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
     server = ThreadedMotoServer(ip_address="127.0.0.1", port=0, verbose=False)
@@ -156,6 +192,11 @@ async def main() -> None:
             for name, tmpl in STREAMING_CASES:
                 await _measure(ws, f"{tag}:stream:{name}",
                                tmpl.format(m=mount))
+        for mount in MOUNTS:
+            tag = mount.lstrip("/")
+            for name, tmpl in INDEX_CASES:
+                await _measure_calls(endpoint, f"{tag}:calls:{name}",
+                                     tmpl.format(m=mount))
     finally:
         server.stop()
 

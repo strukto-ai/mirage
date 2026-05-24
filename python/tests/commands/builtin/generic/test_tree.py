@@ -18,7 +18,7 @@ def _dir(name: str) -> FileStat:
 
 def _make_backend(tree_map: dict[str, FileStat]):
 
-    async def stat(p: PathSpec) -> FileStat:
+    async def stat(p: PathSpec, index=None) -> FileStat:
         if p.original not in tree_map:
             raise FileNotFoundError(p.original)
         return tree_map[p.original]

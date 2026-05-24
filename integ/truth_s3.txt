@@ -144,3 +144,11 @@ bytes=8192 lines=1 out0='{"type":"queue-operation","operation":"enqueue",'
 bytes=8192 lines=1 out0='{"parentUuid":null,"isSidechain":false,"userType'
 === gcs:stream:cat_wc_full ===
 bytes=10414430 lines=1 out0='5766'
+=== s3:calls:ls_l ===
+ListObjectsV2=1 HeadObject=0
+=== s3:calls:tree ===
+ListObjectsV2=2 HeadObject=0
+=== gcs:calls:ls_l ===
+ListObjectsV2=1 HeadObject=0
+=== gcs:calls:tree ===
+ListObjectsV2=2 HeadObject=0
