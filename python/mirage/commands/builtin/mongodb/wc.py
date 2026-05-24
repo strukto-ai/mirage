@@ -69,7 +69,7 @@ async def wc(
 
     if scope.level == ScopeLevel.DOCUMENTS and scope.database and scope.name:
         if c:
-            paths = await resolve_glob(accessor, paths)
+            paths = await resolve_glob(accessor, paths, index)
             data = await mongodb_read(
                 accessor,
                 paths[0],

@@ -66,7 +66,7 @@ async def cat(
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
-        paths = await resolve_glob(accessor, paths)
+        paths = await resolve_glob(accessor, paths, index)
         p = paths[0]
         scope = detect_scope(p)
         if scope.level == ScopeLevel.DOCUMENTS:

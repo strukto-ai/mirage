@@ -59,7 +59,7 @@ async def cat(
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
-        paths = await resolve_glob(accessor, paths)
+        paths = await resolve_glob(accessor, paths, index)
         p = paths[0]
         try:
             data = await postgres_read(accessor, p, index)

@@ -66,7 +66,7 @@ async def wc(
     scope = detect_scope(paths[0])
 
     if scope.level == "file":
-        paths = await resolve_glob(accessor, paths)
+        paths = await resolve_glob(accessor, paths, index)
         p = paths[0]
         data = await langfuse_read(
             accessor,

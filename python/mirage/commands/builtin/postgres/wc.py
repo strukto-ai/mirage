@@ -68,7 +68,7 @@ async def wc(
 
     if scope.level == "entity_rows":
         if c:
-            paths = await resolve_glob(accessor, paths)
+            paths = await resolve_glob(accessor, paths, index)
             data = await postgres_read(accessor, paths[0], index)
             return str(len(data)).encode(), IOResult()
         pool = await accessor.pool()

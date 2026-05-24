@@ -80,7 +80,7 @@ async def stat(
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("stat: missing operand")
-    paths = await resolve_glob(accessor, paths)
+    paths = await resolve_glob(accessor, paths, index)
     fmt = c if c is not None else f
     lines: list[str] = []
     for p in paths:

@@ -42,7 +42,7 @@ async def jq(
         raise ValueError("jq: usage: jq EXPRESSION [path]")
     expression = texts[0]
     if paths:
-        paths = await resolve_glob(accessor, paths)
+        paths = await resolve_glob(accessor, paths, index)
         outputs: list[bytes] = []
         for p in paths:
             raw = await discord_read(accessor, p, index)

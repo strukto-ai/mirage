@@ -54,7 +54,7 @@ async def wc(
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
-        paths = await resolve_glob(accessor, paths)
+        paths = await resolve_glob(accessor, paths, index)
         p = paths[0]
         data = await ci_read(accessor, p, index)
     else:

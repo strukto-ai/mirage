@@ -140,7 +140,7 @@ async def ls(
                 directory=cwd,
                 resolved=False,
             )]
-    paths = await resolve_glob(accessor, paths)
+    paths = await resolve_glob(accessor, paths, index)
     for p in paths:
         try:
             entries = await _ls_async(

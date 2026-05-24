@@ -104,7 +104,7 @@ async def tree(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    paths = await resolve_glob(accessor, paths)
+    paths = await resolve_glob(accessor, paths, index)
     p0 = paths[0]
     max_depth = int(L) if L is not None else None
     warnings: list[str] = []
