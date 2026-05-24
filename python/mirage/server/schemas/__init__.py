@@ -18,7 +18,8 @@ from mirage.server.schemas.versions import (BranchRequest, BranchResponse,
                                             CheckoutRequest, CloneRequest,
                                             CommitRequest, CommitResponse,
                                             DiffResponse, VersionLogItem)
-from mirage.server.schemas.workspaces import (  # yapf: disable
+
+from mirage.server.schemas.workspaces import (  # isort: skip
     CloneWorkspaceRequest, CreateWorkspaceRequest, DeleteWorkspaceResponse,
     LoadWorkspaceRequest, SnapshotWorkspaceRequest, SnapshotWorkspaceResponse,
     WorkspaceBrief, WorkspaceDetail, WorkspaceInternals)
