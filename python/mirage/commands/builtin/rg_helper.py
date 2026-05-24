@@ -16,7 +16,8 @@ import fnmatch
 import posixpath
 import re
 
-from mirage.commands.builtin.grep_helper import (compile_pattern,
+from mirage.commands.builtin.grep_helper import (BINARY_EXTENSIONS,
+                                                 compile_pattern,
                                                  get_extension, grep_lines)
 from mirage.commands.builtin.utils.types import (_AsyncReadBytes,
                                                  _AsyncReaddir, _AsyncStat,
@@ -144,13 +145,12 @@ def rg_search_file(
     return results
 
 
-async def rg_folder_filetype(
+async def rg_folder(
     readdir_fn: _AsyncReaddir,
     stat_fn: _AsyncStat,
     read_bytes_fn: _AsyncReadBytes,
     path: str,
     pattern: str,
-    filetype_fns: dict,
     ignore_case: bool,
     invert: bool,
     line_numbers: bool,
@@ -184,13 +184,12 @@ async def rg_folder_filetype(
             continue
 
         if s.type == FileType.DIRECTORY:
-            sub = await rg_folder_filetype(
+            sub = await rg_folder(
                 readdir_fn,
                 stat_fn,
                 read_bytes_fn,
                 entry,
                 pattern,
-                filetype_fns,
                 ignore_case,
                 invert,
                 line_numbers,
@@ -208,42 +207,10 @@ async def rg_folder_filetype(
             results.extend(sub)
             continue
 
-        if not rg_matches_filter(entry, file_type, glob_pattern, hidden):
+        if get_extension(entry) in BINARY_EXTENSIONS:
             continue
 
-        ext = get_extension(entry)
-        if ext in filetype_fns:
-            try:
-                fn = filetype_fns[ext]
-                stdout, io = await fn(
-                    [entry],
-                    pattern,
-                    stdin=None,
-                    i=ignore_case,
-                )
-                if stdout is None:
-                    continue
-                if isinstance(stdout, bytes):
-                    data = stdout
-                else:
-                    chunks = [chunk async for chunk in stdout]
-                    data = b"".join(chunks)
-                text = data.decode(errors="replace").strip()
-                lines = text.splitlines() if text else []
-                has_csv_header = bool(lines) and "," in lines[0]
-                data_lines = lines[1:] if has_csv_header else lines
-                if not data_lines:
-                    continue
-                if files_only:
-                    results.append(entry)
-                elif count_only:
-                    results.append(str(len(data_lines)))
-                else:
-                    for line in data_lines:
-                        results.append(f"{entry}:{line}")
-            except Exception as exc:
-                if warnings is not None:
-                    warnings.append(f"rg: {entry}: {exc}")
+        if not rg_matches_filter(entry, file_type, glob_pattern, hidden):
             continue
 
         try:
@@ -383,6 +350,8 @@ async def rg_full(
                 warnings,
             ))
         else:
+            if get_extension(entry) in BINARY_EXTENSIONS:
+                continue
             if not rg_matches_filter(entry, file_type, glob_pattern, hidden):
                 continue
             try:

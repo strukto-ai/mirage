@@ -249,33 +249,3 @@ async def test_rg_glob_filter():
     decoded = (await _drain_async(output)).decode()
     assert "/dir/a.log" in decoded
     assert "/dir/b.txt" not in decoded
-
-
-@pytest.mark.asyncio
-async def test_rg_filetype_fn_dispatch_on_dir():
-    """When path is dir and filetype_fns provided, rg dispatches to handler."""
-    readdir, stat, rb, rs = _make_backend({
-        "/dir/data.parquet": b"<binary>",
-    })
-    calls: list = []
-
-    async def parquet_handler(paths, pattern, stdin=None, i=False):
-        calls.append((paths, pattern))
-        return b"row1-match\nrow2-match\n", None
-
-    output, _ = await rg(
-        [_spec("/dir")],
-        pattern="match",
-        readdir=readdir,
-        stat=stat,
-        read_bytes=rb,
-        read_stream=rs,
-        accessor="sentinel",
-        filetype_fns={
-            ".parquet":
-            lambda accessor, *args, **kw: parquet_handler(*args, **kw)
-        },
-    )
-    decoded = (await _drain_async(output)).decode()
-    assert "row1-match" in decoded
-    assert calls

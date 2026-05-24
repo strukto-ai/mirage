@@ -17,8 +17,7 @@ from functools import partial
 
 from mirage.accessor.trello import TrelloAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.rg_helper import (compile_pattern,
-                                               rg_folder_filetype,
+from mirage.commands.builtin.rg_helper import (compile_pattern, rg_folder,
                                                rg_matches_filter,
                                                rg_search_file)
 from mirage.commands.builtin.trello._provision import file_read_provision
@@ -108,13 +107,12 @@ async def rg(
         file_stat = await st(target)
         compiled = compile_pattern(pattern, i, F, w)
         if file_stat.type == FileType.DIRECTORY:
-            results = await rg_folder_filetype(
+            results = await rg_folder(
                 rd,
                 st,
                 rb,
                 target,
                 pattern,
-                {},
                 i,
                 v,
                 n,

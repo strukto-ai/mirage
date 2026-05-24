@@ -49,7 +49,6 @@ async def rg(
     hidden: bool = False,
     type: str | None = None,
     glob: str | None = None,
-    filetype_fns: dict | None = None,
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -73,7 +72,6 @@ async def rg(
         read_bytes=_read,
         read_stream=_read_stream,
         accessor=accessor,
-        filetype_fns=filetype_fns,
         stdin=stdin,
         ignore_case=i,
         invert=v,

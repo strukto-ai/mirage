@@ -3,10 +3,8 @@ from functools import partial
 
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.grep_helper import (compile_pattern,
-                                                 grep_files_only,
-                                                 grep_folder_filetype,
-                                                 grep_lines, grep_recursive,
-                                                 grep_stream)
+                                                 grep_files_only, grep_lines,
+                                                 grep_recursive, grep_stream)
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
@@ -25,7 +23,6 @@ async def grep(
     read_bytes: Callable[..., Awaitable[bytes]],
     read_stream: Callable[..., AsyncIterator[bytes]] | None,
     accessor: object = None,
-    filetype_fns: dict | None = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     pattern_via_e: bool = False,
     ignore_case: bool = False,
@@ -43,8 +40,6 @@ async def grep(
     before_context: int = 0,
     index: IndexCacheStore | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
-    filetype_fns = filetype_fns or {}
-
     if paths:
         mount_prefix = paths[0].prefix
         rd = partial(call_readdir,
@@ -58,38 +53,8 @@ async def grep(
                      accessor,
                      prefix=mount_prefix)
 
-        if recursive and filetype_fns:
-            bound_ft = {
-                ext: partial(fn, accessor)
-                for ext, fn in filetype_fns.items()
-            }
-            warnings: list[str] = []
-            results = await grep_folder_filetype(
-                rd,
-                st,
-                rb,
-                paths[0].original,
-                pattern,
-                bound_ft,
-                ignore_case=ignore_case,
-                invert=invert,
-                line_numbers=line_numbers,
-                count_only=count_only,
-                files_only=files_only,
-                only_matching=only_matching,
-                max_count=max_count,
-                fixed_string=fixed_string,
-                whole_word=whole_word,
-                warnings=warnings,
-                prefix=mount_prefix,
-            )
-            stderr = "\n".join(warnings).encode() if warnings else None
-            if not results:
-                return b"", IOResult(exit_code=1, stderr=stderr)
-            return "\n".join(results).encode(), IOResult(stderr=stderr)
-
         if files_only:
-            warnings = []
+            warnings: list[str] = []
             results: list[str] = []
             for p in paths:
                 hits = await grep_files_only(
@@ -108,8 +73,7 @@ async def grep(
                     max_count=max_count,
                     whole_word=whole_word,
                     warnings=warnings,
-                    read_stream_fn=partial(read_stream, accessor)
-                    if read_stream else None,
+                    read_stream_fn=None,
                 )
                 results.extend(hits)
             stderr = "\n".join(warnings).encode() if warnings else None
@@ -138,8 +102,7 @@ async def grep(
                         only_matching=only_matching,
                         max_count=max_count,
                         warnings=warnings,
-                        read_stream_fn=partial(read_stream, accessor)
-                        if read_stream else None,
+                        read_stream_fn=None,
                     )
                     all_results.extend(res)
                 else:

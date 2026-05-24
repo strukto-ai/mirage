@@ -42,13 +42,13 @@ async def _ws():
 
 
 @pytest.mark.asyncio
-async def test_ls_l_shows_parquet_metadata():
+async def test_ls_l_no_parquet_enrichment():
     ws = await _ws()
     ws._cwd = "/"
     io = await ws.execute("ls -l /data/")
     out = await io.stdout_str()
-    assert "parquet" in out.lower()
     assert "test.parquet" in out
+    assert "rows" not in out
 
 
 @pytest.mark.asyncio

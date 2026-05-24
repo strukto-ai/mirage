@@ -18,10 +18,8 @@ from functools import partial
 from mirage.accessor.ssh import SSHAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.grep_helper import (compile_pattern,
-                                                 grep_files_only,
-                                                 grep_folder_filetype,
-                                                 grep_lines, grep_recursive,
-                                                 grep_stream)
+                                                 grep_files_only, grep_lines,
+                                                 grep_recursive, grep_stream)
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
                                                 call_stat)
@@ -122,8 +120,6 @@ async def grep(
     after_ctx = int(A) if A is not None else (int(C) if C is not None else 0)
     before_ctx = int(B) if B is not None else (int(C) if C is not None else 0)
 
-    filetype_fns = _extra.get("filetype_fns") or {}
-
     if paths:
         paths = await resolve_glob(accessor, paths, index)
         mount_prefix = paths[0].prefix if paths else ""
@@ -137,36 +133,6 @@ async def grep(
                      _read_bytes,
                      accessor,
                      prefix=mount_prefix)
-
-        if (r or R) and filetype_fns:
-            bound_ft = {
-                ext: partial(fn, accessor)
-                for ext, fn in filetype_fns.items()
-            }
-            warnings: list[str] = []
-            results = await grep_folder_filetype(
-                rd,
-                st,
-                rb,
-                paths[0].original,
-                pattern,
-                bound_ft,
-                ignore_case=i,
-                invert=v,
-                line_numbers=n,
-                count_only=c,
-                files_only=args_l,
-                only_matching=o,
-                max_count=max_count,
-                fixed_string=F,
-                whole_word=w,
-                warnings=warnings,
-                prefix=mount_prefix,
-            )
-            stderr = "\n".join(warnings).encode() if warnings else None
-            if not results:
-                return b"", IOResult(exit_code=1, stderr=stderr)
-            return "\n".join(results).encode(), IOResult(stderr=stderr)
 
         if args_l:
             warnings_l: list[str] = []
@@ -212,7 +178,7 @@ async def grep(
                         only_matching=o,
                         max_count=max_count,
                         warnings=warnings_r,
-                        read_stream_fn=partial(read_stream, accessor),
+                        read_stream_fn=None,
                     )
                     all_results.extend(res)
                 else:

@@ -263,52 +263,18 @@ async def test_ls_missing_path_returns_warning_and_exit_1():
 
 
 @pytest.mark.asyncio
-async def test_ls_filetype_fn_overrides_default_long_format():
+async def test_ls_l_no_filetype_enrichment():
     tree = {
         "/dir": _dir("dir"),
         "/dir/data.parquet": _file("data.parquet", 999),
     }
     readdir, stat = _make_fs_backend(tree)
 
-    calls: list = []
-
-    async def parquet_handler(accessor, paths, **kwargs):
-        calls.append((accessor, paths, kwargs))
-        return b"PARQUET-META\tdata.parquet", None
-
     output, _ = await ls(
         [_spec("/dir")],
         readdir=readdir,
         stat=stat,
         long=True,
-        accessor="sentinel-accessor",
-        filetype_fns={".parquet": parquet_handler},
-    )
-    decoded = output.decode()
-    assert "PARQUET-META" in decoded
-    assert calls and calls[0][0] == "sentinel-accessor"
-    assert calls[0][2].get("args_l") is True
-
-
-@pytest.mark.asyncio
-async def test_ls_filetype_fn_failure_falls_back_to_default():
-    tree = {
-        "/dir": _dir("dir"),
-        "/dir/data.parquet": _file("data.parquet", 999),
-    }
-    readdir, stat = _make_fs_backend(tree)
-
-    async def broken_handler(*_args, **_kwargs):
-        raise RuntimeError("boom")
-
-    output, _ = await ls(
-        [_spec("/dir")],
-        readdir=readdir,
-        stat=stat,
-        long=True,
-        accessor="x",
-        filetype_fns={".parquet": broken_handler},
     )
     decoded = output.decode()
     assert "data.parquet" in decoded
-    assert "PARQUET-META" not in decoded

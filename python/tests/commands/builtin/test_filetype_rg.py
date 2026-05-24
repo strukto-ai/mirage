@@ -43,12 +43,13 @@ async def _ws():
 
 
 @pytest.mark.asyncio
-async def test_rg_finds_in_parquet():
+async def test_rg_skips_parquet_in_dir():
     ws = await _ws()
     ws._cwd = "/"
-    io = await ws.execute("rg alice /data/test.parquet")
-    assert io.exit_code == 0
-    assert "alice" in (await io.stdout_str())
+    io = await ws.execute("rg alice /data/")
+    out = await io.stdout_str()
+    assert "test.parquet" not in out
+    assert "notes.txt" in out
 
 
 @pytest.mark.asyncio

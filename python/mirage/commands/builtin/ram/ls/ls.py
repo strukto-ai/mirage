@@ -43,7 +43,6 @@ async def ls(
     R: bool = False,
     d: bool = False,
     F: bool = False,
-    filetype_fns: dict | None = None,
     index: IndexCacheStore = None,
     cwd: PathSpec | str = "/",
     **_extra: object,
@@ -74,8 +73,6 @@ async def ls(
         recursive=R,
         list_dir=d,
         classify=F,
-        accessor=accessor,
-        filetype_fns=filetype_fns,
         index=index,
         trailing_newline=True,
     )

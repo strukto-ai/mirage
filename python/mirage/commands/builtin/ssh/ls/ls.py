@@ -24,13 +24,6 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 
 
-def _get_extension(path: str) -> str | None:
-    dot = path.rfind(".")
-    if dot == -1 or "/" in path[dot:]:
-        return None
-    return path[dot:]
-
-
 async def _ls_entries(
     accessor: SSHAccessor,
     path: PathSpec,
@@ -110,7 +103,6 @@ async def ls(
     R: bool = False,
     d: bool = False,
     F: bool = False,
-    filetype_fns: dict | None = None,
     index: IndexCacheStore = None,
     cwd: PathSpec | str = "/",
     prefix: str = "",
@@ -154,27 +146,6 @@ async def ls(
             continue
         if args_l and not args_1:
             for e in entries:
-                ext = _get_extension(e.name)
-                if filetype_fns and ext in filetype_fns:
-                    try:
-                        fn = filetype_fns[ext]
-                        path_for_entry = (p.original if isinstance(
-                            p, PathSpec) else p).rstrip("/") + "/" + e.name
-                        stdout, _io = await fn(
-                            accessor,
-                            [path_for_entry],
-                            args_l=True,
-                        )
-                        if stdout:
-                            if isinstance(stdout, bytes):
-                                results.append(stdout.decode(errors="replace"))
-                            else:
-                                chunks = [chunk async for chunk in stdout]
-                                results.append(
-                                    b"".join(chunks).decode(errors="replace"))
-                            continue
-                    except Exception:
-                        pass
                 size_str = _human_size(e.size or 0) if h else str(e.size or 0)
                 line = (f"{e.type or '-'}\t{size_str}"
                         f"\t{e.modified or ''}\t{e.name}")

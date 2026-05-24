@@ -12,22 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import logging
-
 from mirage.commands.builtin.redis.ls.ls import ls
-from mirage.commands.optional import try_load_command
 
-_logger = logging.getLogger(__name__)
-
-ls_feather = try_load_command("mirage.commands.builtin.redis.ls.ls_feather",
-                              "ls_feather", "parquet")
-ls_hdf5 = try_load_command("mirage.commands.builtin.redis.ls.ls_hdf5",
-                           "ls_hdf5", "hdf5")
-ls_orc = try_load_command("mirage.commands.builtin.redis.ls.ls_orc", "ls_orc",
-                          "parquet")
-ls_parquet = try_load_command("mirage.commands.builtin.redis.ls.ls_parquet",
-                              "ls_parquet", "parquet")
-
-COMMANDS = [
-    c for c in (ls, ls_parquet, ls_orc, ls_feather, ls_hdf5) if c is not None
-]
+COMMANDS = [ls]

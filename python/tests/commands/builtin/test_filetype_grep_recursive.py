@@ -43,13 +43,13 @@ async def _ws():
 
 
 @pytest.mark.asyncio
-async def test_grep_r_finds_in_parquet():
+async def test_grep_r_skips_parquet():
     ws = await _ws()
     ws._cwd = "/"
     io = await ws.execute("grep -r alice /data/")
     out = await io.stdout_str()
-    assert "alice" in out
-    assert "test.parquet" in out
+    assert "test.parquet" not in out
+    assert "notes.txt" in out
 
 
 @pytest.mark.asyncio

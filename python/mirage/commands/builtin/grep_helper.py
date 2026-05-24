@@ -21,7 +21,17 @@ from mirage.commands.builtin.utils.types import (_AsyncReadBytes,
                                                  _AsyncReaddir, _AsyncStat)
 from mirage.commands.resolve import COMPOUND_EXTENSIONS
 from mirage.io.async_line_iterator import AsyncLineIterator
-from mirage.types import FileType, PathSpec
+from mirage.types import FileType
+
+BINARY_EXTENSIONS = frozenset({
+    ".parquet",
+    ".orc",
+    ".feather",
+    ".arrow",
+    ".ipc",
+    ".hdf5",
+    ".h5",
+})
 
 
 def classify_pattern(
@@ -164,134 +174,6 @@ async def grep_stream(
         yield str(match_count).encode() + b"\n"
 
 
-async def grep_folder_filetype(
-    readdir_fn: _AsyncReaddir,
-    stat_fn: _AsyncStat,
-    read_bytes_fn: _AsyncReadBytes,
-    path: str,
-    pattern: str,
-    filetype_fns: dict,
-    ignore_case: bool,
-    invert: bool,
-    line_numbers: bool,
-    count_only: bool,
-    files_only: bool,
-    only_matching: bool,
-    max_count: int | None,
-    fixed_string: bool,
-    whole_word: bool,
-    warnings: list[str] | None,
-    prefix: str = "",
-) -> list[str]:
-    results: list[str] = []
-    try:
-        entries = await readdir_fn(path)
-    except (FileNotFoundError, ValueError) as exc:
-        if warnings is not None:
-            warnings.append(f"grep: {path}: {exc}")
-        return results
-
-    pat = compile_pattern(pattern, ignore_case, fixed_string, whole_word)
-
-    for entry in entries:
-        try:
-            s = await stat_fn(entry)
-        except (FileNotFoundError, ValueError) as exc:
-            if warnings is not None:
-                warnings.append(f"grep: {entry}: {exc}")
-            continue
-
-        if s.type == FileType.DIRECTORY:
-            sub = await grep_folder_filetype(
-                readdir_fn,
-                stat_fn,
-                read_bytes_fn,
-                entry,
-                pattern,
-                filetype_fns,
-                ignore_case,
-                invert,
-                line_numbers,
-                count_only,
-                files_only,
-                only_matching,
-                max_count,
-                fixed_string,
-                whole_word,
-                warnings,
-                prefix,
-            )
-            results.extend(sub)
-            continue
-
-        ext = get_extension(entry)
-        if ext in filetype_fns:
-            try:
-                fn = filetype_fns[ext]
-                scope = PathSpec(
-                    original=entry,
-                    directory=entry.rsplit("/", 1)[0] or "/",
-                    resolved=True,
-                    prefix=prefix,
-                )
-                stdout, io = await fn(
-                    [scope],
-                    pattern,
-                    stdin=None,
-                    i=ignore_case,
-                )
-                if stdout is None:
-                    continue
-                if isinstance(stdout, bytes):
-                    data = stdout
-                else:
-                    chunks = [chunk async for chunk in stdout]
-                    data = b"".join(chunks)
-                text = data.decode(errors="replace").strip()
-                lines = text.splitlines() if text else []
-                has_csv_header = bool(lines) and "," in lines[0]
-                data_lines = lines[1:] if has_csv_header else lines
-                if not data_lines:
-                    continue
-                if files_only:
-                    results.append(entry)
-                elif count_only:
-                    results.append(str(len(data_lines)))
-                else:
-                    for line in data_lines:
-                        results.append(f"{entry}:{line}")
-            except Exception as exc:
-                if warnings is not None:
-                    warnings.append(f"grep: {entry}: {exc}")
-            continue
-
-        try:
-            raw = await read_bytes_fn(entry)
-            text_lines = raw.decode(errors="replace").splitlines()
-            for i_line, line in enumerate(text_lines, 1):
-                m = pat.search(line)
-                matched = bool(m) != invert
-                if not matched:
-                    continue
-                if files_only:
-                    results.append(entry)
-                    break
-                elif count_only:
-                    pass
-                elif only_matching and m and not invert:
-                    pfx = f"{i_line}:{m.group()}" if line_numbers else m.group(
-                    )
-                    results.append(f"{entry}:{pfx}")
-                else:
-                    pfx = f"{i_line}:{line}" if line_numbers else line
-                    results.append(f"{entry}:{pfx}")
-        except Exception as exc:
-            if warnings is not None:
-                warnings.append(f"grep: {entry}: {exc}")
-
-    return results
-
-
 async def grep_recursive(
     readdir_fn: _AsyncReaddir,
     stat_fn: _AsyncStat,
@@ -337,7 +219,10 @@ async def grep_recursive(
                 warnings,
                 read_stream_fn,
             ))
-        elif read_stream_fn is not None:
+            continue
+        if get_extension(entry) in BINARY_EXTENSIONS:
+            continue
+        if read_stream_fn is not None:
             try:
                 source = read_stream_fn(entry)
                 file_results: list[str] = []

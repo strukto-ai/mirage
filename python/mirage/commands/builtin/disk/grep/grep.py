@@ -76,7 +76,6 @@ async def grep(
         read_bytes=_read_bytes,
         read_stream=_read_stream,
         accessor=accessor,
-        filetype_fns=_extra.get("filetype_fns"),
         stdin=stdin,
         ignore_case=i,
         invert=v,

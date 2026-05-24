@@ -98,48 +98,6 @@ async def walk(
     return stats, warnings
 
 
-async def _drain_filetype_output(stdout) -> str:
-    if isinstance(stdout, bytes):
-        return stdout.decode(errors="replace")
-    chunks: list[bytes] = []
-    async for chunk in stdout:
-        chunks.append(chunk)
-    return b"".join(chunks).decode(errors="replace")
-
-
-async def render_long_entry(
-    entry: FileStat,
-    parent: PathSpec,
-    *,
-    accessor: object,
-    filetype_fns: dict | None,
-    index: IndexCacheStore | None = None,
-) -> str | None:
-    """Try to render one entry via a registered filetype handler (e.g. parquet
-    metadata). Returns formatted string or None if no handler / handler failed.
-    """
-    if not filetype_fns:
-        return None
-    ext = get_extension(entry.name)
-    if ext not in filetype_fns:
-        return None
-    fn = filetype_fns[ext]
-    child = parent.child(entry.name)
-    entry_spec = PathSpec(original=child,
-                          directory=child,
-                          resolved=False,
-                          prefix=parent.prefix)
-    try:
-        stdout, _io = await fn(accessor, [entry_spec],
-                               args_l=True,
-                               index=index)
-    except Exception:
-        return None
-    if not stdout:
-        return None
-    return await _drain_filetype_output(stdout)
-
-
 async def walk_grouped(
     path: PathSpec,
     *,
@@ -186,33 +144,17 @@ async def walk_grouped(
     return groups, warnings
 
 
-async def _render_group(
+def _render_group(
     results: list[str],
-    dir_spec: PathSpec,
     entries: list[FileStat],
     *,
     long: bool,
     one_per_line: bool,
     human: bool,
     classify: bool,
-    accessor: object,
-    filetype_fns: dict | None,
-    index: IndexCacheStore | None = None,
 ) -> None:
     if long and not one_per_line:
-        standard_stats: list[FileStat] = []
-        for e in entries:
-            rendered = await render_long_entry(e,
-                                               dir_spec,
-                                               accessor=accessor,
-                                               filetype_fns=filetype_fns,
-                                               index=index)
-            if rendered is not None:
-                results.append(rendered)
-                continue
-            standard_stats.append(e)
-        if standard_stats:
-            results.extend(format_ls_long(standard_stats, human=human))
+        results.extend(format_ls_long(entries, human=human))
     else:
         results.extend(format_simple(entries, classify=classify))
 
@@ -232,8 +174,6 @@ async def ls(
     recursive: bool = False,
     list_dir: bool = False,
     classify: bool = False,
-    accessor: object = None,
-    filetype_fns: dict | None = None,
     index: IndexCacheStore | None = None,
     trailing_newline: bool = False,
 ) -> tuple[bytes, IOResult]:
@@ -254,16 +194,12 @@ async def ls(
                 if p_idx > 0 or g_idx > 0:
                     results.append("")
                 results.append(f"{dir_spec.original}:")
-                await _render_group(results,
-                                    dir_spec,
-                                    entries,
-                                    long=long,
-                                    one_per_line=one_per_line,
-                                    human=human,
-                                    classify=classify,
-                                    accessor=accessor,
-                                    filetype_fns=filetype_fns,
-                                    index=index)
+                _render_group(results,
+                              entries,
+                              long=long,
+                              one_per_line=one_per_line,
+                              human=human,
+                              classify=classify)
     else:
         for p in paths:
             entries, sub_ws = await walk(p,
@@ -276,16 +212,12 @@ async def ls(
                                          list_dir=list_dir,
                                          index=index)
             warnings.extend(sub_ws)
-            await _render_group(results,
-                                p,
-                                entries,
-                                long=long,
-                                one_per_line=one_per_line,
-                                human=human,
-                                classify=classify,
-                                accessor=accessor,
-                                filetype_fns=filetype_fns,
-                                index=index)
+            _render_group(results,
+                          entries,
+                          long=long,
+                          one_per_line=one_per_line,
+                          human=human,
+                          classify=classify)
 
     body = "\n".join(results)
     if trailing_newline and results:
@@ -300,7 +232,6 @@ __all__ = [
     "format_simple",
     "get_extension",
     "ls",
-    "render_long_entry",
     "walk",
     "walk_grouped",
 ]

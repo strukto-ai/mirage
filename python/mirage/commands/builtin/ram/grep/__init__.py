@@ -12,23 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import logging
-
 from mirage.commands.builtin.ram.grep.grep import grep
-from mirage.commands.optional import try_load_command
 
-_logger = logging.getLogger(__name__)
-
-grep_feather = try_load_command(
-    "mirage.commands.builtin.ram.grep.grep_feather", "grep_feather", "parquet")
-grep_hdf5 = try_load_command("mirage.commands.builtin.ram.grep.grep_hdf5",
-                             "grep_hdf5", "hdf5")
-grep_orc = try_load_command("mirage.commands.builtin.ram.grep.grep_orc",
-                            "grep_orc", "parquet")
-grep_parquet = try_load_command(
-    "mirage.commands.builtin.ram.grep.grep_parquet", "grep_parquet", "parquet")
-
-COMMANDS = [
-    c for c in (grep, grep_parquet, grep_orc, grep_feather, grep_hdf5)
-    if c is not None
-]
+COMMANDS = [grep]
