@@ -106,12 +106,12 @@ async def main():
         result = await ws.execute(f"stat {path}")
         print(await result.stdout_str())
 
-    print("=== GREP: search for 'item_5' ===\n")
+    print("=== GREP: search for 'item_5' (via cat) ===\n")
 
     for label, path in [("parquet", PARQUET), ("orc", ORC),
                         ("feather", FEATHER), ("hdf5", HDF5)]:
-        print(f"--- grep item_5 {label} ---")
-        result = await ws.execute(f"grep item_5 {path}")
+        print(f"--- cat {label} | grep item_5 ---")
+        result = await ws.execute(f"cat {path} | grep item_5")
         print(f"  {(await result.stdout_str()).strip()}")
     print()
 
@@ -142,7 +142,7 @@ async def main():
     result = await ws.execute(f"head -n 5 {PARQUET} | wc -l")
     print(f"  {(await result.stdout_str()).strip()}")
 
-    print("\n=== LS -L: enriched metadata ===\n")
+    print("\n=== LS -L: long listing ===\n")
 
     result = await ws.execute("ls -l /s3/data/")
     print(await result.stdout_str())
@@ -155,29 +155,10 @@ async def main():
         print(f"  {label}: {(await result.stdout_str()).strip()}")
     print()
 
-    print("=== GREP -R: search across formats in folder ===\n")
+    print("=== GLOB: cat / head across files via *.ext ===\n")
 
-    print("--- grep -r item_5 /s3/data/ ---")
-    result = await ws.execute("grep -r item_5 /s3/data/")
-    for line in (await result.stdout_str()).strip().splitlines():
-        print(f"  {line}")
-    print()
-
-    print("--- rg item_5 /s3/data/ ---")
-    result = await ws.execute("rg item_5 /s3/data/")
-    for line in (await result.stdout_str()).strip().splitlines():
-        print(f"  {line}")
-
-    print("\n=== GLOB: filetype dispatch via *.ext ===\n")
-
-    print("--- grep item_5 /s3/data/*.h5 ---")
-    result = await ws.execute("grep item_5 /s3/data/*.h5")
-    print(f"  exit={result.exit_code}")
-    for line in (await result.stdout_str()).strip().splitlines():
-        print(f"  {line}")
-
-    print("\n--- grep item_5 /s3/data/*.parquet ---")
-    result = await ws.execute("grep item_5 /s3/data/*.parquet")
+    print("--- cat /s3/data/*.parquet | grep item_5 ---")
+    result = await ws.execute("cat /s3/data/*.parquet | grep item_5")
     print(f"  exit={result.exit_code}")
     for line in (await result.stdout_str()).strip().splitlines():
         print(f"  {line}")
