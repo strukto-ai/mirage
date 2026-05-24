@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -32,7 +31,7 @@ def _write_config(tmp_path: Path) -> Path:
     return p
 
 
-def _run_cli(env: dict, *args: str, expect_exit: int = 0) -> dict | list:
+def _run(env: dict, *args: str, expect_exit: int = 0) -> dict | list:
     cmd = [sys.executable, "-m", "mirage.cli.main", *args]
     proc = subprocess.run(cmd, env=env, capture_output=True, timeout=30)
     if proc.returncode != expect_exit:
@@ -44,46 +43,160 @@ def _run_cli(env: dict, *args: str, expect_exit: int = 0) -> dict | list:
     return json.loads(proc.stdout)
 
 
-def test_log_empty_store_returns_empty(tmp_path):
-    store = tmp_path / ".mirage"
-    out = _run_cli(dict(os.environ), "workspace", "log", "--store", str(store))
-    assert out == []
-
-
-def test_version_flow_commit_log_status_diff_branch_checkout(daemon, tmp_path):
+def test_commit_log_checkout_clone(daemon, tmp_path):
     env = daemon["env"]
-    store = tmp_path / "proj" / ".mirage"
     cfg = _write_config(tmp_path)
-    _run_cli(env, "workspace", "create", str(cfg), "--id", "vws")
-    _run_cli(env, "execute", "-w", "vws", "-c", "echo one > /a.txt")
+    wid = _run(env, "workspace", "create", str(cfg))["id"]
 
-    committed = _run_cli(env, "workspace", "commit", "vws", "-m", "first",
-                         "--store", str(store))
-    assert len(committed["version"]) == 40
-    assert committed["branch"] == "main"
+    _run(env, "execute", "-w", wid, "-c", "echo v1 > /notes.txt")
+    v1 = _run(env, "workspace", "commit", wid, "-m", "first")["version"]
 
-    log = _run_cli(env, "workspace", "log", "--store", str(store))
-    assert [v["message"] for v in log] == ["first"]
-    v1 = log[0]["id"]
+    _run(env, "execute", "-w", wid, "-c", "echo v2 > /notes.txt")
+    _run(env, "workspace", "commit", wid, "-m", "second")
 
-    _run_cli(env, "execute", "-w", "vws", "-c", "echo two > /a.txt")
-    st = _run_cli(env, "workspace", "status", "vws", "--store", str(store))
-    assert st["modified"] == ["a.txt"]
+    log = _run(env, "workspace", "log", wid)
+    assert [e["message"] for e in log] == ["second", "first"]
 
-    c2 = _run_cli(env, "workspace", "commit", "vws", "-m", "second", "--store",
-                  str(store))
-    diff = _run_cli(env, "workspace", "diff", v1, c2["version"], "--store",
-                    str(store))
-    assert diff["modified"] == ["a.txt"]
+    _run(env, "workspace", "checkout", wid, v1)
+    reverted = _run(env, "execute", "-w", wid, "-c", "cat /notes.txt")
+    assert reverted["stdout"] == "v1\n"
 
-    br = _run_cli(env, "workspace", "branch", "exp", "--store", str(store))
-    assert br["branch"] == "exp"
+    clone = _run(env, "workspace", "clone", wid, "--at", v1)
+    assert clone["id"] != wid
 
-    restored = _run_cli(env, "workspace", "checkout", v1, "--id",
-                        "vws-restored", "--store", str(store))
-    assert restored["id"] == "vws-restored"
-    out = _run_cli(env, "execute", "-w", "vws-restored", "-c", "cat /a.txt")
-    assert out["stdout"].startswith("one")
 
-    _run_cli(env, "workspace", "delete", "vws")
-    _run_cli(env, "workspace", "delete", "vws-restored")
+def test_log_empty_before_commit(daemon, tmp_path):
+    env = daemon["env"]
+    cfg = _write_config(tmp_path)
+    wid = _run(env, "workspace", "create", str(cfg))["id"]
+    assert _run(env, "workspace", "log", wid) == []
+
+
+def test_diff_versions_and_live(daemon, tmp_path):
+    env = daemon["env"]
+    cfg = _write_config(tmp_path)
+    wid = _run(env, "workspace", "create", str(cfg))["id"]
+
+    _run(env, "execute", "-w", wid, "-c", "echo one > /a.txt")
+    v1 = _run(env, "workspace", "commit", wid, "-m", "first")["version"]
+
+    _run(env, "execute", "-w", wid, "-c", "echo two > /a.txt")
+    _run(env, "execute", "-w", wid, "-c", "echo new > /b.txt")
+    v2 = _run(env, "workspace", "commit", wid, "-m", "second")["version"]
+
+    by_version = _run(env, "workspace", "diff", wid, v1, v2)
+    assert by_version["modified"] == ["a.txt"]
+    assert by_version["added"] == ["b.txt"]
+
+    _run(env, "execute", "-w", wid, "-c", "echo three > /a.txt")
+    live = _run(env, "workspace", "diff", wid)
+    assert live["modified"] == ["a.txt"]
+
+
+def test_branch_diverges_and_guards_commit(daemon, tmp_path):
+    env = daemon["env"]
+    cfg = _write_config(tmp_path)
+    wid = _run(env, "workspace", "create", str(cfg))["id"]
+
+    _run(env, "execute", "-w", wid, "-c", "echo one > /a.txt")
+    _run(env, "workspace", "commit", wid, "-m", "first")
+
+    _run(env, "workspace", "branch", wid, "exp")
+    _run(env, "execute", "-w", wid, "-c", "echo two > /a.txt")
+    _run(env, "workspace", "commit", wid, "-b", "exp", "-m", "on exp")
+
+    exp_log = _run(env, "workspace", "log", wid, "-b", "exp")
+    main_log = _run(env, "workspace", "log", wid, "-b", "main")
+    assert [e["message"] for e in exp_log] == ["on exp", "first"]
+    assert [e["message"] for e in main_log] == ["first"]
+
+    _run(env,
+         "workspace",
+         "commit",
+         wid,
+         "-b",
+         "ghost",
+         "-m",
+         "x",
+         expect_exit=2)
+
+
+def test_diff_includes_deleted(daemon, tmp_path):
+    env = daemon["env"]
+    cfg = _write_config(tmp_path)
+    wid = _run(env, "workspace", "create", str(cfg))["id"]
+
+    _run(env, "execute", "-w", wid, "-c", "echo one > /a.txt")
+    _run(env, "execute", "-w", wid, "-c", "echo two > /b.txt")
+    v1 = _run(env, "workspace", "commit", wid, "-m", "first")["version"]
+
+    _run(env, "execute", "-w", wid, "-c", "rm /b.txt")
+    v2 = _run(env, "workspace", "commit", wid, "-m", "second")["version"]
+
+    changes = _run(env, "workspace", "diff", wid, v1, v2)
+    assert changes["deleted"] == ["b.txt"]
+
+
+def test_clone_live_and_explicit_id(daemon, tmp_path):
+    env = daemon["env"]
+    cfg = _write_config(tmp_path)
+    wid = _run(env, "workspace", "create", str(cfg))["id"]
+    _run(env, "execute", "-w", wid, "-c", "echo hello > /a.txt")
+
+    auto = _run(env, "workspace", "clone", wid)
+    assert auto["id"] != wid
+
+    named = _run(env, "workspace", "clone", wid, "--id", "myclone")
+    assert named["id"] == "myclone"
+    got = _run(env, "execute", "-w", "myclone", "-c", "cat /a.txt")
+    assert got["stdout"] == "hello\n"
+
+
+def test_branch_from_non_main(daemon, tmp_path):
+    env = daemon["env"]
+    cfg = _write_config(tmp_path)
+    wid = _run(env, "workspace", "create", str(cfg))["id"]
+
+    _run(env, "execute", "-w", wid, "-c", "echo one > /a.txt")
+    _run(env, "workspace", "commit", wid, "-m", "first")
+    _run(env, "workspace", "branch", wid, "exp")
+    _run(env, "execute", "-w", wid, "-c", "echo two > /a.txt")
+    _run(env, "workspace", "commit", wid, "-b", "exp", "-m", "on exp")
+
+    _run(env, "workspace", "branch", wid, "exp2", "--from", "exp")
+    log = _run(env, "workspace", "log", wid, "-b", "exp2")
+    assert [e["message"] for e in log] == ["on exp", "first"]
+
+
+def test_checkout_by_branch_name(daemon, tmp_path):
+    env = daemon["env"]
+    cfg = _write_config(tmp_path)
+    wid = _run(env, "workspace", "create", str(cfg))["id"]
+
+    _run(env, "execute", "-w", wid, "-c", "echo one > /a.txt")
+    _run(env, "workspace", "commit", wid, "-m", "first")
+    _run(env, "workspace", "branch", wid, "exp")
+    _run(env, "execute", "-w", wid, "-c", "echo two > /a.txt")
+    _run(env, "workspace", "commit", wid, "-b", "exp", "-m", "on exp")
+
+    _run(env, "workspace", "checkout", wid, "main")
+    on_main = _run(env, "execute", "-w", wid, "-c", "cat /a.txt")
+    assert on_main["stdout"] == "one\n"
+
+    _run(env, "workspace", "checkout", wid, "exp")
+    on_exp = _run(env, "execute", "-w", wid, "-c", "cat /a.txt")
+    assert on_exp["stdout"] == "two\n"
+
+
+def test_error_paths_exit_2(daemon, tmp_path):
+    env = daemon["env"]
+    cfg = _write_config(tmp_path)
+    wid = _run(env, "workspace", "create", str(cfg))["id"]
+    _run(env, "execute", "-w", wid, "-c", "echo one > /a.txt")
+    _run(env, "workspace", "commit", wid, "-m", "first")
+    _run(env, "workspace", "branch", wid, "exp")
+
+    _run(env, "workspace", "branch", wid, "exp", expect_exit=2)
+    _run(env, "workspace", "commit", "ghost-ws", "-m", "x", expect_exit=2)
+    _run(env, "workspace", "checkout", wid, "nope", expect_exit=2)
+    _run(env, "workspace", "diff", wid, "nope", "nope2", expect_exit=2)

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import Fastify from 'fastify'
 import multipart from '@fastify/multipart'
 import { WorkspaceRegistry } from './registry.ts'
@@ -23,13 +25,16 @@ import { registerExecuteRoutes } from './routers/execute.ts'
 import { registerHealthRoutes } from './routers/health.ts'
 import { registerJobsRoutes } from './routers/jobs.ts'
 import { registerSessionsRoutes } from './routers/sessions.ts'
+import { registerVersionsRoutes } from './routers/versions.ts'
 import { registerWorkspacesRoutes } from './routers/workspaces.ts'
+import { LocalBackend } from './version/backend.ts'
 
 export interface BuildAppOptions {
   idleGraceSeconds?: number
   onIdleExit?: () => void
   allowedHosts?: readonly string[]
   authConfig?: AuthConfig
+  versionRoot?: string
 }
 
 export type MirageApp = ReturnType<typeof buildApp>
@@ -48,6 +53,9 @@ export function buildApp(options: BuildAppOptions = {}) {
     onIdleExit: exitFn,
   })
   const jobs = new JobTable()
+  const versionBackend = new LocalBackend(
+    options.versionRoot ?? join(homedir(), '.mirage', 'repos'),
+  )
   const app = Fastify({ logger: false })
   const allowedHosts = resolveAllowedHosts(options.allowedHosts)
   if (!allowedHosts.includes('*')) {
@@ -69,11 +77,12 @@ export function buildApp(options: BuildAppOptions = {}) {
   })
   registerHealthRoutes(app, { registry, startedAt, exit: exitFn })
   registerWorkspacesRoutes(app, { registry })
+  registerVersionsRoutes(app, { registry, versionBackend })
   registerSessionsRoutes(app, { registry })
   registerExecuteRoutes(app, { registry, jobs })
   registerJobsRoutes(app, { jobs })
   app.addHook('onClose', async () => {
     await registry.closeAll()
   })
-  return Object.assign(app, { registry, jobs })
+  return Object.assign(app, { registry, jobs, versionBackend })
 }

@@ -16,44 +16,37 @@ from pathlib import Path
 
 import pytest
 
-from mirage.cli.version.store import HeadMovedError, VersionStore
+from mirage.server.version.backend import LocalBackend
+from mirage.server.version.errors import HeadMovedError
+from mirage.server.version.store import VersionStore
 
 
 @pytest.mark.asyncio
 async def test_open_creates_bare_repo(tmp_path: Path):
-    store = await VersionStore.open(tmp_path / ".mirage")
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
     assert store is not None
-    assert (tmp_path / ".mirage" / "objects").is_dir()
-    assert (tmp_path / ".mirage" / "HEAD").is_file()
+    assert (tmp_path / "ws" / "objects").is_dir()
+    assert (tmp_path / "ws" / "HEAD").is_file()
 
 
 @pytest.mark.asyncio
 async def test_open_reuses_existing_repo(tmp_path: Path):
-    path = tmp_path / ".mirage"
-    await VersionStore.open(path)
-    reopened = await VersionStore.open(path)
+    backend = LocalBackend(tmp_path)
+    await VersionStore.open(backend, "ws")
+    reopened = await VersionStore.open(backend, "ws")
     assert reopened is not None
 
 
 @pytest.mark.asyncio
-async def test_open_without_dulwich_raises_clear_error(tmp_path: Path,
-                                                       monkeypatch):
-    from mirage.cli.version import store as store_mod
-    monkeypatch.setattr(store_mod, "Repo", None)
-    with pytest.raises(ImportError, match="cli"):
-        await VersionStore.open(tmp_path / ".mirage")
-
-
-@pytest.mark.asyncio
 async def test_blob_roundtrip(tmp_path: Path):
-    store = await VersionStore.open(tmp_path / ".mirage")
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
     oid = await store.write_blob(b"hello")
     assert await store.read_blob(oid) == b"hello"
 
 
 @pytest.mark.asyncio
 async def test_identical_blobs_dedup(tmp_path: Path):
-    store = await VersionStore.open(tmp_path / ".mirage")
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
     first = await store.write_blob(b"same-bytes")
     second = await store.write_blob(b"same-bytes")
     assert first == second
@@ -61,7 +54,7 @@ async def test_identical_blobs_dedup(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_tree_roundtrip(tmp_path: Path):
-    store = await VersionStore.open(tmp_path / ".mirage")
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
     a = await store.write_blob(b"aaa")
     b = await store.write_blob(b"bbb")
     tree = await store.write_tree({"a.txt": a, "dir/b.txt": b})
@@ -70,7 +63,7 @@ async def test_tree_roundtrip(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_tree_nested_paths(tmp_path: Path):
-    store = await VersionStore.open(tmp_path / ".mirage")
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
     x = await store.write_blob(b"x")
     y = await store.write_blob(b"y")
     z = await store.write_blob(b"z")
@@ -88,7 +81,7 @@ async def test_tree_nested_paths(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_commit_advances_branch(tmp_path: Path):
-    store = await VersionStore.open(tmp_path / ".mirage")
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
     t1 = await store.write_tree({"a.txt": await store.write_blob(b"v1")})
     c1 = await store.commit(t1, parents=[], branch="main", message="first")
     assert await store.head("main") == c1
@@ -104,7 +97,7 @@ async def test_commit_advances_branch(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_commit_rejects_stale_head(tmp_path: Path):
-    store = await VersionStore.open(tmp_path / ".mirage")
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
     c1 = await store.commit(await store.write_tree(
         {"a.txt": await store.write_blob(b"v1")}),
                             parents=[],
@@ -128,7 +121,7 @@ async def test_commit_rejects_stale_head(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_branches_and_log(tmp_path: Path):
-    store = await VersionStore.open(tmp_path / ".mirage")
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
     t1 = await store.write_tree({"a.txt": await store.write_blob(b"v1")})
     c1 = await store.commit(t1, parents=[], branch="main", message="first")
     t2 = await store.write_tree({"a.txt": await store.write_blob(b"v2")})
@@ -140,7 +133,7 @@ async def test_branches_and_log(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_tree_diff(tmp_path: Path):
-    store = await VersionStore.open(tmp_path / ".mirage")
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
     keep = await store.write_blob(b"keep")
     before = await store.write_blob(b"before")
     after = await store.write_blob(b"after")

@@ -15,40 +15,18 @@
 import asyncio
 import stat
 import time
-from pathlib import Path
 
-try:
-    from dulwich.diff_tree import (CHANGE_ADD, CHANGE_DELETE, CHANGE_MODIFY,
-                                   tree_changes)
-    from dulwich.objects import Blob, Commit, Tree
-    from dulwich.repo import Repo
-except ImportError:
-    Repo = None
-    Blob = Commit = Tree = None
-    tree_changes = None
-    CHANGE_ADD = CHANGE_DELETE = CHANGE_MODIFY = None
+from dulwich.diff_tree import (CHANGE_ADD, CHANGE_DELETE, CHANGE_MODIFY,
+                               tree_changes)
+from dulwich.objects import Blob, Commit, Tree
+from dulwich.repo import Repo
+
+from mirage.server.version.backend import VersionBackend
+from mirage.server.version.errors import HeadMovedError
 
 FILE_MODE = 0o100644
 DIR_MODE = 0o40000
 AUTHOR = b"mirage <mirage@local>"
-_CLI_EXTRA = ("workspace versioning requires the 'cli' extra: "
-              "pip install mirage-ai[cli]")
-
-
-class HeadMovedError(Exception):
-
-    def __init__(self, branch: str) -> None:
-        self.branch = branch
-        super().__init__(
-            f"branch {branch!r} moved since this commit was prepared; "
-            "refusing to overwrite (re-read the head and retry)")
-
-
-def _open_repo(path: Path) -> Repo:
-    if (path / "objects").is_dir():
-        return Repo(str(path))
-    path.mkdir(parents=True, exist_ok=True)
-    return Repo.init_bare(str(path))
 
 
 def _add_blob(repo: Repo, data: bytes) -> bytes:
@@ -158,17 +136,14 @@ def _diff(repo: Repo, tree_a: bytes, tree_b: bytes) -> dict[str, list[str]]:
 
 class VersionStore:
 
-    def __init__(self, repo: Repo, path: Path) -> None:
+    def __init__(self, repo: Repo) -> None:
         self._repo = repo
-        self._path = path
 
     @classmethod
-    async def open(cls, path: str | Path) -> "VersionStore":
-        if Repo is None:
-            raise ImportError(_CLI_EXTRA)
-        p = Path(path)
-        repo = await asyncio.to_thread(_open_repo, p)
-        return cls(repo, p)
+    async def open(cls, backend: VersionBackend,
+                   workspace_id: str) -> "VersionStore":
+        repo = await asyncio.to_thread(backend.open_repo, workspace_id)
+        return cls(repo)
 
     async def write_blob(self, data: bytes) -> bytes:
         return await asyncio.to_thread(_add_blob, self._repo, data)

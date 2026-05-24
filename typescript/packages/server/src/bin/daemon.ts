@@ -17,7 +17,7 @@ import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { buildApp, type BuildAppOptions, type MirageApp } from '../app.ts'
-import { ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS } from '../env.ts'
+import { ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS, ENV_VERSION_ROOT } from '../env.ts'
 
 const DEFAULT_PORT = 8765
 
@@ -29,7 +29,11 @@ export interface DaemonEnvOpts {
 export function buildDaemonOpts(env: Record<string, string | undefined>): DaemonEnvOpts {
   const port = Number(env[ENV_DAEMON_PORT] ?? DEFAULT_PORT)
   const idleGraceSeconds = Number(env[ENV_IDLE_GRACE_SECONDS] ?? '30')
-  const opts: Omit<BuildAppOptions, 'onIdleExit'> = { idleGraceSeconds }
+  const versionRoot = env[ENV_VERSION_ROOT]
+  const opts: Omit<BuildAppOptions, 'onIdleExit'> = {
+    idleGraceSeconds,
+    ...(versionRoot !== undefined ? { versionRoot } : {}),
+  }
   return { port, opts }
 }
 

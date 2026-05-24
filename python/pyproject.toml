@@ -52,6 +52,7 @@ dependencies = [
     "jq>=1.11.0",
     "mfusepy>=1.0.0",
     "pyjwt[crypto]>=2.10",
+    "dulwich>=1.2.4",
 ]
 
 [project.urls]
@@ -154,10 +155,6 @@ all = [
     "mirage-ai[deepagents]",
     "mirage-ai[openhands]",
     "mirage-ai[daytona]",
-]
-# --- cli (workspace versioning) ---
-cli = [
-    "dulwich>=1.2.4",
 ]
 
 [tool.uv]

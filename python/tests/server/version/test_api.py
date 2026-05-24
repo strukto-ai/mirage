@@ -14,13 +14,15 @@
 
 import pytest
 
-from mirage.cli.version.api import (branch, checkout, commit, commit_state,
-                                    read_version, resolve_ref, snapshot_tree,
-                                    status, status_state, version_diff,
-                                    version_log)
-from mirage.cli.version.state_tree import META_PATH
-from mirage.cli.version.store import VersionStore
 from mirage.resource.ram import RAMResource
+from mirage.server.version.api import (branch, checkout, commit, commit_state,
+                                       diff_live_vs_ref, read_version,
+                                       resolve_ref, snapshot_tree, status,
+                                       status_state, version_diff, version_log)
+from mirage.server.version.backend import LocalBackend
+from mirage.server.version.errors import NoSuchBranchError
+from mirage.server.version.state_tree import META_PATH
+from mirage.server.version.store import VersionStore
 from mirage.types import CacheKey, MountMode, StateKey
 from mirage.workspace import Workspace
 from mirage.workspace.snapshot import to_state_dict
@@ -42,7 +44,7 @@ async def test_snapshot_tree_contains_files_and_meta(tmp_path):
     ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
     await ws.execute("echo hello > /m/a.txt")
-    store = await VersionStore.open(tmp_path / ".mirage")
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
 
     tree = await snapshot_tree(store, ws)
     contents = await store.read_tree(tree)
@@ -55,7 +57,7 @@ async def test_snapshot_tree_contains_files_and_meta(tmp_path):
 async def test_commit_advances_branch_and_links_parent(tmp_path):
     ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
-    store = await VersionStore.open(tmp_path / ".mirage")
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
 
     await ws.execute("echo one > /m/a.txt")
     c1 = await commit(store, ws, branch="main", message="first")
@@ -71,7 +73,7 @@ async def test_commit_advances_branch_and_links_parent(tmp_path):
 async def test_version_log_lists_messages_newest_first(tmp_path):
     ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
-    store = await VersionStore.open(tmp_path / ".mirage")
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
     await ws.execute("echo one > /m/a.txt")
     await commit(store, ws, message="first")
     await ws.execute("echo two > /m/a.txt")
@@ -85,7 +87,7 @@ async def test_version_log_lists_messages_newest_first(tmp_path):
 async def test_version_diff_reports_changed_files_only(tmp_path):
     ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
-    store = await VersionStore.open(tmp_path / ".mirage")
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
     await ws.execute("echo one > /m/a.txt")
     c1 = await commit(store, ws, message="first")
     await ws.execute("echo two > /m/a.txt")
@@ -99,10 +101,28 @@ async def test_version_diff_reports_changed_files_only(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_diff_live_vs_ref_reports_changes_against_version(tmp_path):
+    ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
+    await ws.execute("echo one > /m/a.txt")
+    c1 = await commit(store, ws, branch="main", message="first")
+    await ws.execute("echo two > /m/a.txt")
+    await ws.execute("echo new > /m/b.txt")
+
+    by_oid = await diff_live_vs_ref(store, to_state_dict(ws), c1)
+    assert by_oid["modified"] == ["m/a.txt"]
+    assert by_oid["added"] == ["m/b.txt"]
+
+    by_branch = await diff_live_vs_ref(store, to_state_dict(ws), "main")
+    assert by_branch == by_oid
+
+
+@pytest.mark.asyncio
 async def test_status_reports_uncommitted_changes(tmp_path):
     ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
-    store = await VersionStore.open(tmp_path / ".mirage")
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
     await ws.execute("echo one > /m/a.txt")
     await commit(store, ws, message="first")
     await ws.execute("echo changed > /m/a.txt")
@@ -115,7 +135,7 @@ async def test_status_reports_uncommitted_changes(tmp_path):
 async def test_diff_ignores_cache_churn(tmp_path):
     ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
-    store = await VersionStore.open(tmp_path / ".mirage")
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
     await ws.execute("echo one > /m/a.txt")
 
     s1 = to_state_dict(ws)
@@ -137,7 +157,7 @@ async def test_diff_ignores_cache_churn(tmp_path):
 async def test_status_state_reports_uncommitted_changes(tmp_path):
     ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
-    store = await VersionStore.open(tmp_path / ".mirage")
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
     await ws.execute("echo one > /m/a.txt")
     await commit(store, ws, message="first")
     await ws.execute("echo changed > /m/a.txt")
@@ -147,10 +167,39 @@ async def test_status_state_reports_uncommitted_changes(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_status_state_no_commit_yet_lists_all_as_added(tmp_path):
+    ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
+    await ws.execute("echo one > /m/a.txt")
+
+    st = await status_state(store, to_state_dict(ws), "main")
+    assert st == {"added": ["m/a.txt"], "modified": [], "deleted": []}
+
+
+@pytest.mark.asyncio
+async def test_status_ignores_cache_churn(tmp_path):
+    ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
+    await ws.execute("echo one > /m/a.txt")
+
+    s1 = to_state_dict(ws)
+    s1[StateKey.CACHE][CacheKey.ENTRIES] = [_cache_entry(b"AAA")]
+    await commit_state(store, s1, message="first")
+
+    live = to_state_dict(ws)
+    live[StateKey.CACHE][CacheKey.ENTRIES] = [_cache_entry(b"BBB")]
+    st = await status_state(store, live, "main")
+
+    assert st == {"added": [], "modified": [], "deleted": []}
+
+
+@pytest.mark.asyncio
 async def test_resolve_ref_branch_and_oid(tmp_path):
     ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
-    store = await VersionStore.open(tmp_path / ".mirage")
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
     await ws.execute("echo one > /m/a.txt")
     c1 = await commit(store, ws, branch="main", message="first")
 
@@ -163,7 +212,7 @@ async def test_resolve_ref_branch_and_oid(tmp_path):
 async def test_commit_state_creates_version_from_state(tmp_path):
     ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
-    store = await VersionStore.open(tmp_path / ".mirage")
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
     await ws.execute("echo hi > /m/a.txt")
 
     version = await commit_state(store,
@@ -176,10 +225,38 @@ async def test_commit_state_creates_version_from_state(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_commit_to_unknown_branch_errors(tmp_path):
+    ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
+    await ws.execute("echo one > /m/a.txt")
+    await commit(store, ws, branch="main", message="first")
+
+    with pytest.raises(NoSuchBranchError):
+        await commit(store, ws, branch="exp", message="oops")
+
+
+@pytest.mark.asyncio
+async def test_commit_diverges_after_branch_created(tmp_path):
+    ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
+    await ws.execute("echo one > /m/a.txt")
+    main_head = await commit(store, ws, branch="main", message="first")
+
+    await branch(store, "exp", from_branch="main")
+    await ws.execute("echo two > /m/a.txt")
+    exp_head = await commit(store, ws, branch="exp", message="on exp")
+
+    assert (await store.read_commit(exp_head)).parents == [main_head]
+    assert await store.head("main") == main_head
+
+
+@pytest.mark.asyncio
 async def test_branch_creates_line_at_current(tmp_path):
     ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
-    store = await VersionStore.open(tmp_path / ".mirage")
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
     await ws.execute("echo one > /m/a.txt")
     c1 = await commit(store, ws, branch="main", message="first")
 
@@ -193,7 +270,7 @@ async def test_branch_creates_line_at_current(tmp_path):
 async def test_read_version_reads_back_files_and_meta(tmp_path):
     ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
-    store = await VersionStore.open(tmp_path / ".mirage")
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
     await ws.execute("echo hello > /m/a.txt")
     version = await commit(store, ws, message="first")
 
@@ -208,7 +285,7 @@ async def test_read_version_reads_back_files_and_meta(tmp_path):
 async def test_checkout_rebuilds_content_in_place(tmp_path):
     ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
-    store = await VersionStore.open(tmp_path / ".mirage")
+    store = await VersionStore.open(LocalBackend(tmp_path), "ws")
     await ws.execute("echo original > /m/a.txt")
     await commit(store, ws, branch="main", message="first")
 

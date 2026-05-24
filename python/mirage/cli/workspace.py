@@ -12,9 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import os
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -24,14 +22,7 @@ import yaml
 from mirage.cli.client import make_client
 from mirage.cli.output import (emit, fail, format_age, format_table,
                                handle_response)
-from mirage.cli.version.api import branch as version_branch
-from mirage.cli.version.api import (commit_state, read_version, resolve_ref,
-                                    status_state, version_diff, version_log)
-from mirage.cli.version.state_tree import to_state
-from mirage.cli.version.store import HeadMovedError, VersionStore
 from mirage.config import _interpolate_env, load_config
-from mirage.workspace.snapshot import read_tar, write_tar
-from mirage.workspace.snapshot.manifest import split_manifest_and_blobs
 
 app = typer.Typer(no_args_is_help=True, help="Manage workspaces.")
 
@@ -109,6 +100,21 @@ def _format_workspace_detail(detail: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _format_version_log(versions: list[dict[str, Any]]) -> str:
+    if not versions:
+        return "No versions."
+    rows = [[v["id"][:12], v["message"]] for v in versions]
+    return format_table(["VERSION", "MESSAGE"], rows)
+
+
+def _format_diff(changes: dict[str, list[str]]) -> str:
+    lines: list[str] = []
+    for kind in ("added", "modified", "deleted"):
+        for path in changes.get(kind, []):
+            lines.append(f"{kind:<9} {path}")
+    return "\n".join(lines) if lines else "No changes."
+
+
 @app.command("create")
 def create_cmd(
     config_path: Path = typer.Argument(...,
@@ -167,28 +173,23 @@ def delete_cmd(workspace_id: str = typer.Argument(...)) -> None:
 
 @app.command("clone")
 def clone_cmd(
-    workspace_id: str = typer.Argument(..., help="Source workspace id."),
+    source_id: str = typer.Argument(..., help="Source workspace id."),
     new_id: str
     | None = typer.Option(None, "--id", help="Explicit id for the clone."),
-    override: Path | None = typer.Option(
+    at: str | None = typer.Option(
         None,
-        "--override",
-        exists=True,
-        readable=True,
-        help="Partial config YAML/JSON; merged into the clone's mounts.",
-    ),
+        "--at",
+        help="Clone from a past version (id or branch) not the live state."),
 ) -> None:
-    """Clone a workspace; defaults to fresh local backings + shared remotes."""
-    body: dict = {}
+    """Clone a workspace, optionally from one of its past versions."""
+    body: dict = {"source_id": source_id}
     if new_id:
         body["id"] = new_id
-    if override:
-        body["override"] = _resolve_override(override)
+    if at:
+        body["at"] = at
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
-        r = client.request("POST",
-                           f"/v1/workspaces/{workspace_id}/clone",
-                           json=body)
+        r = client.request("POST", "/v1/workspaces/clone", json=body)
     emit(handle_response(r), human=_format_workspace_detail)
 
 
@@ -246,186 +247,98 @@ def load_cmd(
     emit(handle_response(r), human=_format_workspace_detail)
 
 
-def _resolve_store_path(store: Path | None) -> Path:
-    if store is not None:
-        return store
-    cwd = Path.cwd()
-    for parent in (cwd, *cwd.parents):
-        candidate = parent / ".mirage"
-        if (candidate / "objects").is_dir():
-            return candidate
-    return cwd / ".mirage"
-
-
-def _format_version_log(versions: list[dict]) -> str:
-    if not versions:
-        return "No versions."
-    rows = [[v["id"][:12], v["message"]] for v in versions]
-    return format_table(["VERSION", "MESSAGE"], rows)
-
-
-def _format_changes(changes: dict) -> str:
-    lines = []
-    for sign, kind in (("+", "added"), ("~", "modified"), ("-", "deleted")):
-        for path in changes.get(kind, []):
-            lines.append(f"{sign} {path}")
-    return "\n".join(lines) if lines else "No changes."
-
-
-def _daemon_snapshot(workspace_id: str, tar_path: Path) -> None:
-    with make_client() as client:
-        client.ensure_running(allow_spawn=False)
-        r = client.request("POST",
-                           f"/v1/workspaces/{workspace_id}/snapshot",
-                           json={"path": str(tar_path)})
-    handle_response(r)
-
-
-async def _do_commit(store_path: Path, tar_path: Path, branch: str,
-                     message: str) -> str:
-    state = read_tar(str(tar_path))
-    store = await VersionStore.open(store_path)
-    version = await commit_state(store, state, branch, message)
-    return version.decode()
-
-
-async def _do_log(store_path: Path, branch: str) -> list[dict]:
-    store = await VersionStore.open(store_path)
-    if branch not in await store.branches():
-        return []
-    return await version_log(store, branch)
-
-
-async def _do_diff(store_path: Path, ref_a: str, ref_b: str) -> dict:
-    store = await VersionStore.open(store_path)
-    a = await resolve_ref(store, ref_a)
-    b = await resolve_ref(store, ref_b)
-    return await version_diff(store, a, b)
-
-
-async def _do_branch(store_path: Path, name: str, from_branch: str) -> str:
-    store = await VersionStore.open(store_path)
-    await version_branch(store, name, from_branch)
-    return (await store.head(name)).decode()
-
-
-async def _do_status(store_path: Path, tar_path: Path, branch: str) -> dict:
-    state = read_tar(str(tar_path))
-    store = await VersionStore.open(store_path)
-    return await status_state(store, state, branch)
-
-
-async def _do_checkout_tar(store_path: Path, ref: str, tar_path: Path) -> None:
-    store = await VersionStore.open(store_path)
-    version = await resolve_ref(store, ref)
-    entries, meta = await read_version(store, version)
-    manifest, blobs = split_manifest_and_blobs(to_state(entries, meta))
-    write_tar(str(tar_path), manifest, blobs)
-
-
 @app.command("commit")
 def commit_cmd(
-    workspace_id: str = typer.Argument(..., help="Workspace id to snapshot."),
+    workspace_id: str = typer.Argument(..., help="Workspace id."),
     message: str = typer.Option("", "-m", "--message",
                                 help="Version message."),
     branch: str = typer.Option("main",
                                "-b",
                                "--branch",
                                help="Branch to commit on."),
-    store: Path | None = typer.Option(
-        None,
-        "--store",
-        help="Version store dir (default: walk up for .mirage)."),
 ) -> None:
-    """Commit the live workspace as a version in the local .mirage store."""
-    store_path = _resolve_store_path(store)
-    with tempfile.TemporaryDirectory() as td:
-        tar_path = Path(td) / "snapshot.tar"
-        _daemon_snapshot(workspace_id, tar_path)
-        try:
-            version = asyncio.run(
-                _do_commit(store_path, tar_path, branch, message))
-        except HeadMovedError as e:
-            fail(str(e), exit_code=2)
-    emit({
-        "version": version,
-        "branch": branch
-    },
+    """Commit the workspace's current state as a version."""
+    body = {"message": message, "branch": branch}
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        r = client.request("POST",
+                           f"/v1/workspaces/{workspace_id}/commit",
+                           json=body)
+    emit(handle_response(r),
          human=lambda d: f"Committed {d['version'][:12]} on {d['branch']}.")
-
-
-@app.command("log")
-def log_cmd(
-        branch: str = typer.Option("main", "-b", "--branch"),
-        store: Path | None = typer.Option(None, "--store"),
-) -> None:
-    """List versions on a branch (newest first) from the local store."""
-    versions = asyncio.run(_do_log(_resolve_store_path(store), branch))
-    emit(versions, human=_format_version_log)
-
-
-@app.command("diff")
-def diff_cmd(
-        ref_a: str = typer.Argument(..., help="Older version (branch or id)."),
-        ref_b: str = typer.Argument(..., help="Newer version (branch or id)."),
-        store: Path | None = typer.Option(None, "--store"),
-) -> None:
-    """Diff two versions; lists changed mount-relative paths."""
-    changes = asyncio.run(_do_diff(_resolve_store_path(store), ref_a, ref_b))
-    emit(changes, human=_format_changes)
 
 
 @app.command("branch")
 def branch_cmd(
-        name: str = typer.Argument(..., help="New branch name."),
-        from_branch: str = typer.Option("main",
-                                        "--from",
-                                        help="Branch to fork from."),
-        store: Path | None = typer.Option(None, "--store"),
+    workspace_id: str = typer.Argument(..., help="Workspace id."),
+    name: str = typer.Argument(..., help="New branch name."),
+    from_branch: str = typer.Option("main",
+                                    "--from",
+                                    help="Branch to fork from."),
 ) -> None:
-    """Create a branch at the head of another branch."""
-    head = asyncio.run(
-        _do_branch(_resolve_store_path(store), name, from_branch))
-    emit({
-        "branch": name,
-        "head": head
-    },
-         human=lambda d: f"Branch {d['branch']} -> {d['head'][:12]}.")
+    """Create a branch at another branch's current version."""
+    body = {"name": name, "from_branch": from_branch}
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        r = client.request("POST",
+                           f"/v1/workspaces/{workspace_id}/branch",
+                           json=body)
+    emit(handle_response(r),
+         human=lambda d:
+         f"Created branch {d['branch']} at {d['version'][:12]}.")
 
 
-@app.command("status")
-def status_cmd(
-        workspace_id: str = typer.Argument(...),
+@app.command("log")
+def log_cmd(
+        workspace_id: str = typer.Argument(..., help="Workspace id."),
         branch: str = typer.Option("main", "-b", "--branch"),
-        store: Path | None = typer.Option(None, "--store"),
 ) -> None:
-    """Show uncommitted changes: live workspace vs branch head."""
-    store_path = _resolve_store_path(store)
-    with tempfile.TemporaryDirectory() as td:
-        tar_path = Path(td) / "snapshot.tar"
-        _daemon_snapshot(workspace_id, tar_path)
-        changes = asyncio.run(_do_status(store_path, tar_path, branch))
-    emit(changes, human=_format_changes)
+    """List a workspace's versions (newest first)."""
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        r = client.request(
+            "GET", f"/v1/workspaces/{workspace_id}/versions?branch={branch}")
+    emit(handle_response(r), human=_format_version_log)
+
+
+@app.command("diff")
+def diff_cmd(
+        workspace_id: str = typer.Argument(..., help="Workspace id."),
+        a: str | None = typer.Argument(
+            None, help="Base ref; omit to use live state."),
+        b: str | None = typer.Argument(
+            None, help="Compare ref; omit to use live state."),
+        branch: str = typer.Option("main", "-b", "--branch"),
+) -> None:
+    """Show changed files (git-style).
+
+    diff <id>          live vs HEAD
+    diff <id> <a>      live vs <a>
+    diff <id> <a> <b>  <a> vs <b>
+    """
+    params: dict[str, str] = {"branch": branch}
+    if a is not None:
+        params["a"] = a
+    if b is not None:
+        params["b"] = b
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        r = client.request("GET",
+                           f"/v1/workspaces/{workspace_id}/diff",
+                           params=params)
+    emit(handle_response(r), human=_format_diff)
 
 
 @app.command("checkout")
 def checkout_cmd(
-        ref: str = typer.Argument(...,
-                                  help="Version id or branch to restore."),
-        new_id: str | None = typer.Option(
-            None, "--id", help="Explicit id for the restored workspace."),
-        store: Path | None = typer.Option(None, "--store"),
+    workspace_id: str = typer.Argument(..., help="Workspace id."),
+    ref: str = typer.Argument(..., help="Version id or branch to restore."),
 ) -> None:
-    """Restore a version into a new workspace via the daemon."""
-    store_path = _resolve_store_path(store)
-    with tempfile.TemporaryDirectory() as td:
-        tar_path = Path(td) / "version.tar"
-        asyncio.run(_do_checkout_tar(store_path, ref, tar_path))
-        body: dict = {"path": str(tar_path)}
-        if new_id:
-            body["id"] = new_id
-        with make_client() as client:
-            client.ensure_running()
-            r = client.request("POST", "/v1/workspaces/load", json=body)
-        result = handle_response(r)
-    emit(result, human=_format_workspace_detail)
+    """Restore a workspace in place to one of its versions."""
+    body = {"ref": ref}
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        r = client.request("POST",
+                           f"/v1/workspaces/{workspace_id}/checkout",
+                           json=body)
+    emit(handle_response(r), human=_format_workspace_detail)

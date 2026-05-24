@@ -29,8 +29,16 @@ def test_install_fingerprints_pins_revision_and_queues_drift():
     ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
     entries = [
-        {"path": "/m/pinned.txt", "mount_prefix": "/m/", "revision": "v9"},
-        {"path": "/m/checked.txt", "mount_prefix": "/m/", "fingerprint": "fp1"},
+        {
+            "path": "/m/pinned.txt",
+            "mount_prefix": "/m/",
+            "revision": "v9"
+        },
+        {
+            "path": "/m/checked.txt",
+            "mount_prefix": "/m/",
+            "fingerprint": "fp1"
+        },
     ]
 
     install_fingerprints(ws, entries, DriftPolicy.STRICT)

@@ -12,10 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.cli.version.state_tree import (CACHE_PREFIX, META_PATH,
-                                           blob_to_meta, meta_to_blob,
-                                           to_state, tree_inputs_from_state)
-from mirage.cli.version.store import VersionStore
+from mirage.server.version.errors import NoSuchBranchError
+from mirage.server.version.state_tree import (CACHE_PREFIX, META_PATH,
+                                              blob_to_meta, meta_to_blob,
+                                              to_state, tree_inputs_from_state)
+from mirage.server.version.store import VersionStore
 from mirage.types import DriftPolicy, StateKey
 from mirage.workspace.snapshot import (apply_state_dict, install_fingerprints,
                                        to_state_dict)
@@ -46,9 +47,12 @@ async def commit_state(store: VersionStore,
                        branch: str = "main",
                        message: str = "") -> bytes:
     tree = await snapshot_tree_from_state(store, state)
+    branches = await store.branches()
     parents: list[bytes] = []
-    if branch in await store.branches():
+    if branch in branches:
         parents = [await store.head(branch)]
+    elif branches:
+        raise NoSuchBranchError(branch)
     return await store.commit(tree, parents, branch, message)
 
 
@@ -123,6 +127,14 @@ async def version_diff(store: VersionStore, version_a: bytes,
     return _strip_meta(await store.diff(tree_a, tree_b))
 
 
+async def diff_live_vs_ref(store: VersionStore, state: dict,
+                           ref) -> dict[str, list[str]]:
+    live_tree = await snapshot_tree_from_state(store, state)
+    version = await resolve_ref(store, ref)
+    ref_tree = (await store.read_commit(version)).tree
+    return _strip_meta(await store.diff(ref_tree, live_tree))
+
+
 async def status(store: VersionStore,
                  ws,
                  branch: str = "main") -> dict[str, list[str]]:
@@ -133,5 +145,8 @@ async def status_state(store: VersionStore,
                        state: dict,
                        branch: str = "main") -> dict[str, list[str]]:
     live_tree = await snapshot_tree_from_state(store, state)
-    head_tree = (await store.read_commit(await store.head(branch))).tree
+    if branch in await store.branches():
+        head_tree = (await store.read_commit(await store.head(branch))).tree
+    else:
+        head_tree = await store.write_tree({})
     return _strip_meta(await store.diff(head_tree, live_tree))

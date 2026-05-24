@@ -379,7 +379,33 @@ class Workspace:
                 disables drift checking and evicts snapshot cache for
                 fingerprinted paths.
         """
-        state = read_tar(source)
+        return cls.from_state(read_tar(source),
+                              resources=resources,
+                              drift_policy=drift_policy)
+
+    @classmethod
+    def from_state(
+            cls,
+            state: dict,
+            *,
+            resources: dict | None = None,
+            drift_policy: DriftPolicy = DriftPolicy.STRICT) -> "Workspace":
+        """Reconstruct a Workspace directly from a state dict (no tar).
+
+        The in-process inverse of ``to_state_dict``: build the mounts,
+        restore content/cache/history, then install drift fingerprints.
+        ``load`` is this plus a tar read; callers that already hold a
+        state dict (e.g. a version checkout) should use this and skip the
+        tar round-trip.
+
+        Args:
+            state: a state dict from ``to_state_dict`` or a version.
+            resources: {prefix: Resource} overrides for mounts saved
+                with redacted creds.
+            drift_policy: STRICT (default) raises on mismatch. OFF
+                disables drift checking and evicts snapshot cache for
+                fingerprinted paths.
+        """
         ws = cls._from_state(state, resources=resources)
         install_fingerprints(ws,
                              state.get(StateKey.FINGERPRINTS) or [],
@@ -387,9 +413,9 @@ class Workspace:
         live_only = state.get(StateKey.LIVE_ONLY_MOUNTS) or []
         if live_only:
             logger.warning(
-                "Workspace.load: %s mount(s) opt out of snapshot replay; "
-                "reads against them will serve current state with no drift "
-                "detection: %s", len(live_only), live_only)
+                "Workspace.from_state: %s mount(s) opt out of snapshot "
+                "replay; reads against them will serve current state with "
+                "no drift detection: %s", len(live_only), live_only)
         return ws
 
     async def copy(self) -> "Workspace":

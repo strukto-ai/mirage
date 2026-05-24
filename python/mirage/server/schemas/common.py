@@ -12,12 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import os
+from pydantic import BaseModel
 
-from mirage.server.app import build_app
-from mirage.server.env import ENV_IDLE_GRACE_SECONDS, ENV_VERSION_ROOT
 
-_idle_grace = float(os.environ.get(ENV_IDLE_GRACE_SECONDS, "30"))
-_version_root = os.environ.get(ENV_VERSION_ROOT)
+class MountSummary(BaseModel):
+    prefix: str
+    resource: str
+    mode: str
+    description: str = ""
 
-app = build_app(idle_grace_seconds=_idle_grace, version_root=_version_root)
+
+class SessionSummary(BaseModel):
+    session_id: str
+    cwd: str

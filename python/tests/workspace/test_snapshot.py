@@ -61,6 +61,16 @@ def test_save_load_ram_round_trip(tmp_path):
     assert _read(dst, "/m/sub/b.txt") == "world\n"
 
 
+def test_from_state_rebuilds_in_process_without_tar():
+    src = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
+                    mode=MountMode.WRITE)
+    _seed(src)
+
+    dst = Workspace.from_state(to_state_dict(src))
+    assert _read(dst, "/m/a.txt") == "hello\n"
+    assert _read(dst, "/m/sub/b.txt") == "world\n"
+
+
 def test_save_load_ram_compressed_gz(tmp_path):
     src = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
                     mode=MountMode.WRITE)

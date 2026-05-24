@@ -1,0 +1,18 @@
+# Shared by BOTH examples/python/version/branching.py and
+# examples/typescript/version/branching.ts (wired into test_python.yml and
+# test_typescript.yml). Both daemons must produce the same messages, branch
+# lineage, and diff paths, so a single truth file enforces cross-language
+# parity: if py and ts ever diverge, one of the two CI runs fails here.
+=== committed 'first' on main ===
+=== branched exp from main ===
+=== committed 'on exp' on exp ===
+=== committed 'second' on main ===
+=== log main ===
+second
+first
+=== log exp ===
+on exp
+first
+=== diff main exp ===
+added: b.txt
+modified: a.txt

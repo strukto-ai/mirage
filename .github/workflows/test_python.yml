@@ -77,6 +77,7 @@ jobs:
           run examples/python/redis_resource/example_redis_index.py integ/truth/python/redis_index.txt
           run examples/python/redis_resource/example_redis_cache.py integ/truth/python/redis_cache.txt
           run examples/python/redis_resource/example_redis_vfs.py integ/truth/python/redis_vfs.txt
+          run examples/python/version/branching.py integ/truth/version_branching.txt
 
       - name: Sync Python dependencies for camel
         working-directory: python

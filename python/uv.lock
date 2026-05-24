@@ -3092,6 +3092,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
     { name = "aiohttp" },
+    { name = "dulwich" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "jq" },
@@ -3152,9 +3153,6 @@ audio = [
 camel = [
     { name = "camel-ai" },
     { name = "markitdown" },
-]
-cli = [
-    { name = "dulwich" },
 ]
 daytona = [
     { name = "daytona" },
@@ -3255,7 +3253,7 @@ requires-dist = [
     { name = "camel-ai", marker = "extra == 'camel'", specifier = ">=0.2.40,<0.3" },
     { name = "daytona", marker = "extra == 'daytona'", specifier = ">=0.176.0" },
     { name = "deepagents", marker = "extra == 'deepagents'", specifier = ">=0.4.12" },
-    { name = "dulwich", marker = "extra == 'cli'", specifier = ">=1.2.4" },
+    { name = "dulwich", specifier = ">=1.2.4" },
     { name = "fastapi", specifier = ">=0.135.1" },
     { name = "h5py", marker = "extra == 'hdf5'", specifier = ">=3.16.0" },
     { name = "httpx", specifier = ">=0.28.1" },
@@ -3316,7 +3314,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.12.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.41.0" },
 ]
-provides-extras = ["s3", "r2", "gcs", "oci", "ssh", "fuse", "mongodb", "postgres", "redis", "email", "parquet", "hdf5", "pdf", "audio", "langfuse", "anthropic", "openai", "pydantic-ai", "deepagents", "openhands", "camel", "daytona", "all", "cli"]
+provides-extras = ["s3", "r2", "gcs", "oci", "ssh", "fuse", "mongodb", "postgres", "redis", "email", "parquet", "hdf5", "pdf", "audio", "langfuse", "anthropic", "openai", "pydantic-ai", "deepagents", "openhands", "camel", "daytona", "all"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -12,7 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const ENV_ALLOWED_HOSTS = 'MIRAGE_ALLOWED_HOSTS'
-export const ENV_DAEMON_PORT = 'MIRAGE_DAEMON_PORT'
-export const ENV_IDLE_GRACE_SECONDS = 'MIRAGE_IDLE_GRACE_SECONDS'
-export const ENV_VERSION_ROOT = 'MIRAGE_VERSION_ROOT'
+export class HeadMovedError extends Error {
+  constructor(readonly branch: string) {
+    super(
+      `branch '${branch}' moved since this commit was prepared; ` +
+        'refusing to overwrite (re-read the head and retry)',
+    )
+    this.name = 'HeadMovedError'
+  }
+}
+
+export class NoSuchBranchError extends Error {
+  constructor(readonly branch: string) {
+    super(`no branch '${branch}'; create it first with \`mirage workspace branch\``)
+    this.name = 'NoSuchBranchError'
+  }
+}

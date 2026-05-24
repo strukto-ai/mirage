@@ -17,21 +17,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from mirage.config import WorkspaceConfig
-
-
-class MountSummary(BaseModel):
-    prefix: str
-    resource: str
-    mode: str
-    description: str = ""
-
-
-class WorkspaceBrief(BaseModel):
-    id: str
-    mode: str
-    mount_count: int
-    session_count: int
-    created_at: float
+from mirage.server.schemas.common import MountSummary, SessionSummary
 
 
 class WorkspaceInternals(BaseModel):
@@ -41,9 +27,12 @@ class WorkspaceInternals(BaseModel):
     in_flight_jobs: int
 
 
-class SessionSummary(BaseModel):
-    session_id: str
-    cwd: str
+class WorkspaceBrief(BaseModel):
+    id: str
+    mode: str
+    mount_count: int
+    session_count: int
+    created_at: float
 
 
 class WorkspaceDetail(BaseModel):
@@ -92,9 +81,3 @@ class LoadWorkspaceRequest(BaseModel):
 class DeleteWorkspaceResponse(BaseModel):
     id: str
     closed_at: float
-
-
-class HealthResponse(BaseModel):
-    status: str = "ok"
-    workspaces: int
-    uptime_s: float

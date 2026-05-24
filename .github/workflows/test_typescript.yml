@@ -86,6 +86,7 @@ jobs:
           run redis/redis_index.ts integ/truth/typescript/redis_index.txt
           run redis/redis_cache.ts integ/truth/typescript/redis_cache.txt
           run redis/redis_vfs.ts integ/truth/typescript/redis_vfs.txt
+          run version/branching.ts integ/truth/version_branching.txt
 
   python-fs-shim:
     runs-on: ubuntu-latest
