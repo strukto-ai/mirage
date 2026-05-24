@@ -19,7 +19,7 @@ from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.grep_helper import (compile_pattern, grep_lines,
                                                  grep_stream)
-from mirage.commands.builtin.rg_helper import rg_folder_filetype, rg_full
+from mirage.commands.builtin.rg_helper import rg_full
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
                                                 call_stat)
@@ -69,8 +69,6 @@ async def rg(
     if C is not None:
         context_before = context_after = int(C)
 
-    filetype_fns = _extra.get("filetype_fns") or {}
-
     if paths:
         paths = await resolve_glob(accessor, paths, index)
         mount_prefix = paths[0].prefix if paths else ""
@@ -100,40 +98,6 @@ async def rg(
                 is_dir = True
             except (FileNotFoundError, ValueError):
                 pass
-
-        if is_dir and filetype_fns:
-            bound_ft = {
-                ext: partial(fn, accessor)
-                for ext, fn in filetype_fns.items()
-            }
-            warnings: list[str] = []
-            results = await rg_folder_filetype(
-                rd,
-                st,
-                rb,
-                paths[0].original,
-                pattern,
-                bound_ft,
-                ignore_case=i,
-                invert=v,
-                line_numbers=n,
-                count_only=c,
-                files_only=args_l,
-                only_matching=o,
-                max_count=max_count,
-                fixed_string=F,
-                whole_word=w,
-                file_type=type,
-                glob_pattern=glob,
-                hidden=hidden,
-                warnings=warnings,
-            )
-            stderr = "\n".join(warnings).encode() if warnings else None
-            if not results:
-                return b"", IOResult(exit_code=1, stderr=stderr)
-            if mount_prefix and args_l:
-                results = [mount_prefix + "/" + r.lstrip("/") for r in results]
-            return "\n".join(results).encode(), IOResult(stderr=stderr)
 
         needs_full = (is_dir or args_l or context_before or context_after
                       or type or glob)
