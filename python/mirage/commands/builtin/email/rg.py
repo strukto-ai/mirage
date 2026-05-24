@@ -58,7 +58,6 @@ async def rg(
     pattern_str = texts[0]
     max_count = int(m) if m is not None else None
     pat = compile_pattern(pattern_str, i, F, w)
-    index
 
     if paths:
         folder = extract_folder(paths)

@@ -30,7 +30,6 @@ async def stat_provision(
     *texts: str,
     **_extra: object,
 ) -> ProvisionResult:
-    accessor.store
     return ProvisionResult(
         command=f"stat {paths[0].original}" if paths else "stat", )
 
