@@ -75,6 +75,8 @@ PER_MOUNT_CASES: list[tuple[str, str]] = [
     ("rg_l_item", "rg -l item {m}/data/"),
     ("grep_item_parquet", "grep item_5 {m}/data/example.parquet"),
     ("rg_item_glob_feather", "rg item_5 {m}/data/*.feather"),
+    ("ls_glob_parquet", "ls {m}/data/*.parquet"),
+    ("ls_file_json", "ls {m}/data/example.json"),
     ("find_json", "find {m}/ -name '*.json'"),
     ("find_type_f", "find {m}/data -type f | sort"),
     ("jq_version", "jq .metadata.version {m}/data/example.json"),

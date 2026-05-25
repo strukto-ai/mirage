@@ -23,6 +23,18 @@ def format_simple(entries: list[FileStat],
     return out
 
 
+async def _file_entry(
+    path: PathSpec,
+    stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
+    index: IndexCacheStore | None,
+) -> FileStat | None:
+    try:
+        s = await stat(path, index)
+    except (FileNotFoundError, ValueError):
+        return None
+    return s if s.type != FileType.DIRECTORY else None
+
+
 async def walk(
     path: PathSpec,
     *,
@@ -46,9 +58,17 @@ async def walk(
 
     try:
         entries = await readdir(path, index)
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, ValueError, NotADirectoryError) as exc:
+        file_entry = await _file_entry(path, stat, index)
+        if file_entry is not None:
+            return [file_entry], warnings
         warnings.append(f"ls: cannot access '{path.original}': {exc}")
         return [], warnings
+
+    if not entries:
+        file_entry = await _file_entry(path, stat, index)
+        if file_entry is not None:
+            return [file_entry], warnings
 
     stats: list[FileStat] = []
     for entry in entries:

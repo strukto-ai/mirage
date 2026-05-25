@@ -54,6 +54,10 @@ id,value,label
 === s3:rg_item_glob_feather ===
 id,value,label
 5,7.5,item_5
+=== s3:ls_glob_parquet ===
+example.parquet
+=== s3:ls_file_json ===
+example.json
 === s3:find_json ===
 /s3/data/example.json
 === s3:find_type_f ===
@@ -143,6 +147,10 @@ id,value,label
 === gcs:rg_item_glob_feather ===
 id,value,label
 5,7.5,item_5
+=== gcs:ls_glob_parquet ===
+example.parquet
+=== gcs:ls_file_json ===
+example.json
 === gcs:find_json ===
 /gcs/data/example.json
 === gcs:find_type_f ===
