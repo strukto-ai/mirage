@@ -110,12 +110,13 @@ async def test_wc_full(github_env):
     data = await materialize(stdout)
     text = data.decode()
     parts = text.split("\t")
-    assert len(parts) == 3
+    assert len(parts) == 4
     line_count, word_count, byte_count = int(parts[0]), int(parts[1]), int(
         parts[2])
     assert line_count > 0
     assert word_count > 0
     assert byte_count == len(MOCK_BLOBS["bbb333"])
+    assert parts[3] == "/src/utils.py"
 
 
 @pytest.mark.asyncio
@@ -128,7 +129,7 @@ async def test_wc_line_only(github_env):
         index=index,
     )
     data = await materialize(stdout)
-    count = int(data.decode().strip())
+    count = int(data.decode().split("\t")[0])
     expected = MOCK_BLOBS["bbb333"].decode().count("\n")
     assert count == expected
 
