@@ -110,7 +110,6 @@ class ResourceName(str, Enum):
     GITHUB_CI = "github_ci"
     GCS = "gcs"
     EMAIL = "email"
-    PAPERCLIP = "paperclip"
     DATABRICKS_VOLUME = "databricks_volume"
 
 

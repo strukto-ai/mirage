@@ -168,7 +168,6 @@
                 "icon": "ellipsis",
                 "pages": [
                   "home/setup/trello",
-                  "home/setup/paperclip",
                   "home/setup/sscholar"
                 ]
               }
@@ -277,8 +276,7 @@
                 "group": "Others",
                 "icon": "ellipsis",
                 "pages": [
-                  "python/resource/trello",
-                  "python/resource/paperclip"
+                  "python/resource/trello"
                 ]
               },
               "python/resource/new"

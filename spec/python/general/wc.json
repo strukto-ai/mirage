@@ -26,7 +26,6 @@
       "langfuse",
       "linear",
       "mongodb",
-      "paperclip",
       "postgres",
       "ram",
       "redis",

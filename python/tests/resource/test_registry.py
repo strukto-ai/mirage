@@ -43,7 +43,6 @@ EXPECTED_RESOURCES = {
     "langfuse",
     "ssh",
     "email",
-    "paperclip",
     "databricks_volume",
 }
 

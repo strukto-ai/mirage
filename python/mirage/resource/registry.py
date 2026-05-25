@@ -101,9 +101,6 @@ REGISTRY: dict[str, ResourceEntry] = {
     "email":
     ResourceEntry("mirage.resource.email:EmailResource",
                   "mirage.resource.email:EmailConfig"),
-    "paperclip":
-    ResourceEntry("mirage.resource.paperclip:PaperclipResource",
-                  "mirage.resource.paperclip:PaperclipConfig"),
     "databricks_volume":
     ResourceEntry("mirage.resource.databricks_volume:DatabricksVolumeResource",
                   "mirage.resource.databricks_volume:DatabricksVolumeConfig"),

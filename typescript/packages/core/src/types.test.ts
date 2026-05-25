@@ -71,14 +71,13 @@ describe('ResourceName', () => {
     expect(ResourceName.GITHUB_CI).toBe('github_ci')
     expect(ResourceName.GCS).toBe('gcs')
     expect(ResourceName.EMAIL).toBe('email')
-    expect(ResourceName.PAPERCLIP).toBe('paperclip')
     expect(ResourceName.OPFS).toBe('opfs')
     expect(ResourceName.SUPABASE).toBe('supabase')
     expect(ResourceName.POSTGRES).toBe('postgres')
   })
 
-  it('contains exactly 34 entries', () => {
-    expect(Object.keys(ResourceName)).toHaveLength(34)
+  it('contains exactly 33 entries', () => {
+    expect(Object.keys(ResourceName)).toHaveLength(33)
   })
 
   it('is frozen at runtime', () => {

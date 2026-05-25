@@ -67,7 +67,6 @@ export const ResourceName = Object.freeze({
   OCI: 'oci',
   R2: 'r2',
   EMAIL: 'email',
-  PAPERCLIP: 'paperclip',
   OPFS: 'opfs',
   SUPABASE: 'supabase',
   POSTGRES: 'postgres',

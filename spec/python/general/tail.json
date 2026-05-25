@@ -30,7 +30,6 @@
       "linear",
       "mongodb",
       "notion",
-      "paperclip",
       "postgres",
       "ram",
       "redis",
