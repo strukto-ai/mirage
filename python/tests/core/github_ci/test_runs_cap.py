@@ -18,9 +18,10 @@ import pytest
 
 from mirage.accessor.github_ci import GitHubCIAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.commands.builtin.github_ci.find import find as find_cmd
+from mirage.commands.builtin.github_ci.ls import ls as ls_cmd
 from mirage.core.github_ci import _client as ci_client
 from mirage.core.github_ci.runs import list_runs
+from mirage.io.stream import materialize
 from mirage.resource.github_ci.config import GitHubCIConfig
 from mirage.types import PathSpec
 
@@ -153,23 +154,19 @@ async def test_list_runs_default_caps_at_300(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_find_runs_listing_capped(monkeypatch):
+async def test_ls_runs_listing_capped(monkeypatch):
     session = _MockSession("workflow_runs", total=1000)
     _patch_session(monkeypatch, session)
     cfg = GitHubCIConfig(token="t", owner="o", repo="r", max_runs=5)
     accessor = GitHubCIAccessor(config=cfg)
     index = RAMIndexCacheStore()
     runs_path = PathSpec(original="/runs", directory="/runs", prefix="")
-    out, _ = await find_cmd(
+    out, _ = await ls_cmd(
         accessor,
         [runs_path],
-        maxdepth="1",
-        prefix="",
+        args_1=True,
         index=index,
     )
-    assert out is not None
-    run_dirs = [
-        line for line in out.decode().splitlines()
-        if line.startswith("/runs/") and line.count("/") == 2
-    ]
-    assert len(run_dirs) == 5
+    data = await materialize(out)
+    names = [line for line in data.decode().splitlines() if line.strip()]
+    assert len(names) == 5

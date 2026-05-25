@@ -19,6 +19,7 @@ import pytest
 from mirage.accessor.github_ci import GitHubCIAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.github_ci.rg import rg
+from mirage.io.stream import materialize
 from mirage.resource.github_ci.config import GitHubCIConfig
 from mirage.types import FileStat, FileType, PathSpec
 
@@ -53,7 +54,8 @@ async def test_rg_single_file_match(accessor, index):
             "beta",
             index=index,
         )
-        assert b"beta" in out
+        data = await materialize(out)
+        assert b"beta" in data
         assert io.exit_code == 0
 
 
@@ -66,12 +68,13 @@ async def test_rg_no_match_exit_one(accessor, index):
             patch("mirage.commands.builtin.github_ci.rg.ci_read",
                   new=AsyncMock(return_value=b"abc\ndef\n")),
     ):
-        _, io = await rg(
+        out, io = await rg(
             accessor,
             [_scope("/runs/wf_1/run.json")],
             "missing",
             index=index,
         )
+        await materialize(out)
         assert io.exit_code == 1
 
 
@@ -80,17 +83,17 @@ async def test_rg_directory_implicit_recursive(accessor, index):
     dir_stat = FileStat(name="workflows", type=FileType.DIRECTORY)
     file_stat = FileStat(name="ci.json", type=FileType.JSON)
 
-    async def fake_stat(_acc, p, _idx):
+    async def fake_stat(_acc, p, _idx=None):
         if p.original.endswith(".json"):
             return file_stat
         return dir_stat
 
-    async def fake_readdir(_acc, p, _idx):
+    async def fake_readdir(_acc, p, _idx=None):
         if p.original == "/workflows":
             return ["/workflows/ci_1.json", "/workflows/build_2.json"]
         return []
 
-    async def fake_read(_acc, p, _idx):
+    async def fake_read(_acc, p, _idx=None):
         if "ci_1" in p.original:
             return b"name: Test\non: push\n"
         return b"name: Build\non: push\n"
@@ -109,8 +112,15 @@ async def test_rg_directory_implicit_recursive(accessor, index):
             "Test",
             index=index,
         )
-        assert b"name: Test" in out
+        data = await materialize(out)
+        assert b"name: Test" in data
         assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_rg_runs_root_rejected(accessor, index):
+    with pytest.raises(ValueError, match="across runs is disabled"):
+        await rg(accessor, [_scope("/runs")], "x", index=index)
 
 
 @pytest.mark.asyncio
@@ -122,5 +132,6 @@ async def test_rg_stdin(accessor, index):
         stdin=b"line one\nline two\nline three\n",
         index=index,
     )
-    assert b"line two" in out
+    data = await materialize(out)
+    assert b"line two" in data
     assert io.exit_code == 0

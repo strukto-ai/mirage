@@ -12,10 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.ls import ls as generic_ls
 from mirage.commands.builtin.github._provision import metadata_provision
-from mirage.commands.builtin.utils.formatting import _human_size
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.github.glob import resolve_glob
@@ -23,69 +25,7 @@ from mirage.core.github.readdir import readdir
 from mirage.core.github.stat import stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
-from mirage.types import FileType, PathSpec
-
-
-async def _ls_async(
-    accessor,
-    path: PathSpec,
-    index,
-    long: bool = False,
-    all_files: bool = False,
-    sort_by: str = "name",
-    reverse: bool = False,
-    recursive: bool = False,
-    list_dir: bool = False,
-    warnings: list[str] | None = None,
-):
-    if list_dir:
-        entries = [await stat(accessor, path, index)]
-    else:
-        raw = await readdir(accessor, path, index)
-        entries = []
-        for e in raw:
-            try:
-                e_spec = PathSpec(original=e,
-                                  directory=e,
-                                  resolved=False,
-                                  prefix=path.prefix)
-                entries.append(await stat(accessor, e_spec, index))
-            except (FileNotFoundError, ValueError) as exc:
-                if warnings is not None:
-                    warnings.append(f"ls: cannot access '{e}': {exc}")
-
-    if not all_files:
-        entries = [e for e in entries if not e.name.startswith(".")]
-
-    if sort_by == "size":
-        entries = sorted(entries,
-                         key=lambda e: e.size or 0,
-                         reverse=not reverse)
-    else:
-        entries = sorted(entries, key=lambda e: e.name, reverse=reverse)
-
-    if recursive:
-        all_entries = []
-        for e in entries:
-            all_entries.append(e)
-            if e.type == FileType.DIRECTORY:
-                sub_path = path.child(e.name)
-                sub_spec = PathSpec(original=sub_path,
-                                    directory=sub_path,
-                                    resolved=False,
-                                    prefix=path.prefix)
-                sub = await _ls_async(accessor,
-                                      sub_spec,
-                                      index,
-                                      long=long,
-                                      all_files=all_files,
-                                      sort_by=sort_by,
-                                      reverse=reverse,
-                                      recursive=True,
-                                      warnings=warnings)
-                all_entries.extend(sub)
-        return all_entries
-    return entries
+from mirage.types import LsSortBy, PathSpec
 
 
 async def ls_provision(
@@ -124,41 +64,19 @@ async def ls(
     if index is None:
         raise ValueError("ls: no tree loaded")
     paths = await resolve_glob(accessor, paths, index)
-    all_files = a or A
-    sort_by = "name"
-    if S:
-        sort_by = "size"
-    warnings: list[str] = []
-    results: list[str] = []
-    for p in paths:
-        try:
-            entries = await _ls_async(
-                accessor,
-                p,
-                index,
-                long=args_l,
-                all_files=all_files,
-                sort_by=sort_by,
-                reverse=r,
-                recursive=R,
-                list_dir=d,
-                warnings=warnings,
-            )
-        except (FileNotFoundError, ValueError) as exc:
-            warnings.append(f"ls: cannot access '{p.original}': {exc}")
-            continue
-        if args_l and not args_1:
-            for e in entries:
-                size_str = _human_size(e.size or 0) if h else str(e.size or 0)
-                line = (f"{e.type or '-'}\t{size_str}"
-                        f"\t{e.modified or ''}\t{e.name}")
-                results.append(line)
-        else:
-            for e in entries:
-                is_dir = F and e.type == FileType.DIRECTORY
-                name = e.name + "/" if is_dir else e.name
-                results.append(name)
-    stderr = "\n".join(warnings).encode() if warnings else None
-    exit_code = 1 if warnings and not results else 0
-    output = "\n".join(results).encode()
-    return output, IOResult(stderr=stderr, exit_code=exit_code)
+    sort_by = LsSortBy.TIME if t else LsSortBy.SIZE if S else LsSortBy.NAME
+    return await generic_ls(
+        paths,
+        readdir=partial(readdir, accessor),
+        stat=partial(stat, accessor),
+        long=args_l,
+        one_per_line=args_1,
+        all_files=a or A,
+        human=h,
+        sort_by=sort_by,
+        reverse=r,
+        recursive=R,
+        list_dir=d,
+        classify=F,
+        index=index,
+    )

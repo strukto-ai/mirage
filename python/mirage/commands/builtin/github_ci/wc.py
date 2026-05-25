@@ -16,6 +16,8 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.github_ci import GitHubCIAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.wc import WCCounts, format_wc
+from mirage.commands.builtin.generic.wc import wc as generic_wc
 from mirage.commands.builtin.github_ci._provision import file_read_provision
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
@@ -55,25 +57,33 @@ async def wc(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        p = paths[0]
-        data = await ci_read(accessor, p, index)
-    else:
-        data = await _read_stdin_async(stdin)
-        if data is None:
-            raise ValueError("wc: missing operand")
-    text = data.decode(errors="replace")
-    line_count = text.count("\n")
-    word_count = len(text.split())
-    byte_count = len(data)
-    if L:
-        max_len = max((len(ln) for ln in text.splitlines()), default=0)
-        return str(max_len).encode(), IOResult()
-    if args_l:
-        return str(line_count).encode(), IOResult()
-    if w:
-        return str(word_count).encode(), IOResult()
-    if m:
-        return str(len(text)).encode(), IOResult()
-    if c:
-        return str(byte_count).encode(), IOResult()
-    return f"{line_count}\t{word_count}\t{byte_count}".encode(), IOResult()
+        outputs: list[str] = []
+        totals = WCCounts()
+        for p in paths:
+            data = await ci_read(accessor, p, index)
+            counts = await generic_wc(data)
+            outputs.append(
+                format_wc(counts,
+                          args_l=args_l,
+                          w=w,
+                          c=c,
+                          m=m,
+                          L=L,
+                          label=p.original))
+            totals.merge(counts)
+        if len(paths) > 1:
+            outputs.append(
+                format_wc(totals,
+                          args_l=args_l,
+                          w=w,
+                          c=c,
+                          m=m,
+                          L=L,
+                          label="total"))
+        return "\n".join(outputs).encode(), IOResult()
+    data = await _read_stdin_async(stdin)
+    if data is None:
+        raise ValueError("wc: missing operand")
+    counts = await generic_wc(data)
+    return format_wc(counts, args_l=args_l, w=w, c=c, m=m,
+                     L=L).encode(), IOResult()

@@ -81,6 +81,8 @@ async def main():
     await _run(ws, f'cat "{db_json}"')
     await _run(ws, f'cat "{coll_schema}"')
     await _run(ws, f'cat "{view_schema}"')
+    await _run(ws, f'cat -n "{coll_schema}"')
+    await _run(ws, f'cat -n "{coll_doc}"')
 
     print("\n" + "=" * 60)
     print("HEAD / TAIL / WC / STAT")
