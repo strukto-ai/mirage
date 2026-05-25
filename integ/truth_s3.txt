@@ -48,6 +48,9 @@ example.parquet
 /s3/data/example.jsonl
 === s3:rg_l_item ===
 /s3/data/example.jsonl
+=== s3:grep_rc_mirage ===
+/s3/data/example.json:3
+/s3/data/example.jsonl:5678
 === s3:grep_item_parquet ===
 id,value,label
 5,0.6709052457548175,item_5
@@ -141,6 +144,9 @@ example.parquet
 /gcs/data/example.jsonl
 === gcs:rg_l_item ===
 /gcs/data/example.jsonl
+=== gcs:grep_rc_mirage ===
+/gcs/data/example.json:3
+/gcs/data/example.jsonl:5678
 === gcs:grep_item_parquet ===
 id,value,label
 5,0.6709052457548175,item_5

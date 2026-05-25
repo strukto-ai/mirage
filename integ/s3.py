@@ -73,6 +73,7 @@ PER_MOUNT_CASES: list[tuple[str, str]] = [
     ("grep_queue_wc", "grep queue-operation {m}/data/example.jsonl | wc -l"),
     ("grep_rl_item", "grep -rl item {m}/data/"),
     ("rg_l_item", "rg -l item {m}/data/"),
+    ("grep_rc_mirage", "grep -rc mirage {m}/data/"),
     ("grep_item_parquet", "grep item_5 {m}/data/example.parquet"),
     ("rg_item_glob_feather", "rg item_5 {m}/data/*.feather"),
     ("ls_glob_parquet", "ls {m}/data/*.parquet"),
