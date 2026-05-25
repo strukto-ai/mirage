@@ -33,8 +33,13 @@ from mirage.commands.builtin.email.stat import stat
 from mirage.commands.builtin.email.tail import tail
 from mirage.commands.builtin.email.tree import tree
 from mirage.commands.builtin.email.wc import wc
+from mirage.commands.builtin.filetype_factory import make_filetype_commands
+from mirage.core.email.glob import resolve_glob as _ft_resolve_glob
+from mirage.core.email.read import read as _ft_read
 
 COMMANDS = [
+    *make_filetype_commands(
+        "email", _ft_resolve_glob, _ft_read, read_takes_index=True),
     basename,
     cat,
     dirname,
