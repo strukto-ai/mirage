@@ -24,12 +24,27 @@ describe('mirage CLI program', () => {
     )
   })
 
-  it('workspace subcommand has create/list/get/delete/clone/snapshot/load', () => {
+  it('workspace subcommand has lifecycle + versioning commands', () => {
     const program = buildProgram()
     const ws = program.commands.find((c) => c.name() === 'workspace')
     expect(ws).toBeDefined()
     const sub = ws?.commands.map((c) => c.name()).sort() ?? []
-    expect(sub).toEqual(['clone', 'create', 'delete', 'get', 'list', 'load', 'snapshot'].sort())
+    expect(sub).toEqual(
+      [
+        'branch',
+        'checkout',
+        'clone',
+        'commit',
+        'create',
+        'delete',
+        'diff',
+        'get',
+        'list',
+        'load',
+        'log',
+        'snapshot',
+      ].sort(),
+    )
   })
 
   it('daemon subcommand has status/stop/restart/kill', () => {

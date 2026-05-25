@@ -28,7 +28,9 @@ from mirage.server.host_validation import (HostHeaderMiddleware,
                                            resolve_allowed_hosts)
 from mirage.server.jobs import JobTable
 from mirage.server.registry import WorkspaceRegistry
-from mirage.server.routers import execute, health, jobs, sessions, workspaces
+from mirage.server.routers import (execute, health, jobs, sessions, versions,
+                                   workspaces)
+from mirage.server.version.backend import LocalBackend
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +80,8 @@ async def _lifespan(app: FastAPI):
 def build_app(idle_grace_seconds: float = 30.0,
               exit_event: asyncio.Event | None = None,
               allowed_hosts: list[str] | None = None,
-              auth_config: AuthConfig | None = None) -> FastAPI:
+              auth_config: AuthConfig | None = None,
+              version_root: str | Path | None = None) -> FastAPI:
     """Construct a daemon FastAPI app.
 
     The workspace registry is created eagerly so the app is usable
@@ -124,7 +127,11 @@ def build_app(idle_grace_seconds: float = 30.0,
         exit_event=app.state.exit_event,
     )
     app.state.jobs = JobTable()
+    vroot = (Path(version_root) if version_root is not None else Path.home() /
+             ".mirage" / "repos")
+    app.state.version_backend = LocalBackend(vroot)
     app.include_router(workspaces.router)
+    app.include_router(versions.router)
     app.include_router(sessions.router)
     app.include_router(execute.router)
     app.include_router(jobs.router)

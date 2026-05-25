@@ -16,6 +16,7 @@ from mirage.workspace.snapshot.api import snapshot
 from mirage.workspace.snapshot.config import MountArgs
 from mirage.workspace.snapshot.drift import (ContentDriftError,
                                              capture_fingerprints, check_drift,
+                                             install_fingerprints,
                                              live_only_mount_prefixes)
 from mirage.workspace.snapshot.manifest import (resolve_manifest,
                                                 split_manifest_and_blobs)
@@ -46,5 +47,6 @@ __all__ = [
     "ContentDriftError",
     "capture_fingerprints",
     "check_drift",
+    "install_fingerprints",
     "live_only_mount_prefixes",
 ]

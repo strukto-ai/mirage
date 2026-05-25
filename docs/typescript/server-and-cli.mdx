@@ -63,8 +63,31 @@ mirage job wait <job-id>
 | `mirage workspace list` | List active workspaces. |
 | `mirage workspace get <id> [--verbose]` | Show one workspace's detail. |
 | `mirage workspace delete <id>` | Stop and remove. |
-| `mirage workspace clone <id> [--id NEW]` | Clone; fresh local resources, reused remote ones. |
+| `mirage workspace clone <src> [--id NEW] [--at REF]` | New workspace from the source; `--at REF` clones a past version, else the live state. |
 | `mirage workspace snapshot <id> <out.tar>` | Snapshot to tar. |
+
+## Versioning
+
+Each workspace has a git-backed history kept by the daemon (under
+`~/.mirage/repos/<id>`; set `MIRAGE_VERSION_ROOT` to relocate). Same verbs and
+semantics as the [Python CLI](/home/cli#versioning).
+
+```bash
+mirage workspace commit <id> -m "first"            # commit live state
+mirage workspace log <id> [-b branch]              # versions, newest first
+mirage workspace diff <id> [a] [b]                 # changed paths; no refs = live vs HEAD
+mirage workspace branch <id> <name> [--from b]     # fork a branch
+mirage workspace checkout <id> <ref>               # restore in place (version id or branch)
+mirage workspace clone <src> --at <ref> --id new   # new workspace from a past version
+```
+
+| Command | Purpose |
+|---|---|
+| `mirage workspace commit <id> [-m MSG] [-b BRANCH]` | Commit the live state as a version. |
+| `mirage workspace log <id> [-b BRANCH]` | List versions on a branch, newest first. |
+| `mirage workspace diff <id> [a] [b] [-b BRANCH]` | Changed paths (added/modified/deleted). |
+| `mirage workspace branch <id> <name> [--from BRANCH]` | Fork a branch at a branch's current version. |
+| `mirage workspace checkout <id> <ref>` | Restore the live state in place to a version or branch. |
 
 ## Sessions
 

@@ -14,7 +14,7 @@
 
 import logging
 
-from mirage.types import FingerprintKey
+from mirage.types import DriftPolicy, FingerprintKey
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +93,41 @@ def capture_fingerprints(ws) -> list[dict]:
             entry[FingerprintKey.REVISION] = rec.revision
         out.append(entry)
     return out
+
+
+def install_fingerprints(ws, fingerprint_entries: list[dict],
+                         drift_policy: DriftPolicy) -> None:
+    """Install snapshot fingerprints/revisions onto a reconstructed ws.
+
+    Revisions pin replay reads to exact backend versions; bare
+    fingerprints queue an eager drift check. OFF evicts the snapshot
+    cache for fingerprinted paths so reads serve current state.
+
+    Args:
+        ws: the reconstructed workspace to install onto.
+        fingerprint_entries: entries from a snapshot's FINGERPRINTS.
+        drift_policy: STRICT queues drift checks; OFF skips and evicts.
+    """
+    ws._drift_policy = drift_policy
+    if drift_policy == DriftPolicy.OFF:
+        if fingerprint_entries:
+            ws._cache.evict_paths(f[FingerprintKey.PATH]
+                                  for f in fingerprint_entries)
+        return
+    for f in fingerprint_entries:
+        path = f[FingerprintKey.PATH]
+        try:
+            mount = ws._registry.mount_for(path)
+        except ValueError:
+            continue
+        revision = f.get(FingerprintKey.REVISION)
+        if revision is not None:
+            mount.revisions[path] = revision
+            continue
+        fingerprint = f.get(FingerprintKey.FINGERPRINT)
+        if fingerprint is not None:
+            ws._pending_drift.append((mount, path, fingerprint))
+    ws._drift_check_pending = bool(ws._pending_drift)
 
 
 def live_only_mount_prefixes(ws) -> list[str]:

@@ -205,6 +205,67 @@ mirage workspace delete demo
 mirage workspace delete demo_loaded
 ```
 
+## Versioning
+
+Every workspace has its own git-backed history kept by the daemon (under
+`~/.mirage/repos/<workspace-id>` by default; set `MIRAGE_VERSION_ROOT` to
+relocate). You commit the live state as a version, then log, diff, branch,
+and restore in place. The verbs follow git.
+
+### Commit and log
+
+```bash
+mirage execute --workspace_id demo --command "echo v1 > /notes.txt"
+mirage workspace commit demo -m "first"
+
+mirage execute --workspace_id demo --command "echo v2 > /notes.txt"
+mirage workspace commit demo -m "second"
+
+mirage workspace log demo          # newest first: "second", then "first"
+```
+
+### Diff
+
+`diff` reports changed paths (added / modified / deleted), git-style. No refs
+compares live state to the branch HEAD; one ref compares live to that ref; two
+refs compare two versions.
+
+```bash
+mirage workspace diff demo                # live vs HEAD
+mirage workspace diff demo <v1>           # live vs <v1>
+mirage workspace diff demo <v1> <v2>      # <v1> vs <v2>
+```
+
+### Branch
+
+`branch` forks at another branch's current version; commit onto it with `-b`.
+
+```bash
+mirage workspace branch demo exp                  # fork exp from main
+mirage workspace branch demo exp2 --from exp      # fork from a non-main branch
+mirage workspace commit demo -b exp -m "on exp"   # commit onto exp
+mirage workspace log demo -b exp                  # log a specific branch
+```
+
+### Checkout
+
+`checkout` restores the live state to a past version or branch, in place.
+It overwrites uncommitted live state.
+
+```bash
+mirage workspace checkout demo <version>     # by version id
+mirage workspace checkout demo main          # by branch name
+```
+
+### Clone from a version
+
+`clone --at` makes a new workspace from one of the source's past versions
+(omit `--at` to clone the live state).
+
+```bash
+mirage workspace clone demo --at <version> --id demo_at_v1
+```
+
 ## Verbs at a glance
 
 | Verb | What it does |
@@ -213,7 +274,12 @@ mirage workspace delete demo_loaded
 | `mirage workspace list` | Brief one-line summary per active workspace. |
 | `mirage workspace get ID [--verbose]` | Full detail (mounts, sessions, optionally cache / dirty / history internals). |
 | `mirage workspace delete ID` | Stop the workspace; daemon may exit on the idle timer. |
-| `mirage workspace clone ID [--id NAME]` | Fresh local backings, shared remote resources. |
+| `mirage workspace clone SRC_ID [--id NAME] [--at REF]` | New workspace from the source; `--at REF` clones a past version, otherwise the live state. |
+| `mirage workspace commit ID [-m MSG] [-b BRANCH]` | Commit the live state as a version; returns the version id. |
+| `mirage workspace log ID [-b BRANCH]` | List versions on a branch, newest first. |
+| `mirage workspace diff ID [A] [B] [-b BRANCH]` | Changed paths (added/modified/deleted). No refs: live vs HEAD; one ref: live vs A; two: A vs B. |
+| `mirage workspace branch ID NAME [--from BRANCH]` | Fork a branch at another branch's current version. |
+| `mirage workspace checkout ID REF` | Restore the live state in place to a version id or branch. |
 | `mirage workspace snapshot ID PATH.tar` | Snapshot to a tar file. |
 | `mirage workspace load PATH.tar [CONFIG] [--id NAME]` | Restore from tar; optional config re-supplies redacted creds. |
 | `mirage session create WS [--id NAME]` | Add a named session (own cwd + env). |

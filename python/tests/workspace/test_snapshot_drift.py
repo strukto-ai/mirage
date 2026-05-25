@@ -21,8 +21,33 @@ from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Config, S3Resource
 from mirage.types import DriftPolicy, MountMode
 from mirage.workspace import Workspace
-from mirage.workspace.snapshot import ContentDriftError
+from mirage.workspace.snapshot import ContentDriftError, install_fingerprints
 from tests.integration.s3_mock import patch_s3_multi
+
+
+def test_install_fingerprints_pins_revision_and_queues_drift():
+    ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    entries = [
+        {
+            "path": "/m/pinned.txt",
+            "mount_prefix": "/m/",
+            "revision": "v9"
+        },
+        {
+            "path": "/m/checked.txt",
+            "mount_prefix": "/m/",
+            "fingerprint": "fp1"
+        },
+    ]
+
+    install_fingerprints(ws, entries, DriftPolicy.STRICT)
+
+    mount = ws._registry.mount_for("/m/pinned.txt")
+    assert mount.revisions["/m/pinned.txt"] == "v9"
+    assert ws._drift_check_pending is True
+    queued = [path for (_, path, _) in ws._pending_drift]
+    assert "/m/checked.txt" in queued
 
 
 def _config() -> S3Config:

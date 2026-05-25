@@ -101,6 +101,21 @@ def _format_workspace_detail(detail: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _format_version_log(versions: list[dict[str, Any]]) -> str:
+    if not versions:
+        return "No versions."
+    rows = [[v["id"][:12], v["message"]] for v in versions]
+    return format_table(["VERSION", "MESSAGE"], rows)
+
+
+def _format_diff(changes: dict[str, list[str]]) -> str:
+    lines: list[str] = []
+    for kind in ("added", "modified", "deleted"):
+        for path in changes.get(kind, []):
+            lines.append(f"{kind:<9} {path}")
+    return "\n".join(lines) if lines else "No changes."
+
+
 @app.command("create")
 def create_cmd(
     config_path: Path = typer.Argument(...,
@@ -159,19 +174,23 @@ def delete_cmd(workspace_id: str = typer.Argument(...)) -> None:
 
 @app.command("clone")
 def clone_cmd(
-    workspace_id: str = typer.Argument(..., help="Source workspace id."),
+    source_id: str = typer.Argument(..., help="Source workspace id."),
     new_id: str
     | None = typer.Option(None, "--id", help="Explicit id for the clone."),
+    at: str | None = typer.Option(
+        None,
+        "--at",
+        help="Clone from a past version (id or branch) not the live state."),
 ) -> None:
-    """Clone a workspace; defaults to fresh local backings + shared remotes."""
-    body: dict = {}
+    """Clone a workspace, optionally from one of its past versions."""
+    body: dict = {"source_id": source_id}
     if new_id:
         body["id"] = new_id
+    if at:
+        body["at"] = at
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
-        r = client.request("POST",
-                           f"/v1/workspaces/{workspace_id}/clone",
-                           json=body)
+        r = client.request("POST", "/v1/workspaces/clone", json=body)
     emit(handle_response(r), human=_format_workspace_detail)
 
 
@@ -225,4 +244,101 @@ def load_cmd(
     with make_client() as client:
         client.ensure_running()
         r = client.request("POST", "/v1/workspaces/load", json=body)
+    emit(handle_response(r), human=_format_workspace_detail)
+
+
+@app.command("commit")
+def commit_cmd(
+    workspace_id: str = typer.Argument(..., help="Workspace id."),
+    message: str = typer.Option("", "-m", "--message",
+                                help="Version message."),
+    branch: str = typer.Option("main",
+                               "-b",
+                               "--branch",
+                               help="Branch to commit on."),
+) -> None:
+    """Commit the workspace's current state as a version."""
+    body = {"message": message, "branch": branch}
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        r = client.request("POST",
+                           f"/v1/workspaces/{workspace_id}/commit",
+                           json=body)
+    emit(handle_response(r),
+         human=lambda d: f"Committed {d['version'][:12]} on {d['branch']}.")
+
+
+@app.command("branch")
+def branch_cmd(
+    workspace_id: str = typer.Argument(..., help="Workspace id."),
+    name: str = typer.Argument(..., help="New branch name."),
+    from_branch: str = typer.Option("main",
+                                    "--from",
+                                    help="Branch to fork from."),
+) -> None:
+    """Create a branch at another branch's current version."""
+    body = {"name": name, "from_branch": from_branch}
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        r = client.request("POST",
+                           f"/v1/workspaces/{workspace_id}/branch",
+                           json=body)
+    emit(handle_response(r),
+         human=lambda d:
+         f"Created branch {d['branch']} at {d['version'][:12]}.")
+
+
+@app.command("log")
+def log_cmd(
+        workspace_id: str = typer.Argument(..., help="Workspace id."),
+        branch: str = typer.Option("main", "-b", "--branch"),
+) -> None:
+    """List a workspace's versions (newest first)."""
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        r = client.request(
+            "GET", f"/v1/workspaces/{workspace_id}/versions?branch={branch}")
+    emit(handle_response(r), human=_format_version_log)
+
+
+@app.command("diff")
+def diff_cmd(
+        workspace_id: str = typer.Argument(..., help="Workspace id."),
+        a: str | None = typer.Argument(
+            None, help="Base ref; omit to use live state."),
+        b: str | None = typer.Argument(
+            None, help="Compare ref; omit to use live state."),
+        branch: str = typer.Option("main", "-b", "--branch"),
+) -> None:
+    """Show changed files (git-style).
+
+    diff <id>          live vs HEAD
+    diff <id> <a>      live vs <a>
+    diff <id> <a> <b>  <a> vs <b>
+    """
+    params: dict[str, str] = {"branch": branch}
+    if a is not None:
+        params["a"] = a
+    if b is not None:
+        params["b"] = b
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        r = client.request("GET",
+                           f"/v1/workspaces/{workspace_id}/diff",
+                           params=params)
+    emit(handle_response(r), human=_format_diff)
+
+
+@app.command("checkout")
+def checkout_cmd(
+    workspace_id: str = typer.Argument(..., help="Workspace id."),
+    ref: str = typer.Argument(..., help="Version id or branch to restore."),
+) -> None:
+    """Restore a workspace in place to one of its versions."""
+    body = {"ref": ref}
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        r = client.request("POST",
+                           f"/v1/workspaces/{workspace_id}/checkout",
+                           json=body)
     emit(handle_response(r), human=_format_workspace_detail)

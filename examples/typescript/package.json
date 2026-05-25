@@ -12,6 +12,7 @@
     "@openai/agents": "^0.8.0",
     "@struktoai/mirage-agents": "workspace:*",
     "@struktoai/mirage-browser": "workspace:*",
+    "@struktoai/mirage-cli": "workspace:*",
     "@struktoai/mirage-core": "workspace:*",
     "@struktoai/mirage-node": "workspace:*",
     "ai": "^6.0.170",

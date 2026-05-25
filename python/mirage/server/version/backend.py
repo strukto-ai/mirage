@@ -12,12 +12,26 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import os
+from pathlib import Path
+from typing import Protocol
 
-from mirage.server.app import build_app
-from mirage.server.env import ENV_IDLE_GRACE_SECONDS, ENV_VERSION_ROOT
+from dulwich.repo import Repo
 
-_idle_grace = float(os.environ.get(ENV_IDLE_GRACE_SECONDS, "30"))
-_version_root = os.environ.get(ENV_VERSION_ROOT)
 
-app = build_app(idle_grace_seconds=_idle_grace, version_root=_version_root)
+class VersionBackend(Protocol):
+
+    def open_repo(self, workspace_id: str) -> Repo:
+        ...
+
+
+class LocalBackend:
+
+    def __init__(self, root: str | Path) -> None:
+        self._root = Path(root)
+
+    def open_repo(self, workspace_id: str) -> Repo:
+        path = self._root / workspace_id
+        if (path / "objects").is_dir():
+            return Repo(str(path))
+        path.mkdir(parents=True, exist_ok=True)
+        return Repo.init_bare(str(path))
