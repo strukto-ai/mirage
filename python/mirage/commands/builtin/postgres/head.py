@@ -14,18 +14,15 @@
 
 from collections.abc import AsyncIterator
 
-import orjson
-
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.head import head as generic_head
 from mirage.commands.builtin.postgres._provision import file_read_provision
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.core.postgres import _client
 from mirage.core.postgres.glob import resolve_glob
 from mirage.core.postgres.read import read as postgres_read
-from mirage.core.postgres.scope import detect_scope
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
@@ -43,15 +40,6 @@ async def head_provision(
                            for p in paths))
 
 
-async def _head_bytes(data: bytes, lines: int,
-                      bytes_mode: int | None) -> AsyncIterator[bytes]:
-    if bytes_mode is not None:
-        yield data[:bytes_mode]
-        return
-    parts = data.split(b"\n", lines)
-    yield b"\n".join(parts[:lines])
-
-
 @command("head",
          resource="postgres",
          spec=SPECS["head"],
@@ -66,31 +54,14 @@ async def head(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    lines = int(n) if n is not None else 10
-    bytes_mode = int(c) if c is not None else None
+    n_int = int(n) if n is not None else None
+    c_int = int(c) if c is not None else None
     if paths:
-        scope = detect_scope(paths[0])
-        is_file = scope.level == "entity_rows"
-        if is_file and not bytes_mode:
-            limit = min(lines, accessor.config.default_row_limit)
-            pool = await accessor.pool()
-            async with pool.acquire() as conn:
-                rows = await _client.fetch_rows(conn,
-                                                scope.schema,
-                                                scope.entity,
-                                                limit=limit,
-                                                offset=0)
-            if not rows:
-                return _head_bytes(b"", lines, None), IOResult()
-            jsonl = "\n".join(
-                orjson.dumps(r, default=str).decode() for r in rows) + "\n"
-            return _head_bytes(jsonl.encode(), lines, None), IOResult()
-
-        paths = await resolve_glob(accessor, paths, index=index)
+        paths = await resolve_glob(accessor, paths, index)
         p = paths[0]
         data = await postgres_read(accessor, p, index)
-        return _head_bytes(data, lines, bytes_mode), IOResult()
+        return generic_head(data, n=n_int, c=c_int), IOResult()
     raw = await _read_stdin_async(stdin)
     if raw is None:
         raise ValueError("head: missing operand")
-    return _head_bytes(raw, lines, bytes_mode), IOResult()
+    return generic_head(raw, n=n_int, c=c_int), IOResult()

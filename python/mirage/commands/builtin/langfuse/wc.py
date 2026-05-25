@@ -16,12 +16,14 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.langfuse import LangfuseAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.wc import WCCounts, format_wc
+from mirage.commands.builtin.generic.wc import wc as generic_wc
 from mirage.commands.builtin.langfuse._provision import file_read_provision
+from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.langfuse.glob import resolve_glob
 from mirage.core.langfuse.read import read as langfuse_read
-from mirage.core.langfuse.scope import detect_scope
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
@@ -53,29 +55,35 @@ async def wc(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    if w or m or L:
-        msg = "wc: only -l and -c supported for Langfuse"
-        return None, IOResult(
-            exit_code=1,
-            stderr=msg.encode(),
-        )
-
-    if not paths:
-        raise ValueError("wc: missing operand")
-
-    scope = detect_scope(paths[0])
-
-    if scope.level == "file":
+    if paths:
         paths = await resolve_glob(accessor, paths, index)
-        p = paths[0]
-        data = await langfuse_read(
-            accessor,
-            p,
-            index,
-        )
-        if c:
-            return str(len(data)).encode(), IOResult()
-        line_count = data.count(b"\n")
-        return str(line_count).encode(), IOResult()
-
-    raise ValueError("wc: path must target a file")
+        outputs: list[str] = []
+        totals = WCCounts()
+        for p in paths:
+            data = await langfuse_read(accessor, p, index)
+            counts = await generic_wc(data)
+            outputs.append(
+                format_wc(counts,
+                          args_l=args_l,
+                          w=w,
+                          c=c,
+                          m=m,
+                          L=L,
+                          label=p.original))
+            totals.merge(counts)
+        if len(paths) > 1:
+            outputs.append(
+                format_wc(totals,
+                          args_l=args_l,
+                          w=w,
+                          c=c,
+                          m=m,
+                          L=L,
+                          label="total"))
+        return "\n".join(outputs).encode(), IOResult()
+    data = await _read_stdin_async(stdin)
+    if data is None:
+        raise ValueError("wc: missing operand")
+    counts = await generic_wc(data)
+    return format_wc(counts, args_l=args_l, w=w, c=c, m=m,
+                     L=L).encode(), IOResult()

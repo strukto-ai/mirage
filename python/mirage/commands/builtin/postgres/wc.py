@@ -16,13 +16,14 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.wc import WCCounts, format_wc
+from mirage.commands.builtin.generic.wc import wc as generic_wc
 from mirage.commands.builtin.postgres._provision import file_read_provision
+from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.core.postgres import _client
 from mirage.core.postgres.glob import resolve_glob
 from mirage.core.postgres.read import read as postgres_read
-from mirage.core.postgres.scope import detect_scope
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
@@ -54,26 +55,35 @@ async def wc(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    if w or m or L:
-        msg = "wc: only -l and -c supported for Postgres"
-        return None, IOResult(
-            exit_code=1,
-            stderr=msg.encode(),
-        )
-
-    if not paths:
+    if paths:
+        paths = await resolve_glob(accessor, paths, index)
+        outputs: list[str] = []
+        totals = WCCounts()
+        for p in paths:
+            data = await postgres_read(accessor, p, index)
+            counts = await generic_wc(data)
+            outputs.append(
+                format_wc(counts,
+                          args_l=args_l,
+                          w=w,
+                          c=c,
+                          m=m,
+                          L=L,
+                          label=p.original))
+            totals.merge(counts)
+        if len(paths) > 1:
+            outputs.append(
+                format_wc(totals,
+                          args_l=args_l,
+                          w=w,
+                          c=c,
+                          m=m,
+                          L=L,
+                          label="total"))
+        return "\n".join(outputs).encode(), IOResult()
+    data = await _read_stdin_async(stdin)
+    if data is None:
         raise ValueError("wc: missing operand")
-
-    scope = detect_scope(paths[0])
-
-    if scope.level == "entity_rows":
-        if c:
-            paths = await resolve_glob(accessor, paths, index)
-            data = await postgres_read(accessor, paths[0], index)
-            return str(len(data)).encode(), IOResult()
-        pool = await accessor.pool()
-        async with pool.acquire() as conn:
-            count = await _client.count_rows(conn, scope.schema, scope.entity)
-        return str(count).encode(), IOResult()
-
-    raise ValueError("wc: path must target an entity rows.jsonl file")
+    counts = await generic_wc(data)
+    return format_wc(counts, args_l=args_l, w=w, c=c, m=m,
+                     L=L).encode(), IOResult()

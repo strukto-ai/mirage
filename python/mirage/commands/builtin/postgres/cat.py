@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.cat import cat as generic_cat
 from mirage.commands.builtin.postgres._provision import file_read_provision
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
@@ -37,12 +38,6 @@ async def cat_provision(
         accessor, paths,
         "cat " + " ".join(p.original if isinstance(p, PathSpec) else p
                           for p in paths))
-
-
-async def _number_lines(data: bytes) -> AsyncIterator[bytes]:
-    lines = data.decode(errors="replace").splitlines()
-    for i, line in enumerate(lines, 1):
-        yield f"     {i}\t{line}\n".encode()
 
 
 @command("cat",
@@ -67,12 +62,9 @@ async def cat(
             return None, IOResult(exit_code=1, stderr=str(exc).encode())
         io = IOResult(reads={p.strip_prefix: data}, cache=[p.strip_prefix])
         if n:
-            return _number_lines(data), io
+            return generic_cat(data, number_lines=True), io
         return data, io
     source = _resolve_source(stdin, "cat: missing operand")
     if n:
-        raw = b""
-        async for chunk in source:
-            raw += chunk
-        return _number_lines(raw), IOResult()
+        return generic_cat(source, number_lines=True), IOResult()
     return source, IOResult()
