@@ -119,6 +119,32 @@ async def main():
     if out:
         print(f"  {out[:120]}")
 
+    # ── basename / dirname / realpath (path ops) ─────
+    print(f"\n=== basename {file_path} ===")
+    r = await ws.execute(f'basename "{file_path}"')
+    out = (await r.stdout_str()).strip()
+    print(f"  {out}")
+    assert out == target, f"basename expected {target!r}, got {out!r}"
+
+    print(f"\n=== dirname {file_path} ===")
+    r = await ws.execute(f'dirname "{file_path}"')
+    out = (await r.stdout_str()).strip()
+    print(f"  {out}")
+    assert out == date_path, f"dirname expected {date_path!r}, got {out!r}"
+
+    print(f"\n=== realpath {file_path} ===")
+    r = await ws.execute(f'realpath "{file_path}"')
+    out = (await r.stdout_str()).strip()
+    print(f"  {out}")
+    assert out == file_path, f"realpath expected {file_path!r}, got {out!r}"
+
+    print(f"\n=== realpath -e {file_path} (must exist) ===")
+    r = await ws.execute(f'realpath -e "{file_path}"')
+    print(f"  exit={r.exit_code} {(await r.stdout_str()).strip()}")
+    assert r.exit_code == 0, (
+        "regression: realpath -e failed for existing file; "
+        f"stderr={await r.stderr_str()}")
+
     # ── grep at FILE level ───────────────────────────
     print(f"\n=== grep message {target} ===")
     r = await ws.execute(f'grep message "{file_path}"')

@@ -43,5 +43,5 @@ def test_resource_accessor(config):
 
 def test_resource_commands(config):
     resource = DiscordResource(config)
-    # 15 native + 9 filetype cmds x 7 columnar exts
-    assert len(resource._commands) == 15 + 9 * 7
+    # 18 native + 9 filetype cmds x 7 columnar exts
+    assert len(resource._commands) == 18 + 9 * 7
