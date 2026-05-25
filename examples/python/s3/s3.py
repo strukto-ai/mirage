@@ -641,7 +641,7 @@ async def main():
         # Verify creds are NOT in the raw tar bytes
         raw = open(snap, "rb").read()
         leaked = config.aws_access_key_id and (
-            config.aws_access_key_id.encode() in raw)
+            config.aws_access_key_id.get_secret_value().encode() in raw)
         print(f"  creds leaked in tar bytes: {bool(leaked)} "
               f"(expect False)")
         print(f"  '<REDACTED>' present in tar: "
