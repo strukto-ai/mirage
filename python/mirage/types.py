@@ -72,6 +72,11 @@ class ConsistencyPolicy(str, Enum):
     ALWAYS = "always"
 
 
+class OnExceed(str, Enum):
+    ERROR = "error"
+    TRUNCATE = "truncate"
+
+
 class VFSWriteOp(str, Enum):
     WRITE = "write"
     UNLINK = "unlink"
