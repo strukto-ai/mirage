@@ -1,0 +1,54 @@
+# Expected substrings for the MongoDB integ run (integ/mongodb.py).
+# Matched as fixed substrings by integ/check_lines.sh, so volatile output
+# (index $indexStats timestamps, system.views internal collection, stat sizes)
+# is tolerated. Seed data is fixed (integer _ids) so content is deterministic.
+
+# ---- directory structure (ls / tree) ----
+mirage_integ
+collections
+views
+database.json
+documents.jsonl
+schema.json
+authors
+books
+recent_books
+
+# ---- database.json ----
+"database": "mirage_integ"
+"name": "authors", "document_count": 3
+"name": "books", "document_count": 5
+"views": [{"name": "recent_books"}]
+
+# ---- schema.json sampled fields (volatile index stats ignored) ----
+"name": "books", "kind": "collection"
+"path": "author"
+"path": "rating"
+"path": "tags"
+"path": "title"
+"path": "year"
+"primary_key": "_id"
+"sampled": 100
+
+# ---- documents (cat / head / tail / view) ----
+"title": "alpha", "author": "ada"
+"title": "beta", "author": "ben"
+"title": "gamma", "author": "cara"
+"title": "delta", "author": "ada"
+"title": "epsilon", "author": "ben"
+{"_id": 1, "name": "ada", "books": 2}
+
+# ---- wc (content cached by prior cat -> generic count<TAB>name) ----
+5	/mongodb/mirage_integ/collections/books/documents.jsonl
+
+# ---- stat ----
+name=documents.jsonl
+
+# ---- grep / rg at db + root scope (search push-down, path-prefixed) ----
+mirage_integ/collections/authors/documents.jsonl:
+mirage_integ/collections/books/documents.jsonl:
+
+# ---- find ----
+/mongodb/mirage_integ/collections/books/documents.jsonl
+/mongodb/mirage_integ/collections/books/schema.json
+/mongodb/mirage_integ/views/recent_books/documents.jsonl

@@ -1,0 +1,69 @@
+name: Integ (mongodb)
+
+"on":
+  push:
+    branches: [main]
+    paths:
+      - integ/mongodb.py
+      - integ/truth_mongodb.txt
+      - integ/check_lines.sh
+      - python/mirage/accessor/mongodb.py
+      - python/mirage/core/mongodb/**
+      - python/mirage/commands/builtin/mongodb/**
+      - python/mirage/resource/mongodb/**
+      - .github/workflows/test_integ_mongodb.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - integ/mongodb.py
+      - integ/truth_mongodb.txt
+      - integ/check_lines.sh
+      - python/mirage/accessor/mongodb.py
+      - python/mirage/core/mongodb/**
+      - python/mirage/commands/builtin/mongodb/**
+      - python/mirage/resource/mongodb/**
+      - .github/workflows/test_integ_mongodb.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integ-mongodb:
+    runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:8
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1}).ok'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      MONGODB_URI: mongodb://localhost:27017
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        working-directory: python
+        run: uv sync --all-extras --no-extra camel
+
+      - name: Run MongoDB backend and check against truth
+        shell: bash
+        run: |
+          set -o pipefail
+          ./python/.venv/bin/python integ/mongodb.py 2>&1 \
+            | bash integ/check_lines.sh integ/truth_mongodb.txt
