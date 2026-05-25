@@ -42,4 +42,5 @@ def test_resource_accessor(config):
 
 def test_resource_commands_registered(config):
     resource = SlackResource(config)
-    assert len(resource._commands) == 20
+    # 20 native + 9 filetype cmds x 7 columnar exts
+    assert len(resource._commands) == 20 + 9 * 7
