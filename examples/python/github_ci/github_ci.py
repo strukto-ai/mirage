@@ -146,13 +146,13 @@ async def main():
     r = await ws.execute("tree -L 2 /ci/")
     print(await r.stdout_str())
 
-    # ── find ──────────────────────────────────────────
-    print("=== find /ci/runs/ -name '*.log' | head -n 10 ===")
-    r = await ws.execute('find /ci/runs/ -name "*.log" | head -n 10')
+    # ── find (scoped to a single run) ─────────────────
+    print(f"=== find {run_path}/ -name '*.log' | head -n 10 ===")
+    r = await ws.execute(f'find "{run_path}/" -name "*.log" | head -n 10')
     print(await r.stdout_str())
 
-    print("=== find /ci/runs/ -name '*.json' | head -n 10 ===")
-    r = await ws.execute('find /ci/runs/ -name "*.json" | head -n 10')
+    print(f"=== find {run_path}/ -name '*.json' | head -n 10 ===")
+    r = await ws.execute(f'find "{run_path}/" -name "*.json" | head -n 10')
     print(await r.stdout_str())
 
     # ── cd into a run ─────────────────────────────────

@@ -19,7 +19,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.core.github_ci.glob import resolve_glob
+from mirage.core.github_ci.glob import is_cross_run_root, resolve_glob
 from mirage.core.github_ci.read import read as ci_read
 from mirage.core.github_ci.readdir import readdir as _readdir
 from mirage.core.github_ci.stat import stat as _stat
@@ -65,6 +65,9 @@ async def grep(
     after_ctx = int(A) if A is not None else (int(C) if C is not None else 0)
     before_ctx = int(B) if B is not None else (int(C) if C is not None else 0)
     resolved = await resolve_glob(accessor, paths, index) if paths else []
+    if (r or R) and any(is_cross_run_root(p) for p in resolved):
+        raise ValueError("grep: recursive search across runs is disabled; "
+                         "target a specific run (e.g. /ci/runs/<run>/jobs)")
     return await generic_grep(
         resolved,
         pattern=pattern,

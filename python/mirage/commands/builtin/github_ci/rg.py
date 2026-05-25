@@ -19,7 +19,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.core.github_ci.glob import resolve_glob
+from mirage.core.github_ci.glob import is_cross_run_root, resolve_glob
 from mirage.core.github_ci.read import read as ci_read
 from mirage.core.github_ci.readdir import readdir as _readdir
 from mirage.core.github_ci.stat import stat as _stat
@@ -60,6 +60,9 @@ async def rg(
     if C is not None:
         context_before = context_after = int(C)
     resolved = await resolve_glob(accessor, paths, index) if paths else []
+    if any(is_cross_run_root(p) for p in resolved):
+        raise ValueError("rg: recursive search across runs is disabled; "
+                         "target a specific run (e.g. /ci/runs/<run>/jobs)")
     return await generic_rg(
         resolved,
         pattern=pattern,

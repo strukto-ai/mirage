@@ -119,6 +119,12 @@ async def test_grep_recursive_directory(accessor, index):
 
 
 @pytest.mark.asyncio
+async def test_grep_recursive_runs_rejected(accessor, index):
+    with pytest.raises(ValueError, match="across runs is disabled"):
+        await grep(accessor, [_scope("/runs")], "x", r=True, index=index)
+
+
+@pytest.mark.asyncio
 async def test_grep_stdin(accessor, index):
     out, io = await grep(
         accessor,

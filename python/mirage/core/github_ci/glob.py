@@ -25,6 +25,16 @@ from mirage.types import PathSpec
 logger = logging.getLogger(__name__)
 
 
+def is_cross_run_root(path: PathSpec) -> bool:
+    original = path.original if isinstance(path, PathSpec) else path
+    prefix = path.prefix if isinstance(path, PathSpec) else ""
+    if prefix and original.startswith(prefix):
+        rest = original[len(prefix):]
+        if prefix.endswith("/") or rest == "" or rest.startswith("/"):
+            original = rest or "/"
+    return original.strip("/") in ("", "runs")
+
+
 async def resolve_glob(
     accessor: GitHubCIAccessor,
     paths: list[PathSpec],

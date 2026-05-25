@@ -118,6 +118,12 @@ async def test_rg_directory_implicit_recursive(accessor, index):
 
 
 @pytest.mark.asyncio
+async def test_rg_runs_root_rejected(accessor, index):
+    with pytest.raises(ValueError, match="across runs is disabled"):
+        await rg(accessor, [_scope("/runs")], "x", index=index)
+
+
+@pytest.mark.asyncio
 async def test_rg_stdin(accessor, index):
     out, io = await rg(
         accessor,

@@ -19,7 +19,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.github_ci._provision import metadata_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.core.github_ci.glob import resolve_glob
+from mirage.core.github_ci.glob import is_cross_run_root, resolve_glob
 from mirage.core.github_ci.readdir import readdir as _readdir
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
@@ -98,6 +98,9 @@ async def find(
                            directory=search_path,
                            resolved=False,
                            prefix=search_prefix)
+    if is_cross_run_root(search_spec):
+        raise ValueError("find: recursive search across runs is disabled; "
+                         "target a specific run (e.g. /ci/runs/<run>)")
     all_paths = await _walk(accessor, search_spec, index, md)
     results: list[str] = []
     base_depth = search_path.strip("/").count("/") if search_path.strip(
