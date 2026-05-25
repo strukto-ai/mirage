@@ -66,3 +66,21 @@ async def test_rg_no_match():
     ws._cwd = "/"
     io = await ws.execute("rg nonexistent /data/")
     assert (await io.stdout_str()).strip() == ""
+
+
+@pytest.mark.asyncio
+async def test_rg_single_parquet_renders_and_matches():
+    ws = await _ws()
+    ws._cwd = "/"
+    io = await ws.execute("rg alice /data/test.parquet")
+    out = await io.stdout_str()
+    assert "alice" in out
+    assert "bob" not in out
+
+
+@pytest.mark.asyncio
+async def test_rg_glob_parquet_dispatches_filetype():
+    ws = await _ws()
+    ws._cwd = "/"
+    io = await ws.execute("rg alice /data/*.parquet")
+    assert "alice" in (await io.stdout_str())
