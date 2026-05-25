@@ -18,12 +18,15 @@ from typing import Any
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.commands.builtin.databricks_volume import \
     COMMANDS as DATABRICKS_VOLUME_COMMANDS
+from mirage.core.databricks_volume.create import create
 from mirage.core.databricks_volume.exists import exists
 from mirage.core.databricks_volume.glob import resolve_glob as _resolve_glob
 from mirage.core.databricks_volume.read import read_bytes
 from mirage.core.databricks_volume.readdir import readdir
 from mirage.core.databricks_volume.stat import stat as databricks_stat
 from mirage.core.databricks_volume.stream import range_read, read_stream
+from mirage.core.databricks_volume.unlink import unlink
+from mirage.core.databricks_volume.write import write_bytes
 from mirage.ops.databricks_volume import OPS as DATABRICKS_VOLUME_OPS
 from mirage.resource.base import BaseResource
 from mirage.resource.databricks_volume.config import DatabricksVolumeConfig
@@ -37,6 +40,9 @@ _DATABRICKS_VOLUME_OPS = {
     "read_stream": read_stream,
     "range_read": range_read,
     "exists": exists,
+    "write": write_bytes,
+    "create": create,
+    "unlink": unlink,
 }
 
 

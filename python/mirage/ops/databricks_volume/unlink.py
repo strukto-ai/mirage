@@ -12,11 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.ops.databricks_volume.create import create
-from mirage.ops.databricks_volume.read import read
-from mirage.ops.databricks_volume.readdir import readdir
-from mirage.ops.databricks_volume.stat import stat
-from mirage.ops.databricks_volume.unlink import unlink
-from mirage.ops.databricks_volume.write import write
+from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
+from mirage.core.databricks_volume.unlink import unlink as unlink_core
+from mirage.ops.registry import op
+from mirage.types import PathSpec
 
-OPS = [read, readdir, stat, write, create, unlink]
+
+@op("unlink", resource="databricks_volume", write=True)
+async def unlink(
+    accessor: DatabricksVolumeAccessor,
+    path: PathSpec,
+    *,
+    index,
+    **kwargs,
+) -> None:
+    await unlink_core(accessor, path, index)

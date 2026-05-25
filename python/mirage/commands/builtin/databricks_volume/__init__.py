@@ -18,8 +18,10 @@ from mirage.commands.builtin.databricks_volume.grep import grep
 from mirage.commands.builtin.databricks_volume.head import head
 from mirage.commands.builtin.databricks_volume.ls import ls
 from mirage.commands.builtin.databricks_volume.rg import rg
+from mirage.commands.builtin.databricks_volume.rm import rm
 from mirage.commands.builtin.databricks_volume.stat import stat
 from mirage.commands.builtin.databricks_volume.tail import tail
+from mirage.commands.builtin.databricks_volume.touch import touch
 from mirage.commands.builtin.databricks_volume.tree import tree
 
 COMMANDS = [
@@ -28,8 +30,10 @@ COMMANDS = [
     grep,
     head,
     ls,
+    rm,
     rg,
     stat,
     tail,
+    touch,
     tree,
 ]

@@ -1,3 +1,4 @@
+import posixpath
 from io import BytesIO
 from types import SimpleNamespace
 from urllib.parse import unquote
@@ -33,6 +34,8 @@ class FakeFiles:
         self.get_metadata_calls: list[str] = []
         self.get_directory_metadata_calls: list[str] = []
         self.list_directory_calls: list[str] = []
+        self.upload_calls: list[tuple[str, bytes, bool]] = []
+        self.delete_calls: list[str] = []
 
     def download(self, path: str) -> FakeDownload:
         self.download_calls.append(path)
@@ -60,6 +63,43 @@ class FakeFiles:
         if path not in self.directories:
             raise NotFoundError(path)
         return self.directories[path]
+
+    def upload(self, path: str, contents, overwrite: bool = False) -> None:
+        data = contents.read()
+        self.upload_calls.append((path, data, overwrite))
+        parent = posixpath.dirname(path.rstrip("/")) or "/"
+        if parent not in self.directory_metadata:
+            if parent in self.metadata:
+                raise NotADirectoryError(parent)
+            raise NotFoundError(parent)
+        if path in self.directory_metadata:
+            raise IsADirectoryError(path)
+        self.downloads[path] = data
+        self.metadata[path] = file_metadata(len(data))
+        self._upsert_directory_entry(parent, file_entry(path, len(data)))
+
+    def delete(self, path: str) -> None:
+        self.delete_calls.append(path)
+        if path in self.directory_metadata:
+            raise IsADirectoryError(path)
+        if path not in self.metadata and path not in self.downloads:
+            raise NotFoundError(path)
+        self.metadata.pop(path, None)
+        self.downloads.pop(path, None)
+        parent = posixpath.dirname(path.rstrip("/")) or "/"
+        self.directories[parent] = [
+            entry for entry in self.directories.get(parent, [])
+            if getattr(entry, "path", None) != path
+        ]
+
+    def _upsert_directory_entry(self, parent: str, entry: object) -> None:
+        entries = [
+            existing for existing in self.directories.get(parent, [])
+            if getattr(existing, "path", None) != getattr(entry, "path", None)
+        ]
+        entries.append(entry)
+        self.directories[parent] = sorted(
+            entries, key=lambda item: getattr(item, "path", ""))
 
 
 def _apply_range_header(data: bytes, range_header: str) -> bytes:

@@ -12,11 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.ops.databricks_volume.create import create
-from mirage.ops.databricks_volume.read import read
-from mirage.ops.databricks_volume.readdir import readdir
-from mirage.ops.databricks_volume.stat import stat
-from mirage.ops.databricks_volume.unlink import unlink
-from mirage.ops.databricks_volume.write import write
+from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
+from mirage.cache.index import IndexCacheStore
+from mirage.core.databricks_volume.write import write_bytes
+from mirage.types import PathSpec
 
-OPS = [read, readdir, stat, write, create, unlink]
+
+async def create(
+    accessor: DatabricksVolumeAccessor,
+    path: PathSpec,
+    index: IndexCacheStore = None,
+) -> None:
+    await write_bytes(accessor, path, b"", index)
