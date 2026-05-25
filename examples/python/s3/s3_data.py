@@ -106,12 +106,12 @@ async def main():
         result = await ws.execute(f"stat {path}")
         print(await result.stdout_str())
 
-    print("=== GREP: search for 'item_5' (via cat) ===\n")
+    print("=== GREP: search for 'item_5' ===\n")
 
     for label, path in [("parquet", PARQUET), ("orc", ORC),
                         ("feather", FEATHER), ("hdf5", HDF5)]:
-        print(f"--- cat {label} | grep item_5 ---")
-        result = await ws.execute(f"cat {path} | grep item_5")
+        print(f"--- grep item_5 {label} ---")
+        result = await ws.execute(f"grep item_5 {path}")
         print(f"  {(await result.stdout_str()).strip()}")
     print()
 
@@ -155,16 +155,16 @@ async def main():
         print(f"  {label}: {(await result.stdout_str()).strip()}")
     print()
 
-    print("=== GLOB: cat / head across files via *.ext ===\n")
+    print("=== GLOB: grep / head across files via *.ext ===\n")
 
-    print("--- cat /s3/data/*.parquet | grep item_5 ---")
-    result = await ws.execute("cat /s3/data/*.parquet | grep item_5")
+    print("--- grep item_5 /s3/data/*.parquet ---")
+    result = await ws.execute("grep item_5 /s3/data/*.parquet")
     print(f"  exit={result.exit_code}")
     for line in (await result.stdout_str()).strip().splitlines():
         print(f"  {line}")
 
-    print("\n--- cat /s3/data/*.orc | grep item_3 ---")
-    result = await ws.execute("cat /s3/data/*.orc | grep item_3")
+    print("\n--- grep item_3 /s3/data/*.orc ---")
+    result = await ws.execute("grep item_3 /s3/data/*.orc")
     print(f"  exit={result.exit_code}")
     for line in (await result.stdout_str()).strip().splitlines():
         print(f"  {line}")

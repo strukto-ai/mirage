@@ -283,8 +283,8 @@ async def main():
         ("feather", "/gdrive/mirage/example.feather"),
         ("hdf5", "/gdrive/mirage/example.h5"),
     ]:
-        print(f"--- cat {label} | grep item_5 ---")
-        r = await ws.execute(f"cat {path} | grep item_5")
+        print(f"--- grep item_5 {label} ---")
+        r = await ws.execute(f"grep item_5 {path}")
         print(f"  exit={r.exit_code}  {(await r.stdout_str()).strip()[:100]}")
 
     print("\n--- cat parquet | head -n 3 ---")

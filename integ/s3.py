@@ -73,6 +73,8 @@ PER_MOUNT_CASES: list[tuple[str, str]] = [
     ("grep_queue_wc", "grep queue-operation {m}/data/example.jsonl | wc -l"),
     ("grep_rl_item", "grep -rl item {m}/data/"),
     ("rg_l_item", "rg -l item {m}/data/"),
+    ("grep_item_parquet", "grep item_5 {m}/data/example.parquet"),
+    ("rg_item_glob_feather", "rg item_5 {m}/data/*.feather"),
     ("find_json", "find {m}/ -name '*.json'"),
     ("find_type_f", "find {m}/data -type f | sort"),
     ("jq_version", "jq .metadata.version {m}/data/example.json"),

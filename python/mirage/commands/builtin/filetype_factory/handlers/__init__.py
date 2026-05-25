@@ -15,7 +15,9 @@
 from mirage.commands.builtin.filetype_factory.handlers.cat import _ft_cat
 from mirage.commands.builtin.filetype_factory.handlers.cut import _ft_cut
 from mirage.commands.builtin.filetype_factory.handlers.file import _ft_file
+from mirage.commands.builtin.filetype_factory.handlers.grep import _ft_grep
 from mirage.commands.builtin.filetype_factory.handlers.head import _ft_head
+from mirage.commands.builtin.filetype_factory.handlers.rg import _ft_rg
 from mirage.commands.builtin.filetype_factory.handlers.stat import _ft_stat
 from mirage.commands.builtin.filetype_factory.handlers.tail import _ft_tail
 from mirage.commands.builtin.filetype_factory.handlers.wc import _ft_wc
@@ -28,6 +30,8 @@ _BUILDERS = (
     ("stat", _ft_stat),
     ("cut", _ft_cut),
     ("file", _ft_file),
+    ("grep", _ft_grep),
+    ("rg", _ft_rg),
 )
 
 __all__ = [
@@ -35,7 +39,9 @@ __all__ = [
     "_ft_cat",
     "_ft_cut",
     "_ft_file",
+    "_ft_grep",
     "_ft_head",
+    "_ft_rg",
     "_ft_stat",
     "_ft_tail",
     "_ft_wc",
