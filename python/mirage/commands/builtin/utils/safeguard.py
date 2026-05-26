@@ -41,10 +41,10 @@ def _build_notice(safeguard: CommandSafeguard) -> bytes:
 
 
 async def apply_safeguard(
-    src: ByteSource | None,
+    src: ByteSource,
     safeguard: CommandSafeguard | None,
 ) -> tuple[ByteSource | None, IOResult]:
-    if src is None or safeguard is None:
+    if safeguard is None:
         return src, IOResult()
     max_lines = safeguard.max_lines
     max_bytes = safeguard.max_bytes
