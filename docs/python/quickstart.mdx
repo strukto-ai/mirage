@@ -84,6 +84,27 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
+## Output Safeguards
+
+To keep huge reads from flooding an agent, `cat`, `grep`, `rg`, `head`,
+and `tail` cap their **final** output at 2000 lines by default. When a
+cap fires, the agent sees the truncated bytes plus a stderr notice
+(`output truncated at safeguard limit (2000 lines); ...`); exit code
+stays 0.
+
+Caps fire only on the **terminal** command of a pipeline, so
+`cat big.txt | head -n 30` still shows 30 lines. Limits are
+per-command and per-mount; tighten or relax them per resource:
+
+```python
+from mirage.types import CommandSafeguard, OnExceed
+
+mount.command_safeguards["cat"] = CommandSafeguard(max_lines=500)
+mount.command_safeguards["grep"] = CommandSafeguard(
+    max_lines=200, on_exceed=OnExceed.ERROR,
+)
+```
+
 ## Next Steps
 
 - See [Resource Docs](/python/resource/index) for the full list of supported data sources
