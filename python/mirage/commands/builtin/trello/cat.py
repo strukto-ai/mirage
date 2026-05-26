@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.trello import TrelloAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.cat import cat as generic_cat
 from mirage.commands.builtin.trello._provision import file_read_provision
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
@@ -40,12 +41,6 @@ async def cat_provision(
                           for p in paths))
 
 
-async def _number_lines(data: bytes) -> AsyncIterator[bytes]:
-    lines = data.decode(errors="replace").splitlines()
-    for i, line in enumerate(lines, 1):
-        yield f"     {i}\t{line}\n".encode()
-
-
 @command("cat", resource="trello", spec=SPECS["cat"], provision=cat_provision)
 async def cat(
     accessor: TrelloAccessor,
@@ -61,13 +56,8 @@ async def cat(
         p = paths[0]
         data = await trello_read(accessor, p, index)
         io = IOResult(reads={p.strip_prefix: data}, cache=[p.strip_prefix])
-        if n:
-            return _number_lines(data), io
-        return yield_bytes(data), io
+        return (generic_cat(data, number_lines=True)
+                if n else yield_bytes(data)), io
     source = _resolve_source(stdin, "cat: missing operand")
-    if n:
-        raw = b""
-        async for chunk in source:
-            raw += chunk
-        return _number_lines(raw), IOResult()
-    return source, IOResult()
+    return (generic_cat(source, number_lines=True)
+            if n else source), IOResult()
