@@ -12,20 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
 from collections.abc import AsyncIterator
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.tail import tail as generic_tail
+from mirage.commands.builtin.tail_helper import _parse_n
 from mirage.commands.builtin.discord._provision import file_read_provision
-from mirage.commands.builtin.tail_helper import _parse_n, tail_bytes
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.core.discord._client import discord_get
 from mirage.core.discord.glob import resolve_glob
 from mirage.core.discord.read import read as discord_read
-from mirage.core.discord.scope import detect_scope
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
@@ -41,14 +39,6 @@ async def tail_provision(
         accessor, paths,
         "tail " + " ".join(p.original if isinstance(p, PathSpec) else p
                            for p in paths))
-
-
-async def _tail_result(raw: bytes, lines: int, plus_mode: bool,
-                       bytes_mode: int | None) -> AsyncIterator[bytes]:
-    if bytes_mode is not None:
-        yield raw[-bytes_mode:] if bytes_mode else b""
-        return
-    yield tail_bytes(raw, lines, plus_mode=plus_mode)
 
 
 @command("tail",
@@ -67,29 +57,20 @@ async def tail(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    lines, plus_mode = _parse_n(n)
-    bytes_mode = int(c) if c is not None else None
+    n_int: int | None = None
+    from_line: int | None = None
+    if n is not None:
+        lines, plus_mode = _parse_n(n)
+        if plus_mode:
+            from_line = lines
+        else:
+            n_int = lines
+    c_int = int(c) if c is not None else None
     if paths:
-        scope = await detect_scope(paths[0], index)
-
-        # Smart tail: Discord returns newest messages first
-        if scope.level == "file" and scope.channel_id and not bytes_mode:
-            msgs = await discord_get(
-                accessor.config,
-                f"/channels/{scope.channel_id}/messages",
-                params={"limit": lines},
-            )
-            msgs.sort(key=lambda m: int(m["id"]))
-            jsonl = "\n".join(json.dumps(m, ensure_ascii=False)
-                              for m in msgs) + "\n"
-            return _tail_result(jsonl.encode(), lines, plus_mode,
-                                None), IOResult()
-
-        paths = await resolve_glob(accessor, paths, index=index)
-        p = paths[0]
-        raw = await discord_read(accessor, p, index)
-        return _tail_result(raw, lines, plus_mode, bytes_mode), IOResult()
-    raw = await _read_stdin_async(stdin)
-    if raw is None:
-        raise ValueError("tail: missing operand")
-    return _tail_result(raw, lines, plus_mode, bytes_mode), IOResult()
+        paths = await resolve_glob(accessor, paths, index)
+        data = await discord_read(accessor, paths[0], index)
+        return generic_tail(data, n=n_int, c=c_int,
+                            from_line=from_line), IOResult()
+    source = _resolve_source(stdin, "tail: missing operand")
+    return generic_tail(source, n=n_int, c=c_int,
+                        from_line=from_line), IOResult()

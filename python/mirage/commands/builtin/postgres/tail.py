@@ -18,9 +18,10 @@ import orjson
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.tail import tail as generic_tail
 from mirage.commands.builtin.postgres._provision import file_read_provision
-from mirage.commands.builtin.tail_helper import _parse_n, tail_bytes
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.builtin.tail_helper import _parse_n
+from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.postgres import _client
@@ -44,14 +45,6 @@ async def tail_provision(
                            for p in paths))
 
 
-async def _tail_result(raw: bytes, lines: int, plus_mode: bool,
-                       bytes_mode: int | None) -> AsyncIterator[bytes]:
-    if bytes_mode is not None:
-        yield raw[-bytes_mode:] if bytes_mode else b""
-        return
-    yield tail_bytes(raw, lines, plus_mode=plus_mode)
-
-
 @command("tail",
          resource="postgres",
          spec=SPECS["tail"],
@@ -68,13 +61,20 @@ async def tail(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    lines, plus_mode = _parse_n(n)
-    bytes_mode = int(c) if c is not None else None
+    n_int: int | None = None
+    from_line: int | None = None
+    if n is not None:
+        lines, plus_mode = _parse_n(n)
+        if plus_mode:
+            from_line = lines
+        else:
+            n_int = lines
+    c_int = int(c) if c is not None else None
     if paths:
         scope = detect_scope(paths[0])
         is_file = scope.level == "entity_rows"
-        if is_file and not bytes_mode:
-            limit = min(lines, accessor.config.default_row_limit)
+        if is_file and c_int is None and n_int is not None:
+            limit = min(n_int, accessor.config.default_row_limit)
             pool = await accessor.pool()
             async with pool.acquire() as conn:
                 total = await _client.count_rows(conn, scope.schema,
@@ -86,17 +86,17 @@ async def tail(
                                                 limit=limit,
                                                 offset=offset)
             if not rows:
-                return _tail_result(b"", lines, plus_mode, None), IOResult()
+                return generic_tail(b"", n=n_int, c=c_int,
+                                    from_line=from_line), IOResult()
             jsonl = "\n".join(
                 orjson.dumps(r, default=str).decode() for r in rows) + "\n"
-            return _tail_result(jsonl.encode(), lines, plus_mode,
-                                None), IOResult()
+            return generic_tail(jsonl.encode(), n=n_int, c=c_int,
+                                from_line=from_line), IOResult()
 
         paths = await resolve_glob(accessor, paths, index=index)
-        p = paths[0]
-        raw = await postgres_read(accessor, p, index)
-        return _tail_result(raw, lines, plus_mode, bytes_mode), IOResult()
-    raw = await _read_stdin_async(stdin)
-    if raw is None:
-        raise ValueError("tail: missing operand")
-    return _tail_result(raw, lines, plus_mode, bytes_mode), IOResult()
+        raw = await postgres_read(accessor, paths[0], index)
+        return generic_tail(raw, n=n_int, c=c_int,
+                            from_line=from_line), IOResult()
+    source = _resolve_source(stdin, "tail: missing operand")
+    return generic_tail(source, n=n_int, c=c_int,
+                        from_line=from_line), IOResult()

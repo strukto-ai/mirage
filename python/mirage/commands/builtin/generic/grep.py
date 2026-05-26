@@ -38,6 +38,7 @@ async def grep(
     max_count: int | None = None,
     after_context: int = 0,
     before_context: int = 0,
+    scope_check: Callable[..., Awaitable[str | None]] | None = None,
     index: IndexCacheStore | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
@@ -53,8 +54,14 @@ async def grep(
                      accessor,
                      prefix=mount_prefix)
 
+        scope_warning_str: str | None = None
+        if scope_check is not None and not paths[0].resolved:
+            scope_warning_str = await scope_check(rd, st, paths[0], recursive)
+
         if files_only:
             warnings: list[str] = []
+            if scope_warning_str:
+                warnings.append(scope_warning_str)
             results: list[str] = []
             for p in paths:
                 hits = await grep_files_only(
@@ -86,6 +93,8 @@ async def grep(
                                   whole_word)
             all_results: list[str] = []
             warnings = []
+            if scope_warning_str:
+                warnings.append(scope_warning_str)
             for p in paths:
                 s = await stat(accessor, p)
                 if s.type == FileType.DIRECTORY:

@@ -16,9 +16,10 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.tail import tail as generic_tail
 from mirage.commands.builtin.mongodb._provision import file_read_provision
-from mirage.commands.builtin.tail_helper import _parse_n, tail_bytes
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.builtin.tail_helper import _parse_n
+from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.mongodb.glob import resolve_glob
@@ -43,14 +44,6 @@ async def tail_provision(
                            for p in paths))
 
 
-async def _tail_result(raw: bytes, lines: int, plus_mode: bool,
-                       bytes_mode: int | None) -> AsyncIterator[bytes]:
-    if bytes_mode is not None:
-        yield raw[-bytes_mode:] if bytes_mode else b""
-        return
-    yield tail_bytes(raw, lines, plus_mode=plus_mode)
-
-
 @command("tail",
          resource="mongodb",
          spec=SPECS["tail"],
@@ -68,16 +61,23 @@ async def tail(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    lines, plus_mode = _parse_n(n)
-    bytes_mode = int(c) if c is not None else None
+    n_int: int | None = None
+    from_line: int | None = None
+    if n is not None:
+        lines, plus_mode = _parse_n(n)
+        if plus_mode:
+            from_line = lines
+        else:
+            n_int = lines
+    c_int = int(c) if c is not None else None
     if paths:
         paths = await resolve_glob(accessor, paths, index=index)
         p = paths[0]
         if f and detect_scope(p).level == ScopeLevel.DOCUMENTS:
             return watch_stream(accessor, p, index), IOResult()
         raw = await mongodb_read(accessor, p, index)
-        return _tail_result(raw, lines, plus_mode, bytes_mode), IOResult()
-    raw = await _read_stdin_async(stdin)
-    if raw is None:
-        raise ValueError("tail: missing operand")
-    return _tail_result(raw, lines, plus_mode, bytes_mode), IOResult()
+        return generic_tail(raw, n=n_int, c=c_int,
+                            from_line=from_line), IOResult()
+    source = _resolve_source(stdin, "tail: missing operand")
+    return generic_tail(source, n=n_int, c=c_int,
+                        from_line=from_line), IOResult()

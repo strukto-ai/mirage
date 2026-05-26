@@ -13,28 +13,21 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
-from functools import partial
 
 from mirage.accessor.linear import LinearAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.grep_helper import (compile_pattern,
-                                                 grep_files_only,
-                                                 grep_recursive, grep_stream)
+from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.linear._provision import file_read_provision
-from mirage.commands.builtin.utils.stream import _resolve_source
-from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
-                                                call_stat)
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.linear.glob import resolve_glob
-from mirage.core.linear.read import read as linear_read
+from mirage.core.linear.read import read as _read
 from mirage.core.linear.readdir import readdir as _readdir
 from mirage.core.linear.scope import scope_warning
 from mirage.core.linear.stat import stat as _stat
-from mirage.io.stream import exit_on_empty, quiet_match, yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
-from mirage.types import FileType, PathSpec
+from mirage.types import PathSpec
 
 
 async def grep_provision(
@@ -88,119 +81,29 @@ async def grep(
     max_count = int(m) if m is not None else None
     after_ctx = int(A) if A is not None else (int(C) if C is not None else 0)
     before_ctx = int(B) if B is not None else (int(C) if C is not None else 0)
-
-    if paths:
-        paths = await resolve_glob(accessor, paths, index)
-        file_prefix = paths[0].prefix if paths else ""
-        warnings: list[str] = []
-        rd = partial(call_readdir,
-                     _readdir,
-                     accessor,
-                     index=index,
-                     prefix=file_prefix)
-        st = partial(call_stat,
-                     _stat,
-                     accessor,
-                     index=index,
-                     prefix=file_prefix)
-        rb = partial(call_read_bytes,
-                     linear_read,
-                     accessor,
-                     index=index,
-                     prefix=file_prefix)
-        recursive = r or R
-        if isinstance(paths[0], PathSpec) and not paths[0].resolved:
-            warning = await scope_warning(rd, st, paths[0], recursive)
-            if warning:
-                warnings.append(warning)
-        if args_l:
-            results = await grep_files_only(
-                rd,
-                st,
-                rb,
-                paths[0].original,
-                pattern,
-                recursive=recursive,
-                ignore_case=i,
-                invert=v,
-                line_numbers=n,
-                count_only=c,
-                fixed_string=F,
-                only_matching=o,
-                max_count=max_count,
-                whole_word=w,
-                warnings=warnings,
-            )
-            stderr = ("\n".join(warnings).encode() if warnings else None)
-            if not results:
-                return b"", IOResult(exit_code=1, stderr=stderr)
-            if prefix:
-                results = [prefix + "/" + item.lstrip("/") for item in results]
-            return "\n".join(results).encode(), IOResult(stderr=stderr)
-
-        pat = compile_pattern(pattern, i, F, w)
-        target = paths[0].original
-        file_stat = await st(target)
-        if file_stat.type == FileType.DIRECTORY:
-            if not recursive:
-                return (b"",
-                        IOResult(
-                            exit_code=1,
-                            stderr=f"grep: {target}: Is a directory".encode()))
-            results = await grep_recursive(
-                rd,
-                st,
-                rb,
-                target,
-                pat,
-                invert=v,
-                line_numbers=n,
-                count_only=c,
-                files_only=False,
-                only_matching=o,
-                max_count=max_count,
-                warnings=warnings,
-            )
-            stderr = ("\n".join(warnings).encode() if warnings else None)
-            if not results:
-                return b"", IOResult(exit_code=1, stderr=stderr)
-            return "\n".join(results).encode(), IOResult(stderr=stderr)
-
-        data = await rb(target)
-        source = yield_bytes(data)
-        stream = grep_stream(
-            source,
-            pat,
-            invert=v,
-            line_numbers=n,
-            only_matching=o,
-            max_count=max_count,
-            count_only=c,
-            after_context=after_ctx,
-            before_context=before_ctx,
-        )
-        if q:
-            io = IOResult(exit_code=1)
-            return quiet_match(stream, io), io
-        io = IOResult(
-            stderr="\n".join(warnings).encode() if warnings else None)
-        return exit_on_empty(stream, io), io
-
-    source = _resolve_source(stdin, "grep: usage: grep [flags] pattern [path]")
-    pat = compile_pattern(pattern, i, F, w)
-    stream = grep_stream(
-        source,
-        pat,
+    resolved = await resolve_glob(accessor, paths, index) if paths else []
+    return await generic_grep(
+        resolved,
+        pattern=pattern,
+        readdir=_readdir,
+        stat=_stat,
+        read_bytes=_read,
+        read_stream=None,
+        accessor=accessor,
+        stdin=stdin,
+        ignore_case=i,
         invert=v,
         line_numbers=n,
-        only_matching=o,
-        max_count=max_count,
         count_only=c,
+        files_only=args_l,
+        whole_word=w,
+        fixed_string=F,
+        only_matching=o,
+        quiet=q,
+        recursive=r or R,
+        max_count=max_count,
         after_context=after_ctx,
         before_context=before_ctx,
+        scope_check=scope_warning,
+        index=index,
     )
-    if q:
-        io = IOResult(exit_code=1)
-        return quiet_match(stream, io), io
-    io = IOResult()
-    return exit_on_empty(stream, io), io
