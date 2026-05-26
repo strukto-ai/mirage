@@ -23,12 +23,24 @@ class CommandSafeguard(BaseModel):
     on_exceed: OnExceed = OnExceed.ERROR
 
 
+_DEFAULT_MAX_LINES = 2000
+
 DEFAULT_COMMAND_SAFEGUARDS: dict[str, CommandSafeguard] = {
-    "cat": CommandSafeguard(max_lines=10_000, on_exceed=OnExceed.TRUNCATE),
-    "grep": CommandSafeguard(max_lines=10_000, on_exceed=OnExceed.TRUNCATE),
-    "rg": CommandSafeguard(max_lines=10_000, on_exceed=OnExceed.TRUNCATE),
-    "head": CommandSafeguard(max_lines=100_000, on_exceed=OnExceed.TRUNCATE),
-    "tail": CommandSafeguard(max_lines=100_000, on_exceed=OnExceed.TRUNCATE),
+    "cat":
+    CommandSafeguard(max_lines=_DEFAULT_MAX_LINES,
+                     on_exceed=OnExceed.TRUNCATE),
+    "grep":
+    CommandSafeguard(max_lines=_DEFAULT_MAX_LINES,
+                     on_exceed=OnExceed.TRUNCATE),
+    "rg":
+    CommandSafeguard(max_lines=_DEFAULT_MAX_LINES,
+                     on_exceed=OnExceed.TRUNCATE),
+    "head":
+    CommandSafeguard(max_lines=_DEFAULT_MAX_LINES,
+                     on_exceed=OnExceed.TRUNCATE),
+    "tail":
+    CommandSafeguard(max_lines=_DEFAULT_MAX_LINES,
+                     on_exceed=OnExceed.TRUNCATE),
 }
 
 
