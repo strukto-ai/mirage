@@ -1116,16 +1116,33 @@ c
 olleh
 === base64_stdin_d ===
 hello
+=== safeguard_cat_truncates ===
+line0
+line1
+line2
+line3
+line4
+line5
+line6
+line7
+line8
+line9
+line10
+line11
+line12
+line13
+line14
+line15
+line16
+line17
+line18
+line19
+output truncated at safeguard limit (20 lines); narrow with grep, or read more with head -n / tail -n / a more specific path
+=== safeguard_cat_pipe_uncapped ===
+50
 === snapshot_load_cache ===
 hello
 world
 foo
 bar
 baz
-
-=== safeguard_cat_truncates ===
-line0
-line19
-output truncated at safeguard limit (20 lines)
-=== safeguard_cat_pipe_uncapped ===
-50

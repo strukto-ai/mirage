@@ -452,11 +452,8 @@ async def run_cases(ws, reload_resources: dict | None = None) -> None:
     for name, cmd in CASES:
         result = await ws.execute(cmd)
         out = await result.stdout_str()
-        err = await result.stderr_str()
         print(f"=== {name} ===")
         print(out, end="" if out.endswith("\n") else "\n")
-        if err:
-            print(err, end="" if err.endswith("\n") else "\n")
 
     await ws.execute("tee /data/big.txt > /dev/null", stdin=BIG_TXT.encode())
     _set_cat_safeguard(ws, max_lines=20)

@@ -165,11 +165,12 @@ def _build_workspace(endpoint: str) -> Workspace:
 async def _run(ws: Workspace, name: str, cmd: str) -> None:
     result = await ws.execute(cmd)
     out = await result.stdout_str()
-    err = await result.stderr_str()
     print(f"=== {name} ===")
     print(out, end="" if out.endswith("\n") else "\n")
-    if err:
-        print(err, end="" if err.endswith("\n") else "\n")
+    if "safeguard_" in name:
+        err = await result.stderr_str()
+        if err:
+            print(err, end="" if err.endswith("\n") else "\n")
 
 
 def _set_cat_safeguard(ws: Workspace, max_lines: int) -> None:
