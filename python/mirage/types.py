@@ -122,6 +122,7 @@ class ResourceName(str, Enum):
     GCS = "gcs"
     EMAIL = "email"
     DATABRICKS_VOLUME = "databricks_volume"
+    HF_BUCKETS = "hf_buckets"
 
 
 @dataclass(frozen=True)
