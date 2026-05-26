@@ -90,7 +90,9 @@ async def tail(
                                     from_line=from_line), IOResult()
             jsonl = "\n".join(
                 orjson.dumps(r, default=str).decode() for r in rows) + "\n"
-            return generic_tail(jsonl.encode(), n=n_int, c=c_int,
+            return generic_tail(jsonl.encode(),
+                                n=n_int,
+                                c=c_int,
                                 from_line=from_line), IOResult()
 
         paths = await resolve_glob(accessor, paths, index=index)
