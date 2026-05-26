@@ -13,17 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
-from functools import partial
 
 from mirage.accessor.linear import LinearAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.linear._provision import file_read_provision
-from mirage.commands.builtin.rg_helper import (compile_pattern, rg_folder,
-                                               rg_matches_filter,
-                                               rg_search_file)
-from mirage.commands.builtin.utils.stream import _resolve_source
-from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
-                                                call_stat)
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.linear.glob import resolve_glob
@@ -31,10 +25,9 @@ from mirage.core.linear.read import read as linear_read
 from mirage.core.linear.readdir import readdir as _readdir
 from mirage.core.linear.scope import scope_warning
 from mirage.core.linear.stat import stat as _stat
-from mirage.io.stream import exit_on_empty
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
-from mirage.types import FileType, PathSpec
+from mirage.types import PathSpec
 
 
 async def rg_provision(
@@ -80,120 +73,32 @@ async def rg(
     context_before = int(B) if B is not None else 0
     if C is not None:
         context_before = context_after = int(C)
-    if paths:
-        paths = await resolve_glob(accessor, paths, index)
-        file_prefix = paths[0].prefix if paths else ""
-        warnings: list[str] = []
-        rd = partial(call_readdir,
-                     _readdir,
-                     accessor,
-                     index=index,
-                     prefix=file_prefix)
-        st = partial(call_stat,
-                     _stat,
-                     accessor,
-                     index=index,
-                     prefix=file_prefix)
-        rb = partial(call_read_bytes,
-                     linear_read,
-                     accessor,
-                     index=index,
-                     prefix=file_prefix)
-        if isinstance(paths[0], PathSpec) and not paths[0].resolved:
-            warning = await scope_warning(rd, st, paths[0], True)
-            if warning:
-                warnings.append(warning)
-        target = paths[0].original
-        file_stat = await st(target)
-        compiled = compile_pattern(pattern, i, F, w)
-        if file_stat.type == FileType.DIRECTORY:
-            results = await rg_folder(
-                rd,
-                st,
-                rb,
-                target,
-                pattern,
-                i,
-                v,
-                n,
-                c,
-                args_l,
-                o,
-                max_count,
-                F,
-                w,
-                type,
-                glob,
-                hidden,
-                warnings,
-            )
-            stderr = ("\n".join(warnings).encode() if warnings else None)
-            if not results:
-                return b"", IOResult(exit_code=1, stderr=stderr)
-            if prefix and args_l:
-                results = [prefix + "/" + item.lstrip("/") for item in results]
-            return "\n".join(results).encode(), IOResult(stderr=stderr)
-        if not rg_matches_filter(target, type, glob, hidden):
-            return b"", IOResult(exit_code=1)
-        raw = await rb(target)
-        results = rg_search_file(
-            lambda _: raw,
-            target,
-            compiled,
-            v,
-            n,
-            c,
-            args_l,
-            o,
-            max_count,
-            context_before,
-            context_after,
-            False,
-            warnings,
-        )
-        stderr = ("\n".join(warnings).encode() if warnings else None)
-        if not results:
-            return b"", IOResult(exit_code=1, stderr=stderr)
-        return "\n".join(results).encode(), IOResult(stderr=stderr)
 
-    return await grep_stdin(texts[0],
-                            stdin,
-                            i=i,
-                            v=v,
-                            n=n,
-                            c=c,
-                            w=w,
-                            F=F,
-                            o=o,
-                            m=m)
+    resolved = await resolve_glob(accessor, paths, index) if paths else []
 
-
-async def grep_stdin(
-    pattern: str,
-    stdin: AsyncIterator[bytes] | bytes | None,
-    *,
-    i: bool,
-    v: bool,
-    n: bool,
-    c: bool,
-    w: bool,
-    F: bool,
-    o: bool,
-    m: str | None,
-) -> tuple[ByteSource | None, IOResult]:
-    from mirage.commands.builtin.general.grep import _grep_stream
-
-    source = _resolve_source(stdin, "rg: usage: rg [flags] pattern path")
-    compiled = compile_pattern(pattern, i, F, w)
-    max_count = int(m) if m is not None else None
-    stream = _grep_stream(
-        source,
-        compiled,
+    return await generic_rg(
+        resolved,
+        pattern=pattern,
+        readdir=_readdir,
+        stat=_stat,
+        read_bytes=linear_read,
+        read_stream=None,
+        accessor=accessor,
+        stdin=stdin,
+        ignore_case=i,
         invert=v,
         line_numbers=n,
+        count_only=c,
+        files_only=args_l,
+        whole_word=w,
+        fixed_string=F,
         only_matching=o,
         max_count=max_count,
-        count_only=c,
+        context_before=context_before,
+        context_after=context_after,
+        hidden=hidden,
+        file_type=type,
+        glob_pattern=glob,
+        scope_check=scope_warning,
+        index=index,
     )
-    io = IOResult()
-    return exit_on_empty(stream, io), io

@@ -13,29 +13,34 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
-from functools import partial
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.grep_helper import (compile_pattern, grep_lines,
-                                                 grep_stream)
-from mirage.commands.builtin.rg_helper import rg_full
-from mirage.commands.builtin.utils.stream import _resolve_source
-from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
-                                                call_stat)
+from mirage.commands.builtin.generic.rg import rg as generic_rg
+from mirage.commands.builtin.s3._provision import file_read_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.s3.glob import resolve_glob
 from mirage.core.s3.read import read_bytes as _read_bytes
 from mirage.core.s3.readdir import readdir as _readdir
 from mirage.core.s3.stat import stat as _stat
-from mirage.core.s3.stream import read_stream
-from mirage.io.stream import exit_on_empty
+from mirage.core.s3.stream import read_stream as _read_stream
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileType, PathSpec
+from mirage.provision.types import ProvisionResult
+from mirage.types import PathSpec
 
 
-@command("rg", resource="s3", spec=SPECS["rg"])
+async def rg_provision(
+    accessor: S3Accessor,
+    paths: list[PathSpec],
+    *texts: str,
+    **_extra: object,
+) -> ProvisionResult:
+    rendered = "rg " + " ".join(texts + tuple(str(p) for p in paths))
+    return await file_read_provision(accessor, paths, rendered)
+
+
+@command("rg", resource="s3", spec=SPECS["rg"], provision=rg_provision)
 async def rg(
     accessor: S3Accessor,
     paths: list[PathSpec],
@@ -69,109 +74,30 @@ async def rg(
     if C is not None:
         context_before = context_after = int(C)
 
-    if paths:
-        paths = await resolve_glob(accessor, paths, index)
-        mount_prefix = paths[0].prefix if paths else ""
-        rd = partial(call_readdir,
-                     _readdir,
-                     accessor,
-                     index=index,
-                     prefix=mount_prefix)
-        st = partial(call_stat,
-                     _stat,
-                     accessor,
-                     index=index,
-                     prefix=mount_prefix)
-        rb = partial(call_read_bytes,
-                     _read_bytes,
-                     accessor,
-                     prefix=mount_prefix)
+    resolved = await resolve_glob(accessor, paths, index) if paths else []
 
-        is_dir = False
-        try:
-            s = await _stat(accessor, paths[0])
-            is_dir = s.type == FileType.DIRECTORY
-        except (FileNotFoundError, ValueError):
-            try:
-                await _readdir(accessor, paths[0], index)
-            except (FileNotFoundError, ValueError):
-                pass
-
-        needs_full = (is_dir or args_l or context_before or context_after
-                      or type or glob)
-        if needs_full:
-            warnings_f: list[str] = []
-            results = await rg_full(
-                rd,
-                st,
-                rb,
-                paths[0].original,
-                pattern,
-                ignore_case=i,
-                invert=v,
-                line_numbers=n,
-                count_only=c,
-                files_only=args_l,
-                fixed_string=F,
-                only_matching=o,
-                max_count=max_count,
-                whole_word=w,
-                context_before=context_before,
-                context_after=context_after,
-                file_type=type,
-                glob_pattern=glob,
-                hidden=hidden,
-                warnings=warnings_f,
-            )
-            stderr = "\n".join(warnings_f).encode() if warnings_f else None
-            if not results:
-                return b"", IOResult(exit_code=1, stderr=stderr)
-            return "\n".join(results).encode(), IOResult(stderr=stderr)
-
-        pat = compile_pattern(pattern, i, F, w)
-
-        if len(paths) > 1:
-            all_results: list[str] = []
-            for p in paths:
-                data = (await
-                        _read_bytes(accessor,
-                                    p)).decode(errors="replace").splitlines()
-                hits = grep_lines(p.original, data, pat, v, n, c, args_l, o,
-                                  max_count)
-                if c:
-                    if hits:
-                        all_results.append(f"{p.original}:{hits[0]}")
-                elif args_l:
-                    all_results.extend(hits)
-                else:
-                    all_results.extend(f"{p.original}:{r}" for r in hits)
-            if not all_results:
-                return b"", IOResult(exit_code=1)
-            return "\n".join(all_results).encode(), IOResult()
-
-        source = read_stream(accessor, paths[0])
-        stream = grep_stream(
-            source,
-            pat,
-            invert=v,
-            line_numbers=n,
-            only_matching=o,
-            max_count=max_count,
-            count_only=c,
-        )
-        io = IOResult()
-        return exit_on_empty(stream, io), io
-
-    source = _resolve_source(stdin, "rg: usage: rg [flags] pattern path")
-    pat = compile_pattern(pattern, i, F, w)
-    stream = grep_stream(
-        source,
-        pat,
+    return await generic_rg(
+        resolved,
+        pattern=pattern,
+        readdir=_readdir,
+        stat=_stat,
+        read_bytes=_read_bytes,
+        read_stream=_read_stream,
+        accessor=accessor,
+        stdin=stdin,
+        ignore_case=i,
         invert=v,
         line_numbers=n,
+        count_only=c,
+        files_only=args_l,
+        whole_word=w,
+        fixed_string=F,
         only_matching=o,
         max_count=max_count,
-        count_only=c,
+        context_before=context_before,
+        context_after=context_after,
+        hidden=hidden,
+        file_type=type,
+        glob_pattern=glob,
+        index=index,
     )
-    io = IOResult()
-    return exit_on_empty(stream, io), io

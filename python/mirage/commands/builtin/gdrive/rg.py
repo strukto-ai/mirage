@@ -13,52 +13,33 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
-from functools import partial
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.grep_helper import (compile_pattern, grep_lines,
-                                                 grep_stream)
-from mirage.commands.builtin.rg_helper import rg_full
-from mirage.commands.builtin.utils.stream import _resolve_source
-from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
-                                                call_stat)
+from mirage.commands.builtin.gdrive._provision import file_read_provision
+from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
 from mirage.core.gdrive.read import read as gdrive_read
 from mirage.core.gdrive.readdir import readdir as _readdir
 from mirage.core.gdrive.stat import stat as _stat
-from mirage.io.stream import exit_on_empty, yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileType, PathSpec
+from mirage.provision.types import ProvisionResult
+from mirage.types import PathSpec
 
 
-async def _collect_files(
+async def rg_provision(
     accessor: GDriveAccessor,
-    path: PathSpec,
-    index: IndexCacheStore | None,
-) -> list[str]:
-    if path.endswith(".json") or path.endswith(".jsonl"):
-        return [path]
-    try:
-        children = await _readdir(accessor, path, index)
-    except FileNotFoundError:
-        return []
-    files: list[str] = []
-    for child in children:
-        if child.endswith(".json") or child.endswith(".jsonl"):
-            files.append(child)
-        else:
-            child_spec = PathSpec(original=child,
-                                  directory=child,
-                                  resolved=False,
-                                  prefix=path.prefix)
-            files.extend(await _collect_files(accessor, child_spec, index))
-    return files
+    paths: list[PathSpec],
+    *texts: str,
+    **_extra: object,
+) -> ProvisionResult:
+    rendered = "rg " + " ".join(texts + tuple(str(p) for p in paths))
+    return await file_read_provision(accessor, paths, rendered)
 
 
-@command("rg", resource="gdrive", spec=SPECS["rg"])
+@command("rg", resource="gdrive", spec=SPECS["rg"], provision=rg_provision)
 async def rg(
     accessor: GDriveAccessor,
     paths: list[PathSpec],
@@ -92,106 +73,30 @@ async def rg(
     if C is not None:
         context_before = context_after = int(C)
 
-    if paths:
-        paths = await resolve_glob(accessor, paths, index)
-        file_prefix = paths[0].prefix if paths else ""
-        rd = partial(call_readdir,
-                     _readdir,
-                     accessor,
-                     index=index,
-                     prefix=file_prefix)
-        st = partial(call_stat,
-                     _stat,
-                     accessor,
-                     index=index,
-                     prefix=file_prefix)
-        rb = partial(call_read_bytes, gdrive_read, accessor, index=index)
+    resolved = await resolve_glob(accessor, paths, index) if paths else []
 
-        is_dir = False
-        try:
-            s = await _stat(accessor, paths[0], index)
-            is_dir = s.type == FileType.DIRECTORY
-        except (FileNotFoundError, ValueError):
-            try:
-                await _readdir(accessor, paths[0], index)
-                is_dir = True
-            except (FileNotFoundError, ValueError):
-                pass
-
-        if is_dir:
-            warnings: list[str] = []
-            results = await rg_full(
-                rd,
-                st,
-                rb,
-                paths[0].original,
-                pattern,
-                ignore_case=i,
-                invert=v,
-                line_numbers=n,
-                count_only=c,
-                files_only=args_l,
-                fixed_string=F,
-                only_matching=o,
-                max_count=max_count,
-                whole_word=w,
-                context_before=context_before,
-                context_after=context_after,
-                file_type=type,
-                glob_pattern=glob,
-                hidden=hidden,
-                warnings=warnings,
-            )
-            stderr = ("\n".join(warnings).encode() if warnings else None)
-            if not results:
-                return b"", IOResult(exit_code=1, stderr=stderr)
-            return "\n".join(results).encode(), IOResult(stderr=stderr)
-
-        pat = compile_pattern(pattern, i, F, w)
-
-        if len(paths) > 1:
-            all_results: list[str] = []
-            for p in paths:
-                data = (await
-                        rb(p.original)).decode(errors="replace").splitlines()
-                hits = grep_lines(p.original, data, pat, v, n, c, args_l, o,
-                                  max_count)
-                if c:
-                    if hits:
-                        all_results.append(f"{p.original}:{hits[0]}")
-                elif args_l:
-                    all_results.extend(hits)
-                else:
-                    all_results.extend(f"{p.original}:{r}" for r in hits)
-            if not all_results:
-                return b"", IOResult(exit_code=1)
-            return "\n".join(all_results).encode(), IOResult()
-
-        p = paths[0]
-        data = await rb(p.original)
-        source = yield_bytes(data)
-        stream = grep_stream(
-            source,
-            pat,
-            invert=v,
-            line_numbers=n,
-            only_matching=o,
-            max_count=max_count,
-            count_only=c,
-        )
-        io = IOResult()
-        return exit_on_empty(stream, io), io
-
-    source = _resolve_source(stdin, "rg: usage: rg [flags] pattern path")
-    pat = compile_pattern(pattern, i, F, w)
-    stream = grep_stream(
-        source,
-        pat,
+    return await generic_rg(
+        resolved,
+        pattern=pattern,
+        readdir=_readdir,
+        stat=_stat,
+        read_bytes=gdrive_read,
+        read_stream=None,
+        accessor=accessor,
+        stdin=stdin,
+        ignore_case=i,
         invert=v,
         line_numbers=n,
+        count_only=c,
+        files_only=args_l,
+        whole_word=w,
+        fixed_string=F,
         only_matching=o,
         max_count=max_count,
-        count_only=c,
+        context_before=context_before,
+        context_after=context_after,
+        hidden=hidden,
+        file_type=type,
+        glob_pattern=glob,
+        index=index,
     )
-    io = IOResult()
-    return exit_on_empty(stream, io), io

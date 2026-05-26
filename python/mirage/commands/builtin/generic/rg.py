@@ -38,6 +38,7 @@ async def rg(
     hidden: bool = False,
     file_type: str | None = None,
     glob_pattern: str | None = None,
+    scope_check: Callable[..., Awaitable[str | None]] | None = None,
     index: IndexCacheStore | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
@@ -52,6 +53,10 @@ async def rg(
                      read_bytes,
                      accessor,
                      prefix=mount_prefix)
+
+        scope_warning_str: str | None = None
+        if scope_check is not None and not paths[0].resolved:
+            scope_warning_str = await scope_check(rd, st, paths[0], True)
 
         is_dir = False
         try:
@@ -68,6 +73,8 @@ async def rg(
                       or file_type or glob_pattern)
         if needs_full:
             warnings_f: list[str] = []
+            if scope_warning_str:
+                warnings_f.append(scope_warning_str)
             results = await rg_full(
                 rd,
                 st,
