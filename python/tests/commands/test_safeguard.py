@@ -24,7 +24,7 @@ def test_defaults():
     sg = CommandSafeguard()
     assert sg.max_bytes is None
     assert sg.max_lines is None
-    assert sg.on_exceed == OnExceed.ERROR
+    assert sg.on_exceed == OnExceed.TRUNCATE
 
 
 def test_on_exceed_coerces_from_string():

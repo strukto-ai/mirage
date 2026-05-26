@@ -25,7 +25,7 @@ from mirage import MountMode, Workspace
 from mirage.accessor.s3 import S3Accessor
 from mirage.resource.gcs import GCSConfig, GCSResource
 from mirage.resource.s3 import S3Config, S3Resource
-from mirage.types import CommandSafeguard, OnExceed
+from mirage.types import CommandSafeguard
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 SEED_OBJECTS = [
@@ -174,7 +174,7 @@ async def _run(ws: Workspace, name: str, cmd: str) -> None:
 
 
 def _set_cat_safeguard(ws: Workspace, max_lines: int) -> None:
-    sg = CommandSafeguard(max_lines=max_lines, on_exceed=OnExceed.TRUNCATE)
+    sg = CommandSafeguard(max_lines=max_lines)
     mounts = list(ws._registry._mounts)
     if ws._registry.default_mount is not None:
         mounts.append(ws._registry.default_mount)

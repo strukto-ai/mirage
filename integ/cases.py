@@ -16,7 +16,7 @@ import os
 import tempfile
 
 from mirage import Workspace
-from mirage.types import CommandSafeguard, OnExceed
+from mirage.types import CommandSafeguard
 
 SEED_FILES = {
     "/data/a.txt":
@@ -435,7 +435,7 @@ SAFEGUARD_CASES: list[tuple[str, str]] = [
 
 
 def _set_cat_safeguard(ws: Workspace, max_lines: int) -> None:
-    sg = CommandSafeguard(max_lines=max_lines, on_exceed=OnExceed.TRUNCATE)
+    sg = CommandSafeguard(max_lines=max_lines)
     mounts = list(ws._registry._mounts)
     if ws._registry.default_mount is not None:
         mounts.append(ws._registry.default_mount)

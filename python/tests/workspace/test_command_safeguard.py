@@ -73,8 +73,7 @@ def test_pipe_terminal_under_limit_no_notice():
 
 def test_mount_override_caps_small():
     ws = _build_ws(5)
-    _override(ws, "cat",
-              CommandSafeguard(max_lines=3, on_exceed=OnExceed.TRUNCATE))
+    _override(ws, "cat", CommandSafeguard(max_lines=3))
     code, out, err = asyncio.run(_run(ws, "cat /big.txt"))
     assert code == 0
     assert out == "line0\nline1\nline2\n"

@@ -37,14 +37,14 @@ async def test_no_safeguard_passthrough():
 
 @pytest.mark.asyncio
 async def test_under_limit_not_truncated():
-    sg = CommandSafeguard(max_lines=100, on_exceed=OnExceed.TRUNCATE)
+    sg = CommandSafeguard(max_lines=100)
     out, io = await apply_safeguard(_TEN, sg)
     assert out == _TEN and io.stderr is None
 
 
 @pytest.mark.asyncio
 async def test_truncate_by_lines():
-    sg = CommandSafeguard(max_lines=3, on_exceed=OnExceed.TRUNCATE)
+    sg = CommandSafeguard(max_lines=3)
     out, io = await apply_safeguard(_TEN, sg)
     assert out == b"line0\nline1\nline2\n"
     assert io.exit_code == 0
@@ -62,7 +62,7 @@ async def test_error_by_lines():
 
 @pytest.mark.asyncio
 async def test_truncate_by_bytes():
-    sg = CommandSafeguard(max_bytes=10, on_exceed=OnExceed.TRUNCATE)
+    sg = CommandSafeguard(max_bytes=10)
     out, io = await apply_safeguard(_TEN, sg)
     assert out == _TEN[:10]
     assert b"truncated" in (await materialize(io.stderr))
@@ -70,7 +70,7 @@ async def test_truncate_by_bytes():
 
 @pytest.mark.asyncio
 async def test_streaming_input_truncates_and_stops_early():
-    sg = CommandSafeguard(max_lines=2, on_exceed=OnExceed.TRUNCATE)
+    sg = CommandSafeguard(max_lines=2)
     out, io = await apply_safeguard(_stream(_TEN), sg)
     assert out == b"line0\nline1\n"
     assert b"truncated" in (await materialize(io.stderr))

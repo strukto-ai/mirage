@@ -12,26 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.types import CommandSafeguard, OnExceed
+from mirage.types import CommandSafeguard
 
 _DEFAULT_MAX_LINES = 2000
 
 DEFAULT_COMMAND_SAFEGUARDS: dict[str, CommandSafeguard] = {
-    "cat":
-    CommandSafeguard(max_lines=_DEFAULT_MAX_LINES,
-                     on_exceed=OnExceed.TRUNCATE),
-    "grep":
-    CommandSafeguard(max_lines=_DEFAULT_MAX_LINES,
-                     on_exceed=OnExceed.TRUNCATE),
-    "rg":
-    CommandSafeguard(max_lines=_DEFAULT_MAX_LINES,
-                     on_exceed=OnExceed.TRUNCATE),
-    "head":
-    CommandSafeguard(max_lines=_DEFAULT_MAX_LINES,
-                     on_exceed=OnExceed.TRUNCATE),
-    "tail":
-    CommandSafeguard(max_lines=_DEFAULT_MAX_LINES,
-                     on_exceed=OnExceed.TRUNCATE),
+    name: CommandSafeguard(max_lines=_DEFAULT_MAX_LINES)
+    for name in ("cat", "grep", "rg", "head", "tail")
 }
 
 

@@ -80,7 +80,7 @@ class OnExceed(str, Enum):
 class CommandSafeguard(BaseModel):
     max_bytes: NonNegativeInt | None = None
     max_lines: NonNegativeInt | None = None
-    on_exceed: OnExceed = OnExceed.ERROR
+    on_exceed: OnExceed = OnExceed.TRUNCATE
 
 
 class VFSWriteOp(str, Enum):
