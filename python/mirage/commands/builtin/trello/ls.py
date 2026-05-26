@@ -12,10 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.accessor.trello import TrelloAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.ls import ls as generic_ls
 from mirage.commands.builtin.trello._provision import metadata_provision
-from mirage.commands.builtin.utils.formatting import _human_size
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.trello.glob import resolve_glob
@@ -23,7 +25,7 @@ from mirage.core.trello.readdir import readdir
 from mirage.core.trello.stat import stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
-from mirage.types import FileType, PathSpec
+from mirage.types import LsSortBy, PathSpec
 
 
 async def ls_provision(
@@ -56,48 +58,20 @@ async def ls(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    all_files = a or A
-    sort_by = "size" if S else "name"
-    reverse = r
-    index: IndexCacheStore | None = index
     paths = await resolve_glob(accessor, paths, index)
-    warnings: list[str] = []
-    results: list[str] = []
-    for p in paths:
-        try:
-            targets = ([p.original] if d else await readdir(
-                accessor, p, index))
-        except (FileNotFoundError, ValueError) as exc:
-            warnings.append(f"ls: cannot access '{p.original}': {exc}")
-            continue
-        entries = []
-        for entry_path in targets:
-            entry_spec = PathSpec(original=entry_path,
-                                  directory=entry_path,
-                                  resolved=False,
-                                  prefix=p.prefix)
-            try:
-                entries.append(await stat(accessor, entry_spec, index))
-            except (FileNotFoundError, ValueError) as exc:
-                warnings.append(f"ls: cannot access '{entry_path}': {exc}")
-        if not all_files:
-            entries = [
-                entry for entry in entries if not entry.name.startswith(".")
-            ]
-        if sort_by == "size":
-            entries.sort(key=lambda item: item.size or 0, reverse=not reverse)
-        else:
-            entries.sort(key=lambda item: item.name, reverse=reverse)
-        for entry in entries:
-            if args_l and not args_1:
-                size_str = _human_size(entry.size or 0) if h else str(
-                    entry.size or 0)
-                results.append(f"{entry.type or '-'}\t{size_str}\t"
-                               f"{entry.modified or ''}\t{entry.name}")
-            else:
-                suffix = "/" if F and entry.type == FileType.DIRECTORY else ""
-                results.append(entry.name + suffix)
-    stderr = "\n".join(warnings).encode() if warnings else None
-    exit_code = 1 if warnings and not results else 0
-    return "\n".join(results).encode(), IOResult(stderr=stderr,
-                                                 exit_code=exit_code)
+    sort_by = LsSortBy.TIME if t else LsSortBy.SIZE if S else LsSortBy.NAME
+    return await generic_ls(
+        paths,
+        readdir=partial(readdir, accessor),
+        stat=partial(stat, accessor),
+        long=args_l,
+        one_per_line=args_1,
+        all_files=a or A,
+        human=h,
+        sort_by=sort_by,
+        reverse=r,
+        recursive=R,
+        list_dir=d,
+        classify=F,
+        index=index,
+    )
