@@ -181,6 +181,7 @@ conflicts = [
 
 [dependency-groups]
 dev = [
+    "aioresponses>=0.7.6",
     "grpcio>=1.78.0",
     "grpcio-tools>=1.78.0",
     "moto[s3,server]>=5.1.22",

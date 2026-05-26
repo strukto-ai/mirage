@@ -220,6 +220,19 @@ wheels = [
 ]
 
 [[package]]
+name = "aioresponses"
+version = "0.7.8"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "packaging" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/de/03/532bbc645bdebcf3b6af3b25d46655259d66ce69abba7720b71ebfabbade/aioresponses-0.7.8.tar.gz", hash = "sha256:b861cdfe5dc58f3b8afac7b0a6973d5d7b2cb608dd0f6253d16b8ee8eaf6df11", size = 40253, upload-time = "2025-01-19T18:14:03.222Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/12/b7/584157e43c98aa89810bc2f7099e7e01c728ecf905a66cf705106009228f/aioresponses-0.7.8-py2.py3-none-any.whl", hash = "sha256:b73bd4400d978855e55004b23a3a84cb0f018183bcf066a85ad392800b5b9a94", size = 12518, upload-time = "2025-01-19T18:13:59.633Z" },
+]
+
+[[package]]
 name = "aiosignal"
 version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3501,6 +3514,7 @@ ssh = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "aioresponses" },
     { name = "grpcio" },
     { name = "grpcio-tools" },
     { name = "moto", extra = ["s3", "server"] },
@@ -3591,10 +3605,11 @@ requires-dist = [
     { name = "typer", specifier = ">=0.12.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.41.0" },
 ]
-provides-extras = ["s3", "r2", "gcs", "oci", "ssh", "fuse", "mongodb", "postgres", "redis", "email", "parquet", "hdf5", "pdf", "audio", "langfuse", "anthropic", "openai", "pydantic-ai", "deepagents", "openhands", "camel", "daytona", "databricks", "all"]
+provides-extras = ["s3", "r2", "gcs", "oci", "databricks", "ssh", "fuse", "mongodb", "postgres", "redis", "email", "parquet", "hdf5", "pdf", "audio", "langfuse", "anthropic", "openai", "pydantic-ai", "deepagents", "openhands", "camel", "daytona", "all"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "aioresponses", specifier = ">=0.7.6" },
     { name = "grpcio", specifier = ">=1.78.0" },
     { name = "grpcio-tools", specifier = ">=1.78.0" },
     { name = "moto", extras = ["s3", "server"], specifier = ">=5.1.22" },
