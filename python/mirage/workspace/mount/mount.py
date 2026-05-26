@@ -451,6 +451,8 @@ class Mount:
                 if result is not None:
                     stream, io = _wrap_cmd_streams(result, mount_prefix,
                                                    self.revisions or None)
+                    # TODO: hand back a finalization context separately
+                    # instead of stamping policy onto io.safeguard.
                     io.safeguard = resolve_safeguard(
                         cmd_name, cmd.safeguard,
                         self.command_safeguards.get(cmd_name))

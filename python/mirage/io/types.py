@@ -46,6 +46,9 @@ class IOResult:
         safeguard (CommandSafeguard | None): Output cap for the command
             that produced this result, resolved at dispatch time and
             applied to the final output at the workspace boundary.
+            TODO: hoist this and any future finalization-policy fields
+            off IOResult (output data) into a separate
+            FinalizationContext returned alongside (stream, io).
         _stream_source (IOResult | None): Reference to the original IOResult
             that owns the lazy stream. Needed because streaming commands
             (e.g. grep) set exit_code lazily via exit_on_empty — the
