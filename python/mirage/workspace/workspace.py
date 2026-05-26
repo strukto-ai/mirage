@@ -25,12 +25,14 @@ from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index import IndexConfig
 from mirage.commands.builtin.general import HISTORY_COMMANDS
+from mirage.commands.builtin.utils.safeguard import apply_safeguard
 
 try:
     from mirage.cache.file.redis import RedisFileCacheStore
 except ImportError:
     RedisFileCacheStore = None  # type: ignore[misc, assignment]
 from mirage.io import IOResult
+from mirage.io.types import materialize
 from mirage.observe.context import start_recording, stop_recording
 from mirage.observe.observer import Observer
 from mirage.ops import Ops
@@ -766,6 +768,13 @@ class Workspace:
                 cancel=cancel,
             )
             stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
+            if io.safeguard is not None:
+                stdout, sg_io = await apply_safeguard(stdout, io.safeguard)
+                if sg_io.stderr is not None:
+                    existing = await materialize(io.stderr)
+                    io.stderr = existing + await materialize(sg_io.stderr)
+                if sg_io.exit_code != 0:
+                    io.exit_code = sg_io.exit_code
             session.last_exit_code = io.exit_code
             stop_recording()
             self._ops.records.extend(records)

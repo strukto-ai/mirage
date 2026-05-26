@@ -12,16 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, NonNegativeInt
-
-from mirage.types import OnExceed
-
-
-class CommandSafeguard(BaseModel):
-    max_bytes: NonNegativeInt | None = None
-    max_lines: NonNegativeInt | None = None
-    on_exceed: OnExceed = OnExceed.ERROR
-
+from mirage.types import CommandSafeguard, OnExceed
 
 _DEFAULT_MAX_LINES = 2000
 

@@ -15,7 +15,7 @@
 from dataclasses import dataclass
 from enum import Enum, StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt
 
 
 class FindType(str, Enum):
@@ -75,6 +75,12 @@ class ConsistencyPolicy(str, Enum):
 class OnExceed(str, Enum):
     ERROR = "error"
     TRUNCATE = "truncate"
+
+
+class CommandSafeguard(BaseModel):
+    max_bytes: NonNegativeInt | None = None
+    max_lines: NonNegativeInt | None = None
+    on_exceed: OnExceed = OnExceed.ERROR
 
 
 class VFSWriteOp(str, Enum):

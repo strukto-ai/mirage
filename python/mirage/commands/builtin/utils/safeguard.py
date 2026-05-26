@@ -28,14 +28,14 @@ def _trim_to_lines(buf: bytes, max_lines: int) -> bytes:
     return buf
 
 
-def _build_notice(command_name: str, safeguard: CommandSafeguard) -> bytes:
+def _build_notice(safeguard: CommandSafeguard) -> bytes:
     parts: list[str] = []
     if safeguard.max_lines is not None:
         parts.append(f"{safeguard.max_lines} lines")
     if safeguard.max_bytes is not None:
         parts.append(f"{safeguard.max_bytes} bytes")
     limit = " / ".join(parts)
-    return (f"{command_name}: output truncated at safeguard limit ({limit}); "
+    return (f"output truncated at safeguard limit ({limit}); "
             "narrow with grep, or read more with head -n / tail -n / "
             "a more specific path\n").encode()
 
@@ -43,7 +43,6 @@ def _build_notice(command_name: str, safeguard: CommandSafeguard) -> bytes:
 async def apply_safeguard(
     src: ByteSource | None,
     safeguard: CommandSafeguard | None,
-    command_name: str,
 ) -> tuple[ByteSource | None, IOResult]:
     if src is None or safeguard is None:
         return src, IOResult()
@@ -66,7 +65,7 @@ async def apply_safeguard(
     data = bytes(buf)
     if not truncated:
         return data, IOResult()
-    notice = _build_notice(command_name, safeguard)
+    notice = _build_notice(safeguard)
     if safeguard.on_exceed is OnExceed.ERROR:
         return None, IOResult(exit_code=1, stderr=notice)
     return data, IOResult(stderr=notice)

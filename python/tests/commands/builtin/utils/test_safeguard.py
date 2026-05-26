@@ -31,21 +31,21 @@ async def _stream(data: bytes) -> AsyncIterator[bytes]:
 
 @pytest.mark.asyncio
 async def test_no_safeguard_passthrough():
-    out, io = await apply_safeguard(_TEN, None, "cat")
+    out, io = await apply_safeguard(_TEN, None)
     assert out == _TEN and io.exit_code == 0 and io.stderr is None
 
 
 @pytest.mark.asyncio
 async def test_under_limit_not_truncated():
     sg = CommandSafeguard(max_lines=100, on_exceed=OnExceed.TRUNCATE)
-    out, io = await apply_safeguard(_TEN, sg, "cat")
+    out, io = await apply_safeguard(_TEN, sg)
     assert out == _TEN and io.stderr is None
 
 
 @pytest.mark.asyncio
 async def test_truncate_by_lines():
     sg = CommandSafeguard(max_lines=3, on_exceed=OnExceed.TRUNCATE)
-    out, io = await apply_safeguard(_TEN, sg, "cat")
+    out, io = await apply_safeguard(_TEN, sg)
     assert out == b"line0\nline1\nline2\n"
     assert io.exit_code == 0
     assert b"truncated" in (await materialize(io.stderr))
@@ -54,16 +54,16 @@ async def test_truncate_by_lines():
 @pytest.mark.asyncio
 async def test_error_by_lines():
     sg = CommandSafeguard(max_lines=3, on_exceed=OnExceed.ERROR)
-    out, io = await apply_safeguard(_TEN, sg, "cat")
+    out, io = await apply_safeguard(_TEN, sg)
     assert out is None
     assert io.exit_code == 1
-    assert b"cat" in (await materialize(io.stderr))
+    assert b"truncated" in (await materialize(io.stderr))
 
 
 @pytest.mark.asyncio
 async def test_truncate_by_bytes():
     sg = CommandSafeguard(max_bytes=10, on_exceed=OnExceed.TRUNCATE)
-    out, io = await apply_safeguard(_TEN, sg, "cat")
+    out, io = await apply_safeguard(_TEN, sg)
     assert out == _TEN[:10]
     assert b"truncated" in (await materialize(io.stderr))
 
@@ -71,6 +71,6 @@ async def test_truncate_by_bytes():
 @pytest.mark.asyncio
 async def test_streaming_input_truncates_and_stops_early():
     sg = CommandSafeguard(max_lines=2, on_exceed=OnExceed.TRUNCATE)
-    out, io = await apply_safeguard(_stream(_TEN), sg, "cat")
+    out, io = await apply_safeguard(_stream(_TEN), sg)
     assert out == b"line0\nline1\n"
     assert b"truncated" in (await materialize(io.stderr))
