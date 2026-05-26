@@ -52,3 +52,11 @@ mirage_integ/collections/books/documents.jsonl:
 /mongodb/mirage_integ/collections/books/documents.jsonl
 /mongodb/mirage_integ/collections/books/schema.json
 /mongodb/mirage_integ/views/recent_books/documents.jsonl
+
+# ---- safeguard demo (cat cap=2 lines) ----
+=== safeguard_cat_truncates ===
+"title": "alpha"
+"title": "beta"
+output truncated at safeguard limit (2 lines)
+=== safeguard_cat_pipe_uncapped ===
+5	/mongodb/mirage_integ/collections/books/documents.jsonl

@@ -25,6 +25,7 @@ from mirage import MountMode, Workspace
 from mirage.accessor.s3 import S3Accessor
 from mirage.resource.gcs import GCSConfig, GCSResource
 from mirage.resource.s3 import S3Config, S3Resource
+from mirage.types import CommandSafeguard, OnExceed
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 SEED_OBJECTS = [
@@ -91,6 +92,10 @@ PER_MOUNT_CASES: list[tuple[str, str]] = [
     ("file_parquet", "file {m}/data/example.parquet"),
     ("file_orc", "file {m}/data/example.orc"),
     ("file_feather", "file {m}/data/example.feather"),
+
+    # ----- safeguard: per-mount cap on cat (set to 20 lines below) -----
+    ("safeguard_cat_truncates", "cat {m}/data/example.jsonl"),
+    ("safeguard_cat_pipe_uncapped", "cat {m}/data/example.jsonl | wc -l"),
 ]
 
 # Cross-mount fingerprints mirroring examples/python/cross/example.py: read the
@@ -160,8 +165,20 @@ def _build_workspace(endpoint: str) -> Workspace:
 async def _run(ws: Workspace, name: str, cmd: str) -> None:
     result = await ws.execute(cmd)
     out = await result.stdout_str()
+    err = await result.stderr_str()
     print(f"=== {name} ===")
     print(out, end="" if out.endswith("\n") else "\n")
+    if err:
+        print(err, end="" if err.endswith("\n") else "\n")
+
+
+def _set_cat_safeguard(ws: Workspace, max_lines: int) -> None:
+    sg = CommandSafeguard(max_lines=max_lines, on_exceed=OnExceed.TRUNCATE)
+    mounts = list(ws._registry._mounts)
+    if ws._registry.default_mount is not None:
+        mounts.append(ws._registry.default_mount)
+    for m in mounts:
+        m.command_safeguards["cat"] = sg
 
 
 async def _measure(ws: Workspace, name: str, cmd: str) -> None:
@@ -195,6 +212,7 @@ async def main() -> None:
     try:
         _seed(endpoint)
         ws = _build_workspace(endpoint)
+        _set_cat_safeguard(ws, max_lines=20)
         for mount in MOUNTS:
             tag = mount.lstrip("/")
             for name, tmpl in PER_MOUNT_CASES:

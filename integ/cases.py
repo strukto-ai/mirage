@@ -16,6 +16,7 @@ import os
 import tempfile
 
 from mirage import Workspace
+from mirage.types import CommandSafeguard, OnExceed
 
 SEED_FILES = {
     "/data/a.txt":
@@ -70,6 +71,8 @@ SEED_FILES = {
     "/data/sorted_c.txt":
     "apple\ncherry\nelder\nfig\n",
 }
+
+BIG_TXT = "".join(f"line{i}\n" for i in range(50))
 
 CASES: list[tuple[str, str]] = [
     # ----- cat / head / tail -----
@@ -423,6 +426,22 @@ CASES: list[tuple[str, str]] = [
     ("base64_stdin_d", "echo aGVsbG8= | base64 -d"),
 ]
 
+# Safeguard demo: per-mount cap on cat. Runs after the regular CASES so
+# adding the seed file does not affect du / find / ls counts above.
+SAFEGUARD_CASES: list[tuple[str, str]] = [
+    ("safeguard_cat_truncates", "cat /data/big.txt"),
+    ("safeguard_cat_pipe_uncapped", "cat /data/big.txt | wc -l"),
+]
+
+
+def _set_cat_safeguard(ws: Workspace, max_lines: int) -> None:
+    sg = CommandSafeguard(max_lines=max_lines, on_exceed=OnExceed.TRUNCATE)
+    mounts = list(ws._registry._mounts)
+    if ws._registry.default_mount is not None:
+        mounts.append(ws._registry.default_mount)
+    for m in mounts:
+        m.command_safeguards["cat"] = sg
+
 
 async def run_cases(ws, reload_resources: dict | None = None) -> None:
     for path, content in SEED_FILES.items():
@@ -433,8 +452,22 @@ async def run_cases(ws, reload_resources: dict | None = None) -> None:
     for name, cmd in CASES:
         result = await ws.execute(cmd)
         out = await result.stdout_str()
+        err = await result.stderr_str()
         print(f"=== {name} ===")
         print(out, end="" if out.endswith("\n") else "\n")
+        if err:
+            print(err, end="" if err.endswith("\n") else "\n")
+
+    await ws.execute("tee /data/big.txt > /dev/null", stdin=BIG_TXT.encode())
+    _set_cat_safeguard(ws, max_lines=20)
+    for name, cmd in SAFEGUARD_CASES:
+        result = await ws.execute(cmd)
+        out = await result.stdout_str()
+        err = await result.stderr_str()
+        print(f"=== {name} ===")
+        print(out, end="" if out.endswith("\n") else "\n")
+        if err:
+            print(err, end="" if err.endswith("\n") else "\n")
 
     fd, tar = tempfile.mkstemp(suffix=".tar")
     os.close(fd)

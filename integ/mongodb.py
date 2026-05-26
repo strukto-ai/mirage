@@ -19,6 +19,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 from mirage import MountMode, Workspace
 from mirage.resource.mongodb import MongoDBConfig, MongoDBResource
+from mirage.types import CommandSafeguard, OnExceed
 
 MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb://localhost:27017")
 DB = "mirage_integ"
@@ -113,6 +114,12 @@ CASES: list[tuple[str, str]] = [
      f"cat {MOUNT}/{DB}/collections/books/documents.jsonl | grep -c fiction"),
     ("cat_view_docs", f"cat {MOUNT}/{DB}/views/recent_books/documents.jsonl"),
     ("wc_l_view", f"wc -l {MOUNT}/{DB}/views/recent_books/documents.jsonl"),
+
+    # ----- safeguard: per-mount cap on cat (set to 2 lines below) -----
+    ("safeguard_cat_truncates",
+     f"cat {MOUNT}/{DB}/collections/books/documents.jsonl"),
+    ("safeguard_cat_pipe_uncapped",
+     f"cat {MOUNT}/{DB}/collections/books/documents.jsonl | wc -l"),
 ]
 
 
@@ -137,8 +144,20 @@ async def _seed(client: AsyncIOMotorClient) -> None:
 async def _run(ws: Workspace, name: str, cmd: str) -> None:
     result = await ws.execute(cmd)
     out = await result.stdout_str()
+    err = await result.stderr_str()
     print(f"=== {name} ===")
     print(out, end="" if out.endswith("\n") else "\n")
+    if err:
+        print(err, end="" if err.endswith("\n") else "\n")
+
+
+def _set_cat_safeguard(ws: Workspace, max_lines: int) -> None:
+    sg = CommandSafeguard(max_lines=max_lines, on_exceed=OnExceed.TRUNCATE)
+    mounts = list(ws._registry._mounts)
+    if ws._registry.default_mount is not None:
+        mounts.append(ws._registry.default_mount)
+    for m in mounts:
+        m.command_safeguards["cat"] = sg
 
 
 async def main() -> None:
@@ -151,6 +170,8 @@ async def main() -> None:
         config=MongoDBConfig(uri=MONGODB_URI, databases=[DB]))
     ws = Workspace({MOUNT: resource}, mode=MountMode.READ)
     for name, cmd in CASES:
+        if name == "safeguard_cat_truncates":
+            _set_cat_safeguard(ws, max_lines=2)
         await _run(ws, name, cmd)
 
 

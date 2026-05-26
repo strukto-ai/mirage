@@ -228,3 +228,9 @@ ListObjectsV2=2 HeadObject=0
 ListObjectsV2=1 HeadObject=0
 === gcs:calls:tree ===
 ListObjectsV2=2 HeadObject=0
+
+=== s3:safeguard_cat_truncates ===
+=== gcs:safeguard_cat_truncates ===
+output truncated at safeguard limit (20 lines)
+=== s3:safeguard_cat_pipe_uncapped ===
+=== gcs:safeguard_cat_pipe_uncapped ===

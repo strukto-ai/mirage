@@ -1122,3 +1122,10 @@ world
 foo
 bar
 baz
+
+=== safeguard_cat_truncates ===
+line0
+line19
+output truncated at safeguard limit (20 lines)
+=== safeguard_cat_pipe_uncapped ===
+50
