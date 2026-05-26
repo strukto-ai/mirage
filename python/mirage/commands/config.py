@@ -16,6 +16,7 @@ import functools
 from dataclasses import dataclass, replace
 from typing import Callable
 
+from mirage.commands.safeguard import CommandSafeguard
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.help import render_help
 from mirage.commands.spec.types import OperandKind, Option
@@ -57,6 +58,7 @@ class RegisteredCommand:
     src: str | None = None
     dst: str | None = None
     write: bool = False
+    safeguard: CommandSafeguard | None = None
 
 
 def command(
@@ -69,6 +71,7 @@ def command(
     dry_run: Callable | None = None,
     aggregate: Callable | None = None,
     write: bool = False,
+    safeguard: CommandSafeguard | None = None,
 ) -> Callable:
 
     def decorator(fn: Callable) -> Callable:
@@ -86,6 +89,7 @@ def command(
                 provision_fn=provision or dry_run,
                 aggregate=aggregate,
                 write=write,
+                safeguard=safeguard,
             )
             wrapped_fn._registered_commands.append(rc)
         return wrapped_fn

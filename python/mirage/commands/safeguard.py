@@ -21,3 +21,24 @@ class CommandSafeguard(BaseModel):
     max_bytes: NonNegativeInt | None = None
     max_lines: NonNegativeInt | None = None
     on_exceed: OnExceed = OnExceed.ERROR
+
+
+DEFAULT_COMMAND_SAFEGUARDS: dict[str, CommandSafeguard] = {
+    "cat": CommandSafeguard(max_lines=10_000, on_exceed=OnExceed.TRUNCATE),
+    "grep": CommandSafeguard(max_lines=10_000, on_exceed=OnExceed.TRUNCATE),
+    "rg": CommandSafeguard(max_lines=10_000, on_exceed=OnExceed.TRUNCATE),
+    "head": CommandSafeguard(max_lines=100_000, on_exceed=OnExceed.TRUNCATE),
+    "tail": CommandSafeguard(max_lines=100_000, on_exceed=OnExceed.TRUNCATE),
+}
+
+
+def resolve_safeguard(
+    name: str,
+    command_default: CommandSafeguard | None = None,
+    mount_override: CommandSafeguard | None = None,
+) -> CommandSafeguard | None:
+    if mount_override is not None:
+        return mount_override
+    if command_default is not None:
+        return command_default
+    return DEFAULT_COMMAND_SAFEGUARDS.get(name)

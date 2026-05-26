@@ -15,7 +15,8 @@
 import pytest
 from pydantic import ValidationError
 
-from mirage.commands.safeguard import CommandSafeguard
+from mirage.commands.safeguard import (DEFAULT_COMMAND_SAFEGUARDS,
+                                       CommandSafeguard, resolve_safeguard)
 from mirage.types import OnExceed
 
 
@@ -41,3 +42,23 @@ def test_rejects_negative_limits():
         CommandSafeguard(max_bytes=-1)
     with pytest.raises(ValidationError):
         CommandSafeguard(max_lines=-5)
+
+
+def test_resolve_prefers_mount_override():
+    override = CommandSafeguard(max_lines=5)
+    default = CommandSafeguard(max_lines=50)
+    assert resolve_safeguard("cat", default, override) is override
+
+
+def test_resolve_falls_back_to_command_default():
+    default = CommandSafeguard(max_lines=50)
+    assert resolve_safeguard("cat", default, None) is default
+
+
+def test_resolve_falls_back_to_central_default():
+    assert resolve_safeguard("cat", None,
+                             None) is DEFAULT_COMMAND_SAFEGUARDS["cat"]
+
+
+def test_resolve_unknown_command_has_no_safeguard():
+    assert resolve_safeguard("nl", None, None) is None
