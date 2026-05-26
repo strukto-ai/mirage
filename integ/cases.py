@@ -431,6 +431,8 @@ CASES: list[tuple[str, str]] = [
 SAFEGUARD_CASES: list[tuple[str, str]] = [
     ("safeguard_cat_truncates", "cat /data/big.txt"),
     ("safeguard_cat_pipe_uncapped", "cat /data/big.txt | wc -l"),
+    ("safeguard_cat_pipe_head_3", "cat /data/big.txt | head -n 3"),
+    ("safeguard_cat_pipe_head_30", "cat /data/big.txt | head -n 30"),
 ]
 
 
