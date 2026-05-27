@@ -12,25 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { defineConfig } from 'tsup'
+// Drop this file into `.opencode/plugins/mirage.ts` of any project and run
+// `opencode`. OpenCode auto-discovers plugin files and merges their `tool`
+// dict over its built-ins, so `read`, `write`, `edit`, `ls`, `bash`, `glob`,
+// and `grep` will operate on the Mirage workspace instead of the local disk.
 
-export default defineConfig({
-  entry: [
-    'src/index.ts',
-    'src/openai/index.ts',
-    'src/langchain/index.ts',
-    'src/pi/index.ts',
-    'src/vercel/index.ts',
-    'src/mastra/index.ts',
-    'src/opencode/index.ts',
-  ],
-  format: ['esm'],
-  dts: {
-    compilerOptions: {
-      ignoreDeprecations: '6.0',
-    },
-  },
-  sourcemap: true,
-  clean: true,
-  target: 'es2022',
-})
+import { MountMode, OpsRegistry, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { miragePlugin } from '@struktoai/mirage-agents/opencode'
+
+const ram = new RAMResource()
+const ops = new OpsRegistry()
+for (const op of ram.ops()) ops.register(op)
+const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
+
+export default miragePlugin(ws)

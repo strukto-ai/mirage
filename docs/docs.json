@@ -312,6 +312,7 @@
               "typescript/agents/pi",
               "typescript/agents/vercel",
               "typescript/agents/mastra",
+              "typescript/agents/opencode",
               "typescript/agents/claude-code",
               "typescript/agents/codex"
             ]

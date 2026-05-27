@@ -1,0 +1,71 @@
+---
+title: OpenCode
+description: Hand a Mirage workspace to OpenCode as a plugin via the @struktoai/mirage-agents/opencode adapter.
+icon: terminal
+---
+
+[OpenCode](https://opencode.ai) is an open-source coding agent that runs in your terminal, IDE, or desktop. Its plugin API lets you register tools that take precedence over the built-ins by name, so a Mirage plugin can swap OpenCode's `read`, `write`, `edit`, `ls`, `bash`, `glob`, and `grep` to operate on a `Workspace` instead of the local disk. Once installed, anything OpenCode reads or writes flows through Mirage and reaches every mounted resource (S3, GCS, Postgres, Linear, Slack, ...) as files.
+
+## Install
+
+`@struktoai/mirage-agents/opencode` is a tool factory plus a thin plugin shim. Pair it with `@struktoai/mirage-node` for any Node or Bun project.
+
+```bash
+bun add @struktoai/mirage-agents @struktoai/mirage-node
+```
+
+OpenCode runs `bun install` on startup against `.opencode/package.json`, so this works whether you use bun, pnpm, or npm in the host project.
+
+## Usage
+
+Drop a plugin file into `.opencode/plugins/` (project-local) or `~/.config/opencode/plugins/` (global). OpenCode auto-discovers it and merges the returned `tool` dict over its built-ins.
+
+```ts .opencode/plugins/mirage.ts
+import { MountMode, OpsRegistry, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { miragePlugin } from '@struktoai/mirage-agents/opencode'
+
+const ram = new RAMResource()
+const ops = new OpsRegistry()
+for (const op of ram.ops()) ops.register(op)
+const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
+
+export default miragePlugin(ws)
+```
+
+Add the dependencies to `.opencode/package.json` so OpenCode resolves them on startup:
+
+```json .opencode/package.json
+{
+  "dependencies": {
+    "@struktoai/mirage-agents": "*",
+    "@struktoai/mirage-node": "*"
+  }
+}
+```
+
+Then run `opencode` in that directory. The agent's `read /hello.txt`, `bash 'find /'`, `grep foo /`, etc. now all flow through the Mirage workspace.
+
+## Exports
+
+| Symbol | Purpose |
+| --- | --- |
+| `mirageTools(ws)` | Returns `{ read, write, edit, ls, bash, glob, grep }`, each shaped as an OpenCode `ToolDefinition`. Use this if you want to compose with other plugin hooks. |
+| `miragePlugin(ws)` | Returns a `Plugin` function for default-exporting from a plugin file. Wraps `mirageTools` under the `tool` hook. |
+
+### Tool reference
+
+| Tool | Input | Output |
+| --- | --- | --- |
+| `read` | `{ filePath }` | `{ title, output }` (text) or binary stub note |
+| `write` | `{ filePath, content }` | `{ title, output }` (auto-mkdirs parent) |
+| `edit` | `{ filePath, oldString, newString, replaceAll? }` | `{ title, output, metadata: { occurrences } }` |
+| `ls` | `{ path }` | `{ title, output }` (newline-separated, dirs suffixed with `/`) |
+| `bash` | `{ command }` | `{ title, output, metadata: { exitCode } }` (runs through Mirage shell) |
+| `glob` | `{ pattern, path? }` | `{ title, output }` (Mirage `find -name`) |
+| `grep` | `{ pattern, path? }` | `{ title, output }` (Mirage `grep -rn`) |
+
+`bash`, `glob`, and `grep` go through `ws.execute()`, so they pick up every Mirage shell builtin (resource-aware `head`, `tail`, `find`, `grep`, etc.) across mounts.
+
+## Examples
+
+- [`examples/typescript/agents/opencode/ram_opencode.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/agents/opencode/ram_opencode.ts), a RAM-backed plugin ready to drop into `.opencode/plugins/mirage.ts`.
