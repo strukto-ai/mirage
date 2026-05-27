@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.nl import nl as generic_nl
@@ -25,7 +26,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("nl", resource="hf_buckets", spec=SPECS["nl"])
+@command("nl", resource=HF_RESOURCES, spec=SPECS["nl"])
 async def nl(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

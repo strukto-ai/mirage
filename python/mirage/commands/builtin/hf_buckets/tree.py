@@ -14,6 +14,7 @@
 
 from functools import partial
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tree import tree as generic_tree
@@ -26,7 +27,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("tree", resource="hf_buckets", spec=SPECS["tree"])
+@command("tree", resource=HF_RESOURCES, spec=SPECS["tree"])
 async def tree(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

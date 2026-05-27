@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.zgrep import zgrep as generic_zgrep
@@ -25,7 +26,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("zgrep", resource="hf_buckets", spec=SPECS["zgrep"])
+@command("zgrep", resource=HF_RESOURCES, spec=SPECS["zgrep"])
 async def zgrep(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

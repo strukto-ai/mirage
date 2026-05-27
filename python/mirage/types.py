@@ -123,6 +123,9 @@ class ResourceName(str, Enum):
     EMAIL = "email"
     DATABRICKS_VOLUME = "databricks_volume"
     HF_BUCKETS = "hf_buckets"
+    HF_DATASETS = "hf_datasets"
+    HF_MODELS = "hf_models"
+    HF_SPACES = "hf_spaces"
 
 
 @dataclass(frozen=True)

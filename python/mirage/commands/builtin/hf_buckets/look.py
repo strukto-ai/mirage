@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.look import look as generic_look
@@ -25,7 +26,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("look", resource="hf_buckets", spec=SPECS["look"])
+@command("look", resource=HF_RESOURCES, spec=SPECS["look"])
 async def look(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

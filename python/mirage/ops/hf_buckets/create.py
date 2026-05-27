@@ -12,13 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.core.hf_buckets.create import create as create_core
 from mirage.ops.registry import op
 from mirage.types import PathSpec
 
 
-@op("create", resource="hf_buckets", write=True)
+@op("create", resource=HF_RESOURCES, write=True)
 async def create(accessor: HfBucketsAccessor, path: PathSpec, *, index,
                  **kwargs) -> None:
     await create_core(accessor, path, index)

@@ -16,6 +16,7 @@ import io
 import tarfile
 from collections.abc import AsyncIterator
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
@@ -37,7 +38,7 @@ def _compression_suffix(z: bool, j: bool, J: bool) -> str:
     return ""
 
 
-@command("tar", resource="hf_buckets", spec=SPECS["tar"], write=True)
+@command("tar", resource=HF_RESOURCES, spec=SPECS["tar"], write=True)
 async def tar(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

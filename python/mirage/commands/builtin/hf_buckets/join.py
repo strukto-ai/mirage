@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.join import join_cmd as generic_join
@@ -25,7 +26,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("join", resource="hf_buckets", spec=SPECS["join"])
+@command("join", resource=HF_RESOURCES, spec=SPECS["join"])
 async def join(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

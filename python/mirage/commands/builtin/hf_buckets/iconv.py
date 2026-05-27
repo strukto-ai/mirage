@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.utils.stream import _read_stdin_async
@@ -26,7 +27,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("iconv", resource="hf_buckets", spec=SPECS["iconv"], write=True)
+@command("iconv", resource=HF_RESOURCES, spec=SPECS["iconv"], write=True)
 async def iconv(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

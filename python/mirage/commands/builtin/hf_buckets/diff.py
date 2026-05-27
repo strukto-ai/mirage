@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.diff import diff as generic_diff
@@ -24,7 +25,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("diff", resource="hf_buckets", spec=SPECS["diff"])
+@command("diff", resource=HF_RESOURCES, spec=SPECS["diff"])
 async def diff(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

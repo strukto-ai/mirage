@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.commands.builtin.generic.basename import \
     basename as generic_basename
@@ -21,7 +22,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("basename", resource="hf_buckets", spec=SPECS["basename"])
+@command("basename", resource=HF_RESOURCES, spec=SPECS["basename"])
 async def basename(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec] | None = None,

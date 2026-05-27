@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
@@ -23,7 +24,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("touch", resource="hf_buckets", spec=SPECS["touch"], write=True)
+@command("touch", resource=HF_RESOURCES, spec=SPECS["touch"], write=True)
 async def touch(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

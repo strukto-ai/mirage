@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cat import cat as generic_cat
@@ -30,7 +31,7 @@ from mirage.types import PathSpec
 
 
 @command("cat",
-         resource="hf_buckets",
+         resource=HF_RESOURCES,
          spec=SPECS["cat"],
          provision=file_read_provision)
 async def cat(

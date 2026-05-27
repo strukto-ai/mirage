@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cut import cut as generic_cut
@@ -25,7 +26,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("cut", resource="hf_buckets", spec=SPECS["cut"])
+@command("cut", resource=HF_RESOURCES, spec=SPECS["cut"])
 async def cut(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.awk import awk as generic_awk
@@ -26,7 +27,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("awk", resource="hf_buckets", spec=SPECS["awk"])
+@command("awk", resource=HF_RESOURCES, spec=SPECS["awk"])
 async def awk(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

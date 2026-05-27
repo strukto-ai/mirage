@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.jq import jq as generic_jq
@@ -59,7 +60,7 @@ async def jq_provision(
     )
 
 
-@command("jq", resource="hf_buckets", spec=SPECS["jq"], provision=jq_provision)
+@command("jq", resource=HF_RESOURCES, spec=SPECS["jq"], provision=jq_provision)
 async def jq(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

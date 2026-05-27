@@ -12,13 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.core.hf_buckets.stat import stat as stat_impl
 from mirage.ops.registry import op
 from mirage.types import FileStat, PathSpec
 
 
-@op("stat", resource="hf_buckets")
+@op("stat", resource=HF_RESOURCES)
 async def stat(accessor: HfBucketsAccessor, path: PathSpec, *, index,
                **kwargs) -> FileStat:
     return await stat_impl(accessor, path, index)

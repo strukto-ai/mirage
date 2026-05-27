@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.core.filetype.hdf5 import cat as hdf5_cat
 from mirage.core.hf_buckets.read import read_bytes
@@ -19,7 +20,7 @@ from mirage.ops.registry import op
 from mirage.types import PathSpec
 
 
-@op("read", resource="hf_buckets", filetype=".hdf5")
+@op("read", resource=HF_RESOURCES, filetype=".hdf5")
 async def read_hdf5(accessor: HfBucketsAccessor, path: PathSpec, *, index,
                     **kwargs) -> bytes:
     raw = await read_bytes(accessor, path, index)

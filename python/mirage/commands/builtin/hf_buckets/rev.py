@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.rev import rev as generic_rev
@@ -25,7 +26,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("rev", resource="hf_buckets", spec=SPECS["rev"])
+@command("rev", resource=HF_RESOURCES, spec=SPECS["rev"])
 async def rev(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.utils.stream import _resolve_source
@@ -39,7 +40,7 @@ def _numeric_suffix(index: int, length: int) -> str:
     return str(index).zfill(length)
 
 
-@command("split", resource="hf_buckets", spec=SPECS["split"], write=True)
+@command("split", resource=HF_RESOURCES, spec=SPECS["split"], write=True)
 async def split(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

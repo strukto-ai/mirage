@@ -17,6 +17,7 @@ import posixpath
 import zipfile
 from collections.abc import AsyncIterator
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
@@ -28,7 +29,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("zip", resource="hf_buckets", spec=SPECS["zip"], write=True)
+@command("zip", resource=HF_RESOURCES, spec=SPECS["zip"], write=True)
 async def zip_cmd(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

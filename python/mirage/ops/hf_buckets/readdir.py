@@ -12,13 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.core.hf_buckets.readdir import readdir as readdir_impl
 from mirage.ops.registry import op
 from mirage.types import PathSpec
 
 
-@op("readdir", resource="hf_buckets")
+@op("readdir", resource=HF_RESOURCES)
 async def readdir(accessor: HfBucketsAccessor, path: PathSpec, *, index,
                   **kwargs) -> list[str]:
     return await readdir_impl(accessor, path, index)

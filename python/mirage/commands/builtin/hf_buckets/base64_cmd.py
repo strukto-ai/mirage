@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.base64_cmd import \
@@ -26,7 +27,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("base64", resource="hf_buckets", spec=SPECS["base64"])
+@command("base64", resource=HF_RESOURCES, spec=SPECS["base64"])
 async def base64_cmd(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

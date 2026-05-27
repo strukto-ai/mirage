@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.sed import sed as generic_sed
@@ -26,7 +27,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("sed", resource="hf_buckets", spec=SPECS["sed"])
+@command("sed", resource=HF_RESOURCES, spec=SPECS["sed"])
 async def sed(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.grep import grep as generic_grep
@@ -41,7 +42,7 @@ async def grep_provision(
 
 
 @command("grep",
-         resource="hf_buckets",
+         resource=HF_RESOURCES,
          spec=SPECS["grep"],
          provision=grep_provision)
 async def grep(

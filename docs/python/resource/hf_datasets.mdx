@@ -1,0 +1,113 @@
+---
+title: HF Datasets
+icon: cloud
+---
+The HF Datasets resource mounts a [Hugging Face Dataset](https://huggingface.co/datasets)
+repo at some prefix such as `/ds/`. Backed by Apache OpenDAL's `Hf` service.
+All reads are lazy: only the bytes you actually `cat`/`head` get transferred.
+
+For credential setup, see [HF Datasets Setup](/home/setup/hf_datasets).
+
+## Config
+
+```python
+import os
+
+from mirage import MountMode, Workspace
+from mirage.resource.hf_datasets import HfDatasetsConfig, HfDatasetsResource
+
+config = HfDatasetsConfig(
+    repo_id=os.environ["HF_DATASET_REPO"],   # "namespace/dataset-name"
+    token=os.environ.get("HF_TOKEN"),
+    # Optional:
+    # endpoint="https://huggingface.co",
+    # revision="main",
+    # key_prefix="train/",
+)
+resource = HfDatasetsResource(config)
+ws = Workspace({"/ds": resource}, mode=MountMode.READ)
+```
+
+`HfDatasetsConfig` takes `repo_id` in `namespace/dataset-name` form plus an
+optional access token. Public datasets need no token.
+
+## Filesystem Layout
+
+Maps dataset repo files to virtual paths under the mount prefix.
+
+For example, if dataset `AlienKevin/SWE-ZERO-12M-trajectories` contains:
+
+```text
+README.md
+data/train-00000-of-01000.parquet
+data/train-00001-of-01000.parquet
+```
+
+Then mounting at `/ds/` exposes:
+
+```text
+/ds/
+  README.md
+  data/
+    train-00000-of-01000.parquet
+    train-00001-of-01000.parquet
+```
+
+## Example
+
+```python
+import asyncio
+import os
+
+from dotenv import load_dotenv
+
+from mirage import MountMode, Workspace
+from mirage.resource.hf_datasets import HfDatasetsConfig, HfDatasetsResource
+
+load_dotenv(".env.development")
+
+config = HfDatasetsConfig(
+    repo_id=os.environ.get("HF_DATASET_REPO",
+                           "AlienKevin/SWE-ZERO-12M-trajectories"),
+    token=os.environ.get("HF_TOKEN"),
+)
+resource = HfDatasetsResource(config)
+
+
+async def main() -> None:
+    ws = Workspace({"/ds": resource}, mode=MountMode.READ)
+
+    r = await ws.execute("ls /ds/")
+    print(await r.stdout_str())
+
+    r = await ws.execute("cat /ds/README.md | head -n 20")
+    print(await r.stdout_str())
+
+    r = await ws.execute("find /ds/ -name '*.parquet' | head -n 5")
+    print(await r.stdout_str())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## Shell Commands
+
+Same set as [HF Buckets](/python/resource/hf_buckets#shell-commands) — read,
+text-processing, file ops, path utilities, compression, encoding, and
+format-specific variants for parquet/feather/orc/hdf5.
+
+## Cache
+
+Uses `IndexCacheStore` with `index_ttl = 600` (10 minutes). Directory
+listings are cached and populate file-size/type entries for `stat`'s fast
+path, so a `readdir` + per-entry `stat` (which `ls`, FUSE `getattr`, and
+most shell commands trigger) costs one HTTP request instead of N.
+
+## Use Cases
+
+- **AI agents inspecting datasets**: Mount, browse the README, sample a few
+  rows from parquet shards without downloading the whole dataset
+- **Dataset triage**: `ls`, `stat`, `find` to see what's in a repo before
+  committing to a full local copy
+- **Sandboxed access**: Pin a `revision` for reproducibility

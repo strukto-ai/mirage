@@ -14,6 +14,7 @@
 
 import uuid
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -23,7 +24,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("mktemp", resource="hf_buckets", spec=SPECS["mktemp"], write=True)
+@command("mktemp", resource=HF_RESOURCES, spec=SPECS["mktemp"], write=True)
 async def mktemp(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

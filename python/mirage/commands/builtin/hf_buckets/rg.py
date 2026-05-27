@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.rg import rg as generic_rg
@@ -40,7 +41,7 @@ async def rg_provision(
     return await file_read_provision(accessor, paths, rendered)
 
 
-@command("rg", resource="hf_buckets", spec=SPECS["rg"], provision=rg_provision)
+@command("rg", resource=HF_RESOURCES, spec=SPECS["rg"], provision=rg_provision)
 async def rg(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

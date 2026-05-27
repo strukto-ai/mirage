@@ -111,7 +111,10 @@
                   "home/setup/gcs",
                   "home/setup/oci",
                   "home/setup/supabase",
-                  "home/setup/hf_buckets"
+                  "home/setup/hf_buckets",
+                  "home/setup/hf_datasets",
+                  "home/setup/hf_models",
+                  "home/setup/hf_spaces"
                 ]
               },
               {
@@ -225,7 +228,10 @@
                   "python/resource/gcs",
                   "python/resource/supabase",
                   "python/resource/oci",
-                  "python/resource/hf_buckets"
+                  "python/resource/hf_buckets",
+                  "python/resource/hf_datasets",
+                  "python/resource/hf_models",
+                  "python/resource/hf_spaces"
                 ]
               },
               {

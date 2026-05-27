@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.stat import stat as generic_stat
@@ -25,7 +26,7 @@ from mirage.types import PathSpec
 
 
 @command("stat",
-         resource="hf_buckets",
+         resource=HF_RESOURCES,
          spec=SPECS["stat"],
          provision=metadata_provision)
 async def stat(

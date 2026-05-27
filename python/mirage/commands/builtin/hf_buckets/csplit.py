@@ -15,6 +15,7 @@
 import re
 from collections.abc import AsyncIterator
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.utils.stream import _read_stdin_async
@@ -52,7 +53,7 @@ def _split_by_patterns(
     return parts
 
 
-@command("csplit", resource="hf_buckets", spec=SPECS["csplit"], write=True)
+@command("csplit", resource=HF_RESOURCES, spec=SPECS["csplit"], write=True)
 async def csplit(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

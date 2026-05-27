@@ -17,6 +17,8 @@ import opendal
 from mirage.accessor.base import Accessor
 from mirage.resource.secrets import reveal_secret
 
+HF_RESOURCES = ["hf_buckets", "hf_datasets", "hf_models", "hf_spaces"]
+
 
 class _HfAccessor(Accessor):
     REPO_TYPE: str = ""

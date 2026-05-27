@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tail import tail as generic_tail
@@ -29,7 +30,7 @@ from mirage.types import PathSpec
 
 
 @command("tail",
-         resource="hf_buckets",
+         resource=HF_RESOURCES,
          spec=SPECS["tail"],
          provision=head_tail_provision)
 async def tail(

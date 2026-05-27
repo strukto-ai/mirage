@@ -14,6 +14,7 @@
 
 from functools import partial
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.ls import ls as generic_ls
@@ -28,7 +29,7 @@ from mirage.types import LsSortBy, PathSpec
 
 
 @command("ls",
-         resource="hf_buckets",
+         resource=HF_RESOURCES,
          spec=SPECS["ls"],
          provision=metadata_provision)
 async def ls(

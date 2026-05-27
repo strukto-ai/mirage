@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.expand import expand as generic_expand
@@ -25,7 +26,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("expand", resource="hf_buckets", spec=SPECS["expand"])
+@command("expand", resource=HF_RESOURCES, spec=SPECS["expand"])
 async def expand(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

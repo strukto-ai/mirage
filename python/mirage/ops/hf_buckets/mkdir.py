@@ -12,13 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.core.hf_buckets.mkdir import mkdir as mkdir_core
 from mirage.ops.registry import op
 from mirage.types import PathSpec
 
 
-@op("mkdir", resource="hf_buckets", write=True)
+@op("mkdir", resource=HF_RESOURCES, write=True)
 async def mkdir(accessor: HfBucketsAccessor, path: PathSpec, *, index,
                 **kwargs) -> None:
     await mkdir_core(accessor, path, index)

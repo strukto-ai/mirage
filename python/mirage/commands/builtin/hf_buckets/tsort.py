@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tsort import tsort as generic_tsort
@@ -25,7 +26,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("tsort", resource="hf_buckets", spec=SPECS["tsort"])
+@command("tsort", resource=HF_RESOURCES, spec=SPECS["tsort"])
 async def tsort(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

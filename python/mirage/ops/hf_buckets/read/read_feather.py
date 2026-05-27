@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.core.filetype.feather import cat as feather_cat
 from mirage.core.hf_buckets.read import read_bytes
@@ -19,7 +20,7 @@ from mirage.ops.registry import op
 from mirage.types import PathSpec
 
 
-@op("read", resource="hf_buckets", filetype=".feather")
+@op("read", resource=HF_RESOURCES, filetype=".feather")
 async def read_feather(accessor: HfBucketsAccessor, path: PathSpec, *, index,
                        **kwargs) -> bytes:
     raw = await read_bytes(accessor, path, index)

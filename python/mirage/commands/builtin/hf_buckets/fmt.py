@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.fmt import fmt as generic_fmt
@@ -25,7 +26,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("fmt", resource="hf_buckets", spec=SPECS["fmt"])
+@command("fmt", resource=HF_RESOURCES, spec=SPECS["fmt"])
 async def fmt(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

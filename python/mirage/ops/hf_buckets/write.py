@@ -12,13 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.core.hf_buckets.write import write_bytes
 from mirage.ops.registry import op
 from mirage.types import PathSpec
 
 
-@op("write", resource="hf_buckets", write=True)
+@op("write", resource=HF_RESOURCES, write=True)
 async def write(accessor: HfBucketsAccessor, path: PathSpec, data: bytes, *,
                 index, **kwargs) -> None:
     await write_bytes(accessor, path, data, index)

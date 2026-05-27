@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.md5 import md5 as generic_md5
@@ -23,7 +24,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("md5", resource="hf_buckets", spec=SPECS["md5"])
+@command("md5", resource=HF_RESOURCES, spec=SPECS["md5"])
 async def md5(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.file_helper import _detect
@@ -55,7 +56,7 @@ def _format_file_result(
     return f"{path}: {desc}"
 
 
-@command("file", resource="hf_buckets", spec=SPECS["file"])
+@command("file", resource=HF_RESOURCES, spec=SPECS["file"])
 async def file(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

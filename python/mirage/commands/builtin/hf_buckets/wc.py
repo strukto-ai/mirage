@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.wc import WCCounts, format_wc
@@ -29,7 +30,7 @@ from mirage.types import PathSpec
 
 
 @command("wc",
-         resource="hf_buckets",
+         resource=HF_RESOURCES,
          spec=SPECS["wc"],
          provision=file_read_provision)
 async def wc(

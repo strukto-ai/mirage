@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.core.filetype.parquet import cat as parquet_cat
 from mirage.core.hf_buckets.read import read_bytes
@@ -19,7 +20,7 @@ from mirage.ops.registry import op
 from mirage.types import PathSpec
 
 
-@op("read", resource="hf_buckets", filetype=".parquet")
+@op("read", resource=HF_RESOURCES, filetype=".parquet")
 async def read_parquet(accessor: HfBucketsAccessor, path: PathSpec, *, index,
                        **kwargs) -> bytes:
     raw = await read_bytes(accessor, path, index)

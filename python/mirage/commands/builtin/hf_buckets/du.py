@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.utils.formatting import _human_size
@@ -36,7 +37,7 @@ def _depth(entry_path: str, base_path: str) -> int:
     return rel.strip("/").count("/") + 1
 
 
-@command("du", resource="hf_buckets", spec=SPECS["du"])
+@command("du", resource=HF_RESOURCES, spec=SPECS["du"])
 async def du(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

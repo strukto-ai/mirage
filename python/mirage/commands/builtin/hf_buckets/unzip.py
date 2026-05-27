@@ -16,6 +16,7 @@ import io
 import zipfile
 from collections.abc import AsyncIterator
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
@@ -27,7 +28,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("unzip", resource="hf_buckets", spec=SPECS["unzip"], write=True)
+@command("unzip", resource=HF_RESOURCES, spec=SPECS["unzip"], write=True)
 async def unzip(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],

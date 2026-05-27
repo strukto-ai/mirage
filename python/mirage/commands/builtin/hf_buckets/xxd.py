@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.xxd import xxd as generic_xxd
@@ -25,7 +26,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("xxd", resource="hf_buckets", spec=SPECS["xxd"])
+@command("xxd", resource=HF_RESOURCES, spec=SPECS["xxd"])
 async def xxd(
     accessor: HfBucketsAccessor,
     paths: list[PathSpec],
