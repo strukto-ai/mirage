@@ -2,6 +2,7 @@
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
   "name": "Mirage",
+  "description": "Mirage gives AI agents one virtual filesystem for S3, Google Drive, Slack, GitHub, Notion, Postgres, and SSH, so shell commands work across services.",
   "colors": {
     "primary": "#0C0C0C",
     "light": "#FAFAFA",
@@ -26,9 +27,6 @@
   },
   "seo": {
     "metatags": {
-      "charset": "UTF-8",
-      "viewport": "width=device-width, initial-scale=1.0",
-      "description": "Mirage gives AI agents one virtual filesystem for S3, Google Drive, Slack, GitHub, Notion, Postgres, and SSH, so shell commands can read, write, and pipe across services.",
       "keywords": "Mirage, filesystem for AI agents, virtual filesystem, AI agent tools, agent infrastructure, MCP alternative, bash for agents, S3 filesystem, Google Drive filesystem, Slack filesystem, GitHub filesystem, agent sandbox, Strukto",
       "author": "Strukto",
       "robots": "index, follow",
@@ -39,24 +37,17 @@
       "language": "en",
       "category": "Technology",
       "target": "developers",
-      "title": "Mirage · Unified Virtual Filesystem for AI Agents | Strukto",
-      "application-name": "Mirage",
-      "apple-mobile-web-app-title": "Mirage",
       "apple-mobile-web-app-capable": "yes",
       "apple-mobile-web-app-status-bar-style": "black-translucent",
-      "og:title": "Mirage · Unified Virtual Filesystem for AI Agents | Strukto",
       "og:type": "website",
       "og:url": "https://docs.mirage.strukto.ai",
       "og:image": "https://raw.githubusercontent.com/strukto-ai/mirage/main/assets/mirage-og-light.png",
       "og:image:alt": "Mirage virtual filesystem for AI agents",
-      "og:description": "Mount S3, Google Drive, Slack, GitHub, Notion, Postgres, SSH, and more behind one filesystem. Agents read, write, and pipe across services with shell commands.",
       "og:site_name": "Mirage",
       "og:locale": "en_US",
       "twitter:card": "summary_large_image",
       "twitter:site": "@struktoai",
       "twitter:creator": "@struktoai",
-      "twitter:title": "Mirage · Unified Virtual Filesystem for AI Agents | Strukto",
-      "twitter:description": "Mount S3, Google Drive, Slack, GitHub, Notion, Postgres, SSH, and more behind one filesystem. Agents read, write, and pipe across services with familiar shell commands.",
       "twitter:image": "https://raw.githubusercontent.com/strukto-ai/mirage/main/assets/mirage-og-light.png",
       "twitter:image:alt": "Mirage · Unified Virtual Filesystem for AI Agents | Strukto"
     }
