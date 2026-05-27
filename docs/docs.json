@@ -110,7 +110,8 @@
                   "home/setup/r2",
                   "home/setup/gcs",
                   "home/setup/oci",
-                  "home/setup/supabase"
+                  "home/setup/supabase",
+                  "home/setup/hf_buckets"
                 ]
               },
               {
@@ -223,7 +224,8 @@
                   "python/resource/r2",
                   "python/resource/gcs",
                   "python/resource/supabase",
-                  "python/resource/oci"
+                  "python/resource/oci",
+                  "python/resource/hf_buckets"
                 ]
               },
               {

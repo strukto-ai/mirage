@@ -140,3 +140,73 @@ jobs:
               f"${{ matrix.blocked }} got imported transitively"
           print(f"OK: imported ${{ matrix.module }} cleanly without ${{ matrix.blocked }}")
           PY
+
+  hf-buckets-optional-deps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install base package without hf_buckets extra
+        working-directory: python
+        run: |
+          uv venv .venv-hf
+          uv pip install --python .venv-hf/bin/python "."
+
+      - name: Verify huggingface_hub is not installed
+        working-directory: python
+        run: |
+          if .venv-hf/bin/python -c "import huggingface_hub" 2>/dev/null; then
+            echo "FAIL: huggingface_hub should not be installed without the hf_buckets extra"
+            exit 1
+          fi
+          echo "OK: huggingface_hub absent"
+
+      - name: Imports + read modules work; write/unlink raise ImportError on call
+        working-directory: python
+        run: |
+          .venv-hf/bin/python - <<'PY'
+          import sys
+          from mirage.resource.hf_buckets import HfBucketsConfig, HfBucketsResource
+          cfg = HfBucketsConfig(bucket="ns/b", token="t")
+          HfBucketsResource(cfg)
+          # Read core modules must import without huggingface_hub.
+          from mirage.core.hf_buckets import read, readdir, stat, glob, find, du, stream  # noqa: F401
+          # Write/unlink/create modules are guarded by try/except; import is fine.
+          from mirage.core.hf_buckets.write import _upload_sync
+          from mirage.core.hf_buckets.unlink import _delete_sync
+          # Calling the sync helpers without HfApi must raise a helpful ImportError.
+          for fn, name in ((_upload_sync, "_upload_sync"), (_delete_sync, "_delete_sync")):
+              try:
+                  if fn is _upload_sync:
+                      fn(None, "https://huggingface.co", "bid", "key", b"")
+                  else:
+                      fn(None, "https://huggingface.co", "bid", "key")
+              except ImportError as e:
+                  assert "huggingface_hub" in str(e), f"{name}: unexpected message {e!r}"
+              else:
+                  raise AssertionError(f"{name}: expected ImportError without huggingface_hub")
+          assert "huggingface_hub" not in sys.modules, "huggingface_hub got imported transitively"
+          print("OK: hf_buckets reads work without extra; writes raise ImportError cleanly")
+          PY
+
+      - name: Install hf_buckets extra and verify writes are reachable
+        working-directory: python
+        run: |
+          uv pip install --python .venv-hf/bin/python ".[hf_buckets]"
+          .venv-hf/bin/python - <<'PY'
+          from huggingface_hub import HfApi
+          from mirage.core.hf_buckets.write import HfApi as HfApiBoundWrite
+          from mirage.core.hf_buckets.unlink import HfApi as HfApiBoundUnlink
+          assert HfApiBoundWrite is HfApi and HfApiBoundUnlink is HfApi
+          print("OK: huggingface_hub available; write/unlink bind HfApi at module top")
+          PY

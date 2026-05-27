@@ -1,0 +1,41 @@
+---
+title: Hugging Face Buckets
+icon: cloud
+description: Set up the Hugging Face Buckets resource in Python.
+---
+
+## Dependencies
+
+Reads work out of the box (pure `aiohttp`). Writes require the
+`huggingface_hub` SDK for the Xet upload protocol:
+
+```bash
+uv sync --extra hf_buckets
+```
+
+For credential setup, see the [HF Buckets Setup](/home/setup/hf_buckets) guide.
+
+## Configuration
+
+```python
+import os
+from mirage import Workspace, MountMode
+from mirage.resource.hf_buckets import HfBucketsConfig, HfBucketsResource
+
+config = HfBucketsConfig(
+    bucket=os.environ["HF_BUCKET_NAME"],
+    token=os.environ["HF_TOKEN"],
+)
+resource = HfBucketsResource(config)
+ws = Workspace({"/hf/": resource}, mode=MountMode.READ)
+```
+
+## Config Reference
+
+| Field        | Required | Default                    | Description                                                  |
+| ------------ | -------- | -------------------------- | ------------------------------------------------------------ |
+| `bucket`     | Yes      |                            | Bucket in `namespace/bucket-name` form                       |
+| `token`      | No       | `None`                     | HF access token (required for private buckets and all writes)|
+| `endpoint`   | No       | `https://huggingface.co`   | HF endpoint (override for enterprise instances)              |
+| `timeout`    | No       | `30`                       | Request timeout in seconds                                   |
+| `key_prefix` | No       | `None`                     | Optional path prefix scoping the mount to a subtree          |
