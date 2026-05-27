@@ -47,6 +47,9 @@ REGISTRY: dict[str, ResourceEntry] = {
     "gcs":
     ResourceEntry("mirage.resource.gcs:GCSResource",
                   "mirage.resource.gcs:GCSConfig"),
+    "hf_buckets":
+    ResourceEntry("mirage.resource.hf_buckets:HfBucketsResource",
+                  "mirage.resource.hf_buckets:HfBucketsConfig"),
     "github":
     ResourceEntry("mirage.resource.github:GitHubResource",
                   "mirage.resource.github:GitHubConfig"),
