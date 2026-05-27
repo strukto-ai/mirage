@@ -13,9 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.hf_buckets import HfBucketsAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.types import PathSpec
 
 
-async def mkdir(accessor: HfBucketsAccessor, path: PathSpec) -> None:
-    raise NotImplementedError(
-        "hf_buckets is read-only in v1; mkdir is not supported")
+async def mkdir(accessor: HfBucketsAccessor,
+                path: PathSpec,
+                index: IndexCacheStore | None = None) -> None:
+    # Object stores don't have real directories; mkdir is a no-op.
+    return None

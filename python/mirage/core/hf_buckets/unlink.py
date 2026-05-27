@@ -12,10 +12,46 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import time
+
+from huggingface_hub.errors import EntryNotFoundError, RepositoryNotFoundError
+
 from mirage.accessor.hf_buckets import HfBucketsAccessor
-from mirage.types import PathSpec
+from mirage.cache.index import IndexCacheStore
+from mirage.core.hf_buckets._client import HfBucketsClient, _key
+from mirage.core.hf_buckets.stat import stat
+from mirage.observe.context import record
+from mirage.resource.secrets import reveal_secret
+from mirage.types import FileType, PathSpec
 
 
-async def unlink(accessor: HfBucketsAccessor, path: PathSpec) -> None:
-    raise NotImplementedError(
-        "hf_buckets is read-only in v1; unlink is not supported")
+def _delete_sync(token: str | None, endpoint: str, bucket_id: str,
+                 key: str) -> None:
+    # Lazy import: huggingface_hub is an optional [hf_buckets] extra.
+    from huggingface_hub import HfApi
+    api = HfApi(endpoint=endpoint, token=token)
+    api.batch_bucket_files(bucket_id, delete=[key])
+
+
+async def unlink(accessor: HfBucketsAccessor,
+                 path: PathSpec,
+                 index: IndexCacheStore | None = None) -> None:
+    if isinstance(path, str):
+        path = PathSpec.from_str_path(path)
+    file_stat = await stat(accessor, path, index)
+    if file_stat.type == FileType.DIRECTORY:
+        raise IsADirectoryError(path.strip_prefix)
+    raw = path.strip_prefix
+    config = accessor.config
+    key = _key(raw, config)
+    client = HfBucketsClient(config)
+    bucket_id = await client.bucket_id()
+    token = reveal_secret(config.token)
+    start_ms = int(time.monotonic() * 1000)
+    try:
+        await asyncio.to_thread(_delete_sync, token, config.endpoint,
+                                bucket_id, key)
+    except (RepositoryNotFoundError, EntryNotFoundError) as exc:
+        raise FileNotFoundError(raw) from exc
+    record("unlink", path.original, "hf_buckets", 0, start_ms)

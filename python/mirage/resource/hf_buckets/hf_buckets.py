@@ -17,14 +17,18 @@ from typing import Any
 
 from mirage.accessor.hf_buckets import HfBucketsAccessor, HfBucketsConfig
 from mirage.commands.builtin.hf_buckets import COMMANDS as HF_COMMANDS
+from mirage.core.hf_buckets.create import create
 from mirage.core.hf_buckets.du import du, du_all
 from mirage.core.hf_buckets.exists import exists
 from mirage.core.hf_buckets.find import find
 from mirage.core.hf_buckets.glob import resolve_glob as _resolve_glob
+from mirage.core.hf_buckets.mkdir import mkdir
 from mirage.core.hf_buckets.read import read_bytes
 from mirage.core.hf_buckets.readdir import readdir
 from mirage.core.hf_buckets.stat import stat as hf_stat
 from mirage.core.hf_buckets.stream import range_read, read_stream
+from mirage.core.hf_buckets.unlink import unlink
+from mirage.core.hf_buckets.write import write_bytes
 from mirage.ops.hf_buckets import OPS as HF_OPS
 from mirage.resource.base import BaseResource
 from mirage.resource.hf_buckets.prompt import PROMPT
@@ -40,6 +44,10 @@ _OPS = {
     "du_all": du_all,
     "exists": exists,
     "find_flat": find,
+    "write": write_bytes,
+    "create": create,
+    "unlink": unlink,
+    "mkdir": mkdir,
 }
 
 

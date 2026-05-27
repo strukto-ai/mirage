@@ -12,11 +12,46 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import time
+
+from huggingface_hub.errors import EntryNotFoundError, RepositoryNotFoundError
+
 from mirage.accessor.hf_buckets import HfBucketsAccessor
+from mirage.cache.index import IndexCacheStore
+from mirage.core.hf_buckets._client import HfBucketsClient, _key
+from mirage.observe.context import record
+from mirage.resource.secrets import reveal_secret
 from mirage.types import PathSpec
 
 
-async def write_bytes(accessor: HfBucketsAccessor, path: PathSpec,
-                      data: bytes) -> None:
-    raise NotImplementedError(
-        "hf_buckets is read-only in v1; write_bytes is not supported")
+def _upload_sync(token: str | None, endpoint: str, bucket_id: str, key: str,
+                 data: bytes) -> None:
+    # Lazy import: huggingface_hub is an optional [hf_buckets] extra.
+    from huggingface_hub import HfApi
+    api = HfApi(endpoint=endpoint, token=token)
+    api.batch_bucket_files(bucket_id, add=[(data, key)])
+
+
+async def write_bytes(accessor: HfBucketsAccessor,
+                      path: PathSpec,
+                      data: bytes,
+                      index: IndexCacheStore | None = None) -> None:
+    if isinstance(path, str):
+        path = PathSpec.from_str_path(path)
+    raw = path.strip_prefix
+    config = accessor.config
+    key = _key(raw, config)
+    client = HfBucketsClient(config)
+    try:
+        bucket_id = await client.bucket_id()
+    except Exception as exc:
+        raise FileNotFoundError(raw) from exc
+    token = reveal_secret(config.token)
+    start_ms = int(time.monotonic() * 1000)
+    try:
+        await asyncio.to_thread(_upload_sync, token, config.endpoint,
+                                bucket_id, key, data)
+    except (RepositoryNotFoundError, EntryNotFoundError) as exc:
+        raise FileNotFoundError(raw) from exc
+    record("write", path.original, "hf_buckets", len(data), start_ms)

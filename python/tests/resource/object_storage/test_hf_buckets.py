@@ -32,15 +32,13 @@ def test_config_immutable():
         cfg.bucket = "other/other"
 
 
-def test_resource_has_read_only_ops():
+def test_resource_registers_ops():
     r = HfBucketsResource(HfBucketsConfig(bucket="o/b"))
     op_names = {o.name for o in r.ops_list()}
-    assert {"read", "readdir", "stat"} <= op_names
-    assert "write" not in op_names
-    assert "unlink" not in op_names
+    assert {"read", "readdir", "stat", "write", "create", "unlink"} <= op_names
 
 
 def test_resource_registers_commands():
     r = HfBucketsResource(HfBucketsConfig(bucket="o/b"))
     cmd_names = {c.name for c in r.commands()}
-    assert {"cat", "ls", "grep", "stat"} <= cmd_names
+    assert {"cat", "ls", "grep", "stat", "touch", "rm"} <= cmd_names

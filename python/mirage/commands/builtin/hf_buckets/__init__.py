@@ -46,6 +46,7 @@ from mirage.commands.builtin.hf_buckets.readlink import readlink
 from mirage.commands.builtin.hf_buckets.realpath import realpath
 from mirage.commands.builtin.hf_buckets.rev import rev
 from mirage.commands.builtin.hf_buckets.rg import rg
+from mirage.commands.builtin.hf_buckets.rm import rm
 from mirage.commands.builtin.hf_buckets.sed import sed
 from mirage.commands.builtin.hf_buckets.sha256sum import sha256sum
 from mirage.commands.builtin.hf_buckets.shuf import shuf
@@ -56,6 +57,7 @@ from mirage.commands.builtin.hf_buckets.strings import strings
 from mirage.commands.builtin.hf_buckets.tac import tac
 from mirage.commands.builtin.hf_buckets.tail import tail
 from mirage.commands.builtin.hf_buckets.tar import tar
+from mirage.commands.builtin.hf_buckets.touch import touch
 from mirage.commands.builtin.hf_buckets.tr import tr
 from mirage.commands.builtin.hf_buckets.tree import tree
 from mirage.commands.builtin.hf_buckets.tsort import tsort
@@ -103,6 +105,7 @@ COMMANDS = [
     realpath,
     rev,
     rg,
+    rm,
     sed,
     sha256sum,
     shuf,
@@ -113,6 +116,7 @@ COMMANDS = [
     tac,
     tail,
     tar,
+    touch,
     tr,
     tree,
     tsort,
