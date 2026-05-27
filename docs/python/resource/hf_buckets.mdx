@@ -3,11 +3,11 @@ title: HF Buckets
 icon: cloud
 ---
 The HF Buckets resource mounts a [Hugging Face Bucket](https://huggingface.co/docs/buckets)
-as a virtual filesystem. Reads go directly over HF's HTTP API with `aiohttp`
-(true async streaming, no SDK dependency). Writes use the `huggingface_hub`
-SDK for the Xet upload protocol.
+at some prefix such as `/hf/`. Reads go directly over HF's HTTP API with
+`aiohttp` (true async streaming, no SDK dependency). Writes use the
+`huggingface_hub` SDK for the Xet upload protocol.
 
-For credential setup, see [HF Buckets Setup](/python/setup/hf_buckets).
+For credential setup, see [HF Buckets Setup](/home/setup/hf_buckets).
 
 ## Config
 
@@ -18,23 +18,35 @@ from mirage import MountMode, Workspace
 from mirage.resource.hf_buckets import HfBucketsConfig, HfBucketsResource
 
 config = HfBucketsConfig(
-    bucket=os.environ["HF_BUCKET_NAME"],
+    bucket=os.environ["HF_BUCKET_NAME"],  # "namespace/bucket-name"
     token=os.environ["HF_TOKEN"],
+    # Optional:
+    # endpoint="https://huggingface.co",
+    # timeout=30,
+    # key_prefix="data/",
 )
 resource = HfBucketsResource(config)
 ws = Workspace({"/hf": resource}, mode=MountMode.READ)
 ```
 
+`HfBucketsResource(config)` takes an `HfBucketsConfig` object with the
+bucket in `namespace/bucket-name` form plus an optional access token.
+Both `READ` and `WRITE` modes are supported. Writes require the
+`hf_buckets` extra (`uv sync --extra hf_buckets`); reads work with the
+base install.
+
 ## Filesystem Layout
 
-Bucket paths map to virtual paths under the mount prefix.
+The HF Buckets resource maps bucket object keys to virtual paths under
+the mount prefix.
 
 For example, if bucket `your-user/my-data` contains:
 
 ```text
-data/example.json
-data/example.parquet
-data/example.jsonl
+data/file.txt
+data/config.json
+reports/q1.csv
+reports/q2.csv
 ```
 
 Then mounting at `/hf/` exposes:
@@ -42,20 +54,23 @@ Then mounting at `/hf/` exposes:
 ```text
 /hf/
   data/
-    example.json
-    example.parquet
-    example.jsonl
+    file.txt
+    config.json
+  reports/
+    q1.csv
+    q2.csv
 ```
 
-Path mapping: virtual `/hf/data/example.json` resolves to bucket key
-`data/example.json`.
+Path mapping: virtual `/hf/data/file.txt` maps to bucket key
+`data/file.txt`.
 
 ## Cache
 
-Uses `IndexCacheStore` with 10-minute TTL. Directory listings populate
-file-size/type entries that `stat` reads via a fast path, so a `readdir`
-followed by per-entry `stat` calls (which is what `ls`, FUSE `getattr`,
-and most shell commands trigger) costs one HTTP request instead of N.
+The HF Buckets resource uses `IndexCacheStore` with `index_ttl = 600`
+(10 minutes). Directory listings are cached and populate file-size/type
+entries that `stat` reads via a fast path, so a `readdir` followed by
+per-entry `stat` calls (which is what `ls`, FUSE `getattr`, and most
+shell commands trigger) costs one HTTP request instead of N.
 
 ## Example
 
@@ -74,22 +89,29 @@ config = HfBucketsConfig(
     bucket=os.environ["HF_BUCKET_NAME"],
     token=os.environ["HF_TOKEN"],
 )
+
 resource = HfBucketsResource(config)
 
 
-async def main():
+async def main() -> None:
     ws = Workspace({"/hf/": resource}, mode=MountMode.READ)
 
     r = await ws.execute("ls /hf/")
     print(await r.stdout_str())
 
-    r = await ws.execute("cat /hf/data/example.json | head -n 10")
+    r = await ws.execute("cat /hf/data/file.txt")
     print(await r.stdout_str())
 
     r = await ws.execute("tree /hf/")
     print(await r.stdout_str())
 
-    r = await ws.execute("stat /hf/data/example.json")
+    r = await ws.execute("find /hf/ -name '*.json'")
+    print(await r.stdout_str())
+
+    r = await ws.execute("grep example /hf/data/config.json")
+    print(await r.stdout_str())
+
+    r = await ws.execute("stat /hf/data/file.txt")
     print(await r.stdout_str())
 
 
@@ -99,10 +121,37 @@ if __name__ == "__main__":
 
 ## Shell Commands
 
-The HF Buckets resource mirrors the S3 command surface (`cat`, `ls`, `head`,
-`tail`, `grep`, `rg`, `wc`, `find`, `tree`, `jq`, `stat`, `du`, plus the
-full text-processing/compression/encoding/data-format set). Parquet, Feather,
-ORC, and HDF5 reads pretty-print through the optional filetype dispatch.
+The HF Buckets resource mirrors the full S3 command surface — read,
+text-processing, file-operation, path-utility, compression, encoding,
+and data-format commands all work the same way. See the
+[S3 resource](/python/resource/s3#shell-commands) page for the full
+reference. Parquet, Feather, ORC, and HDF5 reads pretty-print through
+the optional filetype dispatch when the `parquet` / `hdf5` extras are
+installed.
 
 Writes (`write_bytes`, `unlink`, `create`, `mkdir`) require the
-`hf_buckets` extra to be installed.
+`hf_buckets` extra to be installed; calling them without it raises an
+`ImportError` with the install hint.
+
+## Use Cases
+
+- **AI agents accessing HF datasets**: Mount HF Buckets for agents to read and process datasets stored on the Hub
+- **Data pipelines**: Read and write HF bucket objects with shell-like commands
+- **Sandboxed bucket access**: Restrict agent operations to a specific bucket and prefix
+- **FUSE mounting**: Expose HF Buckets through a virtual FUSE mount for external tools
+
+## Scoping a resource to a key prefix
+
+Pass `key_prefix: str | None = None` to `HfBucketsConfig` to transparently scope every operation to a subpath of the bucket:
+
+```python
+HfBucketsResource(HfBucketsConfig(
+    bucket="your-user/app-data",
+    token=hf_token,
+    key_prefix=f"users/{user_id}/",
+))
+```
+
+When set, every read/write/list/stat operation is transparently scoped to that bucket subpath. Agents see clean paths like `/data/notes.md`; the underlying bucket key is `users/{user_id}/data/notes.md`. Useful for multi-tenant systems.
+
+**Normalization:** leading slashes are stripped and a trailing slash is added automatically. Both `None` and an empty string are treated as "no prefix."

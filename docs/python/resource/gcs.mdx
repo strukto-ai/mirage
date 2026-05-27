@@ -2,11 +2,12 @@
 title: GCS
 icon: google
 ---
-The GCS resource mounts a Google Cloud Storage bucket as a virtual filesystem.
-It uses GCS's S3-compatible XML API via HMAC keys, inheriting all S3 resource
-capabilities.
+The GCS resource mounts a Google Cloud Storage bucket at some prefix
+such as `/gcs/`. All operations involve network I/O to the remote object
+store. Uses aioboto3 against GCS's S3-compatible XML API via HMAC keys,
+inheriting all S3 resource capabilities.
 
-For credential setup, see [GCS Setup](/python/setup/gcs).
+For credential setup, see [GCS Setup](/home/setup/gcs).
 
 ## Config
 
@@ -20,15 +21,24 @@ config = GCSConfig(
     bucket=os.environ["GCS_BUCKET"],
     access_key_id=os.environ["GCS_ACCESS_KEY_ID"],
     secret_access_key=os.environ["GCS_SECRET_ACCESS_KEY"],
+    # Optional:
+    # endpoint_url="https://storage.googleapis.com",
+    # region="auto",
+    # timeout=30,
+    # proxy="http://proxy:8080",
 )
 resource = GCSResource(config)
 ws = Workspace({"/gcs": resource}, mode=MountMode.READ)
 ```
 
+`GCSResource(config)` takes a `GCSConfig` object with the bucket name
+and HMAC credentials. Both `READ` and `WRITE` modes are supported.
+
 ## Filesystem Layout
 
-The GCS resource maps object keys to virtual paths under the mount prefix,
-identical to the S3 resource.
+The GCS resource maps object keys to virtual paths under the mount
+prefix, identical to the S3 resource. GCS "directories" are
+prefix-based — there are no real directory objects.
 
 For example, if bucket `mirage-ai` contains:
 
@@ -48,12 +58,15 @@ Then mounting at `/gcs/` exposes:
     example.jsonl
 ```
 
-Path mapping: virtual `/gcs/data/example.json` maps to GCS key `data/example.json`.
+Path mapping: virtual `/gcs/data/example.json` maps to GCS key
+`data/example.json`.
 
 ## Cache
 
-Uses `IndexCacheStore` with 10-minute TTL, same as S3. Directory listings
-are cached to reduce API calls.
+The GCS resource uses `IndexCacheStore` with `index_ttl = 600`
+(10 minutes), same as S3. Directory listings are cached for up to 600
+seconds before being refreshed from GCS. This reduces API calls for
+repeated directory traversals.
 
 ## Example
 
@@ -73,22 +86,23 @@ config = GCSConfig(
     access_key_id=os.environ["GCS_ACCESS_KEY_ID"],
     secret_access_key=os.environ["GCS_SECRET_ACCESS_KEY"],
 )
+
 resource = GCSResource(config)
 
 
-async def main():
+async def main() -> None:
     ws = Workspace({"/gcs/": resource}, mode=MountMode.READ)
 
     r = await ws.execute("ls /gcs/")
-    print(await r.stdout_str())
-
-    r = await ws.execute("ls /gcs/data/")
     print(await r.stdout_str())
 
     r = await ws.execute("cat /gcs/data/example.json | head -n 10")
     print(await r.stdout_str())
 
     r = await ws.execute("tree /gcs/")
+    print(await r.stdout_str())
+
+    r = await ws.execute("find /gcs/ -name '*.parquet'")
     print(await r.stdout_str())
 
     r = await ws.execute("stat /gcs/data/example.json")
@@ -101,6 +115,14 @@ if __name__ == "__main__":
 
 ## Shell Commands
 
-The GCS resource inherits all S3 shell commands. See `docs/resource/s3.md`
-for the full command reference including read, text processing, file operations,
-compression, encoding, and data format support (Parquet, Feather, ORC, HDF5).
+GCS is S3-compatible and exposes the same command surface as the
+[S3 resource](/python/resource/s3#shell-commands) — read,
+text-processing, file-operation, path-utility, compression, encoding,
+and data-format (parquet/feather/orc/hdf5) commands all work the same
+way. See the S3 page for the full command reference.
+
+## Use Cases
+
+- **AI agents accessing GCS data**: Mount GCS buckets for agents to read and process datasets
+- **Data pipelines**: Read and write GCS objects with shell-like commands
+- **FUSE mounting**: Expose GCS buckets through a virtual FUSE mount for external tools

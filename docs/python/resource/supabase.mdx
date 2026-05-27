@@ -3,8 +3,11 @@ title: Supabase Storage
 icon: bolt
 description: Mount Supabase Storage as a virtual filesystem.
 ---
-The Supabase resource exposes a Supabase Storage bucket as a virtual
-filesystem. It uses the S3-compatible API internally.
+The Supabase resource mounts a Supabase Storage bucket at some prefix
+such as `/supabase/`. All operations involve network I/O to the remote
+object store. Uses aioboto3 against Supabase's S3-compatible API.
+
+For credential setup, see [Supabase Setup](/home/setup/supabase).
 
 ## Config
 
@@ -17,41 +20,40 @@ from mirage.resource.supabase import SupabaseConfig, SupabaseResource
 config = SupabaseConfig(
     bucket=os.environ["SUPABASE_BUCKET"],
     region=os.environ["SUPABASE_REGION"],
-    project_ref="oawrffhlppbtbpnehiif",
+    project_ref=os.environ["SUPABASE_PROJECT_REF"],
     access_key_id=os.environ["SUPABASE_ACCESS_KEY_ID"],
     secret_access_key=os.environ["SUPABASE_SECRET_ACCESS_KEY"],
+    # Optional:
+    # endpoint_url="https://{project_ref}.storage.supabase.co/storage/v1/s3",
+    # session_token="...",
+    # timeout=30,
+    # proxy="http://proxy:8080",
 )
 resource = SupabaseResource(config=config)
 ws = Workspace({"/supabase": resource}, mode=MountMode.READ)
 ```
 
-| Field              | Required | Default | Description                          |
-| ------------------ | -------- | ------- | ------------------------------------ |
-| `bucket`           | yes      |         | Supabase storage bucket name         |
-| `region`           | yes      |         | Supabase project region              |
-| `project_ref`      | no*      |         | Supabase project reference ID        |
-| `endpoint_url`     | no*      |         | Custom S3-compatible endpoint        |
-| `access_key_id`    | yes      |         | S3 access key from Supabase settings |
-| `secret_access_key`| yes      |         | S3 secret key from Supabase settings |
-| `session_token`    | no       |         | Optional session token               |
-| `timeout`          | no       | `30`    | Request timeout in seconds           |
-| `proxy`            | no       |         | HTTP proxy URL                       |
-
-*Either `project_ref` or `endpoint_url` is required. If `project_ref`
-is provided, the endpoint is auto-built as
-`https://{project_ref}.storage.supabase.co/storage/v1/s3`.
+`SupabaseResource(config)` takes a `SupabaseConfig` object with the
+bucket name, `region`, and either `project_ref` (endpoint is auto-built
+as `https://{project_ref}.storage.supabase.co/storage/v1/s3`) or an
+explicit `endpoint_url`. Both `READ` and `WRITE` modes are supported.
 
 ## Filesystem Layout
 
+The Supabase resource maps object keys to virtual paths under the mount
+prefix. Supabase "directories" are prefix-based — there are no real
+directory objects.
+
+For example, if bucket `my-bucket` contains:
+
 ```text
-/supabase/
-  <object-key-path>/
-    <file>
+avatars/user-001.png
+avatars/user-002.png
+documents/report.pdf
+documents/data.csv
 ```
 
-Object keys map directly to virtual paths.
-
-Example:
+Then mounting at `/supabase/` exposes:
 
 ```text
 /supabase/
@@ -63,10 +65,14 @@ Example:
     data.csv
 ```
 
+Path mapping: virtual `/supabase/avatars/user-001.png` maps to Supabase
+key `avatars/user-001.png`.
+
 ## Cache
 
-Uses `IndexCacheStore` for directory listings with configurable TTL.
-File content caching is handled by the workspace.
+The Supabase resource uses `IndexCacheStore` with `index_ttl = 600`
+(10 minutes). Directory listings are cached for up to 600 seconds before
+being refreshed from Supabase.
 
 ## Example
 
@@ -84,15 +90,16 @@ load_dotenv(".env.development")
 config = SupabaseConfig(
     bucket=os.environ["SUPABASE_BUCKET"],
     region=os.environ["SUPABASE_REGION"],
-    project_ref="oawrffhlppbtbpnehiif",
+    project_ref=os.environ["SUPABASE_PROJECT_REF"],
     access_key_id=os.environ["SUPABASE_ACCESS_KEY_ID"],
     secret_access_key=os.environ["SUPABASE_SECRET_ACCESS_KEY"],
 )
+
 resource = SupabaseResource(config=config)
 
 
-async def main():
-    ws = Workspace({"/supabase": resource}, mode=MountMode.READ)
+async def main() -> None:
+    ws = Workspace({"/supabase/": resource}, mode=MountMode.READ)
 
     r = await ws.execute("ls /supabase/")
     print(await r.stdout_str())
@@ -100,10 +107,13 @@ async def main():
     r = await ws.execute("cat /supabase/documents/data.csv | head -n 10")
     print(await r.stdout_str())
 
+    r = await ws.execute("tree -L 2 /supabase/")
+    print(await r.stdout_str())
+
     r = await ws.execute("find /supabase/ -name '*.pdf'")
     print(await r.stdout_str())
 
-    r = await ws.execute("tree -L 2 /supabase/")
+    r = await ws.execute("stat /supabase/avatars/user-001.png")
     print(await r.stdout_str())
 
 
@@ -113,12 +123,14 @@ if __name__ == "__main__":
 
 ## Shell Commands
 
-| Command         | Notes                                      |
-| --------------- | ------------------------------------------ |
-| `ls`            | List objects and prefixes                  |
-| `cat`           | Read object content                        |
-| `head` / `tail` | First/last N lines                         |
-| `grep`          | Pattern search                             |
-| `wc`            | Line/word/byte counts                      |
-| `stat`          | Object metadata (size, modified time)      |
-| `find`          | Recursive search with `-name`, `-maxdepth` |
+Supabase Storage is S3-compatible and exposes the same command surface
+as the [S3 resource](/python/resource/s3#shell-commands) — read,
+text-processing, file-operation, path-utility, compression, encoding,
+and data-format (parquet/feather/orc/hdf5) commands all work the same
+way. See the S3 page for the full command reference.
+
+## Use Cases
+
+- **AI agents accessing Supabase data**: Mount Supabase buckets for agents to read and process datasets
+- **Data pipelines**: Read and write Supabase objects with shell-like commands
+- **FUSE mounting**: Expose Supabase buckets through a virtual FUSE mount for external tools
