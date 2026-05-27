@@ -15,10 +15,30 @@
 import { MountMode, OpsRegistry, RAMResource, Workspace } from '@struktoai/mirage-node'
 import { miragePlugin } from '@struktoai/mirage-agents/opencode'
 
-const ram = new RAMResource()
-const ops = new OpsRegistry()
-for (const op of ram.ops()) ops.register(op)
-const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
-await ws.fs.writeFile('/hello.txt', 'hi from mirage RAM')
+async function makeWs(sessionID: string): Promise<Workspace> {
+  const ram = new RAMResource()
+  const ops = new OpsRegistry()
+  for (const op of ram.ops()) ops.register(op)
+  const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
+  await ws.fs.writeFile('/hello.txt', `hi from session ${sessionID}`)
+  return ws
+}
 
-export default miragePlugin(ws)
+const workspaces = new Map<string, Workspace>()
+const pending = new Map<string, Promise<Workspace>>()
+
+async function wsFor(ctx: { sessionID: string }): Promise<Workspace> {
+  const cached = workspaces.get(ctx.sessionID)
+  if (cached !== undefined) return cached
+  const inflight = pending.get(ctx.sessionID)
+  if (inflight !== undefined) return inflight
+  const p = makeWs(ctx.sessionID).then((ws) => {
+    workspaces.set(ctx.sessionID, ws)
+    pending.delete(ctx.sessionID)
+    return ws
+  })
+  pending.set(ctx.sessionID, p)
+  return p
+}
+
+export default miragePlugin(wsFor)

@@ -186,3 +186,21 @@ describe('opencode miragePlugin', () => {
     ])
   })
 })
+
+describe('opencode resolver (per-session workspace)', () => {
+  it('routes each session to its own workspace', async () => {
+    const wsA = mkWs()
+    const wsB = mkWs()
+    await wsA.fs.writeFile('/note.txt', 'alice')
+    await wsB.fs.writeFile('/note.txt', 'bob')
+    const tools = mirageTools((ctx) => (ctx.sessionID === 'a' ? wsA : wsB))
+
+    const exec = (t: unknown) =>
+      (t as { execute: (a: unknown, c: unknown) => Promise<string> }).execute
+    const ctxA = { sessionID: 'a', messageID: 'm', agent: '', abort: new AbortController().signal }
+    const ctxB = { sessionID: 'b', messageID: 'm', agent: '', abort: new AbortController().signal }
+
+    expect(await exec(tools.read)({ filePath: '/note.txt' }, ctxA)).toBe('alice')
+    expect(await exec(tools.read)({ filePath: '/note.txt' }, ctxB)).toBe('bob')
+  })
+})

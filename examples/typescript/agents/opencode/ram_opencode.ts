@@ -15,7 +15,11 @@
 import { config as loadEnv } from 'dotenv'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createOpencodeServer, createOpencodeClient } from '@opencode-ai/sdk'
+import {
+  createOpencodeServer,
+  createOpencodeClient,
+  type OpencodeClient,
+} from '@opencode-ai/sdk'
 
 const here = dirname(fileURLToPath(import.meta.url))
 loadEnv({ path: resolve(here, '../../../../.env.development') })
@@ -41,29 +45,26 @@ const server = await createOpencodeServer({
 })
 const client = createOpencodeClient({ baseUrl: server.url })
 
-try {
-  const session = await client.session.create({ body: { title: 'mirage-cat-demo' } })
+const MODEL = { providerID: 'openai', modelID: 'gpt-5.4-mini' }
+const PROMPT = 'Run `cat /hello.txt` with the bash tool and report exactly what it printed.'
+
+async function runSession(c: OpencodeClient, title: string): Promise<void> {
+  const session = await c.session.create({ body: { title } })
   const sessionId = (session.data as { id: string }).id
-
-  const result = await client.session.prompt({
+  const result = await c.session.prompt({
     path: { id: sessionId },
-    body: {
-      model: { providerID: 'openai', modelID: 'gpt-5.4-mini' },
-      parts: [
-        {
-          type: 'text',
-          text: 'Run `cat /hello.txt` with the bash tool and report exactly what it printed.',
-        },
-      ],
-    },
+    body: { model: MODEL, parts: [{ type: 'text', text: PROMPT }] },
   })
-
   const data = result.data as { parts?: Array<{ type: string; text?: string }> }
   for (const part of data.parts ?? []) {
     if (part.type === 'text' && part.text !== undefined && part.text.length > 0) {
-      console.log(part.text)
+      console.log(`[${title}] ${part.text}`)
     }
   }
+}
+
+try {
+  await Promise.all([runSession(client, 'alice'), runSession(client, 'bob')])
 } finally {
   server.close()
 }
