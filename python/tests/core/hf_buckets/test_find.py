@@ -63,7 +63,8 @@ async def test_find_subdir_uses_subpath_url():
         m.get("https://huggingface.co/api/buckets/o/b",
               payload={"id": "bkt-1"})
         m.get(
-            "https://huggingface.co/api/buckets/bkt-1/tree/data?recursive=true",
+            ("https://huggingface.co/api/buckets/"
+             "bkt-1/tree/data?recursive=true"),
             payload=[
                 {
                     "type": "file",
@@ -89,7 +90,8 @@ async def test_find_strips_key_prefix():
         m.get("https://huggingface.co/api/buckets/o/b",
               payload={"id": "bkt-1"})
         m.get(
-            "https://huggingface.co/api/buckets/bkt-1/tree/data?recursive=true",
+            ("https://huggingface.co/api/buckets/"
+             "bkt-1/tree/data?recursive=true"),
             payload=[
                 {
                     "type": "file",

@@ -53,7 +53,6 @@ async def stat(accessor: HfBucketsAccessor,
                 )
             if resp.status != 404:
                 resp.raise_for_status()
-                # Any 2xx other than 200 we treat as "unexpected, not a directory."
                 raise FileNotFoundError(raw)
         tree_url = _tree_url(config.endpoint, bucket_id, _prefix(raw, config))
         async with session.get(tree_url) as tresp:
