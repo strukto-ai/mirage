@@ -32,16 +32,32 @@ async def stat(accessor: HfBucketsAccessor,
     stripped = raw.strip("/")
     if not stripped:
         return FileStat(name="/", type=FileType.DIRECTORY)
+    if index is not None:
+        virtual_key = (original_prefix + "/" +
+                       stripped if original_prefix else "/" + stripped)
+        lookup = await index.get(virtual_key)
+        if lookup.entry is not None:
+            entry = lookup.entry
+            if entry.resource_type == "folder":
+                return FileStat(name=entry.name, type=FileType.DIRECTORY)
+            return FileStat(name=entry.name,
+                            size=entry.size,
+                            type=guess_type(entry.name))
+        parent = virtual_key.rsplit("/", 1)[0] or "/"
+        parent_listing = await index.list_dir(parent)
+        if parent_listing.entries is not None:
+            raise FileNotFoundError(raw)
     config = accessor.config
     key = _key(raw, config)
     client = HfBucketsClient(config)
     bucket_id = await client.bucket_id()
     file_url = _resolve_url(config.endpoint, bucket_id, key)
     async with await client.session() as session:
-        async with session.head(file_url, allow_redirects=True) as resp:
-            if resp.status == 200:
-                size = int(resp.headers.get("Content-Length", "0"))
-                # TODO: confirm Xet hash header name against real HF response.
+        async with session.head(file_url, allow_redirects=False) as resp:
+            if resp.status in (200, 302):
+                size_hdr = (resp.headers.get("X-Linked-Size")
+                            or resp.headers.get("Content-Length") or "0")
+                size = int(size_hdr)
                 xet = resp.headers.get("X-Xet-Hash")
                 return FileStat(
                     name=stripped.rsplit("/", 1)[-1],
