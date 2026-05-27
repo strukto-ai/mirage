@@ -1037,14 +1037,14 @@ wheels = [
 
 [[package]]
 name = "click"
-version = "8.3.1"
+version = "8.4.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-9-mirage-ai-all' and extra == 'extra-9-mirage-ai-camel') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openai') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openhands') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-pydantic-ai')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3d/fa/656b739db8587d7b5dfa22e22ed02566950fbfbcdc20311993483657a5c0/click-8.3.1.tar.gz", hash = "sha256:12ff4785d337a1bb490bb7e9c2b1ee5da3112e94a8622f26a6c77f5d2fc6842a", size = 295065, upload-time = "2025-11-15T20:45:42.706Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9b/98/518d8e5081007684232226f475082b30087d0f585e8457db087298259f49/click-8.4.1.tar.gz", hash = "sha256:918b5633eddf6b41c32d4f454bf0de810065c74e3f7dbf8ee5452f8be88d3e96", size = 353007, upload-time = "2026-05-22T04:08:37.769Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/98/78/01c019cdb5d6498122777c1a43056ebb3ebfeef2076d9d026bfe15583b2b/click-8.3.1-py3-none-any.whl", hash = "sha256:981153a64e25f12d547d3426c367a4857371575ee7ad18df2a6183ab0545b2a6", size = 108274, upload-time = "2025-11-15T20:45:41.139Z" },
+    { url = "https://files.pythonhosted.org/packages/c7/0d/67e5b4109ea4a837e80daa87c2c696711955e40449a97e8926672534def2/click-8.4.1-py3-none-any.whl", hash = "sha256:482be17c6991b8c19c5429a1e995d9b0efdbb63172824c41f99965dc0ade8ec2", size = 116639, upload-time = "2026-05-22T04:08:35.26Z" },
 ]
 
 [[package]]
@@ -2334,21 +2334,23 @@ wheels = [
 
 [[package]]
 name = "huggingface-hub"
-version = "0.36.2"
+version = "1.16.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "click" },
     { name = "filelock" },
     { name = "fsspec" },
-    { name = "hf-xet", marker = "platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'" },
+    { name = "hf-xet", marker = "platform_machine == 'AMD64' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64' or (extra == 'extra-9-mirage-ai-all' and extra == 'extra-9-mirage-ai-camel') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openai') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openhands') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-pydantic-ai')" },
+    { name = "httpx" },
     { name = "packaging" },
     { name = "pyyaml" },
-    { name = "requests" },
     { name = "tqdm" },
+    { name = "typer" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/7c/b7/8cb61d2eece5fb05a83271da168186721c450eb74e3c31f7ef3169fa475b/huggingface_hub-0.36.2.tar.gz", hash = "sha256:1934304d2fb224f8afa3b87007d58501acfda9215b334eed53072dd5e815ff7a", size = 649782, upload-time = "2026-02-06T09:24:13.098Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ab/11/9b6e439cb2417c479c3da108b38363232a1554721de9f8ef4836cb07422b/huggingface_hub-1.16.4.tar.gz", hash = "sha256:023bacd155f837d3fa56379ac8e23dababe6d6d87b04f8dacc258a44a38abe01", size = 792585, upload-time = "2026-05-26T17:19:09.971Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a8/af/48ac8483240de756d2438c380746e7130d1c6f75802ef22f3c6d49982787/huggingface_hub-0.36.2-py3-none-any.whl", hash = "sha256:48f0c8eac16145dfce371e9d2d7772854a4f591bcb56c9cf548accf531d54270", size = 566395, upload-time = "2026-02-06T09:24:11.133Z" },
+    { url = "https://files.pythonhosted.org/packages/da/86/e05d58ea272089151ba9f6fcc7b44a97aa2533d5a5bce46611220c23c6d6/huggingface_hub-1.16.4-py3-none-any.whl", hash = "sha256:994ec184c3330952d7b5f131ea0b1a6ba1047bd05461f5dec191f8fc1099fbd7", size = 668190, upload-time = "2026-05-26T17:19:08.228Z" },
 ]
 
 [[package]]
@@ -3408,6 +3410,7 @@ all = [
     { name = "daytona" },
     { name = "deepagents" },
     { name = "h5py" },
+    { name = "huggingface-hub" },
     { name = "langfuse" },
     { name = "mfusepy" },
     { name = "motor" },
@@ -3463,6 +3466,9 @@ gcs = [
 hdf5 = [
     { name = "h5py" },
     { name = "tables" },
+]
+hf-buckets = [
+    { name = "huggingface-hub" },
 ]
 langfuse = [
     { name = "langfuse" },
@@ -3547,6 +3553,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.135.1" },
     { name = "h5py", marker = "extra == 'hdf5'", specifier = ">=3.16.0" },
     { name = "httpx", specifier = ">=0.28.1" },
+    { name = "huggingface-hub", marker = "extra == 'hf-buckets'", specifier = ">=1.5.0" },
     { name = "jq", specifier = ">=1.11.0" },
     { name = "langfuse", marker = "extra == 'langfuse'", specifier = ">=4.2.0" },
     { name = "markitdown", marker = "extra == 'camel'", specifier = ">=0.1.5" },
@@ -3561,6 +3568,7 @@ requires-dist = [
     { name = "mirage-ai", extras = ["fuse"], marker = "extra == 'all'" },
     { name = "mirage-ai", extras = ["gcs"], marker = "extra == 'all'" },
     { name = "mirage-ai", extras = ["hdf5"], marker = "extra == 'all'" },
+    { name = "mirage-ai", extras = ["hf-buckets"], marker = "extra == 'all'" },
     { name = "mirage-ai", extras = ["langfuse"], marker = "extra == 'all'" },
     { name = "mirage-ai", extras = ["mongodb"], marker = "extra == 'all'" },
     { name = "mirage-ai", extras = ["oci"], marker = "extra == 'all'" },
@@ -3605,7 +3613,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.12.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.41.0" },
 ]
-provides-extras = ["s3", "r2", "gcs", "oci", "databricks", "ssh", "fuse", "mongodb", "postgres", "redis", "email", "parquet", "hdf5", "pdf", "audio", "langfuse", "anthropic", "openai", "pydantic-ai", "deepagents", "openhands", "camel", "daytona", "all"]
+provides-extras = ["s3", "r2", "gcs", "oci", "databricks", "hf-buckets", "ssh", "fuse", "mongodb", "postgres", "redis", "email", "parquet", "hdf5", "pdf", "audio", "langfuse", "anthropic", "openai", "pydantic-ai", "deepagents", "openhands", "camel", "daytona", "all"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -8997,7 +9005,7 @@ name = "tqdm"
 version = "4.67.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-9-mirage-ai-all' and extra == 'extra-9-mirage-ai-camel') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openai') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openhands') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-pydantic-ai')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/09/a9/6ba95a270c6f1fbcd8dac228323f2777d886cb206987444e4bce66338dd4/tqdm-4.67.3.tar.gz", hash = "sha256:7d825f03f89244ef73f1d4ce193cb1774a8179fd96f31d7e1dcde62092b960bb", size = 169598, upload-time = "2026-02-03T17:35:53.048Z" }
 wheels = [
