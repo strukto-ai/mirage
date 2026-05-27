@@ -103,11 +103,11 @@ class MirageTerminalToolkit(BaseToolkit):
         job_id = self._sessions.get(id)
         if job_id is None:
             return f"Error: no session '{id}'"
-        jobs_io = self._runner.run(self._ws.execute("jobs"))
-        jobs_out = _decode(
-            jobs_io.stdout if isinstance(jobs_io.stdout, bytes) else None)
-        if f"[{job_id}] running" in jobs_out:
-            return jobs_out
+        ps_io = self._runner.run(self._ws.execute("ps"))
+        ps_out = _decode(
+            ps_io.stdout if isinstance(ps_io.stdout, bytes) else None)
+        if any(line.startswith(f"{job_id}\t") for line in ps_out.splitlines()):
+            return ps_out
         wait_io = self._runner.run(self._ws.execute(f"wait %{job_id}"))
         return _io_to_str(wait_io)
 
