@@ -12,17 +12,58 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// Drop this file into `.opencode/plugins/mirage.ts` of any project and run
-// `opencode`. OpenCode auto-discovers plugin files and merges their `tool`
-// dict over its built-ins, so `read`, `write`, `edit`, `ls`, `bash`, `glob`,
-// and `grep` will operate on the Mirage workspace instead of the local disk.
+import { config as loadEnv } from 'dotenv'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { createOpencodeServer, createOpencodeClient } from '@opencode-ai/sdk'
 
-import { MountMode, OpsRegistry, RAMResource, Workspace } from '@struktoai/mirage-node'
-import { miragePlugin } from '@struktoai/mirage-agents/opencode'
+const here = dirname(fileURLToPath(import.meta.url))
+loadEnv({ path: resolve(here, '../../../../.env.development') })
 
-const ram = new RAMResource()
-const ops = new OpsRegistry()
-for (const op of ram.ops()) ops.register(op)
-const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
+if (process.env.OPENAI_API_KEY === undefined || process.env.OPENAI_API_KEY === '') {
+  console.error('OPENAI_API_KEY missing in .env.development')
+  process.exit(1)
+}
 
-export default miragePlugin(ws)
+process.chdir(here)
+
+const server = await createOpencodeServer({
+  timeout: 30_000,
+  config: {
+    provider: {
+      openai: {
+        npm: '@ai-sdk/openai',
+        name: 'OpenAI',
+        models: { 'gpt-5.4-mini': { name: 'GPT-5.4 mini' } },
+      },
+    },
+  },
+})
+const client = createOpencodeClient({ baseUrl: server.url })
+
+try {
+  const session = await client.session.create({ body: { title: 'mirage-cat-demo' } })
+  const sessionId = (session.data as { id: string }).id
+
+  const result = await client.session.prompt({
+    path: { id: sessionId },
+    body: {
+      model: { providerID: 'openai', modelID: 'gpt-5.4-mini' },
+      parts: [
+        {
+          type: 'text',
+          text: 'Run `cat /hello.txt` with the bash tool and report exactly what it printed.',
+        },
+      ],
+    },
+  })
+
+  const data = result.data as { parts?: Array<{ type: string; text?: string }> }
+  for (const part of data.parts ?? []) {
+    if (part.type === 'text' && part.text !== undefined && part.text.length > 0) {
+      console.log(part.text)
+    }
+  }
+} finally {
+  server.close()
+}

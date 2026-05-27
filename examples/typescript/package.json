@@ -9,6 +9,7 @@
     "@mariozechner/pi-ai": "^0.70.2",
     "@mariozechner/pi-coding-agent": "^0.70.2",
     "@mastra/core": "^1.29.1",
+    "@opencode-ai/sdk": "^1.15.11",
     "@openai/agents": "^0.8.0",
     "@struktoai/mirage-agents": "workspace:*",
     "@struktoai/mirage-browser": "workspace:*",

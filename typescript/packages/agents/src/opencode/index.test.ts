@@ -23,57 +23,45 @@ function mkWs(): Workspace {
   return new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
 }
 
-interface ToolResultObj {
-  title?: string
-  output: string
-  metadata?: Record<string, unknown>
-}
-
-async function callTool(t: unknown, input: unknown): Promise<ToolResultObj> {
+async function callTool(t: unknown, input: unknown): Promise<string> {
   const exec = (t as { execute?: (input: unknown, ctx: unknown) => unknown }).execute
   if (typeof exec !== 'function') throw new Error('tool has no execute')
   const ctx = {
     sessionID: 's',
     messageID: 'm',
     agent: 'a',
-    directory: '/',
-    worktree: '/',
     abort: new AbortController().signal,
-    metadata: () => undefined,
-    ask: () => Promise.resolve(),
   }
   const result = await exec(input, ctx)
-  return result as ToolResultObj
+  return result as string
 }
 
 describe('opencode mirageTools.read', () => {
   it('reads a text file', async () => {
     const ws = mkWs()
     await ws.fs.writeFile('/notes.txt', 'hello')
-    const r = await callTool(mirageTools(ws).read, { filePath: '/notes.txt' })
-    expect(r.output).toBe('hello')
-    expect(r.title).toBe('/notes.txt')
+    const out = await callTool(mirageTools(ws).read, { filePath: '/notes.txt' })
+    expect(out).toBe('hello')
   })
 
   it('returns error message for missing file', async () => {
-    const r = await callTool(mirageTools(mkWs()).read, { filePath: '/missing.txt' })
-    expect(r.output.startsWith('Error:')).toBe(true)
+    const out = await callTool(mirageTools(mkWs()).read, { filePath: '/missing.txt' })
+    expect(out.startsWith('Error:')).toBe(true)
   })
 
   it('returns binary stub for non-text files', async () => {
     const ws = mkWs()
     await ws.fs.writeFile('/blob.bin', new Uint8Array([0, 1, 2, 3]))
-    const r = await callTool(mirageTools(ws).read, { filePath: '/blob.bin' })
-    expect(r.output).toContain('Binary file')
-    expect(r.metadata?.binary).toBe(true)
+    const out = await callTool(mirageTools(ws).read, { filePath: '/blob.bin' })
+    expect(out).toContain('Binary file')
   })
 })
 
 describe('opencode mirageTools.write', () => {
   it('writes a new file', async () => {
     const ws = mkWs()
-    const r = await callTool(mirageTools(ws).write, { filePath: '/out.txt', content: 'data' })
-    expect(r.title).toBe('/out.txt')
+    const out = await callTool(mirageTools(ws).write, { filePath: '/out.txt', content: 'data' })
+    expect(out).toContain('/out.txt')
     expect(await ws.fs.readFileText('/out.txt')).toBe('data')
   })
 
@@ -88,48 +76,48 @@ describe('opencode mirageTools.edit', () => {
   it('replaces single occurrence', async () => {
     const ws = mkWs()
     await ws.fs.writeFile('/f.txt', 'foo bar baz')
-    const r = await callTool(mirageTools(ws).edit, {
+    const out = await callTool(mirageTools(ws).edit, {
       filePath: '/f.txt',
       oldString: 'bar',
       newString: 'BAR',
     })
-    expect(r.metadata?.occurrences).toBe(1)
+    expect(out).toContain('1 occurrence')
     expect(await ws.fs.readFileText('/f.txt')).toBe('foo BAR baz')
   })
 
   it('rejects multiple occurrences without replaceAll', async () => {
     const ws = mkWs()
     await ws.fs.writeFile('/f.txt', 'aa aa')
-    const r = await callTool(mirageTools(ws).edit, {
+    const out = await callTool(mirageTools(ws).edit, {
       filePath: '/f.txt',
       oldString: 'aa',
       newString: 'X',
     })
-    expect(r.output).toContain('appears 2 times')
+    expect(out).toContain('appears 2 times')
   })
 
   it('replaces all when replaceAll is true', async () => {
     const ws = mkWs()
     await ws.fs.writeFile('/f.txt', 'aa aa')
-    const r = await callTool(mirageTools(ws).edit, {
+    const out = await callTool(mirageTools(ws).edit, {
       filePath: '/f.txt',
       oldString: 'aa',
       newString: 'X',
       replaceAll: true,
     })
-    expect(r.metadata?.occurrences).toBe(2)
+    expect(out).toContain('2 occurrences')
     expect(await ws.fs.readFileText('/f.txt')).toBe('X X')
   })
 
   it('returns error when string not found', async () => {
     const ws = mkWs()
     await ws.fs.writeFile('/f.txt', 'hello')
-    const r = await callTool(mirageTools(ws).edit, {
+    const out = await callTool(mirageTools(ws).edit, {
       filePath: '/f.txt',
       oldString: 'world',
       newString: 'X',
     })
-    expect(r.output).toContain('string not found')
+    expect(out).toContain('string not found')
   })
 })
 
@@ -138,8 +126,8 @@ describe('opencode mirageTools.ls', () => {
     const ws = mkWs()
     await ws.fs.writeFile('/a.txt', 'a')
     await ws.fs.mkdir('/d')
-    const r = await callTool(mirageTools(ws).ls, { path: '/' })
-    const entries = r.output.split('\n').sort()
+    const out = await callTool(mirageTools(ws).ls, { path: '/' })
+    const entries = out.split('\n').sort()
     expect(entries).toContain('/a.txt')
     expect(entries).toContain('/d/')
   })
@@ -147,14 +135,13 @@ describe('opencode mirageTools.ls', () => {
 
 describe('opencode mirageTools.bash', () => {
   it('runs a shell command and returns stdout', async () => {
-    const r = await callTool(mirageTools(mkWs()).bash, { command: 'echo hello' })
-    expect(r.output).toBe('hello')
-    expect(r.metadata?.exitCode).toBe(0)
+    const out = await callTool(mirageTools(mkWs()).bash, { command: 'echo hello' })
+    expect(out).toBe('hello')
   })
 
-  it('captures non-zero exit code', async () => {
-    const r = await callTool(mirageTools(mkWs()).bash, { command: 'cat /nope.txt' })
-    expect(r.metadata?.exitCode).not.toBe(0)
+  it('captures stderr on failure', async () => {
+    const out = await callTool(mirageTools(mkWs()).bash, { command: 'cat /nope.txt' })
+    expect(out.length).toBeGreaterThan(0)
   })
 })
 
@@ -164,10 +151,10 @@ describe('opencode mirageTools.glob', () => {
     await ws.fs.writeFile('/a.ts', '')
     await ws.fs.writeFile('/b.ts', '')
     await ws.fs.writeFile('/c.md', '')
-    const r = await callTool(mirageTools(ws).glob, { pattern: '*.ts' })
-    expect(r.output).toContain('/a.ts')
-    expect(r.output).toContain('/b.ts')
-    expect(r.output).not.toContain('/c.md')
+    const out = await callTool(mirageTools(ws).glob, { pattern: '*.ts' })
+    expect(out).toContain('/a.ts')
+    expect(out).toContain('/b.ts')
+    expect(out).not.toContain('/c.md')
   })
 })
 
@@ -176,9 +163,9 @@ describe('opencode mirageTools.grep', () => {
     const ws = mkWs()
     await ws.fs.writeFile('/a.txt', 'hello world')
     await ws.fs.writeFile('/b.txt', 'goodbye')
-    const r = await callTool(mirageTools(ws).grep, { pattern: 'hello' })
-    expect(r.output).toContain('/a.txt')
-    expect(r.output).toContain('hello')
+    const out = await callTool(mirageTools(ws).grep, { pattern: 'hello' })
+    expect(out).toContain('/a.txt')
+    expect(out).toContain('hello')
   })
 })
 

@@ -54,18 +54,20 @@ Then run `opencode` in that directory. The agent's `read /hello.txt`, `bash 'fin
 
 ### Tool reference
 
+Each tool's `execute` returns a plain string (matching the OpenCode plugin contract).
+
 | Tool | Input | Output |
 | --- | --- | --- |
-| `read` | `{ filePath }` | `{ title, output }` (text) or binary stub note |
-| `write` | `{ filePath, content }` | `{ title, output }` (auto-mkdirs parent) |
-| `edit` | `{ filePath, oldString, newString, replaceAll? }` | `{ title, output, metadata: { occurrences } }` |
-| `ls` | `{ path }` | `{ title, output }` (newline-separated, dirs suffixed with `/`) |
-| `bash` | `{ command }` | `{ title, output, metadata: { exitCode } }` (runs through Mirage shell) |
-| `glob` | `{ pattern, path? }` | `{ title, output }` (Mirage `find -name`) |
-| `grep` | `{ pattern, path? }` | `{ title, output }` (Mirage `grep -rn`) |
+| `read` | `{ filePath }` | UTF-8 text, or a binary-stub note for non-text files |
+| `write` | `{ filePath, content }` | Confirmation line (auto-mkdirs parent) |
+| `edit` | `{ filePath, oldString, newString, replaceAll? }` | Confirmation line with occurrence count |
+| `ls` | `{ path }` | Newline-separated entries, dirs suffixed with `/` |
+| `bash` | `{ command }` | Merged stdout/stderr (routes through Mirage shell) |
+| `glob` | `{ pattern, path? }` | `find -name` results |
+| `grep` | `{ pattern, path? }` | `grep -rn` results |
 
 `bash`, `glob`, and `grep` go through `ws.execute()`, so they pick up every Mirage shell builtin (resource-aware `head`, `tail`, `find`, `grep`, etc.) across mounts.
 
 ## Examples
 
-- [`examples/typescript/agents/opencode/ram_opencode.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/agents/opencode/ram_opencode.ts), a RAM-backed plugin ready to drop into `.opencode/plugins/mirage.ts`.
+- [`examples/typescript/agents/opencode/ram_opencode.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/agents/opencode/ram_opencode.ts), an end-to-end runner that spawns OpenCode via `@opencode-ai/sdk`, loads a RAM-backed plugin that pre-writes `/hello.txt`, and asks `gpt-5.4-mini` to `cat` it.
