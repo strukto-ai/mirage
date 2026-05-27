@@ -56,7 +56,8 @@ async def test_write_bytes_uploads():
     cfg = HfBucketsConfig(bucket="o/b", token="t")
     acc = HfBucketsAccessor(cfg)
     fake_api = MagicMock()
-    with patch("huggingface_hub.HfApi", return_value=fake_api) as api_ctor:
+    with patch("mirage.core.hf_buckets.write.HfApi",
+               return_value=fake_api) as api_ctor:
         with aioresponses() as m:
             _bucket_id_mock(m)
             await write_bytes(acc, PathSpec.from_str_path("/hello.txt"),
@@ -72,7 +73,7 @@ async def test_unlink_deletes_file():
     cfg = HfBucketsConfig(bucket="o/b", token="t")
     acc = HfBucketsAccessor(cfg)
     fake_api = MagicMock()
-    with patch("huggingface_hub.HfApi", return_value=fake_api):
+    with patch("mirage.core.hf_buckets.unlink.HfApi", return_value=fake_api):
         with aioresponses() as m:
             _bucket_id_mock(m, repeat=2)
             _stat_file_mock(m, "delete-me.txt", size=10)
@@ -86,7 +87,7 @@ async def test_unlink_refuses_directory():
     cfg = HfBucketsConfig(bucket="o/b", token="t")
     acc = HfBucketsAccessor(cfg)
     fake_api = MagicMock()
-    with patch("huggingface_hub.HfApi", return_value=fake_api):
+    with patch("mirage.core.hf_buckets.unlink.HfApi", return_value=fake_api):
         with aioresponses() as m:
             _bucket_id_mock(m)
             _stat_dir_mock(m, "some-dir")
@@ -100,7 +101,7 @@ async def test_create_writes_empty_file():
     cfg = HfBucketsConfig(bucket="o/b", token="t")
     acc = HfBucketsAccessor(cfg)
     fake_api = MagicMock()
-    with patch("huggingface_hub.HfApi", return_value=fake_api):
+    with patch("mirage.core.hf_buckets.write.HfApi", return_value=fake_api):
         with aioresponses() as m:
             _bucket_id_mock(m)
             await create(acc, PathSpec.from_str_path("/touched.txt"))

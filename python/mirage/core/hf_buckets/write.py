@@ -15,7 +15,13 @@
 import asyncio
 import time
 
-from huggingface_hub.errors import EntryNotFoundError, RepositoryNotFoundError
+try:
+    from huggingface_hub import HfApi
+    from huggingface_hub.errors import (EntryNotFoundError,
+                                        RepositoryNotFoundError)
+except ImportError:
+    HfApi = None
+    EntryNotFoundError = RepositoryNotFoundError = Exception
 
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
@@ -24,11 +30,14 @@ from mirage.observe.context import record
 from mirage.resource.secrets import reveal_secret
 from mirage.types import PathSpec
 
+_MISSING_DEP = ("huggingface_hub is required for hf_buckets writes. "
+                "Install with: pip install mirage-ai[hf_buckets]")
+
 
 def _upload_sync(token: str | None, endpoint: str, bucket_id: str, key: str,
                  data: bytes) -> None:
-    # Lazy import: huggingface_hub is an optional [hf_buckets] extra.
-    from huggingface_hub import HfApi
+    if HfApi is None:
+        raise ImportError(_MISSING_DEP)
     api = HfApi(endpoint=endpoint, token=token)
     api.batch_bucket_files(bucket_id, add=[(data, key)])
 
