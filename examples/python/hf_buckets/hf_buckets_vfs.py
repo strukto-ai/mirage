@@ -23,13 +23,6 @@ from mirage.resource.hf_buckets import HfBucketsConfig, HfBucketsResource
 
 load_dotenv(".env.development")
 
-if not os.environ.get("HF_TOKEN") or not os.environ.get("HF_BUCKET_NAME"):
-    print(
-        "ERROR: HF_TOKEN and HF_BUCKET_NAME must be set in .env.development",
-        file=sys.stderr,
-    )
-    sys.exit(1)
-
 config = HfBucketsConfig(
     bucket=os.environ["HF_BUCKET_NAME"],
     token=os.environ["HF_TOKEN"],

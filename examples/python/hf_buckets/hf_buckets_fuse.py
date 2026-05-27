@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
-import sys
 import time
 
 from dotenv import load_dotenv
@@ -22,13 +21,6 @@ from mirage import MountMode, Workspace
 from mirage.resource.hf_buckets import HfBucketsConfig, HfBucketsResource
 
 load_dotenv(".env.development")
-
-if not os.environ.get("HF_TOKEN") or not os.environ.get("HF_BUCKET_NAME"):
-    print(
-        "ERROR: HF_TOKEN and HF_BUCKET_NAME must be set in .env.development",
-        file=sys.stderr,
-    )
-    sys.exit(1)
 
 config = HfBucketsConfig(
     bucket=os.environ["HF_BUCKET_NAME"],
