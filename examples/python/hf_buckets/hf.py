@@ -38,6 +38,13 @@ def ops_summary() -> str:
     return f"{len(records)} ops, {total} bytes transferred"
 
 
+def show_plan(label: str, dr) -> None:
+    print(f"\n--- plan: {label} ---")
+    print(f"  network_read: {dr.network_read}  cache_read: {dr.cache_read}")
+    print(f"  read_ops: {dr.read_ops}  cache_hits: {dr.cache_hits}  "
+          f"precision: {dr.precision}")
+
+
 async def main():
     # ── discover structure ────────────────────────────
     print("=== ls /hf/ ===")
@@ -260,6 +267,78 @@ async def main():
           " | wc -l (sub as pattern) ===")
     r = await ws.execute('grep "$(echo queue)" /hf/example.jsonl | wc -l')
     print(f"  count: {(await r.stdout_str()).strip()}")
+
+    # ── PROVISION: estimate cost without executing ────────────────────
+    # Returns a ProvisionResult with network_read / cache_read / precision
+    # instead of running the command. Provisioned commands:
+    #   file_read_provision: cat, wc        (full-file read, EXACT)
+    #   head_tail_provision: head, tail     (EXACT for -c, RANGE for -n)
+    #   metadata_provision : find, ls, stat (0 bytes, EXACT)
+    #   grep / jq          : inline provisioners in their command files
+    # When a file is already in the workspace cache, the workspace
+    # automatically moves network_read into cache_read and zeros
+    # network_read. That's why we clear the cache first to see the
+    # "first-time" estimate, then re-plan after caching to see the diff.
+    print("\n=== PROVISION (plan without executing) ===")
+    await ws.cache.clear()
+    before_plan = ops_summary()
+
+    # ── single-command plans (cache cleared, so network_read shows up) ──
+    dr = await ws.execute("cat /hf/example.json", provision=True)
+    show_plan("cat /hf/example.json (file_read_provision)", dr)
+
+    dr = await ws.execute("wc -l /hf/example.jsonl", provision=True)
+    show_plan("wc -l /hf/example.jsonl (file_read_provision)", dr)
+
+    dr = await ws.execute("head -c 100 /hf/example.jsonl", provision=True)
+    show_plan("head -c 100 /hf/example.jsonl (byte budget, EXACT)", dr)
+
+    dr = await ws.execute("head -n 5 /hf/example.jsonl", provision=True)
+    show_plan("head -n 5 /hf/example.jsonl (line budget, RANGE)", dr)
+    print(f"  range: [{dr.network_read_low}, {dr.network_read_high}]")
+
+    dr = await ws.execute("ls /hf/", provision=True)
+    show_plan("ls /hf/ (metadata_provision, 0 bytes)", dr)
+
+    dr = await ws.execute("stat /hf/example.json", provision=True)
+    show_plan("stat /hf/example.json (metadata_provision)", dr)
+
+    dr = await ws.execute("grep mirage /hf/example.jsonl", provision=True)
+    show_plan("grep mirage /hf/example.jsonl (grep_provision)", dr)
+
+    dr = await ws.execute("jq .metadata /hf/example.json", provision=True)
+    show_plan("jq .metadata /hf/example.json (jq_provision)", dr)
+
+    # ── compound plans ──
+    dr = await ws.execute("cat /hf/example.jsonl | head -n 3", provision=True)
+    print("\n--- plan: cat | head -n 3 (pipeline with children) ---")
+    print(f"  op: {dr.op}  children: {len(dr.children)}  "
+          f"precision: {dr.precision}")
+    print(f"  network_read: {dr.network_read}  cache_read: {dr.cache_read}")
+    for c in dr.children:
+        print(f"    {c.command}: net={c.network_read}  "
+              f"cache={c.cache_read}  {c.precision}")
+
+    dr = await ws.execute("grep mirage /hf/example.jsonl && echo found",
+                          provision=True)
+    print("\n--- plan: grep ... && echo found (compound) ---")
+    print(f"  op: {dr.op}  network_read: {dr.network_read}")
+    for c in dr.children:
+        print(f"    {c.command}: net={c.network_read}  {c.precision}")
+
+    print(f"\n  Stats before plans: {before_plan}")
+    print(f"  Stats after plans:  {ops_summary()}  (planning is read-free)")
+
+    # ── cache-aware plan: same command after caching the file ──
+    print("\n--- caching: cat /hf/example.json | wc -c ---")
+    r = await ws.execute("cat /hf/example.json | wc -c")
+    print(f"  bytes: {(await r.stdout_str()).strip()}")
+
+    dr = await ws.execute("cat /hf/example.json", provision=True)
+    print("\n--- plan after cache: cat /hf/example.json ---")
+    print(f"  network_read: {dr.network_read}  "
+          f"cache_read: {dr.cache_read}  cache_hits: {dr.cache_hits}")
+    print("  (network shifted to cache: file is hot)")
 
     # ── chunk-level streaming + multi-stage pipe backpressure ─────────
     print("\n=== STREAMING (single command) ===")
