@@ -19,6 +19,7 @@ import { MirageFS, type FuseAttr } from './fs.ts'
 
 const ENOENT = -2
 const ENOTEMPTY = -66
+const EACCES = -13
 
 // Invoke a MirageFS op through its ops() surface — covers the same dispatch
 // path that @zkochan/fuse-native uses in production. Returns the callback args
@@ -174,6 +175,42 @@ describe('MirageFS — rmdir maps non-empty to ENOTEMPTY', () => {
     const mfs = new MirageFS(ws)
     const [code] = await callOp<[number]>(mfs, 'rmdir', '/data/sub')
     expect(code).toBe(ENOTEMPTY)
+  })
+})
+
+describe('MirageFS — read-only mount write consistency', () => {
+  it('rejects create and buffered flush through the same mount-mode gate', async () => {
+    const resource = new RAMResource()
+    const seedWs = new Workspace({ '/data/': resource }, { mode: MountMode.WRITE })
+    await seedWs.fs.writeFile('/data/existing.txt', 'seed')
+
+    const readonlyWs = new Workspace({ '/data/': resource }, { mode: MountMode.READ })
+    const mfs = new MirageFS(readonlyWs)
+
+    const [createCode] = await callOp<[number]>(mfs, 'create', '/data/new.txt', 0o100644)
+    expect(createCode).toBe(EACCES)
+
+    const [openCode, fh] = await callOp<[number, number]>(mfs, 'open', '/data/existing.txt', 0x8401)
+    expect(openCode).toBe(0)
+
+    const bytes = Buffer.from('changed')
+    const [writeBytes] = await callOp<[number]>(
+      mfs,
+      'write',
+      '/data/existing.txt',
+      fh,
+      bytes,
+      bytes.byteLength,
+      0,
+    )
+    expect(writeBytes).toBe(bytes.byteLength)
+
+    // The kernel reports byte acceptance before flush. Flush is the point where
+    // Mirage commits buffered FUSE writes, so it must enforce the same READ-mode
+    // restriction as create.
+    const [flushCode] = await callOp<[number]>(mfs, 'flush', '/data/existing.txt', fh)
+    expect(flushCode).toBe(EACCES)
+    expect(new TextDecoder().decode(await seedWs.fs.readFile('/data/existing.txt'))).toBe('seed')
   })
 })
 
