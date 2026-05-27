@@ -77,6 +77,7 @@ async def write_bytes(
     remote_parent = backend_path(accessor.config, parent)
     remote_path = backend_path(accessor.config, path)
     start_ms = int(time.monotonic() * 1000)
+    # TODO native async client calling HTTP API as databricks sdk is sync
     await asyncio.to_thread(
         _ensure_parent_directory_sync,
         accessor,
