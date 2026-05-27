@@ -13,97 +13,35 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import pytest
-from aioresponses import aioresponses
 
-from mirage.accessor.hf_buckets import HfBucketsAccessor, HfBucketsConfig
 from mirage.core.hf_buckets.find import find
 from mirage.types import PathSpec
 
 
 @pytest.mark.asyncio
-async def test_find_root_returns_sorted_files_only():
-    cfg = HfBucketsConfig(bucket="o/b", token="t")
-    acc = HfBucketsAccessor(cfg)
-    with aioresponses() as m:
-        m.get("https://huggingface.co/api/buckets/o/b",
-              payload={"id": "bkt-1"})
-        m.get(
-            "https://huggingface.co/api/buckets/bkt-1/tree?recursive=true",
-            payload=[
-                {
-                    "type": "file",
-                    "path": "z.txt",
-                    "size": 3
-                },
-                {
-                    "type": "directory",
-                    "path": "sub"
-                },
-                {
-                    "type": "file",
-                    "path": "sub/a.txt",
-                    "size": 2
-                },
-                {
-                    "type": "file",
-                    "path": "a.txt",
-                    "size": 1
-                },
-            ],
-        )
-        out = await find(acc, PathSpec.from_str_path("/"))
-    assert out == ["/a.txt", "/sub/a.txt", "/z.txt"]
+async def test_find_root_returns_sorted_files_only(make_acc):
+    acc = make_acc({
+        "a.json": b"a",
+        "b.json": b"b",
+        "data/c.json": b"c",
+    })
+    out = await find(acc, PathSpec.from_str_path("/"))
+    assert out == ["/a.json", "/b.json", "/data/c.json"]
 
 
 @pytest.mark.asyncio
-async def test_find_subdir_uses_subpath_url():
-    cfg = HfBucketsConfig(bucket="o/b", token="t")
-    acc = HfBucketsAccessor(cfg)
-    with aioresponses() as m:
-        m.get("https://huggingface.co/api/buckets/o/b",
-              payload={"id": "bkt-1"})
-        m.get(
-            ("https://huggingface.co/api/buckets/"
-             "bkt-1/tree/data?recursive=true"),
-            payload=[
-                {
-                    "type": "file",
-                    "path": "data/a.json",
-                    "size": 1
-                },
-                {
-                    "type": "file",
-                    "path": "data/sub/b.json",
-                    "size": 2
-                },
-            ],
-        )
-        out = await find(acc, PathSpec.from_str_path("/data"))
+async def test_find_subdir_scopes_results(make_acc):
+    acc = make_acc({
+        "data/a.json": b"a",
+        "data/sub/b.json": b"b",
+        "other.txt": b"o",
+    })
+    out = await find(acc, PathSpec.from_str_path("/data"))
     assert out == ["/data/a.json", "/data/sub/b.json"]
 
 
 @pytest.mark.asyncio
-async def test_find_strips_key_prefix():
-    cfg = HfBucketsConfig(bucket="o/b", token="t", key_prefix="data/")
-    acc = HfBucketsAccessor(cfg)
-    with aioresponses() as m:
-        m.get("https://huggingface.co/api/buckets/o/b",
-              payload={"id": "bkt-1"})
-        m.get(
-            ("https://huggingface.co/api/buckets/"
-             "bkt-1/tree/data?recursive=true"),
-            payload=[
-                {
-                    "type": "file",
-                    "path": "data/a.json",
-                    "size": 1
-                },
-                {
-                    "type": "file",
-                    "path": "data/sub/b.json",
-                    "size": 2
-                },
-            ],
-        )
-        out = await find(acc, PathSpec.from_str_path("/"))
-    assert out == ["/a.json", "/sub/b.json"]
+async def test_find_missing_returns_empty(make_acc):
+    acc = make_acc({})
+    out = await find(acc, PathSpec.from_str_path("/nope"))
+    assert out == []

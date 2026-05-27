@@ -14,9 +14,10 @@
 
 import time
 
+from opendal.exceptions import NotFound
+
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.core.hf_buckets._client import HfBucketsClient, _key, _resolve_url
 from mirage.observe.context import record
 from mirage.types import PathSpec
 
@@ -29,29 +30,19 @@ async def read_bytes(accessor: HfBucketsAccessor,
     if isinstance(path, str):
         path = PathSpec.from_str_path(path)
     raw = path.strip_prefix
-    config = accessor.config
-    key = _key(raw, config)
-    client = HfBucketsClient(config)
-    bucket_id = await client.bucket_id()
-    url = _resolve_url(config.endpoint, bucket_id, key)
-    headers: dict[str, str] = {}
-    if offset or size is not None:
-        end = (offset + size - 1) if size is not None else ""
-        headers["Range"] = f"bytes={offset}-{end}"
+    key = raw.lstrip("/")
+    op = accessor.operator()
     start_ms = int(time.monotonic() * 1000)
-    async with await client.session() as session:
-        async with session.get(url, headers=headers,
-                               allow_redirects=True) as resp:
-            if resp.status == 404:
-                raise FileNotFoundError(raw)
-            if resp.status != 200 and resp.status != 206:
-                resp.raise_for_status()
-                raise FileNotFoundError(raw)
-            data = await resp.read()
-            record("read",
-                   raw,
-                   "hf_buckets",
-                   len(data),
-                   start_ms,
-                   fingerprint=resp.headers.get("X-Xet-Hash"))
-            return data
+    try:
+        if offset or size is not None:
+            async with await op.open(key, "rb") as f:
+                if offset:
+                    await f.seek(offset)
+                data = await f.read(size
+                                    ) if size is not None else await f.read()
+        else:
+            data = bytes(await op.read(key))
+    except NotFound as exc:
+        raise FileNotFoundError(raw) from exc
+    record("read", raw, "hf_buckets", len(data), start_ms)
+    return data

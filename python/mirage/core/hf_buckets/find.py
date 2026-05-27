@@ -12,10 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from opendal.exceptions import NotFound
+
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.core.hf_buckets._client import (HfBucketsClient, _prefix,
-                                            _strip_prefix, _tree_url)
 from mirage.types import PathSpec
 
 
@@ -27,22 +27,16 @@ async def find(
     if isinstance(path, str):
         path = PathSpec.from_str_path(path)
     target = path.strip_prefix
-    config = accessor.config
-    pfx = _prefix(target, config).rstrip("/")
-    client = HfBucketsClient(config)
-    bucket_id = await client.bucket_id()
-    url = _tree_url(config.endpoint, bucket_id, pfx)
-    # TODO: confirm HF tree recursive param against real API.
-    async with await client.session() as session:
-        async with session.get(url, params={"recursive": "true"}) as resp:
-            resp.raise_for_status()
-            entries_json = await resp.json()
+    pfx = target.strip("/")
+    scan_path = pfx + "/" if pfx else "/"
+    op = accessor.operator()
     results: list[str] = []
-    for entry in entries_json:
-        if entry.get("type") == "directory":
-            continue
-        bucket_key = entry.get("path", "")
-        if not bucket_key:
-            continue
-        results.append("/" + _strip_prefix(bucket_key, config))
+    try:
+        async for entry in await op.scan(scan_path):
+            rel = entry.path
+            if not rel or rel.endswith("/"):
+                continue
+            results.append("/" + rel.lstrip("/"))
+    except NotFound:
+        return []
     return sorted(results)

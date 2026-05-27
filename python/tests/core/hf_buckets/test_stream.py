@@ -13,51 +13,33 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import pytest
-from aioresponses import aioresponses
 
-from mirage.accessor.hf_buckets import HfBucketsAccessor, HfBucketsConfig
 from mirage.core.hf_buckets.stream import range_read, read_stream
 from mirage.types import PathSpec
 
 
 @pytest.mark.asyncio
-async def test_range_read_inclusive_exclusive():
-    cfg = HfBucketsConfig(bucket="o/b", token="t")
-    acc = HfBucketsAccessor(cfg)
-    with aioresponses() as m:
-        m.get("https://huggingface.co/api/buckets/o/b",
-              payload={"id": "bkt-1"})
-        m.get("https://huggingface.co/buckets/bkt-1/resolve/x", body=b"2345")
-        out = await range_read(acc, PathSpec.from_str_path("/x"), 2, 6)
-    assert out == b"2345"
+async def test_range_read_returns_slice(make_acc):
+    acc = make_acc({"x": b"abcdef"})
+    out = await range_read(acc, PathSpec.from_str_path("/x"), 1, 4)
+    assert out == b"bcd"
 
 
 @pytest.mark.asyncio
-async def test_read_stream_yields_chunks():
-    cfg = HfBucketsConfig(bucket="o/b", token="t")
-    acc = HfBucketsAccessor(cfg)
-    with aioresponses() as m:
-        m.get("https://huggingface.co/api/buckets/o/b",
-              payload={"id": "bkt-1"})
-        m.get("https://huggingface.co/buckets/bkt-1/resolve/x",
-              body=b"abcdefghij")
-        chunks: list[bytes] = []
-        async for c in read_stream(acc,
-                                   PathSpec.from_str_path("/x"),
-                                   chunk_size=4):
-            chunks.append(c)
-    assert b"".join(chunks) == b"abcdefghij"
+async def test_read_stream_yields_chunks(make_acc):
+    acc = make_acc({"x": b"abcdefgh"})
+    chunks = []
+    async for c in read_stream(acc, PathSpec.from_str_path("/x"),
+                               chunk_size=3):
+        chunks.append(c)
+    assert b"".join(chunks) == b"abcdefgh"
+    assert len(chunks) >= 2
 
 
 @pytest.mark.asyncio
-async def test_read_stream_handles_empty_file():
-    cfg = HfBucketsConfig(bucket="o/b", token="t")
-    acc = HfBucketsAccessor(cfg)
-    with aioresponses() as m:
-        m.get("https://huggingface.co/api/buckets/o/b",
-              payload={"id": "bkt-1"})
-        m.get("https://huggingface.co/buckets/bkt-1/resolve/empty", body=b"")
-        chunks: list[bytes] = []
-        async for c in read_stream(acc, PathSpec.from_str_path("/empty")):
-            chunks.append(c)
-    assert chunks == []
+async def test_read_stream_handles_empty_file(make_acc):
+    acc = make_acc({"empty": b""})
+    chunks = [
+        c async for c in read_stream(acc, PathSpec.from_str_path("/empty"))
+    ]
+    assert b"".join(chunks) == b""

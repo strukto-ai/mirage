@@ -3,9 +3,9 @@ title: HF Buckets
 icon: cloud
 ---
 The HF Buckets resource mounts a [Hugging Face Bucket](https://huggingface.co/docs/buckets)
-at some prefix such as `/hf/`. Reads go directly over HF's HTTP API with
-`aiohttp` (true async streaming, no SDK dependency). Writes use the
-`huggingface_hub` SDK for the Xet upload protocol.
+at some prefix such as `/hf/`. Backed by Apache OpenDAL's `Hf` service,
+which speaks HF's HTTP API natively (async, streaming, no Python SDK
+dependency).
 
 For credential setup, see [HF Buckets Setup](/home/setup/hf_buckets).
 
@@ -31,9 +31,7 @@ ws = Workspace({"/hf": resource}, mode=MountMode.READ)
 
 `HfBucketsResource(config)` takes an `HfBucketsConfig` object with the
 bucket in `namespace/bucket-name` form plus an optional access token.
-Both `READ` and `WRITE` modes are supported. Writes require the
-`hf_buckets` extra (`uv sync --extra hf_buckets`); reads work with the
-base install.
+Both `READ` and `WRITE` modes are supported out of the box.
 
 ## Filesystem Layout
 

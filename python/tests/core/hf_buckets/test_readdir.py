@@ -13,78 +13,39 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import pytest
-from aioresponses import aioresponses
 
-from mirage.accessor.hf_buckets import HfBucketsAccessor, HfBucketsConfig
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.hf_buckets.readdir import readdir
 from mirage.types import PathSpec
 
 
 @pytest.mark.asyncio
-async def test_readdir_root_returns_children():
-    cfg = HfBucketsConfig(bucket="o/b", token="t")
-    acc = HfBucketsAccessor(cfg)
-    index = RAMIndexCacheStore(ttl=60)
-    with aioresponses() as m:
-        m.get("https://huggingface.co/api/buckets/o/b",
-              payload={"id": "bkt-1"})
-        m.get("https://huggingface.co/api/buckets/bkt-1/tree",
-              payload=[
-                  {
-                      "type": "file",
-                      "path": "foo.txt",
-                      "size": 4,
-                      "xet_hash": "h1"
-                  },
-                  {
-                      "type": "directory",
-                      "path": "sub"
-                  },
-              ])
-        out = await readdir(acc, PathSpec.from_str_path("/"), index)
-    assert sorted(out) == ["/foo.txt", "/sub"]
+async def test_readdir_root_returns_children(make_acc):
+    acc = make_acc({"hello.txt": b"x", "data/file.txt": b"y"})
+    entries = await readdir(acc, PathSpec.from_str_path("/"),
+                            RAMIndexCacheStore(ttl=60))
+    assert "/data" in entries
+    assert "/hello.txt" in entries
 
 
 @pytest.mark.asyncio
-async def test_readdir_subdir():
-    cfg = HfBucketsConfig(bucket="o/b", token="t")
-    acc = HfBucketsAccessor(cfg)
-    index = RAMIndexCacheStore(ttl=60)
-    with aioresponses() as m:
-        m.get("https://huggingface.co/api/buckets/o/b",
-              payload={"id": "bkt-1"})
-        m.get("https://huggingface.co/api/buckets/bkt-1/tree/data",
-              payload=[
-                  {
-                      "type": "file",
-                      "path": "data/a.json",
-                      "size": 1
-                  },
-                  {
-                      "type": "file",
-                      "path": "data/b.json",
-                      "size": 2
-                  },
-              ])
-        out = await readdir(acc, PathSpec.from_str_path("/data"), index)
-    assert sorted(out) == ["/data/a.json", "/data/b.json"]
+async def test_readdir_subdir(make_acc):
+    acc = make_acc({
+        "data/a.txt": b"a",
+        "data/sub/b.txt": b"b",
+        "other.txt": b"o"
+    })
+    entries = await readdir(acc, PathSpec.from_str_path("/data"),
+                            RAMIndexCacheStore(ttl=60))
+    assert sorted(entries) == ["/data/a.txt", "/data/sub"]
 
 
 @pytest.mark.asyncio
-async def test_readdir_populates_index_cache():
-    cfg = HfBucketsConfig(bucket="o/b", token="t")
-    acc = HfBucketsAccessor(cfg)
-    index = RAMIndexCacheStore(ttl=60)
-    with aioresponses() as m:
-        m.get("https://huggingface.co/api/buckets/o/b",
-              payload={"id": "bkt-1"})
-        m.get("https://huggingface.co/api/buckets/bkt-1/tree",
-              payload=[{
-                  "type": "file",
-                  "path": "foo.txt",
-                  "size": 4
-              }])
-        await readdir(acc, PathSpec.from_str_path("/"), index)
-    listing = await index.list_dir("/")
-    assert listing.entries == ["/foo.txt"]
+async def test_readdir_populates_index_cache(make_acc):
+    acc = make_acc({"f.txt": b"hello"})
+    cache = RAMIndexCacheStore(ttl=60)
+    await readdir(acc, PathSpec.from_str_path("/"), cache)
+    lookup = await cache.get("/f.txt")
+    assert lookup.entry is not None
+    assert lookup.entry.size == 5
+    assert lookup.entry.resource_type == "file"

@@ -12,35 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import time
 
-try:
-    from huggingface_hub import HfApi
-    from huggingface_hub.errors import (EntryNotFoundError,
-                                        RepositoryNotFoundError)
-except ImportError:
-    HfApi = None
-    EntryNotFoundError = RepositoryNotFoundError = Exception
+from opendal.exceptions import NotFound
 
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.core.hf_buckets._client import HfBucketsClient, _key
 from mirage.core.hf_buckets.stat import stat
 from mirage.observe.context import record
-from mirage.resource.secrets import reveal_secret
 from mirage.types import FileType, PathSpec
-
-_MISSING_DEP = ("huggingface_hub is required for hf_buckets writes. "
-                "Install with: pip install mirage-ai[hf_buckets]")
-
-
-def _delete_sync(token: str | None, endpoint: str, bucket_id: str,
-                 key: str) -> None:
-    if HfApi is None:
-        raise ImportError(_MISSING_DEP)
-    api = HfApi(endpoint=endpoint, token=token)
-    api.batch_bucket_files(bucket_id, delete=[key])
 
 
 async def unlink(accessor: HfBucketsAccessor,
@@ -52,15 +32,11 @@ async def unlink(accessor: HfBucketsAccessor,
     if file_stat.type == FileType.DIRECTORY:
         raise IsADirectoryError(path.strip_prefix)
     raw = path.strip_prefix
-    config = accessor.config
-    key = _key(raw, config)
-    client = HfBucketsClient(config)
-    bucket_id = await client.bucket_id()
-    token = reveal_secret(config.token)
+    key = raw.lstrip("/")
+    op = accessor.operator()
     start_ms = int(time.monotonic() * 1000)
     try:
-        await asyncio.to_thread(_delete_sync, token, config.endpoint,
-                                bucket_id, key)
-    except (RepositoryNotFoundError, EntryNotFoundError) as exc:
+        await op.delete(key)
+    except NotFound as exc:
         raise FileNotFoundError(raw) from exc
     record("unlink", path.original, "hf_buckets", 0, start_ms)

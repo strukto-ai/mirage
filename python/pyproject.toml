@@ -53,6 +53,7 @@ dependencies = [
     "mfusepy>=1.0.0",
     "pyjwt[crypto]>=2.10",
     "dulwich>=1.2.4",
+    "opendal>=0.47.1",
 ]
 
 [project.urls]
@@ -78,9 +79,6 @@ r2       = ["aioboto3>=13.0"]
 gcs      = ["aioboto3>=13.0"]
 oci      = ["aioboto3>=13.0"]
 databricks = ["databricks-sdk>=0.72.0"]
-
-# --- huggingface ---
-hf_buckets = ["huggingface_hub>=1.5.0"]
 
 # --- network / remote ---
 ssh      = ["asyncssh>=2.22.0", "paramiko>=4.0.0"]
@@ -143,7 +141,6 @@ all = [
     "mirage-ai[gcs]",
     "mirage-ai[oci]",
     "mirage-ai[databricks]",
-    "mirage-ai[hf_buckets]",
     "mirage-ai[ssh]",
     "mirage-ai[fuse]",
     "mirage-ai[mongodb]",

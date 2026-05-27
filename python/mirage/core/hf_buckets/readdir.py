@@ -14,10 +14,10 @@
 
 import logging
 
+from opendal.exceptions import NotFound
+
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore, IndexEntry
-from mirage.core.hf_buckets._client import (HfBucketsClient, _prefix,
-                                            _strip_prefix, _tree_url)
 from mirage.core.hf_buckets.constants import SCOPE_ERROR
 from mirage.types import PathSpec
 
@@ -34,33 +34,31 @@ async def readdir(accessor: HfBucketsAccessor, path: PathSpec,
         rest = target[len(prefix):]
         if prefix.endswith("/") or rest == "" or rest.startswith("/"):
             target = rest or "/"
-    config = accessor.config
-    raw_key = prefix + target if prefix else target
-    virtual_key = raw_key.rstrip("/") or "/"
+    virtual_key = (prefix + target if prefix else target).rstrip("/") or "/"
     listing = await index.list_dir(virtual_key)
     if listing.entries is not None:
         return listing.entries
-    pfx = _prefix(target, config).rstrip("/")
-    client = HfBucketsClient(config)
-    bucket_id = await client.bucket_id()
-    url = _tree_url(config.endpoint, bucket_id, pfx)
-    async with await client.session() as session:
-        async with session.get(url) as resp:
-            resp.raise_for_status()
-            entries_json = await resp.json()
+    list_path = target.strip("/")
+    list_path = list_path + "/" if list_path else "/"
+    op = accessor.operator()
     names: list[str] = []
     dir_keys: set[str] = set()
     sizes: dict[str, int | None] = {}
-    for entry in entries_json:
-        bucket_key = entry.get("path", "")
-        if not bucket_key:
-            continue
-        key = "/" + _strip_prefix(bucket_key, config)
-        names.append(key)
-        if entry.get("type") == "directory":
-            dir_keys.add(key)
-        else:
-            sizes[key] = entry.get("size")
+    try:
+        async for entry in await op.list(list_path):
+            relative = entry.path
+            if not relative or relative == list_path:
+                continue
+            is_dir = relative.endswith("/")
+            base = "/" + relative.rstrip("/")
+            names.append(base)
+            if is_dir:
+                dir_keys.add(base)
+            else:
+                meta = entry.metadata
+                sizes[base] = meta.content_length if meta else None
+    except NotFound as exc:
+        raise FileNotFoundError(target) from exc
     names = sorted(names)
     if len(names) > SCOPE_ERROR:
         logger.warning(

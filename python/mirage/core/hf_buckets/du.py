@@ -12,70 +12,53 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from opendal.exceptions import NotFound
+
 from mirage.accessor.hf_buckets import HfBucketsAccessor
-from mirage.core.hf_buckets._client import (HfBucketsClient, _prefix,
-                                            _strip_prefix, _tree_url)
 from mirage.types import PathSpec
 
 
 async def du(accessor: HfBucketsAccessor, path: PathSpec) -> int:
-    """Total size in bytes under a prefix.
-
-    Args:
-        accessor (HfBucketsAccessor): HF buckets accessor.
-        path (PathSpec | str): Prefix path.
-    """
     if isinstance(path, str):
         path = PathSpec.from_str_path(path)
     target = path.strip_prefix
-    config = accessor.config
-    pfx = _prefix(target, config).rstrip("/")
-    client = HfBucketsClient(config)
-    bucket_id = await client.bucket_id()
-    url = _tree_url(config.endpoint, bucket_id, pfx)
+    pfx = target.strip("/")
+    scan_path = pfx + "/" if pfx else "/"
+    op = accessor.operator()
     total = 0
-    async with await client.session() as session:
-        async with session.get(url, params={"recursive": "true"}) as resp:
-            resp.raise_for_status()
-            entries_json = await resp.json()
-    for entry in entries_json:
-        if entry.get("type") == "directory":
-            continue
-        total += int(entry.get("size", 0) or 0)
+    try:
+        async for entry in await op.scan(scan_path):
+            if entry.path.endswith("/"):
+                continue
+            meta = entry.metadata
+            if meta is not None:
+                total += int(meta.content_length or 0)
+    except NotFound:
+        return 0
     return total
 
 
 async def du_all(accessor: HfBucketsAccessor,
                  path: PathSpec) -> list[tuple[str, int]]:
-    """List of (path, size) tuples plus a trailing total entry.
-
-    Args:
-        accessor (HfBucketsAccessor): HF buckets accessor.
-        path (PathSpec | str): Prefix path.
-    """
     if isinstance(path, str):
         path = PathSpec.from_str_path(path)
     target = path.strip_prefix
-    config = accessor.config
-    pfx = _prefix(target, config).rstrip("/")
-    client = HfBucketsClient(config)
-    bucket_id = await client.bucket_id()
-    url = _tree_url(config.endpoint, bucket_id, pfx)
+    pfx = target.strip("/")
+    scan_path = pfx + "/" if pfx else "/"
+    op = accessor.operator()
     results: list[tuple[str, int]] = []
     total = 0
-    async with await client.session() as session:
-        async with session.get(url, params={"recursive": "true"}) as resp:
-            resp.raise_for_status()
-            entries_json = await resp.json()
-    for entry in entries_json:
-        if entry.get("type") == "directory":
-            continue
-        bucket_key = entry.get("path", "")
-        if not bucket_key:
-            continue
-        sz = int(entry.get("size", 0) or 0)
-        results.append(("/" + _strip_prefix(bucket_key, config), sz))
-        total += sz
+    try:
+        async for entry in await op.scan(scan_path):
+            rel = entry.path
+            if not rel or rel.endswith("/"):
+                continue
+            meta = entry.metadata
+            sz = int(meta.content_length or 0) if meta is not None else 0
+            results.append(("/" + rel.lstrip("/"), sz))
+            total += sz
+    except NotFound:
+        pass
     results.sort()
     results.append((target, total))
     return results

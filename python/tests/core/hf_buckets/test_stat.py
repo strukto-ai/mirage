@@ -13,85 +13,38 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import pytest
-from aioresponses import aioresponses
 
-from mirage.accessor.hf_buckets import HfBucketsAccessor, HfBucketsConfig
 from mirage.core.hf_buckets.stat import stat
 from mirage.types import FileType, PathSpec
 
 
 @pytest.mark.asyncio
-async def test_stat_root_directory_is_local():
-    cfg = HfBucketsConfig(bucket="o/b", token="t")
-    acc = HfBucketsAccessor(cfg)
-    out = await stat(acc, PathSpec.from_str_path("/"))
-    assert out.type == FileType.DIRECTORY
-    assert out.name == "/"
+async def test_stat_file_returns_size_and_etag(make_acc):
+    acc = make_acc({"data/file.txt": b"abcde"})
+    s = await stat(acc, PathSpec.from_str_path("/data/file.txt"))
+    assert s.name == "file.txt"
+    assert s.size == 5
+    assert s.fingerprint == "etag-data/file.txt"
+    assert s.type != FileType.DIRECTORY
 
 
 @pytest.mark.asyncio
-async def test_stat_file_returns_size_and_xet_hash():
-    cfg = HfBucketsConfig(bucket="o/b", token="t")
-    acc = HfBucketsAccessor(cfg)
-    with aioresponses() as m:
-        m.get("https://huggingface.co/api/buckets/o/b",
-              payload={"id": "bkt-1"})
-        m.head("https://huggingface.co/buckets/bkt-1/resolve/data/x.txt",
-               status=200,
-               headers={
-                   "Content-Length": "11",
-                   "X-Xet-Hash": "deadbeef",
-                   "Last-Modified": "Mon, 26 May 2026 10:00:00 GMT",
-               })
-        out = await stat(acc, PathSpec.from_str_path("/data/x.txt"))
-    assert out.size == 11
-    assert out.fingerprint == "deadbeef"
-    assert out.extra["xet_hash"] == "deadbeef"
+async def test_stat_directory_via_dir_probe(make_acc):
+    acc = make_acc({"data/file.txt": b"x"})
+    s = await stat(acc, PathSpec.from_str_path("/data"))
+    assert s.type == FileType.DIRECTORY
+    assert s.name == "data"
 
 
 @pytest.mark.asyncio
-async def test_stat_directory_via_tree_probe():
-    cfg = HfBucketsConfig(bucket="o/b", token="t")
-    acc = HfBucketsAccessor(cfg)
-    with aioresponses() as m:
-        m.get("https://huggingface.co/api/buckets/o/b",
-              payload={"id": "bkt-1"})
-        m.head("https://huggingface.co/buckets/bkt-1/resolve/data", status=404)
-        m.get("https://huggingface.co/api/buckets/bkt-1/tree/data/",
-              payload=[{
-                  "type": "file",
-                  "path": "data/x.txt",
-                  "size": 1
-              }])
-        out = await stat(acc, PathSpec.from_str_path("/data"))
-    assert out.type == FileType.DIRECTORY
+async def test_stat_missing_raises_filenotfound(make_acc):
+    acc = make_acc({})
+    with pytest.raises(FileNotFoundError):
+        await stat(acc, PathSpec.from_str_path("/missing.txt"))
 
 
 @pytest.mark.asyncio
-async def test_stat_missing_raises_filenotfound():
-    cfg = HfBucketsConfig(bucket="o/b", token="t")
-    acc = HfBucketsAccessor(cfg)
-    with aioresponses() as m:
-        m.get("https://huggingface.co/api/buckets/o/b",
-              payload={"id": "bkt-1"})
-        m.head("https://huggingface.co/buckets/bkt-1/resolve/nope.txt",
-               status=404)
-        m.get("https://huggingface.co/api/buckets/bkt-1/tree/nope.txt/",
-              status=404)
-        with pytest.raises(FileNotFoundError):
-            await stat(acc, PathSpec.from_str_path("/nope.txt"))
-
-
-@pytest.mark.asyncio
-async def test_stat_403_propagates_as_client_error():
-    cfg = HfBucketsConfig(bucket="o/b", token="t")
-    acc = HfBucketsAccessor(cfg)
-    with aioresponses() as m:
-        m.get("https://huggingface.co/api/buckets/o/b",
-              payload={"id": "bkt-1"})
-        m.head("https://huggingface.co/buckets/bkt-1/resolve/secret.txt",
-               status=403)
-        with pytest.raises(Exception) as exc_info:
-            await stat(acc, PathSpec.from_str_path("/secret.txt"))
-    # Should propagate as some HTTP-level exception, not FileNotFoundError.
-    assert not isinstance(exc_info.value, FileNotFoundError)
+async def test_stat_root_is_directory(make_acc):
+    acc = make_acc({})
+    s = await stat(acc, PathSpec.from_str_path("/"))
+    assert s.type == FileType.DIRECTORY

@@ -15,9 +15,10 @@
 import time
 from collections.abc import AsyncIterator
 
+from opendal.exceptions import NotFound
+
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.core.hf_buckets._client import HfBucketsClient, _key, _resolve_url
 from mirage.core.hf_buckets.constants import DEFAULT_CHUNK_SIZE
 from mirage.observe.context import record, record_stream
 from mirage.types import PathSpec
@@ -28,29 +29,18 @@ async def range_read(accessor: HfBucketsAccessor, path: PathSpec, start: int,
     if isinstance(path, str):
         path = PathSpec.from_str_path(path)
     raw = path.strip_prefix
-    config = accessor.config
-    key = _key(raw, config)
-    client = HfBucketsClient(config)
-    bucket_id = await client.bucket_id()
-    url = _resolve_url(config.endpoint, bucket_id, key)
-    headers = {"Range": f"bytes={start}-{end - 1}"}
+    key = raw.lstrip("/")
+    op = accessor.operator()
     start_ms = int(time.monotonic() * 1000)
-    async with await client.session() as session:
-        async with session.get(url, headers=headers,
-                               allow_redirects=True) as resp:
-            if resp.status == 404:
-                raise FileNotFoundError(raw)
-            if resp.status != 200 and resp.status != 206:
-                resp.raise_for_status()
-                raise FileNotFoundError(raw)
-            data = await resp.read()
-            record("read",
-                   raw,
-                   "hf_buckets",
-                   len(data),
-                   start_ms,
-                   fingerprint=resp.headers.get("X-Xet-Hash"))
-            return data
+    try:
+        async with await op.open(key, "rb") as f:
+            if start:
+                await f.seek(start)
+            data = await f.read(end - start)
+    except NotFound as exc:
+        raise FileNotFoundError(raw) from exc
+    record("read", raw, "hf_buckets", len(data), start_ms)
+    return data
 
 
 async def read_stream(
@@ -62,22 +52,18 @@ async def read_stream(
     if isinstance(path, str):
         path = PathSpec.from_str_path(path)
     raw = path.strip_prefix
-    config = accessor.config
-    key = _key(raw, config)
-    client = HfBucketsClient(config)
-    bucket_id = await client.bucket_id()
-    url = _resolve_url(config.endpoint, bucket_id, key)
+    key = raw.lstrip("/")
+    op = accessor.operator()
     rec = record_stream("read", raw, "hf_buckets")
-    async with await client.session() as session:
-        async with session.get(url, allow_redirects=True) as resp:
-            if resp.status == 404:
-                raise FileNotFoundError(raw)
-            if resp.status != 200 and resp.status != 206:
-                resp.raise_for_status()
-                raise FileNotFoundError(raw)
-            if rec is not None:
-                rec.fingerprint = resp.headers.get("X-Xet-Hash")
-            async for chunk in resp.content.iter_chunked(chunk_size):
+    try:
+        async with await op.open(key, "rb") as f:
+            while True:
+                chunk = await f.read(chunk_size)
+                if not chunk:
+                    break
+                chunk_bytes = bytes(chunk)
                 if rec is not None:
-                    rec.bytes += len(chunk)
-                yield chunk
+                    rec.bytes += len(chunk_bytes)
+                yield chunk_bytes
+    except NotFound as exc:
+        raise FileNotFoundError(raw) from exc

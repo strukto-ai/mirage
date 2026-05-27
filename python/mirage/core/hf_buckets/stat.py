@@ -12,10 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from opendal.exceptions import NotFound
+from opendal.types import EntryMode
+
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.core.hf_buckets._client import (HfBucketsClient, _key, _prefix,
-                                            _resolve_url, _tree_url)
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.filetype import guess_type
 
@@ -47,36 +48,29 @@ async def stat(accessor: HfBucketsAccessor,
         parent_listing = await index.list_dir(parent)
         if parent_listing.entries is not None:
             raise FileNotFoundError(raw)
-    config = accessor.config
-    key = _key(raw, config)
-    client = HfBucketsClient(config)
-    bucket_id = await client.bucket_id()
-    file_url = _resolve_url(config.endpoint, bucket_id, key)
-    async with await client.session() as session:
-        async with session.head(file_url, allow_redirects=False) as resp:
-            if resp.status in (200, 302):
-                size_hdr = (resp.headers.get("X-Linked-Size")
-                            or resp.headers.get("Content-Length") or "0")
-                size = int(size_hdr)
-                xet = resp.headers.get("X-Xet-Hash")
-                return FileStat(
-                    name=stripped.rsplit("/", 1)[-1],
-                    size=size,
-                    modified=resp.headers.get("Last-Modified"),
-                    type=guess_type(raw),
-                    fingerprint=xet,
-                    extra={"xet_hash": xet} if xet else {},
-                )
-            if resp.status != 404:
-                resp.raise_for_status()
-                raise FileNotFoundError(raw)
-        tree_url = _tree_url(config.endpoint, bucket_id, _prefix(raw, config))
-        async with session.get(tree_url) as tresp:
-            if tresp.status == 200:
-                entries = await tresp.json()
-                if entries:
-                    return FileStat(
-                        name=stripped.rsplit("/", 1)[-1] or "/",
-                        type=FileType.DIRECTORY,
-                    )
+    op = accessor.operator()
+    key = stripped
+    try:
+        md = await op.stat(key)
+    except NotFound:
+        md = None
+    if md is not None and md.mode != EntryMode.Dir:
+        modified = md.last_modified.isoformat() if md.last_modified else None
+        return FileStat(
+            name=stripped.rsplit("/", 1)[-1],
+            size=md.content_length,
+            modified=modified,
+            type=guess_type(raw),
+            fingerprint=md.etag,
+            extra={"etag": md.etag} if md.etag else {},
+        )
+    try:
+        md_dir = await op.stat(key + "/")
+        if md_dir and md_dir.mode == EntryMode.Dir:
+            return FileStat(
+                name=stripped.rsplit("/", 1)[-1] or "/",
+                type=FileType.DIRECTORY,
+            )
+    except NotFound:
+        pass
     raise FileNotFoundError(raw)

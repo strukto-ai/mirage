@@ -14,7 +14,7 @@
 
 from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
 
-from mirage.accessor.base import Accessor
+from mirage.accessor._hf import _HfAccessor
 from mirage.utils import key_prefix as kp
 
 
@@ -50,10 +50,8 @@ class HfBucketsConfig(BaseModel):
         return self.bucket.split("/", 1)[1]
 
 
-class HfBucketsAccessor(Accessor):
-
-    def __init__(self, config: HfBucketsConfig) -> None:
-        self.config = config
+class HfBucketsAccessor(_HfAccessor):
+    REPO_TYPE = "bucket"
 
     @property
     def bucket_uri(self) -> str:

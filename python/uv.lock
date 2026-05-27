@@ -2340,7 +2340,7 @@ dependencies = [
     { name = "click" },
     { name = "filelock" },
     { name = "fsspec" },
-    { name = "hf-xet", marker = "platform_machine == 'AMD64' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64' or (extra == 'extra-9-mirage-ai-all' and extra == 'extra-9-mirage-ai-camel') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openai') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openhands') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-pydantic-ai')" },
+    { name = "hf-xet", marker = "platform_machine == 'AMD64' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'" },
     { name = "httpx" },
     { name = "packaging" },
     { name = "pyyaml" },
@@ -3410,12 +3410,12 @@ all = [
     { name = "daytona" },
     { name = "deepagents" },
     { name = "h5py" },
-    { name = "huggingface-hub" },
     { name = "langfuse" },
     { name = "mfusepy" },
     { name = "motor" },
     { name = "openai" },
     { name = "openai-agents" },
+    { name = "opendal" },
     { name = "openhands-sdk" },
     { name = "openhands-tools" },
     { name = "pandas" },
@@ -3468,7 +3468,7 @@ hdf5 = [
     { name = "tables" },
 ]
 hf-buckets = [
-    { name = "huggingface-hub" },
+    { name = "opendal" },
 ]
 langfuse = [
     { name = "langfuse" },
@@ -3553,7 +3553,6 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.135.1" },
     { name = "h5py", marker = "extra == 'hdf5'", specifier = ">=3.16.0" },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "huggingface-hub", marker = "extra == 'hf-buckets'", specifier = ">=1.5.0" },
     { name = "jq", specifier = ">=1.11.0" },
     { name = "langfuse", marker = "extra == 'langfuse'", specifier = ">=4.2.0" },
     { name = "markitdown", marker = "extra == 'camel'", specifier = ">=0.1.5" },
@@ -3588,6 +3587,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.4.3" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=2.30.0" },
     { name = "openai-agents", marker = "extra == 'openai'", specifier = ">=0.14.7" },
+    { name = "opendal", marker = "extra == 'hf-buckets'", specifier = ">=0.47.1" },
     { name = "openhands-sdk", marker = "extra == 'openhands'", specifier = ">=1.18.0" },
     { name = "openhands-tools", marker = "extra == 'openhands'", specifier = ">=1.18.0" },
     { name = "orjson", specifier = ">=3.11" },
@@ -4202,6 +4202,41 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/8f/d2/640b5149cd5688bc0ad1fdbb4df6a2f7b84a093c8d787c27d566132f8b8b/openapi_spec_validator-0.9.0.tar.gz", hash = "sha256:6d648cff6490ebb799dcfe273792f2941c050158854c721f086599d845da78b8", size = 1756839, upload-time = "2026-05-20T09:23:18.871Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/95/d8/321ff889330acca2e3097f3d4f80a40bcc41b6d34d302978ab32c449520b/openapi_spec_validator-0.9.0-py3-none-any.whl", hash = "sha256:222fecffc7714f6d0a6ad62c0e4b66cc2b7dbfafb7b93acfc6c308abbdb51af8", size = 50328, upload-time = "2026-05-20T09:23:17.017Z" },
+]
+
+[[package]]
+name = "opendal"
+version = "0.47.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/24/a8/674b7d77806b2d9f0a92294503b35784267fd0c1dd8f11fe4108a372656a/opendal-0.47.1.tar.gz", hash = "sha256:b3b9a7f056ed5bddb142c54bbf9618125e6f864ed53d35d91fad9823960e39e7", size = 1210250, upload-time = "2026-04-30T18:18:35.013Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/73/ec/44ee750a2e60657fda0e0df67485b5e82d633855b8c76ca17b5d5eb97f0c/opendal-0.47.1-cp311-abi3-macosx_10_12_x86_64.whl", hash = "sha256:82e848e2e9e1b8407120e8bd020de783a4248fbbf049f391644fc74c93a67051", size = 17747421, upload-time = "2026-04-30T18:17:19.094Z" },
+    { url = "https://files.pythonhosted.org/packages/f7/c7/92c806f4c65c55516a7d078e674b6d2dbd80b72dcb681c9bce807497260b/opendal-0.47.1-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:c678036551d957895578b00f8ab9a6317fcc702439e891ccfa868c56c8373d97", size = 17039309, upload-time = "2026-04-30T18:17:34.362Z" },
+    { url = "https://files.pythonhosted.org/packages/cd/9e/67caeb3f1a03dfb3764ade225a2e43953efbac69cc1f3d0912f72df9f891/opendal-0.47.1-cp311-abi3-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:5431625e597827da5961b3c17230513be61dd58f1053b1310a7a207123696956", size = 16810680, upload-time = "2026-04-30T18:17:42.973Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/05/408b2d9095c25d6d07695d72121a2e75c51b1aa4d6c7c5f82c6b9cd7104c/opendal-0.47.1-cp311-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:de74b280c41024739e1b96006660041f5d85e6b1813ecec7df5552e3e22ebea2", size = 18225419, upload-time = "2026-04-30T18:17:15.247Z" },
+    { url = "https://files.pythonhosted.org/packages/b4/98/c3cbb282f53e0f2f30bc70762b15bfbbd55fc495481141d45de77dae7aa7/opendal-0.47.1-cp311-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:dc89730216f48edec808a0dd162164bb7a458931b496befcb0c860ad693f4fcf", size = 17362367, upload-time = "2026-04-30T18:17:52.781Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/c5/dd230895c8ce14e06665bd43757e8f1cac3860a82b214956699075498804/opendal-0.47.1-cp311-abi3-musllinux_1_1_aarch64.whl", hash = "sha256:4ff0d29358435681ebb1c7fb4fadbc113ca9af138014ad7b6ac65d92de9ffa03", size = 17715763, upload-time = "2026-04-30T18:18:08.373Z" },
+    { url = "https://files.pythonhosted.org/packages/a8/7a/33c19dc935ad4a1f71c5682577486b85370594d2f2fb78ceb9b7d208188a/opendal-0.47.1-cp311-abi3-musllinux_1_1_armv7l.whl", hash = "sha256:49f312533fc76acbd3bc0040c114584c0e0e7661f62e0e522efa0825eacbbc8e", size = 17107011, upload-time = "2026-04-30T18:18:29.961Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/24/aa064423a77122b983105a825c9574d0536e66d9ee9606dacd4c93412875/opendal-0.47.1-cp311-abi3-musllinux_1_1_x86_64.whl", hash = "sha256:05f36d4a3f464401440d89d415fb5cd604fbefad0c5ac408bbcc1f0f736cff84", size = 18437138, upload-time = "2026-04-30T18:18:27.056Z" },
+    { url = "https://files.pythonhosted.org/packages/c7/49/95f6671c8ef04eff65a09ebf93149c03ed6318334a4ddea182a31b43fc8f/opendal-0.47.1-cp311-abi3-win_amd64.whl", hash = "sha256:fa2e403e7f86f57164181d1d0f4b59afc77997f89cdeeab883591622b99bda29", size = 19973547, upload-time = "2026-04-30T18:17:45.838Z" },
+    { url = "https://files.pythonhosted.org/packages/97/a4/7f1dea88b09240d703ed2b740c47f0d4fd69a5f1014e51f1555c03fb72f2/opendal-0.47.1-cp313-cp313t-macosx_10_12_x86_64.whl", hash = "sha256:16e6168054d685cee37079696ded71cdb4edce27b98e4a3b2cd06004f3c646f1", size = 17729184, upload-time = "2026-04-30T18:17:12.407Z" },
+    { url = "https://files.pythonhosted.org/packages/77/d3/3cc8033d5237398b10ad18816f67b6c0d451bd36bd4c14acdeca0aa26327/opendal-0.47.1-cp313-cp313t-macosx_11_0_arm64.whl", hash = "sha256:b7a60a20a314e21854675d4e92ac440bd7d578731b2d4051fba939b3c8514968", size = 17018531, upload-time = "2026-04-30T18:17:03.002Z" },
+    { url = "https://files.pythonhosted.org/packages/e9/22/86a1955372ee4b17755281330464aca080751504f94a12e14e389f96ce22/opendal-0.47.1-cp313-cp313t-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:29d318e41a2523138318cc7868fda9da5534f938bb5a0bc1d677b16270acd07b", size = 16802193, upload-time = "2026-04-30T18:18:21.023Z" },
+    { url = "https://files.pythonhosted.org/packages/20/2a/cd3842eef2d6c9bdfdf2470810229dcfca712e300d4392c3c331426dbc8d/opendal-0.47.1-cp313-cp313t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:7abbd8f5b0ce9107f9ca747dceb98e43bf2ff244b59b6b4d50195e024c726aad", size = 18208510, upload-time = "2026-04-30T18:17:06.173Z" },
+    { url = "https://files.pythonhosted.org/packages/46/ac/1971078ffd889f313c796a359e0eee85c9109e8b51b7809b5f1648cc3648/opendal-0.47.1-cp313-cp313t-manylinux_2_28_aarch64.whl", hash = "sha256:204d17e5f533268c15565e316ac10b57980583f31ebf68d08d2238cf077a7348", size = 17346962, upload-time = "2026-04-30T18:18:02.163Z" },
+    { url = "https://files.pythonhosted.org/packages/04/be/32d755e62c687edc47ba1ce166e7e444767e66516651ce94df7137a730a7/opendal-0.47.1-cp313-cp313t-musllinux_1_1_aarch64.whl", hash = "sha256:d7b9d312eae9dd79af92a09dbd69758b15772061747d3310da64d42f483b9d4a", size = 17702055, upload-time = "2026-04-30T18:16:53.974Z" },
+    { url = "https://files.pythonhosted.org/packages/3c/04/010d04bd34aa0b62d26d3863cafefc3396b6265ae98035202cfbb9c2deba/opendal-0.47.1-cp313-cp313t-musllinux_1_1_armv7l.whl", hash = "sha256:bfa5c82f129b5d2e66abbdf678365baf29b6bb4de0df4c59c746187c51618f72", size = 17098872, upload-time = "2026-04-30T18:18:11.527Z" },
+    { url = "https://files.pythonhosted.org/packages/14/5a/190a77d830bf7f24bafb863e2b7f7d8fa24133458f469da1bac12712b3b5/opendal-0.47.1-cp313-cp313t-musllinux_1_1_x86_64.whl", hash = "sha256:74f31918290e88853da9983ca96fdfc7a0d01ebdd6fdfa46942cb223ed275158", size = 18424945, upload-time = "2026-04-30T18:17:22.277Z" },
+    { url = "https://files.pythonhosted.org/packages/7b/97/95eafe7972e3a1e64b88f01bb6c70c54752fba490407fc38b59c009c83eb/opendal-0.47.1-cp313-cp313t-win_amd64.whl", hash = "sha256:27350a385aeab80cafaeb982bcaa055df263ab87571f27c99b8c783c12ccb03a", size = 19956938, upload-time = "2026-04-30T18:17:00.056Z" },
+    { url = "https://files.pythonhosted.org/packages/c1/9d/fc4e09ea1270c94faf6b834900415f033ec6eae6f5c93aefa0e3ab8fe1ea/opendal-0.47.1-cp314-cp314t-macosx_10_12_x86_64.whl", hash = "sha256:634b4c56ff8616497462b01fbc754e6bcb924f56d66de1f63c55fdd81d4f9e9c", size = 17730506, upload-time = "2026-04-30T18:17:25.514Z" },
+    { url = "https://files.pythonhosted.org/packages/88/36/4f28c6824f46411427d6a750315a82270599b04eff234667e28951fa3b8b/opendal-0.47.1-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:cdd9e9eb0dadf040b398e8a041e4359abaf91000d6fac3d2013795db42b11e42", size = 17020913, upload-time = "2026-04-30T18:17:28.764Z" },
+    { url = "https://files.pythonhosted.org/packages/7b/76/5df4c9649931b2c4b919ae1be135586cf55b8881723da9e821ded8bf83ed/opendal-0.47.1-cp314-cp314t-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:ee9a88bb2f78ea33f44f042fcc40cb0a0f51c0492b02fcc2dac8448dade0fc72", size = 16803782, upload-time = "2026-04-30T18:17:40.218Z" },
+    { url = "https://files.pythonhosted.org/packages/33/30/71c1c0123f3d76ce1ff8871064de96b92a074b15d18da1626f74d7d75027/opendal-0.47.1-cp314-cp314t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:3ac5817090c7da4d074226250abea3c612f4ddaa91e4d255e7589c9143a38107", size = 18209490, upload-time = "2026-04-30T18:17:09.291Z" },
+    { url = "https://files.pythonhosted.org/packages/8f/99/be3a5c63729fa002e9a292c124d8a77cb0b2bf6959d18f91814ecbe96245/opendal-0.47.1-cp314-cp314t-manylinux_2_28_aarch64.whl", hash = "sha256:e7e9049ba876638a17c6648609d177d837e3e20c9417370af5987f2b09e06f69", size = 17348455, upload-time = "2026-04-30T18:16:56.791Z" },
+    { url = "https://files.pythonhosted.org/packages/a9/bf/351af98281332574b23a0e8a98b609cf6390e1666bf5115b6ef3044d79b4/opendal-0.47.1-cp314-cp314t-musllinux_1_1_aarch64.whl", hash = "sha256:59d20c6a65ecd80635fd415a6131f93e616e84cba6318506339912b6ccae0461", size = 17701814, upload-time = "2026-04-30T18:18:32.899Z" },
+    { url = "https://files.pythonhosted.org/packages/58/f0/27d9c5dbb05dcdb68b63f57083a4847a445b81a6d693c51fcc1c747097b4/opendal-0.47.1-cp314-cp314t-musllinux_1_1_armv7l.whl", hash = "sha256:57352f79efcb612dd49854e1057fe766667cd230dab99d952e4069821a6c8fdb", size = 17099690, upload-time = "2026-04-30T18:18:36.973Z" },
+    { url = "https://files.pythonhosted.org/packages/34/6e/273840d18ef7248f32166507f19caa7c795daa92edee551b91236bebf38a/opendal-0.47.1-cp314-cp314t-musllinux_1_1_x86_64.whl", hash = "sha256:166535032b768017289a7dc1d6820220f37b0d2a79881271b48a961a14a1f4b7", size = 18425858, upload-time = "2026-04-30T18:16:47.7Z" },
+    { url = "https://files.pythonhosted.org/packages/92/01/4ccbb7bf074b6a711693421a8ccfc4343c4a976c1faedcfbadf5871606c6/opendal-0.47.1-cp314-cp314t-win_amd64.whl", hash = "sha256:9bcc6ba8672e3cf6d718b1bf931c418c53ae7a6ec529b124477827820bee03bc", size = 19958408, upload-time = "2026-04-30T18:17:55.881Z" },
 ]
 
 [[package]]
@@ -9005,7 +9040,7 @@ name = "tqdm"
 version = "4.67.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-9-mirage-ai-all' and extra == 'extra-9-mirage-ai-camel') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openai') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openhands') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-pydantic-ai')" },
+    { name = "colorama", marker = "sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/09/a9/6ba95a270c6f1fbcd8dac228323f2777d886cb206987444e4bce66338dd4/tqdm-4.67.3.tar.gz", hash = "sha256:7d825f03f89244ef73f1d4ce193cb1774a8179fd96f31d7e1dcde62092b960bb", size = 169598, upload-time = "2026-02-03T17:35:53.048Z" }
 wheels = [

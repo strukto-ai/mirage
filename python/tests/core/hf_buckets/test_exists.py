@@ -13,35 +13,18 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import pytest
-from aioresponses import aioresponses
 
-from mirage.accessor.hf_buckets import HfBucketsAccessor, HfBucketsConfig
 from mirage.core.hf_buckets.exists import exists
 from mirage.types import PathSpec
 
 
 @pytest.mark.asyncio
-async def test_exists_true_for_file():
-    cfg = HfBucketsConfig(bucket="o/b", token="t")
-    acc = HfBucketsAccessor(cfg)
-    with aioresponses() as m:
-        m.get("https://huggingface.co/api/buckets/o/b",
-              payload={"id": "bkt-1"})
-        m.head("https://huggingface.co/buckets/bkt-1/resolve/foo.txt",
-               status=200,
-               headers={"Content-Length": "3"})
-        assert await exists(acc, PathSpec.from_str_path("/foo.txt")) is True
+async def test_exists_true_for_file(make_acc):
+    acc = make_acc({"a.txt": b"x"})
+    assert await exists(acc, PathSpec.from_str_path("/a.txt")) is True
 
 
 @pytest.mark.asyncio
-async def test_exists_false_for_missing():
-    cfg = HfBucketsConfig(bucket="o/b", token="t")
-    acc = HfBucketsAccessor(cfg)
-    with aioresponses() as m:
-        m.get("https://huggingface.co/api/buckets/o/b",
-              payload={"id": "bkt-1"})
-        m.head("https://huggingface.co/buckets/bkt-1/resolve/nope.txt",
-               status=404)
-        m.get("https://huggingface.co/api/buckets/bkt-1/tree/nope.txt/",
-              status=404)
-        assert await exists(acc, PathSpec.from_str_path("/nope.txt")) is False
+async def test_exists_false_for_missing(make_acc):
+    acc = make_acc({})
+    assert await exists(acc, PathSpec.from_str_path("/missing.txt")) is False
