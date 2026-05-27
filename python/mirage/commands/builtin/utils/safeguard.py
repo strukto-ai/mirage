@@ -12,10 +12,44 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import time
+from collections.abc import AsyncIterator
+
 from mirage.commands.safeguard import CommandSafeguard
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import OnExceed
 from mirage.utils.stream import ensure_stream
+
+
+class CommandTimeoutError(Exception):
+
+    def __init__(self, command: str, seconds: float) -> None:
+        super().__init__(f"{command}: timed out after {seconds}s")
+        self.command = command
+        self.seconds = seconds
+
+
+async def with_timeout(
+    src: ByteSource,
+    seconds: float,
+    command: str,
+) -> AsyncIterator[bytes]:
+    stream = ensure_stream(src)
+    start = time.monotonic()
+    iterator = stream.__aiter__()
+    while True:
+        remaining = seconds - (time.monotonic() - start)
+        if remaining <= 0:
+            raise CommandTimeoutError(command, seconds)
+        try:
+            chunk = await asyncio.wait_for(iterator.__anext__(),
+                                           timeout=remaining)
+        except StopAsyncIteration:
+            return
+        except asyncio.TimeoutError as exc:
+            raise CommandTimeoutError(command, seconds) from exc
+        yield chunk
 
 
 def _trim_to_lines(buf: bytes, max_lines: int) -> bytes:

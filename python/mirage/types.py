@@ -80,6 +80,7 @@ class OnExceed(str, Enum):
 class CommandSafeguard(BaseModel):
     max_bytes: NonNegativeInt | None = None
     max_lines: NonNegativeInt | None = None
+    timeout_seconds: float | None = None
     on_exceed: OnExceed = OnExceed.TRUNCATE
 
 

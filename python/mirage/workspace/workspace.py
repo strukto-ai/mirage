@@ -25,7 +25,8 @@ from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index import IndexConfig
 from mirage.commands.builtin.general import HISTORY_COMMANDS
-from mirage.commands.builtin.utils.safeguard import apply_safeguard
+from mirage.commands.builtin.utils.safeguard import (CommandTimeoutError,
+                                                     apply_safeguard)
 
 try:
     from mirage.cache.file.redis import RedisFileCacheStore
@@ -135,15 +136,20 @@ class Workspace:
         self._registry.set_consistency(consistency)
 
         for prefix, value in resources.items():
+            mount_safeguards: dict = {}
             if isinstance(value, tuple) and len(value) >= 2:
                 prov = value[0]
                 mount_mode = value[1]
+                if len(value) >= 3 and value[2]:
+                    mount_safeguards = dict(value[2])
             else:
                 prov = value
                 mount_mode = mode
             if index is not None:
                 prov.set_index(index)
-            self._registry.mount(prefix, prov, mount_mode)
+            mount_obj = self._registry.mount(prefix, prov, mount_mode)
+            if mount_safeguards:
+                mount_obj.command_safeguards.update(mount_safeguards)
 
         self._fuse = FuseManager()
         self._native = native
@@ -751,6 +757,11 @@ class Workspace:
                                           exit_code=2)
                 return io
             if provision:
+                # TODO: provision_node bypasses _execute_command and so
+                # doesn't pick up CommandSafeguard.timeout_seconds. Dry-run
+                # estimates can hang on slow accessors. Add a wait_for here
+                # using a resolved safeguard for the AST's primary command,
+                # or wrap each handler call inside provision_node.
                 return await provision_node(self._registry, self.dispatch,
                                             _exec_for_recursion, ast,
                                             effective_session)
@@ -781,6 +792,17 @@ class Workspace:
             exec_node.records = records
             io.stdout = stdout
             await self.apply_io(io)
+            return io
+        except CommandTimeoutError as exc:
+            stop_recording()
+            if cancel is not None:
+                cancel.set()
+            msg = (str(exc) + "\n").encode()
+            io = IOResult(exit_code=124, stderr=msg)
+            exec_node = ExecutionNode(command=command,
+                                      stderr=msg,
+                                      exit_code=124)
+            session.last_exit_code = 124
             return io
         except (MirageAbortError, ContentDriftError):
             raise

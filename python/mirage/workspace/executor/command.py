@@ -15,6 +15,8 @@
 import fnmatch
 from collections.abc import Callable
 
+from mirage.commands.builtin.utils.safeguard import with_timeout
+from mirage.commands.safeguard import resolve_safeguard
 from mirage.commands.spec import OperandKind, parse_command, parse_to_kwargs
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize, wrap_cachable_streams
@@ -261,6 +263,8 @@ async def _fan_out_traversal(
                 final_io_exit = 1
 
     merged_io.exit_code = final_io_exit
+    if merged_io.safeguard is None:
+        merged_io.safeguard = resolve_safeguard(cmd_name)
     exec_node = ExecutionNode(command=cmd_str,
                               exit_code=final_io_exit,
                               stderr=merged_io.stderr)
@@ -612,8 +616,17 @@ async def handle_command(
                                   stderr=msg.encode())
 
     if is_cross_mount(cmd_name, path_scopes, registry):
-        return await handle_cross_mount(cmd_name, path_scopes, text_only,
-                                        dispatch, cmd_str)
+        stdout, io, exec_node = await handle_cross_mount(
+            cmd_name, path_scopes, text_only, dispatch, cmd_str)
+        if io.safeguard is None:
+            io.safeguard = resolve_safeguard(cmd_name)
+        if (io.safeguard is not None
+                and io.safeguard.timeout_seconds is not None
+                and io.safeguard.timeout_seconds > 0 and stdout is not None
+                and not isinstance(stdout, bytes)):
+            stdout = with_timeout(stdout, io.safeguard.timeout_seconds,
+                                  cmd_name)
+        return stdout, io, exec_node
 
     # Reject unsupported cross-mount commands
     if len(path_scopes) >= 2:
@@ -700,6 +713,15 @@ async def handle_command(
         io.writes = {prefix + k: v for k, v in io.writes.items()}
         io.cache = [prefix + p for p in io.cache]
     stdout, io = wrap_cachable_streams(stdout, io)
+
+    # TODO: io.stderr is also a ByteSource that downstream materialize()
+    # consumes without a timeout wrap. A handler returning a slow
+    # streaming stderr could hang past the resolved timeout. Wrap it
+    # symmetrically with with_timeout here.
+    if (io.safeguard is not None and io.safeguard.timeout_seconds is not None
+            and io.safeguard.timeout_seconds > 0 and stdout is not None
+            and not isinstance(stdout, bytes)):
+        stdout = with_timeout(stdout, io.safeguard.timeout_seconds, cmd_name)
 
     stderr_bytes = await materialize(io.stderr)
     exec_node = ExecutionNode(command=cmd_str,

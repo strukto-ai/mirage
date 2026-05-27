@@ -23,7 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.resource.registry import build_resource
-from mirage.types import ConsistencyPolicy, MountMode
+from mirage.types import CommandSafeguard, ConsistencyPolicy, MountMode
 
 
 def _coerce_mount_mode(value):
@@ -153,6 +153,8 @@ class MountBlock(BaseModel):
     resource: str
     mode: MountMode | None = None
     config: dict[str, Any] = Field(default_factory=dict)
+    command_safeguards: dict[str,
+                             CommandSafeguard] = Field(default_factory=dict)
 
     @field_validator("mode", mode="before")
     @classmethod
@@ -199,7 +201,10 @@ class WorkspaceConfig(BaseModel):
         for prefix, block in self.mounts.items():
             prov = build_resource(block.resource, block.config)
             mode = block.mode if block.mode is not None else self.mode
-            resources[prefix] = (prov, mode)
+            if block.command_safeguards:
+                resources[prefix] = (prov, mode, block.command_safeguards)
+            else:
+                resources[prefix] = (prov, mode)
         kwargs: dict[str, Any] = {
             "resources": resources,
             "mode": self.mode,

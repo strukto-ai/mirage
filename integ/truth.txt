@@ -1175,6 +1175,12 @@ line26
 line27
 line28
 line29
+=== timeout_sleep_fires ===
+exit=124
+sleep: timed out after 0.1s
+=== timeout_pipeline_first_wins ===
+exit=124
+sleep: timed out after 0.1s
 === snapshot_load_cache ===
 hello
 world

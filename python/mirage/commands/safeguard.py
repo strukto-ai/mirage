@@ -15,11 +15,16 @@
 from mirage.types import CommandSafeguard
 
 _DEFAULT_MAX_LINES = 2000
+_DEFAULT_TIMEOUT_SECONDS = 600.0
 
 DEFAULT_COMMAND_SAFEGUARDS: dict[str, CommandSafeguard] = {
-    name: CommandSafeguard(max_lines=_DEFAULT_MAX_LINES)
+    name:
+    CommandSafeguard(max_lines=_DEFAULT_MAX_LINES,
+                     timeout_seconds=_DEFAULT_TIMEOUT_SECONDS)
     for name in ("cat", "grep", "rg", "head", "tail")
 }
+
+FALLBACK_SAFEGUARD = CommandSafeguard(timeout_seconds=_DEFAULT_TIMEOUT_SECONDS)
 
 
 def resolve_safeguard(
@@ -31,4 +36,4 @@ def resolve_safeguard(
         return mount_override
     if command_default is not None:
         return command_default
-    return DEFAULT_COMMAND_SAFEGUARDS.get(name)
+    return DEFAULT_COMMAND_SAFEGUARDS.get(name, FALLBACK_SAFEGUARD)

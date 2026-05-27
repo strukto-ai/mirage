@@ -60,5 +60,7 @@ def test_resolve_falls_back_to_central_default():
                              None) is DEFAULT_COMMAND_SAFEGUARDS["cat"]
 
 
-def test_resolve_unknown_command_has_no_safeguard():
-    assert resolve_safeguard("nl", None, None) is None
+def test_resolve_unknown_command_returns_fallback_safeguard():
+    from mirage.commands.safeguard import FALLBACK_SAFEGUARD
+    assert resolve_safeguard("nl", None, None) is FALLBACK_SAFEGUARD
+    assert FALLBACK_SAFEGUARD.timeout_seconds is not None

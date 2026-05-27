@@ -70,15 +70,60 @@ class JobTable:
         return job
 
     def get(self, job_id: int) -> Job | None:
-        return self._jobs.get(job_id)
+        job = self._jobs.get(job_id)
+        if job is not None:
+            self._refresh(job)
+        return job
 
     def list_jobs(self) -> list[Job]:
-        return list(self._jobs.values())
+        jobs = list(self._jobs.values())
+        for j in jobs:
+            self._refresh(j)
+        return jobs
 
     def running_jobs(self) -> list[Job]:
+        for j in self._jobs.values():
+            self._refresh(j)
         return [
             j for j in self._jobs.values() if j.status == JobStatus.RUNNING
         ]
+
+    def _refresh(self, job: Job) -> None:
+        """Sync status from the underlying asyncio task without awaiting.
+
+        When the bg task has finished (normally, raised, or was cancelled)
+        but no one has called ``wait``, this updates the job's status,
+        exit_code, and captured streams from the task result. Lets
+        ``list_jobs`` / ``running_jobs`` / ``get`` report fresh state.
+        Requires ``_run_bg`` to have already materialized stdout/stderr,
+        so reading the result is purely synchronous.
+        """
+        if job.status != JobStatus.RUNNING:
+            return
+        if not job.task.done():
+            return
+        if job.task.cancelled():
+            job.status = JobStatus.KILLED
+            job.exit_code = 137
+            job.stderr = b"Killed"
+            return
+        exc = job.task.exception()
+        if exc is not None:
+            job.status = JobStatus.COMPLETED
+            job.exit_code = 1
+            job.stderr = str(exc).encode()
+            return
+        stdout, io_result, exec_node = job.task.result()
+        job.stdout = stdout if isinstance(stdout, bytes) else b""
+        job.io_result = io_result
+        job.execution_node = exec_node
+        io_result.sync_exit_code()
+        job.exit_code = io_result.exit_code
+        if isinstance(io_result.stderr, bytes):
+            job.stderr = io_result.stderr
+        elif io_result.stderr is None:
+            job.stderr = b""
+        job.status = JobStatus.COMPLETED
 
     def kill(self, job_id: int) -> bool:
         job = self._jobs.get(job_id)
