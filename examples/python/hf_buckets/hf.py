@@ -15,6 +15,7 @@
 import asyncio
 import os
 import time
+import uuid
 
 from dotenv import load_dotenv
 
@@ -29,7 +30,7 @@ config = HfBucketsConfig(
 )
 
 resource = HfBucketsResource(config)
-ws = Workspace({"/hf/": resource}, mode=MountMode.READ)
+ws = Workspace({"/hf/": resource}, mode=MountMode.WRITE)
 
 
 def ops_summary() -> str:
@@ -384,6 +385,41 @@ async def main():
         "| wc -l")
     await ws.cache.clear()
     await measure("non-cancellable: cat | wc -l", f"cat {target} | wc -l")
+
+    # WRITE + REMOVE flow. HF Buckets silently drops zero-byte uploads,
+    # so we use ws.ops.write to push non-empty bytes (touch would no-op).
+    # Demonstrates parent-dir index cache invalidation: without it, `ls`
+    # after a write would return stale entries.
+    test_file = f"/hf/test-{uuid.uuid4().hex[:8]}.txt"
+    test_file.rsplit("/", 1)[-1]
+    print(f"\n=== WRITE + REMOVE FLOW (using {test_file}) ===")
+
+    print(f"\n--- write '{test_file}' (14 bytes) ---")
+    await ws.ops.write(test_file, b"Hello, Mirage!")
+    print("  written")
+
+    print(f"\n--- stat {test_file} (should succeed) ---")
+    r = await ws.execute(f"stat {test_file}")
+    print(f"  {(await r.stdout_str()).strip()}")
+
+    print(f"\n--- cat {test_file} ---")
+    r = await ws.execute(f"cat {test_file}")
+    print(f"  {(await r.stdout_str()).strip()!r}")
+
+    print(f"\n--- rm {test_file} ---")
+    r = await ws.execute(f"rm {test_file}")
+    print(f"  exit: {r.exit_code}")
+
+    print(f"\n--- stat {test_file} (should fail: not found) ---")
+    r = await ws.execute(f"stat {test_file}")
+    err = (await r.stderr_str()).strip()[:80]
+    print(f"  exit: {r.exit_code}  stderr: {err}")
+
+    # touch on an existing file is still tested (no-op when c=False but
+    # file exists, since exists() short-circuits).
+    print("\n--- touch on existing file (no-op) ---")
+    r = await ws.execute("touch /hf/example.json")
+    print(f"  exit: {r.exit_code}")
 
     print(f"\nStats: {ops_summary()}")
 
