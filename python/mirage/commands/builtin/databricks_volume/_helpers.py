@@ -1,0 +1,42 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+from functools import partial
+from typing import Callable
+
+from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.utils.wrap import (call_read_bytes,
+                                                call_read_stream)
+from mirage.core.databricks_volume.read import read_bytes as _read_bytes
+from mirage.core.databricks_volume.stream import read_stream as _read_stream
+from mirage.types import PathSpec
+
+
+def path_prefix(paths: list[PathSpec],
+                fallback: PathSpec | None = None) -> str:
+    if paths:
+        return paths[0].prefix
+    if fallback is not None:
+        return fallback.prefix
+    return ""
+
+
+def read_bytes_with_index(index: IndexCacheStore | None,
+                          prefix: str = "") -> Callable:
+    return partial(call_read_bytes, _read_bytes, index=index, prefix=prefix)
+
+
+def read_stream_with_index(index: IndexCacheStore | None,
+                           prefix: str = "") -> Callable:
+    return partial(call_read_stream, _read_stream, index=index, prefix=prefix)

@@ -12,28 +12,48 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.databricks_volume.awk import awk
 from mirage.commands.builtin.databricks_volume.cat import cat
+from mirage.commands.builtin.databricks_volume.cut import cut
+from mirage.commands.builtin.databricks_volume.diff import diff
 from mirage.commands.builtin.databricks_volume.find import find
 from mirage.commands.builtin.databricks_volume.grep import grep
 from mirage.commands.builtin.databricks_volume.head import head
+from mirage.commands.builtin.databricks_volume.jq import jq
 from mirage.commands.builtin.databricks_volume.ls import ls
+from mirage.commands.builtin.databricks_volume.nl import nl
 from mirage.commands.builtin.databricks_volume.rg import rg
 from mirage.commands.builtin.databricks_volume.rm import rm
+from mirage.commands.builtin.databricks_volume.sed import sed
+from mirage.commands.builtin.databricks_volume.sort import sort
 from mirage.commands.builtin.databricks_volume.stat import stat
 from mirage.commands.builtin.databricks_volume.tail import tail
 from mirage.commands.builtin.databricks_volume.touch import touch
+from mirage.commands.builtin.databricks_volume.tr import tr
 from mirage.commands.builtin.databricks_volume.tree import tree
+from mirage.commands.builtin.databricks_volume.uniq import uniq
+from mirage.commands.builtin.databricks_volume.wc import wc
 
 COMMANDS = [
+    awk,
     cat,
+    cut,
+    diff,
     find,
     grep,
     head,
+    jq,
     ls,
+    nl,
     rm,
     rg,
+    sed,
+    sort,
     stat,
     tail,
     touch,
     tree,
+    tr,
+    uniq,
+    wc,
 ]
