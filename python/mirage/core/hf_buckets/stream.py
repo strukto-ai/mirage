@@ -44,7 +44,11 @@ async def range_read(accessor: HfBucketsAccessor, path: PathSpec, start: int,
                 resp.raise_for_status()
                 raise FileNotFoundError(raw)
             data = await resp.read()
-            record("read", raw, "hf_buckets", len(data), start_ms,
+            record("read",
+                   raw,
+                   "hf_buckets",
+                   len(data),
+                   start_ms,
                    fingerprint=resp.headers.get("X-Xet-Hash"))
             return data
 

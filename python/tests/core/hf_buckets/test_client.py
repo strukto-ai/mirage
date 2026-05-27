@@ -75,10 +75,10 @@ def test_resolve_url():
 
 
 def test_resolve_url_encodes_path():
-    assert _resolve_url("https://huggingface.co", "bkt-1",
-                        "data/hello world.txt") == (
-                            "https://huggingface.co/buckets/bkt-1/resolve/data/hello%20world.txt"
-                        )
+    assert _resolve_url(
+        "https://huggingface.co", "bkt-1", "data/hello world.txt"
+    ) == (
+        "https://huggingface.co/buckets/bkt-1/resolve/data/hello%20world.txt")
 
 
 def test_tree_url_encodes_path():
@@ -114,8 +114,7 @@ async def test_client_bucket_id_concurrent_calls_dedupe():
     with aioresponses() as m:
         m.get("https://huggingface.co/api/buckets/o/b",
               payload={"id": "bkt-1"})
-        results = await asyncio.gather(
-            *[client.bucket_id() for _ in range(8)])
+        results = await asyncio.gather(*[client.bucket_id() for _ in range(8)])
     assert all(r == "bkt-1" for r in results)
     matched = sum(1 for call_list in m.requests.values() for _ in call_list)
     assert matched == 1

@@ -72,7 +72,8 @@ async def test_read_bytes_accepts_206_partial_content():
         m.get("https://huggingface.co/api/buckets/o/b",
               payload={"id": "bkt-1"})
         m.get("https://huggingface.co/buckets/bkt-1/resolve/x",
-              status=206, body=b"cdef")
+              status=206,
+              body=b"cdef")
         out = await read_bytes(acc,
                                PathSpec.from_str_path("/x"),
                                offset=2,

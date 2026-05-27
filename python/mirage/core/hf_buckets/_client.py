@@ -81,8 +81,7 @@ class HfBucketsClient:
                     resp.raise_for_status()
                     data = await resp.json()
             if "id" not in data:
-                raise RuntimeError(
-                    f"HF API response missing 'id' for bucket "
-                    f"{self._config.bucket}: {data}")
+                raise RuntimeError(f"HF API response missing 'id' for bucket "
+                                   f"{self._config.bucket}: {data}")
             self._bucket_id = data["id"]
             return self._bucket_id

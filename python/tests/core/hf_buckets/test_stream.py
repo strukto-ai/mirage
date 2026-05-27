@@ -56,8 +56,7 @@ async def test_read_stream_handles_empty_file():
     with aioresponses() as m:
         m.get("https://huggingface.co/api/buckets/o/b",
               payload={"id": "bkt-1"})
-        m.get("https://huggingface.co/buckets/bkt-1/resolve/empty",
-              body=b"")
+        m.get("https://huggingface.co/buckets/bkt-1/resolve/empty", body=b"")
         chunks: list[bytes] = []
         async for c in read_stream(acc, PathSpec.from_str_path("/empty")):
             chunks.append(c)
