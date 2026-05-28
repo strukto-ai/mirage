@@ -31,7 +31,7 @@ class AliyunConfig(BaseModel):
     def resolved_endpoint_url(self) -> str:
         if self.endpoint_url:
             return self.endpoint_url
-        return f"https://oss-{self.region}.aliyuncs.com"
+        return f"https://s3.oss-{self.region}.aliyuncs.com"
 
     def to_s3_config(self) -> S3Config:
         return S3Config(

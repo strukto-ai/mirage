@@ -22,8 +22,10 @@ from mirage.types import ResourceName
 
 
 def test_scaleway_regional_endpoint():
-    config = ScalewayConfig(bucket="b", region="fr-par",
-                            access_key_id="k", secret_access_key="s")
+    config = ScalewayConfig(bucket="b",
+                            region="fr-par",
+                            access_key_id="k",
+                            secret_access_key="s")
     assert config.resolved_endpoint_url() == "https://s3.fr-par.scw.cloud"
 
 
@@ -33,15 +35,19 @@ def test_scaleway_requires_region():
 
 
 def test_scaleway_custom_endpoint_override():
-    config = ScalewayConfig(bucket="b", region="nl-ams",
+    config = ScalewayConfig(bucket="b",
+                            region="nl-ams",
                             endpoint_url="https://custom.example.com",
-                            access_key_id="k", secret_access_key="s")
+                            access_key_id="k",
+                            secret_access_key="s")
     assert config.resolved_endpoint_url() == "https://custom.example.com"
 
 
 def test_scaleway_to_s3_config():
-    config = ScalewayConfig(bucket="b", region="pl-waw",
-                            access_key_id="key", secret_access_key="secret")
+    config = ScalewayConfig(bucket="b",
+                            region="pl-waw",
+                            access_key_id="key",
+                            secret_access_key="secret")
     s3 = config.to_s3_config()
     assert isinstance(s3, S3Config)
     assert s3.endpoint_url == "https://s3.pl-waw.scw.cloud"
@@ -50,7 +56,9 @@ def test_scaleway_to_s3_config():
 
 def test_scaleway_resource_uses_s3_resource_type():
     resource = ScalewayResource(
-        ScalewayConfig(bucket="b", region="fr-par",
-                       access_key_id="k", secret_access_key="s"))
+        ScalewayConfig(bucket="b",
+                       region="fr-par",
+                       access_key_id="k",
+                       secret_access_key="s"))
     assert resource.name == ResourceName.S3
     assert isinstance(resource.config, S3Config)

@@ -22,8 +22,10 @@ from mirage.types import ResourceName
 
 
 def test_backblaze_regional_endpoint():
-    config = BackblazeConfig(bucket="b", region="us-west-002",
-                             access_key_id="k", secret_access_key="s")
+    config = BackblazeConfig(bucket="b",
+                             region="us-west-002",
+                             access_key_id="k",
+                             secret_access_key="s")
     assert config.resolved_endpoint_url() == (
         "https://s3.us-west-002.backblazeb2.com")
 
@@ -34,15 +36,19 @@ def test_backblaze_requires_region():
 
 
 def test_backblaze_custom_endpoint_override():
-    config = BackblazeConfig(bucket="b", region="us-west-002",
+    config = BackblazeConfig(bucket="b",
+                             region="us-west-002",
                              endpoint_url="https://custom.example.com",
-                             access_key_id="k", secret_access_key="s")
+                             access_key_id="k",
+                             secret_access_key="s")
     assert config.resolved_endpoint_url() == "https://custom.example.com"
 
 
 def test_backblaze_to_s3_config():
-    config = BackblazeConfig(bucket="b", region="eu-central-003",
-                             access_key_id="key", secret_access_key="secret")
+    config = BackblazeConfig(bucket="b",
+                             region="eu-central-003",
+                             access_key_id="key",
+                             secret_access_key="secret")
     s3 = config.to_s3_config()
     assert isinstance(s3, S3Config)
     assert s3.endpoint_url == "https://s3.eu-central-003.backblazeb2.com"
@@ -51,7 +57,9 @@ def test_backblaze_to_s3_config():
 
 def test_backblaze_resource_uses_s3_resource_type():
     resource = BackblazeResource(
-        BackblazeConfig(bucket="b", region="us-west-002",
-                        access_key_id="k", secret_access_key="s"))
+        BackblazeConfig(bucket="b",
+                        region="us-west-002",
+                        access_key_id="k",
+                        secret_access_key="s"))
     assert resource.name == ResourceName.S3
     assert isinstance(resource.config, S3Config)

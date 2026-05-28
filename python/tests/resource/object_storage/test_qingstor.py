@@ -22,8 +22,10 @@ from mirage.types import ResourceName
 
 
 def test_qingstor_zone_endpoint():
-    config = QingStorConfig(bucket="b", region="pek3b",
-                            access_key_id="k", secret_access_key="s")
+    config = QingStorConfig(bucket="b",
+                            region="pek3b",
+                            access_key_id="k",
+                            secret_access_key="s")
     assert config.resolved_endpoint_url() == "https://s3.pek3b.qingstor.com"
 
 
@@ -33,15 +35,19 @@ def test_qingstor_requires_region():
 
 
 def test_qingstor_custom_endpoint_override():
-    config = QingStorConfig(bucket="b", region="sh1a",
+    config = QingStorConfig(bucket="b",
+                            region="sh1a",
                             endpoint_url="https://custom.example.com",
-                            access_key_id="k", secret_access_key="s")
+                            access_key_id="k",
+                            secret_access_key="s")
     assert config.resolved_endpoint_url() == "https://custom.example.com"
 
 
 def test_qingstor_to_s3_config():
-    config = QingStorConfig(bucket="b", region="gd2a",
-                            access_key_id="key", secret_access_key="secret")
+    config = QingStorConfig(bucket="b",
+                            region="gd2a",
+                            access_key_id="key",
+                            secret_access_key="secret")
     s3 = config.to_s3_config()
     assert isinstance(s3, S3Config)
     assert s3.endpoint_url == "https://s3.gd2a.qingstor.com"
@@ -50,7 +56,9 @@ def test_qingstor_to_s3_config():
 
 def test_qingstor_resource_uses_s3_resource_type():
     resource = QingStorResource(
-        QingStorConfig(bucket="b", region="pek3b",
-                       access_key_id="k", secret_access_key="s"))
+        QingStorConfig(bucket="b",
+                       region="pek3b",
+                       access_key_id="k",
+                       secret_access_key="s"))
     assert resource.name == ResourceName.S3
     assert isinstance(resource.config, S3Config)

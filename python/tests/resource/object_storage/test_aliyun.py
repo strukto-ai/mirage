@@ -22,10 +22,12 @@ from mirage.types import ResourceName
 
 
 def test_aliyun_regional_endpoint():
-    config = AliyunConfig(bucket="b", region="cn-hangzhou",
-                          access_key_id="k", secret_access_key="s")
+    config = AliyunConfig(bucket="b",
+                          region="cn-hangzhou",
+                          access_key_id="k",
+                          secret_access_key="s")
     assert config.resolved_endpoint_url() == (
-        "https://oss-cn-hangzhou.aliyuncs.com")
+        "https://s3.oss-cn-hangzhou.aliyuncs.com")
 
 
 def test_aliyun_requires_region():
@@ -34,24 +36,30 @@ def test_aliyun_requires_region():
 
 
 def test_aliyun_custom_endpoint_override():
-    config = AliyunConfig(bucket="b", region="cn-beijing",
+    config = AliyunConfig(bucket="b",
+                          region="cn-beijing",
                           endpoint_url="https://custom.example.com",
-                          access_key_id="k", secret_access_key="s")
+                          access_key_id="k",
+                          secret_access_key="s")
     assert config.resolved_endpoint_url() == "https://custom.example.com"
 
 
 def test_aliyun_to_s3_config():
-    config = AliyunConfig(bucket="b", region="us-west-1",
-                          access_key_id="key", secret_access_key="secret")
+    config = AliyunConfig(bucket="b",
+                          region="us-west-1",
+                          access_key_id="key",
+                          secret_access_key="secret")
     s3 = config.to_s3_config()
     assert isinstance(s3, S3Config)
-    assert s3.endpoint_url == "https://oss-us-west-1.aliyuncs.com"
+    assert s3.endpoint_url == "https://s3.oss-us-west-1.aliyuncs.com"
     assert reveal_secret(s3.aws_secret_access_key) == "secret"
 
 
 def test_aliyun_resource_uses_s3_resource_type():
     resource = AliyunResource(
-        AliyunConfig(bucket="b", region="cn-hangzhou",
-                     access_key_id="k", secret_access_key="s"))
+        AliyunConfig(bucket="b",
+                     region="cn-hangzhou",
+                     access_key_id="k",
+                     secret_access_key="s"))
     assert resource.name == ResourceName.S3
     assert isinstance(resource.config, S3Config)
