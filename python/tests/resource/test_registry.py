@@ -37,7 +37,6 @@ EXPECTED_RESOURCES = {
     "discord",
     "gmail",
     "trello",
-    "telegram",
     "mongodb",
     "postgres",
     "notion",

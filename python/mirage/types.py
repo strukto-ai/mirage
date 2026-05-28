@@ -111,7 +111,6 @@ class ResourceName(str, Enum):
     DISCORD = "discord"
     GMAIL = "gmail"
     TRELLO = "trello"
-    TELEGRAM = "telegram"
     MONGODB = "mongodb"
     POSTGRES = "postgres"
     NOTION = "notion"

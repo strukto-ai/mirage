@@ -83,9 +83,6 @@ REGISTRY: dict[str, ResourceEntry] = {
     "trello":
     ResourceEntry("mirage.resource.trello:TrelloResource",
                   "mirage.resource.trello:TrelloConfig"),
-    "telegram":
-    ResourceEntry("mirage.resource.telegram:TelegramResource",
-                  "mirage.resource.telegram:TelegramConfig"),
     "mongodb":
     ResourceEntry("mirage.resource.mongodb:MongoDBResource",
                   "mirage.resource.mongodb:MongoDBConfig"),

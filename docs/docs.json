@@ -140,7 +140,6 @@
                 "pages": [
                   "home/setup/slack",
                   "home/setup/discord",
-                  "home/setup/telegram",
                   "home/setup/email"
                 ]
               },
@@ -260,7 +259,6 @@
                 "pages": [
                   "python/resource/slack",
                   "python/resource/discord",
-                  "python/resource/telegram",
                   "python/resource/email"
                 ]
               },
