@@ -1,4 +1,4 @@
-name: Integ (s3 + gcs via moto)
+name: Integ (s3 + gcs + minio via moto)
 
 "on":
   push:
@@ -41,7 +41,7 @@ jobs:
         working-directory: python
         run: uv sync --all-extras --no-extra camel
 
-      - name: Run s3 + gcs integ (moto) and diff against truth
+      - name: Run s3 + gcs + minio integ (moto) and diff against truth
         run: |
           ./python/.venv/bin/python integ/s3.py > /tmp/s3.out
           diff integ/truth_s3.txt /tmp/s3.out

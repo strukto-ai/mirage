@@ -24,6 +24,7 @@ from moto.server import ThreadedMotoServer
 from mirage import MountMode, Workspace
 from mirage.accessor.s3 import S3Accessor
 from mirage.resource.gcs import GCSConfig, GCSResource
+from mirage.resource.minio import MinIOConfig, MinIOResource
 from mirage.resource.s3 import S3Config, S3Resource
 from mirage.types import CommandSafeguard
 
@@ -34,7 +35,8 @@ SEED_OBJECTS = [
 ]
 S3_BUCKET = "mirage-integ-s3"
 GCS_BUCKET = "mirage-integ-gcs"
-MOUNTS = ["/s3", "/gcs"]
+MINIO_BUCKET = "mirage-integ-minio"
+MOUNTS = ["/s3", "/gcs", "/minio"]
 CREDS = dict(aws_access_key_id="testing",
              aws_secret_access_key="testing",
              region_name="us-east-1")
@@ -134,7 +136,7 @@ INDEX_CASES: list[tuple[str, str]] = [
 
 def _seed(endpoint: str) -> None:
     client = boto3.client("s3", endpoint_url=endpoint, **CREDS)
-    for bucket in (S3_BUCKET, GCS_BUCKET):
+    for bucket in (S3_BUCKET, GCS_BUCKET, MINIO_BUCKET):
         client.create_bucket(Bucket=bucket)
         for obj in SEED_OBJECTS:
             client.put_object(Bucket=bucket,
@@ -159,7 +161,18 @@ def _build_workspace(endpoint: str) -> Workspace:
     # path-style addressing (bucket.127.0.0.1 is not resolvable).
     gcs.config = gcs.config.model_copy(update={"path_style": True})
     gcs.accessor = S3Accessor(gcs.config)
-    return Workspace({"/s3/": s3, "/gcs/": gcs}, mode=MountMode.READ)
+    minio = MinIOResource(
+        MinIOConfig(bucket=MINIO_BUCKET,
+                    endpoint_url=endpoint,
+                    access_key_id="testing",
+                    secret_access_key="testing",
+                    path_style=True))
+    return Workspace({
+        "/s3/": s3,
+        "/gcs/": gcs,
+        "/minio/": minio
+    },
+                     mode=MountMode.READ)
 
 
 async def _run(ws: Workspace, name: str, cmd: str) -> None:
