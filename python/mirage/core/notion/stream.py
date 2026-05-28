@@ -16,37 +16,15 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.notion import NotionAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.jq import jq as generic_jq
-from mirage.commands.registry import command
-from mirage.commands.spec import SPECS
-from mirage.core.notion.glob import resolve_glob
 from mirage.core.notion.read import read as notion_read
-from mirage.core.notion.stream import read_stream
-from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("jq", resource="notion", spec=SPECS["jq"])
-async def jq(
+async def read_stream(
     accessor: NotionAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
-    r: bool = False,
-    c: bool = False,
-    s: bool = False,
+    path: PathSpec,
     index: IndexCacheStore = None,
-    **_extra: object,
-) -> tuple[ByteSource | None, IOResult]:
-    if paths:
-        paths = await resolve_glob(accessor, paths, index)
-    return await generic_jq(
-        paths,
-        *texts,
-        read_bytes=notion_read,
-        read_stream=read_stream,
-        accessor=accessor,
-        stdin=stdin,
-        r=r,
-        c=c,
-        s=s)
+) -> AsyncIterator[bytes]:
+    data = await notion_read(accessor, path, index)
+    if data:
+        yield data
