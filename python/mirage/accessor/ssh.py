@@ -25,6 +25,10 @@ class SSHAccessor(Accessor):
         self._conn: asyncssh.SSHClientConnection | None = None
         self._sftp: asyncssh.SFTPClient | None = None
 
+    @property
+    def root(self) -> str:
+        return self.config.root
+
     async def sftp(self) -> asyncssh.SFTPClient:
         if self._sftp is not None:
             return self._sftp

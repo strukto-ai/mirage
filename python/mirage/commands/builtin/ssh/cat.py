@@ -16,30 +16,31 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.ssh import SSHAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.aggregators import concat_aggregate
+from mirage.commands.builtin.generic.cat import cat as generic_cat
 from mirage.commands.builtin.ssh._provision import file_read_provision
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.ssh.glob import resolve_glob
-from mirage.core.ssh.stat import stat
+from mirage.core.ssh.stat import stat as local_stat
 from mirage.core.ssh.stream import read_stream
-from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def _number_lines_stream(
-        source: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
-    num = 1
-    async for line in AsyncLineIterator(source):
-        yield f"     {num}\t".encode() + line + b"\n"
-        num += 1
+async def _chain_streams(accessor: SSHAccessor,
+                         paths: list[PathSpec]) -> AsyncIterator[bytes]:
+    for p in paths:
+        async for chunk in read_stream(accessor, p):
+            yield chunk
 
 
 @command("cat",
          resource="ssh",
          spec=SPECS["cat"],
+         aggregate=concat_aggregate,
          provision=file_read_provision)
 async def cat(
     accessor: SSHAccessor,
@@ -50,17 +51,19 @@ async def cat(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    if paths:
+    if paths and accessor.root is not None:
         paths = await resolve_glob(accessor, paths, index)
-        await stat(accessor, paths[0], index)
-        source = read_stream(accessor, paths[0])
+        for p in paths:
+            await local_stat(accessor, p, index)
+        source = _chain_streams(accessor, paths)
         cachable = CachableAsyncIterator(source)
-        io = IOResult(reads={paths[0].strip_prefix: cachable},
-                      cache=[paths[0].strip_prefix])
+        io = IOResult(reads={p.strip_prefix: cachable
+                             for p in paths},
+                      cache=[p.strip_prefix for p in paths])
         if n:
-            return _number_lines_stream(cachable), io
+            return generic_cat(cachable, number_lines=True), io
         return cachable, io
     source = _resolve_source(stdin, "cat: missing operand")
     if n:
-        return _number_lines_stream(source), IOResult()
+        return generic_cat(source, number_lines=True), IOResult()
     return source, IOResult()

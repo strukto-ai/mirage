@@ -29,18 +29,20 @@ async def du(accessor: SSHAccessor, path: PathSpec) -> int:
     return await _du_walk(sftp, _abs(config, path))
 
 
-async def du_all(accessor: SSHAccessor,
-                 path: PathSpec) -> list[tuple[str, int]]:
+async def du_all(
+    accessor: SSHAccessor,
+    path: PathSpec,
+) -> tuple[list[tuple[str, int]], int]:
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
     if isinstance(path, PathSpec):
         path = path.strip_prefix
     config = accessor.config
     sftp = await accessor.sftp()
-    results: list[tuple[str, int]] = []
-    total = await _du_walk_all(sftp, config, path, results)
-    results.append((path, total))
-    return results
+    entries: list[tuple[str, int]] = []
+    total = await _du_walk_all(sftp, config, path, entries)
+    entries.sort()
+    return entries, total
 
 
 async def _du_walk(sftp, remote_path):
@@ -72,9 +74,9 @@ async def _du_walk_all(sftp, config, path, results):
             continue
         child = f"{path.rstrip('/')}/{entry.filename}"
         if entry.attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY:
-            sub = await _du_walk_all(sftp, config, child, results)
-            results.append((child, sub))
-            total += sub
+            total += await _du_walk_all(sftp, config, child, results)
         else:
-            total += entry.attrs.size or 0
+            size = entry.attrs.size or 0
+            results.append((child, size))
+            total += size
     return total

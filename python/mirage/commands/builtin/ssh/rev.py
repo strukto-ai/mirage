@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.ssh import SSHAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.builtin.generic.rev import rev as generic_rev
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.ssh.glob import resolve_glob
@@ -34,17 +34,11 @@ async def rev(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    if paths:
+    if paths and accessor.root is not None:
         paths = await resolve_glob(accessor, paths, index)
-        all_lines: list[str] = []
-        for p in paths:
-            data = (await read_bytes(accessor, p)).decode(errors="replace")
-            all_lines.extend(data.splitlines())
-        reversed_lines = [line[::-1] for line in all_lines]
-        return ("\n".join(reversed_lines) + "\n").encode(), IOResult()
-    raw = await _read_stdin_async(stdin)
-    if raw is None:
-        raise ValueError("rev: missing operand")
-    lines = raw.decode(errors="replace").splitlines()
-    reversed_lines = [line[::-1] for line in lines]
-    return ("\n".join(reversed_lines) + "\n").encode(), IOResult()
+    else:
+        paths = []
+    return await generic_rev(paths,
+                             read_bytes=read_bytes,
+                             accessor=accessor,
+                             stdin=stdin)
