@@ -42,10 +42,11 @@ async def main():
     print(f"=== MinIO at {config.endpoint_url} (bucket {config.bucket}) ===")
 
     # Seed a few objects so the demo is self-contained (WRITE mode).
-    await ws.ops.write("/minio/data/example.jsonl",
-                       b'{"event":"queue-operation","tool":"mirage"}\n'
-                       b'{"event":"read","tool":"mirage"}\n'
-                       b'{"event":"queue-operation","tool":"other"}\n')
+    await ws.ops.write(
+        "/minio/data/example.jsonl",
+        b'{"event":"queue-operation","tool":"mirage"}\n'
+        b'{"event":"read","tool":"mirage"}\n'
+        b'{"event":"queue-operation","tool":"other"}\n')
     await ws.ops.write("/minio/data/config.json",
                        b'{"name":"mirage","version":1,"tags":["s3","minio"]}')
     await ws.ops.write("/minio/notes.txt", b"hello from minio\n")
