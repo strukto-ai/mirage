@@ -128,7 +128,8 @@ async def test_readdir_subfolder(accessor, index):
                                index)
         assert "/docs/notes.txt" in result
         mock_list.assert_called_once_with(accessor.token_manager,
-                                          folder_id="folder1")
+                                          folder_id="folder1",
+                                          drive_id=None)
 
 
 @pytest.mark.asyncio
@@ -150,7 +151,7 @@ async def test_readdir_repopulates_evicted_subfolder(accessor, index):
         "capabilities": {},
     }]
 
-    async def fake_list_files(_tm, folder_id):
+    async def fake_list_files(_tm, folder_id, drive_id=None):
         if folder_id == "root":
             return root_files
         if folder_id == "folder1":
@@ -179,7 +180,7 @@ async def test_readdir_missing_subfolder_raises_after_recursion(
         "capabilities": {},
     }]
 
-    async def fake_list_files(_tm, folder_id):
+    async def fake_list_files(_tm, folder_id, drive_id=None):
         if folder_id == "root":
             return root_files
         raise AssertionError(f"should not list folder_id={folder_id}")
@@ -191,6 +192,52 @@ async def test_readdir_missing_subfolder_raises_after_recursion(
         with pytest.raises(FileNotFoundError):
             await readdir(accessor,
                           PathSpec(original="/docs", directory="/docs"), index)
+
+
+@pytest.mark.asyncio
+async def test_readdir_root_includes_shared_drives(accessor, index):
+    files = [{
+        "id": "f1",
+        "name": "readme.txt",
+        "mimeType": "text/plain",
+        "modifiedTime": "2026-04-01T00:00:00.000Z",
+        "owners": [],
+        "capabilities": {},
+    }]
+    drives = [{"id": "drive1", "name": "Team Drive"}]
+    with patch("mirage.core.gdrive.readdir.list_files",
+               new_callable=AsyncMock, return_value=files), \
+         patch("mirage.core.gdrive.readdir.list_shared_drives",
+               new_callable=AsyncMock, return_value=drives):
+        result = await readdir(accessor, PathSpec(original="/", directory="/"),
+                               index)
+        assert "/readme.txt" in result
+        # Shared Drives appear as top-level directories.
+        assert "/Team Drive/" in result
+        # The drive id is carried on the cached entry for nested listings.
+        entry = (await index.get("/Team Drive")).entry
+        assert entry is not None
+        assert entry.extra.get("drive_id") == "drive1"
+
+
+@pytest.mark.asyncio
+async def test_readdir_root_shared_drives_best_effort(accessor, index):
+    """If Shared Drive enumeration fails, My Drive listing still succeeds."""
+    files = [{
+        "id": "f1",
+        "name": "readme.txt",
+        "mimeType": "text/plain",
+        "modifiedTime": "2026-04-01T00:00:00.000Z",
+        "owners": [],
+        "capabilities": {},
+    }]
+    with patch("mirage.core.gdrive.readdir.list_files",
+               new_callable=AsyncMock, return_value=files), \
+         patch("mirage.core.gdrive.readdir.list_shared_drives",
+               new_callable=AsyncMock, side_effect=RuntimeError("no scope")):
+        result = await readdir(accessor, PathSpec(original="/", directory="/"),
+                               index)
+        assert "/readme.txt" in result
 
 
 @pytest.mark.asyncio

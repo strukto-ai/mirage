@@ -102,7 +102,7 @@ async def test_read_not_found(accessor, index):
 @pytest.mark.asyncio
 async def test_read_auto_bootstraps_from_empty_index(accessor, index):
 
-    async def fake_list_files(_tm, folder_id):
+    async def fake_list_files(_tm, folder_id, drive_id=None):
         if folder_id == "root":
             return [{
                 "id": "f1",
@@ -136,7 +136,7 @@ async def test_read_auto_bootstraps_from_empty_index(accessor, index):
 @pytest.mark.asyncio
 async def test_read_missing_file_raises_after_recursion(accessor, index):
 
-    async def fake_list_files(_tm, folder_id):
+    async def fake_list_files(_tm, folder_id, drive_id=None):
         if folder_id == "root":
             return [{
                 "id": "f1",

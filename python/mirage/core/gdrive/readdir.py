@@ -14,7 +14,8 @@
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import IndexCacheStore, IndexEntry
-from mirage.core.google.drive import MIME_TO_EXT, list_files
+from mirage.core.google.drive import (MIME_TO_EXT, list_files,
+                                       list_shared_drives)
 from mirage.types import PathSpec
 
 
@@ -42,6 +43,7 @@ async def readdir(
 
     if not key:
         folder_id = "root"
+        drive_id = None
     else:
         if index is None:
             raise FileNotFoundError(path)
@@ -56,8 +58,11 @@ async def readdir(
             if result.entry is None:
                 raise FileNotFoundError(path)
         folder_id = result.entry.id
+        drive_id = result.entry.extra.get("drive_id")
 
-    files = await list_files(accessor.token_manager, folder_id=folder_id)
+    files = await list_files(accessor.token_manager,
+                             folder_id=folder_id,
+                             drive_id=drive_id)
     entries = []
     for f in files:
         mime = f.get("mimeType", "")
@@ -87,8 +92,32 @@ async def readdir(
             remote_time=f.get("modifiedTime", ""),
             vfs_name=filename,
             size=int(f.get("size") or f.get("quotaBytesUsed") or 0) or None,
+            extra={"drive_id": f.get("driveId")} if f.get("driveId") else {},
         )
         entries.append((filename, entry, is_dir))
+
+    if not key:
+        # Shared Drive enumeration is best-effort: if the account can't list
+        # them (missing scope, API error), still return My Drive contents.
+        try:
+            shared_drives = await list_shared_drives(accessor.token_manager)
+        except Exception:
+            shared_drives = []
+        existing_names = {name for name, _, _ in entries}
+        for d in shared_drives:
+            name = d["name"]
+            filename = name
+            if filename in existing_names:
+                filename = f"{name} [Shared Drive]"
+            existing_names.add(filename)
+            entry = IndexEntry(
+                id=d["id"],
+                name=name,
+                resource_type="gdrive/shared_drive",
+                vfs_name=filename,
+                extra={"drive_id": d["id"]},
+            )
+            entries.append((filename, entry, True))
 
     if index is not None:
         await index.set_dir(virtual_key, [(name, e) for name, e, _ in entries])

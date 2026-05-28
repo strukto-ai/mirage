@@ -22,6 +22,7 @@ PROMPT = """\
 
   No owned/ vs shared/ split here: gdrive shows the user's full Drive view,
   including files shared with the user that have been added to My Drive.
+  Shared drives visible to the user are included as top-level directories.
 
   IMPORTANT: This is a remote mount. Prefer targeted reads over full scans.
   Date-prefixed globs (2026-05-*) push to a Drive modifiedTime range query.

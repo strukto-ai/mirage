@@ -19,9 +19,11 @@ from mirage.core.google._client import (DRIVE_API_BASE, TokenManager,
                                         google_get_bytes, google_get_stream)
 
 FIELDS = ("nextPageToken,"
-          "files(id,name,mimeType,size,quotaBytesUsed,"
+          "files(id,name,mimeType,driveId,size,quotaBytesUsed,"
           "createdTime,modifiedTime,"
           "owners,capabilities/canEdit,parents)")
+
+DRIVE_FIELDS = "nextPageToken,drives(id,name)"
 
 MIME_TO_EXT = {
     "application/vnd.google-apps.document": ".gdoc.json",
@@ -35,6 +37,7 @@ WORKSPACE_MIMES = set(MIME_TO_EXT.keys())
 async def list_files(
     token_manager: TokenManager,
     folder_id: str = "root",
+    drive_id: str | None = None,
     mime_type: str | None = None,
     trashed: bool = False,
     page_size: int = 1000,
@@ -46,6 +49,8 @@ async def list_files(
     Args:
         token_manager (TokenManager): OAuth2 token manager.
         folder_id (str): parent folder ID or "root".
+        drive_id (str | None): shared drive ID when listing inside a shared
+            drive.
         mime_type (str | None): filter by MIME type.
         trashed (bool): include trashed files.
         page_size (int): results per page.
@@ -76,6 +81,11 @@ async def list_files(
             "pageSize": page_size,
             "orderBy": "modifiedTime desc",
         }
+        if drive_id:
+            params["corpora"] = "drive"
+            params["driveId"] = drive_id
+            params["includeItemsFromAllDrives"] = "true"
+            params["supportsAllDrives"] = "true"
         if page_token:
             params["pageToken"] = page_token
         url = f"{DRIVE_API_BASE}/files"
@@ -85,6 +95,37 @@ async def list_files(
         if not page_token:
             break
     return files
+
+
+async def list_shared_drives(
+    token_manager: TokenManager,
+    page_size: int = 100,
+) -> list[dict]:
+    """List shared drives visible to the authenticated user.
+
+    Args:
+        token_manager (TokenManager): OAuth2 token manager.
+        page_size (int): results per page.
+
+    Returns:
+        list[dict]: shared drive metadata dicts.
+    """
+    drives: list[dict] = []
+    page_token: str | None = None
+    while True:
+        params: dict[str, str | int] = {
+            "fields": DRIVE_FIELDS,
+            "pageSize": page_size,
+        }
+        if page_token:
+            params["pageToken"] = page_token
+        url = f"{DRIVE_API_BASE}/drives"
+        data = await google_get(token_manager, url, params=params)
+        drives.extend(data.get("drives", []))
+        page_token = data.get("nextPageToken")
+        if not page_token:
+            break
+    return drives
 
 
 async def list_all_files(
