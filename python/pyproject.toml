@@ -81,7 +81,7 @@ oci      = ["aioboto3>=13.0"]
 databricks = ["databricks-sdk>=0.72.0"]
 
 # --- network / remote ---
-ssh      = ["asyncssh>=2.22.0", "paramiko>=4.0.0"]
+ssh      = ["asyncssh>=2.22.0"]
 
 # --- mount ---
 fuse     = ["mfusepy>=1.0.0"]
