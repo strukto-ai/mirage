@@ -227,7 +227,9 @@ class MountRegistry:
         Resolution order:
         1. First PathSpec path (or cwd) → mount_for(path)
         2. If mount lacks the command → mount_for_command(cmd_name)
-        3. If cache has all paths → use cache mount instead
+        3. If a read-only command's paths are all cached → use cache
+           mount instead. Write commands always stay on the real mount
+           so mutations reach the backend rather than just the cache.
 
         Args:
             cmd_name (str): command name.
@@ -251,7 +253,9 @@ class MountRegistry:
             return None
 
         default = self._default_mount
-        if (default is not None and path_scopes
+        resolved = mount.resolve_command(cmd_name)
+        if (default is not None and path_scopes and resolved is not None
+                and not resolved.write
                 and isinstance(default.resource, FileCacheMixin)
                 and mount.resource.is_remote is True):
             keys = [p.original for p in path_scopes]
