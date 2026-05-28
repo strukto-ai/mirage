@@ -1,0 +1,103 @@
+---
+title: S3-Compatible Providers
+icon: cloud
+---
+These resources are thin wrappers over the [S3 resource](/python/resource/s3).
+Each maps its provider-specific settings to an `S3Config` and reuses the exact
+same backend, commands, and behavior as S3, they just resolve the right
+endpoint and addressing style for you.
+
+All of them mount at a prefix (e.g. `/data/`) in `READ` or `WRITE` mode and
+support the full S3 shell-command set (`ls`, `cat`, `head`, `tail`, `grep`,
+`rg`, `wc`, `find`, `tree`, `jq`, `stat`, plus parquet/orc/feather table
+rendering).
+
+## Credentials
+
+All providers authenticate with an S3-style **access key + secret** (some also
+accept a session token). Create those in the provider's console. Endpoint and
+addressing style are handled automatically from the fields below; pass
+`endpoint_url` to override.
+
+## Self-hosted (endpoint required, path-style)
+
+### MinIO
+
+```python
+from mirage import MountMode, Workspace
+from mirage.resource.minio import MinIOConfig, MinIOResource
+
+resource = MinIOResource(MinIOConfig(
+    bucket="my-bucket",
+    endpoint_url="http://localhost:9000",
+    access_key_id="minioadmin",
+    secret_access_key="minioadmin",
+    # region="us-east-1", path_style=True (defaults)
+))
+ws = Workspace({"/data": resource}, mode=MountMode.READ)
+```
+
+### Ceph (Rados Gateway)
+
+```python
+from mirage.resource.ceph import CephConfig, CephResource
+
+resource = CephResource(CephConfig(
+    bucket="my-bucket",
+    endpoint_url="https://ceph.example.com",
+    access_key_id="...",
+    secret_access_key="...",
+))
+```
+
+## Managed clouds (endpoint derived from region)
+
+Each computes its endpoint from `region`; pass `endpoint_url` to override.
+
+| Provider | Resource / Config | Endpoint pattern |
+| --- | --- | --- |
+| Wasabi | `WasabiResource` / `WasabiConfig` | `s3.<region>.wasabisys.com` (`s3.wasabisys.com` for `us-east-1`) |
+| Backblaze B2 | `BackblazeResource` / `BackblazeConfig` | `s3.<region>.backblazeb2.com` |
+| DigitalOcean Spaces | `DigitalOceanResource` / `DigitalOceanConfig` | `<region>.digitaloceanspaces.com` |
+| Tencent COS | `TencentResource` / `TencentConfig` | `cos.<region>.myqcloud.com` |
+| Alibaba OSS | `AliyunResource` / `AliyunConfig` | `oss-<region>.aliyuncs.com` |
+| Scaleway | `ScalewayResource` / `ScalewayConfig` | `s3.<region>.scw.cloud` |
+| QingStor | `QingStorResource` / `QingStorConfig` | `s3.<region>.qingstor.com` |
+
+```python
+from mirage import MountMode, Workspace
+from mirage.resource.wasabi import WasabiConfig, WasabiResource
+
+resource = WasabiResource(WasabiConfig(
+    bucket="my-bucket",
+    region="us-east-2",
+    access_key_id="...",
+    secret_access_key="...",
+))
+ws = Workspace({"/data": resource}, mode=MountMode.READ)
+```
+
+The other managed providers follow the identical shape, swap the
+`*Config` / `*Resource` import and set `region` (and `bucket`,
+`access_key_id`, `secret_access_key`). For Tencent COS, `bucket` includes the
+APPID suffix (e.g. `my-bucket-1250000000`).
+
+## Common fields
+
+Every config accepts:
+
+- `bucket` (required)
+- `access_key_id`, `secret_access_key` (required)
+- `region` (required for managed clouds; defaults to `us-east-1` for
+  MinIO/Ceph/Wasabi)
+- `endpoint_url` (optional override)
+- `timeout` (default 30), `proxy` (optional)
+- MinIO/Ceph also accept `path_style` (default `True`)
+
+## Notes
+
+- All wrappers report `ResourceName.S3` and route through the same `core/s3`
+  implementation, so anything documented for [S3](/python/resource/s3) applies
+  (range reads, streaming, versioning-aware reads, the index cache fast path).
+- For a provider not listed here, use the [S3 resource](/python/resource/s3)
+  directly with a custom `endpoint_url` and `path_style`.

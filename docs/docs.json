@@ -220,6 +220,7 @@
                   "python/resource/gcs",
                   "python/resource/supabase",
                   "python/resource/oci",
+                  "python/resource/s3_compatible",
                   "python/resource/hf_buckets",
                   "python/resource/hf_datasets",
                   "python/resource/hf_models",

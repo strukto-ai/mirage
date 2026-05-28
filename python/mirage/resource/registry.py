@@ -47,6 +47,33 @@ REGISTRY: dict[str, ResourceEntry] = {
     "gcs":
     ResourceEntry("mirage.resource.gcs:GCSResource",
                   "mirage.resource.gcs:GCSConfig"),
+    "minio":
+    ResourceEntry("mirage.resource.minio:MinIOResource",
+                  "mirage.resource.minio:MinIOConfig"),
+    "ceph":
+    ResourceEntry("mirage.resource.ceph:CephResource",
+                  "mirage.resource.ceph:CephConfig"),
+    "wasabi":
+    ResourceEntry("mirage.resource.wasabi:WasabiResource",
+                  "mirage.resource.wasabi:WasabiConfig"),
+    "backblaze":
+    ResourceEntry("mirage.resource.backblaze:BackblazeResource",
+                  "mirage.resource.backblaze:BackblazeConfig"),
+    "digitalocean":
+    ResourceEntry("mirage.resource.digitalocean:DigitalOceanResource",
+                  "mirage.resource.digitalocean:DigitalOceanConfig"),
+    "tencent":
+    ResourceEntry("mirage.resource.tencent:TencentResource",
+                  "mirage.resource.tencent:TencentConfig"),
+    "aliyun":
+    ResourceEntry("mirage.resource.aliyun:AliyunResource",
+                  "mirage.resource.aliyun:AliyunConfig"),
+    "scaleway":
+    ResourceEntry("mirage.resource.scaleway:ScalewayResource",
+                  "mirage.resource.scaleway:ScalewayConfig"),
+    "qingstor":
+    ResourceEntry("mirage.resource.qingstor:QingStorResource",
+                  "mirage.resource.qingstor:QingStorConfig"),
     "hf_buckets":
     ResourceEntry("mirage.resource.hf_buckets:HfBucketsResource",
                   "mirage.resource.hf_buckets:HfBucketsConfig"),
