@@ -17,8 +17,8 @@ from collections.abc import AsyncIterator
 from mirage.accessor.notion import NotionAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tail import tail as generic_tail
-from mirage.commands.builtin.tail_helper import _parse_n
 from mirage.commands.builtin.notion._provision import file_read_provision
+from mirage.commands.builtin.tail_helper import _parse_n
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS

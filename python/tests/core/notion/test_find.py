@@ -71,25 +71,19 @@ async def test_find_type_dir():
 
 @pytest.mark.asyncio
 async def test_find_name_glob():
-    out = await find_mod.find(None,
-                              PathSpec.from_str_path("/db"),
-                              name="*.md")
+    out = await find_mod.find(None, PathSpec.from_str_path("/db"), name="*.md")
     assert out == ["/db/page1.md", "/db/sub/page2.md"]
 
 
 @pytest.mark.asyncio
 async def test_find_maxdepth():
-    out = await find_mod.find(None,
-                              PathSpec.from_str_path("/db"),
-                              maxdepth=1)
+    out = await find_mod.find(None, PathSpec.from_str_path("/db"), maxdepth=1)
     assert out == ["/db", "/db/page1.md", "/db/sub"]
 
 
 @pytest.mark.asyncio
 async def test_find_mindepth():
-    out = await find_mod.find(None,
-                              PathSpec.from_str_path("/db"),
-                              mindepth=1)
+    out = await find_mod.find(None, PathSpec.from_str_path("/db"), mindepth=1)
     assert out == ["/db/page1.md", "/db/sub", "/db/sub/page2.md"]
 
 

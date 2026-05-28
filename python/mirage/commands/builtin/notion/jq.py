@@ -40,13 +40,12 @@ async def jq(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-    return await generic_jq(
-        paths,
-        *texts,
-        read_bytes=notion_read,
-        read_stream=read_stream,
-        accessor=accessor,
-        stdin=stdin,
-        r=r,
-        c=c,
-        s=s)
+    return await generic_jq(paths,
+                            *texts,
+                            read_bytes=notion_read,
+                            read_stream=read_stream,
+                            accessor=accessor,
+                            stdin=stdin,
+                            r=r,
+                            c=c,
+                            s=s)

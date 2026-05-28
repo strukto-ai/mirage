@@ -19,11 +19,11 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.jq import jq as generic_jq
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.core.jq import is_jsonl_path, is_streamable_jsonl_expr
 from mirage.core.ssh.glob import resolve_glob
 from mirage.core.ssh.read import read_bytes
 from mirage.core.ssh.stat import stat as _stat_async
 from mirage.core.ssh.stream import read_stream as _stream
-from mirage.core.jq import is_jsonl_path, is_streamable_jsonl_expr
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision import Precision, ProvisionResult
 from mirage.types import PathSpec
