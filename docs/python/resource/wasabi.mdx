@@ -1,0 +1,80 @@
+---
+title: Wasabi
+icon: /images/wasabi-logo.svg
+description: Mount a Wasabi cloud storage bucket as a virtual filesystem.
+---
+The Wasabi resource is a thin wrapper over the [S3 resource](/python/resource/s3).
+It maps a `WasabiConfig` to an `S3Config` and reuses the exact same backend,
+commands, and behavior as S3, it just derives the right Wasabi endpoint from
+`region`. Uses aioboto3 against Wasabi's S3-compatible API.
+
+The endpoint is computed from `region` as `s3.<region>.wasabisys.com`
+(`s3.wasabisys.com` for `us-east-1`). Pass `endpoint_url` to override.
+
+## Config
+
+```python
+import os
+
+from mirage import MountMode, Workspace
+from mirage.resource.wasabi import WasabiConfig, WasabiResource
+
+config = WasabiConfig(
+    bucket=os.environ["WASABI_BUCKET"],
+    region=os.environ.get("WASABI_REGION", "us-east-2"),
+    access_key_id=os.environ["WASABI_ACCESS_KEY_ID"],
+    secret_access_key=os.environ["WASABI_SECRET_ACCESS_KEY"],
+    # Optional:
+    # endpoint_url="https://s3.us-east-2.wasabisys.com",
+    # timeout=30,
+    # proxy="http://proxy:8080",
+)
+resource = WasabiResource(config)
+ws = Workspace({"/data": resource}, mode=MountMode.READ)
+```
+
+`region` defaults to `us-east-1`. Both `READ` and `WRITE` modes are supported.
+
+## Example
+
+```python
+import asyncio
+import os
+
+from dotenv import load_dotenv
+
+from mirage import MountMode, Workspace
+from mirage.resource.wasabi import WasabiConfig, WasabiResource
+
+load_dotenv(".env.development")
+
+config = WasabiConfig(
+    bucket=os.environ["WASABI_BUCKET"],
+    region=os.environ.get("WASABI_REGION", "us-east-2"),
+    access_key_id=os.environ["WASABI_ACCESS_KEY_ID"],
+    secret_access_key=os.environ["WASABI_SECRET_ACCESS_KEY"],
+)
+resource = WasabiResource(config)
+
+
+async def main() -> None:
+    ws = Workspace({"/data/": resource}, mode=MountMode.READ)
+
+    r = await ws.execute("ls /data/")
+    print(await r.stdout_str())
+
+    r = await ws.execute("tree /data/")
+    print(await r.stdout_str())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## Notes
+
+- Wasabi reports `ResourceName.S3` and routes through the same `core/s3`
+  implementation, so the full S3 shell-command set applies. See the
+  [S3 resource](/python/resource/s3) for the complete command reference,
+  range reads, streaming, and the index cache fast path.
+- For credential setup, see [Wasabi Setup](/home/setup/wasabi).

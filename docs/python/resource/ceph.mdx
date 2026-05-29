@@ -1,0 +1,81 @@
+---
+title: Ceph (Rados Gateway)
+icon: /images/ceph-logo.svg
+description: Mount a self-hosted Ceph Rados Gateway bucket as a virtual filesystem.
+---
+The Ceph resource is a thin wrapper over the [S3 resource](/python/resource/s3).
+It maps a `CephConfig` to an `S3Config` and reuses the exact same backend,
+commands, and behavior as S3, it just points at your Ceph Rados Gateway
+`endpoint_url` and uses path-style addressing by default.
+
+Ceph RGW is self-hosted, so `endpoint_url` is **required** (there is no
+region-derived host). Uses aioboto3 against the gateway's S3-compatible API.
+
+## Config
+
+```python
+import os
+
+from mirage import MountMode, Workspace
+from mirage.resource.ceph import CephConfig, CephResource
+
+config = CephConfig(
+    bucket=os.environ["CEPH_BUCKET"],
+    endpoint_url=os.environ["CEPH_ENDPOINT_URL"],
+    access_key_id=os.environ["CEPH_ACCESS_KEY_ID"],
+    secret_access_key=os.environ["CEPH_SECRET_ACCESS_KEY"],
+    # Optional:
+    # region="us-east-1",   # default
+    # path_style=True,      # default
+    # timeout=30,
+    # proxy="http://proxy:8080",
+)
+resource = CephResource(config)
+ws = Workspace({"/ceph": resource}, mode=MountMode.READ)
+```
+
+Both `READ` and `WRITE` modes are supported.
+
+## Example
+
+```python
+import asyncio
+import os
+
+from dotenv import load_dotenv
+
+from mirage import MountMode, Workspace
+from mirage.resource.ceph import CephConfig, CephResource
+
+load_dotenv(".env.development")
+
+config = CephConfig(
+    bucket=os.environ["CEPH_BUCKET"],
+    endpoint_url=os.environ["CEPH_ENDPOINT_URL"],
+    access_key_id=os.environ["CEPH_ACCESS_KEY_ID"],
+    secret_access_key=os.environ["CEPH_SECRET_ACCESS_KEY"],
+)
+resource = CephResource(config)
+
+
+async def main() -> None:
+    ws = Workspace({"/ceph/": resource}, mode=MountMode.READ)
+
+    r = await ws.execute("ls /ceph/")
+    print(await r.stdout_str())
+
+    r = await ws.execute("find /ceph/ -name '*.json'")
+    print(await r.stdout_str())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## Notes
+
+- Ceph reports `ResourceName.S3` and routes through the same `core/s3`
+  implementation, so the full S3 shell-command set applies. See the
+  [S3 resource](/python/resource/s3) for the complete command reference,
+  range reads, streaming, and the index cache fast path.
+- For credential setup, see [Ceph Setup](/home/setup/ceph).

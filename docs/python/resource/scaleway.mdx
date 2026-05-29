@@ -1,0 +1,80 @@
+---
+title: Scaleway
+icon: /images/scaleway-logo.svg
+description: Mount a Scaleway Object Storage bucket via its S3-compatible API.
+---
+The Scaleway resource is a thin wrapper over the [S3 resource](/python/resource/s3).
+It maps a `ScalewayConfig` to an `S3Config` and reuses the exact same backend,
+commands, and behavior as S3, it just derives the right endpoint from `region`.
+Uses aioboto3 against Scaleway Object Storage's S3-compatible API.
+
+The endpoint is computed from `region` as `s3.<region>.scw.cloud`
+(e.g. `s3.fr-par.scw.cloud`). Pass `endpoint_url` to override.
+
+## Config
+
+```python
+import os
+
+from mirage import MountMode, Workspace
+from mirage.resource.scaleway import ScalewayConfig, ScalewayResource
+
+config = ScalewayConfig(
+    bucket=os.environ["SCW_BUCKET"],
+    region=os.environ.get("SCW_REGION", "fr-par"),
+    access_key_id=os.environ["SCW_ACCESS_KEY"],
+    secret_access_key=os.environ["SCW_SECRET_KEY"],
+    # Optional:
+    # endpoint_url="https://s3.fr-par.scw.cloud",
+    # timeout=30,
+    # proxy="http://proxy:8080",
+)
+resource = ScalewayResource(config)
+ws = Workspace({"/data": resource}, mode=MountMode.READ)
+```
+
+Both `READ` and `WRITE` modes are supported.
+
+## Example
+
+```python
+import asyncio
+import os
+
+from dotenv import load_dotenv
+
+from mirage import MountMode, Workspace
+from mirage.resource.scaleway import ScalewayConfig, ScalewayResource
+
+load_dotenv(".env.development")
+
+config = ScalewayConfig(
+    bucket=os.environ["SCW_BUCKET"],
+    region=os.environ.get("SCW_REGION", "fr-par"),
+    access_key_id=os.environ["SCW_ACCESS_KEY"],
+    secret_access_key=os.environ["SCW_SECRET_KEY"],
+)
+resource = ScalewayResource(config)
+
+
+async def main() -> None:
+    ws = Workspace({"/data/": resource}, mode=MountMode.READ)
+
+    r = await ws.execute("ls /data/")
+    print(await r.stdout_str())
+
+    r = await ws.execute("tree /data/")
+    print(await r.stdout_str())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## Notes
+
+- Scaleway reports `ResourceName.S3` and routes through the same `core/s3`
+  implementation, so the full S3 shell-command set applies. See the
+  [S3 resource](/python/resource/s3) for the complete command reference,
+  range reads, streaming, and the index cache fast path.
+- For credential setup, see [Scaleway Setup](/home/setup/scaleway).

@@ -1,0 +1,34 @@
+---
+title: Tencent COS
+icon: /images/tencent-logo.svg
+description: Set up Tencent Cloud Object Storage (COS) credentials for the Tencent resource.
+---
+
+## Credentials
+
+### 1. Create an API key
+
+1. Sign in to the [Tencent Cloud console](https://console.cloud.tencent.com/)
+1. Go to **Access Management** -> **API Keys** -> **Create Key**
+1. Copy the **SecretId** (access key id) and **SecretKey** (secret access key)
+1. Note your bucket's **region** (e.g. `ap-guangzhou`) and the full **bucket**
+   name including the APPID suffix (e.g. `my-bucket-1250000000`)
+
+The endpoint is derived from `region` as `cos.<region>.myqcloud.com`.
+
+<Note>
+Tencent COS bucket names always include the APPID suffix. Use the full name
+(with the suffix) for `COS_BUCKET`.
+</Note>
+
+### 2. Set environment variables
+
+```bash
+# .env.development
+COS_BUCKET=my-bucket-1250000000
+COS_REGION=ap-guangzhou
+COS_SECRET_ID=...
+COS_SECRET_KEY=...
+```
+
+For Python configuration, see the [Tencent resource](/python/resource/tencent) docs.

@@ -1,0 +1,29 @@
+---
+title: MinIO
+icon: /images/minio-logo.svg
+description: Set up MinIO credentials for the MinIO resource.
+---
+
+## Credentials
+
+### 1. Create an access key
+
+1. Open the **MinIO Console** (e.g. `http://localhost:9001`) and sign in
+1. Go to **Access Keys** -> **Create access key**
+1. Copy the **Access Key** and **Secret Key**
+1. Note your server **endpoint** (e.g. `http://localhost:9000`) and **bucket** name
+
+MinIO is self-hosted, so there is no region-derived endpoint, the `endpoint_url`
+is required and MinIO uses path-style addressing.
+
+### 2. Set environment variables
+
+```bash
+# .env.development
+MINIO_BUCKET=my-bucket
+MINIO_ENDPOINT=http://localhost:9000
+MINIO_ACCESS_KEY=...
+MINIO_SECRET_KEY=...
+```
+
+For Python configuration, see the [MinIO resource](/python/resource/minio) docs.

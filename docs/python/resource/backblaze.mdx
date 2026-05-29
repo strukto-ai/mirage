@@ -1,0 +1,80 @@
+---
+title: Backblaze B2
+icon: /images/backblaze-logo.svg
+description: Mount a Backblaze B2 bucket via its S3-compatible API as a virtual filesystem.
+---
+The Backblaze resource is a thin wrapper over the [S3 resource](/python/resource/s3).
+It maps a `BackblazeConfig` to an `S3Config` and reuses the exact same backend,
+commands, and behavior as S3, it just derives the right B2 endpoint from
+`region`. Uses aioboto3 against Backblaze B2's S3-compatible API.
+
+The endpoint is computed from `region` as `s3.<region>.backblazeb2.com`. Pass
+`endpoint_url` to override.
+
+## Config
+
+```python
+import os
+
+from mirage import MountMode, Workspace
+from mirage.resource.backblaze import BackblazeConfig, BackblazeResource
+
+config = BackblazeConfig(
+    bucket=os.environ["B2_BUCKET"],
+    region=os.environ["B2_REGION"],          # e.g. us-west-004
+    access_key_id=os.environ["B2_ACCESS_KEY_ID"],   # B2 application keyID
+    secret_access_key=os.environ["B2_SECRET_ACCESS_KEY"],
+    # Optional:
+    # endpoint_url="https://s3.us-west-004.backblazeb2.com",
+    # timeout=30,
+    # proxy="http://proxy:8080",
+)
+resource = BackblazeResource(config)
+ws = Workspace({"/data": resource}, mode=MountMode.READ)
+```
+
+Both `READ` and `WRITE` modes are supported.
+
+## Example
+
+```python
+import asyncio
+import os
+
+from dotenv import load_dotenv
+
+from mirage import MountMode, Workspace
+from mirage.resource.backblaze import BackblazeConfig, BackblazeResource
+
+load_dotenv(".env.development")
+
+config = BackblazeConfig(
+    bucket=os.environ["B2_BUCKET"],
+    region=os.environ["B2_REGION"],
+    access_key_id=os.environ["B2_ACCESS_KEY_ID"],
+    secret_access_key=os.environ["B2_SECRET_ACCESS_KEY"],
+)
+resource = BackblazeResource(config)
+
+
+async def main() -> None:
+    ws = Workspace({"/data/": resource}, mode=MountMode.READ)
+
+    r = await ws.execute("ls /data/")
+    print(await r.stdout_str())
+
+    r = await ws.execute("find /data/ -name '*.csv'")
+    print(await r.stdout_str())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## Notes
+
+- Backblaze reports `ResourceName.S3` and routes through the same `core/s3`
+  implementation, so the full S3 shell-command set applies. See the
+  [S3 resource](/python/resource/s3) for the complete command reference,
+  range reads, streaming, and the index cache fast path.
+- For credential setup, see [Backblaze B2 Setup](/home/setup/backblaze).

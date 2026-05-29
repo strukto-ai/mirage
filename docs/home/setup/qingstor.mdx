@@ -1,0 +1,31 @@
+---
+title: QingStor
+icon: cloud
+description: Set up QingStor (QingCloud) Object Storage credentials for the QingStor resource.
+---
+
+## Credentials
+
+### 1. Create an access key
+
+1. Sign in to the [QingCloud console](https://console.qingcloud.com/)
+1. Go to **API Keys** (under your account) -> **Create**
+1. Copy the **Access Key ID** and **Secret Access Key**
+1. Note your bucket's **zone** (e.g. `pek3a`) and **bucket** name
+
+The endpoint is derived from the zone (`region`) as `s3.<region>.qingstor.com`,
+QingStor's S3-compatible host (distinct from the native `<zone>.qingstor.com`).
+Set `QINGSTOR_ENDPOINT_URL` to override.
+
+### 2. Set environment variables
+
+```bash
+# .env.development
+QINGSTOR_BUCKET=my-bucket
+QINGSTOR_ZONE=pek3a
+QINGSTOR_ACCESS_KEY_ID=...
+QINGSTOR_SECRET_ACCESS_KEY=...
+# QINGSTOR_ENDPOINT_URL=https://s3.pek3a.qingstor.com   # optional override
+```
+
+For Python configuration, see the [QingStor resource](/python/resource/qingstor) docs.

@@ -1,0 +1,33 @@
+---
+title: Ceph (Rados Gateway)
+icon: /images/ceph-logo.svg
+description: Set up Ceph Rados Gateway (RGW) credentials for the Ceph resource.
+---
+
+## Credentials
+
+### 1. Create an RGW user
+
+On a host with `radosgw-admin` access:
+
+```bash
+radosgw-admin user create --uid=mirage --display-name="Mirage"
+```
+
+The output includes a `keys` block with `access_key` and `secret_key`. Note your
+gateway **endpoint** (e.g. `https://ceph.example.com`) and the **bucket** name.
+
+Ceph RGW is self-hosted, so there is no region-derived endpoint, the
+`endpoint_url` is required and RGW uses path-style addressing.
+
+### 2. Set environment variables
+
+```bash
+# .env.development
+CEPH_BUCKET=my-bucket
+CEPH_ENDPOINT_URL=https://ceph.example.com
+CEPH_ACCESS_KEY_ID=...
+CEPH_SECRET_ACCESS_KEY=...
+```
+
+For Python configuration, see the [Ceph resource](/python/resource/ceph) docs.

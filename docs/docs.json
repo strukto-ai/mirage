@@ -102,6 +102,21 @@
                   "home/setup/gcs",
                   "home/setup/oci",
                   "home/setup/supabase",
+                  "home/setup/minio",
+                  "home/setup/ceph",
+                  "home/setup/wasabi",
+                  "home/setup/backblaze",
+                  "home/setup/digitalocean",
+                  "home/setup/tencent",
+                  "home/setup/aliyun",
+                  "home/setup/scaleway",
+                  "home/setup/qingstor"
+                ]
+              },
+              {
+                "group": "Hugging Face",
+                "icon": "/images/huggingface-logo.svg",
+                "pages": [
                   "home/setup/hf_buckets",
                   "home/setup/hf_datasets",
                   "home/setup/hf_models",
@@ -220,7 +235,21 @@
                   "python/resource/gcs",
                   "python/resource/supabase",
                   "python/resource/oci",
-                  "python/resource/s3_compatible",
+                  "python/resource/minio",
+                  "python/resource/ceph",
+                  "python/resource/wasabi",
+                  "python/resource/backblaze",
+                  "python/resource/digitalocean",
+                  "python/resource/tencent",
+                  "python/resource/aliyun",
+                  "python/resource/scaleway",
+                  "python/resource/qingstor"
+                ]
+              },
+              {
+                "group": "Hugging Face",
+                "icon": "/images/huggingface-logo.svg",
+                "pages": [
                   "python/resource/hf_buckets",
                   "python/resource/hf_datasets",
                   "python/resource/hf_models",

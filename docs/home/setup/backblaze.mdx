@@ -1,0 +1,30 @@
+---
+title: Backblaze B2
+icon: /images/backblaze-logo.svg
+description: Set up Backblaze B2 credentials for the Backblaze resource.
+---
+
+## Credentials
+
+### 1. Create an application key
+
+1. Sign in to [Backblaze](https://secure.backblaze.com/) -> **B2 Cloud Storage**
+1. Go to **Application Keys** -> **Add a New Application Key**
+1. Scope it to your bucket with at least **Read** access
+1. Copy the **keyID** (access key id) and **applicationKey** (secret access key)
+1. Note your bucket's **endpoint region** from the bucket details
+   (e.g. `us-west-004`) and the **bucket** name
+
+The endpoint is derived from `region` as `s3.<region>.backblazeb2.com`.
+
+### 2. Set environment variables
+
+```bash
+# .env.development
+B2_BUCKET=my-bucket
+B2_REGION=us-west-004
+B2_ACCESS_KEY_ID=...   # B2 keyID
+B2_SECRET_ACCESS_KEY=...   # B2 applicationKey
+```
+
+For Python configuration, see the [Backblaze resource](/python/resource/backblaze) docs.
