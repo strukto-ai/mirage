@@ -15,7 +15,7 @@
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import IndexCacheStore, IndexEntry
 from mirage.core.google.drive import (MIME_TO_EXT, list_files,
-                                       list_shared_drives)
+                                      list_shared_drives)
 from mirage.types import PathSpec
 
 
