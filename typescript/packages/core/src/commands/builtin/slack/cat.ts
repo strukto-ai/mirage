@@ -37,6 +37,20 @@ function numberLines(data: Uint8Array): Uint8Array {
   return ENC.encode(out.join(''))
 }
 
+function concatBuffers(buffers: readonly Uint8Array[]): Uint8Array {
+  if (buffers.length === 0) return new Uint8Array(0)
+  if (buffers.length === 1) return buffers[0] ?? new Uint8Array(0)
+  let total = 0
+  for (const b of buffers) total += b.length
+  const out = new Uint8Array(total)
+  let off = 0
+  for (const b of buffers) {
+    out.set(b, off)
+    off += b.length
+  }
+  return out
+}
+
 async function catCommand(
   accessor: SlackAccessor,
   paths: PathSpec[],
@@ -46,15 +60,19 @@ async function catCommand(
   const nFlag = opts.flags.n === true
   if (paths.length > 0) {
     const resolved = await resolveSlackGlob(accessor, paths, opts.index ?? undefined)
-    const first = resolved[0]
-    if (first === undefined) return [null, new IOResult()]
-    const data = await slackRead(accessor, first, opts.index ?? undefined)
-    const out: ByteSource = nFlag ? numberLines(data) : data
-    const io = new IOResult({
-      reads: { [first.stripPrefix]: data },
-      cache: [first.stripPrefix],
-    })
-    return [out, io]
+    if (resolved.length === 0) return [null, new IOResult()]
+    const reads: Record<string, Uint8Array> = {}
+    const cache: string[] = []
+    const buffers: Uint8Array[] = []
+    for (const p of resolved) {
+      const data = await slackRead(accessor, p, opts.index ?? undefined)
+      reads[p.stripPrefix] = data
+      cache.push(p.stripPrefix)
+      buffers.push(data)
+    }
+    const merged = concatBuffers(buffers)
+    const out: ByteSource = nFlag ? numberLines(merged) : merged
+    return [out, new IOResult({ reads, cache })]
   }
   const raw = await readStdinAsync(opts.stdin)
   if (raw === null) {
