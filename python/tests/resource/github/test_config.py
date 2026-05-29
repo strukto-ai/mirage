@@ -38,7 +38,9 @@ def test_github_config_owner_repo_ref_default():
 
 
 def test_github_config_accepts_owner_repo_ref():
-    cfg = GitHubConfig(token="ghp_abc123", owner="strukto-ai", repo="mirage",
+    cfg = GitHubConfig(token="ghp_abc123",
+                       owner="strukto-ai",
+                       repo="mirage",
                        ref="dev")
     assert cfg.owner == "strukto-ai"
     assert cfg.repo == "mirage"

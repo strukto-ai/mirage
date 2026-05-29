@@ -47,8 +47,7 @@ class GitHubResource(BaseResource):
         if owner is None or repo is None:
             raise ValueError(
                 "GitHubResource requires owner and repo, either as "
-                "constructor kwargs or in GitHubConfig"
-            )
+                "constructor kwargs or in GitHubConfig")
         default_branch = fetch_default_branch_sync(config, owner, repo)
         tree, truncated = fetch_tree_sync(config, owner, repo, ref)
         self.accessor = GitHubAccessor(config,
