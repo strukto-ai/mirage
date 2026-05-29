@@ -282,10 +282,8 @@ async def test_wc_report_through_redirect_chain(ws):
         io = await ws.execute(
             "echo -n '/s3/data/example.json ' > /tmp/size_report.txt && "
             "wc -c /s3/data/example.json >> /tmp/size_report.txt && "
-            "echo >> /tmp/size_report.txt && "
             "echo -n '/s3/data/example.jsonl ' >> /tmp/size_report.txt && "
             "wc -c /s3/data/example.jsonl >> /tmp/size_report.txt && "
-            "echo >> /tmp/size_report.txt && "
             "cat /tmp/size_report.txt")
         json_size = len(objects["data/example.json"])
         jsonl_size = len(objects["data/example.jsonl"])

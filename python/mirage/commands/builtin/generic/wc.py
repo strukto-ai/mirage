@@ -1,6 +1,8 @@
 import codecs
+import inspect
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from typing import Any, Callable
 
 from mirage.utils.stream import ensure_stream
 
@@ -117,3 +119,39 @@ def format_wc(
     if label is None:
         return body
     return f"{body}\t{label}"
+
+
+async def format_multi(
+    paths: list[Any],
+    *,
+    read: Callable[..., Any],
+    accessor: object = None,
+    args_l: bool = False,
+    w: bool = False,
+    c: bool = False,
+    m: bool = False,
+    L: bool = False,
+) -> bytes:
+    outputs: list[str] = []
+    totals = WCCounts()
+    for path in paths:
+        source = read(accessor, path)
+        if inspect.isawaitable(source):
+            source = await source
+        counts = await wc(source)
+        outputs.append(
+            format_wc(counts,
+                      args_l=args_l,
+                      w=w,
+                      c=c,
+                      m=m,
+                      L=L,
+                      label=path.original))
+        totals.merge(counts)
+    if len(paths) > 1:
+        outputs.append(
+            format_wc(totals, args_l=args_l, w=w, c=c, m=m, L=L,
+                      label="total"))
+    if not outputs:
+        return b""
+    return ("\n".join(outputs) + "\n").encode()

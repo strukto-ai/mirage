@@ -28,7 +28,7 @@ async def test_wc_default(workspace):
     await workspace.ops.write("/f.txt", b"hello world\nfoo bar\n")
     io = await workspace.execute("wc /f.txt", session_id="default")
     assert io.exit_code == 0
-    parts = io.stdout.decode().split("\t")
+    parts = io.stdout.decode().rstrip("\n").split("\t")
     assert parts[0] == "2"
     assert parts[1] == "4"
     assert parts[2] == "20"

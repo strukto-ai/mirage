@@ -18,7 +18,7 @@ from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.databricks_volume._helpers import (
     path_prefix, read_bytes_with_index)
-from mirage.commands.builtin.generic.wc import WCCounts, format_wc
+from mirage.commands.builtin.generic.wc import format_multi, format_wc
 from mirage.commands.builtin.generic.wc import wc as generic_wc
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
@@ -44,30 +44,16 @@ async def wc(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        read_bytes = read_bytes_with_index(index, path_prefix(paths))
-        outputs: list[str] = []
-        totals = WCCounts()
-        for path in paths:
-            counts = await generic_wc(await read_bytes(accessor, path))
-            outputs.append(
-                format_wc(counts,
-                          args_l=args_l,
-                          w=w,
-                          c=c,
-                          m=m,
-                          L=L,
-                          label=path.original))
-            totals.merge(counts)
-        if len(paths) > 1:
-            outputs.append(
-                format_wc(totals,
-                          args_l=args_l,
-                          w=w,
-                          c=c,
-                          m=m,
-                          L=L,
-                          label="total"))
-        return "\n".join(outputs).encode(), IOResult()
+        read = read_bytes_with_index(index, path_prefix(paths))
+        body = await format_multi(paths,
+                                  read=read,
+                                  accessor=accessor,
+                                  args_l=args_l,
+                                  w=w,
+                                  c=c,
+                                  m=m,
+                                  L=L)
+        return body, IOResult()
     source = _resolve_source(stdin, "wc: missing operand")
     counts = await generic_wc(source)
     return format_wc(counts, args_l=args_l, w=w, c=c, m=m,

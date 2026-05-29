@@ -25,7 +25,7 @@ async def test_workspace_execute_databricks_volume_wc(
     io = await databricks_text_workspace.execute("wc -l /dbx/words.txt")
 
     assert io.exit_code == 0
-    assert io.stdout == b"3\t/dbx/words.txt"
+    assert io.stdout == b"3\t/dbx/words.txt\n"
 
 
 @pytest.mark.asyncio
