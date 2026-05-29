@@ -9,7 +9,7 @@
         <img src="https://img.shields.io/badge/made by-strukto.ai-0C0C0C?labelColor=FAFAFA" /></a>
     <a href="https://github.com/strukto-ai/mirage/blob/main/LICENSE" alt="License">
         <img src="https://img.shields.io/github/license/strukto-ai/mirage?color=0C0C0C&labelColor=FAFAFA" /></a>
-    <a href="https://discord.gg/QSdD7KspFu" alt="Discord">
+    <a href="https://discord.gg/u8BPQ65KsS" alt="Discord">
         <img src="https://img.shields.io/badge/discord-join-0C0C0C?labelColor=FAFAFA&logo=discord&logoColor=0C0C0C" /></a>
     <br/>
     <a href="https://docs.mirage.strukto.ai/python/quickstart" alt="Python docs">
