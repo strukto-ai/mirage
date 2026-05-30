@@ -60,4 +60,4 @@ async def wc(
     source = _resolve_source(stdin, "wc: missing operand")
     counts = await generic_wc(source)
     return format_wc(counts, args_l=args_l, w=w, c=c, m=m,
-                     L=L).encode(), IOResult()
+                     L=L).encode() + b"\n", IOResult()

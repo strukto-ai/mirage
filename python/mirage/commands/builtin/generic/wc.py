@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from mirage.types import PathSpec
 from mirage.utils.stream import ensure_stream
 
 
@@ -122,7 +123,7 @@ def format_wc(
 
 
 async def format_multi(
-    paths: list[Any],
+    paths: list[PathSpec],
     *,
     read: Callable[..., Any],
     accessor: object = None,
@@ -132,6 +133,27 @@ async def format_multi(
     m: bool = False,
     L: bool = False,
 ) -> bytes:
+    """Format wc output for multiple already-resolved paths.
+
+    Globs are expanded by the caller (``resolve_glob``) before this runs, so
+    ``paths`` is always a flat list of concrete entries, never patterns. One
+    record is emitted per path, plus a trailing ``total`` row when more than
+    one path is given; every record ends with a newline per POSIX wc.
+
+    Args:
+        paths (list[PathSpec]): Resolved paths; only ``.original`` is read.
+        read (Callable[..., Any]): Reader called as ``read(accessor, path)``;
+            returns bytes, an awaitable of bytes, or an async byte iterator.
+        accessor (object): Backend accessor passed through to ``read``.
+        args_l (bool): Report line count only.
+        w (bool): Report word count only.
+        c (bool): Report byte count only.
+        m (bool): Report character count only.
+        L (bool): Report longest line length only.
+
+    Returns:
+        bytes: Encoded wc output, or ``b""`` when ``paths`` is empty.
+    """
     outputs: list[str] = []
     totals = WCCounts()
     for path in paths:

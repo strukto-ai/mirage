@@ -289,3 +289,16 @@ async def test_format_multi_empty_paths_returns_empty():
 
     out = await format_multi([], read=fake_read, args_l=True)
     assert out == b""
+
+
+async def _async_byte_read(_accessor, _path):
+    yield b"hello "
+    yield b"world\n"
+
+
+@pytest.mark.asyncio
+async def test_format_multi_accepts_async_iterator_read():
+    paths = [PathSpec.from_str_path("/a.txt")]
+
+    out = await format_multi(paths, read=_async_byte_read, args_l=True)
+    assert out == b"1\t/a.txt\n"

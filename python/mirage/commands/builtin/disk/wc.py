@@ -59,7 +59,7 @@ async def wc(
                                                    "wc: missing operand")
     if args_l and not (L or w or c or m):
         line_count = await generic_wc_lines(source)
-        return str(line_count).encode(), IOResult()
+        return str(line_count).encode() + b"\n", IOResult()
     counts = await generic_wc(source)
-    return format_wc(counts, args_l=args_l, w=w, c=c, m=m, L=L).encode(), \
-        IOResult()
+    return format_wc(counts, args_l=args_l, w=w, c=c, m=m,
+                     L=L).encode() + b"\n", IOResult()
