@@ -18,6 +18,7 @@ from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
 from mirage.shell.call_stack import CallStack
 from mirage.shell.types import SET_FLAG_TO_OPTION
+from mirage.workspace.executor.control import ReturnSignal
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 

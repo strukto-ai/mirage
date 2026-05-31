@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import dataclass
+
 from mirage.commands.config import RegisteredCommand
 from mirage.commands.spec import SPECS, CommandSpec
 from mirage.io import IOResult
@@ -22,6 +24,7 @@ from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
 
+@dataclass
 class _ManHit:
     mount: Mount
     cmd: RegisteredCommand
