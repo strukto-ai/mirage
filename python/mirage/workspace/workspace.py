@@ -25,14 +25,12 @@ from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index import IndexConfig
 from mirage.commands.builtin.general import HISTORY_COMMANDS
-from mirage.commands.builtin.utils.safeguard import apply_safeguard
 
 try:
     from mirage.cache.file.redis import RedisFileCacheStore
 except ImportError:
     RedisFileCacheStore = None  # type: ignore[misc, assignment]
 from mirage.io import IOResult
-from mirage.io.types import materialize
 from mirage.observe.context import start_recording, stop_recording
 from mirage.observe.observer import Observer
 from mirage.ops import Ops
@@ -41,7 +39,6 @@ from mirage.ops.os_patch import make_os_module
 from mirage.provision import ProvisionResult
 from mirage.resource.base import BaseResource
 from mirage.resource.ram import RAMResource
-from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
 from mirage.types import (DEFAULT_AGENT_ID, DEFAULT_SESSION_ID,
@@ -54,8 +51,7 @@ from mirage.workspace.fuse import FuseManager
 from mirage.workspace.history import ExecutionHistory
 from mirage.workspace.mount import Mount, MountRegistry
 from mirage.workspace.native import native_exec
-from mirage.workspace.node import execute_node as _execute_node
-from mirage.workspace.node import provision_node
+from mirage.workspace.node import provision_node, run_command_tree
 from mirage.workspace.session import (Session, SessionManager,
                                       reset_current_session,
                                       set_current_session)
@@ -668,7 +664,7 @@ class Workspace:
                                             exec_recursion, ast,
                                             effective_session)
             records = start_recording()
-            stdout, io, exec_node = await _execute_node(
+            io, exec_node = await run_command_tree(
                 self.dispatch,
                 self._registry,
                 self.job_table,
@@ -677,22 +673,13 @@ class Workspace:
                 ast,
                 effective_session,
                 stdin,
-                history=self.history,
-                cancel=cancel,
+                self.history,
+                cancel,
             )
-            stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
-            if io.safeguard is not None:
-                stdout, sg_io = await apply_safeguard(stdout, io.safeguard)
-                if sg_io.stderr is not None:
-                    existing = await materialize(io.stderr)
-                    io.stderr = existing + await materialize(sg_io.stderr)
-                if sg_io.exit_code != 0:
-                    io.exit_code = sg_io.exit_code
             session.last_exit_code = io.exit_code
             stop_recording()
             self._ops.records.extend(records)
             exec_node.records = records
-            io.stdout = stdout
             await self.apply_io(io)
             return io
         except (MirageAbortError, ContentDriftError):
