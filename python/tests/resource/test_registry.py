@@ -55,6 +55,7 @@ EXPECTED_RESOURCES = {
     "databricks_volume",
     "hf_buckets",
     "nextcloud",
+    "dify",
 }
 
 

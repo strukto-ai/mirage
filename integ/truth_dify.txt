@@ -1,0 +1,66 @@
+=== ls ===
+CHANGELOG.md
+guides
+policies
+=== ls_guides ===
+auth
+quickstart
+=== tree ===
+├── CHANGELOG.md
+├── guides
+│   ├── auth
+│   └── quickstart
+└── policies
+    ├── privacy
+    └── refunds
+=== find_md ===
+/knowledge/CHANGELOG.md
+=== find_type_f ===
+/knowledge/CHANGELOG.md
+/knowledge/guides/auth
+/knowledge/guides/quickstart
+/knowledge/policies/privacy
+/knowledge/policies/refunds
+=== stat_fmt ===
+190 auth
+=== cat_auth ===
+Authentication uses bearer tokens via the Authorization header.
+Requests are rate limited to 100 calls per minute per token.
+If you exceed the limit you receive HTTP 429 and must back off.
+=== head_1 ===
+Welcome to Acme. This quickstart gets you running fast.
+=== tail_1 ===
+Set your token in the ACME_TOKEN environment variable.
+=== wc_l ===
+2	/knowledge/guides/auth
+=== wc_c ===
+159	/knowledge/policies/refunds
+=== grep_429 ===
+If you exceed the limit you receive HTTP 429 and must back off.
+=== grep_c_rate ===
+1
+=== grep_r_refund ===
+/knowledge/policies/refunds:Email support to start a refund with your order id.
+/knowledge/policies/refunds:Approved refunds are processed within five business days.
+=== grep_rl_encrypted ===
+/knowledge/CHANGELOG.md
+/knowledge/policies/privacy
+=== rg_l_token ===
+/knowledge/guides/auth
+/knowledge/guides/quickstart
+=== pipe_sort_uniq_wc ===
+3
+=== search_throttle ===
+Requests are rate limited to 100 calls per minute per token.
+If you exceed the limit you receive HTTP 429 and must back off.
+=== search_scoped_refund ===
+Refunds are available within 30 days of purchase.
+Approved refunds are processed within five business days.
+=== search_hybrid_encrypted ===
+Customer data is stored encrypted at rest and in transit.
+=== calls_ls ===
+list=1 detail=1 segments=0 retrieve=0
+=== calls_ls_then_guides ===
+list=1 detail=3 segments=0 retrieve=0
+=== calls_cat ===
+list=1 detail=0 segments=1 retrieve=0

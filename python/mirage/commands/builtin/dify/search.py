@@ -1,0 +1,53 @@
+from mirage.commands.registry import command
+from mirage.commands.spec import SPECS
+from mirage.core.dify import search as search_core
+from mirage.core.dify.glob import resolve_glob
+from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
+
+
+def default_paths(paths: list[PathSpec],
+                  cwd: PathSpec | None) -> list[PathSpec]:
+    if paths:
+        return paths
+    if cwd is not None:
+        return [cwd]
+    return [PathSpec(original="/", directory="/")]
+
+
+def is_mount_root(path: PathSpec) -> bool:
+    root = path.prefix.rstrip("/") if path.prefix else "/"
+    root = root or "/"
+    value = path.original.rstrip("/") or "/"
+    return value == "/" or value == root
+
+
+@command("search", resource="dify", spec=SPECS["search"])
+async def search(
+    accessor,
+    paths: list[PathSpec],
+    *texts: str,
+    method: str = "semantic",
+    top_k: str | int = 10,
+    threshold: str | float = 0.0,
+    **_extra: object,
+) -> tuple[ByteSource | None, IOResult]:
+    if not texts:
+        raise ValueError("search: query is required")
+    query = texts[0]
+    index = _extra.get("index")
+    cwd = _extra.get("cwd")
+    target_paths = default_paths(paths,
+                                 cwd if isinstance(cwd, PathSpec) else None)
+    if any(is_mount_root(path) for path in target_paths):
+        resolved_paths: list[PathSpec] = []
+    else:
+        resolved_paths = await resolve_glob(accessor, target_paths, index)
+    output = await search_core.search_segments(accessor,
+                                               query,
+                                               resolved_paths,
+                                               index,
+                                               method=method,
+                                               top_k=int(top_k),
+                                               threshold=float(threshold))
+    return output, IOResult()

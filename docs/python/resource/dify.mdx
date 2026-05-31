@@ -1,0 +1,222 @@
+---
+title: Dify
+icon: /images/dify-logo.svg
+description: Mount a Dify Knowledge dataset as a read-only virtual filesystem.
+---
+
+The Dify resource exposes completed Dify Knowledge documents as text files
+mounted at a prefix such as `/knowledge/`. Each file is assembled from the
+document's completed, enabled segments.
+
+For API key setup, see [Dify Setup](/python/setup/dify).
+
+## Config
+
+```python
+import os
+
+from mirage import MountMode, Workspace
+from mirage.resource.dify import DifyConfig, DifyResource
+
+config = DifyConfig(
+    api_key=os.environ["DIFY_API_KEY"],
+    base_url=os.environ.get("DIFY_BASE_URL", "https://api.dify.ai/v1"),
+    dataset_id=os.environ["DIFY_DATASET_ID"],
+    slug_metadata_name=os.environ.get("DIFY_SLUG_METADATA_NAME", "slug"),
+)
+resource = DifyResource(config=config)
+ws = Workspace({"/knowledge/": resource}, mode=MountMode.READ)
+```
+
+The resource is read-only and does not support snapshots.
+
+## Filesystem Layout
+
+Dify documents are mapped to paths using the configured slug metadata field.
+The default metadata field name is `slug`. If a document has no configured slug
+metadata, Mirage falls back to the Dify document name.
+
+```text
+/knowledge/
+  README.md
+  guides/
+    quickstart.md
+    api.md
+  policies/
+    support.md
+```
+
+Example mapping:
+
+| Dify document | Metadata | Mirage path |
+| ------------- | -------- | ----------- |
+| `Quickstart` | `slug=guides/quickstart.md` | `/knowledge/guides/quickstart.md` |
+| `README.md` | no slug | `/knowledge/README.md` |
+
+### Creating Slug Metadata in Dify
+
+In the Dify Knowledge UI, open a document and add a metadata item whose name
+matches `slug_metadata_name`. The default name is `slug`.
+
+```text
+name: slug
+value: guides/quickstart.md
+```
+
+For a custom Dify metadata name:
+
+```python
+config = DifyConfig(
+    api_key=os.environ["DIFY_API_KEY"],
+    base_url=os.environ.get("DIFY_BASE_URL", "https://api.dify.ai/v1"),
+    dataset_id=os.environ["DIFY_DATASET_ID"],
+    slug_metadata_name="path",
+)
+```
+
+Then use:
+
+```text
+name: path
+value: guides/quickstart.md
+```
+
+Mirage reads `doc_metadata` from Dify and uses this value as the document's
+virtual path below the mount prefix.
+
+Use these rules for slug metadata values:
+
+- Use `/` to create folders.
+- Do not use empty segments, `.`, or `..`.
+- Keep each slug metadata value unique across the dataset.
+- Do not use a path that is also needed as a folder. For example, `guides` and `guides/quickstart.md` cannot both be document paths.
+
+Only visible documents are included:
+
+- `enabled` is `true`
+- `indexing_status` is `completed`
+- `archived` is `false`
+
+## Reading Documents
+
+`cat`, `head`, `tail`, and `grep` read Dify document segments. Segment content
+is joined with a single newline between chunks.
+
+```bash
+ls /knowledge/
+find /knowledge/ -type f
+cat /knowledge/guides/quickstart.md
+head -n 20 /knowledge/guides/quickstart.md
+grep -i "billing" /knowledge/guides/quickstart.md
+wc /knowledge/guides/quickstart.md
+```
+
+## Search
+
+The `search` command calls Dify's dataset retrieval API. Use it when meaning
+matters more than exact text matching.
+
+```bash
+search "how do I reset my password" /knowledge/
+search --method hybrid --top-k 5 "billing policy" /knowledge/policies/
+search --method semantic --threshold 0.4 "quickstart" /knowledge/guides/*.md
+```
+
+Supported methods:
+
+| Method | Dify retrieval mode |
+| ------ | ------------------- |
+| `semantic` | semantic search |
+| `fulltext` | full text search |
+| `hybrid` | hybrid search |
+| `keyword` | keyword search |
+
+`top-k` is capped at `100`. `threshold` must be between `0` and `1`.
+
+Scoped search uses Dify metadata filtering. Documents with the configured slug
+metadata field are filtered by that field; name-based documents are filtered by
+`document_name`, which requires Dify Built-in Fields to be enabled in dataset
+metadata.
+
+### Scoped Search Requirements
+
+Mirage converts a scoped search path into Dify metadata filters:
+
+| Mirage target | Dify metadata filter |
+| ------------- | -------------------- |
+| Document with configured slug metadata | `<slug_metadata_name> in [...]` |
+| Document without configured slug metadata | `document_name in [...]` |
+| Folder or glob | `<slug_metadata_name>` / `document_name` filters for all matched files |
+
+To make scoped search reliable:
+
+1. Add the configured slug metadata field to every document.
+1. Enable Dify **Built-in Fields** in the dataset metadata settings.
+1. Ensure `document_name` is available if you rely on name-based paths.
+
+If Built-in Fields are disabled, scoped search against documents without the
+configured slug metadata field may return empty results even though `cat`,
+`grep`, and `find` can still see the same file.
+
+## Cache
+
+The resource uses Mirage's index cache for the virtual tree. Directory listings
+and path resolution reuse the cached document tree until the index expires or
+the workspace is recreated. If documents are edited directly in Dify, repeated
+operations can temporarily see cached paths and metadata.
+
+Document content is still read from Dify when commands materialize file data.
+
+## Example
+
+```python
+import asyncio
+import os
+
+from dotenv import load_dotenv
+
+from mirage import MountMode, Workspace
+from mirage.resource.dify import DifyConfig, DifyResource
+
+load_dotenv(".env.development")
+
+config = DifyConfig(
+    api_key=os.environ["DIFY_API_KEY"],
+    base_url=os.environ.get("DIFY_BASE_URL", "https://api.dify.ai/v1"),
+    dataset_id=os.environ["DIFY_DATASET_ID"],
+    slug_metadata_name=os.environ.get("DIFY_SLUG_METADATA_NAME", "slug"),
+)
+resource = DifyResource(config=config)
+
+
+async def main() -> None:
+    ws = Workspace({"/knowledge/": resource}, mode=MountMode.READ)
+
+    r = await ws.execute("ls /knowledge/")
+    print(await r.stdout_str())
+
+    r = await ws.execute("find /knowledge/ -type f | head -n 10")
+    print(await r.stdout_str())
+
+    r = await ws.execute('search --method hybrid --top-k 5 "getting started" /knowledge/')
+    print(await r.stdout_str())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+A runnable version is available at
+`examples/python/dify/dify.py`.
+
+## Shell Commands
+
+| Command | Notes |
+| ------- | ----- |
+| `ls` | List folders and documents |
+| `cat` | Read full document text from completed segments |
+| `head` / `tail` | Read the first or last lines/bytes |
+| `grep` | Exact or regex matching over streamed document text |
+| `find` | Search the virtual tree by name, type, depth, and size |
+| `wc` | Count lines, words, bytes, characters, and max line length |
+| `search` | Semantic/full-text/hybrid/keyword retrieval through Dify |

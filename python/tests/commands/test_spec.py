@@ -91,6 +91,23 @@ def test_parse_positional_text_then_path():
     ]
 
 
+def test_search_spec_parses_query_paths_and_options():
+    parsed = parse_command(
+        SPECS["search"],
+        [
+            "--method", "hybrid", "--top-k", "5", "--threshold", "0.4",
+            "login docs", "guides/*.md"
+        ],
+        cwd="/knowledge",
+    )
+
+    assert parsed.flag("--method") == "hybrid"
+    assert parsed.flag("--top-k") == "5"
+    assert parsed.flag("--threshold") == "0.4"
+    assert parsed.args == [("login docs", OperandKind.TEXT),
+                           ("/knowledge/guides/*.md", OperandKind.PATH)]
+
+
 def test_parse_double_dash_stops_flags():
     spec = CommandSpec(options=(Option(short="-r"), ),
                        rest=Operand(kind=OperandKind.PATH))
@@ -198,6 +215,7 @@ def test_all_commands_have_specs():
         "file",
         "nl",
         "grep",
+        "search",
         "rg",
         "sort",
         "uniq",

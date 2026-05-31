@@ -24,11 +24,11 @@
 </p>
 
 <p align="center">
-  <a href="./README.md"><img alt="英文 README" src="https://img.shields.io/badge/English-d9d9d9"></a>
-  <a href="./README.zh-CN.md"><img alt="簡體中文 README" src="https://img.shields.io/badge/简体中文-d9d9d9"></a>
+  <a href="../README.md"><img alt="README in English" src="https://img.shields.io/badge/English-d9d9d9"></a>
+  <a href="./README.zh-CN.md"><img alt="简体中文 README" src="https://img.shields.io/badge/简体中文-d9d9d9"></a>
   <a href="./README.zh-TW.md"><img alt="繁體中文 README" src="https://img.shields.io/badge/繁體中文-d9d9d9"></a>
-  <a href="./README.fr.md"><img alt="法文 README" src="https://img.shields.io/badge/Français-d9d9d9"></a>
-  <a href="./README.vi.md"><img alt="越南文 README" src="https://img.shields.io/badge/Ti%E1%BA%BFng%20Vi%E1%BB%87t-d9d9d9"></a>
+  <a href="./README.fr.md"><img alt="README en Français" src="https://img.shields.io/badge/Français-d9d9d9"></a>
+  <a href="./README.vi.md"><img alt="README Tiếng Việt" src="https://img.shields.io/badge/Ti%E1%BA%BFng%20Vi%E1%BB%87t-d9d9d9"></a>
 </p>
 
 Mirage 是 **面向 AI Agent 的統一虛擬檔案系統**：它把 S3、Google Drive、Slack、Gmail、Redis 等服務和資料源並排掛載到同一棵檔案樹中。

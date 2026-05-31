@@ -167,6 +167,13 @@
                 ]
               },
               {
+                "group": "Knowledge",
+                "icon": "/images/dify-logo.svg",
+                "pages": [
+                  "home/setup/dify"
+                ]
+              },
+              {
                 "group": "Notes",
                 "icon": "book",
                 "pages": [
@@ -298,6 +305,13 @@
                 "pages": [
                   "python/resource/mongodb",
                   "python/resource/postgres"
+                ]
+              },
+              {
+                "group": "Knowledge",
+                "icon": "/images/dify-logo.svg",
+                "pages": [
+                  "python/resource/dify"
                 ]
               },
               {
