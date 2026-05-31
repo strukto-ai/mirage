@@ -18,6 +18,7 @@ import logging
 import sys
 import time
 from collections.abc import AsyncIterator
+from functools import partial
 from typing import Any
 
 from mirage.cache.file import io as cache_io
@@ -48,6 +49,7 @@ from mirage.types import (DEFAULT_AGENT_ID, DEFAULT_SESSION_ID,
                           ConsistencyPolicy, DriftPolicy, FileStat, MountMode,
                           PathSpec, StateKey)
 from mirage.workspace.abort import MirageAbortError
+from mirage.workspace.file_prompt import build_file_prompt
 from mirage.workspace.fuse import FuseManager
 from mirage.workspace.history import ExecutionHistory
 from mirage.workspace.mount import Mount, MountRegistry
@@ -71,10 +73,6 @@ logger = logging.getLogger(__name__)
 _DISPATCH_READ_OPS = frozenset({"read", "read_bytes"})
 _DISPATCH_WRITE_OPS = frozenset(
     {"write", "write_bytes", "append", "unlink", "create", "truncate"})
-
-_HELP_HINT = (
-    "Tip: run `man` to list every available command grouped by resource, "
-    "`man <cmd>` for a single entry, and `<cmd> --help` for flag details.")
 
 
 class Workspace:
@@ -269,18 +267,7 @@ class Workspace:
 
     @property
     def file_prompt(self) -> str:
-        parts: list[str] = [_HELP_HINT]
-        for m in self._registry.mounts():
-            prompt = m.resource.PROMPT
-            if not prompt:
-                continue
-            prefix = m.prefix.rstrip("/") or "/"
-            section = prompt.format(prefix=prefix)
-            if m.mode != MountMode.READ and m.resource.WRITE_PROMPT:
-                section += "\n" + m.resource.WRITE_PROMPT.replace(
-                    "{prefix}", prefix)
-            parts.append(section)
-        return "\n\n".join(parts)
+        return build_file_prompt(self._registry.mounts())
 
     # ── lifecycle ───────────────────────────────────────────────────────────
 
@@ -670,6 +657,10 @@ class Workspace:
             if self.observer is not None:
                 await self.observer.log_command(exec_record, session_cwd)
 
+    async def _exec_recursion(self, cancel: asyncio.Event | None, cmd: str,
+                              **opts: Any) -> Any:
+        return await self.execute(cmd, cancel=cancel, **opts)
+
     async def execute(
         self,
         command: str,
@@ -734,8 +725,7 @@ class Workspace:
         io = IOResult()
         exec_node = ExecutionNode(command=command, exit_code=0)
 
-        async def _exec_for_recursion(cmd: str, **opts: Any) -> Any:
-            return await self.execute(cmd, cancel=cancel, **opts)
+        exec_recursion = partial(self._exec_recursion, cancel)
 
         session_token = set_current_session(effective_session)
         try:
@@ -752,14 +742,14 @@ class Workspace:
                 return io
             if provision:
                 return await provision_node(self._registry, self.dispatch,
-                                            _exec_for_recursion, ast,
+                                            exec_recursion, ast,
                                             effective_session)
             records = start_recording()
             stdout, io, exec_node = await _execute_node(
                 self.dispatch,
                 self._registry,
                 self.job_table,
-                _exec_for_recursion,
+                exec_recursion,
                 self._current_agent_id,
                 ast,
                 effective_session,
