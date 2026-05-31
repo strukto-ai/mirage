@@ -53,11 +53,14 @@ async def cat(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        p = paths[0]
-        data = await notion_read(accessor, p, index)
-        io = IOResult(reads={p.strip_prefix: data}, cache=[p.strip_prefix])
-        return (generic_cat(data, number_lines=True)
-                if n else yield_bytes(data)), io
+        reads = {
+            p.strip_prefix: await notion_read(accessor, p, index)
+            for p in paths
+        }
+        merged = b"".join(reads.values())
+        io = IOResult(reads=reads, cache=list(reads))
+        return (generic_cat(merged, number_lines=True)
+                if n else yield_bytes(merged)), io
     source = _resolve_source(stdin, "cat: missing operand")
     return (generic_cat(source, number_lines=True)
             if n else source), IOResult()

@@ -24,7 +24,7 @@ from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
 from mirage.core.gdrive.stream import read_stream as gdrive_read_stream
 from mirage.io.cachable_iterator import CachableAsyncIterator
-from mirage.io.stream import yield_bytes
+from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
@@ -57,19 +57,18 @@ async def cat(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        p = paths[0]
-        result = await gdrive_read_stream(accessor, p, index)
-        if isinstance(result, bytes):
-            io = IOResult(reads={p.strip_prefix: result},
-                          cache=[p.strip_prefix])
-            if n:
-                return generic_cat(result, number_lines=True), io
-            return yield_bytes(result), io
-        cachable = CachableAsyncIterator(result)
-        io = IOResult(reads={p.strip_prefix: cachable}, cache=[p.strip_prefix])
+        reads: dict[str, ByteSource] = {}
+        for p in paths:
+            result = await gdrive_read_stream(accessor, p, index)
+            if isinstance(result, bytes):
+                reads[p.strip_prefix] = result
+            else:
+                reads[p.strip_prefix] = CachableAsyncIterator(result)
+        source = async_chain(*reads.values())
+        io = IOResult(reads=reads, cache=list(reads))
         if n:
-            return generic_cat(cachable, number_lines=True), io
-        return cachable, io
+            return generic_cat(source, number_lines=True), io
+        return source, io
     source = _resolve_source(stdin, "cat: missing operand")
     if n:
         return generic_cat(source, number_lines=True), IOResult()

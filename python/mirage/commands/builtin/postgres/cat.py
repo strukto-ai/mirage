@@ -55,15 +55,17 @@ async def cat(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        p = paths[0]
-        try:
-            data = await postgres_read(accessor, p, index)
-        except ValueError as exc:
-            return None, IOResult(exit_code=1, stderr=str(exc).encode())
-        io = IOResult(reads={p.strip_prefix: data}, cache=[p.strip_prefix])
+        reads: dict[str, bytes] = {}
+        for p in paths:
+            try:
+                reads[p.strip_prefix] = await postgres_read(accessor, p, index)
+            except ValueError as exc:
+                return None, IOResult(exit_code=1, stderr=str(exc).encode())
+        merged = b"".join(reads.values())
+        io = IOResult(reads=reads, cache=list(reads))
         if n:
-            return generic_cat(data, number_lines=True), io
-        return data, io
+            return generic_cat(merged, number_lines=True), io
+        return merged, io
     source = _resolve_source(stdin, "cat: missing operand")
     if n:
         return generic_cat(source, number_lines=True), IOResult()

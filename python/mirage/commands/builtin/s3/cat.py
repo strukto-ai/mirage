@@ -25,6 +25,7 @@ from mirage.core.s3.glob import resolve_glob
 from mirage.core.s3.stat import stat
 from mirage.core.s3.stream import read_stream
 from mirage.io.cachable_iterator import CachableAsyncIterator
+from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -44,14 +45,16 @@ async def cat(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        await stat(accessor, paths[0], index)
-        source = read_stream(accessor, paths[0])
-        cachable = CachableAsyncIterator(source)
-        key = paths[0].strip_prefix
-        io = IOResult(reads={key: cachable}, cache=[key])
+        reads: dict[str, CachableAsyncIterator] = {}
+        for p in paths:
+            await stat(accessor, p, index)
+            reads[p.strip_prefix] = CachableAsyncIterator(
+                read_stream(accessor, p))
+        source = async_chain(*reads.values())
+        io = IOResult(reads=reads, cache=list(reads))
         if n:
-            return generic_cat(cachable, number_lines=True), io
-        return cachable, io
+            return generic_cat(source, number_lines=True), io
+        return source, io
     source = _resolve_source(stdin, "cat: missing operand")
     if n:
         return generic_cat(source, number_lines=True), IOResult()

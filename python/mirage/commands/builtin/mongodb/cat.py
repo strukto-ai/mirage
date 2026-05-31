@@ -26,6 +26,8 @@ from mirage.core.mongodb.read import read as mongodb_read
 from mirage.core.mongodb.scope import detect_scope
 from mirage.core.mongodb.stream import read_stream
 from mirage.core.mongodb.types import ScopeLevel
+from mirage.io.cachable_iterator import CachableAsyncIterator
+from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
@@ -55,17 +57,17 @@ async def cat(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        p = paths[0]
-        scope = detect_scope(p)
-        if scope.level == ScopeLevel.DOCUMENTS:
-            source = read_stream(accessor, p, index)
-            io = IOResult(reads={p.strip_prefix: source},
-                          cache=[p.strip_prefix])
-            return (generic_cat(source, number_lines=True)
-                    if n else source), io
-        data = await mongodb_read(accessor, p, index)
-        io = IOResult(reads={p.strip_prefix: data}, cache=[p.strip_prefix])
-        return (generic_cat(data, number_lines=True) if n else data), io
+        reads: dict[str, ByteSource] = {}
+        for p in paths:
+            scope = detect_scope(p)
+            if scope.level == ScopeLevel.DOCUMENTS:
+                reads[p.strip_prefix] = CachableAsyncIterator(
+                    read_stream(accessor, p, index))
+            else:
+                reads[p.strip_prefix] = await mongodb_read(accessor, p, index)
+        source = async_chain(*reads.values())
+        io = IOResult(reads=reads, cache=list(reads))
+        return (generic_cat(source, number_lines=True) if n else source), io
     source = _resolve_source(stdin, "cat: missing operand")
     return (generic_cat(source, number_lines=True)
             if n else source), IOResult()
