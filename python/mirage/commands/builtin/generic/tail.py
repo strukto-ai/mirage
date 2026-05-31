@@ -1,6 +1,9 @@
+import inspect
 from collections import deque
 from collections.abc import AsyncIterator
+from typing import Any, Callable
 
+from mirage.types import PathSpec
 from mirage.utils.stream import ensure_stream
 
 
@@ -67,3 +70,46 @@ async def tail(
 
     for line in recent:
         yield line
+
+
+async def tail_multi(
+    paths: list[PathSpec],
+    *,
+    read: Callable[..., Any],
+    accessor: object = None,
+    index: object = None,
+    n: int | None = None,
+    c: int | None = None,
+    from_line: int | None = None,
+    show_headers: bool = False,
+) -> AsyncIterator[bytes]:
+    """Run tail over multiple already-resolved paths.
+
+    Globs are expanded by the caller, so ``paths`` is a flat list of concrete
+    entries. When ``show_headers`` is set a ``==> path <==`` banner is emitted
+    before each file (POSIX/GNU tail with multiple files), separated by a blank
+    line between files. The per-file source is produced lazily by ``read``.
+
+    Args:
+        paths (list[PathSpec]): Resolved paths; only ``.original`` is read.
+        read (Callable[..., Any]): Reader called as ``read(accessor, path,
+            index)``; returns bytes, an awaitable of bytes, or an async byte
+            iterator.
+        accessor (object): Backend accessor passed through to ``read``.
+        index (object): Index cache store passed through to ``read``.
+        n (int | None): Line count.
+        c (int | None): Byte count.
+        from_line (int | None): 1-based start line for ``tail -n +N``.
+        show_headers (bool): Emit ``==> path <==`` banners between files.
+    """
+    for i, p in enumerate(paths):
+        if show_headers:
+            header = f"==> {p.original} <==\n"
+            if i > 0:
+                header = "\n" + header
+            yield header.encode()
+        source = read(accessor, p, index)
+        if inspect.isawaitable(source):
+            source = await source
+        async for chunk in tail(source, n=n, c=c, from_line=from_line):
+            yield chunk

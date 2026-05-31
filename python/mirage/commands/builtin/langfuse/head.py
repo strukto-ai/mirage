@@ -17,6 +17,7 @@ from collections.abc import AsyncIterator
 from mirage.accessor.langfuse import LangfuseAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.head import head as generic_head
+from mirage.commands.builtin.generic.head import head_multi
 from mirage.commands.builtin.langfuse._provision import file_read_provision
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
@@ -58,9 +59,13 @@ async def head(
     c_int = int(c) if c is not None else None
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        p = paths[0]
-        data = await langfuse_read(accessor, p, index)
-        return generic_head(data, n=n_int, c=c_int), IOResult()
+        return head_multi(paths,
+                          read=langfuse_read,
+                          accessor=accessor,
+                          index=index,
+                          n=n_int,
+                          c=c_int,
+                          show_headers=len(paths) > 1), IOResult()
     raw = await _read_stdin_async(stdin)
     if raw is None:
         raise ValueError("head: missing operand")

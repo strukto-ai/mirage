@@ -18,6 +18,7 @@ from mirage.accessor.email import EmailAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.email._provision import file_read_provision
 from mirage.commands.builtin.generic.tail import tail as generic_tail
+from mirage.commands.builtin.generic.tail import tail_multi
 from mirage.commands.builtin.tail_helper import _parse_n
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
@@ -68,9 +69,15 @@ async def tail(
     c_int = int(c) if c is not None else None
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        data = await email_read(accessor, paths[0], index)
-        return generic_tail(data, n=n_int, c=c_int,
-                            from_line=from_line), IOResult()
+        show_headers = (v or len(paths) > 1) and not q
+        return tail_multi(paths,
+                          read=email_read,
+                          accessor=accessor,
+                          index=index,
+                          n=n_int,
+                          c=c_int,
+                          from_line=from_line,
+                          show_headers=show_headers), IOResult()
     source = _resolve_source(stdin, "tail: missing operand")
     return generic_tail(source, n=n_int, c=c_int,
                         from_line=from_line), IOResult()

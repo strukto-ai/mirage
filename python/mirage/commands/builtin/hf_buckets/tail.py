@@ -18,13 +18,14 @@ from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tail import tail as generic_tail
+from mirage.commands.builtin.generic.tail import tail_multi
 from mirage.commands.builtin.hf_buckets._provision import head_tail_provision
 from mirage.commands.builtin.tail_helper import _parse_n
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.hf_buckets.glob import resolve_glob
-from mirage.core.hf_buckets.read import read_bytes
+from mirage.core.hf_buckets.stream import read_stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -56,15 +57,15 @@ async def tail(
     c_int = int(c) if c is not None else None
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        raw = await read_bytes(accessor, paths[0])
-        if c_int is not None:
-            should_cache = c_int >= len(raw)
-        else:
-            should_cache = (from_line is None and n_int is not None
-                            and n_int >= raw.count(b"\n"))
-        cache = [paths[0].original] if should_cache else []
-        return generic_tail(raw, n=n_int, c=c_int,
-                            from_line=from_line), IOResult(cache=cache)
+        show_headers = (v or len(paths) > 1) and not q
+        return tail_multi(paths,
+                          read=read_stream,
+                          accessor=accessor,
+                          index=index,
+                          n=n_int,
+                          c=c_int,
+                          from_line=from_line,
+                          show_headers=show_headers), IOResult()
     source = _resolve_source(stdin, "tail: missing operand")
     return generic_tail(source, n=n_int, c=c_int,
                         from_line=from_line), IOResult()

@@ -58,7 +58,12 @@ async def head(
     c_int = int(c) if c is not None else None
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        data = await notion_read(accessor, paths[0], index)
-        return generic_head(data, n=n_int, c=c_int), IOResult()
+        return head_multi(paths,
+                          read=notion_read,
+                          accessor=accessor,
+                          index=index,
+                          n=n_int,
+                          c=c_int,
+                          show_headers=len(paths) > 1), IOResult()
     source = _resolve_source(stdin, "head: missing operand")
     return generic_head(source, n=n_int, c=c_int), IOResult()
