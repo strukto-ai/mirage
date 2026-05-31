@@ -21,7 +21,6 @@ from collections.abc import AsyncIterator
 from functools import partial
 from typing import Any
 
-from mirage.cache.file import io as cache_io
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index import IndexConfig
@@ -49,6 +48,7 @@ from mirage.types import (DEFAULT_AGENT_ID, DEFAULT_SESSION_ID,
                           ConsistencyPolicy, DriftPolicy, FileStat, MountMode,
                           PathSpec, StateKey)
 from mirage.workspace.abort import MirageAbortError
+from mirage.workspace.dispatcher import Dispatcher
 from mirage.workspace.file_prompt import build_file_prompt
 from mirage.workspace.fuse import FuseManager
 from mirage.workspace.history import ExecutionHistory
@@ -57,7 +57,6 @@ from mirage.workspace.native import native_exec
 from mirage.workspace.node import execute_node as _execute_node
 from mirage.workspace.node import provision_node
 from mirage.workspace.session import (Session, SessionManager,
-                                      assert_mount_allowed,
                                       reset_current_session,
                                       set_current_session)
 from mirage.workspace.snapshot import (ContentDriftError, apply_state_dict,
@@ -69,10 +68,6 @@ from mirage.workspace.snapshot import to_state_dict
 from mirage.workspace.types import ExecutionNode, ExecutionRecord
 
 logger = logging.getLogger(__name__)
-
-_DISPATCH_READ_OPS = frozenset({"read", "read_bytes"})
-_DISPATCH_WRITE_OPS = frozenset(
-    {"write", "write_bytes", "append", "unlink", "create", "truncate"})
 
 
 class Workspace:
@@ -131,6 +126,7 @@ class Workspace:
         self._session_mgr = SessionManager(session_id)
         self._consistency = consistency
         self._registry.set_consistency(consistency)
+        self._dispatcher = Dispatcher(self._registry, self._cache, consistency)
 
         for prefix, value in resources.items():
             if isinstance(value, tuple) and len(value) >= 2:
@@ -500,34 +496,7 @@ class Workspace:
                        **kwargs: Any) -> tuple[Any, IOResult]:
         if self._drift_check_pending:
             await self._run_pending_drift_check()
-        mount = self._registry.mount_for(path.original)
-        assert_mount_allowed(mount.prefix)
-        cacheable = mount.resource.is_remote is True
-
-        if cacheable and op in _DISPATCH_READ_OPS:
-            cached = await self._cache.get(path.original)
-            if cached is not None:
-                if self._consistency == ConsistencyPolicy.ALWAYS:
-                    try:
-                        remote_stat = await mount.execute_op(
-                            "stat", path.original)
-                    except FileNotFoundError:
-                        await self._cache.remove(path.original)
-                        raise
-                    if (remote_stat is not None
-                            and remote_stat.fingerprint is not None):
-                        fresh = await self._cache.is_fresh(
-                            path.original, remote_stat.fingerprint)
-                        if not fresh:
-                            await self._cache.remove(path.original)
-                            cached = None
-                if cached is not None:
-                    return cached, IOResult(reads={path.original: cached})
-
-        result = await mount.execute_op(op, path.original, **kwargs)
-        if op in _DISPATCH_WRITE_OPS:
-            await self._invalidate_after_write(mount, path.original)
-        return result, IOResult()
+        return await self._dispatcher.dispatch(op, path, **kwargs)
 
     async def _run_pending_drift_check(self) -> None:
         """Drain the post-load drift check.
@@ -572,56 +541,10 @@ class Workspace:
     # ── execution ────────────────────────────────────────────────────────────
 
     async def apply_io(self, io: IOResult) -> None:
-        await cache_io.apply_io(self._cache, io, self._is_cacheable_path)
-        if io.writes:
-            await self._invalidate_index_dirs(io)
-
-    def _is_cacheable_path(self, path: str) -> bool:
-        try:
-            mount = self._registry.mount_for(path)
-        except ValueError:
-            return False
-        return mount.resource.is_remote is True
+        await self._dispatcher.apply_io(io)
 
     async def _invalidate_after_write_by_path(self, path: str) -> None:
-        """Drop file-cache + stale parent index after a write to `path`.
-
-        Single source of truth for post-write invalidation. Called from
-        both `Workspace.dispatch()` and `Ops._call(write=True)` so a
-        write through any code path sees the same invalidation rules:
-        file cache is dropped only for remote-backed mounts, and the
-        parent directory index is dirtied for any mount that maintains
-        an index. No-op for paths that resolve to no known mount.
-        """
-        try:
-            mount = self._registry.mount_for(path)
-        except ValueError:
-            return
-        await self._invalidate_after_write(mount, path)
-
-    async def _invalidate_after_write(self, mount: Mount, path: str) -> None:
-        if mount.resource.is_remote is True:
-            await self._cache.remove(path)
-        idx = getattr(mount.resource, "index", None)
-        if idx is not None:
-            parent = path.rsplit("/", 1)[0] or "/"
-            await idx.invalidate_dir(parent)
-            await idx.invalidate_dir(parent + "/")
-
-    async def _invalidate_index_dirs(self, io: IOResult) -> None:
-        dirs_seen: set[str] = set()
-        for path in io.writes:
-            try:
-                mount = self._registry.mount_for(path)
-            except ValueError:
-                continue
-            parent = path.rsplit("/", 1)[0] or "/"
-            if parent in dirs_seen:
-                continue
-            dirs_seen.add(parent)
-            idx = mount.resource.index
-            await idx.invalidate_dir(parent)
-            await idx.invalidate_dir(parent + "/")
+        await self._dispatcher.invalidate_after_write_by_path(path)
 
     async def _record_execution(
         self,
