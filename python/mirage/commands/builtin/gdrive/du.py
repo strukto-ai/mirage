@@ -12,10 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.gdrive._provision import metadata_provision
-from mirage.commands.builtin.utils.formatting import _human_size
+from mirage.commands.builtin.generic.du import du_multi
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
@@ -24,10 +26,6 @@ from mirage.core.gdrive.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import FileType, PathSpec
-
-
-def _format_size(size: int, human: bool) -> str:
-    return _human_size(size) if human else str(size)
 
 
 async def _du_walk(
@@ -83,15 +81,12 @@ async def du(
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     paths = await resolve_glob(accessor, paths, index)
-    p0 = paths[0]
-    total = await _du_walk(accessor, p0, index)
-    if s:
-        output = _format_size(total, h) + "\t" + p0.original
-        if c:
-            output += "\n" + _format_size(total, h) + "\ttotal"
-        return output.encode(), IOResult()
-    lines: list[str] = []
-    lines.append(_format_size(total, h) + "\t" + p0.original)
-    if c:
-        lines.append(_format_size(total, h) + "\ttotal")
-    return "\n".join(lines).encode(), IOResult()
+    out = await du_multi(
+        paths,
+        compute_total=partial(_du_walk, accessor, index=index),
+        h=h,
+        s=s,
+        a=a,
+        c=c,
+    )
+    return out, IOResult()

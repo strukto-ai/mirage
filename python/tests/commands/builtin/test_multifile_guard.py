@@ -20,7 +20,7 @@ import pytest
 BUILTIN = pathlib.Path(
     __file__).resolve().parents[3] / "mirage" / "commands" / "builtin"
 
-GUARDED_COMMANDS = ("cat", "head", "tail", "wc")
+GUARDED_COMMANDS = ("cat", "head", "tail", "wc", "du", "file")
 
 # Backends whose command genuinely operates on a single resource and rejects
 # or has no multi-file semantics. Each entry needs a one-line reason so the
@@ -81,26 +81,28 @@ def _loops_paths(func: ast.AST) -> bool:
     return False
 
 
+_MULTI_HELPERS = ("format_multi", "generic_grep", "generic_rg", "grep", "rg",
+                  "generic_du", "generic_file", "file_cmd", "du_multi")
+
+
 def _passes_full_list(func: ast.AST) -> bool:
     """Heuristic: the resolved list is handed to a *_multi / generic helper.
 
     Covers backends that delegate multi-file handling to a generic routine
-    (head_multi, tail_multi, format_multi, generic_grep, generic_rg) by
-    passing the whole ``paths``/``resolved`` list as the first argument.
+    (head_multi, tail_multi, format_multi, du_multi, file_cmd, generic_grep,
+    generic_rg) by passing the whole ``paths``/``resolved`` list as the first
+    argument.
     """
-    helper_suffixes = ("_multi", "generic_grep", "generic_rg", "format_multi")
     for node in ast.walk(func):
         if not isinstance(node, ast.Call):
             continue
         target = node.func
         name = getattr(target, "id", getattr(target, "attr", "")) or ""
-        if name.endswith("_multi") or name in ("format_multi", "generic_grep",
-                                               "generic_rg", "grep", "rg"):
+        if name.endswith("_multi") or name in _MULTI_HELPERS:
             for arg in node.args:
                 if isinstance(arg,
                               ast.Name) and arg.id in ("paths", "resolved"):
                     return True
-    _ = helper_suffixes
     return False
 
 

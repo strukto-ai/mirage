@@ -12,48 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.accessor._hf import HF_RESOURCES
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.file_helper import _detect
+from mirage.commands.builtin.generic.file import file_cmd as generic_file
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.hf_buckets.glob import resolve_glob
 from mirage.core.hf_buckets.read import read_bytes
 from mirage.core.hf_buckets.stat import stat
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileType, PathSpec
-
-_MIME_MAP: dict[str, str] = {
-    "text": "text/plain; charset=us-ascii",
-    "json": "application/json; charset=us-ascii",
-    "csv": "text/csv; charset=us-ascii",
-    "directory": "inode/directory",
-    "binary": "application/octet-stream",
-    "image/png": "image/png",
-    "image/jpeg": "image/jpeg",
-    "image/gif": "image/gif",
-    "application/zip": "application/zip",
-    "application/gzip": "application/gzip",
-    "application/pdf": "application/pdf",
-    "parquet": "application/octet-stream",
-    "orc": "application/octet-stream",
-    "feather": "application/octet-stream",
-    "hdf5": "application/octet-stream",
-}
-
-
-def _format_file_result(
-    path: str,
-    result: FileType | str,
-    brief: bool,
-    mime: bool,
-) -> str:
-    key = result.value if isinstance(result, FileType) else str(result)
-    desc = _MIME_MAP.get(key, key) if mime else key
-    if brief:
-        return desc
-    return f"{path}: {desc}"
+from mirage.types import PathSpec
 
 
 @command("file", resource=HF_RESOURCES, spec=SPECS["file"])
@@ -70,15 +41,9 @@ async def file(
     if not paths:
         raise ValueError("file: missing operand")
     paths = await resolve_glob(accessor, paths, index)
-    s = await stat(accessor, paths[0], index)
-    if s.type == FileType.DIRECTORY:
-        result = FileType.DIRECTORY
-    else:
-        try:
-            data = await read_bytes(accessor, paths[0])
-            header = data[:512]
-        except Exception:
-            header = b""
-        result = _detect(paths[0].original, header, s)
-    return _format_file_result(paths[0].original, result, b,
-                               i).encode(), IOResult()
+    return await generic_file(paths,
+                              read_bytes=partial(read_bytes, index=index),
+                              stat_fn=partial(stat, index=index),
+                              accessor=accessor,
+                              b=b,
+                              i=i)

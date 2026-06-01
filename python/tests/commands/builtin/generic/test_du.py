@@ -1,11 +1,37 @@
 import pytest
 
-from mirage.commands.builtin.generic.du import _depth, du
+from mirage.commands.builtin.generic.du import _depth, du, du_multi
 from mirage.types import PathSpec
 
 
 def _spec(path: str) -> PathSpec:
     return PathSpec(original=path, directory=path)
+
+
+def _make_list_backend(tree: dict[str, int]):
+    """Build (compute_total, compute_all) where compute_all returns a flat
+    list (NOT a (list, total) tuple), matching the backend `du_all` contract
+    consumed by `du_multi`. Directory targets include a trailing
+    (dirpath, total) entry, mirroring the real backends."""
+
+    async def compute_total(p: PathSpec) -> int:
+        prefix = p.original.rstrip("/") + "/"
+        return sum(size for path, size in tree.items()
+                   if path == p.original or path.startswith(prefix))
+
+    async def compute_all(p: PathSpec) -> list[tuple[str, int]]:
+        prefix = p.original.rstrip("/") + "/"
+        entries: list[tuple[str, int]] = []
+        total = 0
+        for path, size in sorted(tree.items()):
+            if path == p.original or path.startswith(prefix):
+                entries.append((path, size))
+                total += size
+        if p.original not in dict(entries):
+            entries.append((p.original, total))
+        return entries
+
+    return compute_total, compute_all
 
 
 def _make_backend(tree: dict[str, int]):
@@ -177,6 +203,60 @@ async def test_du_empty_target_returns_zero_with_path():
                    compute_total=compute_total,
                    compute_all=compute_all)
     assert out == "0\t/nothing"
+
+
+@pytest.mark.asyncio
+async def test_du_multi_independent_outputs_bytes():
+    compute_total, compute_all = _make_list_backend({"/a.txt": 3, "/b.txt": 7})
+    out = await du_multi([_spec("/a.txt"), _spec("/b.txt")],
+                         compute_total=compute_total,
+                         compute_all=compute_all)
+    assert out == b"3\t/a.txt\n7\t/b.txt"
+
+
+@pytest.mark.asyncio
+async def test_du_multi_c_grand_total_sums_all_paths():
+    compute_total, compute_all = _make_list_backend({"/a.txt": 3, "/b.txt": 7})
+    out = await du_multi([_spec("/a.txt"), _spec("/b.txt")],
+                         compute_total=compute_total,
+                         compute_all=compute_all,
+                         c=True)
+    assert out.decode().splitlines()[-1] == "10\ttotal"
+
+
+@pytest.mark.asyncio
+async def test_du_multi_directory_collapses_when_not_a():
+    tree = {"/dir/a.txt": 3, "/dir/b.txt": 2}
+    compute_total, compute_all = _make_list_backend(tree)
+    out = await du_multi([_spec("/dir")],
+                         compute_total=compute_total,
+                         compute_all=compute_all)
+    assert out == b"5\t/dir"
+
+
+@pytest.mark.asyncio
+async def test_du_multi_a_lists_files():
+    tree = {"/dir/a.txt": 3, "/dir/b.txt": 2}
+    compute_total, compute_all = _make_list_backend(tree)
+    out = await du_multi([_spec("/dir")],
+                         compute_total=compute_total,
+                         compute_all=compute_all,
+                         a=True)
+    lines = out.decode().splitlines()
+    assert "3\t/dir/a.txt" in lines
+    assert "2\t/dir/b.txt" in lines
+
+
+@pytest.mark.asyncio
+async def test_du_multi_compute_all_none_emits_total_only():
+    """Walk-only backends (gdrive, github) pass compute_all=None: each path
+    yields a single total line; -c still sums across paths."""
+    compute_total, _ = _make_list_backend({"/x/a": 4, "/x/b": 6, "/y/c": 5})
+    out = await du_multi([_spec("/x"), _spec("/y")],
+                         compute_total=compute_total,
+                         compute_all=None,
+                         c=True)
+    assert out.decode().splitlines() == ["10\t/x", "5\t/y", "15\ttotal"]
 
 
 def test_depth_helper_root_is_zero():

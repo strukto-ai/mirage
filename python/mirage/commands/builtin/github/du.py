@@ -12,10 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.du import du_multi
 from mirage.commands.builtin.github._provision import metadata_provision
-from mirage.commands.builtin.utils.formatting import _human_size
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.github.glob import resolve_glob
@@ -24,8 +26,14 @@ from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
 
 
-def _format_size(size: int, human: bool) -> str:
-    return _human_size(size) if human else str(size)
+async def _du_total(index: IndexCacheStore, path: PathSpec) -> int:
+    key = path.original
+    du_prefix = key + "/" if key else ""
+    total = 0
+    for ep, entry in index._entries.items():
+        if (ep == key or ep.startswith(du_prefix)) and entry.size is not None:
+            total += entry.size
+    return total
 
 
 async def du_provision(
@@ -56,22 +64,12 @@ async def du(
     if index is None:
         raise ValueError("du: no tree loaded")
     paths = await resolve_glob(accessor, paths, index)
-    p = paths[0]
-    path = p.original
-    key = path
-    du_prefix = key + "/" if key else ""
-    total = 0
-    for ep, entry in index._entries.items():
-        if ep == key or ep.startswith(du_prefix):
-            if entry.size is not None:
-                total += entry.size
-    if s:
-        output = _format_size(total, h) + "\t" + path
-        if c:
-            output += "\n" + _format_size(total, h) + "\ttotal"
-        return output.encode(), IOResult()
-    lines: list[str] = []
-    lines.append(_format_size(total, h) + "\t" + path)
-    if c:
-        lines.append(_format_size(total, h) + "\ttotal")
-    return "\n".join(lines).encode(), IOResult()
+    out = await du_multi(
+        paths,
+        compute_total=partial(_du_total, index),
+        h=h,
+        s=s,
+        a=a,
+        c=c,
+    )
+    return out, IOResult()
