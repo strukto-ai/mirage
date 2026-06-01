@@ -23,18 +23,13 @@ from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.ssh.glob import resolve_glob
+from mirage.core.ssh.read import read_bytes
 from mirage.core.ssh.stat import stat as local_stat
 from mirage.core.ssh.stream import read_stream
 from mirage.io.cachable_iterator import CachableAsyncIterator
+from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-async def _chain_streams(accessor: SSHAccessor,
-                         paths: list[PathSpec]) -> AsyncIterator[bytes]:
-    for p in paths:
-        async for chunk in read_stream(accessor, p):
-            yield chunk
 
 
 @command("cat",
@@ -53,16 +48,32 @@ async def cat(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths and accessor.root is not None:
         paths = await resolve_glob(accessor, paths, index)
-        for p in paths:
+        # ssh is a remote (cacheable) backend. Single file: stream via a
+        # cachable returned AS stdout so the tee fills the cache as it is
+        # read. Multiple files: one shared cachable cannot give each path its
+        # own correct cache slot, and the cache-fill background drain races the
+        # consumer on the same network stream. Read each file fully to bytes:
+        # cache each path's real bytes directly (no drain, no race).
+        if len(paths) == 1:
+            p = paths[0]
             await local_stat(accessor, p, index)
-        source = _chain_streams(accessor, paths)
-        cachable = CachableAsyncIterator(source)
-        io = IOResult(reads={p.strip_prefix: cachable
-                             for p in paths},
-                      cache=[p.strip_prefix for p in paths])
+            cachable = CachableAsyncIterator(read_stream(accessor, p, index))
+            io = IOResult(reads={p.strip_prefix: cachable},
+                          cache=[p.strip_prefix])
+            source: ByteSource = cachable
+        else:
+            reads: dict[str, ByteSource] = {}
+            parts: list[bytes] = []
+            for p in paths:
+                await local_stat(accessor, p, index)
+                data = await read_bytes(accessor, p, index)
+                reads[p.strip_prefix] = data
+                parts.append(data)
+            io = IOResult(reads=reads, cache=list(reads))
+            source = async_chain(*parts)
         if n:
-            return generic_cat(cachable, number_lines=True), io
-        return cachable, io
+            return generic_cat(source, number_lines=True), io
+        return source, io
     source = _resolve_source(stdin, "cat: missing operand")
     if n:
         return generic_cat(source, number_lines=True), IOResult()
