@@ -22,7 +22,8 @@ from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.databricks_volume.glob import resolve_glob
-from mirage.core.databricks_volume.stream import read_stream
+from mirage.core.databricks_volume.stream import range_read, read_stream
+from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -42,6 +43,11 @@ async def head(
     c_int = int(c) if c is not None else None
     if paths:
         paths = await resolve_glob(accessor, paths, index)
+        # Single file with -c: fetch only the first c_int bytes via a range
+        # request instead of streaming the whole file.
+        if len(paths) == 1 and c_int is not None:
+            data = await range_read(accessor, paths[0], 0, c_int)
+            return yield_bytes(data), IOResult()
         return head_multi(paths,
                           read=read_stream,
                           accessor=accessor,
