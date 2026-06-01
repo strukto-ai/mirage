@@ -23,6 +23,7 @@ from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.hf_buckets.glob import resolve_glob
+from mirage.core.hf_buckets.read import read_bytes
 from mirage.core.hf_buckets.stat import stat
 from mirage.core.hf_buckets.stream import read_stream
 from mirage.io.cachable_iterator import CachableAsyncIterator
@@ -46,19 +47,28 @@ async def cat(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        reads: dict[str, CachableAsyncIterator] = {}
-        for p in paths:
+        # Single file: stream via a cachable returned AS stdout so the tee
+        # fills the cache as the consumer reads. Multiple files: a joined
+        # stdout is a different object from the per-file cachables, so the
+        # cache-fill background drain races the consumer on the same network
+        # stream and poisons the cache. Read each file fully to bytes: cache
+        # each path's real bytes directly (no drain, no race) and concatenate.
+        if len(paths) == 1:
+            p = paths[0]
             await stat(accessor, p, index)
-            reads[p.strip_prefix] = CachableAsyncIterator(
-                read_stream(accessor, p))
-        # Single file: return the cachable directly so the cache stores
-        # the same object the consumer reads (identity is required for
-        # consumed chunks to land in its buffer). Several: chain them.
-        if len(reads) == 1:
-            source: ByteSource = next(iter(reads.values()))
+            cachable = CachableAsyncIterator(read_stream(accessor, p))
+            io = IOResult(reads={p.strip_prefix: cachable},
+                          cache=[p.strip_prefix])
+            source: ByteSource = cachable
         else:
-            source = async_chain(*reads.values())
-        io = IOResult(reads=reads, cache=list(reads))
+            reads: dict[str, ByteSource] = {}
+            parts: list[bytes] = []
+            for p in paths:
+                data = await read_bytes(accessor, p, index)
+                reads[p.strip_prefix] = data
+                parts.append(data)
+            io = IOResult(reads=reads, cache=list(reads))
+            source = async_chain(*parts)
         if n:
             return generic_cat(source, number_lines=True), io
         return source, io

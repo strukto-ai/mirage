@@ -57,22 +57,39 @@ async def cat(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        reads: dict[str, ByteSource] = {}
-        for p in paths:
+        # Single file: return the read result directly (bytes) or a cachable
+        # tee returned AS stdout so the cache fills as the consumer reads.
+        # Multiple files: a joined stdout is a different object from the
+        # per-file cachables, so the cache-fill background drain races the
+        # consumer on the same network stream and poisons the cache. Read each
+        # file fully to bytes: cache real bytes directly and concatenate.
+        if len(paths) == 1:
+            p = paths[0]
             scope = detect_scope(p)
             if scope.level == ScopeLevel.DOCUMENTS:
-                reads[p.strip_prefix] = CachableAsyncIterator(
+                value: ByteSource = CachableAsyncIterator(
                     read_stream(accessor, p, index))
             else:
-                reads[p.strip_prefix] = await mongodb_read(accessor, p, index)
-        # Single file: return the read result directly so the cache stores
-        # the same object the consumer reads (identity is required for
-        # consumed chunks to land in its buffer). Several: chain them.
-        if len(reads) == 1:
-            source: ByteSource = next(iter(reads.values()))
+                value = await mongodb_read(accessor, p, index)
+            io = IOResult(reads={p.strip_prefix: value},
+                          cache=[p.strip_prefix])
+            source: ByteSource = value
         else:
-            source = async_chain(*reads.values())
-        io = IOResult(reads=reads, cache=list(reads))
+            reads: dict[str, ByteSource] = {}
+            parts: list[bytes] = []
+            for p in paths:
+                scope = detect_scope(p)
+                if scope.level == ScopeLevel.DOCUMENTS:
+                    data = b"".join([
+                        chunk
+                        async for chunk in read_stream(accessor, p, index)
+                    ])
+                else:
+                    data = await mongodb_read(accessor, p, index)
+                reads[p.strip_prefix] = data
+                parts.append(data)
+            io = IOResult(reads=reads, cache=list(reads))
+            source = async_chain(*parts)
         return (generic_cat(source, number_lines=True) if n else source), io
     source = _resolve_source(stdin, "cat: missing operand")
     return (generic_cat(source, number_lines=True)

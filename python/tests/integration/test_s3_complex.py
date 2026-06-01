@@ -19,9 +19,11 @@ from unittest.mock import patch
 
 import pytest
 
+from mirage.commands.builtin.s3.cat import cat as s3_cat
+from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Config, S3Resource
-from mirage.types import MountMode
+from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
 
 DATA_DIR = Path(__file__).resolve().parents[3] / "data"
@@ -308,3 +310,47 @@ async def test_grep_then_jq_with_and_or_list(ws):
             "/s3/data/example.jsonl",
             '"Strukto"',
         ]
+
+
+def _resolved(original: str) -> PathSpec:
+    return PathSpec(original=original,
+                    directory=original,
+                    resolved=True,
+                    prefix="/s3/")
+
+
+@pytest.mark.asyncio
+async def test_cat_multifile_caches_materialized_bytes_per_file():
+    """Regression: multi-file cat on a streaming backend must register fully
+    materialized bytes per path in io.reads (not un-exhausted cachables). A
+    per-file cachable cannot preserve stdout identity, so the cache-fill
+    background drain raced the consumer on the same network stream and
+    poisoned each file's cache slot. Materialized bytes cache deterministically
+    with no drain and no race."""
+    objects = _s3_objects()
+    backend = _s3_backend()
+    with _patch_async_session(objects):
+        a = _resolved("/s3/reports/summary.txt")
+        b = _resolved("/s3/archive/2026/q1/deep.txt")
+        source, io = await s3_cat(backend.accessor, [a, b], index=None)
+
+        assert io.reads[
+            "reports/summary.txt"] == b"alpha report\nbeta report\n"
+        assert io.reads["archive/2026/q1/deep.txt"] == b"deep archive\n"
+        assert all(isinstance(v, bytes) for v in io.reads.values())
+
+        combined = b"".join([chunk async for chunk in source])
+        assert combined == b"alpha report\nbeta report\ndeep archive\n"
+
+
+@pytest.mark.asyncio
+async def test_cat_single_file_keeps_streaming_cachable():
+    """The single-file path must stay a streaming cachable returned AS stdout
+    (identity preserved) so large files still stream, not materialize."""
+    objects = _s3_objects()
+    backend = _s3_backend()
+    with _patch_async_session(objects):
+        a = _resolved("/s3/reports/summary.txt")
+        source, io = await s3_cat(backend.accessor, [a], index=None)
+        assert isinstance(source, CachableAsyncIterator)
+        assert io.reads["reports/summary.txt"] is source
