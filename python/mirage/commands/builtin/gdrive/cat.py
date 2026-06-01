@@ -64,7 +64,13 @@ async def cat(
                 reads[p.strip_prefix] = result
             else:
                 reads[p.strip_prefix] = CachableAsyncIterator(result)
-        source = async_chain(*reads.values())
+        # Single file: return the read result directly so the cache stores
+        # the same object the consumer reads (identity is required for
+        # consumed chunks to land in its buffer). Several: chain them.
+        if len(reads) == 1:
+            source: ByteSource = next(iter(reads.values()))
+        else:
+            source = async_chain(*reads.values())
         io = IOResult(reads=reads, cache=list(reads))
         if n:
             return generic_cat(source, number_lines=True), io
