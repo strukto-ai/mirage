@@ -1,4 +1,4 @@
-from mirage.commands.builtin.generic.head import head as generic_head
+from mirage.commands.builtin.generic.head import head_multi
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.dify.glob import resolve_glob
@@ -21,6 +21,10 @@ async def head(
     limit = int(args_n if args_n is not None else n)
     bytes_limit = int(c) if c is not None else None
     paths = await resolve_glob(accessor, paths, index)
-    return generic_head(read_stream(accessor, paths[0], index),
-                        n=limit,
-                        c=bytes_limit), IOResult()
+    return head_multi(paths,
+                      read=read_stream,
+                      accessor=accessor,
+                      index=index,
+                      n=limit,
+                      c=bytes_limit,
+                      show_headers=len(paths) > 1), IOResult()
