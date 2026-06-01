@@ -70,12 +70,13 @@ def _loops_paths(func: ast.AST) -> bool:
                 node.iter, ast.Name) and node.iter.id in ("paths", "resolved"):
             return True
         # comprehension form: {... for p in paths}
-        for comp in ast.walk(node) if isinstance(
-                node, (ast.DictComp, ast.ListComp, ast.SetComp,
-                       ast.GeneratorExp)) else []:
+        for comp in ast.walk(node) if isinstance(node,
+                                                 (ast.DictComp, ast.ListComp,
+                                                  ast.SetComp,
+                                                  ast.GeneratorExp)) else []:
             if isinstance(comp, ast.comprehension) and isinstance(
-                    comp.iter, ast.Name) and comp.iter.id in ("paths",
-                                                              "resolved"):
+                    comp.iter,
+                    ast.Name) and comp.iter.id in ("paths", "resolved"):
                 return True
     return False
 
@@ -96,8 +97,8 @@ def _passes_full_list(func: ast.AST) -> bool:
         if name.endswith("_multi") or name in ("format_multi", "generic_grep",
                                                "generic_rg", "grep", "rg"):
             for arg in node.args:
-                if isinstance(arg, ast.Name) and arg.id in ("paths",
-                                                            "resolved"):
+                if isinstance(arg,
+                              ast.Name) and arg.id in ("paths", "resolved"):
                     return True
     _ = helper_suffixes
     return False
@@ -114,7 +115,10 @@ def _iter_command_files():
 
 @pytest.mark.parametrize(
     "cmd,backend,path",
-    [pytest.param(c, b, p, id=f"{c}:{b}") for c, b, p in _iter_command_files()],
+    [
+        pytest.param(c, b, p, id=f"{c}:{b}")
+        for c, b, p in _iter_command_files()
+    ],
 )
 def test_command_handles_multiple_files(cmd, backend, path):
     if (cmd, backend) in ALLOWLIST:

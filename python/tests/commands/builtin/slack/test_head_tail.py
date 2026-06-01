@@ -25,7 +25,9 @@ slack_tail = importlib.import_module("mirage.commands.builtin.slack.tail")
 
 def _paths(*names: str) -> list[PathSpec]:
     return [
-        PathSpec(original=n, directory=n.rsplit("/", 1)[0], prefix="",
+        PathSpec(original=n,
+                 directory=n.rsplit("/", 1)[0],
+                 prefix="",
                  resolved=True) for n in names
     ]
 
@@ -64,6 +66,7 @@ async def test_head_multi_files_with_headers(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_head_single_file_no_header(monkeypatch):
+
     async def fake_resolve_glob(accessor, paths, index=None):
         return paths
 
@@ -74,7 +77,8 @@ async def test_head_single_file_no_header(monkeypatch):
     monkeypatch.setattr(slack_head, "slack_read", fake_read)
 
     acc = SlackAccessor.__new__(SlackAccessor)
-    out, _ = await slack_head.head(acc, _paths("/c/a/2024-01-01/chat.jsonl"),
+    out, _ = await slack_head.head(acc,
+                                   _paths("/c/a/2024-01-01/chat.jsonl"),
                                    n="2")
     data = await _collect(out)
     assert data == b"x1\nx2\n"

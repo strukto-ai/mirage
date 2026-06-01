@@ -66,7 +66,8 @@ async def test_head_multi_streaming_with_headers(monkeypatch):
     monkeypatch.setattr(s3_head, "read_stream", _streamer(chunks))
 
     acc = S3Accessor.__new__(S3Accessor)
-    out, _ = await s3_head.head(acc, _paths("/data/a.txt", "/data/b.txt"),
+    out, _ = await s3_head.head(acc,
+                                _paths("/data/a.txt", "/data/b.txt"),
                                 n="2")
     data = await _collect(out)
     assert data == (b"==> /data/a.txt <==\na1\na2\n"
@@ -87,7 +88,8 @@ async def test_tail_multi_streaming_with_headers(monkeypatch):
     monkeypatch.setattr(s3_tail, "read_stream", _streamer(chunks))
 
     acc = S3Accessor.__new__(S3Accessor)
-    out, _ = await s3_tail.tail(acc, _paths("/data/a.txt", "/data/b.txt"),
+    out, _ = await s3_tail.tail(acc,
+                                _paths("/data/a.txt", "/data/b.txt"),
                                 n="2")
     data = await _collect(out)
     assert data == (b"==> /data/a.txt <==\na2\na3\n"
