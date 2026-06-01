@@ -109,7 +109,7 @@ async def test_wc_full(github_env):
     )
     data = await materialize(stdout)
     text = data.decode()
-    parts = text.split("\t")
+    parts = text.rstrip("\n").split("\t")
     assert len(parts) == 4
     line_count, word_count, byte_count = int(parts[0]), int(parts[1]), int(
         parts[2])
@@ -357,3 +357,19 @@ async def test_rg_with_prefix(github_env):
     text = data.decode()
     assert io.exit_code == 0
     assert "import" in text
+
+
+@pytest.mark.asyncio
+async def test_rg_count_stdin_terminates_newline(github_env):
+    accessor, index = github_env
+    stdout, io = await rg(
+        accessor,
+        [],
+        "foo",
+        stdin=b"foo foo\nfoo bar\nbaz\n",
+        c=True,
+        index=index,
+    )
+    data = await materialize(stdout)
+    assert io.exit_code == 0
+    assert data and data.endswith(b"\n")

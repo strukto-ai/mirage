@@ -2,6 +2,7 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from mirage.commands.builtin.file_helper import _detect
+from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
 
@@ -65,7 +66,7 @@ async def file_cmd(
             header = b""
         result = _detect(p.original, header, s)
         lines.append(_format_file_result(p.original, result, b, i))
-    return "\n".join(lines).encode(), IOResult()
+    return format_records(lines), IOResult()
 
 
 __all__ = ["file_cmd"]

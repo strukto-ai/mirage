@@ -111,7 +111,7 @@ async def test_stat_custom_format():
         return FileStat(name="foo", size=10, type=FileType.TEXT)
 
     out, _ = await generic_stat([_spec("foo")], stat_fn=stat_fn, c="%n=%s")
-    assert out == b"foo=10"
+    assert out == b"foo=10\n"
 
 
 @pytest.mark.asyncio
@@ -121,7 +121,7 @@ async def test_stat_format_F_directory():
         return FileStat(name="d", type=FileType.DIRECTORY)
 
     out, _ = await generic_stat([_spec("d")], stat_fn=stat_fn, c="%F")
-    assert out == b"directory"
+    assert out == b"directory\n"
 
 
 @pytest.mark.asyncio
@@ -131,7 +131,7 @@ async def test_stat_format_F_regular():
         return FileStat(name="x", type=FileType.JSON)
 
     out, _ = await generic_stat([_spec("x")], stat_fn=stat_fn, f="%F")
-    assert out == b"regular file"
+    assert out == b"regular file\n"
 
 
 @pytest.mark.asyncio
@@ -143,7 +143,7 @@ async def test_stat_multiple_paths():
     out, _ = await generic_stat([_spec("a"), _spec("b")],
                                 stat_fn=stat_fn,
                                 c="%n")
-    assert out == b"a\nb"
+    assert out == b"a\nb\n"
 
 
 @pytest.mark.asyncio
@@ -216,7 +216,7 @@ async def test_file_directory():
     out, _ = await file_cmd([_spec("d")],
                             read_bytes=read_bytes,
                             stat_fn=stat_fn)
-    assert b"d: directory" == out
+    assert b"d: directory\n" == out
 
 
 @pytest.mark.asyncio
@@ -233,7 +233,7 @@ async def test_file_multiple_paths():
                             stat_fn=stat_fn)
     assert b"a:" in out
     assert b"b:" in out
-    assert out.count(b"\n") == 1
+    assert out.count(b"\n") == 2
 
 
 @pytest.mark.asyncio

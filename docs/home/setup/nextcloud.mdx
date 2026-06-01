@@ -1,0 +1,57 @@
+---
+title: Nextcloud
+icon: cloud
+description: Set up Nextcloud / ownCloud / WebDAV credentials for the Nextcloud resource.
+---
+
+## Overview
+
+The Nextcloud resource talks to any [WebDAV](http://www.webdav.org/specs/rfc4918.html)
+server: self-hosted Nextcloud, ownCloud, Hetzner Storage Share, or any
+generic WebDAV endpoint. Authentication is HTTP Basic with an
+**app password** (not your account password).
+
+## Credentials
+
+### 1. Pick a server
+
+Any of these works:
+
+- **Nextcloud Hosted trial** at https://try.nextcloud.com
+- **Self-hosted**: `docker run -p 8080:80 nextcloud`
+- **Hetzner Storage Share**, **ownCloud**, or any WebDAV server
+
+### 2. Create an app password
+
+In your Nextcloud web UI:
+
+1. Open **Settings** → **Security** → **Devices & sessions**
+2. Enter an app name (e.g. `mirage`) and click **Create new app password**
+3. Copy the generated password (shown once)
+
+Login password also works but **app passwords are strongly preferred** so
+you can revoke per-app access without changing your account password.
+
+### 3. Find your WebDAV URL
+
+The standard Nextcloud path is:
+
+```text
+https://<your-server>/remote.php/dav/files/<username>/
+```
+
+For example: `https://cloud.example.com/remote.php/dav/files/alice/`.
+
+For generic WebDAV servers, use whatever URL the provider gives.
+
+### 4. Set environment variables
+
+```bash
+# .env.development
+NEXTCLOUD_URL=https://cloud.example.com/remote.php/dav/files/alice/
+NEXTCLOUD_USERNAME=alice
+NEXTCLOUD_PASSWORD=<app-password>
+```
+
+For Python configuration, see the
+[Nextcloud resource](/python/resource/nextcloud) docs.

@@ -17,6 +17,7 @@ import fnmatch
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.github._provision import metadata_provision
+from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.github.glob import resolve_glob
@@ -113,5 +114,5 @@ async def find(
             results.append(ep)
     if mount_prefix:
         results = [mount_prefix + "/" + r.lstrip("/") for r in results]
-    output = "\n".join(results).encode()
+    output = format_records(results)
     return output, IOResult()

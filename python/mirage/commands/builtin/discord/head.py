@@ -19,6 +19,7 @@ from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.discord._provision import file_read_provision
 from mirage.commands.builtin.generic.head import head as generic_head
+from mirage.commands.builtin.generic.head import head_multi
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -64,9 +65,9 @@ async def head(
     if paths:
         scope = await detect_scope(paths[0], index)
 
-        # Smart head: fetch only first N messages for a date
-        if (scope.level == "file" and scope.channel_id and scope.date_str
-                and c_int is None):
+        # Smart head: fetch only first N messages for a single date.
+        if (len(paths) == 1 and scope.level == "file" and scope.channel_id
+                and scope.date_str and c_int is None):
             after = date_to_snowflake(scope.date_str)
             msgs = await discord_get(
                 accessor.config,
@@ -82,9 +83,13 @@ async def head(
             return generic_head(jsonl.encode(), n=lines), IOResult()
 
         paths = await resolve_glob(accessor, paths, index)
-        p = paths[0]
-        data = await discord_read(accessor, p, index)
-        return generic_head(data, n=n_int, c=c_int), IOResult()
+        return head_multi(paths,
+                          read=discord_read,
+                          accessor=accessor,
+                          index=index,
+                          n=n_int,
+                          c=c_int,
+                          show_headers=len(paths) > 1), IOResult()
     raw = await _read_stdin_async(stdin)
     if raw is None:
         raise ValueError("head: missing operand")

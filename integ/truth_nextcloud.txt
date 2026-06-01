@@ -1,0 +1,64 @@
+# Expected substrings for the Nextcloud integ run (integ/nextcloud.py).
+# Mirrors the integ/s3.py PER_MOUNT_CASES + streaming checks against the same
+# data/ fixtures. Matched as fixed substrings by integ/check_lines.sh, so the
+# default Nextcloud sample files (Documents/, Photos/, Templates/) and volatile
+# output (stat mtimes) are tolerated; only seed-derived content is asserted.
+
+# ---- ls_data / tree / find ----
+example.feather
+example.json
+example.jsonl
+example.orc
+example.parquet
+/nc/data/example.json
+/nc/data/example.jsonl
+
+# ---- stat / wc ----
+15533 example.json
+5766	/nc/data/example.jsonl
+15533	/nc/data/example.json
+
+# ---- cat_head (example.json) ----
+"company": "Strukto",
+"founded": "2024-03-01",
+"valuation": 45000000,
+
+# ---- head / grep on jsonl ----
+"type":"queue-operation","operation":"enqueue"
+"type":"queue-operation","operation":"dequeue"
+
+# ---- grep counts ----
+5678
+86
+
+# ---- grep -r / rg / grep -rc ----
+/nc/data/example.json:3
+/nc/data/example.jsonl:5678
+
+# ---- columnar (parquet / orc / feather) ----
+id,value,label
+5,0.6709052457548175,item_5
+5,7.5,item_5
+
+# ---- jq ----
+"3.0"
+"Platform"
+"AI"
+"Growth"
+"SRE"
+
+# ---- md5 / sha256 (deterministic over example.json) ----
+f249ee110320adc2975cb6c7436c9a45
+ca04d1f4b6a5f1a774fb076af00a791e7f7ef70958300e314c4eafc563ac3bb9
+
+# ---- file: columnar type detection ----
+parquet, 10 rows, 3 columns
+orc, 10 rows, 3 columns
+feather, 10 rows, 3 columns
+
+# ---- safeguard: cat capped at 20 lines, pipe uncapped ----
+output truncated at safeguard limit (20 lines)
+
+# ---- streaming: early-exit single-line reads ----
+lines=1 out0='{"type":"queue-operation","operation":"enqueue",'
+lines=1 out0='{"parentUuid":null,"isSidechain":false,"userType'

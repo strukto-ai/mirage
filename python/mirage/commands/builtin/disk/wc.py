@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.aggregators import wc_aggregate
-from mirage.commands.builtin.generic.wc import WCCounts, format_wc
+from mirage.commands.builtin.generic.wc import format_multi, format_wc
 from mirage.commands.builtin.generic.wc import wc as generic_wc
 from mirage.commands.builtin.generic.wc import wc_lines as generic_wc_lines
 from mirage.commands.builtin.utils.stream import _resolve_source
@@ -45,35 +45,21 @@ async def wc(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths and accessor.root is not None:
         paths = await resolve_glob(accessor, paths, index)
-        outputs: list[str] = []
-        totals = WCCounts()
-        for p in paths:
-            counts = await generic_wc(read_stream(accessor, p))
-            outputs.append(
-                format_wc(counts,
-                          args_l=args_l,
-                          w=w,
-                          c=c,
-                          m=m,
-                          L=L,
-                          label=p.original))
-            totals.merge(counts)
-        if len(paths) > 1:
-            outputs.append(
-                format_wc(totals,
-                          args_l=args_l,
-                          w=w,
-                          c=c,
-                          m=m,
-                          L=L,
-                          label="total"))
-        return "\n".join(outputs).encode(), IOResult()
+        body = await format_multi(paths,
+                                  read=read_stream,
+                                  accessor=accessor,
+                                  args_l=args_l,
+                                  w=w,
+                                  c=c,
+                                  m=m,
+                                  L=L)
+        return body, IOResult()
 
     source: AsyncIterator[bytes] = _resolve_source(stdin,
                                                    "wc: missing operand")
     if args_l and not (L or w or c or m):
         line_count = await generic_wc_lines(source)
-        return str(line_count).encode(), IOResult()
+        return str(line_count).encode() + b"\n", IOResult()
     counts = await generic_wc(source)
-    return format_wc(counts, args_l=args_l, w=w, c=c, m=m, L=L).encode(), \
-        IOResult()
+    return format_wc(counts, args_l=args_l, w=w, c=c, m=m,
+                     L=L).encode() + b"\n", IOResult()

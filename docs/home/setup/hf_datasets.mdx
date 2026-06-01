@@ -1,0 +1,30 @@
+---
+title: HF Datasets
+icon: /images/huggingface-logo.svg
+description: Set up Hugging Face Datasets credentials.
+---
+
+## Credentials
+
+### 1. Pick a Dataset Repo
+
+Browse [huggingface.co/datasets](https://huggingface.co/datasets) and note the
+full `namespace/dataset-name` (e.g. `AlienKevin/SWE-ZERO-12M-trajectories`).
+
+Public datasets need no token. Gated/private datasets do.
+
+### 2. Create an Access Token (gated/private only)
+
+1. Go to https://huggingface.co/settings/tokens
+2. Create a fine-grained token with **Read** access to the dataset
+
+### 3. Set Environment Variables
+
+```bash
+# .env.development
+HF_DATASET_REPO=AlienKevin/SWE-ZERO-12M-trajectories
+HF_TOKEN=hf_...   # optional, public datasets work without it
+```
+
+For Python configuration, see the
+[HF Datasets resource](/python/resource/hf_datasets) docs.

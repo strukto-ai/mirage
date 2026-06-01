@@ -6,6 +6,8 @@ from mirage.commands.builtin.grep_helper import (compile_pattern,
                                                  grep_files_only, grep_lines,
                                                  grep_recursive, grep_stream)
 from mirage.commands.builtin.utils.lines import split_lines
+from mirage.commands.builtin.utils.output import (format_optional_records,
+                                                  format_records)
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
                                                 call_stat)
@@ -88,10 +90,10 @@ async def grep(
                     read_stream_fn=None,
                 )
                 results.extend(hits)
-            stderr = "\n".join(warnings).encode() if warnings else None
+            stderr = format_optional_records(warnings)
             if not results:
                 return b"", IOResult(exit_code=1, stderr=stderr)
-            return "\n".join(results).encode(), IOResult(stderr=stderr)
+            return format_records(results), IOResult(stderr=stderr)
 
         if recursive:
             pat = compile_pattern(pattern, ignore_case, fixed_string,
@@ -131,10 +133,10 @@ async def grep(
                         all_results.extend(
                             f"{p.original}:{rl}" if len(paths) > 1 else rl
                             for rl in hits)
-            stderr = "\n".join(warnings).encode() if warnings else None
+            stderr = format_optional_records(warnings)
             if not all_results:
                 return b"", IOResult(exit_code=1, stderr=stderr)
-            return "\n".join(all_results).encode(), IOResult(stderr=stderr)
+            return format_records(all_results), IOResult(stderr=stderr)
 
         pat = compile_pattern(pattern, ignore_case, fixed_string, whole_word)
 
@@ -155,7 +157,7 @@ async def grep(
                     all_results.extend(f"{p.original}:{r}" for r in hits)
             if not all_results:
                 return b"", IOResult(exit_code=1)
-            return "\n".join(all_results).encode(), IOResult()
+            return format_records(all_results), IOResult()
 
         if read_stream is not None:
             source: AsyncIterator[bytes] = read_stream(accessor, paths[0])

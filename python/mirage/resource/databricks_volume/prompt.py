@@ -15,6 +15,12 @@
 PROMPT = """\
 {prefix}
   Remote Databricks Unity Catalog volume filesystem.
-  IMPORTANT: This is a remote mount. Prefer targeted reads (ls, head, grep, rg)
-  over full scans. Avoid cat on large files without piping to head/tail.
-  Supports: ls, cat, head, tail, grep, rg, find, tree, stat."""
+  IMPORTANT: This is a remote mount - every file/dir access is an API round-trip.
+  Prefer targeted reads (ls, head, grep, rg, find with a path/glob) over full
+  scans; recursive ops (rm -r, cp -r, tree, grep -r) over a large tree are slow.
+  Create parent dirs before writing: `mkdir -p /path && cmd > /path/out`.
+  mv/cp are non-atomic full copies (no server-side rename) - avoid on large files.
+  sed -i is not supported; transform and redirect to a new file instead.
+  Read/analyze: ls, cat, head, tail, grep, rg, find, tree, stat, wc, sort, uniq,
+    cut, nl, tr, sed, awk, jq, diff.
+  Write: touch, rm, rm -r, mkdir, mkdir -p, cp, mv, and >/>> redirects."""

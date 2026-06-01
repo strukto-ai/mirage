@@ -1,5 +1,6 @@
 from collections.abc import Awaitable, Callable
 
+from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -36,7 +37,7 @@ async def cmp_cmd(
             if data1[idx] != data2[idx]:
                 out_lines.append(
                     f"{idx + 1} {oct(data1[idx])} {oct(data2[idx])}")
-        return "\n".join(out_lines).encode(), IOResult(exit_code=1)
+        return format_records(out_lines), IOResult(exit_code=1)
     for idx in range(min(len(data1), len(data2))):
         if data1[idx] != data2[idx]:
             line = 1 + data1[:idx].count(ord(b"\n"))
@@ -45,10 +46,10 @@ async def cmp_cmd(
             if print_bytes:
                 msg += (f" is {oct(data1[idx])} {chr(data1[idx])}"
                         f" {oct(data2[idx])} {chr(data2[idx])}")
-            return msg.encode(), IOResult(exit_code=1)
+            return format_records([msg]), IOResult(exit_code=1)
     shorter = p0.original if len(data1) < len(data2) else p1.original
     msg = f"cmp: EOF on {shorter}"
-    return msg.encode(), IOResult(exit_code=1)
+    return format_records([msg]), IOResult(exit_code=1)
 
 
 __all__ = ["cmp_cmd"]

@@ -57,6 +57,10 @@
     "./mastra": {
       "types": "./dist/mastra/index.d.ts",
       "import": "./dist/mastra/index.js"
+    },
+    "./opencode": {
+      "types": "./dist/opencode/index.d.ts",
+      "import": "./dist/opencode/index.js"
     }
   },
   "files": [

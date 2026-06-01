@@ -1,0 +1,28 @@
+---
+title: DigitalOcean Spaces
+icon: /images/digitalocean-logo.svg
+description: Set up DigitalOcean Spaces credentials for the DigitalOcean resource.
+---
+
+## Credentials
+
+### 1. Create a Spaces access key
+
+1. Sign in to the [DigitalOcean console](https://cloud.digitalocean.com/)
+1. Go to **API** -> **Spaces Keys** -> **Generate New Key**
+1. Copy the **Access Key** and **Secret**
+1. Note your Space's **region** (e.g. `nyc3`) and **Space name** (the bucket)
+
+The endpoint is derived from `region` as `<region>.digitaloceanspaces.com`.
+
+### 2. Set environment variables
+
+```bash
+# .env.development
+DO_SPACE=my-space
+DO_REGION=nyc3
+DO_ACCESS_KEY_ID=...
+DO_SECRET_ACCESS_KEY=...
+```
+
+For Python configuration, see the [DigitalOcean resource](/python/resource/digitalocean) docs.

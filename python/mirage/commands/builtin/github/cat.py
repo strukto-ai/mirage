@@ -54,12 +54,15 @@ async def cat(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths and index is not None:
         paths = await resolve_glob(accessor, paths, index)
-        p = paths[0]
-        data = await github_read(accessor, p, index)
-        io = IOResult(reads={p.strip_prefix: data}, cache=[p.strip_prefix])
+        reads = {
+            p.strip_prefix: await github_read(accessor, p, index)
+            for p in paths
+        }
+        merged = b"".join(reads.values())
+        io = IOResult(reads=reads, cache=list(reads))
         if n:
-            return generic_cat(data, number_lines=True), io
-        return yield_bytes(data), io
+            return generic_cat(merged, number_lines=True), io
+        return yield_bytes(merged), io
     source = _resolve_source(stdin, "cat: missing operand")
     if n:
         return generic_cat(source, number_lines=True), IOResult()

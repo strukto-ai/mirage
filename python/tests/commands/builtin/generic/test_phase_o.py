@@ -132,9 +132,7 @@ async def test_cmp_differing_reports_first_byte():
     rb, _ = _make_backend({"/a.txt": b"hello", "/b.txt": b"hallo"})
     output, io = await cmp_cmd(
         [_spec("/a.txt"), _spec("/b.txt")], read_bytes=rb)
-    decoded = output.decode()
-    assert "differ" in decoded
-    assert "char 2" in decoded
+    assert output == b"/a.txt /b.txt differ: char 2, line 1\n"
     assert io.exit_code == 1
 
 
@@ -177,5 +175,5 @@ async def test_cmp_eof_on_shorter():
     rb, _ = _make_backend({"/a.txt": b"abc", "/b.txt": b"abcdef"})
     output, io = await cmp_cmd(
         [_spec("/a.txt"), _spec("/b.txt")], read_bytes=rb)
-    assert b"EOF" in output
+    assert output == b"cmp: EOF on /a.txt\n"
     assert io.exit_code == 1

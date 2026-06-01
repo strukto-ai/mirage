@@ -21,6 +21,7 @@ from mirage.commands.builtin.langfuse.grep import (_filter_traces,
                                                    _format_dataset_results,
                                                    _format_prompt_results,
                                                    _format_session_results)
+from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -161,7 +162,7 @@ async def rg(
                 all_results.append(f"{bp}:{line}")
         if not any_match:
             return b"", IOResult(exit_code=1)
-        return "\n".join(all_results).encode(), IOResult()
+        return format_records(all_results), IOResult()
 
     raw = await _read_stdin_async(stdin)
     if raw is None:
@@ -179,8 +180,8 @@ async def rg(
     if not matched:
         return b"", IOResult(exit_code=1)
     if c:
-        return str(len(matched)).encode(), IOResult()
+        return str(len(matched)).encode() + b"\n", IOResult()
     result_lines: list[str] = []
     for line in matched:
         result_lines.append(line)
-    return "\n".join(result_lines).encode(), IOResult()
+    return format_records(result_lines), IOResult()

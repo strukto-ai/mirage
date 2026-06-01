@@ -1,0 +1,28 @@
+---
+title: Scaleway
+icon: /images/scaleway-logo.svg
+description: Set up Scaleway Object Storage credentials for the Scaleway resource.
+---
+
+## Credentials
+
+### 1. Create an API key
+
+1. Sign in to the [Scaleway console](https://console.scaleway.com/)
+1. Go to **IAM** -> **API Keys** -> **Generate API Key**
+1. Copy the **Access Key** and **Secret Key**
+1. Note your bucket's **region** (e.g. `fr-par`) and **bucket** name
+
+The endpoint is derived from `region` as `s3.<region>.scw.cloud`.
+
+### 2. Set environment variables
+
+```bash
+# .env.development
+SCW_BUCKET=my-bucket
+SCW_REGION=fr-par
+SCW_ACCESS_KEY=...
+SCW_SECRET_KEY=...
+```
+
+For Python configuration, see the [Scaleway resource](/python/resource/scaleway) docs.

@@ -17,6 +17,7 @@ import fnmatch
 from mirage.accessor.email import EmailAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.email._provision import metadata_provision
+from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.email._client import fetch_headers
@@ -128,7 +129,7 @@ async def find(
         if iname and not fnmatch.fnmatch(entry_name.lower(), iname.lower()):
             continue
         results.append(p)
-    output = "\n".join(results).encode()
+    output = format_records(results)
     return output, IOResult()
 
 
@@ -167,5 +168,5 @@ async def _find_server_side(
                                 if p)
             results.append(vfs_path)
 
-    output = "\n".join(sorted(results)).encode()
+    output = format_records(sorted(results))
     return output, IOResult()

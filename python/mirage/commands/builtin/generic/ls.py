@@ -2,6 +2,8 @@ from collections.abc import Awaitable, Callable
 
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.utils.formatting import format_ls_long
+from mirage.commands.builtin.utils.output import (format_optional_records,
+                                                  format_records)
 from mirage.io.types import IOResult
 from mirage.types import FileStat, FileType, LsSortBy, PathSpec
 
@@ -195,7 +197,6 @@ async def ls(
     list_dir: bool = False,
     classify: bool = False,
     index: IndexCacheStore | None = None,
-    trailing_newline: bool = False,
 ) -> tuple[bytes, IOResult]:
     results: list[str] = []
     warnings: list[str] = []
@@ -239,11 +240,8 @@ async def ls(
                           human=human,
                           classify=classify)
 
-    body = "\n".join(results)
-    if trailing_newline and results:
-        body += "\n"
-    output = body.encode() if results else b""
-    stderr = "\n".join(warnings).encode() if warnings else None
+    output = format_records(results)
+    stderr = format_optional_records(warnings)
     exit_code = 1 if warnings and not results else 0
     return output, IOResult(stderr=stderr, exit_code=exit_code)
 

@@ -6,6 +6,8 @@ from mirage.commands.builtin.grep_helper import (compile_pattern, grep_lines,
                                                  grep_stream)
 from mirage.commands.builtin.rg_helper import rg_full
 from mirage.commands.builtin.utils.lines import split_lines
+from mirage.commands.builtin.utils.output import (format_optional_records,
+                                                  format_records)
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
                                                 call_stat)
@@ -102,10 +104,10 @@ async def rg(
                 hidden=hidden,
                 warnings=warnings_f,
             )
-            stderr = "\n".join(warnings_f).encode() if warnings_f else None
+            stderr = format_optional_records(warnings_f)
             if not results:
                 return b"", IOResult(exit_code=1, stderr=stderr)
-            return "\n".join(results).encode(), IOResult(stderr=stderr)
+            return format_records(results), IOResult(stderr=stderr)
 
         pat = compile_pattern(pattern, ignore_case, fixed_string, whole_word)
 
@@ -126,7 +128,7 @@ async def rg(
                     all_results.extend(f"{p.original}:{r}" for r in hits)
             if not all_results:
                 return b"", IOResult(exit_code=1)
-            return "\n".join(all_results).encode(), IOResult()
+            return format_records(all_results), IOResult()
 
         if read_stream is not None:
             source: AsyncIterator[bytes] = read_stream(accessor, paths[0])

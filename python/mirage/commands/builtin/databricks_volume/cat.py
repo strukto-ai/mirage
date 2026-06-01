@@ -20,10 +20,12 @@ from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.databricks_volume.glob import resolve_glob
+from mirage.core.databricks_volume.read import read_bytes
 from mirage.core.databricks_volume.stat import stat
 from mirage.core.databricks_volume.stream import read_stream
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.cachable_iterator import CachableAsyncIterator
+from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -48,17 +50,31 @@ async def cat(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        path = paths[0]
-        await stat(accessor, path, index)
-        source = read_stream(accessor, path, index)
-        cachable = CachableAsyncIterator(source)
-        key = path.strip_prefix
+        # Single file: stream via a cachable returned AS stdout so the tee
+        # fills the cache as the consumer reads. Multiple files: a joined
+        # stdout is a different object from the per-file cachables, so the
+        # cache-fill background drain races the consumer on the same network
+        # stream and poisons the cache. Read each file fully to bytes: cache
+        # each path's real bytes directly (no drain, no race) and concatenate.
+        if len(paths) == 1:
+            p = paths[0]
+            await stat(accessor, p, index)
+            cachable = CachableAsyncIterator(read_stream(accessor, p, index))
+            io = IOResult(reads={p.strip_prefix: cachable},
+                          cache=[p.strip_prefix])
+            source: ByteSource = cachable
+        else:
+            reads: dict[str, ByteSource] = {}
+            parts: list[bytes] = []
+            for p in paths:
+                data = await read_bytes(accessor, p, index)
+                reads[p.strip_prefix] = data
+                parts.append(data)
+            io = IOResult(reads=reads, cache=list(reads))
+            source = async_chain(*parts)
         if n:
-            return _number_lines_stream(cachable), IOResult(
-                reads={key: cachable},
-                cache=[key],
-            )
-        return cachable, IOResult(reads={key: cachable}, cache=[key])
+            return _number_lines_stream(source), io
+        return source, io
     source = _resolve_source(stdin, "cat: missing operand")
     if n:
         return _number_lines_stream(source), IOResult()

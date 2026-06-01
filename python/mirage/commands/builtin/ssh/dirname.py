@@ -22,7 +22,7 @@ from mirage.types import PathSpec
 
 @command("dirname", resource="ssh", spec=SPECS["dirname"])
 async def dirname(
-    accessor: SSHAccessor = None,
+    accessor: SSHAccessor,
     paths: list[PathSpec] | None = None,
     *texts: str,
     stdin: bytes | None = None,

@@ -1,0 +1,258 @@
+---
+title: Nextcloud
+icon: cloud
+---
+The Nextcloud resource mounts a [WebDAV](http://www.webdav.org/specs/rfc4918.html)
+server (Nextcloud, ownCloud, Hetzner Storage Share, or any generic WebDAV
+endpoint) at some prefix such as `/nc/`. Reads are async and streaming, with
+range requests for partial reads.
+
+For credential setup, see [Nextcloud Setup](/home/setup/nextcloud).
+
+## Config
+
+```python
+import os
+
+from mirage import MountMode, Workspace
+from mirage.resource.nextcloud import NextcloudConfig, NextcloudResource
+
+config = NextcloudConfig(
+    url=os.environ["NEXTCLOUD_URL"],
+    username=os.environ["NEXTCLOUD_USERNAME"],
+    password=os.environ["NEXTCLOUD_PASSWORD"],
+    # Optional:
+    # verify_ssl=True,
+    # timeout=30,
+)
+resource = NextcloudResource(config)
+ws = Workspace({"/nc/": resource}, mode=MountMode.WRITE)
+```
+
+`NextcloudResource(config)` takes a `NextcloudConfig` object with the
+WebDAV URL plus optional Basic Auth credentials. Both `READ` and `WRITE`
+modes are supported. Use an **app password** (Settings → Security in
+Nextcloud) rather than your account password.
+
+## Filesystem Layout
+
+WebDAV resources map directly to virtual paths under the mount prefix.
+
+For example, if your Nextcloud root contains:
+
+```text
+Documents/notes.md
+Documents/contract.pdf
+Photos/2024/cat.jpg
+```
+
+Then mounting at `/nc/` exposes:
+
+```text
+/nc/
+  Documents/
+    notes.md
+    contract.pdf
+  Photos/
+    2024/
+      cat.jpg
+```
+
+Path mapping: virtual `/nc/Documents/notes.md` issues HTTP requests
+against `<NEXTCLOUD_URL>/Documents/notes.md`.
+
+## Cache
+
+The Nextcloud resource uses `IndexCacheStore`. Directory listings come
+from a single `PROPFIND Depth: 1` and populate file size, type, and
+ETag entries that `stat` reads via a fast path, so a `readdir` followed
+by per-entry `stat` calls (which is what `ls`, FUSE `getattr`, and most
+shell commands trigger) costs one HTTP request instead of N.
+
+## Fingerprinting and Snapshots
+
+`SUPPORTS_SNAPSHOT = True`. Per-file fingerprints come from the WebDAV
+`getetag` property, so snapshot drift detection works automatically:
+when a remote file changes, its ETag changes, and Mirage notices on the
+next access.
+
+## Example
+
+```python
+import asyncio
+import os
+
+from dotenv import load_dotenv
+
+from mirage import MountMode, Workspace
+from mirage.resource.nextcloud import NextcloudConfig, NextcloudResource
+
+load_dotenv(".env.development")
+
+config = NextcloudConfig(
+    url=os.environ["NEXTCLOUD_URL"],
+    username=os.environ["NEXTCLOUD_USERNAME"],
+    password=os.environ["NEXTCLOUD_PASSWORD"],
+)
+resource = NextcloudResource(config)
+
+
+async def main() -> None:
+    ws = Workspace({"/nc/": resource}, mode=MountMode.WRITE)
+
+    r = await ws.execute("ls /nc/")
+    print(await r.stdout_str())
+
+    r = await ws.execute("tree /nc/")
+    print(await r.stdout_str())
+
+    r = await ws.execute("find /nc/ -name '*.md'")
+    print(await r.stdout_str())
+
+    r = await ws.execute("cat /nc/Documents/notes.md")
+    print(await r.stdout_str())
+
+    r = await ws.execute("grep TODO /nc/Documents/notes.md")
+    print(await r.stdout_str())
+
+    r = await ws.execute("stat /nc/Documents/notes.md")
+    print(await r.stdout_str())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## Shell Commands
+
+The Nextcloud resource supports the full set of shell commands since it
+operates on real file content (text, binary, JSON, CSV, etc.). Reads
+benefit from HTTP `Range` requests so commands like `head -c BYTES`
+don't pull the whole file.
+
+### Read Commands
+
+| Command         | Notes                                      |
+| --------------- | ------------------------------------------ |
+| `cat`           | Read file content                          |
+| `head` / `tail` | First/last N lines                         |
+| `grep` / `rg`   | Pattern search (file or directory level)   |
+| `jq`            | Query JSON fields                          |
+| `wc`            | Line/word/byte counts                      |
+| `stat`          | File metadata (name, size, type, modified) |
+| `find`          | Recursive search with `-name`, `-maxdepth` |
+| `tree`          | Directory tree view                        |
+| `nl`            | Number lines                               |
+| `du`            | Disk usage summary                         |
+| `file`          | Detect file type                           |
+| `strings`       | Extract printable strings from binary      |
+| `xxd`           | Hex dump                                   |
+| `md5`           | MD5 checksum                               |
+| `sha256sum`     | SHA-256 checksum                           |
+
+### Text Processing
+
+| Command    | Notes                                       |
+| ---------- | ------------------------------------------- |
+| `awk`      | Pattern scanning and processing             |
+| `sed`      | Stream editor                               |
+| `tr`       | Translate or delete characters              |
+| `sort`     | Sort lines                                  |
+| `uniq`     | Remove duplicate lines                      |
+| `cut`      | Extract fields/columns                      |
+| `join`     | Join lines on a common field                |
+| `paste`    | Merge lines side by side                    |
+| `column`   | Columnate output                            |
+| `fold`     | Wrap lines to a specified width             |
+| `expand`   | Convert tabs to spaces                      |
+| `unexpand` | Convert spaces to tabs                      |
+| `fmt`      | Simple text formatter                       |
+| `rev`      | Reverse lines                               |
+| `tac`      | Concatenate and print in reverse            |
+| `look`     | Display lines beginning with a given string |
+| `shuf`     | Shuffle lines                               |
+| `tsort`    | Topological sort                            |
+| `comm`     | Compare two sorted files                    |
+| `cmp`      | Compare two files byte by byte              |
+| `diff`     | Compare files line by line                  |
+| `patch`    | Apply a diff patch                          |
+| `iconv`    | Character encoding conversion               |
+
+### File Operations
+
+| Command  | Notes                                         |
+| -------- | --------------------------------------------- |
+| `cp`     | Copy files (WebDAV `COPY` method)             |
+| `mv`     | Move/rename files (WebDAV `MOVE` method)      |
+| `rm`     | Remove files (WebDAV `DELETE`; recursive for directories) |
+| `mkdir`  | Create directories (WebDAV `MKCOL`)           |
+| `touch`  | Create empty file or update timestamp         |
+| `ln`     | Create symbolic links                         |
+| `tee`    | Write stdin to file and stdout                |
+| `mktemp` | Create temporary file                         |
+| `split`  | Split file into pieces                        |
+| `csplit` | Split file by context                         |
+
+### Path Utilities
+
+| Command    | Notes                      |
+| ---------- | -------------------------- |
+| `basename` | Strip directory from path  |
+| `dirname`  | Strip filename from path   |
+| `realpath` | Resolve path               |
+| `readlink` | Print symbolic link target |
+| `ls`       | List directory contents    |
+
+### Compression
+
+| Command  | Notes                 |
+| -------- | --------------------- |
+| `gzip`   | Compress files        |
+| `gunzip` | Decompress gzip files |
+| `zip`    | Create zip archives   |
+| `unzip`  | Extract zip archives  |
+| `tar`    | Archive files         |
+| `zcat`   | Cat compressed files  |
+| `zgrep`  | Grep compressed files |
+
+### Encoding
+
+| Command  | Notes                |
+| -------- | -------------------- |
+| `base64` | Base64 encode/decode |
+
+### Data Format Support
+
+Commands with format-specific variants for structured data files:
+
+| Format  | Extension  | Variants                                       |
+| ------- | ---------- | ---------------------------------------------- |
+| Parquet | `.parquet` | cat, head, tail, wc, stat, cut, grep, ls, file |
+| Feather | `.feather` | cat, head, tail, wc, stat, cut, grep, ls, file |
+| ORC     | `.orc`     | cat, head, tail, wc, stat, cut, grep, ls, file |
+| HDF5    | `.hdf5`    | cat, head, tail, wc, stat, cut, grep, ls, file |
+
+These variants auto-detect the format by extension and convert to
+tabular text (CSV) for processing.
+
+## Streaming
+
+- **Reads**: streamed in chunks. Downstream commands like `head -n 1`
+  early-cancel, so you only pay for the first chunk over the wire.
+- **Range reads**: `head -c BYTES` and other partial reads issue HTTP
+  `Range` requests that Nextcloud and most WebDAV servers honor.
+- **Writes**: buffer the payload before upload. Streaming uploads
+  (Nextcloud's `uploads/` resumable protocol) are a possible future
+  follow-up.
+
+## Use Cases
+
+- **AI agents accessing personal cloud storage**: Mount Nextcloud so
+  agents can read documents, notes, and structured data on a self-hosted
+  cloud.
+- **Self-hosted alternative to Dropbox/Box**: Same shell-command surface,
+  with full read+write support.
+- **Multi-protocol WebDAV**: Works against any RFC 4918-compliant server,
+  not just Nextcloud.
+- **FUSE mounting**: Expose Nextcloud through a virtual FUSE mount for
+  external tools.

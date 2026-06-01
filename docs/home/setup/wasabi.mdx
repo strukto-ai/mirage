@@ -1,0 +1,29 @@
+---
+title: Wasabi
+icon: /images/wasabi-logo.svg
+description: Set up Wasabi credentials for the Wasabi resource.
+---
+
+## Credentials
+
+### 1. Create an access key
+
+1. Sign in to the [Wasabi console](https://console.wasabisys.com/)
+1. Go to **Access Keys** -> **Create New Access Key**
+1. Copy the **Access Key** and **Secret Key**
+1. Note your bucket's **region** (e.g. `us-east-2`) and **bucket** name
+
+The endpoint is derived from `region` as `s3.<region>.wasabisys.com`
+(`s3.wasabisys.com` for `us-east-1`).
+
+### 2. Set environment variables
+
+```bash
+# .env.development
+WASABI_BUCKET=my-bucket
+WASABI_REGION=us-east-2
+WASABI_ACCESS_KEY_ID=...
+WASABI_SECRET_ACCESS_KEY=...
+```
+
+For Python configuration, see the [Wasabi resource](/python/resource/wasabi) docs.

@@ -1,9 +1,11 @@
+import asyncio
+
 import pytest
 
 from mirage.core.databricks_volume.readdir import readdir
 from mirage.types import PathSpec
 
-from .conftest import directory_entry, file_entry
+from .conftest import ToThreadRecorder, directory_entry, file_entry
 
 
 @pytest.mark.asyncio
@@ -45,3 +47,24 @@ async def test_readdir_missing_directory_raises(accessor, index):
     path = PathSpec.from_str_path("/volume/missing", "/volume")
     with pytest.raises(FileNotFoundError):
         await readdir(accessor, path, index)
+
+
+@pytest.mark.asyncio
+async def test_readdir_runs_blocking_list_off_event_loop(
+    accessor,
+    files,
+    index,
+    remote_root,
+    monkeypatch,
+):
+    to_thread = ToThreadRecorder()
+    monkeypatch.setattr(asyncio, "to_thread", to_thread)
+    files.directories[f"{remote_root}/reports"] = [
+        file_entry(f"{remote_root}/reports/latest.md", size=6),
+    ]
+    path = PathSpec.from_str_path("/volume/reports", "/volume")
+
+    result = await readdir(accessor, path, index)
+
+    assert result == ["/volume/reports/latest.md"]
+    assert len(to_thread.calls) == 1

@@ -1,0 +1,27 @@
+from types import SimpleNamespace
+
+import pytest
+
+from mirage.cache.index import RAMIndexCacheStore
+from mirage.types import FileStat, FileType, PathSpec
+
+
+@pytest.fixture
+def dify_accessor() -> SimpleNamespace:
+    return SimpleNamespace(config=SimpleNamespace(dataset_id="dataset-1",
+                                                  slug_metadata_name="slug"))
+
+
+@pytest.fixture
+def dify_index() -> RAMIndexCacheStore:
+    return RAMIndexCacheStore()
+
+
+@pytest.fixture
+def guide_path() -> PathSpec:
+    return PathSpec.from_str_path("/knowledge/guides/quickstart",
+                                  "/knowledge/")
+
+
+def sample_stat() -> FileStat:
+    return FileStat(name="quickstart", type=FileType.TEXT, size=12)

@@ -24,7 +24,7 @@ from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
 from mirage.core.gdrive.stream import read_stream as gdrive_read_stream
 from mirage.io.cachable_iterator import CachableAsyncIterator
-from mirage.io.stream import yield_bytes
+from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
@@ -57,19 +57,34 @@ async def cat(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        p = paths[0]
-        result = await gdrive_read_stream(accessor, p, index)
-        if isinstance(result, bytes):
-            io = IOResult(reads={p.strip_prefix: result},
+        # Single file: return the read result directly (bytes) or a cachable
+        # tee returned AS stdout so the cache fills as the consumer reads.
+        # Multiple files: a joined stdout is a different object from the
+        # per-file cachables, so the cache-fill background drain races the
+        # consumer on the same network stream and poisons the cache. Read each
+        # file fully to bytes: cache real bytes directly and concatenate.
+        if len(paths) == 1:
+            p = paths[0]
+            result = await gdrive_read_stream(accessor, p, index)
+            value: ByteSource = (result if isinstance(result, bytes) else
+                                 CachableAsyncIterator(result))
+            io = IOResult(reads={p.strip_prefix: value},
                           cache=[p.strip_prefix])
-            if n:
-                return generic_cat(result, number_lines=True), io
-            return yield_bytes(result), io
-        cachable = CachableAsyncIterator(result)
-        io = IOResult(reads={p.strip_prefix: cachable}, cache=[p.strip_prefix])
+            source: ByteSource = value
+        else:
+            reads: dict[str, ByteSource] = {}
+            parts: list[bytes] = []
+            for p in paths:
+                result = await gdrive_read_stream(accessor, p, index)
+                data = (result if isinstance(result, bytes) else b"".join(
+                    [chunk async for chunk in result]))
+                reads[p.strip_prefix] = data
+                parts.append(data)
+            io = IOResult(reads=reads, cache=list(reads))
+            source = async_chain(*parts)
         if n:
-            return generic_cat(cachable, number_lines=True), io
-        return cachable, io
+            return generic_cat(source, number_lines=True), io
+        return source, io
     source = _resolve_source(stdin, "cat: missing operand")
     if n:
         return generic_cat(source, number_lines=True), IOResult()

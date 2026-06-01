@@ -1,0 +1,88 @@
+---
+title: HF Models
+icon: /images/huggingface-logo.svg
+---
+The HF Models resource mounts a [Hugging Face Model](https://huggingface.co/models)
+repo at some prefix such as `/m/`.
+You can inspect configs, tokenizers, and READMEs without downloading the
+weights, weights stream only when you actually `cat` them.
+
+For credential setup, see [HF Models Setup](/home/setup/hf_models).
+
+## Config
+
+```python
+import os
+
+from mirage import MountMode, Workspace
+from mirage.resource.hf_models import HfModelsConfig, HfModelsResource
+
+config = HfModelsConfig(
+    repo_id=os.environ["HF_MODEL_REPO"],   # "namespace/model-name"
+    token=os.environ.get("HF_TOKEN"),
+    # Optional:
+    # endpoint="https://huggingface.co",
+    # revision="main",
+)
+resource = HfModelsResource(config)
+ws = Workspace({"/m": resource}, mode=MountMode.READ)
+```
+
+## Filesystem Layout
+
+Maps model repo files (config, tokenizer, weights, etc.) to virtual paths.
+
+For example, `sapientinc/HRM-Text-1B` mounted at `/m/` exposes:
+
+```text
+/m/
+  README.md
+  config.json
+  tokenizer.json
+  tokenizer_config.json
+  model.safetensors        ← never downloaded unless you cat it
+```
+
+## Example
+
+```python
+import asyncio
+
+from mirage import MountMode, Workspace
+from mirage.resource.hf_models import HfModelsConfig, HfModelsResource
+
+config = HfModelsConfig(repo_id="sapientinc/HRM-Text-1B")
+resource = HfModelsResource(config)
+
+
+async def main() -> None:
+    ws = Workspace({"/m": resource}, mode=MountMode.READ)
+
+    # ls is cheap: one HTTP list call
+    r = await ws.execute("ls -lh /m/")
+    print(await r.stdout_str())
+
+    # Read the config (small, fast)
+    r = await ws.execute("cat /m/config.json")
+    print(await r.stdout_str())
+
+    # Stat the weights without downloading them
+    r = await ws.execute("stat /m/model.safetensors")
+    print(await r.stdout_str())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## Shell Commands
+
+Same set as [HF Buckets](/python/resource/hf_buckets#shell-commands).
+
+## Use Cases
+
+- **Model card inspection**: Read configs, tokenizers, READMEs without
+  pulling multi-GB weight files
+- **Compatibility checks**: `jq` over `config.json` to verify architecture
+  before committing to a download
+- **Pinned revisions**: Mount a specific commit/tag for reproducibility

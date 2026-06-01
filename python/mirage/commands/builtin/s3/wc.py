@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.wc import WCCounts, format_wc
+from mirage.commands.builtin.generic.wc import format_multi, format_wc
 from mirage.commands.builtin.generic.wc import wc as generic_wc
 from mirage.commands.builtin.s3._provision import file_read_provision
 from mirage.commands.builtin.utils.stream import _resolve_source
@@ -44,31 +44,16 @@ async def wc(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        outputs: list[str] = []
-        totals = WCCounts()
-        for p in paths:
-            data = await read_bytes(accessor, p)
-            counts = await generic_wc(data)
-            outputs.append(
-                format_wc(counts,
-                          args_l=args_l,
-                          w=w,
-                          c=c,
-                          m=m,
-                          L=L,
-                          label=p.original))
-            totals.merge(counts)
-        if len(paths) > 1:
-            outputs.append(
-                format_wc(totals,
-                          args_l=args_l,
-                          w=w,
-                          c=c,
-                          m=m,
-                          L=L,
-                          label="total"))
-        return "\n".join(outputs).encode(), IOResult()
+        body = await format_multi(paths,
+                                  read=read_bytes,
+                                  accessor=accessor,
+                                  args_l=args_l,
+                                  w=w,
+                                  c=c,
+                                  m=m,
+                                  L=L)
+        return body, IOResult()
     source = _resolve_source(stdin, "wc: missing operand")
     counts = await generic_wc(source)
     return format_wc(counts, args_l=args_l, w=w, c=c, m=m,
-                     L=L).encode(), IOResult()
+                     L=L).encode() + b"\n", IOResult()

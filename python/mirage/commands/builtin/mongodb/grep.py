@@ -22,6 +22,8 @@ from mirage.commands.builtin.grep_helper import (compile_pattern,
                                                  grep_files_only, grep_lines,
                                                  grep_stream)
 from mirage.commands.builtin.mongodb._provision import file_read_provision
+from mirage.commands.builtin.utils.output import (format_optional_records,
+                                                  format_records)
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
                                                 call_stat)
@@ -143,7 +145,7 @@ async def grep(
             all_lines = format_grep_results(results)
             if not all_lines:
                 return b"", IOResult(exit_code=1)
-            return "\n".join(all_lines).encode(), IOResult()
+            return format_records(all_lines), IOResult()
 
         paths = await resolve_glob(accessor, paths, index=index)
         file_prefix = paths[0].prefix if paths else ""
@@ -182,10 +184,10 @@ async def grep(
                 whole_word=w,
                 warnings=warnings,
             )
-            stderr = ("\n".join(warnings).encode() if warnings else None)
+            stderr = format_optional_records(warnings)
             if not results_l:
                 return b"", IOResult(exit_code=1, stderr=stderr)
-            return ("\n".join(results_l).encode(), IOResult(stderr=stderr))
+            return (format_records(results_l), IOResult(stderr=stderr))
 
         pat = compile_pattern(pattern, i, F, w)
 
@@ -205,7 +207,7 @@ async def grep(
                     all_results.extend(f"{p.original}:{r_}" for r_ in hits)
             if not all_results:
                 return b"", IOResult(exit_code=1)
-            return "\n".join(all_results).encode(), IOResult()
+            return format_records(all_results), IOResult()
 
         source = read_stream(accessor, paths[0], index)
         stream = grep_stream(

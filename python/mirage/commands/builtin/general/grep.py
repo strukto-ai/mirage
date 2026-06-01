@@ -16,6 +16,7 @@ import re
 from collections.abc import AsyncIterator
 
 from mirage.commands.builtin.grep_context import grep_context_lines
+from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.stream import exit_on_empty, quiet_match
@@ -82,7 +83,7 @@ async def _grep_stream(
                     yield m.group().encode() + b"\n"
                 if max_count and match_count >= max_count:
                     if count_only:
-                        yield str(match_count).encode()
+                        yield str(match_count).encode() + b"\n"
                     return
         else:
             match_count += 1
@@ -93,10 +94,10 @@ async def _grep_stream(
                     yield raw_line + b"\n"
             if max_count and match_count >= max_count:
                 if count_only:
-                    yield str(match_count).encode()
+                    yield str(match_count).encode() + b"\n"
                 return
     if count_only:
-        yield str(match_count).encode()
+        yield str(match_count).encode() + b"\n"
 
 
 async def grep(
@@ -155,7 +156,7 @@ async def grep(
                 return b"", IOResult(exit_code=1)
             if prefix:
                 results = [prefix + "/" + r.lstrip("/") for r in results]
-            return "\n".join(results).encode(), IOResult()
+            return format_records(results), IOResult()
 
         pat = _compile_pattern(pattern, i, F, w)
         source = ops["read_stream"](paths[0])

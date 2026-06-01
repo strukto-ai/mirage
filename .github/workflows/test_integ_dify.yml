@@ -1,0 +1,45 @@
+name: Integ (dify knowledge via mock server)
+
+"on":
+  push:
+    branches: [main]
+    paths:
+      - integ/**
+      - python/**
+      - .github/workflows/test_integ_dify.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - integ/**
+      - python/**
+      - .github/workflows/test_integ_dify.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integ-dify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        working-directory: python
+        run: uv sync --all-extras --no-extra camel
+
+      - name: Run dify integ (mock server) and diff against truth
+        run: |
+          ./python/.venv/bin/python integ/dify.py > /tmp/dify.out
+          diff integ/truth_dify.txt /tmp/dify.out

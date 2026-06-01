@@ -17,3 +17,6 @@ from pydantic import BaseModel, SecretStr
 
 class GitHubConfig(BaseModel):
     token: SecretStr
+    owner: str | None = None
+    repo: str | None = None
+    ref: str = "main"

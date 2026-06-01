@@ -229,6 +229,15 @@ export class MirageFS {
     return records
   }
 
+  private async writeFile(path: string, data: Uint8Array): Promise<void> {
+    // Keep FUSE writes on Workspace.dispatch rather than Workspace.fs.writeFile:
+    // dispatch is where Mirage enforces mount modes, revision tracking, and
+    // post-write invalidation. The lower-level fs helper is useful internally,
+    // but using it from FUSE made READ-mode mounts reject create while still
+    // allowing buffered overwrite on flush.
+    await this.ws.dispatch('write', path, [data])
+  }
+
   // ── FUSE op surface (mirrors mfusepy Operations) ─────────────────
 
   ops(): Record<string, unknown> {
@@ -393,7 +402,7 @@ export class MirageFS {
           }
           merged = out
         }
-        await this.ws.fs.writeFile(path, merged)
+        await this.writeFile(path, merged)
         cb(len)
       } catch {
         cb(0)
@@ -414,7 +423,7 @@ export class MirageFS {
             dispatchErr instanceof Error ? dispatchErr.message : String(dispatchErr)
           ).toLowerCase()
           if (!msg.includes('no op')) throw dispatchErr
-          await this.ws.fs.writeFile(path, new Uint8Array(0))
+          await this.writeFile(path, new Uint8Array(0))
         }
         const fh = this.nextFh++
         this.handles.set(fh, { path })
@@ -498,7 +507,7 @@ export class MirageFS {
           const data = await this.ws.fs.readFile(path, { raw: true }).catch(() => new Uint8Array(0))
           const out = new Uint8Array(size)
           out.set(data.subarray(0, Math.min(data.byteLength, size)), 0)
-          await this.ws.fs.writeFile(path, out)
+          await this.writeFile(path, out)
         }
         cb(0)
       } catch (err) {
@@ -606,7 +615,7 @@ export class MirageFS {
         for (const [off, chunk] of writes) {
           merged.set(chunk, off)
         }
-        await this.ws.fs.writeFile(path, merged)
+        await this.writeFile(path, merged)
         cb(0)
       } catch (err) {
         cb(classifyError(err))

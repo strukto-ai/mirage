@@ -80,6 +80,8 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
             self._expiry[resource_path] = exp
 
     async def invalidate_dir(self, resource_path: str) -> None:
+        for child in self._children.get(resource_path, []):
+            self._entries.pop(child, None)
         self._expiry.pop(resource_path, None)
         self._children.pop(resource_path, None)
 

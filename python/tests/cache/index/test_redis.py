@@ -180,6 +180,16 @@ async def test_set_dir_overwrites_previous(store):
 
 
 @pytest.mark.asyncio
+async def test_invalidate_dir_evicts_child_entries(store, entry):
+    await store.set_dir("/folder", [("test.txt", entry)])
+    assert (await store.get("/folder/test.txt")).entry is not None
+    await store.invalidate_dir("/folder")
+    assert (await
+            store.get("/folder/test.txt")).status == LookupStatus.NOT_FOUND
+    assert (await store.list_dir("/folder")).status == LookupStatus.NOT_FOUND
+
+
+@pytest.mark.asyncio
 async def test_clear(store, entry):
     await store.put("/folder/test.txt", entry)
     await store.set_dir("/folder", [("test.txt", entry)])

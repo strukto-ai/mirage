@@ -14,8 +14,10 @@
 
 import pytest
 
+from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.resource.ram import RAMResource
-from mirage.types import MountMode
+from mirage.resource.ssh import SSHConfig, SSHResource
+from mirage.types import MountMode, PathSpec
 from mirage.workspace.mount import MountRegistry
 
 # ── mount_for ──────────────────────────────────
@@ -299,3 +301,33 @@ def test_mount_for_command_nonexistent(registry):
 def test_mount_for_command_grep(multi_registry):
     mount = multi_registry.mount_for_command("grep")
     assert mount is not None
+
+
+# ── resolve_mount cache redirect ───────────────
+
+
+def _remote_registry_with_cache():
+    reg = MountRegistry()
+    reg.mount("/ssh/", SSHResource(SSHConfig(host="example", root="/srv")),
+              MountMode.WRITE)
+    cache = RAMFileCacheStore()
+    reg.set_default_mount(cache)
+    return reg, cache
+
+
+@pytest.mark.asyncio
+async def test_resolve_mount_redirects_cached_read_to_cache():
+    reg, cache = _remote_registry_with_cache()
+    await cache.set("/ssh/a.txt", b"hi")
+    scope = PathSpec(original="/ssh/a.txt", directory="/ssh", resolved=True)
+    mount = await reg.resolve_mount("cat", [scope], "/ssh")
+    assert mount.prefix == "/_default/"
+
+
+@pytest.mark.asyncio
+async def test_resolve_mount_keeps_cached_write_on_remote():
+    reg, cache = _remote_registry_with_cache()
+    await cache.set("/ssh/a.txt", b"hi")
+    scope = PathSpec(original="/ssh/a.txt", directory="/ssh", resolved=True)
+    mount = await reg.resolve_mount("rm", [scope], "/ssh")
+    assert mount.prefix == "/ssh/"

@@ -1,0 +1,78 @@
+---
+title: HF Spaces
+icon: /images/huggingface-logo.svg
+---
+The HF Spaces resource mounts a [Hugging Face Space](https://huggingface.co/spaces)
+repo (app code, README, config, requirements) at some prefix such as `/s/`.
+
+For credential setup, see [HF Spaces Setup](/home/setup/hf_spaces).
+
+## Config
+
+```python
+import os
+
+from mirage import MountMode, Workspace
+from mirage.resource.hf_spaces import HfSpacesConfig, HfSpacesResource
+
+config = HfSpacesConfig(
+    repo_id=os.environ["HF_SPACE_REPO"],   # "namespace/space-name"
+    token=os.environ.get("HF_TOKEN"),
+    # Optional:
+    # endpoint="https://huggingface.co",
+    # revision="main",
+)
+resource = HfSpacesResource(config)
+ws = Workspace({"/s": resource}, mode=MountMode.READ)
+```
+
+## Filesystem Layout
+
+For example, `HuggingFaceBio/carbon-demo` mounted at `/s/` might expose:
+
+```text
+/s/
+  README.md
+  app.py
+  requirements.txt
+  Dockerfile
+```
+
+## Example
+
+```python
+import asyncio
+
+from mirage import MountMode, Workspace
+from mirage.resource.hf_spaces import HfSpacesConfig, HfSpacesResource
+
+
+async def main() -> None:
+    resource = HfSpacesResource(
+        HfSpacesConfig(repo_id="HuggingFaceBio/carbon-demo"))
+    ws = Workspace({"/s": resource}, mode=MountMode.READ)
+
+    r = await ws.execute("ls /s/")
+    print(await r.stdout_str())
+
+    r = await ws.execute("cat /s/README.md | head -n 20")
+    print(await r.stdout_str())
+
+    r = await ws.execute("grep -l import /s/*.py 2>/dev/null")
+    print(await r.stdout_str())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## Shell Commands
+
+Same set as [HF Buckets](/python/resource/hf_buckets#shell-commands).
+
+## Use Cases
+
+- **Space introspection**: Browse an app's structure, requirements, and
+  config before forking/cloning
+- **App code review**: `grep` / `find` across a Space's Python without
+  cloning the repo

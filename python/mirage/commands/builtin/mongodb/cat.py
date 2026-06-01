@@ -26,6 +26,8 @@ from mirage.core.mongodb.read import read as mongodb_read
 from mirage.core.mongodb.scope import detect_scope
 from mirage.core.mongodb.stream import read_stream
 from mirage.core.mongodb.types import ScopeLevel
+from mirage.io.cachable_iterator import CachableAsyncIterator
+from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
@@ -55,17 +57,40 @@ async def cat(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        p = paths[0]
-        scope = detect_scope(p)
-        if scope.level == ScopeLevel.DOCUMENTS:
-            source = read_stream(accessor, p, index)
-            io = IOResult(reads={p.strip_prefix: source},
+        # Single file: return the read result directly (bytes) or a cachable
+        # tee returned AS stdout so the cache fills as the consumer reads.
+        # Multiple files: a joined stdout is a different object from the
+        # per-file cachables, so the cache-fill background drain races the
+        # consumer on the same network stream and poisons the cache. Read each
+        # file fully to bytes: cache real bytes directly and concatenate.
+        if len(paths) == 1:
+            p = paths[0]
+            scope = detect_scope(p)
+            if scope.level == ScopeLevel.DOCUMENTS:
+                value: ByteSource = CachableAsyncIterator(
+                    read_stream(accessor, p, index))
+            else:
+                value = await mongodb_read(accessor, p, index)
+            io = IOResult(reads={p.strip_prefix: value},
                           cache=[p.strip_prefix])
-            return (generic_cat(source, number_lines=True)
-                    if n else source), io
-        data = await mongodb_read(accessor, p, index)
-        io = IOResult(reads={p.strip_prefix: data}, cache=[p.strip_prefix])
-        return (generic_cat(data, number_lines=True) if n else data), io
+            source: ByteSource = value
+        else:
+            reads: dict[str, ByteSource] = {}
+            parts: list[bytes] = []
+            for p in paths:
+                scope = detect_scope(p)
+                if scope.level == ScopeLevel.DOCUMENTS:
+                    data = b"".join([
+                        chunk
+                        async for chunk in read_stream(accessor, p, index)
+                    ])
+                else:
+                    data = await mongodb_read(accessor, p, index)
+                reads[p.strip_prefix] = data
+                parts.append(data)
+            io = IOResult(reads=reads, cache=list(reads))
+            source = async_chain(*parts)
+        return (generic_cat(source, number_lines=True) if n else source), io
     source = _resolve_source(stdin, "cat: missing operand")
     return (generic_cat(source, number_lines=True)
             if n else source), IOResult()

@@ -1,0 +1,82 @@
+---
+title: QingStor
+icon: cloud
+description: Mount a QingStor (QingCloud) Object Storage bucket via its S3-compatible API.
+---
+The QingStor resource is a thin wrapper over the [S3 resource](/python/resource/s3).
+It maps a `QingStorConfig` to an `S3Config` and reuses the exact same backend,
+commands, and behavior as S3, it just derives the right endpoint from `region`
+(the QingStor zone). Uses aioboto3 against QingStor's S3-compatible API.
+
+The endpoint is computed from `region` as `s3.<region>.qingstor.com`
+(e.g. `s3.pek3a.qingstor.com`). This is QingStor's S3-compatible host, distinct
+from the native `<zone>.qingstor.com` API. Pass `endpoint_url` to override.
+
+## Config
+
+```python
+import os
+
+from mirage import MountMode, Workspace
+from mirage.resource.qingstor import QingStorConfig, QingStorResource
+
+config = QingStorConfig(
+    bucket=os.environ["QINGSTOR_BUCKET"],
+    region=os.environ.get("QINGSTOR_ZONE", "pek3a"),
+    access_key_id=os.environ["QINGSTOR_ACCESS_KEY_ID"],
+    secret_access_key=os.environ["QINGSTOR_SECRET_ACCESS_KEY"],
+    # Optional:
+    # endpoint_url="https://s3.pek3a.qingstor.com",
+    # timeout=30,
+    # proxy="http://proxy:8080",
+)
+resource = QingStorResource(config)
+ws = Workspace({"/data": resource}, mode=MountMode.READ)
+```
+
+Both `READ` and `WRITE` modes are supported.
+
+## Example
+
+```python
+import asyncio
+import os
+
+from dotenv import load_dotenv
+
+from mirage import MountMode, Workspace
+from mirage.resource.qingstor import QingStorConfig, QingStorResource
+
+load_dotenv(".env.development")
+
+config = QingStorConfig(
+    bucket=os.environ["QINGSTOR_BUCKET"],
+    region=os.environ.get("QINGSTOR_ZONE", "pek3a"),
+    endpoint_url=os.environ.get("QINGSTOR_ENDPOINT_URL"),
+    access_key_id=os.environ["QINGSTOR_ACCESS_KEY_ID"],
+    secret_access_key=os.environ["QINGSTOR_SECRET_ACCESS_KEY"],
+)
+resource = QingStorResource(config)
+
+
+async def main() -> None:
+    ws = Workspace({"/data/": resource}, mode=MountMode.READ)
+
+    r = await ws.execute("ls /data/")
+    print(await r.stdout_str())
+
+    r = await ws.execute("find /data/ -name '*.json' | head -n 5")
+    print(await r.stdout_str())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## Notes
+
+- QingStor reports `ResourceName.S3` and routes through the same `core/s3`
+  implementation, so the full S3 shell-command set applies. See the
+  [S3 resource](/python/resource/s3) for the complete command reference,
+  range reads, streaming, and the index cache fast path.
+- For credential setup, see [QingStor Setup](/home/setup/qingstor).

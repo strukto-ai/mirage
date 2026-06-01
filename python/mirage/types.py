@@ -112,7 +112,6 @@ class ResourceName(str, Enum):
     DISCORD = "discord"
     GMAIL = "gmail"
     TRELLO = "trello"
-    TELEGRAM = "telegram"
     MONGODB = "mongodb"
     POSTGRES = "postgres"
     NOTION = "notion"
@@ -122,7 +121,13 @@ class ResourceName(str, Enum):
     GITHUB_CI = "github_ci"
     GCS = "gcs"
     EMAIL = "email"
+    DIFY = "dify"
     DATABRICKS_VOLUME = "databricks_volume"
+    HF_BUCKETS = "hf_buckets"
+    HF_DATASETS = "hf_datasets"
+    HF_MODELS = "hf_models"
+    HF_SPACES = "hf_spaces"
+    NEXTCLOUD = "nextcloud"
 
 
 @dataclass(frozen=True)

@@ -19,6 +19,7 @@ import orjson
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tail import tail as generic_tail
+from mirage.commands.builtin.generic.tail import tail_multi
 from mirage.commands.builtin.postgres._provision import file_read_provision
 from mirage.commands.builtin.tail_helper import _parse_n
 from mirage.commands.builtin.utils.stream import _resolve_source
@@ -73,7 +74,8 @@ async def tail(
     if paths:
         scope = detect_scope(paths[0])
         is_file = scope.level == "entity_rows"
-        if is_file and c_int is None and n_int is not None:
+        if (len(paths) == 1 and is_file and c_int is None
+                and n_int is not None):
             limit = min(n_int, accessor.config.default_row_limit)
             pool = await accessor.pool()
             async with pool.acquire() as conn:
@@ -96,9 +98,15 @@ async def tail(
                                 from_line=from_line), IOResult()
 
         paths = await resolve_glob(accessor, paths, index=index)
-        raw = await postgres_read(accessor, paths[0], index)
-        return generic_tail(raw, n=n_int, c=c_int,
-                            from_line=from_line), IOResult()
+        show_headers = (v or len(paths) > 1) and not q
+        return tail_multi(paths,
+                          read=postgres_read,
+                          accessor=accessor,
+                          index=index,
+                          n=n_int,
+                          c=c_int,
+                          from_line=from_line,
+                          show_headers=show_headers), IOResult()
     source = _resolve_source(stdin, "tail: missing operand")
     return generic_tail(source, n=n_int, c=c_int,
                         from_line=from_line), IOResult()

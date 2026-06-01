@@ -15,6 +15,8 @@
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.utils.formatting import _human_size
+from mirage.commands.builtin.utils.output import (format_optional_records,
+                                                  format_records)
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.databricks_volume.glob import resolve_glob
@@ -164,9 +166,9 @@ async def ls(
             for entry in entries:
                 is_dir = F and entry.type == FileType.DIRECTORY
                 results.append(entry.name + ("/" if is_dir else ""))
-    stderr = "\n".join(warnings).encode() if warnings else None
+    stderr = format_optional_records(warnings)
     exit_code = 1 if warnings and not results else 0
-    return "\n".join(results).encode(), IOResult(
+    return format_records(results), IOResult(
         stderr=stderr,
         exit_code=exit_code,
     )

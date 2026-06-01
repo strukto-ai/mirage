@@ -1,0 +1,30 @@
+---
+title: HF Spaces
+icon: /images/huggingface-logo.svg
+description: Set up Hugging Face Spaces credentials.
+---
+
+## Credentials
+
+### 1. Pick a Space Repo
+
+Browse [huggingface.co/spaces](https://huggingface.co/spaces) and note the
+full `namespace/space-name` (e.g. `HuggingFaceBio/carbon-demo`).
+
+Public spaces need no token. Private spaces do.
+
+### 2. Create an Access Token (private only)
+
+1. Go to https://huggingface.co/settings/tokens
+2. Create a fine-grained token with **Read** access to the space
+
+### 3. Set Environment Variables
+
+```bash
+# .env.development
+HF_SPACE_REPO=HuggingFaceBio/carbon-demo
+HF_TOKEN=hf_...   # optional, public spaces work without it
+```
+
+For Python configuration, see the
+[HF Spaces resource](/python/resource/hf_spaces) docs.

@@ -18,22 +18,20 @@ import logging
 import sys
 import time
 from collections.abc import AsyncIterator
+from functools import partial
 from typing import Any
 
-from mirage.cache.file import io as cache_io
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index import IndexConfig
 from mirage.commands.builtin.general import HISTORY_COMMANDS
-from mirage.commands.builtin.utils.safeguard import (CommandTimeoutError,
-                                                     apply_safeguard)
+from mirage.commands.builtin.utils.safeguard import CommandTimeoutError
 
 try:
     from mirage.cache.file.redis import RedisFileCacheStore
 except ImportError:
     RedisFileCacheStore = None  # type: ignore[misc, assignment]
 from mirage.io import IOResult
-from mirage.io.types import materialize
 from mirage.observe.context import start_recording, stop_recording
 from mirage.observe.observer import Observer
 from mirage.ops import Ops
@@ -42,21 +40,20 @@ from mirage.ops.os_patch import make_os_module
 from mirage.provision import ProvisionResult
 from mirage.resource.base import BaseResource
 from mirage.resource.ram import RAMResource
-from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
 from mirage.types import (DEFAULT_AGENT_ID, DEFAULT_SESSION_ID,
                           ConsistencyPolicy, DriftPolicy, FileStat, MountMode,
                           PathSpec, StateKey)
 from mirage.workspace.abort import MirageAbortError
+from mirage.workspace.dispatcher import Dispatcher
+from mirage.workspace.file_prompt import build_file_prompt
 from mirage.workspace.fuse import FuseManager
 from mirage.workspace.history import ExecutionHistory
 from mirage.workspace.mount import Mount, MountRegistry
 from mirage.workspace.native import native_exec
-from mirage.workspace.node import execute_node as _execute_node
-from mirage.workspace.node import provision_node
+from mirage.workspace.node import provision_node, run_command_tree
 from mirage.workspace.session import (Session, SessionManager,
-                                      assert_mount_allowed,
                                       reset_current_session,
                                       set_current_session)
 from mirage.workspace.snapshot import (ContentDriftError, apply_state_dict,
@@ -68,14 +65,6 @@ from mirage.workspace.snapshot import to_state_dict
 from mirage.workspace.types import ExecutionNode, ExecutionRecord
 
 logger = logging.getLogger(__name__)
-
-_DISPATCH_READ_OPS = frozenset({"read", "read_bytes"})
-_DISPATCH_WRITE_OPS = frozenset(
-    {"write", "write_bytes", "append", "unlink", "create", "truncate"})
-
-_HELP_HINT = (
-    "Tip: run `man` to list every available command grouped by resource, "
-    "`man <cmd>` for a single entry, and `<cmd> --help` for flag details.")
 
 
 class Workspace:
@@ -134,6 +123,7 @@ class Workspace:
         self._session_mgr = SessionManager(session_id)
         self._consistency = consistency
         self._registry.set_consistency(consistency)
+        self._dispatcher = Dispatcher(self._registry, self._cache, consistency)
 
         for prefix, value in resources.items():
             mount_safeguards: dict = {}
@@ -275,18 +265,7 @@ class Workspace:
 
     @property
     def file_prompt(self) -> str:
-        parts: list[str] = [_HELP_HINT]
-        for m in self._registry.mounts():
-            prompt = m.resource.PROMPT
-            if not prompt:
-                continue
-            prefix = m.prefix.rstrip("/") or "/"
-            section = prompt.format(prefix=prefix)
-            if m.mode != MountMode.READ and m.resource.WRITE_PROMPT:
-                section += "\n" + m.resource.WRITE_PROMPT.replace(
-                    "{prefix}", prefix)
-            parts.append(section)
-        return "\n\n".join(parts)
+        return build_file_prompt(self._registry.mounts())
 
     # ── lifecycle ───────────────────────────────────────────────────────────
 
@@ -519,34 +498,7 @@ class Workspace:
                        **kwargs: Any) -> tuple[Any, IOResult]:
         if self._drift_check_pending:
             await self._run_pending_drift_check()
-        mount = self._registry.mount_for(path.original)
-        assert_mount_allowed(mount.prefix)
-        cacheable = mount.resource.is_remote is True
-
-        if cacheable and op in _DISPATCH_READ_OPS:
-            cached = await self._cache.get(path.original)
-            if cached is not None:
-                if self._consistency == ConsistencyPolicy.ALWAYS:
-                    try:
-                        remote_stat = await mount.execute_op(
-                            "stat", path.original)
-                    except FileNotFoundError:
-                        await self._cache.remove(path.original)
-                        raise
-                    if (remote_stat is not None
-                            and remote_stat.fingerprint is not None):
-                        fresh = await self._cache.is_fresh(
-                            path.original, remote_stat.fingerprint)
-                        if not fresh:
-                            await self._cache.remove(path.original)
-                            cached = None
-                if cached is not None:
-                    return cached, IOResult(reads={path.original: cached})
-
-        result = await mount.execute_op(op, path.original, **kwargs)
-        if op in _DISPATCH_WRITE_OPS:
-            await self._invalidate_after_write(mount, path.original)
-        return result, IOResult()
+        return await self._dispatcher.dispatch(op, path, **kwargs)
 
     async def _run_pending_drift_check(self) -> None:
         """Drain the post-load drift check.
@@ -591,56 +543,10 @@ class Workspace:
     # ── execution ────────────────────────────────────────────────────────────
 
     async def apply_io(self, io: IOResult) -> None:
-        await cache_io.apply_io(self._cache, io, self._is_cacheable_path)
-        if io.writes:
-            await self._invalidate_index_dirs(io)
-
-    def _is_cacheable_path(self, path: str) -> bool:
-        try:
-            mount = self._registry.mount_for(path)
-        except ValueError:
-            return False
-        return mount.resource.is_remote is True
+        await self._dispatcher.apply_io(io)
 
     async def _invalidate_after_write_by_path(self, path: str) -> None:
-        """Drop file-cache + stale parent index after a write to `path`.
-
-        Single source of truth for post-write invalidation. Called from
-        both `Workspace.dispatch()` and `Ops._call(write=True)` so a
-        write through any code path sees the same invalidation rules:
-        file cache is dropped only for remote-backed mounts, and the
-        parent directory index is dirtied for any mount that maintains
-        an index. No-op for paths that resolve to no known mount.
-        """
-        try:
-            mount = self._registry.mount_for(path)
-        except ValueError:
-            return
-        await self._invalidate_after_write(mount, path)
-
-    async def _invalidate_after_write(self, mount: Mount, path: str) -> None:
-        if mount.resource.is_remote is True:
-            await self._cache.remove(path)
-        idx = getattr(mount.resource, "index", None)
-        if idx is not None:
-            parent = path.rsplit("/", 1)[0] or "/"
-            await idx.invalidate_dir(parent)
-            await idx.invalidate_dir(parent + "/")
-
-    async def _invalidate_index_dirs(self, io: IOResult) -> None:
-        dirs_seen: set[str] = set()
-        for path in io.writes:
-            try:
-                mount = self._registry.mount_for(path)
-            except ValueError:
-                continue
-            parent = path.rsplit("/", 1)[0] or "/"
-            if parent in dirs_seen:
-                continue
-            dirs_seen.add(parent)
-            idx = mount.resource.index
-            await idx.invalidate_dir(parent)
-            await idx.invalidate_dir(parent + "/")
+        await self._dispatcher.invalidate_after_write_by_path(path)
 
     async def _record_execution(
         self,
@@ -675,6 +581,10 @@ class Workspace:
             self.history.append(exec_record)
             if self.observer is not None:
                 await self.observer.log_command(exec_record, session_cwd)
+
+    async def _exec_recursion(self, cancel: asyncio.Event | None, cmd: str,
+                              **opts: Any) -> Any:
+        return await self.execute(cmd, cancel=cancel, **opts)
 
     async def execute(
         self,
@@ -740,8 +650,7 @@ class Workspace:
         io = IOResult()
         exec_node = ExecutionNode(command=command, exit_code=0)
 
-        async def _exec_for_recursion(cmd: str, **opts: Any) -> Any:
-            return await self.execute(cmd, cancel=cancel, **opts)
+        exec_recursion = partial(self._exec_recursion, cancel)
 
         session_token = set_current_session(effective_session)
         try:
@@ -763,34 +672,25 @@ class Workspace:
                 # using a resolved safeguard for the AST's primary command,
                 # or wrap each handler call inside provision_node.
                 return await provision_node(self._registry, self.dispatch,
-                                            _exec_for_recursion, ast,
+                                            exec_recursion, ast,
                                             effective_session)
             records = start_recording()
-            stdout, io, exec_node = await _execute_node(
+            io, exec_node = await run_command_tree(
                 self.dispatch,
                 self._registry,
                 self.job_table,
-                _exec_for_recursion,
+                exec_recursion,
                 self._current_agent_id,
                 ast,
                 effective_session,
                 stdin,
-                history=self.history,
-                cancel=cancel,
+                self.history,
+                cancel,
             )
-            stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
-            if io.safeguard is not None:
-                stdout, sg_io = await apply_safeguard(stdout, io.safeguard)
-                if sg_io.stderr is not None:
-                    existing = await materialize(io.stderr)
-                    io.stderr = existing + await materialize(sg_io.stderr)
-                if sg_io.exit_code != 0:
-                    io.exit_code = sg_io.exit_code
             session.last_exit_code = io.exit_code
             stop_recording()
             self._ops.records.extend(records)
             exec_node.records = records
-            io.stdout = stdout
             await self.apply_io(io)
             return io
         except CommandTimeoutError as exc:

@@ -16,6 +16,7 @@ from mirage.resource.base import BaseResource
 from mirage.resource.disk.disk import DiskResource
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Resource
+from mirage.types import ResourceName
 
 
 def test_base_resource_name():
@@ -32,3 +33,7 @@ def test_memory_resource_name():
 
 def test_s3_resource_name():
     assert S3Resource.name == "s3"
+
+
+def test_hf_buckets_resource_name():
+    assert ResourceName.HF_BUCKETS.value == "hf_buckets"

@@ -5,15 +5,7 @@ import pytest
 from mirage.core.databricks_volume.read import read_bytes
 from mirage.types import PathSpec
 
-
-class ToThreadRecorder:
-
-    def __init__(self) -> None:
-        self.calls = []
-
-    async def __call__(self, fn, *args, **kwargs):
-        self.calls.append((fn, args, kwargs))
-        return fn(*args, **kwargs)
+from .conftest import ToThreadRecorder
 
 
 @pytest.mark.asyncio

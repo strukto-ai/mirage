@@ -73,5 +73,4 @@ async def ls(
         list_dir=d,
         classify=F,
         index=index,
-        trailing_newline=True,
     )

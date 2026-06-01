@@ -1,0 +1,42 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+from pydantic import BaseModel, ConfigDict, SecretStr
+
+from mirage.resource.s3 import S3Config
+
+
+class CephConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    bucket: str
+    endpoint_url: str
+    access_key_id: SecretStr
+    secret_access_key: SecretStr
+    region: str = "us-east-1"
+    path_style: bool = True
+    timeout: int = 30
+    proxy: str | None = None
+
+    def to_s3_config(self) -> S3Config:
+        return S3Config(
+            bucket=self.bucket,
+            region=self.region,
+            endpoint_url=self.endpoint_url,
+            aws_access_key_id=self.access_key_id,
+            aws_secret_access_key=self.secret_access_key,
+            path_style=self.path_style,
+            timeout=self.timeout,
+            proxy=self.proxy,
+        )

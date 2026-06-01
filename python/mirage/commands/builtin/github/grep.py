@@ -22,6 +22,8 @@ from mirage.commands.builtin.grep_helper import (classify_pattern,
                                                  compile_pattern,
                                                  grep_files_only, grep_lines,
                                                  grep_recursive, grep_stream)
+from mirage.commands.builtin.utils.output import (format_optional_records,
+                                                  format_records)
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -221,10 +223,10 @@ async def grep(
                     warnings=warnings_l,
                 )
                 all_results.extend(res)
-            stderr = "\n".join(warnings_l).encode() if warnings_l else None
+            stderr = format_optional_records(warnings_l)
             if not all_results:
                 return b"", IOResult(exit_code=1, stderr=stderr)
-            return "\n".join(all_results).encode(), IOResult(stderr=stderr)
+            return format_records(all_results), IOResult(stderr=stderr)
 
         pat = compile_pattern(pattern, i, F, w)
         all_results = []
@@ -275,10 +277,10 @@ async def grep(
                                        for line in file_lines)
             else:
                 all_results.extend(file_lines)
-        stderr = "\n".join(warnings_g).encode() if warnings_g else None
+        stderr = format_optional_records(warnings_g)
         if not all_results:
             return b"", IOResult(exit_code=1, stderr=stderr)
-        return "\n".join(all_results).encode(), IOResult(stderr=stderr)
+        return format_records(all_results), IOResult(stderr=stderr)
 
     source = _resolve_source(stdin, "grep: usage: grep [flags] pattern [path]")
     pat = compile_pattern(pattern, i, F, w)

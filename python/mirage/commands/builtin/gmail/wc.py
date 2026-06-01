@@ -19,6 +19,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.wc import WCCounts, format_wc
 from mirage.commands.builtin.generic.wc import wc as generic_wc
 from mirage.commands.builtin.gmail._provision import file_read_provision
+from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -83,10 +84,10 @@ async def wc(
                           m=m,
                           L=L,
                           label="total"))
-        return "\n".join(outputs).encode(), IOResult()
+        return format_records(outputs), IOResult()
     data = await _read_stdin_async(stdin)
     if data is None:
         raise ValueError("wc: missing operand")
     counts = await generic_wc(data)
     return format_wc(counts, args_l=args_l, w=w, c=c, m=m,
-                     L=L).encode(), IOResult()
+                     L=L).encode() + b"\n", IOResult()

@@ -67,5 +67,6 @@ async def test_wc_multi_file_emits_total(workspace):
     await workspace.ops.write("/b.txt", b"world\nfoo\n")
     io = await workspace.execute("wc /a.txt /b.txt", session_id="default")
     assert io.exit_code == 0
+    assert io.stdout.endswith(b"\n")
     lines = io.stdout.decode().splitlines()
     assert lines[-1].endswith("total")

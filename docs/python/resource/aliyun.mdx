@@ -1,0 +1,82 @@
+---
+title: Alibaba OSS
+icon: /images/aliyun-logo.svg
+description: Mount an Alibaba Cloud OSS bucket via its S3-compatible API as a virtual filesystem.
+---
+The Aliyun resource is a thin wrapper over the [S3 resource](/python/resource/s3).
+It maps an `AliyunConfig` to an `S3Config` and reuses the exact same backend,
+commands, and behavior as S3, it just derives the right OSS endpoint from
+`region`. Uses aioboto3 against Alibaba OSS's S3-compatible API.
+
+The endpoint is computed from `region` as `s3.oss-<region>.aliyuncs.com`
+(e.g. `s3.oss-cn-hangzhou.aliyuncs.com`). Note the `s3.` prefix: this is the
+S3-compatible host, distinct from the native `oss-<region>.aliyuncs.com`. Pass
+`endpoint_url` to override.
+
+## Config
+
+```python
+import os
+
+from mirage import MountMode, Workspace
+from mirage.resource.aliyun import AliyunConfig, AliyunResource
+
+config = AliyunConfig(
+    bucket=os.environ["OSS_BUCKET"],
+    region=os.environ.get("OSS_REGION", "cn-hangzhou"),
+    access_key_id=os.environ["OSS_ACCESS_KEY_ID"],
+    secret_access_key=os.environ["OSS_ACCESS_KEY_SECRET"],
+    # Optional:
+    # endpoint_url="https://s3.oss-cn-hangzhou.aliyuncs.com",
+    # timeout=30,
+    # proxy="http://proxy:8080",
+)
+resource = AliyunResource(config)
+ws = Workspace({"/data": resource}, mode=MountMode.READ)
+```
+
+Both `READ` and `WRITE` modes are supported.
+
+## Example
+
+```python
+import asyncio
+import os
+
+from dotenv import load_dotenv
+
+from mirage import MountMode, Workspace
+from mirage.resource.aliyun import AliyunConfig, AliyunResource
+
+load_dotenv(".env.development")
+
+config = AliyunConfig(
+    bucket=os.environ["OSS_BUCKET"],
+    region=os.environ.get("OSS_REGION", "cn-hangzhou"),
+    access_key_id=os.environ["OSS_ACCESS_KEY_ID"],
+    secret_access_key=os.environ["OSS_ACCESS_KEY_SECRET"],
+)
+resource = AliyunResource(config)
+
+
+async def main() -> None:
+    ws = Workspace({"/data/": resource}, mode=MountMode.READ)
+
+    r = await ws.execute("ls /data/")
+    print(await r.stdout_str())
+
+    r = await ws.execute("tree /data/")
+    print(await r.stdout_str())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## Notes
+
+- Aliyun reports `ResourceName.S3` and routes through the same `core/s3`
+  implementation, so the full S3 shell-command set applies. See the
+  [S3 resource](/python/resource/s3) for the complete command reference,
+  range reads, streaming, and the index cache fast path.
+- For credential setup, see [Alibaba OSS Setup](/home/setup/aliyun).

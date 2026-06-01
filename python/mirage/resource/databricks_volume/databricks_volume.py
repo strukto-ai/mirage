@@ -18,11 +18,16 @@ from typing import Any
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.commands.builtin.databricks_volume import \
     COMMANDS as DATABRICKS_VOLUME_COMMANDS
+from mirage.core.databricks_volume.copy import copy
 from mirage.core.databricks_volume.create import create
 from mirage.core.databricks_volume.exists import exists
 from mirage.core.databricks_volume.glob import resolve_glob as _resolve_glob
+from mirage.core.databricks_volume.mkdir import mkdir
 from mirage.core.databricks_volume.read import read_bytes
 from mirage.core.databricks_volume.readdir import readdir
+from mirage.core.databricks_volume.rename import rename
+from mirage.core.databricks_volume.rm import rm_recursive
+from mirage.core.databricks_volume.rmdir import rmdir
 from mirage.core.databricks_volume.stat import stat as databricks_stat
 from mirage.core.databricks_volume.stream import range_read, read_stream
 from mirage.core.databricks_volume.unlink import unlink
@@ -43,6 +48,11 @@ _DATABRICKS_VOLUME_OPS = {
     "write": write_bytes,
     "create": create,
     "unlink": unlink,
+    "mkdir": mkdir,
+    "rmdir": rmdir,
+    "copy": copy,
+    "rename": rename,
+    "rm_recursive": rm_recursive,
 }
 
 

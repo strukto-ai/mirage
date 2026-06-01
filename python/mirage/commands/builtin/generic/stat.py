@@ -2,6 +2,7 @@ import re
 from collections.abc import Awaitable, Callable
 
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
 
@@ -54,7 +55,7 @@ async def stat(
             lines.append(f"name={s.name} size={s.size}"
                          f" modified={s.modified}"
                          f" type={s.type.value if s.type else None}")
-    return "\n".join(lines).encode(), IOResult()
+    return format_records(lines), IOResult()
 
 
 __all__ = ["stat"]

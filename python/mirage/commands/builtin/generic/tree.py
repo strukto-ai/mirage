@@ -2,6 +2,8 @@ import fnmatch
 from collections.abc import Awaitable, Callable
 
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.utils.output import (format_optional_records,
+                                                  format_records)
 from mirage.io.types import IOResult
 from mirage.types import FileStat, FileType, PathSpec
 
@@ -108,8 +110,8 @@ async def tree(
                         match_pattern=match_pattern,
                         warnings=warnings,
                         index=index)
-    output = "\n".join(lines).encode()
-    stderr = "\n".join(warnings).encode() if warnings else None
+    output = format_records(lines)
+    stderr = format_optional_records(warnings)
     return output, IOResult(stderr=stderr)
 
 

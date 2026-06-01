@@ -1,0 +1,30 @@
+---
+title: HF Models
+icon: /images/huggingface-logo.svg
+description: Set up Hugging Face Models credentials.
+---
+
+## Credentials
+
+### 1. Pick a Model Repo
+
+Browse [huggingface.co/models](https://huggingface.co/models) and note the
+full `namespace/model-name` (e.g. `sapientinc/HRM-Text-1B`).
+
+Public models need no token. Gated/private models do.
+
+### 2. Create an Access Token (gated/private only)
+
+1. Go to https://huggingface.co/settings/tokens
+2. Create a fine-grained token with **Read** access to the model
+
+### 3. Set Environment Variables
+
+```bash
+# .env.development
+HF_MODEL_REPO=sapientinc/HRM-Text-1B
+HF_TOKEN=hf_...   # optional, public models work without it
+```
+
+For Python configuration, see the
+[HF Models resource](/python/resource/hf_models) docs.

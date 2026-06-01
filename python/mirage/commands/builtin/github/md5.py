@@ -12,10 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import hashlib
+from functools import partial
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.md5 import md5 as generic_md5
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.github.glob import resolve_glob
@@ -36,7 +37,7 @@ async def md5(
     if index is None or not paths:
         raise ValueError("md5: missing operand")
     paths = await resolve_glob(accessor, paths, index)
-    p = paths[0]
-    data = await github_read(accessor, p, index)
-    result = hashlib.md5(data).hexdigest()
-    return result.encode(), IOResult()
+    return await generic_md5(paths,
+                             read_bytes=partial(github_read, index=index),
+                             accessor=accessor,
+                             stdin=stdin)

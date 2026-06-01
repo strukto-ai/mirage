@@ -1,6 +1,7 @@
 import hashlib
 from collections.abc import AsyncIterator, Awaitable, Callable
 
+from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -24,7 +25,7 @@ async def md5(
         data = await read_bytes(accessor, p)
         digest = hashlib.md5(data).hexdigest()
         outputs.append(f"{digest}  {p.original}")
-    return "\n".join(outputs).encode(), IOResult()
+    return format_records(outputs), IOResult()
 
 
 __all__ = ["md5"]

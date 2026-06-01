@@ -44,7 +44,7 @@ async def sort(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    if paths:
+    if paths and accessor.root is not None:
         paths = await resolve_glob(accessor, paths, index)
     else:
         paths = []

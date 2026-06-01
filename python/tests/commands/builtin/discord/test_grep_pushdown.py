@@ -80,6 +80,7 @@ async def test_discord_grep_with_many_concrete_paths_uses_native_search():
     assert fake_search.await_count == 1
     assert io.exit_code == 0
     assert b"hello" in out
+    assert out.endswith(b"\n")
     assert (b"/discord/myguild/channels/general__ch_456/"
             b"2026-01-15/chat.jsonl:") in out
 
@@ -162,5 +163,6 @@ async def test_discord_rg_with_many_concrete_paths_uses_native_search():
     assert fake_search.await_count == 1
     assert io.exit_code == 0
     assert b"hello" in out
+    assert out.endswith(b"\n")
     assert (b"/discord/myguild/channels/general__ch_456/"
             b"2026-01-15/chat.jsonl:") in out

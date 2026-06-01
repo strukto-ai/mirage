@@ -17,6 +17,7 @@ from functools import partial
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.databricks_volume.glob import resolve_glob
@@ -82,4 +83,4 @@ async def stat(
             type_value = file_stat.type.value if file_stat.type else None
             lines.append(f"name={file_stat.name} size={file_stat.size}"
                          f" modified={file_stat.modified} type={type_value}")
-    return "\n".join(lines).encode(), IOResult()
+    return format_records(lines), IOResult()

@@ -18,6 +18,7 @@ from mirage.commands.builtin.find_helper import (_extract_not_name,
                                                  _extract_or_names,
                                                  _parse_mtime, _parse_size)
 from mirage.commands.builtin.s3._provision import metadata_provision
+from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.s3.find import find as find_impl
@@ -86,5 +87,5 @@ async def find(
     )
     if p0.prefix:
         results = [p0.prefix + "/" + r.lstrip("/") for r in results]
-    output = "\n".join(results).encode()
+    output = format_records(results)
     return output, IOResult()

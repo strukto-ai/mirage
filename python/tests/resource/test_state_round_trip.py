@@ -236,8 +236,6 @@ REDACTION_CASES = [
      ["SLACK-TOKEN-LEAK", "SLACK-SEARCH-LEAK"]),
     ("mirage.resource.discord", "DiscordResource", "DiscordConfig",
      dict(token="DISCORD-TOKEN-LEAK"), ["DISCORD-TOKEN-LEAK"]),
-    ("mirage.resource.telegram", "TelegramResource", "TelegramConfig",
-     dict(token="TG-TOKEN-LEAK"), ["TG-TOKEN-LEAK"]),
     ("mirage.resource.notion", "NotionResource", "NotionConfig",
      dict(api_key="NOTION-KEY-LEAK"), ["NOTION-KEY-LEAK"]),
     ("mirage.resource.linear", "LinearResource", "LinearConfig",

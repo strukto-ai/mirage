@@ -17,6 +17,7 @@ from collections.abc import AsyncIterator
 from mirage.accessor.gmail import GmailAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.grep_helper import compile_pattern, grep_lines
+from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -99,7 +100,7 @@ async def rg(
             lines = format_grep_results(rows, scope, file_prefix, pattern_str)
             if not lines:
                 return b"", IOResult(exit_code=1)
-            return ("\n".join(lines) + "\n").encode(), IOResult()
+            return format_records(lines), IOResult()
 
         paths = await resolve_glob(accessor, paths, index)
         blob_paths: list[str] = []
@@ -147,7 +148,7 @@ async def rg(
                 all_results.append(f"{bp}:{line}")
         if not any_match:
             return b"", IOResult(exit_code=1)
-        return "\n".join(all_results).encode(), IOResult()
+        return format_records(all_results), IOResult()
 
     raw = await _read_stdin_async(stdin)
     if raw is None:
@@ -165,8 +166,8 @@ async def rg(
     if not matched:
         return b"", IOResult(exit_code=1)
     if c:
-        return str(len(matched)).encode(), IOResult()
+        return str(len(matched)).encode() + b"\n", IOResult()
     result_lines: list[str] = []
     for line in matched:
         result_lines.append(line)
-    return "\n".join(result_lines).encode(), IOResult()
+    return format_records(result_lines), IOResult()

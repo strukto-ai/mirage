@@ -20,6 +20,8 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.grep_helper import (compile_pattern,
                                                  grep_files_only, grep_lines,
                                                  grep_recursive, grep_stream)
+from mirage.commands.builtin.utils.output import (format_optional_records,
+                                                  format_records)
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.builtin.utils.wrap import (call_read_bytes,
                                                 call_read_stream, call_readdir,
@@ -167,10 +169,10 @@ async def grep(
                                        index=index,
                                        prefix=mount_prefix),
             )
-            stderr = "\n".join(warnings_l).encode() if warnings_l else None
+            stderr = format_optional_records(warnings_l)
             if not results:
                 return b"", IOResult(exit_code=1, stderr=stderr)
-            return "\n".join(results).encode(), IOResult(stderr=stderr)
+            return format_records(results), IOResult(stderr=stderr)
 
         if r or R:
             compiled = compile_pattern(pattern, i, F, w)
@@ -211,10 +213,10 @@ async def grep(
                         all_results.extend(
                             f"{path.original}:{line}" if len(paths) >
                             1 else line for line in hits)
-            stderr = ("\n".join(warnings_r).encode() if warnings_r else None)
+            stderr = format_optional_records(warnings_r)
             if not all_results:
                 return b"", IOResult(exit_code=1, stderr=stderr)
-            return "\n".join(all_results).encode(), IOResult(stderr=stderr)
+            return format_records(all_results), IOResult(stderr=stderr)
 
         compiled = compile_pattern(pattern, i, F, w)
 
@@ -236,7 +238,7 @@ async def grep(
                                        for line in hits)
             if not all_results:
                 return b"", IOResult(exit_code=1)
-            return "\n".join(all_results).encode(), IOResult()
+            return format_records(all_results), IOResult()
 
         source = read_stream(accessor, paths[0], index)
         stream = grep_stream(

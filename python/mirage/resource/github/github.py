@@ -36,11 +36,18 @@ class GitHubResource(BaseResource):
     def __init__(
         self,
         config: GitHubConfig,
-        owner: str,
-        repo: str,
-        ref: str = "main",
+        owner: str | None = None,
+        repo: str | None = None,
+        ref: str | None = None,
     ) -> None:
         super().__init__()
+        owner = owner or config.owner
+        repo = repo or config.repo
+        ref = ref or config.ref
+        if owner is None or repo is None:
+            raise ValueError(
+                "GitHubResource requires owner and repo, either as "
+                "constructor kwargs or in GitHubConfig")
         default_branch = fetch_default_branch_sync(config, owner, repo)
         tree, truncated = fetch_tree_sync(config, owner, repo, ref)
         self.accessor = GitHubAccessor(config,

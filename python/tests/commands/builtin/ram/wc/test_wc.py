@@ -31,7 +31,7 @@ async def test_wc_default(workspace):
     assert parts[0] == "2"
     assert parts[1] == "4"
     assert parts[2] == "20"
-    assert parts[3] == "/f.txt"
+    assert parts[3] == "/f.txt\n"
 
 
 @pytest.mark.asyncio
@@ -90,7 +90,7 @@ async def test_wc_l_stdin(workspace):
                                  session_id="default",
                                  stdin=b"a\nb\nc\n")
     assert io.exit_code == 0
-    assert io.stdout.decode().strip() == "3"
+    assert io.stdout == b"3\n"
 
 
 @pytest.mark.asyncio
@@ -134,6 +134,7 @@ async def test_wc_multi_file_emits_total(workspace):
     await workspace.ops.write("/b.txt", b"world\nfoo\n")
     io = await workspace.execute("wc /a.txt /b.txt", session_id="default")
     assert io.exit_code == 0
+    assert io.stdout.endswith(b"\n")
     lines = io.stdout.decode().splitlines()
     assert any(line.endswith("/a.txt") for line in lines)
     assert any(line.endswith("/b.txt") for line in lines)

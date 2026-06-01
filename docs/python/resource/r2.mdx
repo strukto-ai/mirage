@@ -3,10 +3,11 @@ title: Cloudflare R2
 icon: cloud
 description: Mount Cloudflare R2 storage as a virtual filesystem.
 ---
-The R2 resource exposes a Cloudflare R2 bucket as a virtual filesystem.
-It uses the S3-compatible API internally.
+The R2 resource mounts a Cloudflare R2 bucket at some prefix such as
+`/r2/`. All operations involve network I/O to the remote object store.
+Uses aioboto3 against R2's S3-compatible API.
 
-For credential setup, see [R2 Setup](/python/setup/r2).
+For credential setup, see [R2 Setup](/home/setup/r2).
 
 ## Config
 
@@ -21,38 +22,38 @@ config = R2Config(
     account_id=os.environ["R2_ACCOUNT_ID"],
     access_key_id=os.environ["R2_ACCESS_KEY_ID"],
     secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
+    # Optional:
+    # endpoint_url="https://...r2.cloudflarestorage.com",
+    # aws_profile="my-profile",
+    # region="auto",
+    # timeout=30,
+    # proxy="http://proxy:8080",
 )
 resource = R2Resource(config=config)
 ws = Workspace({"/r2": resource}, mode=MountMode.READ)
 ```
 
-| Field              | Required | Default  | Description                          |
-| ------------------ | -------- | -------- | ------------------------------------ |
-| `bucket`           | yes      |          | R2 bucket name                       |
-| `account_id`       | no*      |          | Cloudflare account ID                |
-| `endpoint_url`     | no*      |          | Custom endpoint URL                  |
-| `access_key_id`    | no       |          | R2 API token access key              |
-| `secret_access_key`| no       |          | R2 API token secret key              |
-| `aws_profile`      | no       |          | AWS profile name (alternative auth)  |
-| `region`           | no       | `auto`   | Region (R2 defaults to `auto`)       |
-| `timeout`          | no       | `30`     | Request timeout in seconds           |
-| `proxy`            | no       |          | HTTP proxy URL                       |
-
-*Either `account_id` or `endpoint_url` is required. If `account_id` is
-provided, the endpoint is auto-built as
-`https://{account_id}.r2.cloudflarestorage.com`.
+`R2Resource(config)` takes an `R2Config` object with the bucket name and
+either `account_id` (endpoint is auto-built as
+`https://{account_id}.r2.cloudflarestorage.com`) or an explicit
+`endpoint_url`. Both `READ` and `WRITE` modes are supported.
 
 ## Filesystem Layout
 
+The R2 resource maps object keys to virtual paths under the mount
+prefix. R2 "directories" are prefix-based — there are no real directory
+objects.
+
+For example, if bucket `my-bucket` contains:
+
 ```text
-/r2/
-  <object-key-path>/
-    <file>
+assets/logo.png
+assets/style.css
+data/export.parquet
+data/metrics.csv
 ```
 
-Object keys map directly to virtual paths.
-
-Example:
+Then mounting at `/r2/` exposes:
 
 ```text
 /r2/
@@ -64,13 +65,15 @@ Example:
     metrics.csv
 ```
 
-Columnar files (`.parquet`, `.orc`, `.feather`) return formatted tables
-when read via `cat`.
+Path mapping: virtual `/r2/assets/logo.png` maps to R2 key
+`assets/logo.png`.
 
 ## Cache
 
-Uses `IndexCacheStore` for directory listings with configurable TTL.
-File content caching is handled by the workspace.
+The R2 resource uses `IndexCacheStore` with `index_ttl = 600`
+(10 minutes). Directory listings are cached for up to 600 seconds before
+being refreshed from R2. This reduces API calls for repeated directory
+traversals.
 
 ## Example
 
@@ -91,11 +94,12 @@ config = R2Config(
     access_key_id=os.environ["R2_ACCESS_KEY_ID"],
     secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
 )
+
 resource = R2Resource(config=config)
 
 
-async def main():
-    ws = Workspace({"/r2": resource}, mode=MountMode.READ)
+async def main() -> None:
+    ws = Workspace({"/r2/": resource}, mode=MountMode.READ)
 
     r = await ws.execute("ls /r2/")
     print(await r.stdout_str())
@@ -103,11 +107,13 @@ async def main():
     r = await ws.execute("cat /r2/data/metrics.csv | head -n 10")
     print(await r.stdout_str())
 
-    # Parquet files render as formatted tables
-    r = await ws.execute("cat /r2/data/export.parquet")
+    r = await ws.execute("tree /r2/")
     print(await r.stdout_str())
 
     r = await ws.execute("find /r2/ -name '*.csv'")
+    print(await r.stdout_str())
+
+    r = await ws.execute("stat /r2/assets/logo.png")
     print(await r.stdout_str())
 
 
@@ -117,14 +123,141 @@ if __name__ == "__main__":
 
 ## Shell Commands
 
-| Command         | Notes                                        |
-| --------------- | -------------------------------------------- |
-| `ls`            | List objects and prefixes                    |
-| `cat`           | Read object content (tables for columnar)    |
-| `head` / `tail` | First/last N lines                           |
-| `grep` / `rg`   | Pattern search                               |
-| `jq`            | Query JSON objects                           |
-| `wc`            | Line/word/byte counts                        |
-| `stat`          | Object metadata (size, modified time)        |
-| `find`          | Recursive search with `-name`, `-maxdepth`   |
-| `tree`          | Directory tree view                          |
+The R2 resource supports the full set of shell commands since it operates
+on real file content (text, binary, JSON, CSV, etc.). Large files benefit
+from range reads to avoid downloading entire objects.
+
+### Read Commands
+
+| Command         | Notes                                      |
+| --------------- | ------------------------------------------ |
+| `cat`           | Read file content                          |
+| `head` / `tail` | First/last N lines                         |
+| `grep` / `rg`   | Pattern search (file or directory level)   |
+| `jq`            | Query JSON fields                          |
+| `wc`            | Line/word/byte counts                      |
+| `stat`          | File metadata (name, size, type, modified) |
+| `find`          | Recursive search with `-name`, `-maxdepth` |
+| `tree`          | Directory tree view                        |
+| `nl`            | Number lines                               |
+| `du`            | Disk usage summary                         |
+| `file`          | Detect file type                           |
+| `strings`       | Extract printable strings from binary      |
+| `xxd`           | Hex dump                                   |
+| `md5`           | MD5 checksum                               |
+| `sha256sum`     | SHA-256 checksum                           |
+
+### Text Processing
+
+| Command    | Notes                                       |
+| ---------- | ------------------------------------------- |
+| `awk`      | Pattern scanning and processing             |
+| `sed`      | Stream editor                               |
+| `tr`       | Translate or delete characters              |
+| `sort`     | Sort lines                                  |
+| `uniq`     | Remove duplicate lines                      |
+| `cut`      | Extract fields/columns                      |
+| `join`     | Join lines on a common field                |
+| `paste`    | Merge lines side by side                    |
+| `column`   | Columnate output                            |
+| `fold`     | Wrap lines to a specified width             |
+| `expand`   | Convert tabs to spaces                      |
+| `unexpand` | Convert spaces to tabs                      |
+| `fmt`      | Simple text formatter                       |
+| `rev`      | Reverse lines                               |
+| `tac`      | Concatenate and print in reverse            |
+| `look`     | Display lines beginning with a given string |
+| `shuf`     | Shuffle lines                               |
+| `tsort`    | Topological sort                            |
+| `comm`     | Compare two sorted files                    |
+| `cmp`      | Compare two files byte by byte              |
+| `diff`     | Compare files line by line                  |
+| `patch`    | Apply a diff patch                          |
+| `iconv`    | Character encoding conversion               |
+
+### File Operations
+
+| Command  | Notes                                 |
+| -------- | ------------------------------------- |
+| `cp`     | Copy files                            |
+| `mv`     | Move/rename files                     |
+| `rm`     | Remove files                          |
+| `mkdir`  | Create directories                    |
+| `touch`  | Create empty file or update timestamp |
+| `ln`     | Create symbolic links                 |
+| `tee`    | Write stdin to file and stdout        |
+| `mktemp` | Create temporary file                 |
+| `split`  | Split file into pieces                |
+| `csplit` | Split file by context                 |
+
+### Path Utilities
+
+| Command    | Notes                      |
+| ---------- | -------------------------- |
+| `basename` | Strip directory from path  |
+| `dirname`  | Strip filename from path   |
+| `realpath` | Resolve path               |
+| `readlink` | Print symbolic link target |
+| `ls`       | List directory contents    |
+
+### Compression
+
+| Command  | Notes                 |
+| -------- | --------------------- |
+| `gzip`   | Compress files        |
+| `gunzip` | Decompress gzip files |
+| `zip`    | Create zip archives   |
+| `unzip`  | Extract zip archives  |
+| `tar`    | Archive files         |
+| `zcat`   | Cat compressed files  |
+| `zgrep`  | Grep compressed files |
+
+### Encoding
+
+| Command  | Notes                |
+| -------- | -------------------- |
+| `base64` | Base64 encode/decode |
+
+### Data Format Support
+
+Commands with format-specific variants for structured data files:
+
+| Format  | Extension  | Variants                                       |
+| ------- | ---------- | ---------------------------------------------- |
+| Parquet | `.parquet` | cat, head, tail, wc, stat, cut, grep, ls, file |
+| Feather | `.feather` | cat, head, tail, wc, stat, cut, grep, ls, file |
+| ORC     | `.orc`     | cat, head, tail, wc, stat, cut, grep, ls, file |
+| HDF5    | `.hdf5`    | cat, head, tail, wc, stat, cut, grep, ls, file |
+
+These variants auto-detect the format by extension and convert to
+tabular text (CSV) for processing.
+
+### Audio Support (Optional)
+
+Audio commands are opt-in and require `sherpa-onnx` with a Whisper model.
+They transcribe audio to text, enabling `cat`, `head`, `tail`, `grep`,
+and `stat` on audio files.
+
+| Format | Extension | Commands                    |
+| ------ | --------- | --------------------------- |
+| WAV    | `.wav`    | cat, head, tail, grep, stat |
+| MP3    | `.mp3`    | cat, head, tail, grep, stat |
+| OGG    | `.ogg`    | cat, head, tail, grep, stat |
+
+To enable, register audio commands manually:
+
+```python
+from mirage.commands.audio import AUDIO_COMMANDS
+from mirage.commands.audio.utils import configure
+
+configure(model_dir="path/to/sherpa-onnx-whisper-base")
+
+for cmd in AUDIO_COMMANDS:
+    ws.register(cmd)
+```
+
+## Use Cases
+
+- **AI agents accessing R2 data**: Mount R2 buckets for agents to read and process datasets
+- **Data pipelines**: Read and write R2 objects with shell-like commands
+- **FUSE mounting**: Expose R2 buckets through a virtual FUSE mount for external tools

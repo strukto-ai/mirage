@@ -5,7 +5,7 @@ description: Step-by-step guide for implementing a new MIRAGE resource.
 ---
 
 This guide covers what you need to implement when adding a new resource
-to MIRAGE. Use the Telegram, Discord, or Slack resources as reference.
+to MIRAGE. Use the Discord or Slack resources as reference.
 
 ## File Structure
 
@@ -132,7 +132,7 @@ async def grep(accessor, paths, *texts, **_extra):
 | Scenario                                   | Approach                                                  |
 | ------------------------------------------ | --------------------------------------------------------- |
 | Resource has a search API (Discord, Slack) | Use scope to route to native API at directory level       |
-| Resource has no search API (Telegram)      | Always fall through to file-level reads; scope is a noop  |
+| Resource has no search API                 | Always fall through to file-level reads; scope is a noop  |
 | `head`/`tail` with direct message fetch    | Use scope to detect file level, fetch N messages directly |
 
 **When the resource has no search API**, keep `scope.py` as a noop for

@@ -135,7 +135,12 @@ class RedisIndexCacheStore(IndexCacheStore):
 
     async def invalidate_dir(self, resource_path: str) -> None:
         children_key = f"{self._children_prefix}{resource_path}"
-        await self._client.delete(children_key)
+        child_paths = await self._client.lrange(children_key, 0, -1)
+        pipe = self._client.pipeline()
+        for child in child_paths:
+            pipe.delete(self._entry_key(child))
+        pipe.delete(children_key)
+        await pipe.execute()
 
     async def clear(self) -> None:
         cursor = 0

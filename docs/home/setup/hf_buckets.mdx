@@ -1,0 +1,30 @@
+---
+title: HF Buckets
+icon: /images/huggingface-logo.svg
+description: Set up Hugging Face Buckets credentials for the HF Buckets resource.
+---
+
+## Credentials
+
+### 1. Create a Bucket
+
+1. Go to https://huggingface.co/new-bucket and create a bucket
+2. Note the full name in `namespace/bucket-name` form
+   (e.g. `your-user/my-data`)
+
+### 2. Create an Access Token
+
+1. Go to https://huggingface.co/settings/tokens
+2. Create a fine-grained token with **Read** (or **Write** if you need
+   to upload) access to the bucket's namespace
+
+### 3. Set Environment Variables
+
+```bash
+# .env.development
+HF_BUCKET_NAME=your-user/my-data
+HF_TOKEN=hf_...
+```
+
+For Python configuration, see the
+[HF Buckets resource](/python/resource/hf_buckets) docs.

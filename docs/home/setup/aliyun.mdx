@@ -1,0 +1,30 @@
+---
+title: Alibaba OSS
+icon: /images/aliyun-logo.svg
+description: Set up Alibaba Cloud OSS credentials for the Aliyun resource.
+---
+
+## Credentials
+
+### 1. Create an AccessKey pair
+
+1. Sign in to the [Alibaba Cloud console](https://www.aliyun.com/)
+1. Go to **AccessKey Management** (RAM user recommended) -> **Create AccessKey**
+1. Copy the **AccessKey ID** and **AccessKey Secret**
+1. Note your bucket's **region** (e.g. `cn-hangzhou`) and **bucket** name
+
+The endpoint is derived from `region` as `s3.oss-<region>.aliyuncs.com`. Note the
+`s3.` prefix: this is the S3-compatible host, distinct from the native
+`oss-<region>.aliyuncs.com`.
+
+### 2. Set environment variables
+
+```bash
+# .env.development
+OSS_BUCKET=my-bucket
+OSS_REGION=cn-hangzhou
+OSS_ACCESS_KEY_ID=...
+OSS_ACCESS_KEY_SECRET=...
+```
+
+For Python configuration, see the [Alibaba OSS resource](/python/resource/aliyun) docs.

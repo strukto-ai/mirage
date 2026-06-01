@@ -1,0 +1,86 @@
+---
+title: MinIO
+icon: /images/minio-logo.svg
+description: Mount a self-hosted MinIO bucket as a virtual filesystem.
+---
+The MinIO resource is a thin wrapper over the [S3 resource](/python/resource/s3).
+It maps a `MinIOConfig` to an `S3Config` and reuses the exact same backend,
+commands, and behavior as S3, it just points at your MinIO `endpoint_url` and
+uses path-style addressing by default.
+
+MinIO is self-hosted, so `endpoint_url` is **required** (there is no
+region-derived host). Uses aioboto3 against MinIO's S3-compatible API.
+
+## Config
+
+```python
+import os
+
+from mirage import MountMode, Workspace
+from mirage.resource.minio import MinIOConfig, MinIOResource
+
+config = MinIOConfig(
+    bucket=os.environ["MINIO_BUCKET"],
+    endpoint_url=os.environ.get("MINIO_ENDPOINT", "http://localhost:9000"),
+    access_key_id=os.environ["MINIO_ACCESS_KEY"],
+    secret_access_key=os.environ["MINIO_SECRET_KEY"],
+    # Optional:
+    # region="us-east-1",   # default
+    # path_style=True,      # default; MinIO requires path-style addressing
+    # timeout=30,
+    # proxy="http://proxy:8080",
+)
+resource = MinIOResource(config)
+ws = Workspace({"/minio": resource}, mode=MountMode.WRITE)
+```
+
+Both `READ` and `WRITE` modes are supported.
+
+## Example
+
+```python
+import asyncio
+import os
+
+from dotenv import load_dotenv
+
+from mirage import MountMode, Workspace
+from mirage.resource.minio import MinIOConfig, MinIOResource
+
+load_dotenv(".env.development")
+
+config = MinIOConfig(
+    bucket=os.environ.get("MINIO_BUCKET", "mirage-demo"),
+    endpoint_url=os.environ.get("MINIO_ENDPOINT", "http://localhost:9000"),
+    access_key_id=os.environ.get("MINIO_ACCESS_KEY", "minioadmin"),
+    secret_access_key=os.environ.get("MINIO_SECRET_KEY", "minioadmin"),
+)
+resource = MinIOResource(config)
+
+
+async def main() -> None:
+    ws = Workspace({"/minio/": resource}, mode=MountMode.READ)
+
+    r = await ws.execute("ls /minio/")
+    print(await r.stdout_str())
+
+    r = await ws.execute("tree /minio/")
+    print(await r.stdout_str())
+
+    r = await ws.execute("cat /minio/data/config.json")
+    print(await r.stdout_str())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## Notes
+
+- MinIO reports `ResourceName.S3` and routes through the same `core/s3`
+  implementation, so the full S3 shell-command set applies (`ls`, `cat`,
+  `head`, `tail`, `grep`, `rg`, `wc`, `find`, `tree`, `jq`, `stat`, plus
+  parquet/orc/feather table rendering). See the [S3 resource](/python/resource/s3)
+  for the complete command reference, range reads, streaming, and the index
+  cache fast path.
+- For credential setup, see [MinIO Setup](/home/setup/minio).

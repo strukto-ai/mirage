@@ -48,6 +48,17 @@ async def test_expiry_stored_in_dict(store):
 
 
 @pytest.mark.asyncio
+async def test_invalidate_dir_evicts_child_entries(store):
+    entry = IndexEntry(id="1", name="f", resource_type="file")
+    await store.set_dir("/dir", [("f.txt", entry)])
+    assert (await store.get("/dir/f.txt")).entry is not None
+    await store.invalidate_dir("/dir")
+    assert (await store.get("/dir/f.txt")).entry is None
+    assert "/dir" not in store._children
+    assert "/dir" not in store._expiry
+
+
+@pytest.mark.asyncio
 async def test_clear_empties_all_dicts(store):
     entry = IndexEntry(id="1", name="f", resource_type="file")
     await store.put("/f.txt", entry)

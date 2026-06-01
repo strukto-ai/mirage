@@ -1,7 +1,11 @@
 import codecs
+import inspect
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from typing import Any, Callable
 
+from mirage.commands.builtin.utils.output import format_records
+from mirage.types import PathSpec
 from mirage.utils.stream import ensure_stream
 
 
@@ -117,3 +121,60 @@ def format_wc(
     if label is None:
         return body
     return f"{body}\t{label}"
+
+
+async def format_multi(
+    paths: list[PathSpec],
+    *,
+    read: Callable[..., Any],
+    accessor: object = None,
+    args_l: bool = False,
+    w: bool = False,
+    c: bool = False,
+    m: bool = False,
+    L: bool = False,
+) -> bytes:
+    """Format wc output for multiple already-resolved paths.
+
+    Globs are expanded by the caller (``resolve_glob``) before this runs, so
+    ``paths`` is always a flat list of concrete entries, never patterns. One
+    record is emitted per path, plus a trailing ``total`` row when more than
+    one path is given; every record ends with a newline per POSIX wc.
+
+    Args:
+        paths (list[PathSpec]): Resolved paths; only ``.original`` is read.
+        read (Callable[..., Any]): Reader called as ``read(accessor, path)``;
+            returns bytes, an awaitable of bytes, or an async byte iterator.
+        accessor (object): Backend accessor passed through to ``read``.
+        args_l (bool): Report line count only.
+        w (bool): Report word count only.
+        c (bool): Report byte count only.
+        m (bool): Report character count only.
+        L (bool): Report longest line length only.
+
+    Returns:
+        bytes: Encoded wc output, or ``b""`` when ``paths`` is empty.
+    """
+    outputs: list[str] = []
+    totals = WCCounts()
+    for path in paths:
+        source = read(accessor, path)
+        if inspect.isawaitable(source):
+            source = await source
+        counts = await wc(source)
+        outputs.append(
+            format_wc(counts,
+                      args_l=args_l,
+                      w=w,
+                      c=c,
+                      m=m,
+                      L=L,
+                      label=path.original))
+        totals.merge(counts)
+    if len(paths) > 1:
+        outputs.append(
+            format_wc(totals, args_l=args_l, w=w, c=c, m=m, L=L,
+                      label="total"))
+    if not outputs:
+        return b""
+    return format_records(outputs)

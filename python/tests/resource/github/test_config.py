@@ -30,6 +30,23 @@ def test_github_config_with_token():
     assert reveal_secret(cfg.token) == "ghp_abc123"
 
 
+def test_github_config_owner_repo_ref_default():
+    cfg = GitHubConfig(token="ghp_abc123")
+    assert cfg.owner is None
+    assert cfg.repo is None
+    assert cfg.ref == "main"
+
+
+def test_github_config_accepts_owner_repo_ref():
+    cfg = GitHubConfig(token="ghp_abc123",
+                       owner="strukto-ai",
+                       repo="mirage",
+                       ref="dev")
+    assert cfg.owner == "strukto-ai"
+    assert cfg.repo == "mirage"
+    assert cfg.ref == "dev"
+
+
 def test_tree_entry_fields():
     entry = TreeEntry(path="src/main.py", type="blob", sha="abc123", size=1024)
     assert entry.path == "src/main.py"

@@ -16,12 +16,12 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.notion import NotionAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.jq import jq as generic_jq
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
-from mirage.core.jq import (format_jq_output, jq_eval, parse_json_auto,
-                            parse_json_path)
 from mirage.core.notion.glob import resolve_glob
 from mirage.core.notion.read import read as notion_read
+from mirage.core.notion.stream import read_stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -38,32 +38,14 @@ async def jq(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not texts:
-        raise ValueError("jq: usage: jq EXPRESSION [path]")
-    expression = texts[0]
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        outputs: list[bytes] = []
-        for p in paths:
-            raw = await notion_read(accessor, p, index)
-            data = parse_json_path(raw, p.original)
-            if s:
-                data = [data] if not isinstance(data, list) else data
-            result = jq_eval(data, expression.strip())
-            spread = "[]" in expression
-            outputs.append(format_jq_output(result, r, c, spread))
-        return b"".join(outputs), IOResult()
-    if stdin is not None:
-        if isinstance(stdin, bytes):
-            raw_bytes = stdin
-        else:
-            raw_bytes = b""
-            async for chunk in stdin:
-                raw_bytes += chunk
-        data = parse_json_auto(raw_bytes)
-        if s and not isinstance(data, list):
-            data = [data]
-        result = jq_eval(data, expression.strip())
-        spread = "[]" in expression
-        return format_jq_output(result, r, c, spread), IOResult()
-    raise ValueError("jq: missing input")
+    return await generic_jq(paths,
+                            *texts,
+                            read_bytes=notion_read,
+                            read_stream=read_stream,
+                            accessor=accessor,
+                            stdin=stdin,
+                            r=r,
+                            c=c,
+                            s=s)

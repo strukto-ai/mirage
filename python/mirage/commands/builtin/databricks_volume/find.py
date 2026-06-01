@@ -16,6 +16,7 @@ import fnmatch
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.databricks_volume.glob import resolve_glob
@@ -101,4 +102,4 @@ async def find(
     depth = int(maxdepth) if maxdepth is not None else None
     results = await _find_recurse(accessor, path, name, type_filter, depth, 0,
                                   index)
-    return "\n".join(results).encode(), IOResult()
+    return format_records(results), IOResult()

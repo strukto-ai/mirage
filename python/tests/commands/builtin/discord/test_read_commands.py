@@ -257,7 +257,7 @@ async def test_wc(accessor):
     ):
         stream, io = await wc(accessor, _make_glob(ABS_FILE), args_l=True)
     data = await _collect(stream)
-    assert data == b"3\t" + ABS_FILE.encode()
+    assert data == b"3\t" + ABS_FILE.encode() + b"\n"
 
 
 @pytest.mark.asyncio

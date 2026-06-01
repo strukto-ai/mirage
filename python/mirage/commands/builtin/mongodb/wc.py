@@ -75,12 +75,12 @@ async def wc(
                 paths[0],
                 index,
             )
-            return str(len(data)).encode(), IOResult()
+            return str(len(data)).encode() + b"\n", IOResult()
         count = await count_documents(
             accessor.client,
             scope.database,
             scope.name,
         )
-        return str(count).encode(), IOResult()
+        return str(count).encode() + b"\n", IOResult()
 
     raise ValueError("wc: path must target documents.jsonl")

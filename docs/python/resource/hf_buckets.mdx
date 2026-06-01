@@ -1,0 +1,252 @@
+---
+title: HF Buckets
+description: Mount Hugging Face Buckets as a Mirage filesystem with async reads and S3-compatible writes for Python agents.
+icon: /images/huggingface-logo.svg
+---
+The HF Buckets resource mounts a [Hugging Face Bucket](https://huggingface.co/docs/buckets)
+at some prefix such as `/hf/`. Speaks HF's HTTP API natively (async,
+streaming, no Python SDK dependency).
+
+For credential setup, see [HF Buckets Setup](/home/setup/hf_buckets).
+
+## Config
+
+```python
+import os
+
+from mirage import MountMode, Workspace
+from mirage.resource.hf_buckets import HfBucketsConfig, HfBucketsResource
+
+config = HfBucketsConfig(
+    bucket=os.environ["HF_BUCKET_NAME"],  # "namespace/bucket-name"
+    token=os.environ["HF_TOKEN"],
+    # Optional:
+    # endpoint="https://huggingface.co",
+    # timeout=30,
+    # key_prefix="data/",
+)
+resource = HfBucketsResource(config)
+ws = Workspace({"/hf": resource}, mode=MountMode.READ)
+```
+
+`HfBucketsResource(config)` takes an `HfBucketsConfig` object with the
+bucket in `namespace/bucket-name` form plus an optional access token.
+Both `READ` and `WRITE` modes are supported out of the box.
+
+## Filesystem Layout
+
+The HF Buckets resource maps bucket object keys to virtual paths under
+the mount prefix.
+
+For example, if bucket `your-user/my-data` contains:
+
+```text
+data/file.txt
+data/config.json
+reports/q1.csv
+reports/q2.csv
+```
+
+Then mounting at `/hf/` exposes:
+
+```text
+/hf/
+  data/
+    file.txt
+    config.json
+  reports/
+    q1.csv
+    q2.csv
+```
+
+Path mapping: virtual `/hf/data/file.txt` maps to bucket key
+`data/file.txt`.
+
+## Cache
+
+The HF Buckets resource uses `IndexCacheStore` with `index_ttl = 600`
+(10 minutes). Directory listings are cached and populate file-size/type
+entries that `stat` reads via a fast path, so a `readdir` followed by
+per-entry `stat` calls (which is what `ls`, FUSE `getattr`, and most
+shell commands trigger) costs one HTTP request instead of N.
+
+## Example
+
+```python
+import asyncio
+import os
+
+from dotenv import load_dotenv
+
+from mirage import MountMode, Workspace
+from mirage.resource.hf_buckets import HfBucketsConfig, HfBucketsResource
+
+load_dotenv(".env.development")
+
+config = HfBucketsConfig(
+    bucket=os.environ["HF_BUCKET_NAME"],
+    token=os.environ["HF_TOKEN"],
+)
+
+resource = HfBucketsResource(config)
+
+
+async def main() -> None:
+    ws = Workspace({"/hf/": resource}, mode=MountMode.READ)
+
+    r = await ws.execute("ls /hf/")
+    print(await r.stdout_str())
+
+    r = await ws.execute("cat /hf/data/file.txt")
+    print(await r.stdout_str())
+
+    r = await ws.execute("tree /hf/")
+    print(await r.stdout_str())
+
+    r = await ws.execute("find /hf/ -name '*.json'")
+    print(await r.stdout_str())
+
+    r = await ws.execute("grep example /hf/data/config.json")
+    print(await r.stdout_str())
+
+    r = await ws.execute("stat /hf/data/file.txt")
+    print(await r.stdout_str())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+## Shell Commands
+
+The HF Buckets resource supports the full set of shell commands since it operates
+on real file content (text, binary, JSON, CSV, etc.). Large files benefit
+from range reads to avoid downloading entire objects.
+
+### Read Commands
+
+| Command         | Notes                                      |
+| --------------- | ------------------------------------------ |
+| `cat`           | Read file content                          |
+| `head` / `tail` | First/last N lines                         |
+| `grep` / `rg`   | Pattern search (file or directory level)   |
+| `jq`            | Query JSON fields                          |
+| `wc`            | Line/word/byte counts                      |
+| `stat`          | File metadata (name, size, type, modified) |
+| `find`          | Recursive search with `-name`, `-maxdepth` |
+| `tree`          | Directory tree view                        |
+| `nl`            | Number lines                               |
+| `du`            | Disk usage summary                         |
+| `file`          | Detect file type                           |
+| `strings`       | Extract printable strings from binary      |
+| `xxd`           | Hex dump                                   |
+| `md5`           | MD5 checksum                               |
+| `sha256sum`     | SHA-256 checksum                           |
+
+### Text Processing
+
+| Command    | Notes                                       |
+| ---------- | ------------------------------------------- |
+| `awk`      | Pattern scanning and processing             |
+| `sed`      | Stream editor                               |
+| `tr`       | Translate or delete characters              |
+| `sort`     | Sort lines                                  |
+| `uniq`     | Remove duplicate lines                      |
+| `cut`      | Extract fields/columns                      |
+| `join`     | Join lines on a common field                |
+| `paste`    | Merge lines side by side                    |
+| `column`   | Columnate output                            |
+| `fold`     | Wrap lines to a specified width             |
+| `expand`   | Convert tabs to spaces                      |
+| `unexpand` | Convert spaces to tabs                      |
+| `fmt`      | Simple text formatter                       |
+| `rev`      | Reverse lines                               |
+| `tac`      | Concatenate and print in reverse            |
+| `look`     | Display lines beginning with a given string |
+| `shuf`     | Shuffle lines                               |
+| `tsort`    | Topological sort                            |
+| `comm`     | Compare two sorted files                    |
+| `cmp`      | Compare two files byte by byte              |
+| `diff`     | Compare files line by line                  |
+| `patch`    | Apply a diff patch                          |
+| `iconv`    | Character encoding conversion               |
+
+### File Operations
+
+| Command  | Notes                                 |
+| -------- | ------------------------------------- |
+| `cp`     | Copy files                            |
+| `mv`     | Move/rename files                     |
+| `rm`     | Remove files                          |
+| `mkdir`  | Create directories                    |
+| `touch`  | Create empty file or update timestamp |
+| `ln`     | Create symbolic links                 |
+| `tee`    | Write stdin to file and stdout        |
+| `mktemp` | Create temporary file                 |
+| `split`  | Split file into pieces                |
+| `csplit` | Split file by context                 |
+
+### Path Utilities
+
+| Command    | Notes                      |
+| ---------- | -------------------------- |
+| `basename` | Strip directory from path  |
+| `dirname`  | Strip filename from path   |
+| `realpath` | Resolve path               |
+| `readlink` | Print symbolic link target |
+| `ls`       | List directory contents    |
+
+### Compression
+
+| Command  | Notes                 |
+| -------- | --------------------- |
+| `gzip`   | Compress files        |
+| `gunzip` | Decompress gzip files |
+| `zip`    | Create zip archives   |
+| `unzip`  | Extract zip archives  |
+| `tar`    | Archive files         |
+| `zcat`   | Cat compressed files  |
+| `zgrep`  | Grep compressed files |
+
+### Encoding
+
+| Command  | Notes                |
+| -------- | -------------------- |
+| `base64` | Base64 encode/decode |
+
+### Data Format Support
+
+Commands with format-specific variants for structured data files:
+
+| Format  | Extension  | Variants                                       |
+| ------- | ---------- | ---------------------------------------------- |
+| Parquet | `.parquet` | cat, head, tail, wc, stat, cut, grep, ls, file |
+| Feather | `.feather` | cat, head, tail, wc, stat, cut, grep, ls, file |
+| ORC     | `.orc`     | cat, head, tail, wc, stat, cut, grep, ls, file |
+| HDF5    | `.hdf5`    | cat, head, tail, wc, stat, cut, grep, ls, file |
+
+These variants auto-detect the format by extension and convert to
+tabular text (CSV) for processing.
+
+## Use Cases
+
+- **AI agents accessing HF datasets**: Mount HF Buckets for agents to read and process datasets stored on the Hub
+- **Data pipelines**: Read and write HF bucket objects with shell-like commands
+- **Sandboxed bucket access**: Restrict agent operations to a specific bucket and prefix
+- **FUSE mounting**: Expose HF Buckets through a virtual FUSE mount for external tools
+
+## Scoping a resource to a key prefix
+
+Pass `key_prefix: str | None = None` to `HfBucketsConfig` to transparently scope every operation to a subpath of the bucket:
+
+```python
+HfBucketsResource(HfBucketsConfig(
+    bucket="your-user/app-data",
+    token=hf_token,
+    key_prefix=f"users/{user_id}/",
+))
+```
+
+When set, every read/write/list/stat operation is transparently scoped to that bucket subpath. Agents see clean paths like `/data/notes.md`; the underlying bucket key is `users/{user_id}/data/notes.md`. Useful for multi-tenant systems.
+
+**Normalization:** leading slashes are stripped and a trailing slash is added automatically. Both `None` and an empty string are treated as "no prefix."

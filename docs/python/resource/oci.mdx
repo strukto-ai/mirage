@@ -3,10 +3,12 @@ title: OCI Object Storage
 icon: server
 description: Mount Oracle Cloud Infrastructure Object Storage as a virtual filesystem.
 ---
-The OCI resource exposes an Oracle Cloud Infrastructure Object Storage
-bucket as a virtual filesystem. It uses the S3-compatible API internally.
+The OCI resource mounts an Oracle Cloud Infrastructure Object Storage
+bucket at some prefix such as `/oci/`. All operations involve network
+I/O to the remote object store. Uses aioboto3 against OCI's
+S3-compatible API.
 
-For credential setup, see [OCI Setup](/python/setup/oci).
+For credential setup, see [OCI Setup](/home/setup/oci).
 
 ## Config
 
@@ -22,34 +24,36 @@ config = OCIConfig(
     region=os.environ["OCI_REGION"],
     access_key_id=os.environ["OCI_ACCESS_KEY_ID"],
     secret_access_key=os.environ["OCI_SECRET_ACCESS_KEY"],
+    # Optional:
+    # endpoint_url="https://{namespace}.compat.objectstorage.{region}.oraclecloud.com",
+    # timeout=30,
+    # proxy="http://proxy:8080",
 )
 resource = OCIResource(config=config)
 ws = Workspace({"/oci": resource}, mode=MountMode.READ)
 ```
 
-| Field              | Required | Default | Description                          |
-| ------------------ | -------- | ------- | ------------------------------------ |
-| `bucket`           | yes      |         | OCI bucket name                      |
-| `namespace`        | yes      |         | OCI tenancy namespace                |
-| `region`           | yes      |         | OCI region (e.g. `us-ashburn-1`)     |
-| `access_key_id`    | yes      |         | Customer secret key access ID        |
-| `secret_access_key`| yes      |         | Customer secret key                  |
-| `endpoint_url`     | no       | auto    | S3-compatible endpoint (auto-built from namespace + region) |
-| `timeout`          | no       | `30`    | Request timeout in seconds           |
-| `proxy`            | no       |         | HTTP proxy URL                       |
+`OCIResource(config)` takes an `OCIConfig` object with the bucket name,
+OCI tenancy `namespace`, `region`, and Customer Secret Key credentials.
+The S3-compatible endpoint is auto-built from `namespace` + `region`
+unless `endpoint_url` is supplied. Both `READ` and `WRITE` modes are
+supported.
 
 ## Filesystem Layout
 
+The OCI resource maps object keys to virtual paths under the mount
+prefix. OCI "directories" are prefix-based — there are no real
+directory objects.
+
+For example, if bucket `my-bucket` contains:
+
 ```text
-/oci/
-  <object-key-path>/
-    <file>
+data/users.csv
+data/logs/2026-04-01.jsonl
+config.json
 ```
 
-Object keys map directly to virtual paths. Directories are inferred
-from `/` delimiters in keys.
-
-Example:
+Then mounting at `/oci/` exposes:
 
 ```text
 /oci/
@@ -60,10 +64,14 @@ Example:
   config.json
 ```
 
+Path mapping: virtual `/oci/data/users.csv` maps to OCI key
+`data/users.csv`.
+
 ## Cache
 
-Uses `IndexCacheStore` for directory listings with configurable TTL.
-File content caching is handled by the workspace.
+The OCI resource uses `IndexCacheStore` with `index_ttl = 600`
+(10 minutes). Directory listings are cached for up to 600 seconds before
+being refreshed from OCI.
 
 ## Example
 
@@ -85,11 +93,12 @@ config = OCIConfig(
     access_key_id=os.environ["OCI_ACCESS_KEY_ID"],
     secret_access_key=os.environ["OCI_SECRET_ACCESS_KEY"],
 )
+
 resource = OCIResource(config=config)
 
 
-async def main():
-    ws = Workspace({"/oci": resource}, mode=MountMode.READ)
+async def main() -> None:
+    ws = Workspace({"/oci/": resource}, mode=MountMode.READ)
 
     r = await ws.execute("ls /oci/")
     print(await r.stdout_str())
@@ -97,7 +106,13 @@ async def main():
     r = await ws.execute("cat /oci/data/users.csv | head -n 5")
     print(await r.stdout_str())
 
+    r = await ws.execute("tree /oci/")
+    print(await r.stdout_str())
+
     r = await ws.execute("find /oci/ -name '*.jsonl'")
+    print(await r.stdout_str())
+
+    r = await ws.execute("stat /oci/config.json")
     print(await r.stdout_str())
 
 
@@ -107,14 +122,141 @@ if __name__ == "__main__":
 
 ## Shell Commands
 
+The OCI resource supports the full set of shell commands since it operates
+on real file content (text, binary, JSON, CSV, etc.). Large files benefit
+from range reads to avoid downloading entire objects.
+
+### Read Commands
+
 | Command         | Notes                                      |
 | --------------- | ------------------------------------------ |
-| `ls`            | List objects and prefixes                  |
-| `cat`           | Read object content                        |
+| `cat`           | Read file content                          |
 | `head` / `tail` | First/last N lines                         |
-| `grep` / `rg`   | Pattern search                             |
-| `jq`            | Query JSON objects                         |
+| `grep` / `rg`   | Pattern search (file or directory level)   |
+| `jq`            | Query JSON fields                          |
 | `wc`            | Line/word/byte counts                      |
-| `stat`          | Object metadata (size, modified time)      |
+| `stat`          | File metadata (name, size, type, modified) |
 | `find`          | Recursive search with `-name`, `-maxdepth` |
 | `tree`          | Directory tree view                        |
+| `nl`            | Number lines                               |
+| `du`            | Disk usage summary                         |
+| `file`          | Detect file type                           |
+| `strings`       | Extract printable strings from binary      |
+| `xxd`           | Hex dump                                   |
+| `md5`           | MD5 checksum                               |
+| `sha256sum`     | SHA-256 checksum                           |
+
+### Text Processing
+
+| Command    | Notes                                       |
+| ---------- | ------------------------------------------- |
+| `awk`      | Pattern scanning and processing             |
+| `sed`      | Stream editor                               |
+| `tr`       | Translate or delete characters              |
+| `sort`     | Sort lines                                  |
+| `uniq`     | Remove duplicate lines                      |
+| `cut`      | Extract fields/columns                      |
+| `join`     | Join lines on a common field                |
+| `paste`    | Merge lines side by side                    |
+| `column`   | Columnate output                            |
+| `fold`     | Wrap lines to a specified width             |
+| `expand`   | Convert tabs to spaces                      |
+| `unexpand` | Convert spaces to tabs                      |
+| `fmt`      | Simple text formatter                       |
+| `rev`      | Reverse lines                               |
+| `tac`      | Concatenate and print in reverse            |
+| `look`     | Display lines beginning with a given string |
+| `shuf`     | Shuffle lines                               |
+| `tsort`    | Topological sort                            |
+| `comm`     | Compare two sorted files                    |
+| `cmp`      | Compare two files byte by byte              |
+| `diff`     | Compare files line by line                  |
+| `patch`    | Apply a diff patch                          |
+| `iconv`    | Character encoding conversion               |
+
+### File Operations
+
+| Command  | Notes                                 |
+| -------- | ------------------------------------- |
+| `cp`     | Copy files                            |
+| `mv`     | Move/rename files                     |
+| `rm`     | Remove files                          |
+| `mkdir`  | Create directories                    |
+| `touch`  | Create empty file or update timestamp |
+| `ln`     | Create symbolic links                 |
+| `tee`    | Write stdin to file and stdout        |
+| `mktemp` | Create temporary file                 |
+| `split`  | Split file into pieces                |
+| `csplit` | Split file by context                 |
+
+### Path Utilities
+
+| Command    | Notes                      |
+| ---------- | -------------------------- |
+| `basename` | Strip directory from path  |
+| `dirname`  | Strip filename from path   |
+| `realpath` | Resolve path               |
+| `readlink` | Print symbolic link target |
+| `ls`       | List directory contents    |
+
+### Compression
+
+| Command  | Notes                 |
+| -------- | --------------------- |
+| `gzip`   | Compress files        |
+| `gunzip` | Decompress gzip files |
+| `zip`    | Create zip archives   |
+| `unzip`  | Extract zip archives  |
+| `tar`    | Archive files         |
+| `zcat`   | Cat compressed files  |
+| `zgrep`  | Grep compressed files |
+
+### Encoding
+
+| Command  | Notes                |
+| -------- | -------------------- |
+| `base64` | Base64 encode/decode |
+
+### Data Format Support
+
+Commands with format-specific variants for structured data files:
+
+| Format  | Extension  | Variants                                       |
+| ------- | ---------- | ---------------------------------------------- |
+| Parquet | `.parquet` | cat, head, tail, wc, stat, cut, grep, ls, file |
+| Feather | `.feather` | cat, head, tail, wc, stat, cut, grep, ls, file |
+| ORC     | `.orc`     | cat, head, tail, wc, stat, cut, grep, ls, file |
+| HDF5    | `.hdf5`    | cat, head, tail, wc, stat, cut, grep, ls, file |
+
+These variants auto-detect the format by extension and convert to
+tabular text (CSV) for processing.
+
+### Audio Support (Optional)
+
+Audio commands are opt-in and require `sherpa-onnx` with a Whisper model.
+They transcribe audio to text, enabling `cat`, `head`, `tail`, `grep`,
+and `stat` on audio files.
+
+| Format | Extension | Commands                    |
+| ------ | --------- | --------------------------- |
+| WAV    | `.wav`    | cat, head, tail, grep, stat |
+| MP3    | `.mp3`    | cat, head, tail, grep, stat |
+| OGG    | `.ogg`    | cat, head, tail, grep, stat |
+
+To enable, register audio commands manually:
+
+```python
+from mirage.commands.audio import AUDIO_COMMANDS
+from mirage.commands.audio.utils import configure
+
+configure(model_dir="path/to/sherpa-onnx-whisper-base")
+
+for cmd in AUDIO_COMMANDS:
+    ws.register(cmd)
+```
+
+## Use Cases
+
+- **AI agents accessing OCI data**: Mount OCI buckets for agents to read and process datasets
+- **Data pipelines**: Read and write OCI objects with shell-like commands
+- **FUSE mounting**: Expose OCI buckets through a virtual FUSE mount for external tools

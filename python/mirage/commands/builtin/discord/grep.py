@@ -22,6 +22,8 @@ from mirage.commands.builtin.discord._provision import file_read_provision
 from mirage.commands.builtin.grep_helper import (compile_pattern,
                                                  grep_files_only, grep_lines,
                                                  grep_stream)
+from mirage.commands.builtin.utils.output import (format_optional_records,
+                                                  format_records)
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
                                                 call_stat)
@@ -129,7 +131,7 @@ async def grep(
                                             channel_map)
                 if not lines:
                     return b"", IOResult(exit_code=1)
-                return "\n".join(lines).encode(), IOResult()
+                return format_records(lines), IOResult()
             except Exception as exc:
                 msg = str(exc)
                 pushdown_warnings.append(
@@ -167,7 +169,7 @@ async def grep(
             joined: list[str] = list(pushdown_warnings)
             for w in extra:
                 joined.extend(w)
-            return ("\n".join(joined) + "\n").encode() if joined else None
+            return format_optional_records(joined)
 
         if args_l:
             warnings: list[str] = []
@@ -191,7 +193,7 @@ async def grep(
             stderr = _stderr_from(warnings)
             if not results:
                 return b"", IOResult(exit_code=1, stderr=stderr)
-            return ("\n".join(results).encode(), IOResult(stderr=stderr))
+            return (format_records(results), IOResult(stderr=stderr))
 
         pat = compile_pattern(pattern, i, F, w)
 
@@ -212,7 +214,7 @@ async def grep(
             stderr = _stderr_from()
             if not all_results:
                 return b"", IOResult(exit_code=1, stderr=stderr)
-            return "\n".join(all_results).encode(), IOResult(stderr=stderr)
+            return format_records(all_results), IOResult(stderr=stderr)
 
         data = await rb(paths[0].original)
         source = yield_bytes(data)

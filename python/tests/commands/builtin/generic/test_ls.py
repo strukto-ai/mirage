@@ -186,23 +186,12 @@ async def test_walk_missing_path_collects_warning():
 
 
 @pytest.mark.asyncio
-async def test_ls_short_output_no_trailing_newline_by_default():
+async def test_ls_short_output_terminates_record():
     tree = {"/dir": _dir("dir"), "/dir/a.txt": _file("a.txt")}
     readdir, stat = _make_fs_backend(tree)
     output, io = await ls([_spec("/dir")], readdir=readdir, stat=stat)
-    assert output == b"a.txt"
-    assert io.exit_code == 0
-
-
-@pytest.mark.asyncio
-async def test_ls_trailing_newline_when_requested():
-    tree = {"/dir": _dir("dir"), "/dir/a.txt": _file("a.txt")}
-    readdir, stat = _make_fs_backend(tree)
-    output, _ = await ls([_spec("/dir")],
-                         readdir=readdir,
-                         stat=stat,
-                         trailing_newline=True)
     assert output == b"a.txt\n"
+    assert io.exit_code == 0
 
 
 @pytest.mark.asyncio
@@ -233,7 +222,7 @@ async def test_ls_one_per_line_overrides_long():
                            stat=stat,
                            long=True,
                            one_per_line=True)
-    assert out_long == b"a.txt"
+    assert out_long == b"a.txt\n"
 
 
 @pytest.mark.asyncio
@@ -307,7 +296,7 @@ async def test_ls_file_argument_lists_the_file():
     tree = {"/dir/a.json": _file("a.json", 5)}
     readdir, stat = _make_fs_backend(tree)
     output, io = await ls([_spec("/dir/a.json")], readdir=readdir, stat=stat)
-    assert output == b"a.json"
+    assert output == b"a.json\n"
     assert io.exit_code == 0
 
 

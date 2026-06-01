@@ -21,6 +21,7 @@ from mirage.types import PathSpec
 
 async def read_stream(accessor: SSHAccessor,
                       path: PathSpec,
+                      index=None,
                       chunk_size: int = 8192):
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)

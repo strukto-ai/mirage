@@ -22,6 +22,8 @@ from mirage.commands.builtin.grep_helper import (compile_pattern,
                                                  grep_files_only, grep_lines,
                                                  grep_stream)
 from mirage.commands.builtin.slack._provision import file_read_provision
+from mirage.commands.builtin.utils.output import (format_optional_records,
+                                                  format_records)
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
                                                 call_stat)
@@ -129,7 +131,7 @@ async def grep(
             if err is None:
                 if not native_lines:
                     return b"", IOResult(exit_code=1)
-                return ("\n".join(native_lines) + "\n").encode(), IOResult()
+                return format_records(native_lines), IOResult()
             logger.warning(
                 "slack search push-down failed (%s); "
                 "falling back to per-file scan", err)
@@ -171,10 +173,10 @@ async def grep(
                 whole_word=w,
                 warnings=warnings,
             )
-            stderr = ("\n".join(warnings).encode() if warnings else None)
+            stderr = format_optional_records(warnings)
             if not results:
                 return b"", IOResult(exit_code=1, stderr=stderr)
-            return ("\n".join(results).encode(), IOResult(stderr=stderr))
+            return (format_records(results), IOResult(stderr=stderr))
 
         pat = compile_pattern(pattern, i, F, w)
 
@@ -194,7 +196,7 @@ async def grep(
                     all_results.extend(f"{p.original}:{r}" for r in hits)
             if not all_results:
                 return b"", IOResult(exit_code=1)
-            return "\n".join(all_results).encode(), IOResult()
+            return format_records(all_results), IOResult()
 
         data = await rb(paths[0].original)
         source = yield_bytes(data)

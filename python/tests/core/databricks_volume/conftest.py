@@ -15,6 +15,16 @@ class NotFoundError(Exception):
     status_code = 404
 
 
+class ToThreadRecorder:
+
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def __call__(self, fn, *args, **kwargs):
+        self.calls.append((fn, args, kwargs))
+        return fn(*args, **kwargs)
+
+
 class FakeDownload:
 
     def __init__(self, data: bytes) -> None:
@@ -36,6 +46,8 @@ class FakeFiles:
         self.list_directory_calls: list[str] = []
         self.upload_calls: list[tuple[str, bytes, bool]] = []
         self.delete_calls: list[str] = []
+        self.create_directory_calls: list[str] = []
+        self.delete_directory_calls: list[str] = []
 
     def download(self, path: str) -> FakeDownload:
         self.download_calls.append(path)
@@ -63,6 +75,35 @@ class FakeFiles:
         if path not in self.directories:
             raise NotFoundError(path)
         return self.directories[path]
+
+    def create_directory(self, path: str) -> None:
+        self.create_directory_calls.append(path)
+        cur = ""
+        for part in path.strip("/").split("/"):
+            cur = cur + "/" + part
+            if cur in self.directory_metadata:
+                continue
+            self.directory_metadata.add(cur)
+            self.metadata[cur] = SimpleNamespace(is_directory=True)
+            self.directories.setdefault(cur, [])
+            parent = posixpath.dirname(cur) or "/"
+            self._upsert_directory_entry(
+                parent, SimpleNamespace(path=cur, is_directory=True))
+
+    def delete_directory(self, path: str) -> None:
+        self.delete_directory_calls.append(path)
+        if path not in self.directory_metadata:
+            raise NotFoundError(path)
+        if self.directories.get(path):
+            raise OSError(f"directory not empty: {path}")
+        self.directory_metadata.discard(path)
+        self.metadata.pop(path, None)
+        self.directories.pop(path, None)
+        parent = posixpath.dirname(path.rstrip("/")) or "/"
+        self.directories[parent] = [
+            entry for entry in self.directories.get(parent, [])
+            if getattr(entry, "path", None) != path
+        ]
 
     def upload(self, path: str, contents, overwrite: bool = False) -> None:
         data = contents.read()

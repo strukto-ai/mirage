@@ -17,6 +17,7 @@ import fnmatch
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.postgres._provision import metadata_provision
+from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.postgres.glob import resolve_glob
@@ -111,5 +112,5 @@ async def find(
         if iname and not fnmatch.fnmatch(entry_name.lower(), iname.lower()):
             continue
         results.append(p)
-    output = "\n".join(results).encode()
+    output = format_records(results)
     return output, IOResult()

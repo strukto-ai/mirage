@@ -16,44 +16,16 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.generic.head import head as generic_head
+from mirage.commands.builtin.generic.head import head_multi
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.databricks_volume.glob import resolve_glob
 from mirage.core.databricks_volume.stream import range_read, read_stream
-from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-
-async def _head_stream(
-    source: AsyncIterator[bytes],
-    lines: int = 10,
-    bytes_mode: int | None = None,
-) -> AsyncIterator[bytes]:
-    if bytes_mode is not None:
-        remaining = bytes_mode
-        async for chunk in source:
-            if len(chunk) <= remaining:
-                yield chunk
-                remaining -= len(chunk)
-                if remaining <= 0:
-                    return
-            else:
-                yield chunk[:remaining]
-                return
-        return
-    count = 0
-    async for line in AsyncLineIterator(source):
-        yield line + b"\n"
-        count += 1
-        if count >= lines:
-            return
-
-
-async def _single_chunk_stream(data: bytes) -> AsyncIterator[bytes]:
-    if data:
-        yield data
 
 
 @command("head", resource="databricks_volume", spec=SPECS["head"])
@@ -67,14 +39,21 @@ async def head(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    lines = int(n) if n is not None else 10
-    bytes_mode = int(c) if c is not None else None
+    n_int = int(n) if n is not None else None
+    c_int = int(c) if c is not None else None
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        if bytes_mode is not None:
-            data = await range_read(accessor, paths[0], 0, bytes_mode)
-            return _single_chunk_stream(data), IOResult()
-        source = read_stream(accessor, paths[0], index)
-        return _head_stream(source, lines, bytes_mode), IOResult()
+        # Single file with -c: fetch only the first c_int bytes via a range
+        # request instead of streaming the whole file.
+        if len(paths) == 1 and c_int is not None:
+            data = await range_read(accessor, paths[0], 0, c_int)
+            return yield_bytes(data), IOResult()
+        return head_multi(paths,
+                          read=read_stream,
+                          accessor=accessor,
+                          index=index,
+                          n=n_int,
+                          c=c_int,
+                          show_headers=len(paths) > 1), IOResult()
     source = _resolve_source(stdin, "head: missing operand")
-    return _head_stream(source, lines, bytes_mode), IOResult()
+    return generic_head(source, n=n_int, c=c_int), IOResult()

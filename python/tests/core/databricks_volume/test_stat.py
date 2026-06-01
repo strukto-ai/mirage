@@ -1,9 +1,11 @@
+import asyncio
+
 import pytest
 
 from mirage.core.databricks_volume.stat import _name_from_backend_path, stat
 from mirage.types import FileType, PathSpec
 
-from .conftest import file_metadata
+from .conftest import ToThreadRecorder, file_metadata
 
 
 def test_name_from_backend_path_file():
@@ -108,3 +110,39 @@ async def test_stat_directory_metadata_error_propagates(
         await stat(accessor, path)
     assert files.get_metadata_calls == [remote_path]
     assert files.get_directory_metadata_calls == [remote_path]
+
+
+@pytest.mark.asyncio
+async def test_stat_runs_blocking_metadata_off_event_loop(
+    accessor,
+    files,
+    remote_root,
+    monkeypatch,
+):
+    to_thread = ToThreadRecorder()
+    monkeypatch.setattr(asyncio, "to_thread", to_thread)
+    files.metadata[f"{remote_root}/reports/latest.md"] = file_metadata(size=6)
+    path = PathSpec.from_str_path("/volume/reports/latest.md", "/volume")
+
+    result = await stat(accessor, path)
+
+    assert result.name == "latest.md"
+    assert len(to_thread.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_stat_directory_fallback_runs_off_event_loop(
+    accessor,
+    files,
+    remote_root,
+    monkeypatch,
+):
+    to_thread = ToThreadRecorder()
+    monkeypatch.setattr(asyncio, "to_thread", to_thread)
+    files.directory_metadata.add(f"{remote_root}/reports")
+    path = PathSpec.from_str_path("/volume/reports", "/volume")
+
+    result = await stat(accessor, path)
+
+    assert result.type == FileType.DIRECTORY
+    assert len(to_thread.calls) == 2

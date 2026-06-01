@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.resource.hf_buckets import HfBucketsResource
 from mirage.resource.registry import REGISTRY, build_resource
 
 EXPECTED_RESOURCES = {
@@ -25,6 +26,15 @@ EXPECTED_RESOURCES = {
     "oci",
     "supabase",
     "gcs",
+    "minio",
+    "ceph",
+    "wasabi",
+    "backblaze",
+    "digitalocean",
+    "tencent",
+    "aliyun",
+    "scaleway",
+    "qingstor",
     "github",
     "github_ci",
     "linear",
@@ -36,7 +46,6 @@ EXPECTED_RESOURCES = {
     "discord",
     "gmail",
     "trello",
-    "telegram",
     "mongodb",
     "postgres",
     "notion",
@@ -44,6 +53,9 @@ EXPECTED_RESOURCES = {
     "ssh",
     "email",
     "databricks_volume",
+    "hf_buckets",
+    "nextcloud",
+    "dify",
 }
 
 
@@ -109,3 +121,8 @@ def test_registry_module_import_is_free_of_resource_deps():
     if "mirage.resource.registry" in sys.modules:
         del sys.modules["mirage.resource.registry"]
     importlib.import_module("mirage.resource.registry")
+
+
+def test_build_hf_buckets_resource():
+    r = build_resource("hf_buckets", {"bucket": "o/b"})
+    assert isinstance(r, HfBucketsResource)

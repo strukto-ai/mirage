@@ -1,6 +1,8 @@
 from collections.abc import Awaitable, Callable
 
 from mirage.commands.builtin.utils.formatting import _human_size
+from mirage.commands.builtin.utils.output import (format_record_text,
+                                                  format_records)
 from mirage.types import PathSpec
 
 
@@ -79,8 +81,66 @@ async def du(
         )
         sub_texts.append(text)
         totals.append(total)
-    out = "\n".join(sub_texts)
+    out = format_record_text(sub_texts)
     if c:
         grand = sum(totals)
-        out += "\n" + _format_size(grand, h) + "\ttotal"
+        out += _format_size(grand, h) + "\ttotal\n"
     return out
+
+
+async def _du_block(
+    p0: PathSpec,
+    compute_total: Callable[[PathSpec], Awaitable[int]],
+    compute_all: Callable[[PathSpec], Awaitable[list[tuple[str, int]]]] | None,
+    *,
+    s: bool,
+    a: bool,
+    h: bool,
+    max_depth: int | None,
+) -> tuple[list[str], int]:
+    if s or compute_all is None:
+        total = await compute_total(p0)
+        return [_format_size(total, h) + "\t" + p0.original], total
+    all_entries = await compute_all(p0)
+    if not all_entries:
+        total = await compute_total(p0)
+        return [_format_size(total, h) + "\t" + p0.original], total
+    if not a:
+        all_entries = [(p, sz) for p, sz in all_entries if p == p0.original]
+    if max_depth is not None:
+        all_entries = [(p, sz) for p, sz in all_entries
+                       if _depth(p, p0.original) <= max_depth]
+    if not all_entries:
+        total = await compute_total(p0)
+        return [_format_size(total, h) + "\t" + p0.original], total
+    lines = [_format_size(sz, h) + "\t" + p for p, sz in all_entries]
+    return lines, sum(sz for _, sz in all_entries)
+
+
+async def du_multi(
+    paths: list[PathSpec],
+    *,
+    compute_total: Callable[[PathSpec], Awaitable[int]],
+    compute_all: Callable[[PathSpec], Awaitable[list[tuple[str, int]]]]
+    | None = None,
+    h: bool = False,
+    s: bool = False,
+    a: bool = False,
+    max_depth: int | None = None,
+    c: bool = False,
+) -> bytes:
+    lines: list[str] = []
+    totals: list[int] = []
+    for p0 in paths:
+        block, total = await _du_block(p0,
+                                       compute_total,
+                                       compute_all,
+                                       s=s,
+                                       a=a,
+                                       h=h,
+                                       max_depth=max_depth)
+        lines.extend(block)
+        totals.append(total)
+    if c:
+        lines.append(_format_size(sum(totals), h) + "\ttotal")
+    return format_records(lines)

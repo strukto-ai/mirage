@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from mirage.commands.builtin.find_helper import (_extract_not_name,
                                                  _extract_or_names,
                                                  _parse_mtime, _parse_size)
+from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FindType, PathSpec
 
@@ -156,4 +157,4 @@ async def find(
                                            stat=stat,
                                            mount_prefix=search_path.prefix)
     results = apply_mount_prefix(results, search_path.prefix)
-    return "\n".join(results).encode(), IOResult()
+    return format_records(results), IOResult()

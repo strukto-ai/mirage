@@ -14,12 +14,16 @@
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.utils.output import format_optional_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.databricks_volume.glob import resolve_glob
+from mirage.core.databricks_volume.rm import rm_recursive
+from mirage.core.databricks_volume.rmdir import rmdir
+from mirage.core.databricks_volume.stat import stat
 from mirage.core.databricks_volume.unlink import unlink
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import FileType, PathSpec
 
 
 @command("rm", resource="databricks_volume", spec=SPECS["rm"], write=True)
@@ -38,25 +42,31 @@ async def rm(
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
         raise ValueError("rm: missing operand")
-    if r or R or d:
-        raise ValueError(
-            "rm: recursive and directory removal are not supported")
     paths = await resolve_glob(accessor, paths, index)
+    recursive = r or R
     verbose_parts: list[str] = []
     removed: dict[str, bytes] = {}
     for path in paths:
         try:
-            await unlink(accessor, path, index)
-        except IsADirectoryError as exc:
-            raise IsADirectoryError(
-                f"rm: cannot remove '{path.original}': Is a directory"
-            ) from exc
+            file_stat = await stat(accessor, path, index)
         except FileNotFoundError:
             if f:
                 continue
             raise
-        removed[path.strip_prefix] = b""
+        if file_stat.type == FileType.DIRECTORY:
+            if recursive:
+                for relative in await rm_recursive(accessor, path, index):
+                    removed[relative] = b""
+            elif d:
+                await rmdir(accessor, path, index)
+                removed[path.strip_prefix] = b""
+            else:
+                raise IsADirectoryError(
+                    f"rm: cannot remove '{path.original}': Is a directory")
+        else:
+            await unlink(accessor, path, index)
+            removed[path.strip_prefix] = b""
         if v:
             verbose_parts.append(f"removed '{path.original}'")
-    output = "\n".join(verbose_parts).encode() if v else None
+    output = format_optional_records(verbose_parts) if v else None
     return output, IOResult(writes=removed)
