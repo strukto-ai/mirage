@@ -14,9 +14,9 @@
 """Tests for find's action flags (-delete, -print0, -ls).
 
 Per-resource find handlers only emit matched paths. The dispatcher
-(`mirage/workspace/executor/command.py:_apply_find_actions`) reads
-the parsed action flags and applies the corresponding side effect
-or output reformat.
+(`mirage/workspace/executor/find_action_dispatch.py:_apply_find_actions`)
+reads the parsed action flags and applies the corresponding side
+effect or output reformat.
 """
 import asyncio
 

@@ -14,18 +14,15 @@
 
 import aiohttp
 
-from mirage.core.linear.queries import (COMMENT_CREATE_MUTATION,
-                                        COMMENT_UPDATE_MUTATION,
-                                        ISSUE_COMMENTS_QUERY,
-                                        ISSUE_CREATE_MUTATION,
-                                        ISSUE_LOOKUP_QUERY, ISSUE_QUERY,
-                                        ISSUE_SEARCH_QUERY,
-                                        ISSUE_UPDATE_MUTATION,
-                                        TEAM_CYCLES_QUERY, TEAM_ISSUES_QUERY,
-                                        TEAM_LIST_QUERY, TEAM_MEMBERS_QUERY,
-                                        TEAM_PROJECTS_QUERY, USER_LOOKUP_QUERY)
 from mirage.resource.linear.config import LinearConfig
 from mirage.resource.secrets import reveal_secret
+
+from mirage.core.linear.queries import (  # isort: skip
+    COMMENT_CREATE_MUTATION, COMMENT_UPDATE_MUTATION, ISSUE_COMMENTS_QUERY,
+    ISSUE_CREATE_MUTATION, ISSUE_LOOKUP_QUERY, ISSUE_QUERY, ISSUE_SEARCH_QUERY,
+    ISSUE_UPDATE_MUTATION, TEAM_CYCLES_QUERY, TEAM_ISSUES_QUERY,
+    TEAM_LIST_QUERY, TEAM_MEMBERS_QUERY, TEAM_PROJECTS_QUERY,
+    USER_LOOKUP_QUERY)
 
 
 class LinearAPIError(RuntimeError):

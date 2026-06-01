@@ -27,7 +27,7 @@ from mirage.workspace.executor.cross_mount import (handle_cross_mount,
                                                    is_cross_mount)
 from mirage.workspace.executor.fanout import (_fan_out_traversal,
                                               _should_fan_out)
-from mirage.workspace.executor.find_actions import _apply_find_actions
+from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
 from mirage.workspace.executor.jobs import (handle_jobs, handle_kill,
                                             handle_ps, handle_wait)
 from mirage.workspace.mount import MountRegistry

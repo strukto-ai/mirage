@@ -18,7 +18,7 @@ from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.types import PathSpec
-from mirage.workspace.executor.find_actions import _apply_find_actions
+from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.types import ExecutionNode
 

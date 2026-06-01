@@ -26,15 +26,11 @@ from mirage.workspace.executor.builtins.script import (handle_bash,
 from mirage.workspace.executor.builtins.text import (_interpret_escapes,
                                                      handle_echo,
                                                      handle_printf)
-from mirage.workspace.executor.builtins.vars import (handle_export,
-                                                     handle_local,
-                                                     handle_printenv,
-                                                     handle_read,
-                                                     handle_readonly,
-                                                     handle_return, handle_set,
-                                                     handle_shift, handle_trap,
-                                                     handle_unset,
-                                                     handle_whoami)
+
+from mirage.workspace.executor.builtins.vars import (  # isort: skip
+    handle_export, handle_local, handle_printenv, handle_read, handle_readonly,
+    handle_return, handle_set, handle_shift, handle_trap, handle_unset,
+    handle_whoami)
 
 __all__ = [
     '_collect_man_hits',
