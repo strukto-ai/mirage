@@ -474,6 +474,12 @@ c
 191c53e00627438f88824862472a3f59  /data/a.txt
 c0710d6b4f15dfa88f600b0e6b624077  /data/b.txt
 aa824302994c716187326457c48e125e  /data/dup.txt
+=== du_multi ===
+24	/data/a.txt
+6	/data/b.txt
+=== file_multi ===
+/data/a.txt: text
+/data/user.json: json
 === grep_pipe_wc ===
 1
 === sort_uniq ===

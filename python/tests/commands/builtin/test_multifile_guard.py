@@ -20,7 +20,7 @@ import pytest
 BUILTIN = pathlib.Path(
     __file__).resolve().parents[3] / "mirage" / "commands" / "builtin"
 
-GUARDED_COMMANDS = ("cat", "head", "tail", "wc", "du", "file")
+GUARDED_COMMANDS = ("cat", "head", "tail", "wc", "du", "file", "nl", "md5")
 
 # Backends whose command genuinely operates on a single resource and rejects
 # or has no multi-file semantics. Each entry needs a one-line reason so the
@@ -82,7 +82,8 @@ def _loops_paths(func: ast.AST) -> bool:
 
 
 _MULTI_HELPERS = ("format_multi", "generic_grep", "generic_rg", "grep", "rg",
-                  "generic_du", "generic_file", "file_cmd", "du_multi")
+                  "generic_du", "generic_file", "file_cmd", "du_multi",
+                  "generic_nl", "generic_md5")
 
 
 def _passes_full_list(func: ast.AST) -> bool:

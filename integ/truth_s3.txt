@@ -94,6 +94,12 @@ parquet, 10 rows, 3 columns (id: int64, value: double, label: large_string)
 orc, 10 rows, 3 columns, 1 stripes (id: int64, value: double, label: string)
 === s3:file_feather ===
 feather, 10 rows, 3 columns (id: int64, value: double, label: large_string)
+=== s3:du_multi ===
+15533	/s3/data/example.json
+10414430	/s3/data/example.jsonl
+=== s3:file_multi ===
+/s3/data/example.json: json
+/s3/data/example.jsonl: json
 === s3:safeguard_cat_truncates ===
 {"type":"queue-operation","operation":"enqueue","timestamp":"2026-03-17T13:35:35.319Z","sessionId":"664396f7-55a4-4604-8289-aa7142480db4"}
 {"type":"queue-operation","operation":"dequeue","timestamp":"2026-03-17T13:35:35.320Z","sessionId":"664396f7-55a4-4604-8289-aa7142480db4"}
@@ -214,6 +220,12 @@ parquet, 10 rows, 3 columns (id: int64, value: double, label: large_string)
 orc, 10 rows, 3 columns, 1 stripes (id: int64, value: double, label: string)
 === gcs:file_feather ===
 feather, 10 rows, 3 columns (id: int64, value: double, label: large_string)
+=== gcs:du_multi ===
+15533	/gcs/data/example.json
+10414430	/gcs/data/example.jsonl
+=== gcs:file_multi ===
+/gcs/data/example.json: json
+/gcs/data/example.jsonl: json
 === gcs:safeguard_cat_truncates ===
 {"type":"queue-operation","operation":"enqueue","timestamp":"2026-03-17T13:35:35.319Z","sessionId":"664396f7-55a4-4604-8289-aa7142480db4"}
 {"type":"queue-operation","operation":"dequeue","timestamp":"2026-03-17T13:35:35.320Z","sessionId":"664396f7-55a4-4604-8289-aa7142480db4"}
@@ -334,6 +346,12 @@ parquet, 10 rows, 3 columns (id: int64, value: double, label: large_string)
 orc, 10 rows, 3 columns, 1 stripes (id: int64, value: double, label: string)
 === minio:file_feather ===
 feather, 10 rows, 3 columns (id: int64, value: double, label: large_string)
+=== minio:du_multi ===
+15533	/minio/data/example.json
+10414430	/minio/data/example.jsonl
+=== minio:file_multi ===
+/minio/data/example.json: json
+/minio/data/example.jsonl: json
 === minio:safeguard_cat_truncates ===
 {"type":"queue-operation","operation":"enqueue","timestamp":"2026-03-17T13:35:35.319Z","sessionId":"664396f7-55a4-4604-8289-aa7142480db4"}
 {"type":"queue-operation","operation":"dequeue","timestamp":"2026-03-17T13:35:35.320Z","sessionId":"664396f7-55a4-4604-8289-aa7142480db4"}

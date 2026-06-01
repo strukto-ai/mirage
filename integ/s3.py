@@ -94,6 +94,8 @@ PER_MOUNT_CASES: list[tuple[str, str]] = [
     ("file_parquet", "file {m}/data/example.parquet"),
     ("file_orc", "file {m}/data/example.orc"),
     ("file_feather", "file {m}/data/example.feather"),
+    ("du_multi", "du {m}/data/example.json {m}/data/example.jsonl"),
+    ("file_multi", "file {m}/data/example.json {m}/data/example.jsonl"),
 
     # ----- safeguard: per-mount cap on cat (set to 20 lines below) -----
     ("safeguard_cat_truncates", "cat {m}/data/example.jsonl"),

@@ -202,6 +202,8 @@ CASES: list[tuple[str, str]] = [
     ("wc_l_multi", "wc -l /data/a.txt /data/b.txt"),
     ("cat_multi3", "cat /data/a.txt /data/b.txt /data/dup.txt"),
     ("md5_multi3", "md5 /data/a.txt /data/b.txt /data/dup.txt"),
+    ("du_multi", "du /data/a.txt /data/b.txt"),
+    ("file_multi", "file /data/a.txt /data/user.json"),
 
     # ----- pipelines -----
     ("grep_pipe_wc", "grep world /data/a.txt | wc -l"),
