@@ -150,6 +150,73 @@ async def test_fan_out_find_has_safeguard_set():
 
 
 @pytest.mark.asyncio
+async def test_cross_mount_honors_per_mount_timeout_override():
+    a = RAMResource()
+    b = RAMResource()
+    a._store.dirs.add("/")
+    b._store.dirs.add("/")
+    a._store.files["/x.txt"] = b"hi\n"
+    b._store.files["/y.txt"] = b"yo\n"
+    ws = Workspace(
+        {
+            "/a/": (a, MountMode.WRITE, {
+                "cat": CommandSafeguard(timeout_seconds=3.0)
+            }),
+            "/b/":
+            b,
+        },
+        mode=MountMode.WRITE)
+    r = await ws.execute("cat /a/x.txt /b/y.txt")
+    assert r.safeguard is not None
+    assert r.safeguard.timeout_seconds == 3.0
+
+
+@pytest.mark.asyncio
+async def test_fan_out_uses_tightest_timeout_among_mounts():
+    parent = RAMResource()
+    child = RAMResource()
+    parent._store.dirs.add("/")
+    parent._store.files["/a.txt"] = b"hi\n"
+    child._store.dirs.add("/")
+    child._store.files["/b.txt"] = b"yo\n"
+    ws = Workspace(
+        {
+            "/p/":
+            parent,
+            "/p/sub/": (child, MountMode.WRITE, {
+                "find": CommandSafeguard(timeout_seconds=2.0)
+            }),
+        },
+        mode=MountMode.WRITE)
+    r = await ws.execute("find /p")
+    assert r.safeguard is not None
+    assert r.safeguard.timeout_seconds == 2.0
+
+
+@pytest.mark.asyncio
+async def test_fan_out_tightest_when_parent_is_tighter():
+    parent = RAMResource()
+    child = RAMResource()
+    parent._store.dirs.add("/")
+    parent._store.files["/a.txt"] = b"hi\n"
+    child._store.dirs.add("/")
+    child._store.files["/b.txt"] = b"yo\n"
+    ws = Workspace(
+        {
+            "/p/": (parent, MountMode.WRITE, {
+                "find": CommandSafeguard(timeout_seconds=2.0)
+            }),
+            "/p/sub/": (child, MountMode.WRITE, {
+                "find": CommandSafeguard(timeout_seconds=9.0)
+            }),
+        },
+        mode=MountMode.WRITE)
+    r = await ws.execute("find /p")
+    assert r.safeguard is not None
+    assert r.safeguard.timeout_seconds == 2.0
+
+
+@pytest.mark.asyncio
 async def test_background_job_propagates_timeout(restore_defaults):
     sg.DEFAULT_COMMAND_SAFEGUARDS["sleep"] = CommandSafeguard(
         timeout_seconds=0.05)

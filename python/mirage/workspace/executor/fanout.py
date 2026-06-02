@@ -18,12 +18,39 @@ from mirage.commands.safeguard import resolve_safeguard
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
-from mirage.types import PathSpec
+from mirage.types import CommandSafeguard, PathSpec
 from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.types import ExecutionNode
 
 _TRAVERSAL_CMDS = frozenset({"find", "tree", "du"})
+
+
+def _tightest_safeguard(cmd_name: str,
+                        mounts: list) -> CommandSafeguard | None:
+    """Resolve the tightest timeout safeguard among the spanned mounts.
+
+    A fan-out op cannot honor several conflicting per-mount budgets, so the
+    smallest positive timeout wins. Falls back to the command-level default
+    when no spanned mount sets a positive timeout.
+
+    Args:
+        cmd_name (str): command name being resolved.
+        mounts (list): the spanned mounts (primary + descendants).
+    """
+    best = None
+    best_timeout = None
+    for mount in mounts:
+        override = getattr(mount, "command_safeguards", {}).get(cmd_name)
+        resolved = resolve_safeguard(cmd_name, None, override)
+        if resolved is None:
+            continue
+        timeout = resolved.timeout_seconds
+        if timeout is None or timeout <= 0:
+            continue
+        if best_timeout is None or timeout < best_timeout:
+            best, best_timeout = resolved, timeout
+    return best if best is not None else resolve_safeguard(cmd_name)
 
 
 def _path_segments(path: str) -> list[str]:
@@ -263,8 +290,8 @@ async def _fan_out_traversal(
                 final_io_exit = 1
 
     merged_io.exit_code = final_io_exit
-    if merged_io.safeguard is None:
-        merged_io.safeguard = resolve_safeguard(cmd_name)
+    merged_io.safeguard = _tightest_safeguard(cmd_name,
+                                              [primary_mount, *descendants])
     exec_node = ExecutionNode(command=cmd_str,
                               exit_code=final_io_exit,
                               stderr=merged_io.stderr)

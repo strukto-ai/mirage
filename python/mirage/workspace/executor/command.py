@@ -263,7 +263,11 @@ async def handle_command(
         stdout, io, exec_node = await handle_cross_mount(
             cmd_name, path_scopes, text_only, dispatch, cmd_str)
         if io.safeguard is None:
-            io.safeguard = resolve_safeguard(cmd_name)
+            primary = (registry.mount_for(path_scopes[0].original)
+                       if path_scopes else None)
+            override = (primary.command_safeguards.get(cmd_name)
+                        if primary is not None else None)
+            io.safeguard = resolve_safeguard(cmd_name, None, override)
         stdout = maybe_with_timeout(stdout, io.safeguard, cmd_name)
         return stdout, io, exec_node
 
