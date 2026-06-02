@@ -14,7 +14,7 @@
 
 from collections.abc import Callable
 
-from mirage.commands.builtin.utils.safeguard import with_timeout
+from mirage.commands.builtin.utils.safeguard import maybe_with_timeout
 from mirage.commands.safeguard import resolve_safeguard
 from mirage.commands.spec import OperandKind, parse_command, parse_to_kwargs
 from mirage.io import IOResult
@@ -264,12 +264,7 @@ async def handle_command(
             cmd_name, path_scopes, text_only, dispatch, cmd_str)
         if io.safeguard is None:
             io.safeguard = resolve_safeguard(cmd_name)
-        if (io.safeguard is not None
-                and io.safeguard.timeout_seconds is not None
-                and io.safeguard.timeout_seconds > 0 and stdout is not None
-                and not isinstance(stdout, bytes)):
-            stdout = with_timeout(stdout, io.safeguard.timeout_seconds,
-                                  cmd_name)
+        stdout = maybe_with_timeout(stdout, io.safeguard, cmd_name)
         return stdout, io, exec_node
 
     # Reject unsupported cross-mount commands
@@ -358,14 +353,8 @@ async def handle_command(
         io.cache = [prefix + p for p in io.cache]
     stdout, io = wrap_cachable_streams(stdout, io)
 
-    # TODO: io.stderr is also a ByteSource that downstream materialize()
-    # consumes without a timeout wrap. A handler returning a slow
-    # streaming stderr could hang past the resolved timeout. Wrap it
-    # symmetrically with with_timeout here.
-    if (io.safeguard is not None and io.safeguard.timeout_seconds is not None
-            and io.safeguard.timeout_seconds > 0 and stdout is not None
-            and not isinstance(stdout, bytes)):
-        stdout = with_timeout(stdout, io.safeguard.timeout_seconds, cmd_name)
+    stdout = maybe_with_timeout(stdout, io.safeguard, cmd_name)
+    io.stderr = maybe_with_timeout(io.stderr, io.safeguard, cmd_name)
 
     stderr_bytes = await materialize(io.stderr)
     exec_node = ExecutionNode(command=cmd_str,

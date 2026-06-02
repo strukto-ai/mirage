@@ -180,3 +180,29 @@ async def test_job_table_reports_completed_bg_without_wait(restore_defaults):
     assert jobs[0].status.value == "completed"
     assert jobs[0].exit_code == 124
     assert b"sleep: timed out" in jobs[0].stderr
+
+
+@pytest.mark.asyncio
+async def test_timeout_wrap_preserves_lazy_nonzero_exit_on_no_match():
+    ws = _ws()
+    await ws.execute("echo hello > /data/f.txt")
+    r = await ws.execute("grep zzz /data/f.txt")
+    assert r.exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_timeout_wrap_preserves_lazy_zero_exit_on_match():
+    ws = _ws()
+    await ws.execute("echo hello > /data/f.txt")
+    r = await ws.execute("grep hello /data/f.txt")
+    assert r.exit_code == 0
+    assert (await r.stdout_str()) == "hello\n"
+
+
+@pytest.mark.asyncio
+async def test_truncation_keeps_lazy_exit_zero_on_match():
+    ws = _ws({"grep": CommandSafeguard(max_lines=2, timeout_seconds=600)})
+    await ws.execute("printf 'a\\na\\na\\na\\n' > /data/f.txt")
+    r = await ws.execute("grep a /data/f.txt")
+    assert r.exit_code == 0
+    assert (await r.stdout_str()) == "a\na\n"

@@ -12,11 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from collections.abc import AsyncIterator
 
 import pytest
 
-from mirage.commands.builtin.utils.safeguard import apply_safeguard
+from mirage.commands.builtin.utils.safeguard import (CommandTimeoutError,
+                                                     apply_safeguard,
+                                                     maybe_with_timeout,
+                                                     run_with_timeout)
 from mirage.commands.safeguard import CommandSafeguard
 from mirage.io.types import materialize
 from mirage.types import OnExceed
@@ -27,6 +31,19 @@ _TEN = b"".join(f"line{i}\n".encode() for i in range(10))
 async def _stream(data: bytes) -> AsyncIterator[bytes]:
     for i in range(0, len(data), 7):
         yield data[i:i + 7]
+
+
+async def _slow_stream() -> AsyncIterator[bytes]:
+    await asyncio.sleep(5)
+    yield b"x"
+
+
+async def _const(value):
+    return value
+
+
+async def _sleep_forever():
+    await asyncio.sleep(5)
 
 
 @pytest.mark.asyncio
@@ -74,3 +91,49 @@ async def test_streaming_input_truncates_and_stops_early():
     out, io = await apply_safeguard(_stream(_TEN), sg)
     assert out == b"line0\nline1\n"
     assert b"truncated" in (await materialize(io.stderr))
+
+
+def test_maybe_with_timeout_passthrough_when_no_safeguard():
+    stream = _stream(_TEN)
+    assert maybe_with_timeout(stream, None, "cat") is stream
+
+
+def test_maybe_with_timeout_passthrough_when_bytes():
+    assert maybe_with_timeout(_TEN, CommandSafeguard(timeout_seconds=1),
+                              "cat") == _TEN
+
+
+def test_maybe_with_timeout_passthrough_when_no_timeout():
+    stream = _stream(_TEN)
+    assert maybe_with_timeout(stream, CommandSafeguard(max_lines=3),
+                              "cat") is stream
+
+
+def test_maybe_with_timeout_passthrough_when_nonpositive():
+    stream = _stream(_TEN)
+    assert maybe_with_timeout(stream, CommandSafeguard(timeout_seconds=0),
+                              "cat") is stream
+
+
+@pytest.mark.asyncio
+async def test_maybe_with_timeout_wraps_and_fires():
+    wrapped = maybe_with_timeout(_slow_stream(),
+                                 CommandSafeguard(timeout_seconds=0.1), "cat")
+    with pytest.raises(CommandTimeoutError):
+        await materialize(wrapped)
+
+
+@pytest.mark.asyncio
+async def test_run_with_timeout_returns_result_when_under_budget():
+    assert await run_with_timeout(_const(42), 1.0, "sleep") == 42
+
+
+@pytest.mark.asyncio
+async def test_run_with_timeout_no_timeout_when_seconds_falsy():
+    assert await run_with_timeout(_const(7), None, "sleep") == 7
+
+
+@pytest.mark.asyncio
+async def test_run_with_timeout_raises_on_overrun():
+    with pytest.raises(CommandTimeoutError):
+        await run_with_timeout(_sleep_forever(), 0.1, "sleep")

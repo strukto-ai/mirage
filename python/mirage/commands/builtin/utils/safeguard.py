@@ -52,6 +52,50 @@ async def with_timeout(
         yield chunk
 
 
+def maybe_with_timeout(
+    stream: ByteSource | None,
+    safeguard: CommandSafeguard | None,
+    command: str,
+) -> ByteSource | None:
+    """Wrap a byte stream with a timeout if the safeguard calls for one.
+
+    Returns the stream untouched when it is None, already bytes, or the
+    safeguard has no positive timeout. Single source of the wrap rule
+    shared by stdout, stderr, and any other stream channel.
+
+    Args:
+        stream (ByteSource | None): the stream to maybe wrap.
+        safeguard (CommandSafeguard | None): resolved safeguard.
+        command (str): command name for the timeout message.
+    """
+    if stream is None or isinstance(stream, bytes):
+        return stream
+    if safeguard is None or not safeguard.timeout_seconds:
+        return stream
+    if safeguard.timeout_seconds <= 0:
+        return stream
+    return with_timeout(stream, safeguard.timeout_seconds, command)
+
+
+async def run_with_timeout(coro, seconds: float | None, name: str):
+    """Wrap a coroutine with a deadline, mapping overrun to a timeout error.
+
+    Used by eager builtins, dry-run, and VFS ops. Returns the coroutine
+    result unchanged when seconds is falsy or non-positive.
+
+    Args:
+        coro: the awaitable to run.
+        seconds (float | None): timeout budget, or None to disable.
+        name (str): command/op name for the timeout message.
+    """
+    if not seconds or seconds <= 0:
+        return await coro
+    try:
+        return await asyncio.wait_for(coro, timeout=seconds)
+    except asyncio.TimeoutError as exc:
+        raise CommandTimeoutError(name or "?", seconds) from exc
+
+
 def _trim_to_lines(buf: bytes, max_lines: int) -> bytes:
     count = 0
     for i, byte in enumerate(buf):
