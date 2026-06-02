@@ -35,6 +35,7 @@ except ImportError:
 from mirage.io import IOResult
 from mirage.observe.context import start_recording, stop_recording
 from mirage.observe.observer import Observer
+from mirage.observe.record import OpRecord
 from mirage.ops import Ops
 from mirage.ops.open import make_open
 from mirage.ops.os_patch import make_os_module
@@ -661,6 +662,7 @@ class Workspace:
         self._current_agent_id = agent_id
         io = IOResult()
         exec_node = ExecutionNode(command=command, exit_code=0)
+        records: list[OpRecord] = []
 
         exec_recursion = partial(self._exec_recursion, cancel)
 
@@ -707,13 +709,17 @@ class Workspace:
             return io
         except CommandTimeoutError as exc:
             stop_recording()
+            logger.debug("command %r timed out after %ss", exc.command,
+                         exc.seconds)
             if cancel is not None:
                 cancel.set()
             msg = (str(exc) + "\n").encode()
             io = IOResult(exit_code=124, stderr=msg)
+            self._ops.records.extend(records)
             exec_node = ExecutionNode(command=command,
                                       stderr=msg,
-                                      exit_code=124)
+                                      exit_code=124,
+                                      records=records)
             session.last_exit_code = 124
             return io
         except (MirageAbortError, ContentDriftError):

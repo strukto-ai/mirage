@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 
 import pytest
 
@@ -217,3 +218,18 @@ async def test_native_path_enforces_timeout(tmp_path, restore_defaults):
     r = await ws.execute("sleep 5", native=True)
     assert r.exit_code == 124
     assert "timed out" in (await r.stderr_str())
+
+
+@pytest.mark.asyncio
+async def test_timeout_preserves_partial_records_and_logs(
+        caplog, restore_defaults):
+    sg.DEFAULT_COMMAND_SAFEGUARDS["sleep"] = CommandSafeguard(
+        timeout_seconds=0.1)
+    ws = _ws()
+    await ws.execute("echo hello > /data/f.txt")
+    before = len(ws._ops.records)
+    with caplog.at_level(logging.DEBUG, logger="mirage.workspace.workspace"):
+        r = await ws.execute("cat /data/f.txt; sleep 5")
+    assert r.exit_code == 124
+    assert len(ws._ops.records) > before
+    assert any("timed out" in m for m in caplog.messages)
