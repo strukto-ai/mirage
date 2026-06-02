@@ -23,6 +23,7 @@ from moto.server import ThreadedMotoServer
 
 from mirage import MountMode, Workspace
 from mirage.accessor.s3 import S3Accessor
+from mirage.commands import safeguard as _safeguard
 from mirage.resource.gcs import GCSConfig, GCSResource
 from mirage.resource.minio import MinIOConfig, MinIOResource
 from mirage.resource.s3 import S3Config, S3Resource
@@ -135,6 +136,20 @@ INDEX_CASES: list[tuple[str, str]] = [
     ("tree", "tree {m}/"),
 ]
 
+# Lazy exit codes survive the timeout/safeguard stream wrap on streaming
+# backends: grep resolves its exit code only after the object is consumed, so
+# wrapping stdout with a timeout must not clobber the final exit code.
+EXIT_CODE_CASES: list[tuple[str, str]] = [
+    ("grep_match", "grep -q mirage {m}/data/example.jsonl"),
+    ("grep_no_match", "grep -q zzzznomatch {m}/data/example.jsonl"),
+]
+
+# Deterministic timeout surface: a per-mount sub-second timeout on sleep makes
+# the command exit 124 with attributed stderr, end-to-end through the runner.
+TIMEOUT_CASES: list[tuple[str, str]] = [
+    ("timeout_sleep_fires", "sleep 2"),
+]
+
 
 def _seed(endpoint: str) -> None:
     client = boto3.client("s3", endpoint_url=endpoint, **CREDS)
@@ -186,6 +201,15 @@ async def _run(ws: Workspace, name: str, cmd: str) -> None:
         err = await result.stderr_str()
         if err:
             print(err, end="" if err.endswith("\n") else "\n")
+
+
+async def _run_exit(ws: Workspace, name: str, cmd: str) -> None:
+    result = await ws.execute(cmd)
+    err = await result.stderr_str()
+    print(f"=== {name} ===")
+    print(f"exit={result.exit_code}")
+    if err:
+        print(err, end="" if err.endswith("\n") else "\n")
 
 
 def _set_cat_safeguard(ws: Workspace, max_lines: int) -> None:
@@ -245,6 +269,21 @@ async def main() -> None:
             for name, tmpl in INDEX_CASES:
                 await _measure_calls(endpoint, f"{tag}:calls:{name}",
                                      tmpl.format(m=mount))
+        for mount in MOUNTS:
+            tag = mount.lstrip("/")
+            for name, tmpl in EXIT_CODE_CASES:
+                await _run_exit(ws, f"{tag}:exit:{name}", tmpl.format(m=mount))
+        prev_sleep = _safeguard.DEFAULT_COMMAND_SAFEGUARDS.get("sleep")
+        _safeguard.DEFAULT_COMMAND_SAFEGUARDS["sleep"] = CommandSafeguard(
+            timeout_seconds=0.1)
+        try:
+            for name, cmd in TIMEOUT_CASES:
+                await _run_exit(ws, f"safeguard:{name}", cmd)
+        finally:
+            if prev_sleep is None:
+                _safeguard.DEFAULT_COMMAND_SAFEGUARDS.pop("sleep", None)
+            else:
+                _safeguard.DEFAULT_COMMAND_SAFEGUARDS["sleep"] = prev_sleep
     finally:
         server.stop()
 

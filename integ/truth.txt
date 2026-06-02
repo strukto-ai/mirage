@@ -1187,6 +1187,11 @@ sleep: timed out after 0.1s
 === timeout_pipeline_first_wins ===
 exit=124
 sleep: timed out after 0.1s
+=== lazy_exit_grep_match ===
+exit=0
+hello
+=== lazy_exit_grep_no_match ===
+exit=1
 === snapshot_load_cache ===
 hello
 world

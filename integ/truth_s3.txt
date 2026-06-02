@@ -426,3 +426,18 @@ ListObjectsV2=2 HeadObject=0
 ListObjectsV2=1 HeadObject=0
 === minio:calls:tree ===
 ListObjectsV2=2 HeadObject=0
+=== s3:exit:grep_match ===
+exit=0
+=== s3:exit:grep_no_match ===
+exit=1
+=== gcs:exit:grep_match ===
+exit=0
+=== gcs:exit:grep_no_match ===
+exit=1
+=== minio:exit:grep_match ===
+exit=0
+=== minio:exit:grep_no_match ===
+exit=1
+=== safeguard:timeout_sleep_fires ===
+exit=124
+sleep: timed out after 0.1s
