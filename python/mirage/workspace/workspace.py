@@ -25,7 +25,8 @@ from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index import IndexConfig
 from mirage.commands.builtin.general import HISTORY_COMMANDS
-from mirage.commands.builtin.utils.safeguard import CommandTimeoutError
+from mirage.commands.builtin.utils.safeguard import (CommandTimeoutError,
+                                                     run_with_timeout)
 from mirage.commands.safeguard import resolve_safeguard
 
 try:
@@ -680,14 +681,16 @@ class Workspace:
                                           exit_code=2)
                 return io
             if provision:
-                # TODO: provision_node bypasses _execute_command and so
-                # doesn't pick up CommandSafeguard.timeout_seconds. Dry-run
-                # estimates can hang on slow accessors. Add a wait_for here
-                # using a resolved safeguard for the AST's primary command,
-                # or wrap each handler call inside provision_node.
-                return await provision_node(self._registry, self.dispatch,
-                                            exec_recursion, ast,
-                                            effective_session)
+                prov_name = command.strip().split()[0] if command.strip(
+                ) else None
+                prov_resolved = (resolve_safeguard(prov_name)
+                                 if prov_name else None)
+                prov_timeout = (prov_resolved.timeout_seconds
+                                if prov_resolved is not None else None)
+                return await run_with_timeout(
+                    provision_node(self._registry, self.dispatch,
+                                   exec_recursion, ast, effective_session),
+                    prov_timeout, prov_name)
             records = start_recording()
             io, exec_node = await run_command_tree(
                 self.dispatch,

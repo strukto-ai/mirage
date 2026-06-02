@@ -23,6 +23,10 @@ from mirage.resource.ram import RAMResource
 from mirage.types import CommandSafeguard
 
 
+async def _slow_provision(*args, **kwargs):
+    await asyncio.sleep(5)
+
+
 @pytest.fixture
 def restore_defaults():
     snapshot = dict(sg.DEFAULT_COMMAND_SAFEGUARDS)
@@ -218,6 +222,17 @@ async def test_native_path_enforces_timeout(tmp_path, restore_defaults):
     r = await ws.execute("sleep 5", native=True)
     assert r.exit_code == 124
     assert "timed out" in (await r.stderr_str())
+
+
+@pytest.mark.asyncio
+async def test_provision_dry_run_honors_timeout(monkeypatch, restore_defaults):
+    sg.DEFAULT_COMMAND_SAFEGUARDS["cat"] = CommandSafeguard(
+        timeout_seconds=0.1)
+    monkeypatch.setattr("mirage.workspace.workspace.provision_node",
+                        _slow_provision)
+    ws = _ws()
+    r = await ws.execute("cat /data/f.txt", provision=True)
+    assert r.exit_code == 124
 
 
 @pytest.mark.asyncio
