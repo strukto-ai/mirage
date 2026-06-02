@@ -16,6 +16,7 @@ import dataclasses
 import inspect
 from typing import Any, Callable
 
+from mirage.commands.builtin.utils.safeguard import run_with_timeout
 from mirage.commands.config import RegisteredCommand
 from mirage.commands.resolve import get_extension
 from mirage.commands.safeguard import CommandSafeguard, resolve_safeguard
@@ -495,13 +496,17 @@ class Mount:
             prefix=mount_prefix,
         )
         kwargs.setdefault("index", self.resource.index)
+        op_override = self.command_safeguards.get(op_name)
+        op_timeout = (op_override.timeout_seconds
+                      if op_override is not None else None)
         prev_prefix = push_mount_prefix(mount_prefix)
         revs_token = push_revisions(self.revisions or None)
         try:
             for op in levels:
                 result = op.fn(self.resource.accessor, scope, *args, **kwargs)
                 if inspect.isawaitable(result):
-                    result = await result
+                    result = await run_with_timeout(result, op_timeout,
+                                                    op_name)
                 if result is not None:
                     return result
             return None
