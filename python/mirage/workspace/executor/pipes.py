@@ -19,6 +19,7 @@ from mirage.io.stream import async_chain, close_quietly, merge_stdout_stderr
 from mirage.io.types import ByteSource, materialize
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
+from mirage.shell.job_budget import JobBudget
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
 from mirage.shell.types import NodeType as NT
 from mirage.workspace.session import Session
@@ -39,6 +40,7 @@ async def handle_pipe(
     child_nodes: list[ExecutionNode] = []
     ios: list[IOResult] = []
     intermediate_streams: list[ByteSource] = []
+    budget = JobBudget(session.pipeline_timeout_seconds)
 
     try:
         for i, cmd in enumerate(commands):
@@ -60,7 +62,7 @@ async def handle_pipe(
             last_stdout = stdout
 
         if last_stdout is not None and not isinstance(last_stdout, bytes):
-            materialized = await materialize(last_stdout)
+            materialized = await budget.run(materialize(last_stdout))
             last_stdout = materialized
     finally:
         # Explicitly close any intermediate generators that may still

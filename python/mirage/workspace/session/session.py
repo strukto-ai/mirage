@@ -30,6 +30,7 @@ class Session:
     readonly_vars: set[str] = field(default_factory=set)
     arrays: dict[str, list[str]] = field(default_factory=dict)
     allowed_mounts: frozenset[str] | None = None
+    pipeline_timeout_seconds: float | None = None
     _stdin_buffer: AsyncLineIterator | None = field(default=None, repr=False)
 
     def to_dict(self) -> dict:
@@ -70,6 +71,7 @@ class Session:
                 for k, v in self.arrays.items()
             },
             "allowed_mounts": self.allowed_mounts,
+            "pipeline_timeout_seconds": self.pipeline_timeout_seconds,
         }
         defaults.update(overrides)
         return Session(**defaults)
