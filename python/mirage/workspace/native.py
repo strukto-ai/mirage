@@ -22,6 +22,7 @@ async def native_exec(
     cwd: str | Path,
     env: dict[str, str] | None = None,
     timeout: float | None = None,
+    name: str | None = None,
 ) -> tuple[bytes, bytes, int]:
     proc = await asyncio.create_subprocess_shell(
         command,
@@ -38,7 +39,8 @@ async def native_exec(
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
-        return b"", b"timeout\n", 124
+        msg = f"{name or command}: timed out after {timeout}s\n".encode()
+        return b"", msg, 124
     return stdout, stderr, proc.returncode or 0
 
 

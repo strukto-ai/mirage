@@ -78,3 +78,14 @@ async def test_native_exec_stream():
         assert b"".join(chunks) == b"1\n2\n3\n4\n5\n"
         exit_code = await proc.wait()
         assert exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_native_exec_times_out_with_attributed_stderr():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        stdout, stderr, code = await native_exec("sleep 5",
+                                                 cwd=tmpdir,
+                                                 timeout=0.1,
+                                                 name="sleep")
+        assert code == 124
+        assert b"sleep: timed out after 0.1s" in stderr

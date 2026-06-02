@@ -26,6 +26,7 @@ from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index import IndexConfig
 from mirage.commands.builtin.general import HISTORY_COMMANDS
 from mirage.commands.builtin.utils.safeguard import CommandTimeoutError
+from mirage.commands.safeguard import resolve_safeguard
 
 try:
     from mirage.cache.file.redis import RedisFileCacheStore
@@ -631,8 +632,19 @@ class Workspace:
                     "native=True requires FUSE. Install macFUSE (macOS) "
                     "or libfuse (Linux). Falling back to virtual mode.")
             else:
+                native_name = command.strip().split()[0] if command.strip(
+                ) else None
+                resolved = (resolve_safeguard(native_name)
+                            if native_name else None)
+                native_timeout = (resolved.timeout_seconds
+                                  if resolved is not None else None)
+                if native_timeout is not None and native_timeout <= 0:
+                    native_timeout = None
                 stdout, stderr, code = await native_exec(
-                    command, cwd=self._fuse.mountpoint)
+                    command,
+                    cwd=self._fuse.mountpoint,
+                    timeout=native_timeout,
+                    name=native_name)
                 return IOResult(exit_code=code, stderr=stderr, stdout=stdout)
 
         session = self._session_mgr.get(session_id)
