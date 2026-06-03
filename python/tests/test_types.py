@@ -17,7 +17,7 @@ from pydantic import ValidationError
 
 from mirage.commands.types import (CommandResult, FilePayload,
                                    RemoteCommandOptions)
-from mirage.types import CommandSafeguard, FileStat, OnExceed
+from mirage.types import Aggr, CommandSafeguard, FileStat, OnExceed
 
 
 def test_filestat_defaults():
@@ -123,3 +123,10 @@ def test_aggr_all_truncate_stays_truncate():
     b = CommandSafeguard(timeout_seconds=2)
     out = CommandSafeguard.aggr([a, b])
     assert out.on_exceed is OnExceed.TRUNCATE
+
+
+def test_every_field_declares_an_aggr_rule():
+    for name, field in CommandSafeguard.model_fields.items():
+        assert any(
+            isinstance(m, Aggr)
+            for m in field.metadata), (f"field {name!r} has no Aggr rule")
