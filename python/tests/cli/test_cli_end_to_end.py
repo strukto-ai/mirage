@@ -337,3 +337,62 @@ def test_missing_env_var_fails_fast_before_daemon_call(daemon, tmp_path):
         if k != "THIS_VAR_IS_NOT_SET_ANYWHERE"
     }
     _run_cli(env, "workspace", "create", str(cfg), expect_exit=2)
+
+
+SAFEGUARD_TRUNCATE_YAML = """\
+mounts:
+  /:
+    resource: ram
+    mode: WRITE
+    command_safeguards:
+      cat:
+        max_lines: 2
+        on_exceed: truncate
+"""
+
+SAFEGUARD_ERROR_YAML = """\
+mounts:
+  /:
+    resource: ram
+    mode: WRITE
+    command_safeguards:
+      cat:
+        max_lines: 2
+        on_exceed: error
+"""
+
+_SEED_5_LINES = "printf '1\\n2\\n3\\n4\\n5\\n' > /f.txt"
+
+
+def _write_named(tmp_path: Path, name: str, text: str) -> Path:
+    p = tmp_path / name
+    p.write_text(text, encoding="utf-8")
+    return p
+
+
+def test_execute_safeguard_truncates_output(daemon, tmp_path):
+    cfg = _write_named(tmp_path, "sg_trunc.yaml", SAFEGUARD_TRUNCATE_YAML)
+    _run_cli(daemon["env"], "workspace", "create", str(cfg), "--id",
+             "sg-trunc")
+    _run_cli(daemon["env"], "execute", "--workspace_id", "sg-trunc",
+             "--command", _SEED_5_LINES)
+    result = _run_cli(daemon["env"], "execute", "--workspace_id", "sg-trunc",
+                      "--command", "cat /f.txt")
+    assert result["exit_code"] == 0
+    assert result["stdout"] == "1\n2\n"
+    _run_cli(daemon["env"], "workspace", "delete", "sg-trunc")
+
+
+def test_execute_safeguard_error_exits_1(daemon, tmp_path):
+    cfg = _write_named(tmp_path, "sg_err.yaml", SAFEGUARD_ERROR_YAML)
+    _run_cli(daemon["env"], "workspace", "create", str(cfg), "--id", "sg-err")
+    _run_cli(daemon["env"], "execute", "--workspace_id", "sg-err", "--command",
+             _SEED_5_LINES)
+    _run_cli(daemon["env"],
+             "execute",
+             "--workspace_id",
+             "sg-err",
+             "--command",
+             "cat /f.txt",
+             expect_exit=1)
+    _run_cli(daemon["env"], "workspace", "delete", "sg-err")

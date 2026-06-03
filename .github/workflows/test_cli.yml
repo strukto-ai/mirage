@@ -124,6 +124,51 @@ jobs:
             fail=1
           fi
 
+          echo
+          echo "--- per-mount command safeguards"
+          cat > /tmp/sg.yaml <<'YAML'
+          mounts:
+            /:
+              resource: ram
+              mode: WRITE
+              command_safeguards:
+                cat:
+                  max_lines: 2
+                  on_exceed: truncate
+          YAML
+          cat > /tmp/sgerr.yaml <<'YAML'
+          mounts:
+            /:
+              resource: ram
+              mode: WRITE
+              command_safeguards:
+                cat:
+                  max_lines: 2
+                  on_exceed: error
+          YAML
+          $MIRAGE workspace delete sg > /dev/null 2>&1 || true
+          $MIRAGE workspace delete sgerr > /dev/null 2>&1 || true
+          $MIRAGE workspace create /tmp/sg.yaml --id sg
+          $MIRAGE workspace create /tmp/sgerr.yaml --id sgerr
+          $MIRAGE execute -w sg -c "printf '1\n2\n3\n4\n5\n' > /f.txt" > /dev/null
+          $MIRAGE execute -w sgerr -c "printf '1\n2\n3\n4\n5\n' > /f.txt" > /dev/null
+
+          check "cat over max_lines, on_exceed=truncate => exit 0" 0 0 \
+            $MIRAGE execute -w sg -c 'cat /f.txt'
+          echo "+ verify truncated to 2 lines"
+          lines=$($MIRAGE execute -w sg -c 'cat /f.txt' | jq -r '.stdout' | grep -c .)
+          echo "  truncated stdout lines: $lines (expected 2)"
+          if [ "$lines" != "2" ]; then
+            echo "FAIL: truncate did not cap to 2 lines"
+            fail=1
+          else
+            echo "PASS"
+          fi
+          check "cat over max_lines, on_exceed=error => exit 1" 1 1 \
+            $MIRAGE execute -w sgerr -c 'cat /f.txt'
+          $MIRAGE workspace delete sg
+          $MIRAGE workspace delete sgerr
+
           curl_check() {
             local desc="$1"
             local expected="$2"
