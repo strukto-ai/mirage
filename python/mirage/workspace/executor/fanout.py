@@ -26,31 +26,22 @@ from mirage.workspace.types import ExecutionNode
 _TRAVERSAL_CMDS = frozenset({"find", "tree", "du"})
 
 
-def _tightest_safeguard(cmd_name: str,
-                        mounts: list) -> CommandSafeguard | None:
-    """Resolve the tightest timeout safeguard among the spanned mounts.
+def _fanout_safeguard(cmd_name: str, mounts: list) -> CommandSafeguard | None:
+    """Aggregate the spanned mounts' safeguards into the most restrictive one.
 
-    A fan-out op cannot honor several conflicting per-mount budgets, so the
-    smallest positive timeout wins. Falls back to the command-level default
-    when no spanned mount sets a positive timeout.
+    A fan-out op produces one merged stream, so the per-mount guards stack:
+    the tightest of each field wins (see CommandSafeguard.aggr).
 
     Args:
         cmd_name (str): command name being resolved.
         mounts (list): the spanned mounts (primary + descendants).
     """
-    best = None
-    best_timeout = None
-    for mount in mounts:
-        override = getattr(mount, "command_safeguards", {}).get(cmd_name)
-        resolved = resolve_safeguard(cmd_name, None, override)
-        if resolved is None:
-            continue
-        timeout = resolved.timeout_seconds
-        if timeout is None or timeout <= 0:
-            continue
-        if best_timeout is None or timeout < best_timeout:
-            best, best_timeout = resolved, timeout
-    return best if best is not None else resolve_safeguard(cmd_name)
+    resolved = [
+        resolve_safeguard(cmd_name, None,
+                          getattr(m, "command_safeguards", {}).get(cmd_name))
+        for m in mounts
+    ]
+    return CommandSafeguard.aggr(resolved)
 
 
 def _path_segments(path: str) -> list[str]:
@@ -290,8 +281,8 @@ async def _fan_out_traversal(
                 final_io_exit = 1
 
     merged_io.exit_code = final_io_exit
-    merged_io.safeguard = _tightest_safeguard(cmd_name,
-                                              [primary_mount, *descendants])
+    merged_io.safeguard = _fanout_safeguard(cmd_name,
+                                            [primary_mount, *descendants])
     exec_node = ExecutionNode(command=cmd_str,
                               exit_code=final_io_exit,
                               stderr=merged_io.stderr)

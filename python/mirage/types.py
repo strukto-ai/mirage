@@ -12,10 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum, StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt
+
+
+def _min_positive(values: Iterable[float | int | None]) -> float | int | None:
+    positives = [v for v in values if v is not None and v > 0]
+    return min(positives) if positives else None
 
 
 class FindType(str, Enum):
@@ -82,6 +88,35 @@ class CommandSafeguard(BaseModel):
     max_lines: NonNegativeInt | None = None
     timeout_seconds: float | None = None
     on_exceed: OnExceed = OnExceed.TRUNCATE
+
+    @classmethod
+    def aggr(
+        cls,
+        safeguards: "Iterable[CommandSafeguard | None]",
+    ) -> "CommandSafeguard | None":
+        """Aggregate several safeguards into the most restrictive one.
+
+        Field-wise "tightest wins": the smallest positive timeout / byte /
+        line cap, and ERROR over TRUNCATE. None or non-positive limits mean
+        unbounded and are skipped. Returns None when nothing is configured.
+        Used wherever guards stack (cross-mount fan-out, layered configs).
+
+        Args:
+            safeguards (Iterable[CommandSafeguard | None]): guards to merge.
+        """
+        present = [s for s in safeguards if s is not None]
+        if not present:
+            return None
+        timeout = _min_positive(s.timeout_seconds for s in present)
+        max_bytes = _min_positive(s.max_bytes for s in present)
+        max_lines = _min_positive(s.max_lines for s in present)
+        on_exceed = (OnExceed.ERROR if any(
+            s.on_exceed is OnExceed.ERROR
+            for s in present) else OnExceed.TRUNCATE)
+        return cls(max_bytes=max_bytes,
+                   max_lines=max_lines,
+                   timeout_seconds=timeout,
+                   on_exceed=on_exceed)
 
 
 class VFSWriteOp(str, Enum):
