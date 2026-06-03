@@ -16,24 +16,37 @@ import asyncio
 
 from mirage import MountMode, Workspace
 from mirage.commands import safeguard as sg
+from mirage.commands.builtin.utils.safeguard import SafeguardExceededError
 from mirage.resource.ram import RAMResource
-from mirage.types import CommandSafeguard, OnExceed
+from mirage.types import CommandSafeguard, OnExceed, PathSpec
 
 A_LINES = "1\n2\n3\n4\n5\n"
 B_LINES = "6\n7\n8\n9\n10\n"
+SMALL_LINES = "x\ny\n"
+C_BYTES = "abcdefgh"
 SUB_MATCHES = "match\nmatch\nmatch\n"
 
 CASES: list[tuple[str, str]] = [
     ("single_cat_truncate", "cat /a/f.txt"),
     ("single_cat_error", "cat /b/f.txt"),
+    ("within_limit_no_fire", "cat /a/small.txt"),
+    ("max_bytes_truncate", "cat /c/f.txt"),
     ("pipe_rightmost_truncate", "cat /a/f.txt | head"),
     ("pipe_rightmost_error", "cat /a/f.txt | grep ."),
+    ("command_limit_under_safeguard", "cat /a/f.txt | head -n 2"),
     ("semicolon_rightmost_truncate", "cat /b/f.txt ; cat /a/f.txt"),
     ("and_rightmost_error", "cat /a/f.txt && cat /b/f.txt"),
+    ("or_rightmost_truncate", "false || cat /a/f.txt"),
     ("subshell_rightmost", "( cat /b/f.txt ; cat /a/f.txt )"),
     ("cross_mount_cat_tightest", "cat /a/f.txt /b/f.txt"),
     ("traversal_grep_r_tightest", "grep -r match /a"),
     ("timeout_fires", "sleep 2"),
+    ("timeout_in_pipe", "sleep 2 | cat"),
+]
+
+VFS_CASES: list[tuple[str, str, str]] = [
+    ("vfs_read_truncate", "/c/f.txt", "/c"),
+    ("vfs_read_error", "/d/f.txt", "/d"),
 ]
 
 
@@ -46,6 +59,8 @@ def _build_ws() -> Workspace:
         timeout_seconds=0.1)
     a = RAMResource()
     b = RAMResource()
+    c = RAMResource()
+    d = RAMResource()
     sub = RAMResource()
     return Workspace(
         {
@@ -63,6 +78,16 @@ def _build_ws() -> Workspace:
             (b, MountMode.WRITE, {
                 "cat": CommandSafeguard(max_lines=2, on_exceed=OnExceed.ERROR),
             }),
+            "/c/": (c, MountMode.WRITE, {
+                "cat":
+                CommandSafeguard(max_bytes=5, on_exceed=OnExceed.TRUNCATE),
+                "read":
+                CommandSafeguard(max_bytes=4, on_exceed=OnExceed.TRUNCATE),
+            }),
+            "/d/": (d, MountMode.WRITE, {
+                "read":
+                CommandSafeguard(max_bytes=4, on_exceed=OnExceed.ERROR),
+            }),
         },
         mode=MountMode.WRITE)
 
@@ -72,6 +97,9 @@ async def main() -> None:
     await ws.execute("mkdir -p /a/sub")
     await ws.execute(f"printf '{A_LINES}' > /a/f.txt")
     await ws.execute(f"printf '{B_LINES}' > /b/f.txt")
+    await ws.execute(f"printf '{SMALL_LINES}' > /a/small.txt")
+    await ws.execute(f"printf '{C_BYTES}' > /c/f.txt")
+    await ws.execute(f"printf '{C_BYTES}' > /d/f.txt")
     await ws.execute(f"printf '{SUB_MATCHES}' > /a/sub/g.txt")
 
     for name, cmd in CASES:
@@ -86,6 +114,15 @@ async def main() -> None:
             print("note=truncated")
         if "timed out" in err:
             print("note=timed_out")
+
+    for name, path, prefix in VFS_CASES:
+        print(f"=== {name} ===")
+        try:
+            value, _ = await ws.dispatch(
+                "read", PathSpec.from_str_path(path, prefix=prefix))
+            print(f"read={value.decode()}")
+        except SafeguardExceededError:
+            print("read=<raised SafeguardExceededError>")
 
 
 if __name__ == "__main__":

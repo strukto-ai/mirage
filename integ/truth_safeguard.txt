@@ -8,6 +8,14 @@ note=truncated
 === single_cat_error ===
 exit=1
 note=truncated
+=== within_limit_no_fire ===
+exit=0
+x
+y
+=== max_bytes_truncate ===
+exit=0
+abcde
+note=truncated
 === pipe_rightmost_truncate ===
 exit=0
 1
@@ -17,6 +25,10 @@ note=truncated
 === pipe_rightmost_error ===
 exit=1
 note=truncated
+=== command_limit_under_safeguard ===
+exit=0
+1
+2
 === semicolon_rightmost_truncate ===
 exit=0
 6
@@ -26,6 +38,13 @@ exit=0
 note=truncated
 === and_rightmost_error ===
 exit=1
+note=truncated
+=== or_rightmost_truncate ===
+exit=0
+1
+2
+3
+4
 note=truncated
 === subshell_rightmost ===
 exit=0
@@ -43,3 +62,10 @@ note=truncated
 === timeout_fires ===
 exit=124
 note=timed_out
+=== timeout_in_pipe ===
+exit=124
+note=timed_out
+=== vfs_read_truncate ===
+read=abcd
+=== vfs_read_error ===
+read=<raised SafeguardExceededError>
