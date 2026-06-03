@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Iterable
+
 from mirage.types import CommandSafeguard
 
 _DEFAULT_MAX_LINES = 2000
@@ -37,3 +39,25 @@ def resolve_safeguard(
     if command_default is not None:
         return command_default
     return DEFAULT_COMMAND_SAFEGUARDS.get(name, FALLBACK_SAFEGUARD)
+
+
+def resolve_across_mounts(
+    name: str,
+    mounts: Iterable,
+) -> CommandSafeguard | None:
+    """Resolve and aggregate the safeguard across the mounts a command spans.
+
+    A command that touches several mounts but yields one stream
+    (cross-mount cat, fan-out find/grep -r/du/tree/ls -R) must respect
+    every spanned mount's guard, so each mount's per-command override is
+    resolved and combined with CommandSafeguard.aggr (tightest per field).
+
+    Args:
+        name (str): command name being resolved.
+        mounts (Iterable): the mounts the command spans.
+    """
+    resolved = [
+        resolve_safeguard(name, None, m.command_safeguards.get(name))
+        for m in mounts
+    ]
+    return CommandSafeguard.aggr(resolved)

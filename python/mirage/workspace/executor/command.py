@@ -15,7 +15,7 @@
 from collections.abc import Callable
 
 from mirage.commands.builtin.utils.safeguard import maybe_with_timeout
-from mirage.commands.safeguard import resolve_safeguard
+from mirage.commands.safeguard import resolve_across_mounts, resolve_safeguard
 from mirage.commands.spec import OperandKind, parse_command, parse_to_kwargs
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize, wrap_cachable_streams
@@ -263,11 +263,14 @@ async def handle_command(
         stdout, io, exec_node = await handle_cross_mount(
             cmd_name, path_scopes, text_only, dispatch, cmd_str)
         if io.safeguard is None:
-            primary = (registry.mount_for(path_scopes[0].original)
-                       if path_scopes else None)
-            override = (primary.command_safeguards.get(cmd_name)
-                        if primary is not None else None)
-            io.safeguard = resolve_safeguard(cmd_name, None, override)
+            mounts = []
+            for s in path_scopes:
+                try:
+                    mounts.append(registry.mount_for(s.original))
+                except ValueError:
+                    pass
+            io.safeguard = (resolve_across_mounts(cmd_name, mounts)
+                            if mounts else resolve_safeguard(cmd_name))
         stdout = maybe_with_timeout(stdout, io.safeguard, cmd_name)
         return stdout, io, exec_node
 

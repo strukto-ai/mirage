@@ -14,34 +14,16 @@
 
 import fnmatch
 
-from mirage.commands.safeguard import resolve_safeguard
+from mirage.commands.safeguard import resolve_across_mounts
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
-from mirage.types import CommandSafeguard, PathSpec
+from mirage.types import PathSpec
 from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.types import ExecutionNode
 
 _TRAVERSAL_CMDS = frozenset({"find", "tree", "du"})
-
-
-def _fanout_safeguard(cmd_name: str, mounts: list) -> CommandSafeguard | None:
-    """Aggregate the spanned mounts' safeguards into the most restrictive one.
-
-    A fan-out op produces one merged stream, so the per-mount guards stack:
-    the tightest of each field wins (see CommandSafeguard.aggr).
-
-    Args:
-        cmd_name (str): command name being resolved.
-        mounts (list): the spanned mounts (primary + descendants).
-    """
-    resolved = [
-        resolve_safeguard(cmd_name, None,
-                          getattr(m, "command_safeguards", {}).get(cmd_name))
-        for m in mounts
-    ]
-    return CommandSafeguard.aggr(resolved)
 
 
 def _path_segments(path: str) -> list[str]:
@@ -281,8 +263,8 @@ async def _fan_out_traversal(
                 final_io_exit = 1
 
     merged_io.exit_code = final_io_exit
-    merged_io.safeguard = _fanout_safeguard(cmd_name,
-                                            [primary_mount, *descendants])
+    merged_io.safeguard = resolve_across_mounts(cmd_name,
+                                                [primary_mount, *descendants])
     exec_node = ExecutionNode(command=cmd_str,
                               exit_code=final_io_exit,
                               stderr=merged_io.stderr)

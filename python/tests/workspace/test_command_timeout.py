@@ -20,7 +20,7 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.commands import safeguard as sg
 from mirage.resource.ram import RAMResource
-from mirage.types import CommandSafeguard
+from mirage.types import CommandSafeguard, OnExceed
 
 
 async def _slow_provision(*args, **kwargs):
@@ -315,3 +315,28 @@ async def test_timeout_preserves_partial_records_and_logs(
     assert r.exit_code == 124
     assert len(ws._ops.records) > before
     assert any("timed out" in m for m in caplog.messages)
+
+
+@pytest.mark.asyncio
+async def test_cross_mount_cat_aggregates_tightest_safeguard():
+    a = RAMResource()
+    b = RAMResource()
+    a._store.dirs.add("/")
+    b._store.dirs.add("/")
+    a._store.files["/x.txt"] = b"1\n2\n3\n"
+    b._store.files["/y.txt"] = b"4\n5\n6\n"
+    ws = Workspace(
+        {
+            "/a/": (a, MountMode.WRITE, {
+                "cat":
+                CommandSafeguard(max_lines=100, on_exceed=OnExceed.TRUNCATE)
+            }),
+            "/b/":
+            (b, MountMode.WRITE, {
+                "cat": CommandSafeguard(max_lines=1, on_exceed=OnExceed.ERROR)
+            }),
+        },
+        mode=MountMode.WRITE)
+    r = await ws.execute("cat /a/x.txt /b/y.txt")
+    assert r.safeguard.max_lines == 1
+    assert r.safeguard.on_exceed is OnExceed.ERROR
