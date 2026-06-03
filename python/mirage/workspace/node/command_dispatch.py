@@ -15,7 +15,7 @@
 import asyncio
 from typing import Any
 
-from mirage.commands.builtin.utils.safeguard import CommandTimeoutError
+from mirage.commands.builtin.utils.safeguard import run_with_timeout
 from mirage.commands.safeguard import resolve_safeguard
 from mirage.io import IOResult
 from mirage.io.stream import materialize
@@ -113,24 +113,12 @@ async def execute_command(
 
     resolved = resolve_safeguard(name) if name else None
     timeout = (resolved.timeout_seconds if resolved is not None else None)
-    if timeout is not None and timeout <= 0:
-        timeout = None
 
     try:
         body = _dispatch_command_body(recurse, dispatch, registry, execute_fn,
                                       node, parts, name, session, stdin,
                                       call_stack, job_table, history, cancel)
-        if timeout is not None:
-            try:
-                # TODO: asyncio.wait_for cancels the inner coroutine via
-                # CancelledError. Handlers that catch/swallow that exception
-                # (or hold non-async resources like raw sockets) may leak.
-                # Audit each builtin / mount handler to confirm it propagates
-                # CancelledError and closes external resources on cancel.
-                return await asyncio.wait_for(body, timeout=timeout)
-            except asyncio.TimeoutError as exc:
-                raise CommandTimeoutError(name or "?", timeout) from exc
-        return await body
+        return await run_with_timeout(body, timeout, name or "?")
     finally:
         for k, prev in saved_env_overrides.items():
             if prev is None:
