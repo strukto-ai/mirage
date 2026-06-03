@@ -1,0 +1,45 @@
+=== single_cat_truncate ===
+exit=0
+1
+2
+3
+4
+note=truncated
+=== single_cat_error ===
+exit=1
+note=truncated
+=== pipe_rightmost_truncate ===
+exit=0
+1
+2
+3
+note=truncated
+=== pipe_rightmost_error ===
+exit=1
+note=truncated
+=== semicolon_rightmost_truncate ===
+exit=0
+6
+7
+8
+9
+note=truncated
+=== and_rightmost_error ===
+exit=1
+note=truncated
+=== subshell_rightmost ===
+exit=0
+6
+7
+8
+9
+note=truncated
+=== cross_mount_cat_tightest ===
+exit=1
+note=truncated
+=== traversal_grep_r_tightest ===
+exit=1
+note=truncated
+=== timeout_fires ===
+exit=124
+note=timed_out

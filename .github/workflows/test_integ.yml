@@ -65,3 +65,8 @@ jobs:
         run: |
           ./python/.venv/bin/python integ/redis.py > /tmp/redis.out
           diff integ/truth.txt /tmp/redis.out
+
+      - name: Run Safeguard scenarios and diff against truth
+        run: |
+          ./python/.venv/bin/python integ/safeguard.py > /tmp/safeguard.out
+          diff integ/truth_safeguard.txt /tmp/safeguard.out
