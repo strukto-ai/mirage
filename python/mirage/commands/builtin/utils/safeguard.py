@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 import time
 from collections.abc import AsyncIterator
 
@@ -21,6 +22,8 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import OnExceed
 from mirage.utils.stream import ensure_stream
 
+logger = logging.getLogger(__name__)
+
 
 class CommandTimeoutError(Exception):
 
@@ -28,6 +31,12 @@ class CommandTimeoutError(Exception):
         super().__init__(f"{command}: timed out after {seconds}s")
         self.command = command
         self.seconds = seconds
+
+
+class SafeguardExceededError(Exception):
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
 
 
 async def with_timeout(
@@ -147,3 +156,33 @@ async def apply_safeguard(
     if safeguard.on_exceed is OnExceed.ERROR:
         return None, IOResult(exit_code=1, stderr=notice)
     return data, IOResult(stderr=notice)
+
+
+async def apply_op_safeguard(result, safeguard: CommandSafeguard | None):
+    """Apply byte/line caps to a byte-producing VFS op result.
+
+    VFS ops have no stderr/exit envelope, so on TRUNCATE the capped bytes
+    are returned (and the notice logged) and on ERROR a
+    SafeguardExceededError is raised. Non-byte results (stat, listings)
+    and unconfigured guards pass through untouched.
+
+    Args:
+        result: the op result (capped only when bytes or a byte stream).
+        safeguard (CommandSafeguard | None): resolved op safeguard.
+    """
+    if safeguard is None:
+        return result
+    if safeguard.max_bytes is None and safeguard.max_lines is None:
+        return result
+    if not isinstance(result,
+                      (bytes, bytearray)) and not hasattr(result, "__aiter__"):
+        return result
+    data, sg_io = await apply_safeguard(result, safeguard)
+    if sg_io.exit_code != 0:
+        message = sg_io.stderr.decode(
+        ) if sg_io.stderr else "safeguard exceeded"
+        raise SafeguardExceededError(message.strip())
+    if sg_io.stderr:
+        logger.debug("vfs op output truncated: %s",
+                     sg_io.stderr.decode().strip())
+    return data

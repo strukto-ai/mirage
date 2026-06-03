@@ -16,7 +16,8 @@ import dataclasses
 import inspect
 from typing import Any, Callable
 
-from mirage.commands.builtin.utils.safeguard import run_with_timeout
+from mirage.commands.builtin.utils.safeguard import (apply_op_safeguard,
+                                                     run_with_timeout)
 from mirage.commands.config import RegisteredCommand
 from mirage.commands.resolve import get_extension
 from mirage.commands.safeguard import CommandSafeguard, resolve_safeguard
@@ -508,7 +509,7 @@ class Mount:
                     result = await run_with_timeout(result, op_timeout,
                                                     op_name)
                 if result is not None:
-                    return result
+                    return await apply_op_safeguard(result, op_override)
             return None
         finally:
             reset_revisions(revs_token)
