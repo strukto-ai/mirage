@@ -1,0 +1,28 @@
+mode: WRITE
+consistency: LAZY
+
+# Same /s3 mount as workspace.yaml, plus per-mount command_safeguards so the
+# guards can be observed firing from the CLI. Python-only: the TS config
+# schema does not yet carry command_safeguards, so this lives in its own file
+# to keep the shared workspace.yaml usable from both CLIs.
+mounts:
+  /s3:
+    resource: s3
+    config:
+      bucket: ${AWS_S3_BUCKET}
+      region: ${AWS_DEFAULT_REGION}
+      aws_access_key_id: ${AWS_ACCESS_KEY_ID}
+      aws_secret_access_key: ${AWS_SECRET_ACCESS_KEY}
+    command_safeguards:
+      # Cap head output at 10 lines and keep going (exit 0 + notice).
+      head:
+        max_lines: 10
+        on_exceed: truncate
+      # Cap grep output at 20 lines and fail hard (exit 1 + notice).
+      grep:
+        max_lines: 20
+        on_exceed: error
+      # Deliberately tiny deadline so any real read trips the timeout
+      # (exit 124). A production value would be seconds, not milliseconds.
+      rg:
+        timeout_seconds: 0.001

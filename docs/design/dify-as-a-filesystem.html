@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Why Dify can be a filesystem</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --line:#2b3242;
+    --ink:#e6edf3; --dim:#9aa7b4; --faint:#6b7685;
+    --accent:#5db0ff; --accent2:#7ee3a0; --warn:#ffb454; --bad:#ff6b6b;
+    --mono:"SFMono-Regular",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.6;-webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:980px;margin:0 auto;padding:0 22px}
+  code,kbd,.mono{font-family:var(--mono)}
+  h1,h2,h3{line-height:1.25;font-weight:680}
+  h2{font-size:1.55rem;margin:0 0 6px}
+  .lead{color:var(--dim);font-size:1.05rem}
+  section{padding:58px 0;border-top:1px solid var(--line)}
+  section:first-of-type{border-top:none}
+  .kicker{font-family:var(--mono);font-size:.72rem;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin:0 0 10px}
+  .muted{color:var(--dim)}
+  .pill{display:inline-block;font-family:var(--mono);font-size:.72rem;padding:2px 8px;border:1px solid var(--line);border-radius:999px;color:var(--dim)}
+
+  /* hero */
+  header.hero{padding:74px 0 56px;background:
+    radial-gradient(1200px 360px at 78% -8%, rgba(93,176,255,.16), transparent 60%),
+    radial-gradient(900px 320px at 8% 0%, rgba(126,227,160,.10), transparent 55%);}
+  header.hero h1{font-size:2.7rem;margin:8px 0 14px;letter-spacing:-.02em}
+  .hero .eq{font-family:var(--mono);font-size:1.05rem;color:var(--dim);margin-top:18px}
+  .hero .eq b{color:var(--accent2)}
+  .tocnav{margin-top:30px;display:flex;flex-wrap:wrap;gap:8px}
+  .tocnav a{font-family:var(--mono);font-size:.8rem;padding:6px 11px;border:1px solid var(--line);border-radius:8px;color:var(--dim);background:var(--panel)}
+  .tocnav a:hover{border-color:var(--accent);color:var(--ink);text-decoration:none}
+
+  /* cards */
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:24px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;cursor:default;transition:.18s}
+  .card:hover{border-color:var(--accent);transform:translateY(-2px)}
+  .card .q{font-family:var(--mono);color:var(--accent);font-size:.8rem}
+  .card h3{margin:6px 0 6px;font-size:1.05rem}
+  .card p{margin:0;color:var(--dim);font-size:.92rem}
+  .card .tool{margin-top:10px;font-family:var(--mono);font-size:.78rem;color:var(--accent2)}
+
+  /* mapping table */
+  table.map{width:100%;border-collapse:collapse;margin-top:18px;font-size:.95rem;overflow:hidden;border-radius:12px;border:1px solid var(--line)}
+  table.map th,table.map td{padding:12px 14px;text-align:left;border-bottom:1px solid var(--line)}
+  table.map thead th{background:var(--panel2);font-size:.78rem;letter-spacing:.04em;text-transform:uppercase;color:var(--faint)}
+  table.map tbody tr{background:var(--panel)}
+  table.map tbody tr:hover{background:var(--panel2)}
+  table.map td:first-child{color:var(--accent);font-family:var(--mono);font-size:.9rem;width:34%}
+  table.map td .file{color:var(--accent2)}
+  table.map td code{color:var(--dim);font-size:.82rem}
+
+  /* generic panel */
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}
+  .label{font-family:var(--mono);font-size:.74rem;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-bottom:8px}
+
+  /* tree visualizer */
+  .docrow{display:flex;align-items:center;gap:10px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;margin-bottom:7px;background:var(--panel2);font-size:.9rem}
+  .docrow input{accent-color:var(--accent)}
+  .docrow .slug{font-family:var(--mono);color:var(--accent);font-size:.82rem}
+  .docrow .nm{color:var(--dim);font-size:.8rem;margin-left:auto}
+  .docrow.noslug .slug{color:var(--warn)}
+  .tree{font-family:var(--mono);font-size:.9rem;white-space:pre;line-height:1.7;margin:0}
+  .tree .d{color:var(--accent)}
+  .tree .f{color:var(--ink)}
+  .tree .fb{color:var(--warn)}
+  .tree .err{color:var(--bad)}
+  .toggle{margin-top:14px;display:flex;align-items:center;gap:10px;font-size:.88rem;color:var(--dim)}
+  .switch{position:relative;width:42px;height:23px;border-radius:999px;background:var(--line);cursor:pointer;transition:.18s;flex:none}
+  .switch.on{background:var(--bad)}
+  .switch::after{content:"";position:absolute;top:2px;left:2px;width:19px;height:19px;border-radius:50%;background:#fff;transition:.18s}
+  .switch.on::after{left:21px}
+
+  /* segment reassembly */
+  .segpick{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .segpick button{font-family:var(--mono);font-size:.82rem;padding:6px 11px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;color:var(--dim);cursor:pointer}
+  .segpick button.active{border-color:var(--accent);color:var(--ink)}
+  .seglist{display:flex;flex-direction:column;gap:7px;min-height:120px}
+  .seg{padding:9px 11px;border:1px dashed var(--line);border-radius:8px;background:var(--panel2);font-size:.86rem;color:var(--dim);transform:translateX(-8px);opacity:0;transition:.32s}
+  .seg.show{transform:none;opacity:1}
+  .seg .sidx{font-family:var(--mono);color:var(--accent2);font-size:.72rem;margin-right:8px}
+  .filebytes{margin-top:12px;background:#0a0e14;border:1px solid var(--line);border-radius:8px;padding:12px;font-family:var(--mono);font-size:.84rem;white-space:pre-wrap;color:var(--accent2);min-height:46px}
+
+  /* terminal */
+  .term{background:#0a0e14;border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:0 18px 50px rgba(0,0,0,.45)}
+  .term .bar{display:flex;align-items:center;gap:7px;padding:10px 14px;background:#11161f;border-bottom:1px solid var(--line)}
+  .dot{width:11px;height:11px;border-radius:50%}
+  .dot.r{background:#ff5f56}.dot.y{background:#ffbd2e}.dot.g{background:#27c93f}
+  .term .bar .ttl{margin-left:8px;font-family:var(--mono);font-size:.76rem;color:var(--faint)}
+  .term .body{display:grid;grid-template-columns:1.15fr .85fr;min-height:340px}
+  .term .out{padding:14px 16px;font-family:var(--mono);font-size:.85rem;overflow:auto;max-height:430px}
+  .term .net{padding:14px 16px;border-left:1px solid var(--line);background:#0c1119;overflow:auto;max-height:430px}
+  .term .net .label{margin-bottom:10px}
+  .ln{white-space:pre-wrap;word-break:break-word}
+  .ln.cmd{color:var(--ink)}
+  .ln.cmd .pr{color:var(--accent2)}
+  .ln.o{color:var(--dim)}
+  .ln.e{color:var(--bad)}
+  .ln.hit b{color:var(--accent);font-weight:700}
+  .ln.score{color:var(--warn)}
+  .inrow{display:flex;align-items:center;gap:8px;padding:11px 16px;border-top:1px solid var(--line);background:#0c1119}
+  .inrow .pr{font-family:var(--mono);color:var(--accent2)}
+  .inrow input{flex:1;background:transparent;border:none;outline:none;color:var(--ink);font-family:var(--mono);font-size:.88rem}
+  .api{margin:0 0 12px;border:1px solid var(--line);border-radius:8px;background:#0a0e14;overflow:hidden}
+  .api .m{padding:7px 10px;font-family:var(--mono);font-size:.76rem;border-bottom:1px solid var(--line)}
+  .api .m .verb{font-weight:700}
+  .api .m .verb.get{color:var(--accent2)}
+  .api .m .verb.post{color:var(--warn)}
+  .api pre{margin:0;padding:9px 10px;font-family:var(--mono);font-size:.74rem;color:var(--dim);white-space:pre-wrap;word-break:break-word}
+  .api .note{padding:6px 10px;font-family:var(--mono);font-size:.72rem;color:var(--faint);border-top:1px dashed var(--line)}
+  .hintbar{margin-top:12px;display:flex;flex-wrap:wrap;gap:7px}
+  .hintbar button{font-family:var(--mono);font-size:.78rem;padding:5px 10px;background:var(--panel2);border:1px solid var(--line);border-radius:7px;color:var(--dim);cursor:pointer}
+  .hintbar button:hover{border-color:var(--accent);color:var(--ink)}
+
+  /* grep vs search */
+  .vs{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}
+  .vs .panel h3{margin:0 0 6px;font-size:1.05rem}
+  .vs .tag{font-family:var(--mono);font-size:.74rem;padding:2px 8px;border-radius:6px}
+  .vs .tag.exact{background:rgba(126,227,160,.14);color:var(--accent2)}
+  .vs .tag.mean{background:rgba(255,180,84,.14);color:var(--warn)}
+  .vs ul{margin:10px 0 0;padding-left:18px;color:var(--dim);font-size:.92rem}
+
+  .callout{background:linear-gradient(180deg,rgba(93,176,255,.08),transparent);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:10px;padding:14px 16px;margin-top:18px;color:var(--dim);font-size:.95rem}
+  .callout b{color:var(--ink)}
+  footer{padding:48px 0 70px;color:var(--faint);font-size:.86rem}
+  footer .src a{color:var(--dim)}
+  @media (max-width:820px){
+    .cards{grid-template-columns:1fr}
+    .grid2,.vs{grid-template-columns:1fr}
+    .term .body{grid-template-columns:1fr}
+    .term .net{border-left:none;border-top:1px solid var(--line)}
+    header.hero h1{font-size:2.05rem}
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="kicker">Mirage &middot; backend design, explained</p>
+    <h1>Why a Dify Knowledge Base<br/>can be a filesystem</h1>
+    <p class="lead">A knowledge base is not stored as files. So how does an agent get to run <span class="mono">cat</span>, <span class="mono">grep</span>, and <span class="mono">find</span> on it? The trick is that a filesystem is an <em>interface</em>, not a place. Anything that can answer three questions can wear it.</p>
+    <p class="eq">filesystem &nbsp;=&nbsp; <b>list</b> &nbsp;+&nbsp; <b>read</b> &nbsp;+&nbsp; <b>stat</b></p>
+    <nav class="tocnav">
+      <a href="#contract">1 &middot; The contract</a>
+      <a href="#map">2 &middot; The mapping</a>
+      <a href="#tree">3 &middot; Folders from slugs</a>
+      <a href="#read">4 &middot; Reading = reassembly</a>
+      <a href="#term">5 &middot; Live terminal</a>
+      <a href="#vs">6 &middot; grep vs search</a>
+    </nav>
+  </div>
+</header>
+
+<!-- 1 -->
+<section id="contract">
+  <div class="wrap">
+    <p class="kicker">Step 1</p>
+    <h2>A filesystem is an interface, not a storage medium</h2>
+    <p class="lead">"Filesystem" does not mean "bytes on a disk." It means a small contract of questions a thing can answer. Every shell tool you know is built on just these three. So the real question for any backend is never "is it a filesystem" but "can it answer list, read, and stat?"</p>
+    <div class="cards">
+      <div class="card">
+        <div class="q">question 1</div>
+        <h3>list</h3>
+        <p>Given a directory, what are its children?</p>
+        <div class="tool">powers: ls &middot; tree &middot; find</div>
+      </div>
+      <div class="card">
+        <div class="q">question 2</div>
+        <h3>read</h3>
+        <p>Given a file, hand me its bytes.</p>
+        <div class="tool">powers: cat &middot; head &middot; grep</div>
+      </div>
+      <div class="card">
+        <div class="q">question 3</div>
+        <h3>stat</h3>
+        <p>File or directory? What size, type, and time?</p>
+        <div class="tool">powers: stat &middot; ls -l &middot; wc</div>
+      </div>
+    </div>
+    <div class="callout">Mirage's whole premise (<b>mount anything</b>) is this: implement list / read / stat once per backend, and every shell tool, plus every AI agent that already speaks shell, comes along for free.</div>
+  </div>
+</section>
+
+<!-- 2 -->
+<section id="map">
+  <div class="wrap">
+    <p class="kicker">Step 2</p>
+    <h2>What Dify gives us to answer those questions</h2>
+    <p class="lead">A Dify Knowledge Base, stripped down, is a <em>dataset</em> holding a flat list of <em>documents</em>, where each document is split into <em>segments</em> (the chunks Dify embeds for retrieval). That is exactly enough structure to fill in the contract.</p>
+    <table class="map">
+      <thead><tr><th>Filesystem concept</th><th>Dify reality</th></tr></thead>
+      <tbody>
+        <tr><td>the mount / root</td><td>the <b>dataset</b> <code>dataset_id</code></td></tr>
+        <tr><td>a <span class="file">file</span></td><td>a <b>document</b> (one PDF, page, or markdown file ingested)</td></tr>
+        <tr><td>a file's <span class="file">bytes</span></td><td>its <b>segments</b>, fetched and rejoined with <code>\n</code></td></tr>
+        <tr><td>the <span class="file">path</span> to a file</td><td>a <b>slug</b> in the document's <code>doc_metadata</code> (e.g. <code>guides/quickstart</code>)</td></tr>
+        <tr><td>a <span class="file">directory</span></td><td><b>inferred</b> from common slug prefixes (no real folder exists)</td></tr>
+        <tr><td>stat (size / time / type)</td><td>document fields: upload <code>size</code>, <code>created_at</code>, always TEXT</td></tr>
+      </tbody>
+    </table>
+    <div class="callout">So <b>"read a file"</b> literally means: fetch that document's segments and glue them back together. The file is <em>reconstructed</em> on demand. It is not sitting anywhere as a contiguous blob.</div>
+  </div>
+</section>
+
+<!-- 3 -->
+<section id="tree">
+  <div class="wrap">
+    <p class="kicker">Step 3 &middot; the one genuinely hard part</p>
+    <h2>Folders conjured from a flat list</h2>
+    <p class="lead">Dify has <strong>no folders</strong>. Documents are a flat list. A filesystem is a tree. The bridge: each document carries a <span class="mono">slug</span>, and directories are <em>derived</em> from the prefixes those slugs share. Toggle documents below and watch the tree rebuild. This is the same move S3 makes with object keys.</p>
+    <div class="grid2">
+      <div class="panel">
+        <div class="label">Documents in the dataset (flat)</div>
+        <div id="docrows"></div>
+        <div class="toggle">
+          <div id="collide" class="switch" role="switch" tabindex="0" aria-label="add a colliding document"></div>
+          <span>Add a document whose slug is <span class="mono">guides</span> (collides with the <span class="mono">guides/</span> directory)</span>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="label">Inferred virtual filesystem</div>
+        <pre id="treeout" class="tree"></pre>
+      </div>
+    </div>
+    <div class="callout"><b>Why the collision matters.</b> A real tree cannot have <span class="mono">guides</span> be both a file and a folder. When two slugs demand that, Mirage's tree builder <em>raises</em> rather than guessing. Documents with no slug fall back to their name and land at the root (shown in <span style="color:var(--warn)">amber</span>).</div>
+  </div>
+</section>
+
+<!-- 4 -->
+<section id="read">
+  <div class="wrap">
+    <p class="kicker">Step 4</p>
+    <h2>Reading a file is reassembling segments</h2>
+    <p class="lead">Pick a document. Its bytes do not exist until you ask. Mirage pages through the document's segments and joins them with newlines. That joined string <em>is</em> the file. Click <span class="mono">cat</span> to watch it happen.</p>
+    <div class="panel">
+      <div class="segpick" id="segpick"></div>
+      <div class="label">Segments returned by Dify (each is one chunk it embedded)</div>
+      <div class="seglist" id="seglist"></div>
+      <div style="margin-top:14px;display:flex;gap:10px;align-items:center">
+        <button id="catbtn" class="segpick" style="display:inline-block"><span class="mono">$ cat</span></button>
+        <span class="muted" style="font-size:.85rem">joins segments with <span class="mono">\n</span> &rarr; the file's bytes</span>
+      </div>
+      <div class="label" style="margin-top:14px">Reconstructed file contents</div>
+      <div id="filebytes" class="filebytes"></div>
+    </div>
+  </div>
+</section>
+
+<!-- 5 -->
+<section id="term">
+  <div class="wrap">
+    <p class="kicker">Step 5 &middot; the payoff</p>
+    <h2>Run shell commands, see the Dify API underneath</h2>
+    <p class="lead">This terminal is live. Type a command on the left; the right panel shows the exact HTTP calls Mirage makes to Dify to answer it. The dataset is the same five documents from above, mounted at <span class="mono">/knowledge</span>.</p>
+    <div class="term">
+      <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="ttl">agent@mirage &mdash; /knowledge (Dify dataset kb-7f3a)</span></div>
+      <div class="body">
+        <div class="out" id="termout"></div>
+        <div class="net"><div class="label">Behind the scenes &middot; Dify API</div><div id="termnet"></div></div>
+      </div>
+      <div class="inrow">
+        <span class="pr">$</span>
+        <input id="terminput" autocomplete="off" spellcheck="false" placeholder="try: ls /knowledge   then press Enter" />
+      </div>
+    </div>
+    <div class="hintbar" id="hints"></div>
+    <div class="callout">Notice the first <span class="mono">ls</span> triggers one <span class="mono">GET /documents</span> call that builds the whole tree into a RAM index. After that, <span class="mono">ls</span> and <span class="mono">stat</span> are served from the index with zero API calls. Only <span class="mono">cat</span> / <span class="mono">grep</span> / <span class="mono">search</span> hit the network again.</div>
+  </div>
+</section>
+
+<!-- 6 -->
+<section id="vs">
+  <div class="wrap">
+    <p class="kicker">Step 6</p>
+    <h2>The bonus Dify gives that a disk cannot</h2>
+    <p class="lead">A real disk can only match exact bytes. Dify can match <em>meaning</em>. So this backend keeps the POSIX tools for literal matching and adds one extra command, <span class="mono">search</span>, that exposes Dify's native vector retrieval through the same paths.</p>
+    <div class="vs">
+      <div class="panel">
+        <span class="tag exact">exact</span>
+        <h3 style="margin-top:8px">grep</h3>
+        <p class="muted" style="font-size:.92rem">Reads the file's bytes and matches a literal pattern or regex, line by line. Same as on any disk.</p>
+        <ul>
+          <li>Finds the string only if those characters are present.</li>
+          <li><span class="mono">grep -ri "429" /knowledge</span></li>
+          <li>Misses "rate limited" when you searched "throttling".</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <span class="tag mean">meaning</span>
+        <h3 style="margin-top:8px">search</h3>
+        <p class="muted" style="font-size:.92rem">Calls Dify's <span class="mono">/retrieve</span> endpoint: embeds your query, ranks segments by semantic similarity, returns them with scores.</p>
+        <ul>
+          <li>Finds "rate limited to 100/min" when you ask about <em>throttling</em>.</li>
+          <li><span class="mono">search "how am I throttled?" /knowledge</span></li>
+          <li>Path scope becomes a <span class="mono">metadata_filtering</span> condition on the slug.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="callout">This is the inverse of the usual problem. Instead of forcing Dify into the filesystem box, the backend surfaces Dify's <b>superpower through</b> the box: ranked semantic retrieval, addressable by path.</div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p><b style="color:var(--ink)">The one-line answer.</b> Dify can be a filesystem because a filesystem is just list + read + stat, and a Dify dataset can answer all three: documents are files, segments are their bytes, slug metadata is the path, and directories are faked from shared prefixes, the same way S3 fakes them from object keys.</p>
+    <p class="src" style="margin-top:18px">Sources &middot;
+      <a href="https://docs.dify.ai/api-reference/datasets/retrieve-chunks-from-a-knowledge-base-test-retrieval">Dify retrieve API</a> &middot;
+      <a href="https://docs.dify.ai/en/use-dify/knowledge/manage-knowledge/maintain-dataset-via-api">Manage knowledge via API</a> &middot;
+      <a href="https://dify.ai/blog/dify-v1-1-0-filtering-knowledge-retrieval-with-customized-metadata">Metadata filtering (Dify v1.1.0)</a> &middot;
+      <a href="https://docs.dify.ai/en/use-dify/nodes/knowledge-retrieval">Knowledge retrieval methods</a>
+    </p>
+    <p class="muted" style="margin-top:10px;font-size:.8rem">The terminal simulates Dify's vector ranking with simple keyword overlap so it runs offline. Real Dify ranks by embedding similarity. Everything else (tree inference, segment reassembly, the API call shapes) mirrors the actual Mirage Dify backend.</p>
+  </div>
+</footer>
+
+<script>
+const DATASET = "kb-7f3a";
+const MOUNT = "/knowledge";
+
+// Shared fake dataset: flat documents, each split into segments, most carrying a slug.
+const BASE_DOCS = [
+  {id:"doc-a", name:"Quickstart", slug:"guides/quickstart", created_at:1716282000, on:true,
+   segments:[
+     "Welcome to Acme. This quickstart gets you running in about five minutes.",
+     "Install the CLI with npm i -g acme, then run acme login to authenticate.",
+     "Set your token in the ACME_TOKEN environment variable before any command."]},
+  {id:"doc-b", name:"Authentication", slug:"guides/auth", created_at:1716290000, on:true,
+   segments:[
+     "Authentication uses bearer tokens. Send the header Authorization: Bearer <token>.",
+     "Requests are rate limited to 100 calls per minute per token.",
+     "If you exceed the limit you receive HTTP 429. Back off and retry with jitter."]},
+  {id:"doc-c", name:"Refund policy", slug:"policies/refunds", created_at:1716300000, on:true,
+   segments:[
+     "Refunds are available within 30 days of the original purchase.",
+     "Email support@acme.com with your order id to start a refund.",
+     "Approved refunds are processed within five business days."]},
+  {id:"doc-d", name:"Privacy policy", slug:"policies/privacy", created_at:1716310000, on:true,
+   segments:[
+     "Customer data is stored encrypted at rest and in transit.",
+     "You may request deletion of your data at any time and we honor it within 30 days."]},
+  {id:"doc-e", name:"CHANGELOG.md", slug:null, created_at:1716320000, on:true,
+   segments:[
+     "v2.0 added rate limit headers and a refund automation endpoint.",
+     "v1.5 introduced encrypted data exports."]},
+];
+// optional colliding document, toggled in the tree demo
+const COLLIDER = {id:"doc-x", name:"Guides overview", slug:"guides", created_at:1716330000, on:false,
+   segments:["This single document wants the path /knowledge/guides, which is also a folder."]};
+
+function activeDocs(includeCollider){
+  const list = BASE_DOCS.filter(d=>d.on);
+  if(includeCollider && COLLIDER.on) list.push(COLLIDER);
+  return list;
+}
+function fileKey(d){ return MOUNT + "/" + (d.slug || d.name); }
+function esc(s){ return s.replace(/[&<>]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+
+// Build the virtual tree + raise on collisions, mirroring core/dify/tree.py
+function buildIndex(docs){
+  const files = {};
+  for(const d of docs){
+    const k = fileKey(d);
+    if(files[k]) throw {kind:"dup", msg:`Duplicate slug '${(d.slug||d.name)}': two documents map to the same path.`};
+    files[k] = d;
+  }
+  const paths = Object.keys(files);
+  // collision: a file path that another path needs as a directory prefix
+  for(const p of paths){
+    const parts = p.split("/").filter(Boolean);
+    for(let i=1;i<parts.length;i++){
+      const anc = "/"+parts.slice(0,i).join("/");
+      if(files[anc]) throw {kind:"collide", msg:`Path collision: '${anc.slice(1)}' is a file but '${p.slice(1)}' needs it as a directory.`};
+    }
+  }
+  const dirs = new Set([MOUNT]);
+  for(const p of paths){
+    const parts = p.split("/").filter(Boolean);
+    for(let i=1;i<parts.length;i++) dirs.add("/"+parts.slice(0,i).join("/"));
+  }
+  const children = {}; dirs.forEach(d=>children[d]=[]);
+  dirs.forEach(d=>{
+    if(d===MOUNT) return;
+    const parent = d.split("/").slice(0,-1).join("/")||"/";
+    if(children[parent]) children[parent].push({name:d.split("/").pop(), type:"dir", path:d});
+  });
+  for(const p of paths){
+    const parent = p.split("/").slice(0,-1).join("/")||"/";
+    children[parent].push({name:p.split("/").pop(), type:"file", path:p, doc:files[p]});
+  }
+  Object.values(children).forEach(a=>a.sort((x,y)=> (x.type===y.type? x.name.localeCompare(y.name) : x.type==="dir"?-1:1)));
+  return {files, dirs, children};
+}
+
+/* ---------- Section 3: tree visualizer ---------- */
+const docrowsEl = document.getElementById("docrows");
+const treeoutEl = document.getElementById("treeout");
+function renderDocRows(){
+  docrowsEl.innerHTML = "";
+  BASE_DOCS.forEach(d=>{
+    const row = document.createElement("label");
+    row.className = "docrow" + (d.slug? "" : " noslug");
+    row.innerHTML = `<input type="checkbox" ${d.on?"checked":""}>
+      <span class="slug">${d.slug? esc(d.slug) : "(no slug)"}</span>
+      <span class="nm">${esc(d.name)}</span>`;
+    row.querySelector("input").addEventListener("change", e=>{ d.on = e.target.checked; renderTree(); });
+    docrowsEl.appendChild(row);
+  });
+}
+function renderTreeNode(idx, dir, depth, lines){
+  const kids = idx.children[dir]||[];
+  kids.forEach(k=>{
+    const pad = "  ".repeat(depth);
+    if(k.type==="dir"){
+      lines.push(`${pad}<span class="d">${esc(k.name)}/</span>`);
+      renderTreeNode(idx, k.path, depth+1, lines);
+    }else{
+      const cls = k.doc.slug? "f":"fb";
+      lines.push(`${pad}<span class="${cls}">${esc(k.name)}</span>`);
+    }
+  });
+}
+function renderTree(){
+  let idx;
+  try{ idx = buildIndex(activeDocs(true)); }
+  catch(err){
+    treeoutEl.innerHTML = `<span class="d">/knowledge</span>\n<span class="err">  ValueError: ${esc(err.msg)}</span>\n<span class="err">  (tree build refused; fix the slugs)</span>`;
+    return;
+  }
+  const lines = [`<span class="d">/knowledge</span>`];
+  renderTreeNode(idx, MOUNT, 1, lines);
+  treeoutEl.innerHTML = lines.join("\n");
+}
+const collideEl = document.getElementById("collide");
+function toggleCollide(){ COLLIDER.on = !COLLIDER.on; collideEl.classList.toggle("on", COLLIDER.on); renderTree(); }
+collideEl.addEventListener("click", toggleCollide);
+collideEl.addEventListener("keydown", e=>{ if(e.key===" "||e.key==="Enter"){e.preventDefault();toggleCollide();} });
+renderDocRows(); renderTree();
+
+/* ---------- Section 4: segment reassembly ---------- */
+const segpickEl = document.getElementById("segpick");
+const seglistEl = document.getElementById("seglist");
+const filebytesEl = document.getElementById("filebytes");
+let pickedDoc = BASE_DOCS[1]; // Authentication, has nice content
+function renderSegPick(){
+  segpickEl.innerHTML="";
+  BASE_DOCS.forEach(d=>{
+    const b=document.createElement("button");
+    b.textContent = (d.slug? d.slug.split("/").pop() : d.name);
+    b.className = d===pickedDoc? "active":"";
+    b.onclick=()=>{ pickedDoc=d; renderSegPick(); showSegs(); filebytesEl.textContent=""; };
+    segpickEl.appendChild(b);
+  });
+}
+function showSegs(){
+  seglistEl.innerHTML="";
+  pickedDoc.segments.forEach((s,i)=>{
+    const el=document.createElement("div");
+    el.className="seg";
+    el.innerHTML=`<span class="sidx">seg ${i}</span>${esc(s)}`;
+    seglistEl.appendChild(el);
+    setTimeout(()=>el.classList.add("show"), 60*i+40);
+  });
+}
+document.getElementById("catbtn").onclick=()=>{
+  filebytesEl.textContent="";
+  const joined = pickedDoc.segments.join("\n");
+  let i=0;
+  (function type(){
+    if(i<=joined.length){ filebytesEl.textContent = joined.slice(0,i); i+=2; requestAnimationFrame(type); }
+  })();
+};
+renderSegPick(); showSegs();
+
+/* ---------- Section 5: live terminal ---------- */
+const outEl = document.getElementById("termout");
+const netEl = document.getElementById("termnet");
+const inEl  = document.getElementById("terminput");
+let treeBuilt = false;
+
+function out(text, cls){ const d=document.createElement("div"); d.className="ln "+(cls||"o"); d.innerHTML=text; outEl.appendChild(d); outEl.scrollTop=outEl.scrollHeight; }
+function apiCall(verb, path, body, note){
+  const wrap=document.createElement("div"); wrap.className="api";
+  let html=`<div class="m"><span class="verb ${verb.toLowerCase()}">${verb}</span> ${esc(path)}</div>`;
+  if(body) html+=`<pre>${esc(JSON.stringify(body,null,2))}</pre>`;
+  if(note) html+=`<div class="note">${esc(note)}</div>`;
+  wrap.innerHTML=html; netEl.appendChild(wrap); netEl.scrollTop=netEl.scrollHeight;
+}
+function clearNet(){ netEl.innerHTML=""; }
+
+function ensureTree(){
+  if(treeBuilt) return getIndex();
+  apiCall("GET", `/datasets/${DATASET}/documents?page=1&limit=100`, null,
+    "list_all_documents: one page builds the whole RAM index. Result is cached.");
+  treeBuilt = true;
+  return getIndex();
+}
+function getIndex(){ return buildIndex(activeDocs(false)); }
+function resolve(idx, raw){
+  let p = raw.replace(/\/+$/,"") || MOUNT;
+  if(!p.startsWith("/")) p = MOUNT + "/" + p;
+  if(idx.files[p]) return {type:"file", path:p, doc:idx.files[p]};
+  if(idx.dirs.has(p)) return {type:"dir", path:p};
+  return null;
+}
+function docPath(doc){ return fileKey(doc); }
+
+const COMMANDS = {
+  help(){
+    out("commands: ls, tree, cat, stat, grep [-r], search, clear", "o");
+    out("paths live under /knowledge   e.g.  cat /knowledge/guides/auth", "o");
+  },
+  clear(){ outEl.innerHTML=""; clearNet(); },
+  ls(args){
+    const idx = ensureTree();
+    const target = args[0] || MOUNT;
+    const r = resolve(idx, target);
+    if(!r){ out(`ls: ${esc(target)}: No such file or directory`, "e"); return; }
+    if(r.type==="file"){ out(target, "o"); return; }
+    const kids = idx.children[r.path]||[];
+    out(kids.map(k=> k.type==="dir"? `<span style="color:var(--accent)">${esc(k.name)}/</span>` : esc(k.name)).join("   ") || "(empty)", "o");
+    if(!args._fromTree) apiCall("note","served from RAM index", null, "0 API calls: ls reads the cached tree.");
+  },
+  tree(args){
+    const idx = ensureTree();
+    const root = resolve(idx, args[0]||MOUNT) || {path:MOUNT};
+    const lines=[];
+    (function rec(dir,depth){
+      (idx.children[dir]||[]).forEach(k=>{
+        lines.push("  ".repeat(depth)+(k.type==="dir"?`<span style="color:var(--accent)">${esc(k.name)}/</span>`:esc(k.name)));
+        if(k.type==="dir") rec(k.path,depth+1);
+      });
+    })(root.path,1);
+    out(`<span style="color:var(--accent)">${esc(root.path)}</span>`,"o");
+    lines.forEach(l=>out(l,"o"));
+  },
+  stat(args){
+    const idx = ensureTree();
+    if(!args[0]){ out("stat: missing operand","e"); return; }
+    const r = resolve(idx, args[0]);
+    if(!r){ out(`stat: ${esc(args[0])}: No such file or directory`,"e"); return; }
+    if(r.type==="dir"){ out(`${esc(r.path)}  type=directory`,"o"); return; }
+    const d=r.doc, bytes=d.segments.join("\n").length;
+    apiCall("GET", `/datasets/${DATASET}/documents/${d.id}`, null, "stat fetches the document detail for accurate size + tokens.");
+    out(`  File: ${esc(r.path)}`,"o");
+    out(`  Type: text   Size: ${bytes}   Doc: ${d.id}`,"o");
+    out(`  Slug: ${d.slug? esc(d.slug):"(none, name-based)"}   Modified: ${new Date(d.created_at*1000).toISOString().slice(0,10)}`,"o");
+  },
+  cat(args){
+    const idx = ensureTree();
+    if(!args[0]){ out("cat: missing operand","e"); return; }
+    const r = resolve(idx, args[0]);
+    if(!r){ out(`cat: ${esc(args[0])}: No such file or directory`,"e"); return; }
+    if(r.type==="dir"){ out(`cat: ${esc(args[0])}: Is a directory`,"e"); return; }
+    apiCall("GET", `/datasets/${DATASET}/documents/${r.doc.id}/segments?page=1&limit=100&status=completed&enabled=true`, null,
+      `read_bytes: ${r.doc.segments.length} segments fetched, joined with \\n.`);
+    r.doc.segments.forEach(s=>out(esc(s),"o"));
+  },
+  grep(args){
+    const idx = ensureTree();
+    let recursive=false; const rest=[];
+    args.forEach(a=>{ if(a==="-r"||a==="-rn"||a==="-ri"||a==="-ri") recursive=true; else rest.push(a); });
+    const pattern = (rest[0]||"").replace(/^["']|["']$/g,"");
+    const target = rest[1] || MOUNT;
+    if(!pattern){ out("grep: missing pattern","e"); return; }
+    const r = resolve(idx, target);
+    if(!r){ out(`grep: ${esc(target)}: No such file or directory`,"e"); return; }
+    let docs=[];
+    if(r.type==="file") docs=[r.doc];
+    else { docs = Object.values(idx.files).filter(d=>docPath(d).startsWith(r.path+"/")||r.path===MOUNT && docPath(d).startsWith(MOUNT+"/")); if(!recursive){ out(`grep: ${esc(target)}: Is a directory`,"e"); return; } }
+    docs.forEach(d=>{
+      apiCall("GET", `/datasets/${DATASET}/documents/${d.id}/segments?...`, null, `grep reads ${esc(d.slug||d.name)} to match locally.`);
+    });
+    let hits=0;
+    docs.forEach(d=>{
+      d.segments.forEach(s=>{
+        if(s.toLowerCase().includes(pattern.toLowerCase())){
+          hits++;
+          const hl = esc(s).replace(new RegExp("("+pattern.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+")","ig"), "<b>$1</b>");
+          out(`<span style="color:var(--accent2)">${esc((d.slug||d.name))}</span>: ${hl}`, "hit");
+        }
+      });
+    });
+    if(!hits) out(`(no matches for "${esc(pattern)}")`,"o");
+  },
+  search(args){
+    const idx = ensureTree();
+    // query is the first quoted token; remaining non-flag token is an optional path
+    const joined = args.join(" ");
+    const qm = joined.match(/["']([^"']+)["']/);
+    const query = qm? qm[1] : args[0];
+    const pathArg = args.find(a=>a.startsWith("/"));
+    if(!query){ out('search: usage: search "your question" [path]',"e"); return; }
+    let scope=null, scopeDocs=null;
+    if(pathArg){
+      const r=resolve(idx,pathArg);
+      if(!r){ out(`search: ${esc(pathArg)}: No such file or directory`,"e"); return; }
+      scope=r.path;
+      scopeDocs = r.type==="file"? [r.doc] : Object.values(idx.files).filter(d=>docPath(d).startsWith(r.path==MOUNT?MOUNT+"/":r.path+"/"));
+    }
+    const body = {query, retrieval_model:{search_method:"semantic_search", top_k:3, score_threshold_enabled:false, reranking_enable:false}};
+    if(scope){
+      const slugs=(scopeDocs||[]).filter(d=>d.slug).map(d=>d.slug);
+      body.retrieval_model.metadata_filtering_conditions={logical_operator:"or",conditions:[{name:"slug",comparison_operator:"in",value:slugs}]};
+    }
+    apiCall("POST", `/datasets/${DATASET}/retrieve`, body, "Dify embeds the query and ranks segments by vector similarity.");
+    // simulate ranking with keyword overlap
+    const pool = (scopeDocs||Object.values(idx.files));
+    const qtokens = query.toLowerCase().replace(/[^a-z0-9 ]/g," ").split(/\s+/).filter(w=>w.length>2);
+    const scored=[];
+    pool.forEach(d=>d.segments.forEach(s=>{
+      const t=s.toLowerCase(); let ov=0; qtokens.forEach(w=>{ if(t.includes(w)) ov++; });
+      const score = ov? +(0.4 + 0.5*ov/qtokens.length).toFixed(2) : 0.18;
+      scored.push({d,s,score});
+    }));
+    scored.sort((a,b)=>b.score-a.score);
+    scored.slice(0,3).forEach(r=>{
+      out(`<span class="score">${r.score.toFixed(2)}</span>  <span style="color:var(--accent2)">${esc(r.d.slug||r.d.name)}</span>`,"o");
+      out(`        ${esc(r.s)}`,"o");
+    });
+  },
+};
+
+function runLine(line){
+  const trimmed=line.trim();
+  out(`<span class="pr">$</span> ${esc(trimmed)}`,"cmd");
+  if(!trimmed) return;
+  const parts = trimmed.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || [];
+  const cmd = parts[0]; const args = parts.slice(1);
+  if(COMMANDS[cmd]){ try{ COMMANDS[cmd](args); }catch(err){ out("error: "+esc(err.msg||String(err)),"e"); } }
+  else out(`${esc(cmd)}: command not found (try: help)`,"e");
+}
+
+inEl.addEventListener("keydown", e=>{
+  if(e.key==="Enter"){ const v=inEl.value; inEl.value=""; runLine(v); }
+});
+
+// seed terminal + hints
+const HINTS = ["ls /knowledge","tree /knowledge","cat /knowledge/guides/auth","stat /knowledge/policies/refunds",'grep -ri 429 /knowledge','search "how am I throttled?" /knowledge','search "money back" /knowledge/policies'];
+const hintsEl=document.getElementById("hints");
+HINTS.forEach(h=>{ const b=document.createElement("button"); b.textContent=h; b.onclick=()=>{ runLine(h); inEl.focus(); }; hintsEl.appendChild(b); });
+out('<span style="color:var(--faint)">Mirage shell. Type help, or click a suggestion below.</span>',"o");
+runLine("ls /knowledge");
+</script>
+</body>
+</html>

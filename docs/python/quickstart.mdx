@@ -93,17 +93,39 @@ cap fires, the agent sees the truncated bytes plus a stderr notice
 stays 0.
 
 Caps fire only on the **terminal** command of a pipeline, so
-`cat big.txt | head -n 30` still shows 30 lines. Limits are
-per-command and per-mount; tighten or relax them per resource:
+`cat big.txt | head -n 30` still shows 30 lines.
+
+### Configure per mount
+
+Limits are per-command and per-mount. Attach them when you mount a
+resource by passing a `(resource, mode, {command: CommandSafeguard})`
+tuple. Each guard sets `max_lines` / `max_bytes` (output cap) and/or
+`timeout_seconds` (deadline); `on_exceed` is `TRUNCATE` (default, exit 0
+plus notice) or `ERROR` (exit 1 plus notice):
 
 ```python
+from mirage import MountMode, Workspace
+from mirage.resource.ram import RAMResource
 from mirage.types import CommandSafeguard, OnExceed
 
-mount.command_safeguards["cat"] = CommandSafeguard(max_lines=500)
-mount.command_safeguards["grep"] = CommandSafeguard(
-    max_lines=200, on_exceed=OnExceed.ERROR,
+ws = Workspace(
+    {
+        "/data": (
+            RAMResource(),
+            MountMode.WRITE,
+            {
+                "head": CommandSafeguard(max_lines=100),  # cap, keep going
+                "grep": CommandSafeguard(max_lines=50, on_exceed=OnExceed.ERROR),
+                "rg": CommandSafeguard(timeout_seconds=30),  # deadline
+            },
+        ),
+    },
+    mode=MountMode.WRITE,
 )
 ```
+
+The same limits are available to the CLI as a `command_safeguards`
+block in the workspace YAML.
 
 ## Next Steps
 

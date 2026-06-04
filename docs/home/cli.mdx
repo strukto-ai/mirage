@@ -292,6 +292,42 @@ mirage workspace clone demo --at <version> --id demo_at_v1
 | `mirage job wait JOB [--timeout SECS]` | Block until the job is done; returns the result. |
 | `mirage job cancel JOB` | Cancel a running job. |
 
+## Per-mount safeguards
+
+<Note>
+Per-mount `command_safeguards` are **Python CLI only** today. The TypeScript
+CLI config schema does not carry them yet.
+</Note>
+
+Cap what a command may stream back per mount with `command_safeguards`, so a
+runaway `cat`/`grep`/`rg` can't flood the agent or hang. Each entry sets
+`max_lines` / `max_bytes` (output cap) and/or `timeout_seconds` (deadline),
+with `on_exceed: truncate` (stop, exit 0, add a stderr notice) or
+`on_exceed: error` (stop, exit 1):
+
+```yaml
+mounts:
+  /data:
+    resource: ram
+    mode: WRITE
+    command_safeguards:
+      head:                  # cap output, keep going
+        max_lines: 100
+        on_exceed: truncate
+      grep:                  # cap output, fail hard
+        max_lines: 50
+        on_exceed: error
+      rg:                    # deadline in seconds
+        timeout_seconds: 30
+```
+
+Caps fire on the **terminal** command of a pipeline only, so
+`cat big.txt | head -n 30` still shows 30 lines. Truncation exits `0`, `error`
+exits `1`, and a timeout exits `124` -- each with a stderr notice. Without a
+`command_safeguards` block, `cat`/`grep`/`rg`/`head`/`tail` still cap at 2000
+lines by default. See [Output Safeguards](/python/quickstart#output-safeguards)
+for the SDK form and the same fields.
+
 ## Daemon control
 
 Most users never run these directly -- the daemon auto-spawns on

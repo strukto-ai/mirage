@@ -1,0 +1,12 @@
+mode: WRITE
+consistency: LAZY
+
+# A standalone scratch workspace for the versioning walkthrough. Versioning is
+# backend-agnostic (it tracks the workspace tree, not the mount type), so this
+# uses a writable RAM mount to keep the demo fast and to avoid writing test
+# files into your real cloud backends. The same verbs work on the cross
+# workspace above.
+mounts:
+  /:
+    resource: ram
+    mode: WRITE
