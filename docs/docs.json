@@ -436,6 +436,13 @@
                 ]
               },
               {
+                "group": "Knowledge",
+                "icon": "brain",
+                "pages": [
+                  "typescript/setup/nowledge_mem"
+                ]
+              },
+              {
                 "group": "Notes",
                 "icon": "book",
                 "pages": [

@@ -1,0 +1,95 @@
+---
+title: Nowledge Mem
+icon: brain
+description: Mount Nowledge Mem as a read-only knowledge tree for memories, threads, sources, wiki pages, artifacts, and skills.
+---
+
+`NowledgeMemResource` connects to the Nowledge Mem API and exposes the Nowledge FS tree through Mirage. Agents can use familiar commands such as `ls`, `cat`, `find`, `grep`, and `recall` without shelling out to the `nmem` CLI.
+
+Nowledge FS is a projection of the whole knowledge workspace, not a folder of memory notes. The root includes memories, threads, parsed Library sources, wiki pages, Working Memory, feed events, artifacts, and active skills. Each path resolves back to Nowledge Mem; Mirage does not create a second datastore.
+
+This resource requires a Nowledge Mem server with the Nowledge FS API (`/fs/*`), available in Nowledge Mem 0.9.0 or newer.
+
+## Node
+
+```bash
+pnpm add @struktoai/mirage-node
+```
+
+```ts
+import {
+  MountMode,
+  NowledgeMemResource,
+  Workspace,
+} from "@struktoai/mirage-node";
+
+const mem = new NowledgeMemResource({
+  apiUrl: process.env.NMEM_API_URL ?? "http://127.0.0.1:14242",
+  apiKey: process.env.NMEM_API_KEY,
+});
+
+const ws = new Workspace({ "/mem": mem }, { mode: MountMode.READ });
+await ws.execute("ls /mem");
+await ws.execute('grep "JWT" /mem/threads');
+await ws.execute('recall "deployment decision" --in /mem/memories -k 5');
+```
+
+## Browser
+
+```bash
+pnpm add @struktoai/mirage-browser
+```
+
+For browser apps, point `apiUrl` at a same-origin proxy or a Nowledge Mem remote endpoint that allows your application origin. Do not ship a long-lived personal API key in client-side code; use a proxy or a short-lived token issued by your app.
+
+```ts
+import {
+  MountMode,
+  NowledgeMemResource,
+  Workspace,
+} from "@struktoai/mirage-browser";
+
+const mem = new NowledgeMemResource({
+  apiUrl: "/api/nowledge-mem",
+});
+
+const ws = new Workspace({ "/mem": mem }, { mode: MountMode.READ });
+await ws.execute('grep "JWT" /mem/memories');
+```
+
+## Commands
+
+| Command                                                               | Purpose                                                        |
+| --------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `ls /mem`                                                             | List the top-level knowledge namespaces.                       |
+| `cat /mem/wiki/entities/PostgreSQL.entity.md`                         | Read a projected wiki/entity/topic page.                       |
+| `cat --line 40 --lines 20 /mem/threads/codex/<thread>/messages.jsonl` | Read a small evidence window from a large thread/source/skill. |
+| `find /mem/memories --label security`                                 | Filter memory metadata.                                        |
+| `grep "JWT" /mem/threads`                                             | Search exact text across rendered content.                     |
+| `grep "JWT" /mem/sources`                                             | Search parsed Library source text.                             |
+| `recall "deployment decision" --in /mem/memories -k 5`                | Semantic recall through the Nowledge Mem API.                  |
+
+## Tree shape
+
+| Path                  | What it represents                                                  |
+| --------------------- | ------------------------------------------------------------------- |
+| `/mem/memories`       | Memories and crystals, including label/date/id projections.         |
+| `/mem/threads`        | Captured agent and chat threads with message files.                 |
+| `/mem/sources`        | Parsed Library documents such as PDFs, spreadsheets, and web pages. |
+| `/mem/wiki`           | Topic, entity, and crystal knowledge pages.                         |
+| `/mem/working-memory` | Current and archived Working Memory.                                |
+| `/mem/feed`           | Activity timeline events.                                           |
+| `/mem/artifacts`      | Reports, drafts, and generated knowledge artifacts.                 |
+| `/mem/skills`         | Active skills exposed as readable bundles.                          |
+
+## Config
+
+| Field          | Default                                    | Notes                                                                                                        |
+| -------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `apiUrl`       | `NMEM_API_URL` or `http://127.0.0.1:14242` | Nowledge Mem API base URL. Snake case `api_url` is also accepted.                                            |
+| `apiKey`       | `NMEM_API_KEY`                             | Optional bearer token for remote Nowledge Mem. Snake case `api_key` is also accepted. Redacted in snapshots. |
+| `defaultLimit` | none                                       | Optional default result limit for API-backed searches.                                                       |
+
+## Mount mode
+
+`read` only. Nowledge Mem remains the source of truth; Mirage provides a filesystem-shaped read surface over its API.

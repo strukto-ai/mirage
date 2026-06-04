@@ -34,6 +34,10 @@ const REGISTRY: Record<string, ResourceFactory> = {
     const { RAMResource } = await import('@struktoai/mirage-core')
     return new RAMResource()
   },
+  nowledge_mem: async (config) => {
+    const { NowledgeMemResource } = await import('@struktoai/mirage-core')
+    return new NowledgeMemResource(config)
+  },
   disk: async (config) => {
     const { DiskResource } = await import('./disk/disk.ts')
     const norm = normalizeFields(config) as { root: string }
