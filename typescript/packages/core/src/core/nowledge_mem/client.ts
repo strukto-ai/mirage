@@ -182,7 +182,10 @@ export interface NowledgeMemAccessorLike {
 }
 
 function stripPrefix(path: string, prefix: string): string {
-  if (prefix !== '' && path.startsWith(prefix)) return path.slice(prefix.length) || '/'
+  if (prefix === '') return path
+  const cleanPrefix = prefix.replace(/\/+$/, '')
+  if (path === cleanPrefix) return '/'
+  if (path.startsWith(`${cleanPrefix}/`)) return path.slice(cleanPrefix.length) || '/'
   return path
 }
 

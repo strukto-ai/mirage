@@ -14,32 +14,10 @@
 
 import type { NowledgeMemAccessor } from '../../../accessor/nowledge_mem.ts'
 import { nowledgeMemPath, nowledgeMemStat } from '../../../core/nowledge_mem/client.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { FileType, ResourceName, type FileStat, type PathSpec } from '../../../types.ts'
+import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-
-const ENC = new TextEncoder()
-
-const TYPE_LABELS: Record<string, string> = {
-  [FileType.DIRECTORY]: 'directory',
-  [FileType.TEXT]: 'regular file',
-  [FileType.BINARY]: 'regular file',
-  [FileType.JSON]: 'regular file',
-  [FileType.CSV]: 'regular file',
-  [FileType.PDF]: 'regular file',
-}
-
-function formatStat(fmt: string, stat: FileStat): string {
-  return fmt.replace(/%(.)/g, (_, spec: string) => {
-    if (spec === 'n') return stat.name
-    if (spec === 's') return String(stat.size ?? 0)
-    if (spec === 'F')
-      return stat.type !== null ? (TYPE_LABELS[stat.type] ?? 'regular file') : 'regular file'
-    if (spec === 'y') return stat.modified ?? ''
-    return '?'
-  })
-}
+import { statGeneric } from '../generic/stat.ts'
 
 async function statCommand(
   accessor: NowledgeMemAccessor,
@@ -47,28 +25,9 @@ async function statCommand(
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  if (paths.length === 0) {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('stat: missing operand\n') })]
-  }
-  const fmt =
-    typeof opts.flags.c === 'string'
-      ? opts.flags.c
-      : typeof opts.flags.f === 'string'
-        ? opts.flags.f
-        : null
-  const lines: string[] = []
-  for (const p of paths) {
-    const stat = await nowledgeMemStat(accessor, nowledgeMemPath(p.original, p.prefix))
-    if (fmt !== null) {
-      lines.push(formatStat(fmt, stat))
-    } else {
-      lines.push(
-        `name=${stat.name} size=${String(stat.size)} modified=${String(stat.modified)} type=${String(stat.type)}`,
-      )
-    }
-  }
-  const out: ByteSource = ENC.encode(lines.join('\n'))
-  return [out, new IOResult()]
+  return statGeneric(paths, opts, (p) =>
+    nowledgeMemStat(accessor, nowledgeMemPath(p.original, p.prefix)),
+  )
 }
 
 export const NOWLEDGE_MEM_STAT = command({

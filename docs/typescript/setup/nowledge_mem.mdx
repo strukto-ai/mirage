@@ -1,12 +1,12 @@
 ---
 title: Nowledge Mem
 icon: brain
-description: Mount Nowledge Mem as a read-only knowledge tree for memories, threads, sources, wiki pages, artifacts, and skills.
+description: Mount Nowledge Mem as a read-only knowledge tree for memories, threads, sources, wiki pages, guidance context, artifacts, and skills.
 ---
 
 `NowledgeMemResource` connects to the Nowledge Mem API and exposes the Nowledge FS tree through Mirage. Agents can use familiar commands such as `ls`, `cat`, `find`, `grep`, and `recall` without shelling out to the `nmem` CLI.
 
-Nowledge FS is a projection of the whole knowledge workspace, not a folder of memory notes. The root includes memories, threads, parsed Library sources, wiki pages, Working Memory, feed events, artifacts, and active skills. Each path resolves back to Nowledge Mem; Mirage does not create a second datastore.
+Nowledge FS is a projection of the whole knowledge workspace, not a folder of memory notes. The root includes memories, threads, parsed Library sources, wiki pages, guidance context, Working Memory, feed events, artifacts, and active skills. Each path resolves back to Nowledge Mem; Mirage does not create a second datastore.
 
 This resource requires a Nowledge Mem server with the Nowledge FS API (`/fs/*`), available in Nowledge Mem 0.9.0 or newer.
 
@@ -77,6 +77,7 @@ await ws.execute('grep "JWT" /mem/memories');
 | `/mem/threads`        | Captured agent and chat threads with message files.                 |
 | `/mem/sources`        | Parsed Library documents such as PDFs, spreadsheets, and web pages. |
 | `/mem/wiki`           | Topic, entity, and crystal knowledge pages.                         |
+| `/mem/context`        | Context Bundle, guidance, profile, and policy-readable projections. |
 | `/mem/working-memory` | Current and archived Working Memory.                                |
 | `/mem/feed`           | Activity timeline events.                                           |
 | `/mem/artifacts`      | Reports, drafts, and generated knowledge artifacts.                 |

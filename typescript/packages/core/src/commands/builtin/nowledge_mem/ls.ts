@@ -13,27 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { NowledgeMemAccessor } from '../../../accessor/nowledge_mem.ts'
-import { nowledgeMemLsStats, nowledgeMemPath } from '../../../core/nowledge_mem/client.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { FileType, ResourceName, type FileStat, type PathSpec } from '../../../types.ts'
+import {
+  nowledgeMemPath,
+  nowledgeMemReaddir,
+  nowledgeMemStat,
+} from '../../../core/nowledge_mem/client.ts'
+import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { humanSize } from '../utils/formatting.ts'
-
-const ENC = new TextEncoder()
-
-function formatName(entry: FileStat, classify: boolean): string {
-  const path = typeof entry.extra.path === 'string' ? entry.extra.path : entry.name
-  const name = path.split('/').pop() ?? entry.name
-  return classify && entry.type === FileType.DIRECTORY ? `${name}/` : name
-}
-
-function formatLong(entry: FileStat, human: boolean): string {
-  const size = human ? humanSize(entry.size ?? 0) : String(entry.size ?? 0)
-  const path = typeof entry.extra.path === 'string' ? entry.extra.path : entry.name
-  const name = path.split('/').pop() ?? entry.name
-  return `${entry.type ?? '-'}\t${size}\t${entry.modified ?? ''}\t${name}`
-}
+import { lsGeneric } from '../generic/ls.ts'
 
 async function lsCommand(
   accessor: NowledgeMemAccessor,
@@ -41,17 +29,12 @@ async function lsCommand(
   _texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const long = opts.flags.args_l === true && opts.flags.args_1 !== true
-  const human = opts.flags.h === true
-  const classify = opts.flags.F === true
-  const p = paths[0]
-  const path = p !== undefined ? nowledgeMemPath(p.original, p.prefix) : '/'
-  const entries = await nowledgeMemLsStats(accessor, path)
-  const lines = entries.map((entry) =>
-    long ? formatLong(entry, human) : formatName(entry, classify),
+  return lsGeneric(
+    paths,
+    opts,
+    (p) => nowledgeMemReaddir(accessor, nowledgeMemPath(p.original, p.prefix)),
+    (p) => nowledgeMemStat(accessor, nowledgeMemPath(p.original, p.prefix)),
   )
-  const out: ByteSource = ENC.encode(lines.join('\n'))
-  return [out, new IOResult()]
 }
 
 export const NOWLEDGE_MEM_LS = command({

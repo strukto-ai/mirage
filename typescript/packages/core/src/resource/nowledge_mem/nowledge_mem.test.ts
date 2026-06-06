@@ -20,6 +20,7 @@ import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
 import {
   HttpNowledgeMemTransport,
   normalizeNowledgeMemConfig,
+  nowledgeMemPath,
 } from '../../core/nowledge_mem/client.ts'
 import { NowledgeMemResource } from './nowledge_mem.ts'
 
@@ -37,6 +38,7 @@ const ROOT_NAMES = [
   'threads',
   'sources',
   'wiki',
+  'context',
   'working-memory',
   'feed',
   'artifacts',
@@ -49,7 +51,7 @@ const ROOT_ENTRIES = ROOT_NAMES.map((name) => ({
   type: 'directory',
 }))
 const ROOT_PATHS = ROOT_NAMES.map((name) => `/${name}`)
-const ROOT_LS_OUTPUT = ROOT_NAMES.join('\n')
+const ROOT_LS_OUTPUT = [...ROOT_NAMES].sort((a, b) => a.localeCompare(b)).join('\n')
 
 function mockFetch(handler: (url: URL) => unknown): void {
   globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -76,6 +78,8 @@ describe('NowledgeMemResource', () => {
       apiUrl: 'https://mem.example/',
       apiKey: 'secret',
     })
+    expect(nowledgeMemPath('/mem/memories', '/mem')).toBe('/memories')
+    expect(nowledgeMemPath('/memories', '/mem')).toBe('/memories')
   })
 
   it('mounts Nowledge Mem as an API-backed read-only resource', async () => {
@@ -141,6 +145,17 @@ describe('NowledgeMemResource', () => {
         expect(url.searchParams.get('path')).toBe('/')
         return {
           entries: ROOT_ENTRIES,
+        }
+      }
+      if (url.pathname === '/fs/stat') {
+        const path = url.searchParams.get('path')
+        if (path !== null && ROOT_PATHS.includes(path)) {
+          return {
+            path,
+            name: path.split('/').pop(),
+            kind: 'directory',
+            type: 'directory',
+          }
         }
       }
       if (url.pathname === '/fs/cat') {

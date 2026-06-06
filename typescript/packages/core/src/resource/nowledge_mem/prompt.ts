@@ -15,10 +15,11 @@
 export const NOWLEDGE_MEM_PROMPT = `{prefix}
   Nowledge Mem is a remote knowledge filesystem, not just a memory list.
   Start with ls {prefix} to discover the tree: memories, threads, sources, wiki,
-  working-memory, feed, artifacts, and skills. Prefer targeted reads: use recall
-  for fuzzy memory questions, find for metadata filters, grep for exact phrases
-  across memories, threads, and parsed Library sources, stat before loading large
-  files, and cat --line/--lines when you only need an evidence window. Treat
-  paths as Nowledge FS identifiers, not local OS paths. This mount talks directly
-  to the Nowledge Mem /fs/* API and does not require the nmem CLI.
+  context, working-memory, feed, artifacts, and skills. Prefer targeted reads:
+  use recall for fuzzy memory questions, find for metadata filters, grep for
+  exact phrases across memories, threads, and parsed Library sources, stat
+  before loading large files, and cat --line/--lines when you only need an
+  evidence window. Treat paths as Nowledge FS identifiers, not local OS paths.
+  This mount talks directly to the Nowledge Mem /fs/* API and does not require
+  the nmem CLI.
 `.trim()

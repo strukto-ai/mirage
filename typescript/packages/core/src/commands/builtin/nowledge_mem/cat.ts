@@ -18,10 +18,10 @@ import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { CommandSpec, Operand, OperandKind, Option } from '../../spec/types.ts'
+import { numberLines } from '../cat_helper.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
 
 const SPEC = new CommandSpec({
   options: [
@@ -32,14 +32,12 @@ const SPEC = new CommandSpec({
   rest: new Operand({ kind: OperandKind.PATH }),
 })
 
-function numberLines(data: Uint8Array): Uint8Array {
-  const text = DEC.decode(data)
-  const lines = text.split('\n')
-  const trailing = text.endsWith('\n')
-  const limit = trailing ? lines.length - 1 : lines.length
-  const out: string[] = []
-  for (let i = 0; i < limit; i++) out.push(`     ${String(i + 1)}\t${lines[i] ?? ''}\n`)
-  return ENC.encode(out.join(''))
+async function* chainBytes(chunks: readonly Uint8Array[]): AsyncIterable<Uint8Array> {
+  for (const chunk of chunks) yield chunk
+}
+
+function outputBytes(chunks: readonly Uint8Array[], number: boolean): ByteSource {
+  return number ? numberLines(chainBytes(chunks)) : chainBytes(chunks)
 }
 
 async function catCommand(
@@ -49,26 +47,30 @@ async function catCommand(
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
   const nFlag = opts.flags.n === true
-  const p = paths[0]
-  if (p !== undefined) {
-    const path = nowledgeMemPath(p.original, p.prefix)
+  if (paths.length > 0) {
     const line =
       typeof opts.flags.line === 'string' ? Number.parseInt(opts.flags.line, 10) : undefined
     const lines =
       typeof opts.flags.lines === 'string' ? Number.parseInt(opts.flags.lines, 10) : undefined
-    const data = await nowledgeMemRead(accessor, path, {
-      ...(line !== undefined && Number.isFinite(line) ? { line } : {}),
-      ...(lines !== undefined && Number.isFinite(lines) ? { lines } : {}),
-    })
-    const out: ByteSource = nFlag ? numberLines(data) : data
-    return [out, new IOResult({ reads: { [p.stripPrefix]: data }, cache: [p.stripPrefix] })]
+    const reads: Record<string, ByteSource> = {}
+    const cache: string[] = []
+    const chunks: Uint8Array[] = []
+    for (const p of paths) {
+      const data = await nowledgeMemRead(accessor, nowledgeMemPath(p.original, p.prefix), {
+        ...(line !== undefined && Number.isFinite(line) ? { line } : {}),
+        ...(lines !== undefined && Number.isFinite(lines) ? { lines } : {}),
+      })
+      reads[p.stripPrefix] = data
+      cache.push(p.stripPrefix)
+      chunks.push(data)
+    }
+    return [outputBytes(chunks, nFlag), new IOResult({ reads, cache })]
   }
   const raw = await readStdinAsync(opts.stdin)
   if (raw === null) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('cat: missing operand\n') })]
   }
-  const out: ByteSource = nFlag ? numberLines(raw) : raw
-  return [out, new IOResult()]
+  return [outputBytes([raw], nFlag), new IOResult()]
 }
 
 export const NOWLEDGE_MEM_CAT = command({
