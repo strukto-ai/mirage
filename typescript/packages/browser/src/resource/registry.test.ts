@@ -27,12 +27,21 @@ describe('browser resource registry', () => {
     expect(names).toContain('oci')
     expect(names).toContain('supabase')
     expect(names).toContain('slack')
+    expect(names).toContain('nowledge_mem')
     expect(names).toEqual([...names].sort())
   })
 
   it('builds RAM with no config', async () => {
     const r = await buildResource('ram', {})
     expect(r.kind).toBe('ram')
+  })
+
+  it('builds Nowledge Mem with API config', async () => {
+    const r = (await buildResource('nowledge_mem', {
+      api_url: 'https://mem.example',
+    })) as unknown as { kind: string; config: Record<string, unknown> }
+    expect(r.kind).toBe('nowledge_mem')
+    expect(r.config).toMatchObject({ apiUrl: 'https://mem.example' })
   })
 
   it('builds S3 with bucket and presignedUrlProvider', async () => {

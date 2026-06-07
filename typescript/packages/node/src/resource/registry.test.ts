@@ -25,6 +25,7 @@ describe('node resource registry', () => {
     expect(names).toContain('s3')
     expect(names).toContain('postgres')
     expect(names).toContain('mongodb')
+    expect(names).toContain('nowledge_mem')
     expect(names).toEqual([...names].sort())
   })
 
@@ -51,6 +52,18 @@ describe('node resource registry', () => {
   it('builds RAM with no config', async () => {
     const r = await buildResource('ram', {})
     expect(r.kind).toBe('ram')
+  })
+
+  it('builds Nowledge Mem with API config', async () => {
+    const r = (await buildResource('nowledge_mem', {
+      api_url: 'https://mem.example',
+      api_key: 'secret',
+    })) as unknown as { kind: string; config: Record<string, unknown> }
+    expect(r.kind).toBe('nowledge_mem')
+    expect(r.config).toMatchObject({
+      apiUrl: 'https://mem.example',
+      apiKey: 'secret',
+    })
   })
 
   it('builds Disk with root', async () => {

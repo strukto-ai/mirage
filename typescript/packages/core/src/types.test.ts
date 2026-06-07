@@ -48,7 +48,7 @@ describe('ConsistencyPolicy', () => {
 })
 
 describe('ResourceName', () => {
-  it('exposes the 24 documented backend kinds with matching string values', () => {
+  it('exposes documented backend kinds with matching string values', () => {
     expect(ResourceName.DISK).toBe('disk')
     expect(ResourceName.S3).toBe('s3')
     expect(ResourceName.RAM).toBe('ram')
@@ -74,10 +74,11 @@ describe('ResourceName', () => {
     expect(ResourceName.OPFS).toBe('opfs')
     expect(ResourceName.SUPABASE).toBe('supabase')
     expect(ResourceName.POSTGRES).toBe('postgres')
+    expect(ResourceName.NOWLEDGE_MEM).toBe('nowledge_mem')
   })
 
-  it('contains exactly 33 entries', () => {
-    expect(Object.keys(ResourceName)).toHaveLength(33)
+  it('contains exactly 34 entries', () => {
+    expect(Object.keys(ResourceName)).toHaveLength(34)
   })
 
   it('is frozen at runtime', () => {

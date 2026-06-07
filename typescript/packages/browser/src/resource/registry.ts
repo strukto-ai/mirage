@@ -109,6 +109,10 @@ const REGISTRY: Record<string, ResourceFactory> = {
     const { RAMResource } = await import('@struktoai/mirage-core')
     return new RAMResource()
   },
+  nowledge_mem: async (config) => {
+    const { NowledgeMemResource } = await import('@struktoai/mirage-core')
+    return new NowledgeMemResource(config)
+  },
   opfs: async (config) => {
     const { OPFSResource } = await import('./opfs/opfs.ts')
     const norm = normalizeFields(config)

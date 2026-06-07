@@ -12,6 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { Accessor, NOOPAccessor } from './base.ts'
-export { NowledgeMemAccessor } from './nowledge_mem.ts'
-export { RAMAccessor } from './ram.ts'
+import type { RegisteredCommand } from '../../config.ts'
+import { NOWLEDGE_MEM_CAT } from './cat.ts'
+import { NOWLEDGE_MEM_FIND } from './find.ts'
+import { NOWLEDGE_MEM_GREP } from './grep.ts'
+import { NOWLEDGE_MEM_LS } from './ls.ts'
+import { NOWLEDGE_MEM_RECALL } from './recall.ts'
+import { NOWLEDGE_MEM_STAT } from './stat.ts'
+
+export const NOWLEDGE_MEM_COMMANDS: readonly RegisteredCommand[] = [
+  ...NOWLEDGE_MEM_LS,
+  ...NOWLEDGE_MEM_CAT,
+  ...NOWLEDGE_MEM_STAT,
+  ...NOWLEDGE_MEM_FIND,
+  ...NOWLEDGE_MEM_GREP,
+  ...NOWLEDGE_MEM_RECALL,
+]

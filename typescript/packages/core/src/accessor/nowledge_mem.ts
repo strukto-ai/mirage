@@ -12,6 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { Accessor, NOOPAccessor } from './base.ts'
-export { NowledgeMemAccessor } from './nowledge_mem.ts'
-export { RAMAccessor } from './ram.ts'
+import { Accessor } from './base.ts'
+import type { NowledgeMemTransport } from '../core/nowledge_mem/client.ts'
+
+export class NowledgeMemAccessor extends Accessor {
+  constructor(
+    public readonly transport: NowledgeMemTransport,
+    public readonly defaultLimit?: number,
+  ) {
+    super()
+  }
+}

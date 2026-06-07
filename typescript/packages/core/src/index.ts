@@ -48,6 +48,26 @@ export {
 } from './resource/secrets.ts'
 export { z } from 'zod'
 export { RAMResource } from './resource/ram/ram.ts'
+export { NowledgeMemResource, type NowledgeMemResourceState } from './resource/nowledge_mem/nowledge_mem.ts'
+export { NOWLEDGE_MEM_PROMPT } from './resource/nowledge_mem/prompt.ts'
+export { NowledgeMemAccessor } from './accessor/nowledge_mem.ts'
+export {
+  HttpNowledgeMemTransport,
+  normalizeNowledgeMemConfig,
+  nowledgeMemFind,
+  nowledgeMemGrep,
+  nowledgeMemLsStats,
+  nowledgeMemRead,
+  nowledgeMemReaddir,
+  nowledgeMemRecall,
+  nowledgeMemStat,
+  redactNowledgeMemConfig,
+  type NowledgeMemConfig,
+  type NowledgeMemConfigRedacted,
+  type NowledgeMemGrepMatch,
+  type NowledgeMemTransport,
+} from './core/nowledge_mem/client.ts'
+export { NOWLEDGE_MEM_COMMANDS } from './commands/builtin/nowledge_mem/index.ts'
 export { RAMStore } from './resource/ram/store.ts'
 export { DevResource } from './resource/dev/dev.ts'
 export { DevStore, DevFiles } from './resource/dev/store.ts'
