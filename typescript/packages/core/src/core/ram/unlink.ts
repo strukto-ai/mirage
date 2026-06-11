@@ -12,13 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invalidateAfterUnlink } from '../../cache/context.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
-import { norm } from './utils.ts'
+import { norm } from '../../util/path.ts'
 
-export function unlink(accessor: RAMAccessor, path: PathSpec): Promise<void> {
+export async function unlink(accessor: RAMAccessor, path: PathSpec): Promise<void> {
   const p = norm(path.stripPrefix)
   accessor.store.files.delete(p)
   accessor.store.modified.delete(p)
-  return Promise.resolve()
+  await invalidateAfterUnlink(path)
 }

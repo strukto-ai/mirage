@@ -12,12 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invalidateAfterUnlink } from '../../cache/context.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
-import { norm } from './utils.ts'
+import { norm } from '../../util/path.ts'
 import { rstripSlash } from '../../util/slash.ts'
 
-export function rmR(accessor: RAMAccessor, path: PathSpec): Promise<void> {
+export async function rmR(accessor: RAMAccessor, path: PathSpec): Promise<void> {
   const p = norm(path.stripPrefix)
   const prefix = rstripSlash(p) + '/'
   for (const key of [...accessor.store.files.keys()]) {
@@ -32,5 +33,5 @@ export function rmR(accessor: RAMAccessor, path: PathSpec): Promise<void> {
       accessor.store.modified.delete(key)
     }
   }
-  return Promise.resolve()
+  await invalidateAfterUnlink(path)
 }

@@ -14,7 +14,7 @@
 
 import type { PathSpec } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
-import { norm, nowIso } from './utils.ts'
+import { norm, nowIso } from '@struktoai/mirage-core'
 
 export async function copy(accessor: RedisAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const s = norm(src.stripPrefix)

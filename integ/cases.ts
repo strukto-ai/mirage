@@ -408,6 +408,15 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ],
   ['arch_iconv_file', 'iconv -f utf-8 -t utf-8 /data/arch/g.txt'],
   ['arch_mktemp', 'mktemp -p /data/arch | wc -l'],
+  // gzip removes h.txt, the ls caches the listing, gunzip recreates h.txt:
+  // cat and the final ls must see the recreated file, not stale cache.
+  [
+    'arch_gzip_interleaved_ls',
+    'mkdir -p /data/arch2 && echo two | tee /data/arch2/h.txt > /dev/null' +
+      ' && gzip /data/arch2/h.txt && ls /data/arch2' +
+      ' && gunzip /data/arch2/h.txt.gz && cat /data/arch2/h.txt' +
+      ' && ls /data/arch2',
+  ],
 ];
 
 export const EXIT_CODE_CASES: ReadonlyArray<readonly [string, string]> = [

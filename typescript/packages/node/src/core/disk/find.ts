@@ -16,8 +16,8 @@ import type { DiskAccessor } from '../../accessor/disk.ts'
 import { readdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 import type { PathSpec } from '@struktoai/mirage-core'
-import { norm, resolveSafe } from './utils.ts'
-import { fnmatch } from '@struktoai/mirage-core'
+import { resolveSafe } from './utils.ts'
+import { fnmatch, norm } from '@struktoai/mirage-core'
 
 export interface FindOptions {
   name?: string | null

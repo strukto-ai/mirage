@@ -12,12 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invalidateAfterUnlink, invalidateAfterWrite } from '../../cache/context.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
-import { norm, nowIso } from './utils.ts'
+import { norm } from '../../util/path.ts'
+import { nowIso } from '../../util/time.ts'
 import { rstripSlash } from '../../util/slash.ts'
 
-export function rename(accessor: RAMAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
+export async function rename(accessor: RAMAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const s = norm(src.stripPrefix)
   const d = norm(dst.stripPrefix)
   const now = nowIso()
@@ -27,7 +29,9 @@ export function rename(accessor: RAMAccessor, src: PathSpec, dst: PathSpec): Pro
     accessor.store.files.delete(s)
     accessor.store.modified.set(d, accessor.store.modified.get(s) ?? now)
     accessor.store.modified.delete(s)
-    return Promise.resolve()
+    await invalidateAfterWrite(dst)
+    await invalidateAfterUnlink(src)
+    return
   }
   if (accessor.store.dirs.has(s)) {
     accessor.store.dirs.delete(s)
@@ -46,7 +50,9 @@ export function rename(accessor: RAMAccessor, src: PathSpec, dst: PathSpec): Pro
         }
       }
     }
-    return Promise.resolve()
+    await invalidateAfterWrite(dst)
+    await invalidateAfterUnlink(src)
+    return
   }
   throw new Error(`file or directory not found: ${s}`)
 }

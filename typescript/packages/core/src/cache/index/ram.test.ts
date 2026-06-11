@@ -81,14 +81,14 @@ describe('RAMIndexCacheStore', () => {
     expect(result.status).toBe(LookupStatus.EXPIRED)
   })
 
-  it('invalidateDir removes children and expiry but not entries', async () => {
+  it('invalidateDir removes children, expiry, and child entries', async () => {
     const store = new RAMIndexCacheStore()
     await store.setDir('/dir', [['a', mkEntry('1', 'a')]])
     await store.invalidateDir('/dir')
     const list = await store.listDir('/dir')
     expect(list.status).toBe(LookupStatus.NOT_FOUND)
     const get = await store.get('/dir/a')
-    expect(get.entry?.id).toBe('1')
+    expect(get.entry ?? null).toBeNull()
   })
 
   it('clear wipes everything', async () => {

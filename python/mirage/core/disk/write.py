@@ -13,20 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import time
-from pathlib import Path
 
 import aiofiles
 
 from mirage.accessor.disk import DiskAccessor
+from mirage.cache.context import invalidate_after_write
+from mirage.core.disk.utils import resolve_safe
 from mirage.observe.context import record
 from mirage.types import PathSpec
-
-
-def _resolve(root: Path, path: str) -> Path:
-    relative = path.lstrip("/")
-    resolved = (root / relative).resolve()
-    resolved.relative_to(root)
-    return resolved
 
 
 async def write_bytes(accessor: DiskAccessor, path: PathSpec,
@@ -37,8 +31,9 @@ async def write_bytes(accessor: DiskAccessor, path: PathSpec,
         path = path.strip_prefix
     root = accessor.root
     start_ms = int(time.monotonic() * 1000)
-    p = _resolve(root, path)
+    p = resolve_safe(root, path)
     p.parent.mkdir(parents=True, exist_ok=True)
     async with aiofiles.open(p, "wb") as f:
         await f.write(data)
     record("write", path, "disk", len(data), start_ms)
+    await invalidate_after_write(path)

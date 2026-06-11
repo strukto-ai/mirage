@@ -14,7 +14,7 @@
 
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
-import { norm } from './utils.ts'
+import { norm } from '../../util/path.ts'
 
 export function exists(accessor: RAMAccessor, path: PathSpec): Promise<boolean> {
   const p = norm(path.stripPrefix)

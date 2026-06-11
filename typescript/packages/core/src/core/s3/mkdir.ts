@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invalidateAfterWrite } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import { loadS3Module, rawPathOf, s3Prefix, withClient } from './_client.ts'
@@ -30,4 +31,5 @@ export async function mkdir(accessor: S3Accessor, path: PathSpec): Promise<void>
       }),
     )
   })
+  await invalidateAfterWrite(path)
 }

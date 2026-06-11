@@ -13,23 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from datetime import datetime, timezone
-from pathlib import Path
 
 import aiofiles.os
 from aiofiles.os import path as aio_path
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.core.disk.utils import resolve_safe
 from mirage.core.timeutil import to_iso_z
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.filetype import guess_type
-
-
-def _resolve(root: Path, path: str) -> Path:
-    relative = path.lstrip("/")
-    resolved = (root / relative).resolve()
-    resolved.relative_to(root)
-    return resolved
 
 
 async def stat(accessor: DiskAccessor,
@@ -45,7 +38,7 @@ async def stat(accessor: DiskAccessor,
         if prefix.endswith("/") or rest == "" or rest.startswith("/"):
             path = rest or "/"
     root = accessor.root
-    p = _resolve(root, path)
+    p = resolve_safe(root, path)
     if not await aio_path.exists(p):
         raise FileNotFoundError(str(p))
     st = await aiofiles.os.stat(p)

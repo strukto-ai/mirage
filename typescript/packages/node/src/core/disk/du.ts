@@ -16,7 +16,8 @@ import type { DiskAccessor } from '../../accessor/disk.ts'
 import { readdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 import type { PathSpec } from '@struktoai/mirage-core'
-import { norm, resolveSafe } from './utils.ts'
+import { norm } from '@struktoai/mirage-core'
+import { resolveSafe } from './utils.ts'
 
 async function walkSizes(full: string): Promise<number> {
   let total = 0

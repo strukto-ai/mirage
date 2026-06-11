@@ -85,6 +85,9 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   }
 
   invalidateDir(resourcePath: string): Promise<void> {
+    for (const child of this.children.get(resourcePath) ?? []) {
+      this.entries.delete(child)
+    }
     this.expiry.delete(resourcePath)
     this.children.delete(resourcePath)
     return Promise.resolve()

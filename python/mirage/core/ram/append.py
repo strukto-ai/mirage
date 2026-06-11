@@ -15,13 +15,11 @@
 import time
 
 from mirage.accessor.ram import RAMAccessor
+from mirage.cache.context import invalidate_after_write
+from mirage.core.pathutil import norm
 from mirage.core.timeutil import now_iso
 from mirage.observe.context import record
 from mirage.types import PathSpec
-
-
-def _norm(path: str) -> str:
-    return "/" + path.strip("/")
 
 
 async def append_bytes(accessor: RAMAccessor, path: PathSpec,
@@ -32,10 +30,11 @@ async def append_bytes(accessor: RAMAccessor, path: PathSpec,
         path = path.strip_prefix
     store = accessor.store
     start_ms = int(time.monotonic() * 1000)
-    p = _norm(path)
+    p = norm(path)
     if p in store.files:
         store.files[p] += data
     else:
         store.files[p] = data
     store.modified[p] = now_iso()
     record("append", path, "ram", len(data), start_ms)
+    await invalidate_after_write(path)

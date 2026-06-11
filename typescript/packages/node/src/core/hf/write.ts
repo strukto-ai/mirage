@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invalidateAfterWrite } from '@struktoai/mirage-core'
 import { type IndexCacheStore, type PathSpec, record } from '@struktoai/mirage-core'
 import type { HfAccessor } from '../../accessor/hf.ts'
 import { enoent, hfKey, isNotFound, rawPathOf } from './util.ts'
@@ -33,4 +34,5 @@ export async function write(
     throw err
   }
   record('write', path.original, accessor.resourceName, data.byteLength, startMs)
+  await invalidateAfterWrite(path)
 }

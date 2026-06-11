@@ -12,22 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stripSlash } from '@struktoai/mirage-core'
-
-export function norm(p: string): string {
-  return `/${stripSlash(p)}`
-}
-
-export function parent(p: string): string {
-  const i = p.lastIndexOf('/')
-  if (i <= 0) return '/'
-  return p.slice(0, i)
-}
-
-export function basename(p: string): string {
-  const tail = p.split('/').pop()
-  return tail !== undefined && tail.length > 0 ? tail : '/'
-}
+export { basename, norm, parent } from '@struktoai/mirage-core'
 
 export function dirname(p: string): string {
   const i = p.lastIndexOf('/')

@@ -1,6 +1,8 @@
 from opendal.exceptions import NotFound
 
 from mirage.accessor.nextcloud import NextcloudAccessor
+from mirage.cache.context import (invalidate_after_unlink,
+                                  invalidate_after_write)
 from mirage.types import PathSpec
 
 
@@ -17,3 +19,5 @@ async def rename(accessor: NextcloudAccessor, src: PathSpec,
         await op.rename(src_key, dst_key)
     except NotFound as exc:
         raise FileNotFoundError(src.strip_prefix) from exc
+    await invalidate_after_write(dst)
+    await invalidate_after_unlink(src)

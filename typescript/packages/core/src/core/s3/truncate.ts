@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invalidateAfterWrite } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import {
@@ -46,4 +47,5 @@ export async function truncate(
     // Remaining bytes are already zero-filled (Uint8Array default).
     await client.send(new PutObjectCommand({ Bucket: accessor.config.bucket, Key: key, Body: out }))
   })
+  await invalidateAfterWrite(path)
 }

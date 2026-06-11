@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invalidateAfterUnlink, norm } from '@struktoai/mirage-core'
 import type { PathSpec } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
-import { norm } from './utils.ts'
 
 export async function unlink(accessor: RedisAccessor, path: PathSpec): Promise<void> {
   const p = norm(path.stripPrefix)
@@ -24,4 +24,5 @@ export async function unlink(accessor: RedisAccessor, path: PathSpec): Promise<v
   }
   await store.delFile(p)
   await store.delModified(p)
+  await invalidateAfterUnlink(p)
 }

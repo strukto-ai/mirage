@@ -15,11 +15,8 @@
 from fnmatch import fnmatch
 
 from mirage.accessor.redis import RedisAccessor
+from mirage.core.pathutil import norm
 from mirage.types import PathSpec
-
-
-def _norm(path: str) -> str:
-    return "/" + path.strip("/")
 
 
 async def find(
@@ -41,7 +38,7 @@ async def find(
     if isinstance(path, PathSpec):
         path = path.strip_prefix
     store = accessor.store
-    p = _norm(path)
+    p = norm(path)
     prefix = p.rstrip("/") + "/"
     base_depth = 0 if p == "/" else p.count("/")
     results: list[str] = []

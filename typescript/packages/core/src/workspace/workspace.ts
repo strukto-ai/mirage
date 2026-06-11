@@ -291,6 +291,7 @@ export class Workspace {
     })
     this.closers.push(() => this.pythonRuntime.close())
     this.cache = options.cache ?? new RAMFileCacheStore({ limit: options.cacheLimit ?? '512MB' })
+    this.registry.attachFileCache(this.cache)
     this.dispatcher = new Dispatcher(this.registry, this.cache, this.opsRegistry, (p) =>
       this.resolve(p),
     )

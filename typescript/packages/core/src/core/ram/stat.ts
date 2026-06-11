@@ -15,7 +15,7 @@
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { guessType } from '../../utils/filetype.ts'
-import { basename, norm } from './utils.ts'
+import { basename, norm } from '../../util/path.ts'
 
 export function stat(accessor: RAMAccessor, path: PathSpec): Promise<FileStat> {
   const p = norm(path.stripPrefix)

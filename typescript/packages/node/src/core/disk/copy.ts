@@ -15,7 +15,7 @@
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { copyFile, mkdir } from 'node:fs/promises'
 import path from 'node:path'
-import type { PathSpec } from '@struktoai/mirage-core'
+import { invalidateAfterWrite, type PathSpec } from '@struktoai/mirage-core'
 import { resolveSafe } from './utils.ts'
 
 export async function copy(accessor: DiskAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
@@ -30,4 +30,5 @@ export async function copy(accessor: DiskAccessor, src: PathSpec, dst: PathSpec)
     }
     throw err
   }
+  await invalidateAfterWrite(dst)
 }

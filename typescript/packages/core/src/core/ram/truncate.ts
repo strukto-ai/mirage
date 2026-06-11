@@ -12,16 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invalidateAfterWrite } from '../../cache/context.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
-import { norm, nowIso } from './utils.ts'
+import { norm } from '../../util/path.ts'
+import { nowIso } from '../../util/time.ts'
 
-export function truncate(accessor: RAMAccessor, path: PathSpec, length: number): Promise<void> {
+export async function truncate(
+  accessor: RAMAccessor,
+  path: PathSpec,
+  length: number,
+): Promise<void> {
   const p = norm(path.stripPrefix)
   const existing = accessor.store.files.get(p) ?? new Uint8Array()
   const out = new Uint8Array(length)
   out.set(existing.subarray(0, Math.min(existing.byteLength, length)))
   accessor.store.files.set(p, out)
   accessor.store.modified.set(p, nowIso())
-  return Promise.resolve()
+  await invalidateAfterWrite(path)
 }

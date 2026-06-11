@@ -14,10 +14,11 @@
 
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { rm } from 'node:fs/promises'
-import type { PathSpec } from '@struktoai/mirage-core'
+import { invalidateAfterUnlink, type PathSpec } from '@struktoai/mirage-core'
 import { resolveSafe } from './utils.ts'
 
 export async function rmR(accessor: DiskAccessor, path: PathSpec): Promise<void> {
   const full = resolveSafe(accessor.root, path.stripPrefix)
   await rm(full, { recursive: true, force: true })
+  await invalidateAfterUnlink(path)
 }

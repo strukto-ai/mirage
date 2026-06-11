@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invalidateAfterUnlink, invalidateAfterWrite } from '../../cache/context.ts'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileType, type PathSpec } from '../../types.ts'
@@ -46,4 +47,6 @@ export async function rename(
     await copy(accessor, s, d, index)
     await unlink(accessor, s, index)
   }
+  await invalidateAfterWrite(d)
+  await invalidateAfterUnlink(s)
 }

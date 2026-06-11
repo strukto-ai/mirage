@@ -15,7 +15,7 @@
 import { record } from '../../observe/context.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import { ResourceName, type PathSpec } from '../../types.ts'
-import { norm } from './utils.ts'
+import { norm } from '../../util/path.ts'
 
 export function read(accessor: RAMAccessor, path: PathSpec): Promise<Uint8Array> {
   const start = performance.now()

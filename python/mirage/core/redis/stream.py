@@ -16,12 +16,9 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.redis import RedisAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.core.pathutil import norm
 from mirage.observe.context import record_stream
 from mirage.types import PathSpec
-
-
-def _norm(path: str) -> str:
-    return "/" + path.strip("/")
 
 
 async def stream(accessor: RedisAccessor,
@@ -36,7 +33,7 @@ async def stream(accessor: RedisAccessor,
             if prefix.endswith("/") or rest == "" or rest.startswith("/"):
                 path = rest or "/"
     store = accessor.store
-    key = _norm(path)
+    key = norm(path)
     data = await store.get_file(key)
     if data is None:
         raise FileNotFoundError(path)

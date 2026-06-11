@@ -17,6 +17,7 @@ import time
 from io import BytesIO
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
+from mirage.cache.context import invalidate_after_write
 from mirage.cache.index import IndexCacheStore
 from mirage.core.databricks_volume._helpers import (ensure_path_spec,
                                                     parent_path)
@@ -92,3 +93,4 @@ async def write_bytes(
             raise FileNotFoundError(path.strip_prefix) from exc
         raise
     record("write", path.original, "databricks_volume", len(data), start_ms)
+    await invalidate_after_write(path)

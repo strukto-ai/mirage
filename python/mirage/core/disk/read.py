@@ -13,21 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import time
-from pathlib import Path
 
 import aiofiles
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.core.disk.utils import resolve_safe
 from mirage.observe.context import record
 from mirage.types import PathSpec
-
-
-def _resolve(root: Path, path: str) -> Path:
-    relative = path.lstrip("/")
-    resolved = (root / relative).resolve()
-    resolved.relative_to(root)
-    return resolved
 
 
 async def read_bytes(accessor: DiskAccessor,
@@ -44,7 +37,7 @@ async def read_bytes(accessor: DiskAccessor,
             path = rest or "/"
     root = accessor.root
     start_ms = int(time.monotonic() * 1000)
-    p = _resolve(root, path)
+    p = resolve_safe(root, path)
     async with aiofiles.open(p, "rb") as f:
         data = await f.read()
     record("read", path, "disk", len(data), start_ms)

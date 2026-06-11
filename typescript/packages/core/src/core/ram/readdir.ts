@@ -16,7 +16,7 @@ import type { RAMAccessor } from '../../accessor/ram.ts'
 import { IndexEntry, type IndexCacheStore } from '../../cache/index/index.ts'
 import { ResourceType } from '../../cache/index/config.ts'
 import type { PathSpec } from '../../types.ts'
-import { norm } from './utils.ts'
+import { norm } from '../../util/path.ts'
 
 export async function readdir(
   accessor: RAMAccessor,

@@ -16,12 +16,9 @@ import time
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.core.pathutil import norm
 from mirage.observe.context import record
 from mirage.types import PathSpec
-
-
-def _norm(path: str) -> str:
-    return "/" + path.strip("/")
 
 
 async def read_bytes(accessor: RAMAccessor, path: PathSpec) -> bytes:
@@ -31,7 +28,7 @@ async def read_bytes(accessor: RAMAccessor, path: PathSpec) -> bytes:
         path = path.strip_prefix
     store = accessor.store
     start_ms = int(time.monotonic() * 1000)
-    key = _norm(path)
+    key = norm(path)
     if key not in store.files:
         raise FileNotFoundError(path)
     data = store.files[key]

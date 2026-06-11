@@ -13,11 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.redis import RedisAccessor
+from mirage.cache.context import invalidate_after_unlink
+from mirage.core.pathutil import norm
 from mirage.types import PathSpec
-
-
-def _norm(path: str) -> str:
-    return "/" + path.strip("/")
 
 
 async def unlink(accessor: RedisAccessor, path: PathSpec) -> None:
@@ -26,8 +24,9 @@ async def unlink(accessor: RedisAccessor, path: PathSpec) -> None:
     if isinstance(path, PathSpec):
         path = path.strip_prefix
     store = accessor.store
-    p = _norm(path)
+    p = norm(path)
     if not await store.has_file(p):
         raise FileNotFoundError(p)
     await store.del_file(p)
     await store.del_modified(p)
+    await invalidate_after_unlink(path)

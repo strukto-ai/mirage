@@ -13,11 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.redis import RedisAccessor
+from mirage.core.pathutil import norm
 from mirage.types import PathSpec
-
-
-def _norm(path: str) -> str:
-    return "/" + path.strip("/")
 
 
 async def exists(accessor: RedisAccessor, path: PathSpec) -> bool:
@@ -26,5 +23,5 @@ async def exists(accessor: RedisAccessor, path: PathSpec) -> bool:
     if isinstance(path, PathSpec):
         path = path.strip_prefix
     store = accessor.store
-    p = _norm(path)
+    p = norm(path)
     return await store.has_file(p) or await store.has_dir(p)

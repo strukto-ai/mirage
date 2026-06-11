@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ssh import SSHAccessor
+from mirage.cache.context import invalidate_after_write
 from mirage.core.ssh._client import _abs
 from mirage.types import PathSpec
 
@@ -26,3 +27,4 @@ async def mkdir(accessor: SSHAccessor,
         await sftp.makedirs(_abs(config, path), exist_ok=True)
     else:
         await sftp.mkdir(_abs(config, path))
+    await invalidate_after_write(path)

@@ -14,7 +14,7 @@
 
 import { resolve, sep } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { basename, norm, parent, resolveSafe } from './utils.ts'
+import { resolveSafe } from './utils.ts'
 
 describe('resolveSafe', () => {
   it('joins root with virtual path', () => {
@@ -35,44 +35,5 @@ describe('resolveSafe', () => {
   it('uses platform separator', () => {
     const res = resolveSafe('/tmp/r', '/a/b')
     expect(res.endsWith(`a${sep}b`)).toBe(true)
-  })
-})
-
-describe('norm', () => {
-  it('always returns leading slash', () => {
-    expect(norm('foo')).toBe('/foo')
-  })
-  it('strips trailing slashes', () => {
-    expect(norm('/foo///')).toBe('/foo')
-  })
-  it('handles empty string', () => {
-    expect(norm('')).toBe('/')
-  })
-  it('handles root', () => {
-    expect(norm('/')).toBe('/')
-  })
-})
-
-describe('parent', () => {
-  it('returns the parent directory', () => {
-    expect(parent('/a/b/c')).toBe('/a/b')
-  })
-  it('returns / for top-level paths', () => {
-    expect(parent('/x')).toBe('/')
-  })
-  it('returns / for /', () => {
-    expect(parent('/')).toBe('/')
-  })
-})
-
-describe('basename', () => {
-  it('returns the last segment', () => {
-    expect(basename('/a/b/c')).toBe('c')
-  })
-  it('returns / for /', () => {
-    expect(basename('/')).toBe('/')
-  })
-  it('handles single-segment paths', () => {
-    expect(basename('/x')).toBe('x')
   })
 })

@@ -174,7 +174,13 @@ export class RedisIndexCacheStore extends IndexCacheStore {
 
   async invalidateDir(resourcePath: string): Promise<void> {
     const c = await this.client()
-    await c.del(this.childrenKey(resourcePath))
+    const childPaths = await c.lRange(this.childrenKey(resourcePath), 0, -1)
+    const pipe = c.multi()
+    for (const child of childPaths) {
+      pipe.del(this.entryKey(child))
+    }
+    pipe.del(this.childrenKey(resourcePath))
+    await pipe.exec()
   }
 
   async clear(): Promise<void> {

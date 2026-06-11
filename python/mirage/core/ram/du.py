@@ -13,11 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
+from mirage.core.pathutil import norm
 from mirage.types import PathSpec
-
-
-def _norm(path: str) -> str:
-    return "/" + path.strip("/")
 
 
 async def du(accessor: RAMAccessor, path: PathSpec) -> int:
@@ -26,7 +23,7 @@ async def du(accessor: RAMAccessor, path: PathSpec) -> int:
     if isinstance(path, PathSpec):
         path = path.strip_prefix
     store = accessor.store
-    p = _norm(path)
+    p = norm(path)
     prefix = p.rstrip("/") + "/"
     total = 0
     for key, data in store.files.items():
@@ -42,7 +39,7 @@ async def du_all(accessor: RAMAccessor,
     if isinstance(path, PathSpec):
         path = path.strip_prefix
     store = accessor.store
-    p = _norm(path)
+    p = norm(path)
     prefix = p.rstrip("/") + "/"
     entries: list[tuple[str, int]] = []
     total = 0

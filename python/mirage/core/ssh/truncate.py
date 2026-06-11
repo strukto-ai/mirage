@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ssh import SSHAccessor
+from mirage.cache.context import invalidate_after_write
 from mirage.core.ssh._client import _abs
 from mirage.types import PathSpec
 
@@ -23,3 +24,4 @@ async def truncate(accessor: SSHAccessor,
     config = accessor.config
     sftp = await accessor.sftp()
     await sftp.truncate(_abs(config, path), length)
+    await invalidate_after_write(path)

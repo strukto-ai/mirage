@@ -15,7 +15,7 @@
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { type PathSpec, record, ResourceName } from '@struktoai/mirage-core'
+import { invalidateAfterWrite, type PathSpec, record, ResourceName } from '@struktoai/mirage-core'
 import { resolveSafe } from './utils.ts'
 
 export async function writeBytes(
@@ -29,4 +29,5 @@ export async function writeBytes(
   await mkdir(path.dirname(full), { recursive: true })
   await writeFile(full, data)
   record('write', virtual, ResourceName.DISK, data.byteLength, start)
+  await invalidateAfterWrite(p)
 }

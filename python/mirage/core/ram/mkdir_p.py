@@ -13,17 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
+from mirage.cache.context import invalidate_after_write
+from mirage.core.pathutil import norm
 from mirage.core.timeutil import now_iso
 from mirage.types import PathSpec
 
 
-def _norm(path: str) -> str:
-    return "/" + path.strip("/")
-
-
 async def mkdir_p(accessor: RAMAccessor, path: PathSpec) -> None:
     store = accessor.store
-    p = _norm(path)
+    p = norm(path)
     parts = p.strip("/").split("/")
     current = ""
     now = now_iso()
@@ -32,3 +30,4 @@ async def mkdir_p(accessor: RAMAccessor, path: PathSpec) -> None:
         store.dirs.add(current)
         if current not in store.modified:
             store.modified[current] = now
+    await invalidate_after_write(path)

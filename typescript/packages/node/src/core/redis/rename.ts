@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invalidateAfterUnlink, invalidateAfterWrite, norm, nowIso } from '@struktoai/mirage-core'
 import type { PathSpec } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
-import { norm, nowIso } from './utils.ts'
 import { rstripSlash } from '@struktoai/mirage-core'
 
 export async function rename(accessor: RedisAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
@@ -30,6 +30,8 @@ export async function rename(accessor: RedisAccessor, src: PathSpec, dst: PathSp
     await store.delModified(s)
     await store.setFile(d, data)
     await store.setModified(d, mod ?? now)
+    await invalidateAfterWrite(d)
+    await invalidateAfterUnlink(s)
     return
   }
   if (await store.hasDir(s)) {
@@ -50,6 +52,8 @@ export async function rename(accessor: RedisAccessor, src: PathSpec, dst: PathSp
         await store.setFile(newKey, data)
       }
     }
+    await invalidateAfterWrite(d)
+    await invalidateAfterUnlink(s)
     return
   }
   throw new Error(`file not found: ${s}`)

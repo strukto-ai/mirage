@@ -15,6 +15,7 @@
 from typing import Any
 
 from mirage.cache.file import io as cache_io
+from mirage.cache.manager import CacheManager
 from mirage.io import IOResult
 from mirage.types import ConsistencyPolicy, FileStat, PathSpec
 from mirage.workspace.mount import Mount, MountRegistry
@@ -116,13 +117,13 @@ class Dispatcher:
         await self.invalidate_after_write(mount, path)
 
     async def invalidate_after_write(self, mount: Mount, path: str) -> None:
-        if mount.resource.is_remote is True:
-            await self._cache.remove(path)
-        idx = getattr(mount.resource, "index", None)
-        if idx is not None:
-            parent = path.rsplit("/", 1)[0] or "/"
-            await idx.invalidate_dir(parent)
-            await idx.invalidate_dir(parent + "/")
+        manager = mount.cache_manager
+        if manager is None:
+            manager = CacheManager(self._cache,
+                                   getattr(mount.resource, "index",
+                                           None), mount.prefix,
+                                   mount.resource.is_remote is True)
+        await manager.invalidate_after_write(path)
 
     async def invalidate_index_dirs(self, io: IOResult) -> None:
         dirs_seen: set[str] = set()

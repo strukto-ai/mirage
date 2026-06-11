@@ -17,6 +17,7 @@ import time
 from opendal.exceptions import NotFound
 
 from mirage.accessor.hf_buckets import HfBucketsAccessor
+from mirage.cache.context import invalidate_after_unlink
 from mirage.cache.index import IndexCacheStore
 from mirage.core.hf_buckets.stat import stat
 from mirage.observe.context import record
@@ -40,3 +41,4 @@ async def unlink(accessor: HfBucketsAccessor,
     except NotFound as exc:
         raise FileNotFoundError(raw) from exc
     record("unlink", path.original, accessor.RESOURCE_NAME, 0, start_ms)
+    await invalidate_after_unlink(path)

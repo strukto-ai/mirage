@@ -13,17 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.redis import RedisAccessor
+from mirage.cache.context import invalidate_after_write
+from mirage.core.pathutil import norm, parent
 from mirage.core.timeutil import now_iso
 from mirage.types import PathSpec
-
-
-def _norm(path: str) -> str:
-    return "/" + path.strip("/")
-
-
-def _parent(path: str) -> str:
-    parts = path.rsplit("/", 1)
-    return parts[0] or "/"
 
 
 async def mkdir(
@@ -36,7 +29,7 @@ async def mkdir(
     if isinstance(path, PathSpec):
         path = path.strip_prefix
     store = accessor.store
-    p = _norm(path)
+    p = norm(path)
     if parents:
         parts = p.strip("/").split("/")
         current = ""
@@ -48,8 +41,9 @@ async def mkdir(
             if mod is None:
                 await store.set_modified(current, now)
         return
-    parent = _parent(p)
-    if parent != "/" and not await store.has_dir(parent):
-        raise FileNotFoundError(f"parent directory does not exist: {parent}")
+    par = parent(p)
+    if par != "/" and not await store.has_dir(par):
+        raise FileNotFoundError(f"parent directory does not exist: {par}")
     await store.add_dir(p)
     await store.set_modified(p, now_iso())
+    await invalidate_after_write(p)

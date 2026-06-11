@@ -14,8 +14,7 @@
 
 import type { PathSpec } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
-import { norm } from './utils.ts'
-import { rstripSlash } from '@struktoai/mirage-core'
+import { norm, rstripSlash } from '@struktoai/mirage-core'
 
 export async function rmR(accessor: RedisAccessor, path: PathSpec): Promise<void> {
   const p = norm(path.stripPrefix)

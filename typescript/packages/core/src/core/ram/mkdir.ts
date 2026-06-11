@@ -12,12 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invalidateAfterWrite } from '../../cache/context.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
-import { norm, nowIso, parent } from './utils.ts'
+import { norm, parent } from '../../util/path.ts'
+import { nowIso } from '../../util/time.ts'
 import { stripSlash } from '../../util/slash.ts'
 
-export function mkdir(accessor: RAMAccessor, path: PathSpec, parents = false): Promise<void> {
+export async function mkdir(accessor: RAMAccessor, path: PathSpec, parents = false): Promise<void> {
   const p = norm(path.stripPrefix)
   if (parents) {
     const parts = stripSlash(p).split('/').filter(Boolean)
@@ -30,7 +32,8 @@ export function mkdir(accessor: RAMAccessor, path: PathSpec, parents = false): P
         accessor.store.modified.set(current, now)
       }
     }
-    return Promise.resolve()
+    await invalidateAfterWrite(path)
+    return
   }
   const par = parent(p)
   if (par !== '/' && !accessor.store.dirs.has(par)) {
@@ -38,5 +41,5 @@ export function mkdir(accessor: RAMAccessor, path: PathSpec, parents = false): P
   }
   accessor.store.dirs.add(p)
   accessor.store.modified.set(p, nowIso())
-  return Promise.resolve()
+  await invalidateAfterWrite(path)
 }

@@ -20,7 +20,7 @@ import {
   type PathSpec,
 } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
-import { basename, norm } from './utils.ts'
+import { basename, norm } from '@struktoai/mirage-core'
 
 export async function stat(
   accessor: RedisAccessor,

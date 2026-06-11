@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invalidateAfterWrite, norm, nowIso, parent } from '@struktoai/mirage-core'
 import { record, ResourceName, type PathSpec } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
-import { norm, nowIso, parent } from './utils.ts'
 
 export async function writeBytes(
   accessor: RedisAccessor,
@@ -31,4 +31,5 @@ export async function writeBytes(
   await store.setFile(p, data)
   await store.setModified(p, nowIso())
   record('write', p, ResourceName.REDIS, data.byteLength, start)
+  await invalidateAfterWrite(p)
 }

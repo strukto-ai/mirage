@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { FileCache } from '../../cache/file/mixin.ts'
+import { CacheManager } from '../../cache/manager.ts'
 import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
 import type { Resource } from '../../resource/base.ts'
 import { DevResource } from '../../resource/dev/dev.ts'
@@ -40,6 +41,27 @@ export class MountRegistry {
   private defaultMountRef: Mount | null = null
   private consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
   private readonly defaultMode: MountMode
+  private fileCache: FileCache | null = null
+
+  /**
+   * Attach the workspace file cache and build per-mount CacheManagers.
+   * Called once by Workspace after the cache store exists; mounts
+   * added later get their manager in `mount()` / `setDefaultMount()`.
+   */
+  attachFileCache(cache: FileCache | null): void {
+    this.fileCache = cache
+    for (const m of this.mountList) this.attachManager(m)
+    if (this.defaultMountRef !== null) this.attachManager(this.defaultMountRef)
+  }
+
+  private attachManager(m: Mount): void {
+    m.cacheManager = new CacheManager(
+      this.fileCache,
+      m.resource.index ?? null,
+      m.prefix,
+      m.resource.isRemote === true,
+    )
+  }
 
   constructor(
     resources: Record<string, Resource>,
@@ -114,6 +136,7 @@ export class MountRegistry {
         else m.registerOp(op)
       }
     }
+    if (this.fileCache !== null) this.attachManager(m)
     this.mountList.push(m)
     this.mountList.sort((a, b) => b.prefix.length - a.prefix.length)
     return m
@@ -233,6 +256,7 @@ export class MountRegistry {
         else mount.registerOp(op)
       }
     }
+    if (this.fileCache !== null) this.attachManager(mount)
     this.defaultMountRef = mount
     return mount
   }

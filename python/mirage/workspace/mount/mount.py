@@ -16,6 +16,8 @@ import dataclasses
 import inspect
 from typing import Any, Callable
 
+from mirage.cache.context import push_cache_manager
+from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.utils.safeguard import (apply_op_safeguard,
                                                      run_with_timeout)
 from mirage.commands.config import RegisteredCommand
@@ -105,6 +107,7 @@ class Mount:
         self.resource = resource
         self.mode = mode
         self.consistency = consistency
+        self.cache_manager: CacheManager | None = None
         # Per-path revision pins installed at Workspace.load time. Read
         # functions consult these via the ``revision_for`` contextvar
         # lookup; on a hit, the backend GET pins to the recorded
@@ -441,6 +444,7 @@ class Mount:
 
         prev_prefix = push_mount_prefix(mount_prefix)
         revs_token = push_revisions(self.revisions or None)
+        prev_manager = push_cache_manager(self.cache_manager)
         try:
             for cmd in handlers:
                 if cmd.write and self.mode == MountMode.READ:
@@ -463,6 +467,7 @@ class Mount:
         finally:
             reset_revisions(revs_token)
             push_mount_prefix(prev_prefix)
+            push_cache_manager(prev_manager)
 
     async def execute_op(
         self,

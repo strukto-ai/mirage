@@ -12,16 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invalidateAfterWrite } from '../../cache/context.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
-import { norm, nowIso } from './utils.ts'
+import { norm } from '../../util/path.ts'
+import { nowIso } from '../../util/time.ts'
 
-export function copy(accessor: RAMAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
+export async function copy(accessor: RAMAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const s = norm(src.stripPrefix)
   const d = norm(dst.stripPrefix)
   const data = accessor.store.files.get(s)
   if (data === undefined) throw new Error(`file not found: ${s}`)
   accessor.store.files.set(d, data)
   accessor.store.modified.set(d, nowIso())
-  return Promise.resolve()
+  await invalidateAfterWrite(dst)
 }

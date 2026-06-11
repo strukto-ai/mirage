@@ -12,23 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stripSlash } from '@struktoai/mirage-core'
-
-export function norm(path: string): string {
-  return `/${stripSlash(path)}`
-}
-
-export function parent(path: string): string {
-  const i = path.lastIndexOf('/')
-  if (i <= 0) return '/'
-  return path.slice(0, i)
-}
-
-export function basename(path: string): string {
-  const tail = path.split('/').pop()
-  return tail !== undefined && tail.length > 0 ? tail : '/'
-}
-
 export function nowIso(): string {
   return new Date().toISOString()
 }

@@ -14,8 +14,7 @@
 
 import type { PathSpec } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
-import { norm } from './utils.ts'
-import { rstripSlash } from '@struktoai/mirage-core'
+import { norm, rstripSlash } from '@struktoai/mirage-core'
 import { fnmatch } from '@struktoai/mirage-core'
 
 export interface FindOptions {

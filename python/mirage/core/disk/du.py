@@ -17,18 +17,12 @@ import os
 from pathlib import Path
 
 from mirage.accessor.disk import DiskAccessor
+from mirage.core.disk.utils import resolve_safe
 from mirage.types import PathSpec
 
 
-def _resolve(root: Path, path: str) -> Path:
-    relative = path.lstrip("/")
-    resolved = (root / relative).resolve()
-    resolved.relative_to(root)
-    return resolved
-
-
 def _du_sync(root: Path, path: str) -> int:
-    p = _resolve(root, path)
+    p = resolve_safe(root, path)
     if p.is_file():
         return p.stat().st_size
     total = 0
@@ -42,7 +36,7 @@ def _du_sync(root: Path, path: str) -> int:
 
 
 def _du_all_sync(root: Path, path: str) -> tuple[list[tuple[str, int]], int]:
-    p = _resolve(root, path)
+    p = resolve_safe(root, path)
     if p.is_file():
         size = p.stat().st_size
         return [(("/" + path.strip("/")), size)], size

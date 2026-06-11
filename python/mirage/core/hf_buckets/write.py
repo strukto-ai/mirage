@@ -17,6 +17,7 @@ import time
 from opendal.exceptions import NotFound
 
 from mirage.accessor.hf_buckets import HfBucketsAccessor
+from mirage.cache.context import invalidate_after_write
 from mirage.cache.index import IndexCacheStore
 from mirage.observe.context import record
 from mirage.types import PathSpec
@@ -37,3 +38,4 @@ async def write_bytes(accessor: HfBucketsAccessor,
     except NotFound as exc:
         raise FileNotFoundError(raw) from exc
     record("write", path.original, accessor.RESOURCE_NAME, len(data), start_ms)
+    await invalidate_after_write(path)

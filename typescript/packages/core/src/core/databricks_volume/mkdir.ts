@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invalidateAfterWrite } from '../../cache/context.ts'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileType, type PathSpec } from '../../types.ts'
@@ -55,4 +56,5 @@ export async function mkdir(
     throw notADirectoryError(p.stripPrefix)
   }
   await createDirectory(accessor, remotePath, p.stripPrefix)
+  await invalidateAfterWrite(p)
 }

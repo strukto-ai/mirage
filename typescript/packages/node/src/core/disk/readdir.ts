@@ -20,7 +20,8 @@ import {
   type PathSpec,
   ResourceType,
 } from '@struktoai/mirage-core'
-import { norm, resolveSafe } from './utils.ts'
+import { norm } from '@struktoai/mirage-core'
+import { resolveSafe } from './utils.ts'
 
 export async function readdir(
   accessor: DiskAccessor,

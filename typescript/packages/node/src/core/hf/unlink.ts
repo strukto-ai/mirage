@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invalidateAfterUnlink } from '@struktoai/mirage-core'
 import { FileType, type IndexCacheStore, type PathSpec, record } from '@struktoai/mirage-core'
 import type { HfAccessor } from '../../accessor/hf.ts'
 import { stat } from './stat.ts'
@@ -39,4 +40,5 @@ export async function unlink(
     throw err
   }
   record('unlink', path.original, accessor.resourceName, 0, startMs)
+  await invalidateAfterUnlink(path)
 }

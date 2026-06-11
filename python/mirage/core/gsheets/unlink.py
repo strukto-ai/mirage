@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gsheets import GSheetsAccessor
+from mirage.cache.context import invalidate_after_unlink
 from mirage.cache.index import IndexCacheStore
 from mirage.core.google.drive import delete_file
 from mirage.core.gsheets.readdir import readdir
@@ -48,3 +49,4 @@ async def unlink(
     await delete_file(accessor.token_manager, result.entry.id)
     parent_dir = "/".join(virtual_key.rsplit("/", 1)[:-1]) or "/"
     await index.invalidate_dir(parent_dir)
+    await invalidate_after_unlink(virtual_key)

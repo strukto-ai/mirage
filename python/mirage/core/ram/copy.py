@@ -13,12 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
+from mirage.cache.context import invalidate_after_write
+from mirage.core.pathutil import norm
 from mirage.core.timeutil import now_iso
 from mirage.types import PathSpec
-
-
-def _norm(path: str) -> str:
-    return "/" + path.strip("/")
 
 
 async def copy(accessor: RAMAccessor, src: PathSpec, dst: PathSpec) -> None:
@@ -31,8 +29,9 @@ async def copy(accessor: RAMAccessor, src: PathSpec, dst: PathSpec) -> None:
     if isinstance(dst, PathSpec):
         dst = dst.strip_prefix
     store = accessor.store
-    s, d = _norm(src), _norm(dst)
+    s, d = norm(src), norm(dst)
     if s not in store.files:
         raise FileNotFoundError(s)
     store.files[d] = store.files[s]
     store.modified[d] = now_iso()
+    await invalidate_after_write(dst)

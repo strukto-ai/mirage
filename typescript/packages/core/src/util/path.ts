@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stripSlash } from '../../util/slash.ts'
+import { stripSlash } from './slash.ts'
 
 export function norm(path: string): string {
   return `/${stripSlash(path)}`
@@ -27,8 +27,4 @@ export function parent(path: string): string {
 export function basename(path: string): string {
   const tail = path.split('/').pop()
   return tail !== undefined && tail.length > 0 ? tail : '/'
-}
-
-export function nowIso(): string {
-  return new Date().toISOString()
 }

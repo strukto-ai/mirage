@@ -414,6 +414,14 @@ export {
 } from './cache/index/config.ts'
 export { IndexCacheStore } from './cache/index/store.ts'
 export { RAMIndexCacheStore } from './cache/index/ram.ts'
+export { CacheManager } from './cache/manager.ts'
+export {
+  activeCacheManager,
+  invalidateAfterUnlink,
+  invalidateAfterWrite,
+  runWithCacheManager,
+  type CacheInvalidator,
+} from './cache/context.ts'
 export {
   RedisIndexCacheStore,
   type RedisClientLike,
@@ -1092,6 +1100,8 @@ export {
 export { setHttpProxyBase } from './commands/builtin/utils/http.ts'
 
 export { lstripSlash, rstripSlash, stripSlash } from './util/slash.ts'
+export { basename, norm, parent } from './util/path.ts'
+export { nowIso } from './util/time.ts'
 export { fnmatch } from './util/fnmatch.ts'
 
 export {

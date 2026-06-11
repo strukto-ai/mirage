@@ -15,13 +15,11 @@
 import time
 
 from mirage.accessor.redis import RedisAccessor
+from mirage.cache.context import invalidate_after_write
+from mirage.core.pathutil import norm
 from mirage.core.timeutil import now_iso
 from mirage.observe.context import record
 from mirage.types import PathSpec
-
-
-def _norm(path: str) -> str:
-    return "/" + path.strip("/")
 
 
 async def append_bytes(
@@ -35,7 +33,7 @@ async def append_bytes(
         path = path.strip_prefix
     store = accessor.store
     start_ms = int(time.monotonic() * 1000)
-    p = _norm(path)
+    p = norm(path)
     existing = await store.get_file(p)
     if existing is not None:
         await store.set_file(p, existing + data)
@@ -43,3 +41,4 @@ async def append_bytes(
         await store.set_file(p, data)
     await store.set_modified(p, now_iso())
     record("append", path, "redis", len(data), start_ms)
+    await invalidate_after_write(path)

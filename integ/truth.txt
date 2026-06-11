@@ -1263,6 +1263,10 @@ world
 gz-data
 === arch_mktemp ===
 1
+=== arch_gzip_interleaved_ls ===
+h.txt.gz
+two
+h.txt
 === lazy_exit_grep_match ===
 exit=0
 hello

@@ -15,7 +15,7 @@
 import { recordStream } from '../../observe/context.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import { ResourceName, type PathSpec } from '../../types.ts'
-import { norm } from './utils.ts'
+import { norm } from '../../util/path.ts'
 
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function* stream(accessor: RAMAccessor, path: PathSpec): AsyncIterable<Uint8Array> {

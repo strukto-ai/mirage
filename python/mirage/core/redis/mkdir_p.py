@@ -13,17 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.redis import RedisAccessor
+from mirage.core.pathutil import norm
 from mirage.core.timeutil import now_iso
 from mirage.types import PathSpec
 
 
-def _norm(path: str) -> str:
-    return "/" + path.strip("/")
-
-
 async def mkdir_p(accessor: RedisAccessor, path: PathSpec) -> None:
     store = accessor.store
-    p = _norm(path)
+    p = norm(path)
     parts = p.strip("/").split("/")
     current = ""
     now = now_iso()

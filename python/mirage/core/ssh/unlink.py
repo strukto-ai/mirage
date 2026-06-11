@@ -15,6 +15,7 @@
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
+from mirage.cache.context import invalidate_after_unlink
 from mirage.core.ssh._client import _abs
 from mirage.types import PathSpec
 
@@ -26,3 +27,4 @@ async def unlink(accessor: SSHAccessor, path: PathSpec) -> None:
         await sftp.remove(_abs(config, path))
     except asyncssh.SFTPNoSuchFile:
         raise FileNotFoundError(path)
+    await invalidate_after_unlink(path)

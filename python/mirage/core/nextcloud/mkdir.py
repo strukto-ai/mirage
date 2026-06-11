@@ -1,4 +1,5 @@
 from mirage.accessor.nextcloud import NextcloudAccessor
+from mirage.cache.context import invalidate_after_write
 from mirage.types import PathSpec
 
 
@@ -11,3 +12,4 @@ async def mkdir(accessor: NextcloudAccessor,
     key = path.strip_prefix.strip("/") + "/"
     op = accessor.operator()
     await op.create_dir(key)
+    await invalidate_after_write(path)

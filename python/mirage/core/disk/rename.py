@@ -12,19 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pathlib import Path
-
 import aiofiles.os
 
 from mirage.accessor.disk import DiskAccessor
+from mirage.cache.context import (invalidate_after_unlink,
+                                  invalidate_after_write)
+from mirage.core.disk.utils import resolve_safe
 from mirage.types import PathSpec
-
-
-def _resolve(root: Path, path: str) -> Path:
-    relative = path.lstrip("/")
-    resolved = (root / relative).resolve()
-    resolved.relative_to(root)
-    return resolved
 
 
 async def rename(accessor: DiskAccessor, src: PathSpec, dst: PathSpec) -> None:
@@ -37,4 +31,6 @@ async def rename(accessor: DiskAccessor, src: PathSpec, dst: PathSpec) -> None:
     if isinstance(dst, PathSpec):
         dst = dst.strip_prefix
     root = accessor.root
-    await aiofiles.os.rename(_resolve(root, src), _resolve(root, dst))
+    await aiofiles.os.rename(resolve_safe(root, src), resolve_safe(root, dst))
+    await invalidate_after_write(dst)
+    await invalidate_after_unlink(src)

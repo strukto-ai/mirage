@@ -16,7 +16,7 @@ import type { FileEntryWithStats } from 'ssh2'
 import type { PathSpec } from '@struktoai/mirage-core'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { isDirectoryAttrs, joinRoot, stripPrefix } from './utils.ts'
-import { stripSlash } from '@struktoai/mirage-core'
+import { norm } from '@struktoai/mirage-core'
 import { fnmatch } from '@struktoai/mirage-core'
 
 export interface FindOptions {
@@ -39,10 +39,6 @@ interface WalkCtx {
   options: FindOptions
   results: string[]
   baseDepth: number
-}
-
-function norm(p: string): string {
-  return `/${stripSlash(p)}`
 }
 
 function isFileType(t: FindOptions['type']): boolean {

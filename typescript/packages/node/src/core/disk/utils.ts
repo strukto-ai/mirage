@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import path from 'node:path'
-import { lstripSlash, stripSlash } from '@struktoai/mirage-core'
+import { lstripSlash } from '@struktoai/mirage-core'
 
 export function resolveSafe(root: string, virtual: string): string {
   const relative = lstripSlash(virtual)
@@ -23,19 +23,4 @@ export function resolveSafe(root: string, virtual: string): string {
     throw new Error(`path escapes root: ${virtual}`)
   }
   return resolved
-}
-
-export function norm(p: string): string {
-  return `/${stripSlash(p)}`
-}
-
-export function parent(p: string): string {
-  const i = p.lastIndexOf('/')
-  if (i <= 0) return '/'
-  return p.slice(0, i)
-}
-
-export function basename(p: string): string {
-  const tail = p.split('/').pop()
-  return tail !== undefined && tail.length > 0 ? tail : '/'
 }

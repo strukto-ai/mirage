@@ -12,9 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type IndexCacheStore, record, ResourceName, type PathSpec } from '@struktoai/mirage-core'
+import {
+  type IndexCacheStore,
+  norm,
+  type PathSpec,
+  record,
+  ResourceName,
+} from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
-import { norm } from './utils.ts'
 
 export async function read(
   accessor: RedisAccessor,

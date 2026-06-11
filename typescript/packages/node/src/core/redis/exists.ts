@@ -14,7 +14,7 @@
 
 import type { PathSpec } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
-import { norm } from './utils.ts'
+import { norm } from '@struktoai/mirage-core'
 
 export async function exists(accessor: RedisAccessor, path: PathSpec): Promise<boolean> {
   const p = norm(path.stripPrefix)

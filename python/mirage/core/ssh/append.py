@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ssh import SSHAccessor
+from mirage.cache.context import invalidate_after_write
 from mirage.core.ssh._client import _abs
 from mirage.types import PathSpec
 
@@ -23,3 +24,4 @@ async def append_bytes(accessor: SSHAccessor, path: PathSpec,
     sftp = await accessor.sftp()
     async with sftp.open(_abs(config, path), "ab") as f:
         await f.write(data)
+    await invalidate_after_write(path)

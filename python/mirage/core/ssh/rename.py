@@ -15,6 +15,8 @@
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
+from mirage.cache.context import (invalidate_after_unlink,
+                                  invalidate_after_write)
 from mirage.core.ssh._client import _abs, _resolve_path
 from mirage.types import PathSpec
 
@@ -28,3 +30,5 @@ async def rename(accessor: SSHAccessor, src: PathSpec, dst: PathSpec) -> None:
         await sftp.rename(_abs(config, src), _abs(config, dst))
     except asyncssh.SFTPNoSuchFile:
         raise FileNotFoundError(src)
+    await invalidate_after_write(dst)
+    await invalidate_after_unlink(src)

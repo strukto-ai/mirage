@@ -1,0 +1,91 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+from mirage.cache.file.mixin import FileCacheMixin
+from mirage.cache.index.store import IndexCacheStore
+from mirage.types import PathSpec
+
+
+class CacheManager:
+    """Post-mutation cache coherence for one mount.
+
+    A backend mutation has two cache consequences: the file-cache entry
+    for the path is stale, and the parent directory listing in the
+    index cache (including negative knowledge that the path does not
+    exist) is stale. This class discharges both, synchronously, at the
+    mutation site: core backend mutators report through
+    ``mirage.cache.context`` right where they already emit observe
+    records, so invalidation happens before the next command in a
+    pipeline runs instead of after the whole command tree.
+    """
+
+    def __init__(self, file_cache: FileCacheMixin | None,
+                 index: IndexCacheStore | None, prefix: str,
+                 is_remote: bool) -> None:
+        """Args:
+            file_cache (FileCacheMixin | None): Workspace file cache
+                store; entries are keyed by mount-absolute path.
+            index (IndexCacheStore | None): The mount resource's index
+                cache; listings are keyed by mount-absolute path.
+            prefix (str): Mount prefix (e.g. "/data/").
+            is_remote (bool): Whether the resource is remote; the file
+                cache only holds remote-backed paths.
+        """
+        self._file_cache = file_cache
+        self._index = index
+        self._prefix = prefix.rstrip("/")
+        self._is_remote = is_remote
+
+    def _virtual(self, path: str | PathSpec) -> str:
+        if isinstance(path, PathSpec):
+            path = path.strip_prefix
+        if not path.startswith("/"):
+            path = "/" + path
+        if self._prefix and not path.startswith(self._prefix):
+            return self._prefix + path
+        return path
+
+    async def invalidate_after_write(self, path: str | PathSpec) -> None:
+        """Invalidate caches after a write to ``path``.
+
+        Args:
+            path (str | PathSpec): Resource-relative path that was
+                written.
+        """
+        virtual = self._virtual(path)
+        if self._is_remote and self._file_cache is not None:
+            await self._file_cache.remove(virtual)
+        await self._invalidate_parent(virtual)
+
+    async def invalidate_after_unlink(self, path: str | PathSpec) -> None:
+        """Invalidate caches after a deletion of ``path``.
+
+        Args:
+            path (str | PathSpec): Resource-relative path that was
+                removed.
+        """
+        virtual = self._virtual(path)
+        if self._is_remote and self._file_cache is not None:
+            await self._file_cache.remove(virtual)
+        if self._index is not None:
+            await self._index.invalidate_dir(virtual)
+            await self._index.invalidate_dir(virtual + "/")
+        await self._invalidate_parent(virtual)
+
+    async def _invalidate_parent(self, virtual: str) -> None:
+        if self._index is None:
+            return
+        parent = virtual.rsplit("/", 1)[0] or "/"
+        await self._index.invalidate_dir(parent)
+        await self._index.invalidate_dir(parent + "/")

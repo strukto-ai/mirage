@@ -19,14 +19,8 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 from mirage.accessor.disk import DiskAccessor
+from mirage.core.disk.utils import resolve_safe
 from mirage.types import PathSpec
-
-
-def _resolve(root: Path, path: str) -> Path:
-    relative = path.lstrip("/")
-    resolved = (root / relative).resolve()
-    resolved.relative_to(root)
-    return resolved
 
 
 def _find_sync(
@@ -45,7 +39,7 @@ def _find_sync(
     path_pattern: str | None = None,
     mindepth: int | None = None,
 ) -> list[str]:
-    p = _resolve(root, path)
+    p = resolve_safe(root, path)
     base = "/" + path.strip("/")
     base_depth = 0 if base == "/" else base.count("/")
     results: list[str] = []

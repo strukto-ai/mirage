@@ -126,6 +126,7 @@ class Workspace:
         self._session_mgr = SessionManager(session_id)
         self._consistency = consistency
         self._registry.set_consistency(consistency)
+        self._registry.attach_file_cache(self._cache)
         self._dispatcher = Dispatcher(self._registry, self._cache, consistency)
 
         for prefix, value in resources.items():

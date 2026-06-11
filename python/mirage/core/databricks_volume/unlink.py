@@ -16,6 +16,7 @@ import asyncio
 import time
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
+from mirage.cache.context import invalidate_after_unlink
 from mirage.cache.index import IndexCacheStore
 from mirage.core.databricks_volume._helpers import ensure_path_spec
 from mirage.core.databricks_volume.errors import is_not_found
@@ -50,3 +51,4 @@ async def unlink(
             raise FileNotFoundError(path.strip_prefix) from exc
         raise
     record("unlink", path.original, "databricks_volume", 0, start_ms)
+    await invalidate_after_unlink(path)

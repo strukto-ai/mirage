@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invalidateAfterUnlink } from '../../cache/context.ts'
 import type { GSlidesAccessor } from '../../accessor/gslides.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
@@ -72,4 +73,5 @@ export async function unlink(
     ? virtualKey.slice(0, virtualKey.lastIndexOf('/')) || '/'
     : '/'
   await index.invalidateDir(parentDir)
+  await invalidateAfterUnlink(virtualKey)
 }

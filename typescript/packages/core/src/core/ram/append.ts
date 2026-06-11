@@ -12,12 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invalidateAfterWrite } from '../../cache/context.ts'
 import { record } from '../../observe/context.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import { ResourceName, type PathSpec } from '../../types.ts'
-import { norm, nowIso } from './utils.ts'
+import { norm } from '../../util/path.ts'
+import { nowIso } from '../../util/time.ts'
 
-export function appendBytes(
+export async function appendBytes(
   accessor: RAMAccessor,
   path: PathSpec,
   data: Uint8Array,
@@ -35,5 +37,5 @@ export function appendBytes(
   }
   accessor.store.modified.set(p, nowIso())
   record('append', p, ResourceName.RAM, data.byteLength, start)
-  return Promise.resolve()
+  await invalidateAfterWrite(path)
 }

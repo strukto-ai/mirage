@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invalidateAfterWrite } from '../../cache/context.ts'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { record } from '../../observe/context.ts'
@@ -63,4 +64,5 @@ export async function writeBytes(
     throw exc
   }
   record('write', p.original, ResourceName.DATABRICKS_VOLUME, data.byteLength, startMs)
+  await invalidateAfterWrite(p)
 }

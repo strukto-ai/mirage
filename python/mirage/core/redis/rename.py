@@ -13,12 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.redis import RedisAccessor
+from mirage.cache.context import (invalidate_after_unlink,
+                                  invalidate_after_write)
+from mirage.core.pathutil import norm
 from mirage.core.timeutil import now_iso
 from mirage.types import PathSpec
-
-
-def _norm(path: str) -> str:
-    return "/" + path.strip("/")
 
 
 async def rename(
@@ -35,7 +34,7 @@ async def rename(
     if isinstance(dst, PathSpec):
         dst = dst.strip_prefix
     store = accessor.store
-    s, d = _norm(src), _norm(dst)
+    s, d = norm(src), norm(dst)
     now = now_iso()
     if await store.has_file(s):
         data = await store.get_file(s)
@@ -60,3 +59,5 @@ async def rename(
                 await store.set_file(new_key, data)
     else:
         raise FileNotFoundError(s)
+    await invalidate_after_write(d)
+    await invalidate_after_unlink(s)

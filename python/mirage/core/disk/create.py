@@ -12,20 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pathlib import Path
-
 import aiofiles
 import aiofiles.os
 
 from mirage.accessor.disk import DiskAccessor
+from mirage.cache.context import invalidate_after_write
+from mirage.core.disk.utils import resolve_safe
 from mirage.types import PathSpec
-
-
-def _resolve(root: Path, path: str) -> Path:
-    relative = path.lstrip("/")
-    resolved = (root / relative).resolve()
-    resolved.relative_to(root)
-    return resolved
 
 
 async def create(accessor: DiskAccessor, path: PathSpec) -> None:
@@ -33,7 +26,8 @@ async def create(accessor: DiskAccessor, path: PathSpec) -> None:
         path = PathSpec(original=path, directory=path)
     if isinstance(path, PathSpec):
         path = path.strip_prefix
-    p = _resolve(accessor.root, path)
+    p = resolve_safe(accessor.root, path)
     await aiofiles.os.makedirs(p.parent, exist_ok=True)
     async with aiofiles.open(p, "wb") as f:
         await f.write(b"")
+    await invalidate_after_write(path)

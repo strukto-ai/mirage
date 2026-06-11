@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { invalidateAfterWrite } from '@struktoai/mirage-core'
 import type { PathSpec } from '@struktoai/mirage-core'
 import type { SFTPWrapper, Stats } from 'ssh2'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
@@ -69,4 +70,5 @@ export async function mkdir(accessor: SSHAccessor, p: PathSpec, recursive: boole
     if (existing?.isDirectory()) continue
     await mkdirOne(sftp, stepRemote, true)
   }
+  await invalidateAfterWrite(p)
 }
