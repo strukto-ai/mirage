@@ -14,7 +14,7 @@ example.parquet
     ├── example.orc
     └── example.parquet
 === s3:stat ===
-15533 example.json
+15533 /s3/data/example.json
 === s3:cat_head ===
 {
   "company": "Strukto",
@@ -144,7 +144,7 @@ example.parquet
     ├── example.orc
     └── example.parquet
 === gcs:stat ===
-15533 example.json
+15533 /gcs/data/example.json
 === gcs:cat_head ===
 {
   "company": "Strukto",
@@ -274,7 +274,7 @@ example.parquet
     ├── example.orc
     └── example.parquet
 === minio:stat ===
-15533 example.json
+15533 /minio/data/example.json
 === minio:cat_head ===
 {
   "company": "Strukto",

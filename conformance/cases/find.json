@@ -1,0 +1,43 @@
+{
+  "command": "find",
+  "cases": [
+    {
+      "id": "find_subdir",
+      "cmd": "find /data/sub",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/sub/deep\n/data/sub/deep/deeper.txt\n/data/sub/nested.txt\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "find_name_glob",
+      "cmd": "find /data/sub -name \"*.txt\"",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/sub/deep/deeper.txt\n/data/sub/nested.txt\n",
+        "stderr_text": ""
+      }
+    }
+  ]
+}

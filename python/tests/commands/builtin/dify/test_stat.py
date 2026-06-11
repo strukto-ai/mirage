@@ -50,4 +50,5 @@ async def test_stat_supports_format(monkeypatch, dify_accessor, dify_index,
                            c="%n %s %F",
                            index=dify_index)
 
-    assert await materialize(stdout) == b"quickstart.md 17 regular file\n"
+    assert await materialize(stdout) == (b"/knowledge/guides/quickstart.md"
+                                         b" 17 regular file\n")

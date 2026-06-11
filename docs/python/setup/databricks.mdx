@@ -78,6 +78,6 @@ ws = Workspace({"/dbx/": resource}, mode=MountMode.READ)
 
 ## Notes
 
-- The resource is read-only in this branch.
+- Supports both read and write mount modes (`MountMode.READ` / `MountMode.WRITE`).
 - Auth falls through to the Databricks SDK defaults when `host`, `token`, and `profile` are omitted.
 - `root_path` is normalized and cannot contain `..`.

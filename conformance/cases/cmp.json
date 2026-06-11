@@ -1,0 +1,43 @@
+{
+  "command": "cmp",
+  "cases": [
+    {
+      "id": "cmp_identical",
+      "cmd": "cmp /data/same_a.txt /data/same_b.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "cmp_differ",
+      "cmd": "cmp /data/a.txt /data/b.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "/data/a.txt /data/b.txt differ: char 1, line 1\n",
+        "stderr_text": ""
+      }
+    }
+  ]
+}

@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.gdrive.grep import grep
 from mirage.core.google._client import TokenManager
@@ -49,7 +50,14 @@ def accessor(config, token_manager):
 
 @pytest.fixture
 def index():
-    return RAMIndexCacheStore()
+    store = RAMIndexCacheStore()
+    store._entries["/test/file.txt"] = IndexEntry(
+        id="f1",
+        name="file.txt",
+        resource_type="gdrive/file",
+        size=42,
+    )
+    return store
 
 
 def _scope(path: str, prefix: str = "") -> PathSpec:

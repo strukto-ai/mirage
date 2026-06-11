@@ -14,7 +14,7 @@ example.parquet
 /nc/data/example.jsonl
 
 # ---- stat / wc ----
-15533 example.json
+15533 /nc/data/example.json
 5766 /nc/data/example.jsonl
 15533 /nc/data/example.json
 

@@ -13,16 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from functools import partial
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.cut_helper import (cut_record, parse_ranges,
-                                                split_records)
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.builtin.generic.cut import cut as generic_cut
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
-from mirage.core.gdrive.read import read as gdrive_read
+from mirage.core.gdrive.stream import stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -41,19 +40,14 @@ async def cut(
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    field_ranges = parse_ranges(f) if f is not None else None
-    char_ranges = parse_ranges(c) if c is not None else None
-    delim = d if d is not None else "\t"
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        raw = await gdrive_read(accessor, paths[0], index)
-    else:
-        raw = await _read_stdin_async(stdin)
-        if raw is None:
-            raise ValueError("cut: missing operand")
-    sep = b"\x00" if z else b"\n"
-    out = [
-        cut_record(rec, delim, field_ranges, char_ranges, complement) + sep
-        for rec in split_records(raw, z)
-    ]
-    return b"".join(out), IOResult()
+    return await generic_cut(paths,
+                             read_stream=partial(stream, index=index),
+                             accessor=accessor,
+                             stdin=stdin,
+                             f=f,
+                             d=d,
+                             c=c,
+                             complement=complement,
+                             z=z)

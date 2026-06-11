@@ -123,6 +123,22 @@ async def test_grep_file_basic():
 
 
 @pytest.mark.asyncio
+async def test_grep_single_dir_operand_warns():
+    readdir, stat, rb, rs = _make_backend({"/d/a.txt": b"apple\n"})
+    output, io = await grep(
+        [_spec("/d")],
+        pattern="ap",
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    assert await _drain_async(output) == b""
+    assert io.exit_code == 1
+    assert io.stderr == b"grep: /d: Is a directory\n"
+
+
+@pytest.mark.asyncio
 async def test_grep_ignore_case():
     readdir, stat, rb, rs = _make_backend({"/a.txt": b"Apple\nBANANA\n"})
     output, _ = await grep(

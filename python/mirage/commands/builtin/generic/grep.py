@@ -216,6 +216,11 @@ async def grep(
                 return b"", IOResult(exit_code=1, stderr=stderr)
             return format_records(all_results), IOResult(stderr=stderr)
 
+        first_stat = await st(paths[0].original)
+        if first_stat.type == FileType.DIRECTORY:
+            stderr = f"grep: {paths[0].original}: Is a directory\n".encode()
+            return b"", IOResult(exit_code=1, stderr=stderr)
+
         if read_stream is not None:
             source: AsyncIterator[bytes] = read_stream(accessor, paths[0])
         else:

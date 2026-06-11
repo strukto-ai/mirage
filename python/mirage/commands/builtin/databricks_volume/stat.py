@@ -42,10 +42,11 @@ def _stat_type_label(file_stat: FileStat) -> str:
     return _TYPE_LABELS.get(file_stat.type, "regular file")
 
 
-def _replace_stat_format(file_stat: FileStat, match: re.Match) -> str:
+def _replace_stat_format(file_stat: FileStat, name: str,
+                         match: re.Match) -> str:
     spec = match.group(1)
     if spec == "n":
-        return file_stat.name
+        return name
     if spec == "s":
         return str(file_stat.size if file_stat.size is not None else 0)
     if spec == "F":
@@ -55,8 +56,8 @@ def _replace_stat_format(file_stat: FileStat, match: re.Match) -> str:
     return "?"
 
 
-def _format_stat(fmt: str, file_stat: FileStat) -> str:
-    return _FORMAT_RE.sub(partial(_replace_stat_format, file_stat), fmt)
+def _format_stat(fmt: str, file_stat: FileStat, name: str) -> str:
+    return _FORMAT_RE.sub(partial(_replace_stat_format, file_stat, name), fmt)
 
 
 @command("stat", resource="databricks_volume", spec=SPECS["stat"])
@@ -78,7 +79,7 @@ async def stat(
     for path in paths:
         file_stat = await stat_impl(accessor, path, index)
         if fmt is not None:
-            lines.append(_format_stat(fmt, file_stat))
+            lines.append(_format_stat(fmt, file_stat, path.original))
         else:
             type_value = file_stat.type.value if file_stat.type else None
             lines.append(f"name={file_stat.name} size={file_stat.size}"

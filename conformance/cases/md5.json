@@ -1,0 +1,24 @@
+{
+  "command": "md5",
+  "cases": [
+    {
+      "id": "md5_file",
+      "cmd": "md5 /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "191c53e00627438f88824862472a3f59  /data/a.txt\n",
+        "stderr_text": ""
+      }
+    }
+  ]
+}

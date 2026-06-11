@@ -20,7 +20,7 @@ import { formatRecords } from '../utils/output.ts'
 const ENC = new TextEncoder()
 
 function octal(n: number): string {
-  return '0o' + n.toString(8)
+  return n.toString(8)
 }
 
 function arraysEqual(a: Uint8Array, b: Uint8Array): boolean {
@@ -74,9 +74,9 @@ export async function cmpGeneric(
       if (opts.flags.b === true) {
         msg += ` is ${octal(data1[idx] ?? 0)} ${String.fromCharCode(data1[idx] ?? 0)} ${octal(data2[idx] ?? 0)} ${String.fromCharCode(data2[idx] ?? 0)}`
       }
-      return [ENC.encode(msg), new IOResult({ exitCode: 1 })]
+      return [formatRecords([msg]), new IOResult({ exitCode: 1 })]
     }
   }
   const shorter = data1.byteLength < data2.byteLength ? p0 : p1
-  return [ENC.encode(`cmp: EOF on ${shorter.original}`), new IOResult({ exitCode: 1 })]
+  return [formatRecords([`cmp: EOF on ${shorter.original}`]), new IOResult({ exitCode: 1 })]
 }

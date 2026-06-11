@@ -86,7 +86,7 @@ describe('discord stat', () => {
       { c: '%n' },
       { index: idx },
     )
-    expect(out.stdout).toBe('general__C1\n')
+    expect(out.stdout).toBe('/mnt/discord/My Server__G1/channels/general__C1\n')
   })
 
   it('returns exit 1 with no operand', async () => {

@@ -52,6 +52,7 @@ export async function read(
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
   let result = await index.get(virtualKey)
   if (result.entry === undefined || result.entry === null) {
+    // cold index: list the parent directory to populate the entry, then retry
     const parentKey = rstripSlash(virtualKey).replace(/\/[^/]+$/, '') || '/'
     if (parentKey !== virtualKey) {
       const parentPath = PathSpec.fromStrPath(parentKey, prefix)

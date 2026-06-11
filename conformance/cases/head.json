@@ -1,0 +1,24 @@
+{
+  "command": "head",
+  "cases": [
+    {
+      "id": "head_bytes",
+      "cmd": "head -c 5 /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "hello",
+        "stderr_text": ""
+      }
+    }
+  ]
+}

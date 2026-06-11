@@ -29,9 +29,9 @@ const TYPE_LABELS: Record<string, string> = {
   [FileType.CSV]: 'regular file',
 }
 
-function formatStat(fmt: string, s: FileStat): string {
+function formatStat(fmt: string, s: FileStat, name: string): string {
   return fmt.replace(/%(.)/g, (_, spec: string) => {
-    if (spec === 'n') return s.name
+    if (spec === 'n') return name
     if (spec === 's') return String(s.size ?? 0)
     if (spec === 'F') return s.type ? (TYPE_LABELS[s.type] ?? 'regular file') : 'regular file'
     if (spec === 'y') return s.modified ?? ''
@@ -69,7 +69,7 @@ export async function statGeneric(
   for (const p of paths) {
     const s = await stat(p)
     if (fmt !== null) {
-      lines.push(formatStat(fmt, s))
+      lines.push(formatStat(fmt, s, p.original))
     } else {
       const sizeStr = s.size === null ? 'None' : String(s.size)
       const modStr = s.modified ?? 'None'

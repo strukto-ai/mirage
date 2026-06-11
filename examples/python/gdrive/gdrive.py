@@ -106,6 +106,18 @@ async def main() -> None:
         result = await ws.execute(f'rg title "{gdoc}"')
         print((await result.stdout_str())[:300])
 
+        print(f"=== cut -c 1-40 {gdoc} ===")
+        result = await ws.execute(f'cut -c 1-40 "{gdoc}"')
+        print((await result.stdout_str())[:300])
+
+        print(f"=== sed -n 2p {gdoc} ===")
+        result = await ws.execute(f'sed -n 2p "{gdoc}"')
+        print((await result.stdout_str())[:300])
+
+        print(f"=== sed s/title/TITLE/g {gdoc} ===")
+        result = await ws.execute(f'sed "s/title/TITLE/g" "{gdoc}"')
+        print((await result.stdout_str())[:300])
+
         print(f"=== realpath {gdoc} ===")
         result = await ws.execute(f'realpath "{gdoc}"')
         print(await result.stdout_str())

@@ -79,11 +79,58 @@ Reads: `readdir`, `stat`, `exists`, `read_bytes`, `read_stream`,
 `range_read`, and glob resolution. Writes: `write`, `create`, `mkdir`,
 `rmdir`, `unlink`, recursive `rm`, `cp`, and `mv`.
 
-Standard shell commands like `ls`, `cat`, `head`, `tail`, `grep`, `rg`,
-`find`, `tree`, `touch`, `mkdir`, `rm`, `cp`, and `mv` work through those
-primitives. `mv`/`cp` are non-atomic download + upload (the Files API has no
-server-side rename); moving a path onto itself is a no-op and never deletes
-the file.
+`mv`/`cp` are non-atomic download + upload — the Files API has no server-side
+rename.
+
+## Shell Commands
+
+The Databricks Volume resource supports shell commands that operate on real
+file content. Reads use the Files API with range requests, so commands like
+`head -c BYTES` avoid downloading the whole object. The supported set is
+scoped to commands that work over the volume API (no compression, encoding,
+or local-only utilities).
+
+### Read Commands
+
+| Command         | Notes                                      |
+| --------------- | ------------------------------------------ |
+| `cat`           | Read file content                          |
+| `head` / `tail` | First/last N lines                         |
+| `grep` / `rg`   | Pattern search (file or directory level)   |
+| `jq`            | Query JSON fields                          |
+| `wc`            | Line/word/byte counts                      |
+| `stat`          | File metadata (name, size, type, modified) |
+| `find`          | Recursive search with `-name`, `-maxdepth` |
+| `tree`          | Directory tree view                        |
+| `nl`            | Number lines                               |
+
+### Text Processing
+
+| Command | Notes                            |
+| ------- | -------------------------------- |
+| `awk`   | Pattern scanning and processing  |
+| `sed`   | Stream editor                    |
+| `tr`    | Translate or delete characters   |
+| `sort`  | Sort lines                       |
+| `uniq`  | Remove duplicate lines           |
+| `cut`   | Extract fields/columns           |
+| `diff`  | Compare files line by line       |
+
+### File Operations
+
+| Command | Notes                                                |
+| ------- | ---------------------------------------------------- |
+| `cp`    | Copy files (non-atomic download + upload)            |
+| `mv`    | Move/rename files (non-atomic download + upload)     |
+| `rm`    | Remove files (recursive for directories)             |
+| `mkdir` | Create directories                                   |
+| `touch` | Create empty file or update timestamp                |
+
+### Path Utilities
+
+| Command | Notes                   |
+| ------- | ----------------------- |
+| `ls`    | List directory contents |
 
 ## Snapshot behavior
 
@@ -151,3 +198,14 @@ See:
 
 - `examples/python/databricks_volume/databricks_volume.py`
 - `examples/python/agents/langchain/databricks_volume_deepagent.py`
+
+## Use Cases
+
+- **Agents in Databricks Apps**: mount a Unity Catalog volume in-process so an
+  agent can read and write governed files without FUSE or hardcoded credentials.
+- **Reading governed datasets**: expose a reports or dataset subtree through
+  `root_path` and query it with shell commands.
+- **Sandboxed volume access**: scope an agent to a single volume (and optional
+  `root_path`) so it cannot read or write outside that subtree.
+- **Writing agent outputs back**: persist generated files to the volume with
+  `write`, `cp`, and `mv`.

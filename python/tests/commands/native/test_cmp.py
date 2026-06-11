@@ -55,7 +55,8 @@ def test_cmp_l(env):
     env.create_file("a.txt", b"abc")
     env.create_file("b.txt", b"axc")
     result = env.mirage("cmp -l /data/a.txt /data/b.txt")
-    assert len(result.strip()) > 0
+    native = env.native("cmp -l a.txt b.txt")
+    assert result.split() == native.split()
 
 
 def test_cmp_b(env):

@@ -384,7 +384,7 @@ text
 === stat_size ===
 24
 === stat_name ===
-a.txt
+/data/a.txt
 === gzip_gunzip_pipe ===
 hello
 world
@@ -1341,3 +1341,32 @@ nested.txt
 exit=0
 nested
 content
+=== nl_pin_du ===
+exit=0
+14
+=== nl_pin_stat ===
+exit=0
+12
+=== nl_pin_file ===
+exit=0
+18
+=== nl_pin_tree ===
+exit=0
+145
+=== nl_pin_ls ===
+exit=0
+34
+=== nl_pin_wc ===
+exit=0
+14
+=== nl_pin_md5 ===
+exit=0
+46
+=== nl_pin_cmp ===
+exit=0
+47
+=== grep_dir_operand ===
+exit=1
+=== grep_dir_among_files ===
+exit=0
+/data/a.txt:hello

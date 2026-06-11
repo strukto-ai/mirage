@@ -84,7 +84,7 @@ describe('slack stat', () => {
       { c: '%n' },
       { index: idx },
     )
-    expect(out.stdout).toBe('general__C1\n')
+    expect(out.stdout).toBe('/mnt/slack/channels/general__C1\n')
   })
 
   it('returns exit 1 with no operand', async () => {

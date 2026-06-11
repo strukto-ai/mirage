@@ -1,0 +1,43 @@
+{
+  "command": "du",
+  "cases": [
+    {
+      "id": "du_file",
+      "cmd": "du /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "24\t/data/a.txt\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "du_dir_summary",
+      "cmd": "du -s /data/sub",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "20\t/data/sub\n",
+        "stderr_text": ""
+      }
+    }
+  ]
+}

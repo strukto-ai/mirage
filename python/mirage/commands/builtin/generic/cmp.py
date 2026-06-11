@@ -35,8 +35,7 @@ async def cmp_cmd(
         out_lines: list[str] = []
         for idx in range(min(len(data1), len(data2))):
             if data1[idx] != data2[idx]:
-                out_lines.append(
-                    f"{idx + 1} {oct(data1[idx])} {oct(data2[idx])}")
+                out_lines.append(f"{idx + 1} {data1[idx]:o} {data2[idx]:o}")
         return format_records(out_lines), IOResult(exit_code=1)
     for idx in range(min(len(data1), len(data2))):
         if data1[idx] != data2[idx]:
@@ -44,8 +43,8 @@ async def cmp_cmd(
             msg = (f"{p0.original} {p1.original}"
                    f" differ: char {idx + 1}, line {line}")
             if print_bytes:
-                msg += (f" is {oct(data1[idx])} {chr(data1[idx])}"
-                        f" {oct(data2[idx])} {chr(data2[idx])}")
+                msg += (f" is {data1[idx]:o} {chr(data1[idx])}"
+                        f" {data2[idx]:o} {chr(data2[idx])}")
             return format_records([msg]), IOResult(exit_code=1)
     shorter = p0.original if len(data1) < len(data2) else p1.original
     msg = f"cmp: EOF on {shorter}"

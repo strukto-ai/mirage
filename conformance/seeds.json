@@ -1,0 +1,29 @@
+{
+  "/data/a.txt": {
+    "text": "hello\nworld\nfoo\nbar\nbaz\n"
+  },
+  "/data/b.txt": {
+    "text": "1\n2\n3\n"
+  },
+  "/data/no_nl.txt": {
+    "text": "no trailing newline"
+  },
+  "/data/empty.txt": {
+    "text": ""
+  },
+  "/data/binary.bin": {
+    "base64": "AAECaGVsbG///g=="
+  },
+  "/data/same_a.txt": {
+    "text": "identical\n"
+  },
+  "/data/same_b.txt": {
+    "text": "identical\n"
+  },
+  "/data/sub/nested.txt": {
+    "text": "nested\ncontent\n"
+  },
+  "/data/sub/deep/deeper.txt": {
+    "text": "deep\n"
+  }
+}

@@ -1,0 +1,140 @@
+{
+  "command": "wc",
+  "cases": [
+    {
+      "id": "wc_default",
+      "cmd": "wc /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": " 5  5 24 /data/a.txt\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "wc_lines",
+      "cmd": "wc -l /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "5 /data/a.txt\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "wc_words",
+      "cmd": "wc -w /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "5 /data/a.txt\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "wc_bytes",
+      "cmd": "wc -c /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "24 /data/a.txt\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "wc_no_trailing_newline",
+      "cmd": "wc /data/no_nl.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": " 0  3 19 /data/no_nl.txt\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "wc_stdin",
+      "cmd": "wc",
+      "stdin_text": "a\nb\n",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "      2       2       4\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "wc_lines_stdin",
+      "cmd": "wc -l",
+      "stdin_text": "a\nb\n",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2\n",
+        "stderr_text": ""
+      }
+    }
+  ]
+}

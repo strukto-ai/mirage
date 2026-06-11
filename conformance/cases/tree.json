@@ -1,0 +1,24 @@
+{
+  "command": "tree",
+  "cases": [
+    {
+      "id": "tree_subdir",
+      "cmd": "tree /data/sub",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "\u251c\u2500\u2500 deep\n\u2502   \u2514\u2500\u2500 deeper.txt\n\u2514\u2500\u2500 nested.txt\n",
+        "stderr_text": ""
+      }
+    }
+  ]
+}

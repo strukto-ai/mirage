@@ -22,7 +22,7 @@ quickstart
 /knowledge/policies/privacy
 /knowledge/policies/refunds
 === stat_fmt ===
-190 auth
+190 /knowledge/guides/auth
 === cat_auth ===
 Authentication uses bearer tokens via the Authorization header.
 Requests are rate limited to 100 calls per minute per token.

@@ -1,0 +1,24 @@
+{
+  "command": "stat",
+  "cases": [
+    {
+      "id": "stat_name_size",
+      "cmd": "stat -c \"%n %s\" /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/a.txt 24\n",
+        "stderr_text": ""
+      }
+    }
+  ]
+}

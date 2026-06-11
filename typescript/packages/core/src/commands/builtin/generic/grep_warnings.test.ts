@@ -88,6 +88,13 @@ describe('grepGeneric recursive warnings', () => {
     expect(await decode(out)).toBe('/data/a.txt\n')
     expect(DEC.decode(io.stderr as Uint8Array)).toBe('grep: /data/bad.txt: boom\n')
   })
+
+  it('grep on a single directory operand warns and exits 1', async () => {
+    const [out, io] = await runGrep({})
+    expect(await decode(out)).toBe('')
+    expect(DEC.decode(io.stderr as Uint8Array)).toBe('grep: /data: Is a directory\n')
+    expect(io.exitCode).toBe(1)
+  })
 })
 
 describe('grepGeneric scopeCheck', () => {

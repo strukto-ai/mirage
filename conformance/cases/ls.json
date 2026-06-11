@@ -1,0 +1,43 @@
+{
+  "command": "ls",
+  "cases": [
+    {
+      "id": "ls_dir",
+      "cmd": "ls /data",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a.txt\nb.txt\nbinary.bin\nempty.txt\nno_nl.txt\nsame_a.txt\nsame_b.txt\nsub\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "ls_subdir",
+      "cmd": "ls /data/sub",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "deep\nnested.txt\n",
+        "stderr_text": ""
+      }
+    }
+  ]
+}

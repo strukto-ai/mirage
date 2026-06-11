@@ -1,0 +1,43 @@
+{
+  "command": "file",
+  "cases": [
+    {
+      "id": "file_text",
+      "cmd": "file /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/a.txt: text\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "file_binary",
+      "cmd": "file /data/binary.bin",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/binary.bin: binary\n",
+        "stderr_text": ""
+      }
+    }
+  ]
+}

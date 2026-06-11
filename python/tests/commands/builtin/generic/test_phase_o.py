@@ -150,7 +150,7 @@ async def test_cmp_verbose_lists_all_diffs():
     rb, _ = _make_backend({"/a.txt": b"abc", "/b.txt": b"axc"})
     output, io = await cmp_cmd(
         [_spec("/a.txt"), _spec("/b.txt")], read_bytes=rb, verbose=True)
-    assert b"2 0o142 0o170" in output
+    assert b"2 142 170" in output
     assert io.exit_code == 1
 
 

@@ -17,9 +17,9 @@ _TYPE_LABELS = {
 }
 
 
-def _replace_spec(spec: str, s: FileStat) -> str:
+def _replace_spec(spec: str, s: FileStat, name: str) -> str:
     if spec == "n":
-        return s.name
+        return name
     if spec == "s":
         return str(s.size if s.size is not None else 0)
     if spec == "F":
@@ -30,8 +30,8 @@ def _replace_spec(spec: str, s: FileStat) -> str:
     return "?"
 
 
-def _format_stat(fmt: str, s: FileStat) -> str:
-    return _FORMAT_RE.sub(lambda m: _replace_spec(m.group(1), s), fmt)
+def _format_stat(fmt: str, s: FileStat, name: str) -> str:
+    return _FORMAT_RE.sub(lambda m: _replace_spec(m.group(1), s, name), fmt)
 
 
 async def stat(
@@ -50,7 +50,7 @@ async def stat(
     for p in paths:
         s = await stat_fn(accessor, p, index)
         if fmt is not None:
-            lines.append(_format_stat(fmt, s))
+            lines.append(_format_stat(fmt, s, p.original))
         else:
             lines.append(f"name={s.name} size={s.size}"
                          f" modified={s.modified}"

@@ -83,9 +83,8 @@ recursive `rm`, `cp`, and `mv`.
 
 Standard shell commands like `ls`, `cat`, `head`, `tail`, `grep`, `rg`,
 `find`, `tree`, `touch`, `mkdir`, `rm`, `cp`, and `mv` work through those
-primitives. `mv`/`cp` are non-atomic download + upload (the Files API has no
-server-side rename); moving a path onto itself is a no-op and never deletes
-the file.
+primitives. `mv`/`cp` are non-atomic download + upload — the Files API has no
+server-side rename.
 
 ## Snapshot behavior
 

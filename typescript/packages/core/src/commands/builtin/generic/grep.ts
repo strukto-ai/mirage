@@ -257,7 +257,16 @@ export async function grepGeneric(
       return [out, new IOResult(multiStderr !== undefined ? { stderr: multiStderr } : {})]
     }
 
-    await stat(first)
+    const firstStat = await stat(first)
+    if (firstStat.type === FileType.DIRECTORY) {
+      return [
+        new Uint8Array(0),
+        new IOResult({
+          exitCode: 1,
+          stderr: ENC.encode(`grep: ${first.original}: Is a directory\n`),
+        }),
+      ]
+    }
     const source = stream(first)
     const matched = grepStream(source, pat, f)
     if (f.quiet) {

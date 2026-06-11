@@ -237,6 +237,16 @@ describe('workspace: cross-mount commands (cp/mv/diff/cmp)', () => {
     expect(stdoutStr(io)).toContain('differ')
     await ws.close()
   })
+
+  it('cmp same-mount differ message ends with newline', async () => {
+    const { ws } = await makeWorkspace()
+    await ws.execute('echo xxx > /ram/a.txt')
+    await ws.execute('echo yyy > /ram/b.txt')
+    const io = await ws.execute('cmp /ram/a.txt /ram/b.txt')
+    expect(io.exitCode).toBe(1)
+    expect(stdoutStr(io)).toBe('/ram/a.txt /ram/b.txt differ: char 1, line 1\n')
+    await ws.close()
+  })
 })
 
 describe('workspace: grep -l / -m early termination', () => {

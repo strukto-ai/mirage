@@ -1,0 +1,62 @@
+{
+  "command": "cat",
+  "cases": [
+    {
+      "id": "cat_no_trailing_newline",
+      "cmd": "cat /data/no_nl.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "no trailing newline",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "cat_empty",
+      "cmd": "cat /data/empty.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "cat_binary",
+      "cmd": "cat /data/binary.bin",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_base64": "AAECaGVsbG///g==",
+        "stderr_text": ""
+      }
+    }
+  ]
+}

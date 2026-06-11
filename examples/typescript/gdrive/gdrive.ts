@@ -111,6 +111,15 @@ async function main(): Promise<void> {
       const rg = await run(ws, `rg title "${firstDoc}"`)
       printOut(`rg title ${firstDoc}`, rg.out, rg.err, 300)
 
+      const cut = await run(ws, `cut -c 1-40 "${firstDoc}"`)
+      printOut(`cut -c 1-40 ${firstDoc}`, cut.out, cut.err, 300)
+
+      const sedPrint = await run(ws, `sed -n 2p "${firstDoc}"`)
+      printOut(`sed -n 2p ${firstDoc}`, sedPrint.out, sedPrint.err, 300)
+
+      const sedSub = await run(ws, `sed "s/title/TITLE/g" "${firstDoc}"`)
+      printOut(`sed s/title/TITLE/g ${firstDoc}`, sedSub.out, sedSub.err, 300)
+
       const realpath = await run(ws, `realpath "${firstDoc}"`)
       printOut(`realpath ${firstDoc}`, realpath.out, realpath.err)
     }

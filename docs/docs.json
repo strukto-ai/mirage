@@ -280,7 +280,8 @@
                 "group": "Cloud Files",
                 "icon": "folder-open",
                 "pages": [
-                  "python/resource/nextcloud"
+                  "python/resource/nextcloud",
+                  "python/resource/databricks_volume"
                 ]
               },
               {

@@ -1,0 +1,43 @@
+{
+  "command": "grep",
+  "cases": [
+    {
+      "id": "grep_match",
+      "cmd": "grep world /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "world\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_no_match",
+      "cmd": "grep zzz /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    }
+  ]
+}

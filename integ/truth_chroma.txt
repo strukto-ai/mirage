@@ -75,7 +75,7 @@ If you exceed the limit you receive HTTP 429 and must back off.
 === uniq_w0_auth ===
 Authentication uses bearer tokens via the Authorization header.
 === stat_name_auth ===
-auth.md
+/knowledge/guides/auth.md
 === cut_d_f1 ===
 Welcome
 Install
