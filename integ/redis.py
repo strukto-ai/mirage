@@ -28,7 +28,7 @@ from mirage.resource.redis import RedisResource  # noqa: E402
 
 sys.path.insert(0, _INTEG_DIR)
 
-from cases import run_cases  # noqa: E402
+from cases import assert_real_mtime, run_cases  # noqa: E402
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
@@ -41,6 +41,7 @@ async def main() -> None:
                                  key_prefix=f"mirage-integ-observer-{run_id}:")
     ws = Workspace({"/data": resource}, mode=MountMode.WRITE, observe=observe)
     await run_cases(ws)
+    await assert_real_mtime(ws)
     await observe.clear()
 
 

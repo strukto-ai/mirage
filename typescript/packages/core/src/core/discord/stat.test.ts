@@ -118,7 +118,7 @@ describe('stat channel dir', () => {
           name: 'general',
           resourceType: 'discord/channel',
           vfsName: 'general__C1',
-          remoteTime: '0',
+          remoteTime: '794354201395200000',
         }),
       ],
     ])
@@ -131,6 +131,7 @@ describe('stat channel dir', () => {
     expect(out.type).toBe(FileType.DIRECTORY)
     expect(out.name).toBe('general__C1')
     expect(out.extra.channel_id).toBe('C1')
+    expect(out.modified).toBe('2021-01-01T00:00:00Z')
   })
 
   it('throws ENOENT for channel dir without index', async () => {

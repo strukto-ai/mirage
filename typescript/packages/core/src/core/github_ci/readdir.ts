@@ -67,6 +67,7 @@ export async function readdir(
         id: String(wf.id),
         name: wf.name ?? '',
         resourceType: 'ci/workflow',
+        remoteTime: wf.updated_at ?? '',
         vfsName: filename,
       })
       entries.push([filename, entry])
@@ -218,6 +219,7 @@ export async function readdir(
           id: String(a.id),
           name: a.name ?? '',
           resourceType: 'ci/artifact',
+          remoteTime: a.updated_at ?? '',
           vfsName: filename,
           size: a.size_in_bytes ?? null,
         }),

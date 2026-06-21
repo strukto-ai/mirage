@@ -86,6 +86,7 @@ export async function stat(
     return new FileStat({
       name: lookup.entry.vfsName !== '' ? lookup.entry.vfsName : lookup.entry.name,
       type: FileType.JSON,
+      modified: lookup.entry.remoteTime,
       extra: { workflow_id: lookup.entry.id },
     })
   }
@@ -97,6 +98,7 @@ export async function stat(
     return new FileStat({
       name: lookup.entry.vfsName !== '' ? lookup.entry.vfsName : lookup.entry.name,
       type: FileType.DIRECTORY,
+      modified: lookup.entry.remoteTime,
       extra: { run_id: lookup.entry.id },
     })
   }
@@ -130,6 +132,7 @@ export async function stat(
     return new FileStat({
       name: lookup.entry.vfsName !== '' ? lookup.entry.vfsName : lookup.entry.name,
       type: FileType.JSON,
+      modified: lookup.entry.remoteTime,
       extra: { job_id: lookup.entry.id },
     })
   }
@@ -146,6 +149,7 @@ export async function stat(
     return new FileStat({
       name: lookup.entry.vfsName !== '' ? lookup.entry.vfsName : lookup.entry.name,
       type: FileType.TEXT,
+      modified: lookup.entry.remoteTime,
       extra: { job_id: lookup.entry.id },
     })
   }
@@ -158,6 +162,7 @@ export async function stat(
       name: lookup.entry.vfsName !== '' ? lookup.entry.vfsName : lookup.entry.name,
       type: FileType.ZIP,
       size: lookup.entry.size,
+      modified: lookup.entry.remoteTime,
       extra: { artifact_id: lookup.entry.id },
     })
   }

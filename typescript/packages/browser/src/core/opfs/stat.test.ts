@@ -33,6 +33,22 @@ describe('opfs/stat', () => {
     const s = await stat(accessor, spec('/d'))
     expect(s.type).toBe(FileType.DIRECTORY)
   })
+  it('derives directory mtime from the newest file child', async () => {
+    const accessor = makeMockAccessor()
+    await mkdir(accessor, spec('/d'))
+    await writeBytes(accessor, spec('/d/a'), new TextEncoder().encode('a'))
+    const child = await stat(accessor, spec('/d/a'))
+    const dir = await stat(accessor, spec('/d'))
+    expect(dir.type).toBe(FileType.DIRECTORY)
+    expect(dir.modified).not.toBeNull()
+    expect(dir.modified).toBe(child.modified)
+  })
+  it('leaves directory mtime null when it has no files', async () => {
+    const accessor = makeMockAccessor()
+    await mkdir(accessor, spec('/empty'))
+    const s = await stat(accessor, spec('/empty'))
+    expect(s.modified).toBeNull()
+  })
   it('throws on missing path', async () => {
     const accessor = makeMockAccessor()
     await expect(stat(accessor, spec('/nope'))).rejects.toThrow()

@@ -80,6 +80,7 @@ export async function stat(
     return new FileStat({
       name: result.entry.vfsName,
       type: FileType.DIRECTORY,
+      modified: result.entry.remoteTime,
       extra: { team_id: result.entry.id },
     })
   }
@@ -111,6 +112,7 @@ export async function stat(
     return new FileStat({
       name: result.entry.vfsName,
       type: FileType.JSON,
+      modified: result.entry.remoteTime,
       extra: { user_id: result.entry.id },
     })
   }
@@ -122,6 +124,7 @@ export async function stat(
     return new FileStat({
       name: result.entry.vfsName,
       type: FileType.DIRECTORY,
+      modified: result.entry.remoteTime,
       extra: { issue_id: result.entry.id },
     })
   }
@@ -161,6 +164,7 @@ export async function stat(
     return new FileStat({
       name: result.entry.vfsName,
       type: FileType.JSON,
+      modified: result.entry.remoteTime,
       extra: { [idKey]: result.entry.id },
     })
   }

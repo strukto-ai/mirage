@@ -62,6 +62,12 @@ async def main() -> None:
                                     )
     print(await board_result.stdout_str())
 
+    print(f"=== ls -l /trello/workspaces/{first_ws}/boards/ "
+          "(mtime from dateLastActivity) ===")
+    long_boards = await ws.execute(
+        f"ls -l /trello/workspaces/{first_ws}/boards/")
+    print(await long_boards.stdout_str())
+
     first_board = (await
                    board_result.stdout_str()).strip().splitlines()[0] if (
                        await board_result.stdout_str()).strip() else ""

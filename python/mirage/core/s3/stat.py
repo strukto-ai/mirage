@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.s3 import S3Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import IndexCacheStore, ResourceType
 from mirage.core.s3._client import _client_kwargs, _key, async_session
 from mirage.core.timeutil import to_iso_z
 from mirage.types import FileStat, FileType, PathSpec
@@ -55,13 +55,16 @@ async def stat(accessor: S3Accessor,
         lookup = await index.get(virtual_key)
         if lookup.entry is not None:
             entry = lookup.entry
-            if entry.resource_type == "folder":
+            # S3 "folders" are synthetic common-prefixes with no object,
+            # so readdir() records no time or size for them.
+            if entry.resource_type == ResourceType.FOLDER:
                 return FileStat(name=entry.name, type=FileType.DIRECTORY)
             # TODO: propagate ETag into IndexCacheEntry so this fast
             # path can also carry fingerprint.
             return FileStat(
                 name=entry.name,
                 size=entry.size,
+                modified=entry.remote_time or None,
                 type=guess_type(entry.name),
             )
         # If the parent directory was already listed by readdir() but

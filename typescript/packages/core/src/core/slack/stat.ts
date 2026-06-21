@@ -16,6 +16,7 @@ import type { SlackAccessor } from '../../accessor/slack.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { readdir as coreReaddir } from './readdir.ts'
+import { epochToIso } from '../../utils/dates.ts'
 import { stripSlash } from '../../utils/slash.ts'
 
 const VIRTUAL_DIRS: ReadonlySet<string> = new Set(['', 'channels', 'dms', 'users'])
@@ -38,6 +39,13 @@ function filetypeFromMimetype(mime: string): FileType {
   if (mapped !== undefined) return mapped
   if (mime.startsWith('text/')) return FileType.TEXT
   return FileType.BINARY
+}
+
+function slackModified(remoteTime: string): string | null {
+  if (remoteTime === '') return null
+  const ts = Number.parseFloat(remoteTime)
+  if (Number.isNaN(ts) || ts <= 0) return null
+  return epochToIso(ts)
 }
 
 function fileNotFound(key: string): Error {
@@ -106,6 +114,7 @@ export async function stat(
     return new FileStat({
       name: lookup.entry.vfsName !== '' ? lookup.entry.vfsName : lookup.entry.name,
       type: FileType.DIRECTORY,
+      modified: slackModified(lookup.entry.remoteTime),
       extra: { channel_id: lookup.entry.id },
     })
   }
@@ -162,6 +171,7 @@ export async function stat(
       name: lookup.entry.vfsName !== '' ? lookup.entry.vfsName : lookup.entry.name,
       type: filetypeFromMimetype(mimetype),
       size: lookup.entry.size ?? null,
+      modified: slackModified(lookup.entry.remoteTime),
       extra: { file_id: lookup.entry.id },
     })
   }

@@ -12,13 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export function utcDateFolder(ts?: number): string {
-  const d = ts === undefined ? new Date() : new Date(ts)
-  return d.toISOString().slice(0, 10)
-}
+import { describe, expect, it } from 'vitest'
+import { epochToIso, utcDateFolder } from './dates.ts'
 
-// Truncated to whole seconds so this matches the Python epoch_to_iso byte
-// for byte (second precision).
-export function epochToIso(seconds: number): string {
-  return new Date(Math.floor(seconds) * 1000).toISOString().replace('.000Z', 'Z')
-}
+describe('epochToIso', () => {
+  it('formats whole seconds as second-precision ISO-Z', () => {
+    expect(epochToIso(1609459200)).toBe('2021-01-01T00:00:00Z')
+  })
+  it('truncates sub-second input (parity with the Python converter)', () => {
+    expect(epochToIso(1609459200.987)).toBe('2021-01-01T00:00:00Z')
+  })
+})
+
+describe('utcDateFolder', () => {
+  it('returns YYYY-MM-DD for a timestamp', () => {
+    expect(utcDateFolder(1609459200000)).toBe('2021-01-01')
+  })
+})

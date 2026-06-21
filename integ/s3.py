@@ -15,10 +15,12 @@
 import asyncio
 import logging
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 
 import aiobotocore.client
 import boto3
+import moto.s3.models as _s3_models
 from cases import run_not_found
 from moto.server import ThreadedMotoServer
 
@@ -30,6 +32,11 @@ from mirage.resource.minio import MinIOConfig, MinIOResource
 from mirage.resource.s3 import S3Config, S3Resource
 from mirage.resource.seaweedfs import SeaweedFSConfig, SeaweedFSResource
 from mirage.types import CommandSafeguard, ConsistencyPolicy
+
+# Freeze the timestamp moto stamps onto every object so LastModified (and thus
+# the `ls -l` mtime column resolved from the index) is deterministic.
+_FROZEN_MTIME = datetime(2026, 3, 31, 12, 0, 0, tzinfo=timezone.utc)
+_s3_models.utcnow = lambda: _FROZEN_MTIME
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 SEED_OBJECTS = [

@@ -16,6 +16,7 @@ import re
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.core.discord.entry import snowflake_to_iso
 from mirage.core.discord.readdir import readdir as _readdir
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
@@ -99,6 +100,7 @@ async def stat(
         return FileStat(
             name=lookup.entry.vfs_name or lookup.entry.name,
             type=FileType.DIRECTORY,
+            modified=snowflake_to_iso(lookup.entry.remote_time),
             extra={"channel_id": lookup.entry.id},
         )
 

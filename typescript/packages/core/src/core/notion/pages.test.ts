@@ -135,6 +135,7 @@ describe('getChildPages', () => {
         {
           id: 'aaaa1111-2222-3333-4444-555566667777',
           type: 'child_page',
+          last_edited_time: '2024-01-03T00:00:00Z',
           child_page: { title: 'First' },
         },
         { id: 'block-paragraph', type: 'paragraph' },
@@ -149,8 +150,12 @@ describe('getChildPages', () => {
     })
     const pages = await getChildPages(transport, 'parent-block')
     expect(pages).toEqual([
-      { id: 'aaaa1111-2222-3333-4444-555566667777', title: 'First' },
-      { id: 'bbbb1111-2222-3333-4444-555566667777', title: 'Second' },
+      {
+        id: 'aaaa1111-2222-3333-4444-555566667777',
+        title: 'First',
+        lastEditedTime: '2024-01-03T00:00:00Z',
+      },
+      { id: 'bbbb1111-2222-3333-4444-555566667777', title: 'Second', lastEditedTime: '' },
     ])
   })
 })

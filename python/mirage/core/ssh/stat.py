@@ -12,14 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from datetime import datetime, timezone
-
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.core.ssh._client import _abs
-from mirage.core.timeutil import to_iso_z
+from mirage.core.timeutil import epoch_to_iso
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.filetype import guess_type
@@ -47,8 +45,7 @@ async def stat(accessor: SSHAccessor,
         name = path.rstrip("/").rsplit("/", 1)[-1] or "/"
         mod_str = ""
         if attrs.mtime is not None:
-            mod_str = to_iso_z(
-                datetime.fromtimestamp(attrs.mtime, tz=timezone.utc))
+            mod_str = epoch_to_iso(attrs.mtime)
         return FileStat(
             name=name,
             size=attrs.size or 0,

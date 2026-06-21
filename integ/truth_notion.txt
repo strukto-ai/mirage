@@ -3,9 +3,14 @@ pages
 === ls_pages ===
 Notes__bbbb2222-3333-4444-5555-666677778888
 Project_Roadmap__aaaa1111-2222-3333-4444-555566667777
+=== ls_l_pages ===
+drwxr-xr-x 1 user user 0 Jan  2 00:00 Notes__bbbb2222-3333-4444-5555-666677778888
+drwxr-xr-x 1 user user 0 Jan  2 00:00 Project_Roadmap__aaaa1111-2222-3333-4444-555566667777
 === ls_page_a ===
 Q1_Goals__cccc1111-2222-3333-4444-555566667777
 page.json
+=== stat_dir_a ===
+/notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777 2026-01-02T00:00:00.000Z
 === tree ===
 └── pages
     ├── Notes__bbbb2222-3333-4444-5555-666677778888

@@ -44,6 +44,7 @@ async def _populate_index(index: RAMIndexCacheStore) -> None:
                 id="C001",
                 name="general",
                 resource_type="slack/channel",
+                remote_time="1609459200",
                 vfs_name="general__C001",
             ),
         ),
@@ -79,6 +80,7 @@ async def test_stat_channel(accessor, index):
                         index=index)
     assert result.type == FileType.DIRECTORY
     assert result.extra["channel_id"] == "C001"
+    assert result.modified == "2021-01-01T00:00:00Z"
 
 
 @pytest.mark.asyncio

@@ -65,13 +65,21 @@ def _paginate_directory(objects, prefix):
             continue
         relative = key[len(prefix):]
         if not relative:
-            contents.append({"Key": key, "Size": len(data)})
+            contents.append({
+                "Key": key,
+                "Size": len(data),
+                "LastModified": LAST_MODIFIED
+            })
             continue
         if "/" in relative:
             child = relative.split("/", 1)[0]
             common_prefixes.add(prefix + child + "/")
             continue
-        contents.append({"Key": key, "Size": len(data)})
+        contents.append({
+            "Key": key,
+            "Size": len(data),
+            "LastModified": LAST_MODIFIED
+        })
     return {
         "CommonPrefixes": [{
             "Prefix": v
@@ -84,7 +92,8 @@ def _paginate_flat(objects, prefix):
     return {
         "Contents": [{
             "Key": k,
-            "Size": len(v)
+            "Size": len(v),
+            "LastModified": LAST_MODIFIED
         } for k, v in sorted(objects.items()) if k.startswith(prefix)]
     }
 

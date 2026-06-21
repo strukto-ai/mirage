@@ -892,3 +892,27 @@ async def run_cases(ws) -> None:
         else:
             print(f"{name} FAIL exit={result.exit_code} "
                   f"elapsed={elapsed:.3f}")
+
+
+async def assert_real_mtime(ws) -> None:
+    await ws.execute("mkdir -p /data/mtimecheck")
+    await ws.execute("tee /data/mtimecheck/probe.txt > /dev/null", stdin=b"x")
+    # Drop the write-through cache so the listing resolves mtime from the
+    # backend stat (the read-cache layer does not carry mtime; that is a
+    # separate concern from whether the backend reports it).
+    await ws.cache.clear()
+    file_out = await (
+        await ws.execute("ls -l /data/mtimecheck/probe.txt")).stdout_str()
+    dir_out = await (await
+                     ws.execute("ls -l /data | grep mtimecheck")).stdout_str()
+    for label, out in (("file", file_out), ("dir", dir_out)):
+        if not out.strip():
+            raise AssertionError(f"mtime check produced no {label} listing")
+        # EPOCH_LS_TIME from mirage.commands.builtin.utils.formatting; kept as
+        # a literal so importing cases does not pull mirage into sys.path (it
+        # would evict the integ dir and break sibling imports like onedrive).
+        if "Jan  1 00:00" in out:
+            raise AssertionError(
+                f"{label} ls -l shows epoch mtime (modified not set): "
+                f"{out.strip()!r}")
+    await ws.execute("rm -rf /data/mtimecheck")

@@ -82,6 +82,7 @@ describe('notion stat', () => {
     const result = await stat(makeAccessor(transport), spec(`/pages/${segment}/`), idx)
     expect(result.name).toBe(segment)
     expect(result.type).toBe(FileType.DIRECTORY)
+    expect(result.modified).toBe('2024-01-02T00:00:00Z')
     expect(result.extra.page_id).toBe(PAGE_ID)
     expect(transport.invocations).toHaveLength(0)
   })

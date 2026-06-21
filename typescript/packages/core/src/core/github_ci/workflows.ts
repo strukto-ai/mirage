@@ -19,6 +19,7 @@ export interface CIWorkflow {
   name?: string
   path?: string
   state?: string
+  updated_at?: string
   [k: string]: unknown
 }
 

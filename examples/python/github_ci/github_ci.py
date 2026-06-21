@@ -69,6 +69,10 @@ async def main():
     r = await ws.execute("ls /ci/runs/")
     print(await r.stdout_str())
 
+    print("\n=== ls -l /ci/runs/ (mtime from updated_at) ===")
+    long_runs = await ws.execute("ls -l /ci/runs/ | head -n 5")
+    print(await long_runs.stdout_str())
+
     runs = (await r.stdout_str()).strip().splitlines()
     if not runs or not runs[0]:
         print("no runs found")

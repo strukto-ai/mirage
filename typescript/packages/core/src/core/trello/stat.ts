@@ -80,6 +80,7 @@ export async function stat(
     return new FileStat({
       name: result.entry.vfsName,
       type: FileType.DIRECTORY,
+      modified: result.entry.remoteTime,
       extra: { workspace_id: result.entry.id },
     })
   }
@@ -110,6 +111,7 @@ export async function stat(
     return new FileStat({
       name: result.entry.vfsName,
       type: FileType.DIRECTORY,
+      modified: result.entry.remoteTime,
       extra: { board_id: result.entry.id },
     })
   }
@@ -145,6 +147,7 @@ export async function stat(
     return new FileStat({
       name: result.entry.vfsName,
       type: FileType.JSON,
+      modified: result.entry.remoteTime,
       extra: { member_id: result.entry.id },
     })
   }
@@ -161,6 +164,7 @@ export async function stat(
     return new FileStat({
       name: result.entry.vfsName,
       type: FileType.JSON,
+      modified: result.entry.remoteTime,
       extra: { label_id: result.entry.id },
     })
   }
@@ -177,6 +181,7 @@ export async function stat(
     return new FileStat({
       name: result.entry.vfsName,
       type: FileType.DIRECTORY,
+      modified: result.entry.remoteTime,
       extra: { list_id: result.entry.id },
     })
   }
@@ -218,6 +223,7 @@ export async function stat(
     return new FileStat({
       name: result.entry.vfsName,
       type: FileType.DIRECTORY,
+      modified: result.entry.remoteTime,
       extra: { card_id: result.entry.id },
     })
   }

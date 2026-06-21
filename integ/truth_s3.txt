@@ -87,11 +87,11 @@ f249ee110320adc2975cb6c7436c9a45  /s3/data/example.json
 === s3:sha256_json ===
 ca04d1f4b6a5f1a774fb076af00a791e7f7ef70958300e314c4eafc563ac3bb9  /s3/data/example.json
 === s3:ls_l_data ===
--rw-r--r-- 1 user user     2514 Jan  1 00:00 example.feather
--rw-r--r-- 1 user user    15533 Jan  1 00:00 example.json
--rw-r--r-- 1 user user 10414430 Jan  1 00:00 example.jsonl
--rw-r--r-- 1 user user      631 Jan  1 00:00 example.orc
--rw-r--r-- 1 user user     2401 Jan  1 00:00 example.parquet
+-rw-r--r-- 1 user user     2514 Mar 31 12:00 example.feather
+-rw-r--r-- 1 user user    15533 Mar 31 12:00 example.json
+-rw-r--r-- 1 user user 10414430 Mar 31 12:00 example.jsonl
+-rw-r--r-- 1 user user      631 Mar 31 12:00 example.orc
+-rw-r--r-- 1 user user     2401 Mar 31 12:00 example.parquet
 === s3:file_parquet ===
 parquet, 10 rows, 3 columns (id: int64, value: double, label: large_string)
 === s3:file_orc ===
@@ -217,11 +217,11 @@ f249ee110320adc2975cb6c7436c9a45  /gcs/data/example.json
 === gcs:sha256_json ===
 ca04d1f4b6a5f1a774fb076af00a791e7f7ef70958300e314c4eafc563ac3bb9  /gcs/data/example.json
 === gcs:ls_l_data ===
--rw-r--r-- 1 user user     2514 Jan  1 00:00 example.feather
--rw-r--r-- 1 user user    15533 Jan  1 00:00 example.json
--rw-r--r-- 1 user user 10414430 Jan  1 00:00 example.jsonl
--rw-r--r-- 1 user user      631 Jan  1 00:00 example.orc
--rw-r--r-- 1 user user     2401 Jan  1 00:00 example.parquet
+-rw-r--r-- 1 user user     2514 Mar 31 12:00 example.feather
+-rw-r--r-- 1 user user    15533 Mar 31 12:00 example.json
+-rw-r--r-- 1 user user 10414430 Mar 31 12:00 example.jsonl
+-rw-r--r-- 1 user user      631 Mar 31 12:00 example.orc
+-rw-r--r-- 1 user user     2401 Mar 31 12:00 example.parquet
 === gcs:file_parquet ===
 parquet, 10 rows, 3 columns (id: int64, value: double, label: large_string)
 === gcs:file_orc ===
@@ -347,11 +347,11 @@ f249ee110320adc2975cb6c7436c9a45  /minio/data/example.json
 === minio:sha256_json ===
 ca04d1f4b6a5f1a774fb076af00a791e7f7ef70958300e314c4eafc563ac3bb9  /minio/data/example.json
 === minio:ls_l_data ===
--rw-r--r-- 1 user user     2514 Jan  1 00:00 example.feather
--rw-r--r-- 1 user user    15533 Jan  1 00:00 example.json
--rw-r--r-- 1 user user 10414430 Jan  1 00:00 example.jsonl
--rw-r--r-- 1 user user      631 Jan  1 00:00 example.orc
--rw-r--r-- 1 user user     2401 Jan  1 00:00 example.parquet
+-rw-r--r-- 1 user user     2514 Mar 31 12:00 example.feather
+-rw-r--r-- 1 user user    15533 Mar 31 12:00 example.json
+-rw-r--r-- 1 user user 10414430 Mar 31 12:00 example.jsonl
+-rw-r--r-- 1 user user      631 Mar 31 12:00 example.orc
+-rw-r--r-- 1 user user     2401 Mar 31 12:00 example.parquet
 === minio:file_parquet ===
 parquet, 10 rows, 3 columns (id: int64, value: double, label: large_string)
 === minio:file_orc ===
@@ -477,11 +477,11 @@ f249ee110320adc2975cb6c7436c9a45  /seaweedfs/data/example.json
 === seaweedfs:sha256_json ===
 ca04d1f4b6a5f1a774fb076af00a791e7f7ef70958300e314c4eafc563ac3bb9  /seaweedfs/data/example.json
 === seaweedfs:ls_l_data ===
--rw-r--r-- 1 user user     2514 Jan  1 00:00 example.feather
--rw-r--r-- 1 user user    15533 Jan  1 00:00 example.json
--rw-r--r-- 1 user user 10414430 Jan  1 00:00 example.jsonl
--rw-r--r-- 1 user user      631 Jan  1 00:00 example.orc
--rw-r--r-- 1 user user     2401 Jan  1 00:00 example.parquet
+-rw-r--r-- 1 user user     2514 Mar 31 12:00 example.feather
+-rw-r--r-- 1 user user    15533 Mar 31 12:00 example.json
+-rw-r--r-- 1 user user 10414430 Mar 31 12:00 example.jsonl
+-rw-r--r-- 1 user user      631 Mar 31 12:00 example.orc
+-rw-r--r-- 1 user user     2401 Mar 31 12:00 example.parquet
 === seaweedfs:file_parquet ===
 parquet, 10 rows, 3 columns (id: int64, value: double, label: large_string)
 === seaweedfs:file_orc ===

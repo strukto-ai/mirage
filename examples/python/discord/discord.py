@@ -57,6 +57,12 @@ async def main():
     print(await r.stdout_str())
     _assert_nonempty(await r.stdout_str(), "no channels in first guild")
 
+    print(f"=== ls -l /discord/{guild}/channels/ "
+          "(mtime from last_message_id) ===")
+    long_ch = await ws.execute(
+        f'ls -l "/discord/{guild}/channels/" | head -n 5')
+    print(await long_ch.stdout_str())
+
     channels = (await r.stdout_str()).strip().splitlines()
     ch = channels[0].strip()
     base = f"/discord/{guild}/channels/{ch}"

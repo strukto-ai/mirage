@@ -97,6 +97,7 @@ async def readdir(
                 id=child_id,
                 name=dirname,
                 resource_type="notion/page",
+                remote_time=child_block.get("last_edited_time", ""),
                 vfs_name=dirname,
             )
             entries.append((dirname, child_entry))

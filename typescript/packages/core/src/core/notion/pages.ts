@@ -92,6 +92,7 @@ export async function getBlockTree(
 export interface ChildPageRef {
   id: string
   title: string
+  lastEditedTime: string
 }
 
 export async function getChildPages(
@@ -106,9 +107,11 @@ export async function getChildPages(
     if (typeof id !== 'string') continue
     const childPage = asObject(block.child_page)
     const title = childPage.title
+    const lastEditedTime = block.last_edited_time
     refs.push({
       id,
       title: typeof title === 'string' ? title : 'untitled',
+      lastEditedTime: typeof lastEditedTime === 'string' ? lastEditedTime : '',
     })
   }
   return refs

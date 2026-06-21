@@ -59,6 +59,7 @@ describe('trello stat workspace nodes', () => {
           id: 'w1',
           name: 'Acme',
           resourceType: 'trello/workspace',
+          remoteTime: '2026-04-05T00:00:00.000Z',
           vfsName: 'Acme__w1',
         }),
       ],
@@ -71,6 +72,7 @@ describe('trello stat workspace nodes', () => {
     expect(s.type).toBe(FileType.DIRECTORY)
     expect(s.name).toBe('Acme__w1')
     expect(s.extra.workspace_id).toBe('w1')
+    expect(s.modified).toBe('2026-04-05T00:00:00.000Z')
   })
 
   it('returns json for workspace.json', async () => {

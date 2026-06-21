@@ -78,6 +78,7 @@ async def stat(
         return FileStat(
             name=result.entry.vfs_name,
             type=FileType.DIRECTORY,
+            modified=result.entry.remote_time or None,
             extra={"team_id": result.entry.id},
         )
 
@@ -110,6 +111,7 @@ async def stat(
         return FileStat(
             name=result.entry.vfs_name,
             type=FileType.JSON,
+            modified=result.entry.remote_time or None,
             extra={"user_id": result.entry.id},
         )
 
@@ -125,6 +127,7 @@ async def stat(
         return FileStat(
             name=result.entry.vfs_name,
             type=FileType.DIRECTORY,
+            modified=result.entry.remote_time or None,
             extra={"issue_id": result.entry.id},
         )
 
@@ -168,6 +171,7 @@ async def stat(
         return FileStat(
             name=result.entry.vfs_name,
             type=FileType.JSON,
+            modified=result.entry.remote_time or None,
             extra={
                 "project_id" if parts[2] == "projects" else "cycle_id":
                 result.entry.id

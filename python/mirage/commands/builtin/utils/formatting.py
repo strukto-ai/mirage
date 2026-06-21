@@ -19,6 +19,8 @@ from mirage.types import FileStat, FileType
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
            "Oct", "Nov", "Dec")
 
+EPOCH_LS_TIME = "Jan  1 00:00"
+
 
 def _human_size(n: int) -> str:
     for unit in ("B", "K", "M", "G", "T"):
@@ -37,12 +39,12 @@ def _ls_mode_string(s: FileStat) -> str:
 
 def _ls_time_string(modified: str | None) -> str:
     if not modified:
-        return "Jan  1 00:00"
+        return EPOCH_LS_TIME
     try:
         text = modified.replace("Z", "+00:00")
         dt = datetime.fromisoformat(text).astimezone(timezone.utc)
     except (ValueError, TypeError):
-        return "Jan  1 00:00"
+        return EPOCH_LS_TIME
     month = _MONTHS[dt.month - 1]
     day = f"{dt.day:>2}"
     return f"{month} {day} {dt.hour:02d}:{dt.minute:02d}"

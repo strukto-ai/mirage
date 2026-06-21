@@ -55,6 +55,7 @@ async def stat(
                 return FileStat(
                     name=result.entry.name,
                     type=FileType.DIRECTORY,
+                    modified=result.entry.remote_time or None,
                     extra={"page_id": page_id},
                 )
         return FileStat(
