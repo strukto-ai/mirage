@@ -19,6 +19,7 @@ from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import IndexCacheStore, IndexEntry
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path, virtual_path
+from mirage.core.databricks_volume.stat import modified_to_iso
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 
@@ -72,12 +73,14 @@ async def readdir(
         name = full_path.rstrip("/").rsplit("/", 1)[-1]
         resource_type = "folder" if getattr(entry, "is_directory",
                                             False) else "file"
+        remote_time = modified_to_iso(getattr(entry, "last_modified", None))
         index_entries.append((name,
                               IndexEntry(
                                   id=full_path,
                                   name=name,
                                   resource_type=resource_type,
                                   size=getattr(entry, "file_size", None),
+                                  remote_time=remote_time or "",
                               )))
     await index.set_dir(virtual_key, index_entries)
     return names

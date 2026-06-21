@@ -25,7 +25,7 @@ from mirage.utils.errors import enoent
 from mirage.utils.filetype import guess_type
 
 
-def _modified(value) -> str | None:
+def modified_to_iso(value) -> str | None:
     if value is None or value == "":
         return None
     if isinstance(value, datetime):
@@ -84,6 +84,23 @@ async def stat(
     stripped = path.strip_prefix.strip("/")
     if not stripped:
         return FileStat(name="/", type=FileType.DIRECTORY)
+    if index is not None:
+        prefix = path.prefix
+        virtual_key = (prefix.rstrip("/") + "/" + stripped if prefix else "/" +
+                       stripped)
+        lookup = await index.get(virtual_key)
+        if lookup.entry is not None:
+            entry = lookup.entry
+            if entry.resource_type == "folder":
+                return FileStat(name=entry.name, type=FileType.DIRECTORY)
+            return FileStat(name=entry.name,
+                            size=entry.size,
+                            modified=entry.remote_time or None,
+                            type=guess_type(entry.name))
+        parent = virtual_key.rsplit("/", 1)[0] or "/"
+        parent_listing = await index.list_dir(parent)
+        if parent_listing.entries is not None:
+            raise enoent(path)
     remote_path = backend_path(accessor.config, path)
     try:
         metadata = await asyncio.to_thread(accessor.files.get_metadata,
@@ -96,7 +113,7 @@ async def stat(
     if _is_directory(metadata):
         return FileStat(name=name, type=FileType.DIRECTORY)
     size = getattr(metadata, "content_length", None)
-    modified = _modified(getattr(metadata, "last_modified", None))
+    modified = modified_to_iso(getattr(metadata, "last_modified", None))
     return FileStat(name=name,
                     size=size,
                     modified=modified,
