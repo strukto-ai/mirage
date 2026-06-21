@@ -124,7 +124,7 @@ async def diff(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     readdir_fn: Callable[..., Awaitable[list[str]]],
-    stat_fn: Callable[..., Awaitable[object]],
+    stat_fn: Callable[..., Awaitable[object]] | None = None,
     accessor: object = None,
     index: object = None,
     i: bool = False,
@@ -137,7 +137,7 @@ async def diff(
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) < 2:
         raise ValueError("diff: requires two paths")
-    if r:
+    if r and stat_fn is not None:
         output = await _diff_dirs(accessor, paths[0], paths[1], read_bytes,
                                   readdir_fn, stat_fn, index, i, w, b, e, u, q)
     else:
