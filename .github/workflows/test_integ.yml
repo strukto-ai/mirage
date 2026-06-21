@@ -259,8 +259,14 @@ jobs:
 
       - name: Create MinIO bucket
         run: |
-          curl -sSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /tmp/mc
-          chmod +x /tmp/mc
+          for i in 1 2 3; do
+            if curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /tmp/mc \
+               && chmod +x /tmp/mc && /tmp/mc --version >/dev/null 2>&1; then
+              break
+            fi
+            echo "mc download attempt $i failed; retrying"; sleep 3
+          done
+          /tmp/mc --version
           /tmp/mc alias set local http://localhost:9000 minio minio123
           /tmp/mc mb local/mirage-integ || true
           /tmp/mc mb local/mirage-integ-s3 || true
