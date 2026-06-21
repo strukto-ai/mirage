@@ -137,7 +137,13 @@ async def diff(
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) < 2:
         raise ValueError("diff: requires two paths")
+    both_dirs = False
     if r and stat_fn is not None:
+        both_dirs = ((await stat_fn(accessor, paths[0],
+                                    index)).type == FileType.DIRECTORY
+                     and (await stat_fn(accessor, paths[1],
+                                        index)).type == FileType.DIRECTORY)
+    if both_dirs:
         output = await _diff_dirs(accessor, paths[0], paths[1], read_bytes,
                                   readdir_fn, stat_fn, index, i, w, b, e, u, q)
     else:

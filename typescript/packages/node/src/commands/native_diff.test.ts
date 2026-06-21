@@ -193,6 +193,20 @@ describe.each(NATIVE_BACKENDS)('native diff (%s backend)', (kind) => {
     }
   })
 
+  it('diff -r on two files diffs them like a plain diff', async () => {
+    const env = makeEnv(kind)
+    try {
+      env.createFile('f1.txt', ENC.encode('hello\n'))
+      env.createFile('f2.txt', ENC.encode('world\n'))
+      const result = await env.mirage('diff -r /data/f1.txt /data/f2.txt')
+      expect(result).toContain('hello')
+      expect(result).toContain('world')
+      expect(result).not.toContain('Not a directory')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
   it('diff -r on identical trees produces no output', async () => {
     const env = makeEnv(kind)
     try {

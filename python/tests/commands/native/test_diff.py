@@ -113,6 +113,14 @@ def test_diff_r_only_in(env):
     assert "Only in /data/o2: rightonly.txt" in result
 
 
+def test_diff_r_on_files(env):
+    env.create_file("f1.txt", b"hello\n")
+    env.create_file("f2.txt", b"world\n")
+    result = env.mirage("diff -r /data/f1.txt /data/f2.txt")
+    assert "hello" in result and "world" in result
+    assert "Not a directory" not in result
+
+
 def test_diff_r_identical_tree(env):
     env.create_file("s1/a.txt", b"x\n")
     env.create_file("s1/sub/b.txt", b"y\n")

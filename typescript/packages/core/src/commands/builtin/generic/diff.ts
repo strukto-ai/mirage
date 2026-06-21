@@ -196,10 +196,13 @@ export async function diffGeneric(
   const p0 = paths[0]
   const p1 = paths[1]
   if (p0 === undefined || p1 === undefined) return [null, new IOResult()]
-  const output =
-    opts.flags.r === true && readdir !== undefined && stat !== undefined
-      ? await diffDirs(readdir, stat, stream, p0, p1, flags)
-      : await diffPair(stream, p0, p1, flags)
+  let output: Uint8Array | undefined
+  if (opts.flags.r === true && readdir !== undefined && stat !== undefined) {
+    const bothDirs =
+      (await stat(p0)).type === FileType.DIRECTORY && (await stat(p1)).type === FileType.DIRECTORY
+    if (bothDirs) output = await diffDirs(readdir, stat, stream, p0, p1, flags)
+  }
+  output ??= await diffPair(stream, p0, p1, flags)
   const exitCode = output.byteLength > 0 ? 1 : 0
   const out: ByteSource = output
   return [out, new IOResult({ exitCode, cache: [p0.stripPrefix, p1.stripPrefix] })]
