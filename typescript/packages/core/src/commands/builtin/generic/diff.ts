@@ -12,8 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { concat } from '../../../io/cachable_iterator.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { FileType, type FileStat, PathSpec } from '../../../types.ts'
+import { gnuBasename } from '../../../utils/path.ts'
+import { rstripSlash } from '../../../utils/slash.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { edScript, normalDiff, unifiedDiff } from '../diff_helper.ts'
 
@@ -22,24 +25,6 @@ const DEC = new TextDecoder('utf-8', { fatal: false })
 
 type Readdir = (p: PathSpec) => Promise<string[]>
 type Stat = (p: PathSpec) => Promise<FileStat>
-
-function concatBytes(parts: Uint8Array[]): Uint8Array {
-  let total = 0
-  for (const part of parts) total += part.byteLength
-  const out = new Uint8Array(total)
-  let offset = 0
-  for (const part of parts) {
-    out.set(part, offset)
-    offset += part.byteLength
-  }
-  return out
-}
-
-function rstripSlash(s: string): string {
-  let end = s.length
-  while (end > 0 && s[end - 1] === '/') end--
-  return s.slice(0, end)
-}
 
 interface DiffFlags {
   i: boolean
@@ -50,18 +35,8 @@ interface DiffFlags {
   u: boolean
 }
 
-function entryBaseName(entry: string): string {
-  let end = entry.length
-  while (end > 0 && entry[end - 1] === '/') end--
-  const trimmed = entry.slice(0, end)
-  const slash = trimmed.lastIndexOf('/')
-  return slash >= 0 ? trimmed.slice(slash + 1) : trimmed
-}
-
 function childSpec(parent: PathSpec, name: string): PathSpec {
-  let end = parent.original.length
-  while (end > 0 && parent.original[end - 1] === '/') end--
-  const childPath = `${parent.original.slice(0, end)}/${name}`
+  const childPath = `${rstripSlash(parent.original)}/${name}`
   return new PathSpec({
     original: childPath,
     directory: childPath,
@@ -128,8 +103,8 @@ async function diffDirs(
 ): Promise<Uint8Array> {
   const rawA = await readdir(dirA)
   const rawB = await readdir(dirB)
-  const namesA = new Set(rawA.map(entryBaseName))
-  const namesB = new Set(rawB.map(entryBaseName))
+  const namesA = new Set(rawA.map((e) => gnuBasename(e)))
+  const namesB = new Set(rawB.map((e) => gnuBasename(e)))
   const names = [...new Set([...namesA, ...namesB])].sort()
   const left = rstripSlash(dirA.original)
   const right = rstripSlash(dirB.original)
@@ -154,9 +129,7 @@ async function diffDirs(
       if (body.byteLength > 0) {
         if (flags.q) parts.push(body)
         else
-          parts.push(
-            concatBytes([ENC.encode(`diff -r ${childA.original} ${childB.original}\n`), body]),
-          )
+          parts.push(concat([ENC.encode(`diff -r ${childA.original} ${childB.original}\n`), body]))
       }
     } else if (aDir) {
       parts.push(
@@ -172,7 +145,7 @@ async function diffDirs(
       )
     }
   }
-  return concatBytes(parts)
+  return concat(parts)
 }
 
 export async function diffGeneric(

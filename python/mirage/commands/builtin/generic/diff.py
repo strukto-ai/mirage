@@ -6,10 +6,7 @@ from mirage.commands.builtin.diff_helper import _ed_script, _normal_diff
 from mirage.commands.builtin.utils.lines import split_lines_keepends
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
-
-
-def _entry_name(entry: str) -> str:
-    return entry.rstrip("/").rsplit("/", 1)[-1]
+from mirage.utils.path import gnu_basename
 
 
 def _child_spec(parent: PathSpec, name: str) -> PathSpec:
@@ -78,8 +75,8 @@ async def _diff_dirs(
 ) -> bytes:
     raw_a = await readdir_fn(accessor, dir_a, index)
     raw_b = await readdir_fn(accessor, dir_b, index)
-    names_a = {_entry_name(entry) for entry in raw_a}
-    names_b = {_entry_name(entry) for entry in raw_b}
+    names_a = {gnu_basename(entry) for entry in raw_a}
+    names_b = {gnu_basename(entry) for entry in raw_b}
     left = dir_a.original.rstrip("/")
     right = dir_b.original.rstrip("/")
     parts: list[bytes] = []
