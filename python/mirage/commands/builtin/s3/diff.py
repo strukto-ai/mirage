@@ -20,6 +20,7 @@ from mirage.commands.spec import SPECS
 from mirage.core.s3.glob import resolve_glob
 from mirage.core.s3.read import read_bytes
 from mirage.core.s3.readdir import readdir
+from mirage.core.s3.stat import stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -44,6 +45,7 @@ async def diff(
     return await generic_diff(paths,
                               read_bytes=read_bytes,
                               readdir_fn=readdir,
+                              stat_fn=stat,
                               accessor=accessor,
                               index=index,
                               i=i,

@@ -15,6 +15,7 @@
 import { ResourceName, command, diffGeneric, specOf } from '@struktoai/mirage-core'
 import { stream as sshStream } from '../../../core/ssh/stream.ts'
 import { readdir as sshReaddir } from '../../../core/ssh/readdir.ts'
+import { stat as sshStat } from '../../../core/ssh/stat.ts'
 import type { SSHAccessor } from '../../../accessor/ssh.ts'
 
 export const SSH_DIFF = command({
@@ -27,5 +28,6 @@ export const SSH_DIFF = command({
       opts,
       (p) => sshStream(accessor, p),
       (p) => sshReaddir(accessor, p, opts.index ?? undefined),
+      (p) => sshStat(accessor, p),
     ),
 })

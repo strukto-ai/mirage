@@ -21,6 +21,7 @@ from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.databricks_volume.glob import resolve_glob
 from mirage.core.databricks_volume.readdir import readdir
+from mirage.core.databricks_volume.stat import stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -46,6 +47,7 @@ async def diff(
                               read_bytes=read_bytes_with_index(
                                   index, path_prefix(paths)),
                               readdir_fn=readdir,
+                              stat_fn=stat,
                               accessor=accessor,
                               index=index,
                               i=i,

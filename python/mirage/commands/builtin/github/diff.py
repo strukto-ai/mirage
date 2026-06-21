@@ -22,6 +22,7 @@ from mirage.commands.spec import SPECS
 from mirage.core.github.glob import resolve_glob
 from mirage.core.github.read import read as github_read
 from mirage.core.github.readdir import readdir as github_readdir
+from mirage.core.github.stat import stat as github_stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -46,6 +47,7 @@ async def diff(
     return await generic_diff(paths,
                               read_bytes=partial(github_read, index=index),
                               readdir_fn=github_readdir,
+                              stat_fn=github_stat,
                               accessor=accessor,
                               index=index,
                               i=i,

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import { PathSpec } from '../../../types.ts'
+import { FileType, type FileStat, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { edScript, normalDiff, unifiedDiff } from '../diff_helper.ts'
 
@@ -21,6 +21,25 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
 type Readdir = (p: PathSpec) => Promise<string[]>
+type Stat = (p: PathSpec) => Promise<FileStat>
+
+function concatBytes(parts: Uint8Array[]): Uint8Array {
+  let total = 0
+  for (const part of parts) total += part.byteLength
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const part of parts) {
+    out.set(part, offset)
+    offset += part.byteLength
+  }
+  return out
+}
+
+function rstripSlash(s: string): string {
+  let end = s.length
+  while (end > 0 && s[end - 1] === '/') end--
+  return s.slice(0, end)
+}
 
 interface DiffFlags {
   i: boolean
@@ -99,32 +118,61 @@ async function diffPair(
   return ENC.encode(result.join(''))
 }
 
-async function diffRecursive(
+async function diffDirs(
   readdir: Readdir,
+  stat: Stat,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-  p0: PathSpec,
-  p1: PathSpec,
+  dirA: PathSpec,
+  dirB: PathSpec,
   flags: DiffFlags,
 ): Promise<Uint8Array> {
-  const rawA = await readdir(p0)
-  const rawB = await readdir(p1)
+  const rawA = await readdir(dirA)
+  const rawB = await readdir(dirB)
   const namesA = new Set(rawA.map(entryBaseName))
   const namesB = new Set(rawB.map(entryBaseName))
   const names = [...new Set([...namesA, ...namesB])].sort()
+  const left = rstripSlash(dirA.original)
+  const right = rstripSlash(dirB.original)
   const parts: Uint8Array[] = []
   for (const name of names) {
-    if (!namesA.has(name) || !namesB.has(name)) continue
-    parts.push(await diffPair(stream, childSpec(p0, name), childSpec(p1, name), flags))
+    if (!namesB.has(name)) {
+      parts.push(ENC.encode(`Only in ${left}: ${name}\n`))
+      continue
+    }
+    if (!namesA.has(name)) {
+      parts.push(ENC.encode(`Only in ${right}: ${name}\n`))
+      continue
+    }
+    const childA = childSpec(dirA, name)
+    const childB = childSpec(dirB, name)
+    const aDir = (await stat(childA)).type === FileType.DIRECTORY
+    const bDir = (await stat(childB)).type === FileType.DIRECTORY
+    if (aDir && bDir) {
+      parts.push(await diffDirs(readdir, stat, stream, childA, childB, flags))
+    } else if (!aDir && !bDir) {
+      const body = await diffPair(stream, childA, childB, flags)
+      if (body.byteLength > 0) {
+        if (flags.q) parts.push(body)
+        else
+          parts.push(
+            concatBytes([ENC.encode(`diff -r ${childA.original} ${childB.original}\n`), body]),
+          )
+      }
+    } else if (aDir) {
+      parts.push(
+        ENC.encode(
+          `File ${childA.original} is a directory while file ${childB.original} is a regular file\n`,
+        ),
+      )
+    } else {
+      parts.push(
+        ENC.encode(
+          `File ${childA.original} is a regular file while file ${childB.original} is a directory\n`,
+        ),
+      )
+    }
   }
-  let total = 0
-  for (const part of parts) total += part.byteLength
-  const out = new Uint8Array(total)
-  let offset = 0
-  for (const part of parts) {
-    out.set(part, offset)
-    offset += part.byteLength
-  }
-  return out
+  return concatBytes(parts)
 }
 
 export async function diffGeneric(
@@ -132,6 +180,7 @@ export async function diffGeneric(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   readdir?: Readdir,
+  stat?: Stat,
 ): Promise<CommandFnResult> {
   if (paths.length < 2) {
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode('diff: requires two paths\n') })]
@@ -148,8 +197,8 @@ export async function diffGeneric(
   const p1 = paths[1]
   if (p0 === undefined || p1 === undefined) return [null, new IOResult()]
   const output =
-    opts.flags.r === true && readdir !== undefined
-      ? await diffRecursive(readdir, stream, p0, p1, flags)
+    opts.flags.r === true && readdir !== undefined && stat !== undefined
+      ? await diffDirs(readdir, stat, stream, p0, p1, flags)
       : await diffPair(stream, p0, p1, flags)
   const exitCode = output.byteLength > 0 ? 1 : 0
   const out: ByteSource = output

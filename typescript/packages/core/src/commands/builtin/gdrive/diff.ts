@@ -15,6 +15,7 @@
 import type { GDriveAccessor } from '../../../accessor/gdrive.ts'
 import { resolveGlob } from '../../../core/gdrive/glob.ts'
 import { readdir as gdriveReaddir } from '../../../core/gdrive/readdir.ts'
+import { stat as gdriveStat } from '../../../core/gdrive/stat.ts'
 import { stream as gdriveStream } from '../../../core/gdrive/read.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
@@ -34,6 +35,7 @@ async function diffCommand(
     opts,
     (p) => gdriveStream(accessor, p, opts.index ?? undefined),
     (p) => gdriveReaddir(accessor, p, opts.index ?? undefined),
+    (p) => gdriveStat(accessor, p, opts.index ?? undefined),
   )
 }
 

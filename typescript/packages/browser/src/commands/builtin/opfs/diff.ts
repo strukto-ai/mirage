@@ -15,6 +15,7 @@
 import { ResourceName, command, diffGeneric, specOf } from '@struktoai/mirage-core'
 import { stream as opfsStream } from '../../../core/opfs/stream.ts'
 import { readdir as opfsReaddir } from '../../../core/opfs/readdir.ts'
+import { stat as opfsStat } from '../../../core/opfs/stat.ts'
 import type { OPFSAccessor } from '../../../accessor/opfs.ts'
 
 export const OPFS_DIFF = command({
@@ -27,5 +28,6 @@ export const OPFS_DIFF = command({
       opts,
       (p) => opfsStream(accessor, p),
       (p) => opfsReaddir(accessor, p),
+      (p) => opfsStat(accessor, p),
     ),
 })

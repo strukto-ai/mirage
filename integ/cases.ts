@@ -400,11 +400,15 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ["diff_u", "diff -u /data/sorted_a.txt /data/sorted_b.txt"],
   [
     "diff_recursive",
-    "mkdir -p /data/dr/x /data/dr/y" +
+    "mkdir -p /data/dr/x/sub /data/dr/y/sub" +
       " && echo aaa | tee /data/dr/x/a.txt > /dev/null" +
       " && echo AAA | tee /data/dr/y/a.txt > /dev/null" +
       " && echo keep | tee /data/dr/x/c.txt > /dev/null" +
       " && echo keep | tee /data/dr/y/c.txt > /dev/null" +
+      " && echo deep1 | tee /data/dr/x/sub/d.txt > /dev/null" +
+      " && echo deep2 | tee /data/dr/y/sub/d.txt > /dev/null" +
+      " && echo L | tee /data/dr/x/leftonly.txt > /dev/null" +
+      " && echo R | tee /data/dr/y/rightonly.txt > /dev/null" +
       " && diff -r /data/dr/x /data/dr/y",
   ],
   ["cmp_same", "cmp /data/a.txt /data/a.txt"],

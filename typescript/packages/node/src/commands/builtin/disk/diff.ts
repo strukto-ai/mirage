@@ -15,6 +15,7 @@
 import { ResourceName, command, diffGeneric, specOf } from '@struktoai/mirage-core'
 import { stream as diskStream } from '../../../core/disk/stream.ts'
 import { readdir as diskReaddir } from '../../../core/disk/readdir.ts'
+import { stat as diskStat } from '../../../core/disk/stat.ts'
 import type { DiskAccessor } from '../../../accessor/disk.ts'
 
 export const DISK_DIFF = command({
@@ -27,5 +28,6 @@ export const DISK_DIFF = command({
       opts,
       (p) => diskStream(accessor, p),
       (p) => diskReaddir(accessor, p, opts.index ?? undefined),
+      (p) => diskStat(accessor, p),
     ),
 })

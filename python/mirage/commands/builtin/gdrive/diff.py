@@ -22,6 +22,7 @@ from mirage.commands.spec import SPECS
 from mirage.core.gdrive.glob import resolve_glob
 from mirage.core.gdrive.read import read as read_bytes
 from mirage.core.gdrive.readdir import readdir
+from mirage.core.gdrive.stat import stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -46,6 +47,7 @@ async def diff(
     return await generic_diff(paths,
                               read_bytes=partial(read_bytes, index=index),
                               readdir_fn=readdir,
+                              stat_fn=stat,
                               accessor=accessor,
                               index=index,
                               i=i,

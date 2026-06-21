@@ -161,4 +161,49 @@ describe.each(NATIVE_BACKENDS)('native diff (%s backend)', (kind) => {
       await env.cleanup()
     }
   })
+
+  it('diff -r recurses into subdirectories', async () => {
+    const env = makeEnv(kind)
+    try {
+      env.createFile('d1/top.txt', ENC.encode('same\n'))
+      env.createFile('d2/top.txt', ENC.encode('same\n'))
+      env.createFile('d1/sub/x.txt', ENC.encode('alpha\n'))
+      env.createFile('d2/sub/x.txt', ENC.encode('beta\n'))
+      const result = await env.mirage('diff -r /data/d1 /data/d2')
+      expect(result).toContain('alpha')
+      expect(result).toContain('beta')
+      expect(result).toContain('/data/d1/sub/x.txt')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('diff -r reports entries only in one directory', async () => {
+    const env = makeEnv(kind)
+    try {
+      env.createFile('o1/shared.txt', ENC.encode('s\n'))
+      env.createFile('o2/shared.txt', ENC.encode('s\n'))
+      env.createFile('o1/leftonly.txt', ENC.encode('l\n'))
+      env.createFile('o2/rightonly.txt', ENC.encode('r\n'))
+      const result = await env.mirage('diff -r /data/o1 /data/o2')
+      expect(result).toContain('Only in /data/o1: leftonly.txt')
+      expect(result).toContain('Only in /data/o2: rightonly.txt')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('diff -r on identical trees produces no output', async () => {
+    const env = makeEnv(kind)
+    try {
+      env.createFile('s1/a.txt', ENC.encode('x\n'))
+      env.createFile('s1/sub/b.txt', ENC.encode('y\n'))
+      env.createFile('s2/a.txt', ENC.encode('x\n'))
+      env.createFile('s2/sub/b.txt', ENC.encode('y\n'))
+      const result = await env.mirage('diff -r /data/s1 /data/s2')
+      expect(result).toBe('')
+    } finally {
+      await env.cleanup()
+    }
+  })
 })

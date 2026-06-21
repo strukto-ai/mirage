@@ -1393,10 +1393,18 @@ baz,
 +date
 +elder
 === diff_recursive ===
+diff -r /data/dr/x/a.txt /data/dr/y/a.txt
 1c1
 < aaa
 ---
 > AAA
+Only in /data/dr/x: leftonly.txt
+Only in /data/dr/y: rightonly.txt
+diff -r /data/dr/x/sub/d.txt /data/dr/y/sub/d.txt
+1c1
+< deep1
+---
+> deep2
 === cmp_same ===
 
 === cmp_differ ===
@@ -1404,7 +1412,7 @@ baz,
 === du_file ===
 24	/data/a.txt
 === du_dir ===
-706	/data
+722	/data
 === du_h ===
 24B	/data/a.txt
 === tree ===

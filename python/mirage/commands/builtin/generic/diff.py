@@ -5,7 +5,16 @@ from collections.abc import Awaitable, Callable
 from mirage.commands.builtin.diff_helper import _ed_script, _normal_diff
 from mirage.commands.builtin.utils.lines import split_lines_keepends
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import FileType, PathSpec
+
+
+def _entry_name(entry: str) -> str:
+    return entry.rstrip("/").rsplit("/", 1)[-1]
+
+
+def _child_spec(parent: PathSpec, name: str) -> PathSpec:
+    child = parent.original.rstrip("/") + "/" + name
+    return PathSpec(original=child, directory=child, prefix=parent.prefix)
 
 
 async def _diff_pair(
@@ -52,11 +61,13 @@ async def _diff_pair(
     return "".join(result).encode()
 
 
-async def _diff_recursive(
+async def _diff_dirs(
     accessor: object,
-    paths: list[PathSpec],
+    dir_a: PathSpec,
+    dir_b: PathSpec,
     read_bytes: Callable[..., Awaitable[bytes]],
     readdir_fn: Callable[..., Awaitable[list[str]]],
+    stat_fn: Callable[..., Awaitable[object]],
     index: object,
     i: bool,
     w: bool,
@@ -65,24 +76,46 @@ async def _diff_recursive(
     u: bool,
     q: bool,
 ) -> bytes:
-    raw_a = await readdir_fn(accessor, paths[0], index)
-    raw_b = await readdir_fn(accessor, paths[1], index)
-    names_a = {entry.rstrip("/").rsplit("/", 1)[-1] for entry in raw_a}
-    names_b = {entry.rstrip("/").rsplit("/", 1)[-1] for entry in raw_b}
-    names = sorted(names_a | names_b)
+    raw_a = await readdir_fn(accessor, dir_a, index)
+    raw_b = await readdir_fn(accessor, dir_b, index)
+    names_a = {_entry_name(entry) for entry in raw_a}
+    names_b = {_entry_name(entry) for entry in raw_b}
+    left = dir_a.original.rstrip("/")
+    right = dir_b.original.rstrip("/")
     parts: list[bytes] = []
-    for name in names:
-        p1_str = paths[0].original.rstrip("/") + "/" + name
-        p2_str = paths[1].original.rstrip("/") + "/" + name
-        p1 = PathSpec(original=p1_str,
-                      directory=p1_str,
-                      prefix=paths[0].prefix)
-        p2 = PathSpec(original=p2_str,
-                      directory=p2_str,
-                      prefix=paths[1].prefix)
-        if name in names_a and name in names_b:
-            parts.append(await _diff_pair(accessor, p1, p2, read_bytes, i, w,
-                                          b, e, u, q))
+    for name in sorted(names_a | names_b):
+        if name not in names_b:
+            parts.append(f"Only in {left}: {name}\n".encode())
+            continue
+        if name not in names_a:
+            parts.append(f"Only in {right}: {name}\n".encode())
+            continue
+        child_a = _child_spec(dir_a, name)
+        child_b = _child_spec(dir_b, name)
+        a_dir = (await stat_fn(accessor, child_a,
+                               index)).type == FileType.DIRECTORY
+        b_dir = (await stat_fn(accessor, child_b,
+                               index)).type == FileType.DIRECTORY
+        if a_dir and b_dir:
+            parts.append(await _diff_dirs(accessor, child_a, child_b,
+                                          read_bytes, readdir_fn, stat_fn,
+                                          index, i, w, b, e, u, q))
+        elif not a_dir and not b_dir:
+            body = await _diff_pair(accessor, child_a, child_b, read_bytes, i,
+                                    w, b, e, u, q)
+            if body:
+                if q:
+                    parts.append(body)
+                else:
+                    header = f"diff -r {child_a.original} {child_b.original}\n"
+                    parts.append(header.encode() + body)
+        elif a_dir:
+            parts.append((f"File {child_a.original} is a directory while file "
+                          f"{child_b.original} is a regular file\n").encode())
+        else:
+            parts.append(
+                (f"File {child_a.original} is a regular file while file "
+                 f"{child_b.original} is a directory\n").encode())
     return b"".join(parts)
 
 
@@ -91,6 +124,7 @@ async def diff(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     readdir_fn: Callable[..., Awaitable[list[str]]],
+    stat_fn: Callable[..., Awaitable[object]],
     accessor: object = None,
     index: object = None,
     i: bool = False,
@@ -104,8 +138,8 @@ async def diff(
     if len(paths) < 2:
         raise ValueError("diff: requires two paths")
     if r:
-        output = await _diff_recursive(accessor, paths, read_bytes, readdir_fn,
-                                       index, i, w, b, e, u, q)
+        output = await _diff_dirs(accessor, paths[0], paths[1], read_bytes,
+                                  readdir_fn, stat_fn, index, i, w, b, e, u, q)
     else:
         output = await _diff_pair(accessor, paths[0], paths[1], read_bytes, i,
                                   w, b, e, u, q)
