@@ -23,11 +23,8 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
 from mirage.io import IOResult
 from mirage.types import PathSpec
-from mirage.workspace.executor.cross.adapter import (DispatchIO,
-                                                     build_dispatch_io)
-from mirage.workspace.executor.cross.detect import MULTI_READ_COMMANDS
-from mirage.workspace.executor.cross.read import cross_multi_read
-from mirage.workspace.executor.cross.types import CrossResult, Dispatch
+from mirage.workspace.executor.cross.adapter import DispatchIO
+from mirage.workspace.executor.cross.types import CrossResult
 from mirage.workspace.types import ExecutionNode
 
 
@@ -106,54 +103,27 @@ async def _cmp(scopes: list[PathSpec], flag_kwargs: dict, io: DispatchIO,
     return out, res, _node(cmd_str, res)
 
 
-async def handle_cross_mount(
-    cmd_name: str,
-    scopes: list[PathSpec],
-    text_args: list[str],
-    flag_kwargs: dict,
-    dispatch: Dispatch,
-    cmd_str: str,
-) -> CrossResult:
-    """Execute a command whose path operands span mounts, via the generics.
+async def run_transfer(cmd_name: str, scopes: list[PathSpec],
+                       flag_kwargs: dict, io: DispatchIO,
+                       cmd_str: str) -> CrossResult:
+    """Copy, move, or compare path operands that span two mounts.
 
-    Cross-mount is wiring, not a second implementation: every path operand is
-    read or written through ``dispatch`` (which routes it to its owning mount),
-    and the shared generic command does the actual cp/mv/diff/cmp/cat/head/
-    tail/wc/grep work. Output therefore matches the single-mount commands.
+    These are the two-operand commands: a source and a destination (cp, mv) or
+    two files to compare (diff, cmp). Each operand is read or written through
+    the dispatch-backed ``io`` (routing it to its owning mount), and the shared
+    generic command does the work, so output matches the single-mount commands.
 
     Args:
-        cmd_name (str): Command name, such as ``cp``, ``mv``, or ``cat``.
+        cmd_name (str): One of cp, mv, diff, cmp.
         scopes (list[PathSpec]): Path operands in command-line order.
-        text_args (list[str]): Positional text operands (e.g. grep pattern).
-        flag_kwargs (dict): Flags parsed from the shared command spec.
-        dispatch (Dispatch): Workspace operation dispatcher.
+        flag_kwargs (dict): Flags parsed against the shared command spec.
+        io (DispatchIO): Dispatch-backed ops bundle.
         cmd_str (str): Original command text for the execution record.
-
-    Returns:
-        CrossResult: Command output, I/O metadata, and execution record.
     """
-    io = build_dispatch_io(dispatch)
-    try:
-        if cmd_name == "cp":
-            return await _cp(scopes, flag_kwargs, io, cmd_str)
-        if cmd_name == "mv":
-            return await _mv(scopes, flag_kwargs, io, cmd_str)
-        if cmd_name == "diff":
-            return await _diff(scopes, flag_kwargs, io, cmd_str)
-        if cmd_name == "cmp":
-            return await _cmp(scopes, flag_kwargs, io, cmd_str)
-        if cmd_name in MULTI_READ_COMMANDS:
-            return await cross_multi_read(cmd_name, scopes, text_args,
-                                          flag_kwargs, io, cmd_str)
-    except (FileNotFoundError, NotADirectoryError, IsADirectoryError,
-            PermissionError) as exc:
-        err = f"{cmd_name}: {exc}\n".encode()
-        return None, IOResult(exit_code=1,
-                              stderr=err), ExecutionNode(command=cmd_str,
-                                                         exit_code=1,
-                                                         stderr=err)
-
-    err = f"{cmd_name}: cross-mount not supported\n".encode()
-    return None, IOResult(exit_code=1,
-                          stderr=err), ExecutionNode(command=cmd_str,
-                                                     exit_code=1)
+    if cmd_name == "cp":
+        return await _cp(scopes, flag_kwargs, io, cmd_str)
+    if cmd_name == "mv":
+        return await _mv(scopes, flag_kwargs, io, cmd_str)
+    if cmd_name == "diff":
+        return await _diff(scopes, flag_kwargs, io, cmd_str)
+    return await _cmp(scopes, flag_kwargs, io, cmd_str)

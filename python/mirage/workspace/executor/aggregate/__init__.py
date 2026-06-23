@@ -69,16 +69,17 @@ def _node(cmd_str: str,
     return ExecutionNode(command=cmd_str, exit_code=exit_code, stderr=stderr)
 
 
-async def cross_multi_read(cmd_name: str, scopes: list[PathSpec],
-                           text_args: list[str], flag_kwargs: dict,
-                           io: DispatchIO, cmd_str: str) -> CrossResult:
+async def run_aggregate(cmd_name: str, scopes: list[PathSpec],
+                        text_args: list[str], flag_kwargs: dict,
+                        io: DispatchIO, cmd_str: str) -> CrossResult:
     """Aggregate a multi-file read across mounts by delegating to the generic.
 
-    Every operand is read once from its owning mount (through the dispatch-
-    backed ``io.read_bytes``); a directory or missing operand fails at that
-    read and aborts the command, as for a single-mount file read. The bytes
-    are then served back to the shared generic command (the same one every
-    backend uses), which does the cat/head/tail/wc/grep aggregation, so
+    These are the N-ary read commands: many files in, one aggregated stream
+    out. Every operand is read once from its owning mount (through the
+    dispatch-backed ``io.read_bytes``); a directory or missing operand fails at
+    that read and aborts the command, as for a single-mount file read. The
+    bytes are then served back to the shared generic command (the same one
+    every backend uses), which does the cat/head/tail/wc/grep aggregation, so
     cross-mount output matches the single-mount commands. Only ``read`` is
     backed by dispatch; ``stat``/``readdir`` are served from the bytes already
     read, so the read family never issues a directory-traversal op.
