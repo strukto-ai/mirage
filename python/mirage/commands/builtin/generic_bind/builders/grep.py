@@ -16,14 +16,12 @@ from collections.abc import AsyncIterator
 
 from mirage.commands.builtin.aggregators import prefix_aggregate
 from mirage.commands.builtin.generic.grep import grep as generic_grep
-from mirage.commands.builtin.generic.rg import rg as generic_rg
-from mirage.commands.builtin.generic.zgrep import zgrep as generic_zgrep
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def _grep(
+async def grep(
     ops: CommandIO,
     accessor: object,
     paths: list[PathSpec],
@@ -31,10 +29,10 @@ async def _grep(
     stdin: AsyncIterator[bytes] | bytes | None = None,
     prefix: str = "",
     index: object = None,
-    **flags: object,
+    **flags,
 ) -> tuple[ByteSource | None, IOResult]:
     resolved = (await ops.resolve_glob(accessor, paths, index)
-                if paths and ops.ready(accessor) else [])
+                if paths and ops.is_mounted(accessor) else [])
     return await generic_grep(
         resolved,
         texts,
@@ -49,58 +47,5 @@ async def _grep(
     )
 
 
-async def _rg(
-    ops: CommandIO,
-    accessor: object,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
-    prefix: str = "",
-    index: object = None,
-    **flags: object,
-) -> tuple[ByteSource | None, IOResult]:
-    if paths and ops.ready(accessor):
-        paths = await ops.resolve_glob(accessor, paths, index)
-    return await generic_rg(
-        paths,
-        texts,
-        flags,
-        readdir=ops.readdir,
-        stat=ops.stat,
-        read_bytes=ops.read_bytes,
-        read_stream=ops.read_stream,
-        accessor=accessor,
-        stdin=stdin,
-        index=index,
-    )
-
-
-async def _zgrep(
-    ops: CommandIO,
-    accessor: object,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
-    prefix: str = "",
-    index: object = None,
-    **flags: object,
-) -> tuple[ByteSource | None, IOResult]:
-    resolved = (await ops.resolve_glob(accessor, paths, index)
-                if paths and ops.ready(accessor) else [])
-    return await generic_zgrep(
-        resolved,
-        texts,
-        flags,
-        read_bytes=ops.read_bytes,
-        accessor=accessor,
-        stdin=stdin,
-        index=index,
-    )
-
-
 # (name, builder, provision_builder, write, aggregate)
-SEARCH_BUILDERS = (
-    ("grep", _grep, None, False, prefix_aggregate),
-    ("rg", _rg, None, False, None),
-    ("zgrep", _zgrep, None, False, None),
-)
+BUILDER = ('grep', grep, None, False, prefix_aggregate)

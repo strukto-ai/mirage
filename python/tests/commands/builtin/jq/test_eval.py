@@ -20,7 +20,7 @@ import pytest
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
-from mirage.commands.builtin.generic_bind.builders.transforms import _jq
+from mirage.commands.builtin.generic_bind.builders.jq import jq as jq_builder
 from mirage.core.jq import JQ_EMPTY, jq_eval
 from mirage.types import MountMode, PathSpec
 
@@ -32,7 +32,7 @@ async def _const_bytes(data, accessor, path, index=None):
 
 
 async def _collect_jq(ops, accessor, paths, expr):
-    out, _ = await _jq(ops, accessor, paths, expr)
+    out, _ = await jq_builder(ops, accessor, paths, expr)
     if isinstance(out, bytes):
         return out
     if hasattr(out, "__aiter__"):
@@ -998,7 +998,7 @@ class TestJqS3Backend:
                         read_bytes=partial(_const_bytes, data),
                         read_stream=None,
                         stat=None,
-                        ready=lambda a: True,
+                        is_mounted=lambda a: True,
                         local=False)
         path = PathSpec(original="/s3/data.json",
                         directory="/s3",

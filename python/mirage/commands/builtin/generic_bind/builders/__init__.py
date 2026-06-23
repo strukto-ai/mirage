@@ -12,20 +12,64 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic_bind.builders.mutate import \
-    MUTATE_BUILDERS
-from mirage.commands.builtin.generic_bind.builders.read import READ_BUILDERS
-from mirage.commands.builtin.generic_bind.builders.search import \
-    SEARCH_BUILDERS
-from mirage.commands.builtin.generic_bind.builders.transforms import \
-    TRANSFORM_BUILDERS
-from mirage.commands.builtin.generic_bind.builders.traverse import \
-    TRAVERSE_BUILDERS
+# yapf: disable
+# isort: skip_file
+from . import (awk, base64, basename, cat, column, comm, cp, cut, dirname, du,
+               expand, file, find, fmt, fold, grep, head, iconv, join, jq, ln,
+               look, ls, md5, mkdir, mv, nl, paste, readlink, realpath, rev,
+               rg, rm, sha256sum, sort, stat, strings, tac, tail, tee, touch,
+               tr, tree, unexpand, uniq, wc, xxd, zgrep)
+# yapf: enable
 
-_BUILDERS = (*READ_BUILDERS, *TRANSFORM_BUILDERS, *TRAVERSE_BUILDERS,
-             *MUTATE_BUILDERS, *SEARCH_BUILDERS)
+_BUILDERS = (
+    awk.BUILDER,
+    base64.BUILDER,
+    basename.BUILDER,
+    cat.BUILDER,
+    column.BUILDER,
+    comm.BUILDER,
+    cp.BUILDER,
+    cut.BUILDER,
+    dirname.BUILDER,
+    du.BUILDER,
+    expand.BUILDER,
+    file.BUILDER,
+    find.BUILDER,
+    fmt.BUILDER,
+    fold.BUILDER,
+    grep.BUILDER,
+    head.BUILDER,
+    iconv.BUILDER,
+    join.BUILDER,
+    jq.BUILDER,
+    ln.BUILDER,
+    look.BUILDER,
+    ls.BUILDER,
+    md5.BUILDER,
+    mkdir.BUILDER,
+    mv.BUILDER,
+    nl.BUILDER,
+    paste.BUILDER,
+    readlink.BUILDER,
+    realpath.BUILDER,
+    rev.BUILDER,
+    rg.BUILDER,
+    rm.BUILDER,
+    sha256sum.BUILDER,
+    sort.BUILDER,
+    stat.BUILDER,
+    strings.BUILDER,
+    tac.BUILDER,
+    tail.BUILDER,
+    tee.BUILDER,
+    touch.BUILDER,
+    tr.BUILDER,
+    tree.BUILDER,
+    unexpand.BUILDER,
+    uniq.BUILDER,
+    wc.BUILDER,
+    xxd.BUILDER,
+    zgrep.BUILDER,
+)
 
-__all__ = [
-    "_BUILDERS", "READ_BUILDERS", "TRANSFORM_BUILDERS", "TRAVERSE_BUILDERS",
-    "MUTATE_BUILDERS", "SEARCH_BUILDERS"
-]
+__all__ = ["_BUILDERS"]

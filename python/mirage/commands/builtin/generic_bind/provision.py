@@ -57,7 +57,7 @@ def make_file_read_provision(stat: Callable) -> Callable:
         *_args: object,
         command: str = "",
         index: IndexCacheStore | None = None,
-        **_extra: object,
+        **kwargs,
     ) -> ProvisionResult:
         if not paths:
             return ProvisionResult(command=command,
@@ -89,7 +89,7 @@ def make_head_tail_provision(stat: Callable) -> Callable:
         n: str | int | None = None,
         c: str | int | None = None,
         index: IndexCacheStore | None = None,
-        **_extra: object,
+        **kwargs,
     ) -> ProvisionResult:
         if not paths:
             return ProvisionResult(command=command,
@@ -126,7 +126,7 @@ async def metadata_provision(
     *_args: object,
     command: str = "",
     index: IndexCacheStore | None = None,
-    **_extra: object,
+    **kwargs,
 ) -> ProvisionResult:
     """Cost estimate for metadata-only ops (stat, ls, find)."""
     n = max(1, len(paths) if paths else 1)
@@ -143,7 +143,7 @@ async def stat_provision(
     accessor: object = None,
     paths: list[PathSpec] | None = None,
     *_args: object,
-    **_extra: object,
+    **kwargs,
 ) -> ProvisionResult:
     """Cost estimate for stat: the command string, no reads."""
     return ProvisionResult(
@@ -158,7 +158,7 @@ def make_jq_provision(stat: Callable) -> Callable:
         paths: list[PathSpec] | None = None,
         *texts: str,
         index: IndexCacheStore | None = None,
-        **_extra: object,
+        **kwargs,
     ) -> ProvisionResult:
         if not paths or not texts:
             return ProvisionResult(command="jq")
@@ -201,7 +201,7 @@ def make_search_provision(stat: Callable) -> Callable:
         *texts: str,
         command: str = "",
         index: IndexCacheStore | None = None,
-        **_extra: object,
+        **kwargs,
     ) -> ProvisionResult:
         rendered = (command or ""
                     ) + " " + " ".join(list(texts) + [str(p) for p in paths])

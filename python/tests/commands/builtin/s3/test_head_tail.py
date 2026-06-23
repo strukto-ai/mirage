@@ -16,7 +16,8 @@ import pytest
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
-from mirage.commands.builtin.generic_bind.builders.read import _head, _tail
+from mirage.commands.builtin.generic_bind.builders.head import head
+from mirage.commands.builtin.generic_bind.builders.tail import tail
 from mirage.types import PathSpec
 
 
@@ -25,7 +26,7 @@ def _ops(chunks):
                      read_bytes=None,
                      read_stream=_streamer(chunks),
                      stat=None,
-                     ready=lambda a: True,
+                     is_mounted=lambda a: True,
                      local=False)
 
 
@@ -65,10 +66,10 @@ async def test_head_multi_streaming_with_headers():
         "/data/b.txt": [b"b1\nb2\n"],
     }
     acc = S3Accessor.__new__(S3Accessor)
-    out, _ = await _head(_ops(chunks),
-                         acc,
-                         _paths("/data/a.txt", "/data/b.txt"),
-                         n="2")
+    out, _ = await head(_ops(chunks),
+                        acc,
+                        _paths("/data/a.txt", "/data/b.txt"),
+                        n="2")
     data = await _collect(out)
     assert data == (b"==> /data/a.txt <==\na1\na2\n"
                     b"\n==> /data/b.txt <==\nb1\nb2\n")
@@ -81,10 +82,10 @@ async def test_tail_multi_streaming_with_headers():
         "/data/b.txt": [b"b1\nb2\nb3\n"],
     }
     acc = S3Accessor.__new__(S3Accessor)
-    out, _ = await _tail(_ops(chunks),
-                         acc,
-                         _paths("/data/a.txt", "/data/b.txt"),
-                         n="2")
+    out, _ = await tail(_ops(chunks),
+                        acc,
+                        _paths("/data/a.txt", "/data/b.txt"),
+                        n="2")
     data = await _collect(out)
     assert data == (b"==> /data/a.txt <==\na2\na3\n"
                     b"\n==> /data/b.txt <==\nb2\nb3\n")

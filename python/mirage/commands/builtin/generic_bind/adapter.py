@@ -24,12 +24,13 @@ logger = logging.getLogger(__name__)
 
 
 def make_resolve_glob(readdir: Callable,
-                      scope_cap: int | None = None) -> Callable:
+                      max_glob_matches: int | None = None) -> Callable:
     """Build a resolve_glob generic over a backend's readdir.
 
     Args:
         readdir (Callable): backend readdir ``(accessor, path, index)``.
-        scope_cap (int | None): max matches per pattern before truncation.
+        max_glob_matches (int | None): cap on matches per pattern before
+            truncation.
     """
 
     async def resolve_glob(accessor: object, paths: list[PathSpec],
@@ -48,11 +49,12 @@ def make_resolve_glob(readdir: Callable,
                     PathSpec.from_str_path(e, p.prefix) for e in entries
                     if fnmatch.fnmatch(e.rsplit("/", 1)[-1], p.pattern)
                 ]
-                if scope_cap is not None and len(matched) > scope_cap:
+                if (max_glob_matches is not None
+                        and len(matched) > max_glob_matches):
                     logger.warning(
                         "%s: %d matches exceeds limit (%d), truncating",
-                        p.directory, len(matched), scope_cap)
-                    matched = matched[:scope_cap]
+                        p.directory, len(matched), max_glob_matches)
+                    matched = matched[:max_glob_matches]
                 result.extend(matched)
             else:
                 result.append(p)
@@ -67,9 +69,9 @@ class CommandIO:
     read_bytes: Callable
     read_stream: Callable
     stat: Callable
-    ready: Callable
+    is_mounted: Callable
     local: bool = True
-    scope_cap: int | None = None
+    max_glob_matches: int | None = None
     write: Callable | None = None
     exists: Callable | None = None
     mkdir: Callable | None = None
@@ -86,4 +88,4 @@ class CommandIO:
 
     @property
     def resolve_glob(self) -> Callable:
-        return make_resolve_glob(self.readdir, self.scope_cap)
+        return make_resolve_glob(self.readdir, self.max_glob_matches)
