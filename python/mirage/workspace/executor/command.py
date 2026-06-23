@@ -46,6 +46,18 @@ _JOB_BUILTINS = frozenset({"wait", "fg", "kill", "jobs", "ps"})
 _FIND_ACTION_FLAGS = frozenset({"delete", "print0", "ls"})
 
 
+async def _exec_node(cmd_str: str, io: IOResult) -> ExecutionNode:
+    """Build the recorded execution node, materializing any streamed stderr.
+
+    Args:
+        cmd_str (str): Original command text for the record.
+        io (IOResult): Command result whose stderr/exit_code the node carries.
+    """
+    return ExecutionNode(command=cmd_str,
+                         stderr=await materialize(io.stderr),
+                         exit_code=io.exit_code)
+
+
 def _check_mount_root_guard_raw(
     cmd_name: str,
     paths: list[PathSpec],
@@ -321,11 +333,7 @@ async def handle_command(
             io.safeguard = (resolve_across_mounts(cmd_name, mounts)
                             if mounts else resolve_safeguard(cmd_name))
         stdout = maybe_with_timeout(stdout, io.safeguard, cmd_name)
-        stderr_bytes = await materialize(io.stderr)
-        exec_node = ExecutionNode(command=cmd_str,
-                                  stderr=stderr_bytes,
-                                  exit_code=io.exit_code)
-        return stdout, io, exec_node
+        return stdout, io, await _exec_node(cmd_str, io)
 
     # Reject unsupported cross-mount commands
     if len(path_scopes) >= 2:
@@ -440,11 +448,7 @@ async def handle_command(
     stdout = maybe_with_timeout(stdout, io.safeguard, cmd_name)
     io.stderr = maybe_with_timeout(io.stderr, io.safeguard, cmd_name)
 
-    stderr_bytes = await materialize(io.stderr)
-    exec_node = ExecutionNode(command=cmd_str,
-                              stderr=stderr_bytes,
-                              exit_code=io.exit_code)
-    return stdout, io, exec_node
+    return stdout, io, await _exec_node(cmd_str, io)
 
 
 async def _inject_child_mounts(
