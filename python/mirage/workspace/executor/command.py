@@ -53,6 +53,9 @@ async def _exec_node(cmd_str: str, io: IOResult) -> ExecutionNode:
         cmd_str (str): Original command text for the record.
         io (IOResult): Command result whose stderr/exit_code the node carries.
     """
+    # The node is a recorded artifact (compared by value, serialized via a
+    # sync to_dict, sometimes read twice), so the live lazy io.stderr is
+    # materialized to concrete bytes here. On the cross-mount path it is bytes.
     return ExecutionNode(command=cmd_str,
                          stderr=await materialize(io.stderr),
                          exit_code=io.exit_code)
