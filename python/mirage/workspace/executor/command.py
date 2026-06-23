@@ -306,9 +306,10 @@ async def handle_command(
         # against the shared spec so flags and text operands do not depend on
         # the source mount.
         parsed = parse_command(SPECS[cmd_name], raw_argv, cwd=session.cwd)
-        stdout, io, exec_node = await handle_cross_mount(
-            cmd_name, path_scopes, parsed.texts(), parse_to_kwargs(parsed),
-            dispatch, cmd_str)
+        stdout, io = await handle_cross_mount(cmd_name, path_scopes,
+                                              parsed.texts(),
+                                              parse_to_kwargs(parsed),
+                                              dispatch)
         if io.safeguard is None:
             mounts = []
             for s in path_scopes:
@@ -319,6 +320,10 @@ async def handle_command(
             io.safeguard = (resolve_across_mounts(cmd_name, mounts)
                             if mounts else resolve_safeguard(cmd_name))
         stdout = maybe_with_timeout(stdout, io.safeguard, cmd_name)
+        stderr_bytes = await materialize(io.stderr)
+        exec_node = ExecutionNode(command=cmd_str,
+                                  stderr=stderr_bytes,
+                                  exit_code=io.exit_code)
         return stdout, io, exec_node
 
     # Reject unsupported cross-mount commands

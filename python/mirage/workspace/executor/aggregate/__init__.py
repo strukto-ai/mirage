@@ -26,9 +26,7 @@ from mirage.io import IOResult
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.workspace.executor.cross.adapter import DispatchIO
-from mirage.workspace.executor.cross.types import CrossResult
-from mirage.workspace.types import ExecutionNode
+from mirage.workspace.executor.cross.adapter import CrossResult, DispatchIO
 
 
 async def _served_stream(reads: dict[str, bytes],
@@ -63,15 +61,9 @@ async def _served_readdir(accessor: object,
     return []
 
 
-def _node(cmd_str: str,
-          exit_code: int = 0,
-          stderr: bytes | None = None) -> ExecutionNode:
-    return ExecutionNode(command=cmd_str, exit_code=exit_code, stderr=stderr)
-
-
 async def run_aggregate(cmd_name: str, scopes: list[PathSpec],
                         text_args: list[str], flag_kwargs: dict,
-                        io: DispatchIO, cmd_str: str) -> CrossResult:
+                        io: DispatchIO) -> CrossResult:
     """Aggregate a multi-file read across mounts by delegating to the generic.
 
     These are the N-ary read commands: many files in, one aggregated stream
@@ -82,7 +74,9 @@ async def run_aggregate(cmd_name: str, scopes: list[PathSpec],
     every backend uses), which does the cat/head/tail/wc/grep aggregation, so
     cross-mount output matches the single-mount commands. Only ``read`` is
     backed by dispatch; ``stat``/``readdir`` are served from the bytes already
-    read, so the read family never issues a directory-traversal op.
+    read, so the read family never issues a directory-traversal op. Returns the
+    same ``(out, IOResult)`` a generic command returns; the caller builds the
+    execution record.
 
     Args:
         cmd_name (str): One of cat, head, tail, wc, grep, rg.
@@ -90,7 +84,6 @@ async def run_aggregate(cmd_name: str, scopes: list[PathSpec],
         text_args (list[str]): Positional text operands (grep pattern).
         flag_kwargs (dict): Flags parsed against the shared command spec.
         io (DispatchIO): Dispatch-backed ops bundle.
-        cmd_str (str): Original command text for the execution record.
     """
     show_headers = len(scopes) > 1
     for scope in scopes:
@@ -110,11 +103,11 @@ async def run_aggregate(cmd_name: str, scopes: list[PathSpec],
             read_stream=read,
             accessor=None,
             show_filename=show_headers)
-        return out, gio, _node(cmd_str, gio.exit_code, gio.stderr)
+        return out, gio
 
     if cmd_name == "cat":
         source: ByteSource = async_chain(*reads.values())
-        return source, result, _node(cmd_str)
+        return source, result
 
     if cmd_name in ("head", "tail"):
         fl = FlagView(flag_kwargs, spec=SPECS[cmd_name])
@@ -141,7 +134,7 @@ async def run_aggregate(cmd_name: str, scopes: list[PathSpec],
                              c=c,
                              from_line=from_line,
                              show_headers=show_headers)
-        return out, result, _node(cmd_str)
+        return out, result
 
     if cmd_name == "wc":
         fl = FlagView(flag_kwargs, spec=SPECS["wc"])
@@ -152,7 +145,7 @@ async def run_aggregate(cmd_name: str, scopes: list[PathSpec],
                                      c=fl.bool("c"),
                                      m=fl.bool("m"),
                                      L=fl.bool("L"))
-        return body, result, _node(cmd_str)
+        return body, result
 
     source = async_chain(*reads.values())
-    return source, result, _node(cmd_str)
+    return source, result

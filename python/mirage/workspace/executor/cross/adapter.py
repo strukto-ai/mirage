@@ -17,8 +17,11 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Callable
 
+from mirage.io import IOResult
+from mirage.io.types import ByteSource
 from mirage.types import FileType, PathSpec
-from mirage.workspace.executor.cross.types import Dispatch
+
+CrossResult = tuple[ByteSource | None, IOResult]
 
 
 def _as_pathspec(path: PathSpec | str) -> PathSpec:
@@ -27,12 +30,12 @@ def _as_pathspec(path: PathSpec | str) -> PathSpec:
     return PathSpec.from_str_path(path, "")
 
 
-async def _fetch(dispatch: Dispatch, path: PathSpec) -> bytes:
+async def _fetch(dispatch: Callable, path: PathSpec) -> bytes:
     data, _ = await dispatch("read", _as_pathspec(path))
     return data
 
 
-async def _read_bytes(dispatch: Dispatch,
+async def _read_bytes(dispatch: Callable,
                       reads: dict[str, bytes],
                       accessor: object,
                       path: PathSpec,
@@ -44,7 +47,7 @@ async def _read_bytes(dispatch: Dispatch,
     return data
 
 
-async def _read_stream(dispatch: Dispatch,
+async def _read_stream(dispatch: Callable,
                        reads: dict[str, bytes],
                        accessor: object,
                        path: PathSpec,
@@ -52,7 +55,7 @@ async def _read_stream(dispatch: Dispatch,
     yield await _read_bytes(dispatch, reads, accessor, path, index)
 
 
-async def _stat(dispatch: Dispatch,
+async def _stat(dispatch: Callable,
                 accessor: object,
                 path: PathSpec,
                 index: object = None):
@@ -60,7 +63,7 @@ async def _stat(dispatch: Dispatch,
     return file_stat
 
 
-async def _readdir(dispatch: Dispatch,
+async def _readdir(dispatch: Callable,
                    accessor: object,
                    path: PathSpec,
                    index: object = None) -> list[str]:
@@ -68,7 +71,7 @@ async def _readdir(dispatch: Dispatch,
     return children
 
 
-async def _find(dispatch: Dispatch,
+async def _find(dispatch: Callable,
                 accessor: object,
                 src: PathSpec,
                 type: str | None = None,
@@ -91,7 +94,7 @@ async def _find(dispatch: Dispatch,
     return entries
 
 
-async def _copy(dispatch: Dispatch, accessor: object, src: PathSpec,
+async def _copy(dispatch: Callable, accessor: object, src: PathSpec,
                 target: PathSpec) -> None:
     src_ps = _as_pathspec(src)
     dst_ps = _as_pathspec(target)
@@ -106,7 +109,7 @@ async def _copy(dispatch: Dispatch, accessor: object, src: PathSpec,
     await dispatch("write", dst_ps, data=data)
 
 
-async def _copy_tree(dispatch: Dispatch, src_dir: PathSpec,
+async def _copy_tree(dispatch: Callable, src_dir: PathSpec,
                      dst_dir: PathSpec) -> None:
     try:
         await dispatch("mkdir", dst_dir)
@@ -125,7 +128,7 @@ async def _copy_tree(dispatch: Dispatch, src_dir: PathSpec,
             await dispatch("write", child_dst, data=data)
 
 
-async def _remove_tree(dispatch: Dispatch, src_dir: PathSpec) -> None:
+async def _remove_tree(dispatch: Callable, src_dir: PathSpec) -> None:
     children, _ = await dispatch("readdir", src_dir)
     for child in children:
         child_src = _as_pathspec(child)
@@ -137,7 +140,7 @@ async def _remove_tree(dispatch: Dispatch, src_dir: PathSpec) -> None:
     await dispatch("rmdir", src_dir)
 
 
-async def _rename(dispatch: Dispatch, accessor: object, src: PathSpec,
+async def _rename(dispatch: Callable, accessor: object, src: PathSpec,
                   target: PathSpec) -> None:
     src_ps = _as_pathspec(src)
     dst_ps = _as_pathspec(target)
@@ -163,7 +166,7 @@ class DispatchIO:
     rename: Callable
 
 
-def build_dispatch_io(dispatch: Dispatch) -> DispatchIO:
+def build_dispatch_io(dispatch: Callable) -> DispatchIO:
     reads: dict[str, bytes] = {}
     return DispatchIO(
         reads=reads,
