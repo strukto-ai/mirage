@@ -12,9 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import functools
-from collections.abc import AsyncIterator
-
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.generic.head import head_multi
 from mirage.commands.builtin.generic.tail import tail_multi
@@ -24,59 +21,22 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
 from mirage.io import IOResult
 from mirage.io.stream import async_chain
-from mirage.io.types import ByteSource
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import PathSpec
 from mirage.workspace.executor.cross.adapter import CrossResult, DispatchIO
-
-
-async def _served_stream(reads: dict[str, bytes],
-                         accessor: object,
-                         path: PathSpec,
-                         index: object = None) -> AsyncIterator[bytes]:
-    yield reads[path.original]
-
-
-async def _served_bytes(reads: dict[str, bytes],
-                        accessor: object,
-                        path: PathSpec,
-                        index: object = None) -> bytes:
-    return reads[path.original]
-
-
-async def _served_stat(reads: dict[str, bytes],
-                       accessor: object,
-                       path: PathSpec,
-                       index: object = None) -> FileStat:
-    # Every operand is read before grep runs, so it is a file, not a
-    # directory; the type only has to be non-DIRECTORY for grep's dir guard.
-    data = reads[path.original]
-    return FileStat(name=path.original.rstrip("/").rsplit("/", 1)[-1],
-                    size=len(data),
-                    type=FileType.TEXT)
-
-
-async def _served_readdir(accessor: object,
-                          path: PathSpec,
-                          index: object = None) -> list[str]:
-    return []
 
 
 async def run_aggregate(cmd_name: str, scopes: list[PathSpec],
                         text_args: list[str], flag_kwargs: dict,
                         io: DispatchIO) -> CrossResult:
-    """Aggregate a multi-file read across mounts by delegating to the generic.
+    """Aggregate a multi-file read whose operands span mounts.
 
     These are the N-ary read commands: many files in, one aggregated stream
-    out. Every operand is read once from its owning mount (through the
-    dispatch-backed ``io.read_bytes``); a directory or missing operand fails at
-    that read and aborts the command, as for a single-mount file read. The
-    bytes are then served back to the shared generic command (the same one
-    every backend uses), which does the cat/head/tail/wc/grep aggregation, so
-    cross-mount output matches the single-mount commands. Only ``read`` is
-    backed by dispatch; ``stat``/``readdir`` are served from the bytes already
-    read, so the read family never issues a directory-traversal op. Returns the
-    same ``(out, IOResult)`` a generic command returns; the caller builds the
-    execution record.
+    out. This is the same wiring a backend's read family uses, with the ops
+    backed by ``dispatch`` instead of one accessor: each operand is read (and,
+    for grep, stat'd) through its owning mount, and the shared generic command
+    does the cat/head/tail/wc/grep work, so cross-mount output matches the
+    single-mount commands. Returns the same ``(out, IOResult)`` a generic
+    command returns; the caller builds the execution record.
 
     Args:
         cmd_name (str): One of cat, head, tail, wc, grep, rg.
@@ -86,28 +46,23 @@ async def run_aggregate(cmd_name: str, scopes: list[PathSpec],
         io (DispatchIO): Dispatch-backed ops bundle.
     """
     show_headers = len(scopes) > 1
-    for scope in scopes:
-        await io.read_bytes(None, scope)
-    reads = io.reads
-    result = IOResult(reads=dict(reads), cache=list(reads))
-    read = functools.partial(_served_stream, reads)
 
     if cmd_name in ("grep", "rg"):
-        out, gio = await generic_grep(
-            scopes,
-            text_args,
-            flag_kwargs,
-            readdir=_served_readdir,
-            stat=functools.partial(_served_stat, reads),
-            read_bytes=functools.partial(_served_bytes, reads),
-            read_stream=read,
-            accessor=None,
-            show_filename=show_headers)
-        return out, gio
+        return await generic_grep(scopes,
+                                  text_args,
+                                  flag_kwargs,
+                                  readdir=io.readdir,
+                                  stat=io.stat,
+                                  read_bytes=io.read_bytes,
+                                  read_stream=io.read_stream,
+                                  accessor=None)
 
     if cmd_name == "cat":
-        source: ByteSource = async_chain(*reads.values())
-        return source, result
+        for scope in scopes:
+            await io.read_bytes(None, scope)
+        reads = io.reads
+        return async_chain(*reads.values()), IOResult(reads=dict(reads),
+                                                      cache=list(reads))
 
     if cmd_name in ("head", "tail"):
         fl = FlagView(flag_kwargs, spec=SPECS[cmd_name])
@@ -123,29 +78,32 @@ async def run_aggregate(cmd_name: str, scopes: list[PathSpec],
                 n_int = lines
         if cmd_name == "head":
             out = head_multi(scopes,
-                             read=read,
+                             read=io.read_stream,
                              n=n_int,
                              c=c,
                              show_headers=show_headers)
         else:
             out = tail_multi(scopes,
-                             read=read,
+                             read=io.read_stream,
                              n=n_int,
                              c=c,
                              from_line=from_line,
                              show_headers=show_headers)
-        return out, result
+        return out, IOResult()
 
     if cmd_name == "wc":
         fl = FlagView(flag_kwargs, spec=SPECS["wc"])
         body = await wc_format_multi(scopes,
-                                     read=read,
+                                     read=io.read_stream,
                                      args_l=fl.bool("args_l"),
                                      w=fl.bool("w"),
                                      c=fl.bool("c"),
                                      m=fl.bool("m"),
                                      L=fl.bool("L"))
-        return body, result
+        return body, IOResult()
 
-    source = async_chain(*reads.values())
-    return source, result
+    for scope in scopes:
+        await io.read_bytes(None, scope)
+    reads = io.reads
+    return async_chain(*reads.values()), IOResult(reads=dict(reads),
+                                                  cache=list(reads))
