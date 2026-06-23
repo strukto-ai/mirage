@@ -200,8 +200,8 @@ jobs:
           ./python/.venv/bin/python integ/find_arg_errors.py > /tmp/fae.out
           diff integ/truth_find_arg_errors.txt /tmp/fae.out
 
-      - name: Run cross-mount cp -r (ram -> ram/redis/s3 via moto)
-        run: ./python/.venv/bin/python integ/cross_cp.py
+      - name: Run cross-mount commands (ram -> ram/redis/s3 via moto)
+        run: ./python/.venv/bin/python integ/cross_commands.py
 
   integ-ts:
     needs: changes

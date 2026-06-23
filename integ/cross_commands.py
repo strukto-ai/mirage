@@ -107,6 +107,26 @@ async def check_read_family(ws: Workspace, dst: str, label: str) -> None:
     out, _, _ = await run(ws, f"grep aaa {src} {copied}")
     check(f"{label}: grep prefixes", f"{src}:aaa" in out
           and f"{copied}:aaa" in out)
+    out, _, _ = await run(ws, f"rg aaa {src} {copied}")
+    check(f"{label}: rg prefixes", f"{src}:aaa" in out
+          and f"{copied}:aaa" in out)
+
+
+async def check_compare(ws: Workspace, dst: str, label: str) -> None:
+    # diff/cmp two files that live on different mounts: identical operands
+    # exit 0 with no output, differing operands exit 1 and report the change.
+    same = f"{dst}/copied/a.txt"
+    other = f"{dst}/copied/sub/b.txt"
+    src = "/ram/dir/a.txt"
+    out, _, code = await run(ws, f"diff {src} {same}")
+    check(f"{label}: diff identical", code == 0 and out == "")
+    out, _, code = await run(ws, f"diff {src} {other}")
+    check(f"{label}: diff differing", code == 1 and "aaa" in out
+          and "bbb" in out)
+    _, _, code = await run(ws, f"cmp {src} {same}")
+    check(f"{label}: cmp identical", code == 0)
+    out, _, code = await run(ws, f"cmp {src} {other}")
+    check(f"{label}: cmp differing", code == 1 and "differ" in out)
 
 
 async def check_move(ws: Workspace, dst: str, label: str) -> None:
@@ -125,6 +145,7 @@ async def exercise(ws: Workspace, dst: str, label: str,
     print(f"===== ram -> {label} =====")
     await check_recursive(ws, dst, label, expect_dirs)
     await check_read_family(ws, dst, label)
+    await check_compare(ws, dst, label)
     await check_no_clobber(ws, dst, label)
     await check_omit_directory(ws, dst, label)
     await check_move(ws, dst, label)
@@ -165,9 +186,9 @@ async def main() -> None:
         server.stop()
 
     if _fail:
-        print(f"\ncross cp -r FAILED ({_fail} checks)")
+        print(f"\ncross commands FAILED ({_fail} checks)")
         sys.exit(1)
-    print("\ncross cp -r OK")
+    print("\ncross commands OK")
 
 
 if __name__ == "__main__":
