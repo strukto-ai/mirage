@@ -33,6 +33,39 @@ async def search_pages(
     return await paginate_post(config, "/search", body, page_size=page_size)
 
 
+async def search_databases(
+    config: NotionConfig,
+    query: str = "",
+    page_size: int = 100,
+) -> list[dict]:
+    body: dict = {
+        "filter": {
+            "value": "database",
+            "property": "object"
+        },
+    }
+    if query:
+        body["query"] = query
+    return await paginate_post(config, "/search", body, page_size=page_size)
+
+
+async def get_database(config: NotionConfig, database_id: str) -> dict:
+    return await notion_get(config, f"/databases/{database_id}")
+
+
+async def query_database(
+    config: NotionConfig,
+    database_id: str,
+    page_size: int = 100,
+) -> list[dict]:
+    return await paginate_post(
+        config,
+        f"/databases/{database_id}/query",
+        {},
+        page_size=page_size,
+    )
+
+
 async def get_page(config: NotionConfig, page_id: str) -> dict:
     return await notion_get(config, f"/pages/{page_id}")
 

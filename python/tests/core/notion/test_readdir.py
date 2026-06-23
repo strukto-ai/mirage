@@ -58,7 +58,7 @@ def _spec(original: str, prefix: str = "") -> PathSpec:
 @pytest.mark.asyncio
 async def test_root_lists_pages_with_prefix():
     out = await readdir_mod.readdir(_ACCESSOR, _spec("/notion", "/notion"))
-    assert out == ["/notion/pages"]
+    assert out == ["/notion/pages", "/notion/databases"]
 
 
 @pytest.mark.asyncio

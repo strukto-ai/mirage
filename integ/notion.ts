@@ -26,9 +26,14 @@ const PAGE_A = "aaaa1111-2222-3333-4444-555566667777";
 const PAGE_B = "bbbb2222-3333-4444-5555-666677778888";
 const PAGE_C = "cccc1111-2222-3333-4444-555566667777";
 const BLOCK_NESTED = "dddd2222-3333-4444-5555-666677778888";
+const DB_TASKS = "eeee1111-2222-3333-4444-555566667777";
+const ROW_1 = "ffff1111-2222-3333-4444-555566667777";
+const ROW_2 = "ffff2222-3333-4444-5555-666677778888";
 const DIR_A = `${MOUNT}/pages/Project_Roadmap__${PAGE_A}`;
 const DIR_B = `${MOUNT}/pages/Notes__${PAGE_B}`;
 const DIR_C = `${DIR_A}/Q1_Goals__${PAGE_C}`;
+const DB_DIR = `${MOUNT}/databases/Tasks__${DB_TASKS}`;
+const ROW_1_DIR = `${DB_DIR}/Write_spec__${ROW_1}`;
 
 const DEC = new TextDecoder();
 
@@ -60,6 +65,24 @@ function page(pageId: string, title: string, parent: Json): Json {
     archived: false,
     url: `https://notion.example/${pageId.replaceAll("-", "")}`,
     properties: titleProp(title),
+  };
+}
+
+function database(databaseId: string, title: string): Json {
+  return {
+    object: "database",
+    id: databaseId,
+    created_time: "2026-01-01T00:00:00.000Z",
+    last_edited_time: "2026-01-02T00:00:00.000Z",
+    parent: { type: "workspace", workspace: true },
+    archived: false,
+    is_inline: false,
+    url: `https://notion.example/${databaseId.replaceAll("-", "")}`,
+    title: [{ type: "text", plain_text: title, text: { content: title } }],
+    properties: {
+      Name: { id: "title", name: "Name", type: "title", title: {} },
+      Priority: { id: "pri", name: "Priority", type: "number", number: { format: "number" } },
+    },
   };
 }
 
@@ -95,48 +118,100 @@ const BLOCKS: Record<string, Json[]> = {
   [BLOCK_NESTED]: [block("b-d1", "bulleted_list_item", { rich_text: [text("phase one detail")] })],
 };
 
+const DATABASES: Record<string, Json> = {
+  [DB_TASKS]: database(DB_TASKS, "Tasks"),
+};
+
+const DB_ROWS: Record<string, Json[]> = {
+  [DB_TASKS]: [
+    page(ROW_1, "Write spec", { type: "database_id", database_id: DB_TASKS }),
+    page(ROW_2, "Ship beta", { type: "database_id", database_id: DB_TASKS }),
+  ],
+};
+
+const ROW_PAGES: Record<string, Json> = Object.fromEntries(
+  Object.values(DB_ROWS).flatMap((rows) => rows.map((row) => [String(row.id), row])),
+);
+
+function searchResults(args: Json): Json[] {
+  const filter = (args.filter ?? {}) as Json;
+  return filter.value === "database" ? Object.values(DATABASES) : Object.values(PAGES);
+}
+
 function startMockServer(): Promise<{ server: Server; port: number }> {
   const server = createServer((req, res) => {
     const path = (req.url ?? "").split("?")[0] ?? "";
     const parts = path.split("/").filter((part) => part !== "");
-    const sendJson = (payload: unknown): void => {
-      const body = JSON.stringify(payload);
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(body);
-    };
-    if (req.method === "GET" && parts.length === 3 && parts[0] === "v1" && parts[1] === "pages") {
-      const found = PAGES[parts[2] ?? ""];
-      if (found !== undefined) {
-        sendJson(found);
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    req.on("end", () => {
+      const raw = Buffer.concat(chunks).toString();
+      const body = raw === "" ? {} : (JSON.parse(raw) as Json);
+      const sendJson = (payload: unknown): void => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(payload));
+      };
+      if (req.method === "GET" && parts.length === 3 && parts[0] === "v1" && parts[1] === "pages") {
+        const found = PAGES[parts[2] ?? ""] ?? ROW_PAGES[parts[2] ?? ""];
+        if (found !== undefined) {
+          sendJson(found);
+          return;
+        }
+      }
+      if (
+        req.method === "GET" &&
+        parts.length === 3 &&
+        parts[0] === "v1" &&
+        parts[1] === "databases"
+      ) {
+        const found = DATABASES[parts[2] ?? ""];
+        if (found !== undefined) {
+          sendJson(found);
+          return;
+        }
+      }
+      if (
+        req.method === "GET" &&
+        parts.length === 4 &&
+        parts[0] === "v1" &&
+        parts[1] === "blocks" &&
+        parts[3] === "children"
+      ) {
+        sendJson({
+          object: "list",
+          results: BLOCKS[parts[2] ?? ""] ?? [],
+          has_more: false,
+          next_cursor: null,
+        });
         return;
       }
-    }
-    if (
-      req.method === "GET" &&
-      parts.length === 4 &&
-      parts[0] === "v1" &&
-      parts[1] === "blocks" &&
-      parts[3] === "children"
-    ) {
-      sendJson({
-        object: "list",
-        results: BLOCKS[parts[2] ?? ""] ?? [],
-        has_more: false,
-        next_cursor: null,
-      });
-      return;
-    }
-    if (req.method === "POST" && parts.length === 2 && parts[0] === "v1" && parts[1] === "search") {
-      sendJson({
-        object: "list",
-        results: Object.values(PAGES),
-        has_more: false,
-        next_cursor: null,
-      });
-      return;
-    }
-    res.writeHead(404);
-    res.end();
+      if (req.method === "POST" && parts.length === 2 && parts[0] === "v1" && parts[1] === "search") {
+        sendJson({
+          object: "list",
+          results: searchResults(body),
+          has_more: false,
+          next_cursor: null,
+        });
+        return;
+      }
+      if (
+        req.method === "POST" &&
+        parts.length === 4 &&
+        parts[0] === "v1" &&
+        parts[1] === "databases" &&
+        parts[3] === "query"
+      ) {
+        sendJson({
+          object: "list",
+          results: DB_ROWS[parts[2] ?? ""] ?? [],
+          has_more: false,
+          next_cursor: null,
+        });
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
   });
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
@@ -149,12 +224,26 @@ function startMockServer(): Promise<{ server: Server; port: number }> {
 
 function toolPayload(name: string, args: Record<string, unknown>): unknown {
   if (name === "API-post-search") {
-    return { object: "list", results: Object.values(PAGES), has_more: false, next_cursor: null };
+    return { object: "list", results: searchResults(args), has_more: false, next_cursor: null };
   }
   if (name === "API-retrieve-a-page") {
-    const found = PAGES[String(args.page_id)];
+    const found = PAGES[String(args.page_id)] ?? ROW_PAGES[String(args.page_id)];
     if (found === undefined) throw new Error(`mock notion: unknown page ${String(args.page_id)}`);
     return found;
+  }
+  if (name === "API-retrieve-a-database") {
+    const found = DATABASES[String(args.database_id)];
+    if (found === undefined)
+      throw new Error(`mock notion: unknown database ${String(args.database_id)}`);
+    return found;
+  }
+  if (name === "API-post-database-query") {
+    return {
+      object: "list",
+      results: DB_ROWS[String(args.database_id)] ?? [],
+      has_more: false,
+      next_cursor: null,
+    };
   }
   if (name === "API-retrieve-block-children") {
     return {
@@ -225,6 +314,11 @@ const CASES: ReadonlyArray<readonly [string, string]> = [
   ["grep_multi", `grep -c alpha ${DIR_A}/page.json ${DIR_B}/page.json`],
   ["grep_recursive", `grep -rl alpha ${MOUNT}/pages/`],
   ["realpath_dotdot", `realpath -e ${DIR_C}/../page.json`],
+  ["ls_databases", `ls ${MOUNT}/databases/`],
+  ["ls_database_dir", `ls ${DB_DIR}/`],
+  ["cat_database_json", `cat ${DB_DIR}/database.json`],
+  ["jq_db_props", `jq ".properties | keys" ${DB_DIR}/database.json`],
+  ["cat_row", `cat ${ROW_1_DIR}/page.json`],
 ];
 
 const EXIT_CODE_CASES: ReadonlyArray<readonly [string, string]> = [

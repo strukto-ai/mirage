@@ -27,9 +27,14 @@ PAGE_A = "aaaa1111-2222-3333-4444-555566667777"
 PAGE_B = "bbbb2222-3333-4444-5555-666677778888"
 PAGE_C = "cccc1111-2222-3333-4444-555566667777"
 BLOCK_NESTED = "dddd2222-3333-4444-5555-666677778888"
+DB_TASKS = "eeee1111-2222-3333-4444-555566667777"
+ROW_1 = "ffff1111-2222-3333-4444-555566667777"
+ROW_2 = "ffff2222-3333-4444-5555-666677778888"
 DIR_A = f"{MOUNT}/pages/Project_Roadmap__{PAGE_A}"
 DIR_B = f"{MOUNT}/pages/Notes__{PAGE_B}"
 DIR_C = f"{DIR_A}/Q1_Goals__{PAGE_C}"
+DB_DIR = f"{MOUNT}/databases/Tasks__{DB_TASKS}"
+ROW_1_DIR = f"{DB_DIR}/Write_spec__{ROW_1}"
 
 
 def _user(uid: str) -> dict:
@@ -66,6 +71,52 @@ def _page(page_id: str, title: str, parent: dict) -> dict:
         "archived": False,
         "url": f"https://notion.example/{page_id.replace('-', '')}",
         "properties": _title_prop(title),
+    }
+
+
+def _database(database_id: str, title: str) -> dict:
+    return {
+        "object":
+        "database",
+        "id":
+        database_id,
+        "created_time":
+        "2026-01-01T00:00:00.000Z",
+        "last_edited_time":
+        "2026-01-02T00:00:00.000Z",
+        "parent": {
+            "type": "workspace",
+            "workspace": True
+        },
+        "archived":
+        False,
+        "is_inline":
+        False,
+        "url":
+        f"https://notion.example/{database_id.replace('-', '')}",
+        "title": [{
+            "type": "text",
+            "plain_text": title,
+            "text": {
+                "content": title
+            },
+        }],
+        "properties": {
+            "Name": {
+                "id": "title",
+                "name": "Name",
+                "type": "title",
+                "title": {}
+            },
+            "Priority": {
+                "id": "pri",
+                "name": "Priority",
+                "type": "number",
+                "number": {
+                    "format": "number"
+                },
+            },
+        },
     }
 
 
@@ -149,6 +200,25 @@ BLOCKS = {
     ],
 }
 
+DATABASES = {
+    DB_TASKS: _database(DB_TASKS, "Tasks"),
+}
+
+DB_ROWS = {
+    DB_TASKS: [
+        _page(ROW_1, "Write spec", {
+            "type": "database_id",
+            "database_id": DB_TASKS
+        }),
+        _page(ROW_2, "Ship beta", {
+            "type": "database_id",
+            "database_id": DB_TASKS
+        }),
+    ],
+}
+
+ROW_PAGES = {row["id"]: row for rows in DB_ROWS.values() for row in rows}
+
 
 class NotionMockHandler(BaseHTTPRequestHandler):
 
@@ -166,9 +236,14 @@ class NotionMockHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parts = self.path.split("?")[0].strip("/").split("/")
         if len(parts) == 3 and parts[0] == "v1" and parts[1] == "pages":
-            page = PAGES.get(parts[2])
+            page = PAGES.get(parts[2]) or ROW_PAGES.get(parts[2])
             if page is not None:
                 self._send_json(page)
+                return
+        if len(parts) == 3 and parts[0] == "v1" and parts[1] == "databases":
+            database = DATABASES.get(parts[2])
+            if database is not None:
+                self._send_json(database)
                 return
         if (len(parts) == 4 and parts[0] == "v1" and parts[1] == "blocks"
                 and parts[3] == "children"):
@@ -183,12 +258,30 @@ class NotionMockHandler(BaseHTTPRequestHandler):
         self.send_response(404)
         self.end_headers()
 
+    def _read_body(self) -> dict:
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length) if length else b""
+        return json.loads(raw) if raw else {}
+
     def do_POST(self) -> None:
         parts = self.path.split("?")[0].strip("/").split("/")
+        body = self._read_body()
         if len(parts) == 2 and parts[0] == "v1" and parts[1] == "search":
+            is_database = body.get("filter", {}).get("value") == "database"
+            results = (list(DATABASES.values())
+                       if is_database else list(PAGES.values()))
             self._send_json({
                 "object": "list",
-                "results": list(PAGES.values()),
+                "results": results,
+                "has_more": False,
+                "next_cursor": None,
+            })
+            return
+        if (len(parts) == 4 and parts[0] == "v1" and parts[1] == "databases"
+                and parts[3] == "query"):
+            self._send_json({
+                "object": "list",
+                "results": DB_ROWS.get(parts[2], []),
                 "has_more": False,
                 "next_cursor": None,
             })
@@ -217,6 +310,11 @@ CASES: list[tuple[str, str]] = [
     ("grep_multi", f"grep -c alpha {DIR_A}/page.json {DIR_B}/page.json"),
     ("grep_recursive", f"grep -rl alpha {MOUNT}/pages/"),
     ("realpath_dotdot", f"realpath -e {DIR_C}/../page.json"),
+    ("ls_databases", f"ls {MOUNT}/databases/"),
+    ("ls_database_dir", f"ls {DB_DIR}/"),
+    ("cat_database_json", f"cat {DB_DIR}/database.json"),
+    ("jq_db_props", f'jq ".properties | keys" {DB_DIR}/database.json'),
+    ("cat_row", f"cat {ROW_1_DIR}/page.json"),
 ]
 
 EXIT_CODE_CASES: list[tuple[str, str]] = [

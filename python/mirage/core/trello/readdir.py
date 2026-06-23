@@ -51,7 +51,7 @@ async def readdir(
         if index is not None:
             listing = await index.list_dir(idx_key)
             if listing.entries is not None:
-                return listing.entries
+                return [f"{prefix}{entry}" for entry in listing.entries]
         workspaces = await list_workspaces(accessor.config)
         if accessor.config.workspace_id:
             workspaces = [
@@ -110,7 +110,7 @@ async def readdir(
             ws_id = result.entry.id
             listing = await index.list_dir(idx_key)
             if listing.entries is not None:
-                return listing.entries
+                return [f"{prefix}{entry}" for entry in listing.entries]
         else:
             raise enoent(virtual)
         boards = await list_workspace_boards(accessor.config, ws_id)
@@ -172,7 +172,7 @@ async def readdir(
             board_id = result.entry.id
             listing = await index.list_dir(idx_key)
             if listing.entries is not None:
-                return listing.entries
+                return [f"{prefix}{entry}" for entry in listing.entries]
         else:
             raise enoent(virtual)
         members = await list_board_members(accessor.config, board_id)
@@ -211,7 +211,7 @@ async def readdir(
             board_id = result.entry.id
             listing = await index.list_dir(idx_key)
             if listing.entries is not None:
-                return listing.entries
+                return [f"{prefix}{entry}" for entry in listing.entries]
         else:
             raise enoent(virtual)
         labels = await list_board_labels(accessor.config, board_id)
@@ -250,7 +250,7 @@ async def readdir(
             board_id = result.entry.id
             listing = await index.list_dir(idx_key)
             if listing.entries is not None:
-                return listing.entries
+                return [f"{prefix}{entry}" for entry in listing.entries]
         else:
             raise enoent(virtual)
         lists = await list_board_lists(accessor.config, board_id)
@@ -307,7 +307,7 @@ async def readdir(
             list_id = result.entry.id
             listing = await index.list_dir(idx_key)
             if listing.entries is not None:
-                return listing.entries
+                return [f"{prefix}{entry}" for entry in listing.entries]
         else:
             raise enoent(virtual)
         cards = await list_list_cards(accessor.config, list_id)

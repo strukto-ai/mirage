@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { resolve } from 'node:path'
+import { basename, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import { MountMode, NotionResource, Workspace, type NotionConfig } from '@struktoai/mirage-node'
@@ -28,17 +28,102 @@ function buildConfig(): NotionConfig {
   return { apiKey }
 }
 
-async function run(ws: Workspace, cmd: string): Promise<string> {
-  console.log(`$ ${cmd}`)
+async function run(ws: Workspace, cmd: string, limit = 1500): Promise<string> {
+  console.log(`=== ${cmd} ===`)
   const r = await ws.execute(cmd)
-  if (r.exitCode !== 0 && r.stderrText !== '') {
-    console.log(`  STDERR: ${r.stderrText.slice(0, 200)}`)
-  }
   const out = r.stdoutText.replace(/\s+$/, '')
-  if (out !== '') {
-    for (const line of out.split('\n').slice(0, 10)) console.log(`  ${line.slice(0, 200)}`)
-  }
+  console.log(out !== '' ? out.slice(0, limit) : '(empty)')
+  if (r.stderrText.trim() !== '') console.log(`  [stderr] ${r.stderrText.trim().slice(0, 300)}`)
+  console.log(`  [exit=${String(r.exitCode)}]\n`)
   return out
+}
+
+async function firstEntry(ws: Workspace, path: string): Promise<string> {
+  const out = (await ws.execute(`ls ${path}`)).stdoutText.trim()
+  if (out === '') return ''
+  return basename(out.split('\n')[0]!.replace(/\/$/, ''))
+}
+
+async function explorePages(ws: Workspace): Promise<void> {
+  console.log('\n########## PAGES ##########\n')
+  await run(ws, 'ls /notion/pages/')
+  const page = await firstEntry(ws, '/notion/pages/')
+  if (page === '') {
+    console.log('No shared pages available\n')
+    return
+  }
+  const base = `/notion/pages/${page}`
+  await run(ws, `ls "${base}/"`)
+  await run(ws, `cat "${base}/page.json"`, 1200)
+  await run(ws, `head -n 5 "${base}/page.json"`)
+  await run(ws, `tail -n 5 "${base}/page.json"`)
+  await run(ws, `wc -l "${base}/page.json"`)
+  await run(ws, `stat "${base}/page.json"`)
+  await run(ws, `jq ".title" "${base}/page.json"`)
+  await run(ws, `jq ".page_id" "${base}/page.json"`)
+  await run(ws, `jq ".parent_type" "${base}/page.json"`)
+  await run(ws, `basename "${base}/page.json"`)
+  await run(ws, `dirname "${base}/page.json"`)
+  await run(ws, `realpath "${base}/page.json"`)
+  await run(ws, `tree -L 1 "${base}/"`)
+  await run(ws, `find "${base}/" -name "*.json"`)
+  await run(ws, `echo "${base}/"*.json`)
+}
+
+async function exploreDatabases(ws: Workspace): Promise<void> {
+  console.log('\n########## DATABASES ##########\n')
+  await run(ws, 'ls /notion/databases/')
+  const db = await firstEntry(ws, '/notion/databases/')
+  if (db === '') {
+    console.log('No shared databases available\n')
+    return
+  }
+  const base = `/notion/databases/${db}`
+  await run(ws, `ls "${base}/"`)
+  await run(ws, `stat "${base}/"`)
+  await run(ws, `stat "${base}/database.json"`)
+  await run(ws, `cat "${base}/database.json"`)
+  await run(ws, `jq ".database_id" "${base}/database.json"`)
+  await run(ws, `jq ".title" "${base}/database.json"`)
+  await run(ws, `jq ".properties | keys" "${base}/database.json"`)
+  await run(ws, `wc -l "${base}/database.json"`)
+  await run(ws, `head -n 8 "${base}/database.json"`)
+  await run(ws, `tail -n 5 "${base}/database.json"`)
+  await run(ws, `basename "${base}/database.json"`)
+  await run(ws, `dirname "${base}/database.json"`)
+  await run(ws, `tree -L 1 "${base}/"`)
+  await run(ws, `find "${base}/" -name "database.json"`)
+  await run(ws, `echo "${base}/"*`)
+
+  const listing = (await ws.execute(`ls "${base}/"`)).stdoutText.trim().split('\n')
+  let row = ''
+  for (const line of listing) {
+    const name = basename(line.replace(/\/$/, ''))
+    if (name !== 'database.json' && name !== '') {
+      row = name
+      break
+    }
+  }
+  if (row === '') {
+    console.log('Database has no row pages\n')
+    return
+  }
+  const rowBase = `${base}/${row}`
+  console.log(`--- row page: ${row} ---\n`)
+  await run(ws, `ls "${rowBase}/"`)
+  await run(ws, `stat "${rowBase}/page.json"`)
+  await run(ws, `cat "${rowBase}/page.json"`, 1200)
+  await run(ws, `jq ".parent_type" "${rowBase}/page.json"`)
+  await run(ws, `jq ".parent_id" "${rowBase}/page.json"`)
+}
+
+async function exploreCrossCutting(ws: Workspace): Promise<void> {
+  console.log('\n########## CROSS-CUTTING ##########\n')
+  await run(ws, 'ls /notion/')
+  await run(ws, 'tree -L 2 /notion/')
+  await run(ws, 'notion-search --query a', 800)
+  await run(ws, 'grep -rl "page_id" /notion/pages/', 800)
+  await run(ws, 'rg -c "title" /notion/databases/', 800)
 }
 
 async function main(): Promise<void> {
@@ -47,71 +132,9 @@ async function main(): Promise<void> {
     { mode: MountMode.READ },
   )
   try {
-    console.log('=== ls /notion/pages/ ===')
-    const p0 = (await run(ws, 'ls /notion/pages/ | head -n 1')).trim()
-    if (p0 === '') {
-      console.log('no pages')
-      return
-    }
-    const pagePath = `/notion/pages/${p0}`
-
-    console.log(`\n=== cat ${pagePath}/page.json ===`)
-    await run(ws, `cat "${pagePath}/page.json"`)
-
-    console.log(`\n=== jq .title ${pagePath}/page.json ===`)
-    await run(ws, `jq ".title" "${pagePath}/page.json"`)
-
-    console.log(`\n=== jq .url ${pagePath}/page.json ===`)
-    await run(ws, `jq ".url" "${pagePath}/page.json"`)
-
-    console.log(`\n=== jq .markdown ${pagePath}/page.json ===`)
-    await run(ws, `jq ".markdown" "${pagePath}/page.json"`)
-
-    console.log(`\n=== stat ${pagePath}/page.json ===`)
-    await run(ws, `stat "${pagePath}/page.json"`)
-
-    console.log(`\n=== head -n 5 ${pagePath}/page.json ===`)
-    await run(ws, `head -n 5 "${pagePath}/page.json"`)
-
-    console.log('\n=== tree -L 1 /notion/ ===')
-    await run(ws, 'tree -L 1 /notion/')
-
-    console.log(`\n=== tree -L 1 ${pagePath}/ ===`)
-    await run(ws, `tree -L 1 "${pagePath}/"`)
-
-    console.log(`\n=== find ${pagePath}/ -name '*.json' ===`)
-    await run(ws, `find "${pagePath}/" -name "*.json"`)
-
-    console.log(`\n=== basename ${pagePath}/page.json ===`)
-    await run(ws, `basename "${pagePath}/page.json"`)
-
-    console.log(`\n=== dirname ${pagePath}/page.json ===`)
-    await run(ws, `dirname "${pagePath}/page.json"`)
-
-    console.log('\n=== notion-search --query EVO ===')
-    await run(ws, 'notion-search --query EVO')
-
-    console.log(`\n=== grep Graph ${pagePath}/*.json (page glob) ===`)
-    await run(ws, `grep -c Graph "${pagePath}/"*.json`)
-
-    console.log('\n=== rg Graph /notion/pages/ ===')
-    await run(ws, 'rg -c Graph /notion/pages/')
-
-    console.log(`\n=== ls ${pagePath}/ (children) ===`)
-    const children = await run(ws, `ls "${pagePath}/"`)
-    const childDirs = children
-      .trim()
-      .split('\n')
-      .filter((line) => line !== '' && !line.endsWith('.json'))
-    if (childDirs.length > 0) {
-      const child = childDirs[0]!
-      console.log(`\n=== jq .title ${pagePath}/${child}/page.json (child page) ===`)
-      await run(ws, `jq ".title" "${pagePath}/${child}/page.json"`)
-    }
-
-    console.log(`\n=== echo ${pagePath}/*.json (glob) ===`)
-    await run(ws, `echo "${pagePath}/"*.json`)
-
+    await explorePages(ws)
+    await exploreDatabases(ws)
+    await exploreCrossCutting(ws)
     const records = ws.records
     const total = records.reduce((acc, r) => acc + (r.bytes ?? 0), 0)
     console.log(`\nStats: ${String(records.length)} ops, ${String(total)} bytes transferred`)

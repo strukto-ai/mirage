@@ -65,6 +65,10 @@ def format_ls_long(
         (len(x) for x in sizes), default=1)
     out: list[str] = []
     for s, raw_size in zip(stats, sizes):
+        if s.size is None and s.modified is None:
+            mode = _ls_mode_string(s)
+            out.append(f"{mode}\t-\t-\t{s.name}")
+            continue
         mode = _ls_mode_string(s)
         size = raw_size.rjust(width)
         time = _ls_time_string(s.modified)

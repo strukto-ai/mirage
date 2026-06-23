@@ -96,6 +96,19 @@ export function pageContentTitle(page: Json): string {
   return ''
 }
 
+export function extractDatabaseTitle(database: Json): string {
+  const titleFragments = asArray(database.title)
+  if (titleFragments.length > 0) {
+    const joined = joinTitleFragments(titleFragments)
+    if (joined !== '') return joined
+  }
+  return 'untitled'
+}
+
+export function databaseSegmentName(database: Json): string {
+  return formatSegment({ id: strOf(database, 'id'), title: extractDatabaseTitle(database) })
+}
+
 export interface NormalizedPage {
   page_id: string
   title: string
@@ -109,6 +122,18 @@ export interface NormalizedPage {
   last_edited_by: string
   markdown: string
   blocks: Json[]
+}
+
+export interface NormalizedDatabase {
+  database_id: string
+  title: string
+  url: string | null
+  created_time: string | null
+  last_edited_time: string | null
+  parent: Json
+  archived: boolean
+  is_inline: boolean
+  properties: Json
 }
 
 export function normalizePage(page: Json, blocks: readonly Json[]): NormalizedPage {
@@ -133,6 +158,22 @@ export function normalizePage(page: Json, blocks: readonly Json[]): NormalizedPa
     last_edited_by: strOf(asObject(page.last_edited_by), 'id'),
     markdown: blocksToMarkdown(contentBlocks),
     blocks: contentBlocks,
+  }
+}
+
+export function normalizeDatabase(database: Json): NormalizedDatabase {
+  const archived =
+    database.archived !== undefined ? boolOf(database, 'archived') : boolOf(database, 'in_trash')
+  return {
+    database_id: strOf(database, 'id'),
+    title: extractDatabaseTitle(database),
+    url: pickStringOrNull(database, 'url'),
+    created_time: pickStringOrNull(database, 'created_time'),
+    last_edited_time: pickStringOrNull(database, 'last_edited_time'),
+    parent: asObject(database.parent),
+    archived,
+    is_inline: boolOf(database, 'is_inline'),
+    properties: asObject(database.properties),
   }
 }
 

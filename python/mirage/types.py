@@ -186,6 +186,7 @@ class ResourceName(str, Enum):
     NEXTCLOUD = "nextcloud"
     LANCEDB = "lancedb"
     ONEDRIVE = "onedrive"
+    SHAREPOINT = "sharepoint"
 
 
 @dataclass(frozen=True)

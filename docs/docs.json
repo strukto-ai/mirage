@@ -137,7 +137,8 @@
                 "group": "Microsoft",
                 "icon": "microsoft",
                 "pages": [
-                  "home/setup/onedrive"
+                  "home/setup/onedrive",
+                  "home/setup/sharepoint"
                 ]
               },
               {
@@ -292,7 +293,8 @@
                 "group": "Microsoft",
                 "icon": "microsoft",
                 "pages": [
-                  "python/resource/onedrive"
+                  "python/resource/onedrive",
+                  "python/resource/sharepoint"
                 ]
               },
               {

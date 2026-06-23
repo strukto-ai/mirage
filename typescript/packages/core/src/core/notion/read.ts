@@ -15,8 +15,8 @@
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import type { NotionTransport } from './_client.ts'
-import { normalizePage, toJsonBytes } from './normalize.ts'
-import { getBlockTree, getPage } from './pages.ts'
+import { normalizeDatabase, normalizePage, toJsonBytes } from './normalize.ts'
+import { getBlockTree, getDatabase, getPage } from './pages.ts'
 import { parseSegment } from './pathing.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
@@ -40,8 +40,22 @@ export async function read(
   if (key === '') throw enoent(path.original)
   const parts = key.split('/')
   const last = parts[parts.length - 1] ?? ''
-  if (last !== 'page.json') throw enoent(path.original)
-  if (parts.length < 3 || parts[0] !== 'pages') throw enoent(path.original)
+  if (last !== 'page.json' && last !== 'database.json') throw enoent(path.original)
+  if (last === 'database.json') {
+    if (parts[0] !== 'databases' || parts.length !== 3) throw enoent(path.original)
+    const databaseSegment = parts[parts.length - 2] ?? ''
+    let parsedDatabase: { id: string; title: string }
+    try {
+      parsedDatabase = parseSegment(databaseSegment)
+    } catch {
+      throw enoent(path.original)
+    }
+    const database = await getDatabase(accessor.transport, parsedDatabase.id)
+    return toJsonBytes(normalizeDatabase(database))
+  }
+  const isPageJson =
+    (parts[0] === 'pages' && parts.length >= 3) || (parts[0] === 'databases' && parts.length >= 4)
+  if (!isPageJson) throw enoent(path.original)
   const parentSegment = parts[parts.length - 2] ?? ''
   let parsed: { id: string; title: string }
   try {

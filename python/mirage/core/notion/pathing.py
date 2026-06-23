@@ -24,6 +24,12 @@ def page_dirname(page: dict) -> str:
     return f"{label}__{page['id']}"
 
 
+def database_dirname(database: dict) -> str:
+    title = extract_database_title(database)
+    label = sanitize_name(title) if title else "untitled"
+    return f"{label}__{database['id']}"
+
+
 def extract_title(page: dict) -> str:
     props = page.get("properties", {})
     for prop in props.values():
@@ -31,3 +37,8 @@ def extract_title(page: dict) -> str:
             title_items = prop.get("title", [])
             return "".join(item.get("plain_text", "") for item in title_items)
     return ""
+
+
+def extract_database_title(database: dict) -> str:
+    title_items = database.get("title", [])
+    return "".join(item.get("plain_text", "") for item in title_items)

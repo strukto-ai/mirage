@@ -168,6 +168,14 @@ function restCallFor(name: string, args: Record<string, unknown>): RestCall {
     const { block_id, ...rest } = args
     return { method: 'GET', path: `/blocks/${String(block_id)}/children`, query: rest }
   }
+  if (name === 'API-retrieve-a-database') {
+    const { database_id, ...rest } = args
+    return { method: 'GET', path: `/databases/${String(database_id)}`, query: rest }
+  }
+  if (name === 'API-post-database-query') {
+    const { database_id, ...rest } = args
+    return { method: 'POST', path: `/databases/${String(database_id)}/query`, body: rest }
+  }
   if (name === 'API-patch-block-children') {
     const { block_id, ...rest } = args
     return { method: 'PATCH', path: `/blocks/${String(block_id)}/children`, body: rest }

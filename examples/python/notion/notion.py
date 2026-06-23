@@ -26,105 +26,110 @@ config = NotionConfig(api_key=os.environ["NOTION_API_KEY"])
 resource = NotionResource(config=config)
 
 
+async def run(ws: Workspace, cmd: str, limit: int = 1500) -> str:
+    print(f"=== {cmd} ===")
+    result = await ws.execute(cmd)
+    out = await result.stdout_str()
+    err = (await result.stderr_str()).strip()
+    print(out[:limit] if out.strip() else "(empty)")
+    if err:
+        print(f"  [stderr] {err[:300]}")
+    print(f"  [exit={result.exit_code}]\n")
+    return out
+
+
+async def first_entry(ws: Workspace, path: str) -> str:
+    result = await ws.execute(f"ls {path}")
+    out = (await result.stdout_str()).strip()
+    if not out:
+        return ""
+    return os.path.basename(out.splitlines()[0].rstrip("/"))
+
+
+async def explore_pages(ws: Workspace) -> None:
+    print("\n########## PAGES ##########\n")
+    await run(ws, "ls /notion/pages/")
+    page = await first_entry(ws, "/notion/pages/")
+    if not page:
+        print("No shared pages available\n")
+        return
+    base = f"/notion/pages/{page}"
+
+    await run(ws, f"ls {base}/")
+    await run(ws, f"cat {base}/page.json", limit=1200)
+    await run(ws, f"head -n 5 {base}/page.json")
+    await run(ws, f"tail -n 5 {base}/page.json")
+    await run(ws, f"wc -l {base}/page.json")
+    await run(ws, f"stat {base}/page.json")
+    await run(ws, f'jq ".title" {base}/page.json')
+    await run(ws, f'jq ".page_id" {base}/page.json')
+    await run(ws, f'jq ".parent_type" {base}/page.json')
+    await run(ws, f"basename {base}/page.json")
+    await run(ws, f"dirname {base}/page.json")
+    await run(ws, f"realpath {base}/page.json")
+    await run(ws, f"tree -L 1 {base}/")
+    await run(ws, f'find {base}/ -name "*.json"')
+    await run(ws, f"echo {base}/*.json")
+
+
+async def explore_databases(ws: Workspace) -> None:
+    print("\n########## DATABASES ##########\n")
+    await run(ws, "ls /notion/databases/")
+    db = await first_entry(ws, "/notion/databases/")
+    if not db:
+        print("No shared databases available\n")
+        return
+    base = f"/notion/databases/{db}"
+
+    await run(ws, f"ls {base}/")
+    await run(ws, f"stat {base}/")
+    await run(ws, f"stat {base}/database.json")
+    await run(ws, f"cat {base}/database.json", limit=1500)
+    await run(ws, f'jq ".database_id" {base}/database.json')
+    await run(ws, f'jq ".title" {base}/database.json')
+    await run(ws, f'jq ".properties | keys" {base}/database.json')
+    await run(ws, f"wc -l {base}/database.json")
+    await run(ws, f"head -n 8 {base}/database.json")
+    await run(ws, f"tail -n 5 {base}/database.json")
+    await run(ws, f"basename {base}/database.json")
+    await run(ws, f"dirname {base}/database.json")
+    await run(ws, f"tree -L 1 {base}/")
+    await run(ws, f'find {base}/ -name "database.json"')
+    await run(ws, f"echo {base}/*")
+
+    row = ""
+    result = await ws.execute(f"ls {base}/")
+    for line in (await result.stdout_str()).strip().splitlines():
+        name = os.path.basename(line.rstrip("/"))
+        if name != "database.json":
+            row = name
+            break
+    if not row:
+        print("Database has no row pages\n")
+        return
+    row_base = f"{base}/{row}"
+    print(f"--- row page: {row} ---\n")
+    await run(ws, f"ls {row_base}/")
+    await run(ws, f"stat {row_base}/page.json")
+    await run(ws, f"cat {row_base}/page.json", limit=1200)
+    await run(ws, f'jq ".parent_type" {row_base}/page.json')
+    await run(ws, f'jq ".parent_id" {row_base}/page.json')
+
+
+async def explore_cross_cutting(ws: Workspace) -> None:
+    print("\n########## CROSS-CUTTING ##########\n")
+    await run(ws, "ls /notion/")
+    await run(ws, "tree -L 2 /notion/")
+    await run(ws, "notion-search --query a", limit=800)
+    await run(ws, 'grep -rl "page_id" /notion/pages/', limit=800)
+    await run(ws, 'rg -c "title" /notion/databases/', limit=800)
+
+
 async def main() -> None:
     ws = Workspace({"/notion": resource}, mode=MountMode.READ)
-
-    print("=== ls /notion/pages/ ===")
-    result = await ws.execute("ls /notion/pages/")
-    print(await result.stdout_str())
-
-    first_page = (await result.stdout_str()).strip().splitlines()[0] if (
-        await result.stdout_str()).strip() else ""
-    if not first_page:
-        print("No pages available")
-        return
-
-    page_path = f"/notion/pages/{first_page}"
-
-    print(f"=== cat {page_path}/page.json ===")
-    result = await ws.execute(f"cat {page_path}/page.json")
-    print((await result.stdout_str())[:2000])
-
-    print(f"\n=== jq .title {page_path}/page.json ===")
-    result = await ws.execute(f'jq ".title" {page_path}/page.json')
-    print(await result.stdout_str())
-
-    print(f"=== jq .url {page_path}/page.json ===")
-    result = await ws.execute(f'jq ".url" {page_path}/page.json')
-    print(await result.stdout_str())
-
-    print(f"=== jq .markdown {page_path}/page.json ===")
-    result = await ws.execute(f'jq ".markdown" {page_path}/page.json')
-    print((await result.stdout_str())[:500])
-
-    print(f"\n=== stat {page_path}/page.json ===")
-    result = await ws.execute(f"stat {page_path}/page.json")
-    print(await result.stdout_str())
-
-    print(f"=== head -n 5 {page_path}/page.json ===")
-    result = await ws.execute(f"head -n 5 {page_path}/page.json")
-    print(await result.stdout_str())
-
-    print("=== tree -L 1 /notion/ ===")
-    result = await ws.execute("tree -L 1 /notion/")
-    print(await result.stdout_str())
-
-    print(f"=== tree -L 1 {page_path}/ ===")
-    result = await ws.execute(f"tree -L 1 {page_path}/")
-    print(await result.stdout_str())
-
-    print(f"=== find {page_path}/ -name '*.json' ===")
-    result = await ws.execute(f'find {page_path}/ -name "*.json"')
-    print(await result.stdout_str())
-
-    print(f"=== basename {page_path}/page.json ===")
-    result = await ws.execute(f"basename {page_path}/page.json")
-    print(await result.stdout_str())
-
-    print(f"=== dirname {page_path}/page.json ===")
-    result = await ws.execute(f"dirname {page_path}/page.json")
-    print(await result.stdout_str())
-
-    print("=== notion-search --query EVO ===")
-    result = await ws.execute("notion-search --query EVO")
-    print((await result.stdout_str())[:1000])
-
-    print(f"\n=== grep Graph {page_path}/*.json (page glob) ===")
-    result = await ws.execute(f'grep -c Graph "{page_path}/"*.json')
-    out = (await result.stdout_str()).strip()
-    lines = out.splitlines() if out else []
-    print(f"  exit={result.exit_code} matches: {len(lines)}")
-    for line in lines[:3]:
-        print(f"  {line[:150]}")
-
-    print("\n=== rg Graph /notion/pages/ ===")
-    result = await ws.execute('rg -c Graph /notion/pages/')
-    out = (await result.stdout_str()).strip()
-    lines = out.splitlines() if out else []
-    print(f"  exit={result.exit_code} matches: {len(lines)}")
-    for line in lines[:3]:
-        print(f"  {line[:150]}")
-
-    print(f"\n=== ls {page_path}/ (children) ===")
-    result = await ws.execute(f"ls {page_path}/")
-    children = await result.stdout_str()
-    print(children)
-
-    child_dirs = [
-        line for line in children.strip().splitlines()
-        if not line.endswith(".json")
-    ]
-    if child_dirs:
-        child = child_dirs[0]
-        print(f"=== cat {page_path}/{child}/page.json (child page) ===")
-        result = await ws.execute(f"cat {page_path}/{child}/page.json")
-        print((await result.stdout_str())[:1000])
-
-    # ── glob expansion (exercises resolve_glob → readdir) ──
-    print(f"\n=== echo {page_path}/*.json (glob) ===")
-    r = await ws.execute(f"echo {page_path}/*.json")
-    out = (await r.stdout_str()).strip()
-    print(f"  {out[:200]}")
+    await explore_pages(ws)
+    await explore_databases(ws)
+    await explore_cross_cutting(ws)
 
 
 if __name__ == "__main__":

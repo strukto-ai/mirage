@@ -1,4 +1,5 @@
 === ls_root ===
+databases
 pages
 === ls_pages ===
 Notes__bbbb2222-3333-4444-5555-666677778888
@@ -12,6 +13,11 @@ page.json
 === stat_dir_a ===
 /notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777 2026-01-02T00:00:00.000Z
 === tree ===
+├── databases
+│   └── Tasks__eeee1111-2222-3333-4444-555566667777
+│       ├── Ship_beta__ffff2222-3333-4444-5555-666677778888
+│       ├── Write_spec__ffff1111-2222-3333-4444-555566667777
+│       └── database.json
 └── pages
     ├── Notes__bbbb2222-3333-4444-5555-666677778888
     │   └── page.json
@@ -211,6 +217,62 @@ name=page.json size=2979 modified=None type=json
 /notion/pages/Notes__bbbb2222-3333-4444-5555-666677778888/page.json
 === realpath_dotdot ===
 /notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777/page.json
+=== ls_databases ===
+Tasks__eeee1111-2222-3333-4444-555566667777
+=== ls_database_dir ===
+Ship_beta__ffff2222-3333-4444-5555-666677778888
+Write_spec__ffff1111-2222-3333-4444-555566667777
+database.json
+=== cat_database_json ===
+{
+  "database_id": "eeee1111-2222-3333-4444-555566667777",
+  "title": "Tasks",
+  "url": "https://notion.example/eeee1111222233334444555566667777",
+  "created_time": "2026-01-01T00:00:00.000Z",
+  "last_edited_time": "2026-01-02T00:00:00.000Z",
+  "parent": {
+    "type": "workspace",
+    "workspace": true
+  },
+  "archived": false,
+  "is_inline": false,
+  "properties": {
+    "Name": {
+      "id": "title",
+      "name": "Name",
+      "type": "title",
+      "title": {}
+    },
+    "Priority": {
+      "id": "pri",
+      "name": "Priority",
+      "type": "number",
+      "number": {
+        "format": "number"
+      }
+    }
+  }
+}
+=== jq_db_props ===
+[
+  "Name",
+  "Priority"
+]
+=== cat_row ===
+{
+  "page_id": "ffff1111-2222-3333-4444-555566667777",
+  "title": "Write spec",
+  "url": "https://notion.example/ffff1111222233334444555566667777",
+  "created_time": "2026-01-01T00:00:00.000Z",
+  "last_edited_time": "2026-01-02T00:00:00.000Z",
+  "parent_type": "database_id",
+  "parent_id": "eeee1111-2222-3333-4444-555566667777",
+  "archived": false,
+  "created_by": "user-1",
+  "last_edited_by": "user-2",
+  "markdown": "",
+  "blocks": []
+}
 === grep_c_match_exit ===
 exit=0
 3

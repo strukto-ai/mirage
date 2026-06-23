@@ -16,8 +16,8 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import type { NotionTransport } from './_client.ts'
-import { pageSegmentName } from './normalize.ts'
-import { getChildPages, searchTopLevelPages } from './pages.ts'
+import { databaseSegmentName, pageSegmentName } from './normalize.ts'
+import { getChildPages, queryDatabase, searchDatabases, searchTopLevelPages } from './pages.ts'
 import { parseSegment, sanitizeName } from './pathing.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
@@ -45,7 +45,7 @@ export async function readdir(
   const idxKey = key !== '' ? `/${key}` : '/'
 
   if (key === '') {
-    return [`${prefix}/pages`]
+    return [`${prefix}/pages`, `${prefix}/databases`]
   }
 
   if (key === 'pages') {
@@ -74,24 +74,94 @@ export async function readdir(
     return entries.map(([name]) => `${prefix}/pages/${name}`)
   }
 
-  const parts = key.split('/')
-  if (parts.length >= 2 && parts[0] === 'pages') {
-    const lastSegment = parts[parts.length - 1] ?? ''
-    let parsed: { id: string; title: string }
-    try {
-      parsed = parseSegment(lastSegment)
-    } catch {
-      throw enoent(path)
-    }
-    const pageIdxKey = `/${parts.join('/')}`
-
+  if (key === 'databases') {
     if (index !== undefined) {
-      const listing = await index.listDir(pageIdxKey)
+      const listing = await index.listDir(idxKey)
       if (listing.entries !== undefined && listing.entries !== null) {
         return listing.entries.map((entry) => `${prefix}${entry}`)
       }
     }
+    const databases = await searchDatabases(accessor.transport)
+    const entries: [string, IndexEntry][] = []
+    for (const database of databases) {
+      const name = databaseSegmentName(database)
+      entries.push([
+        name,
+        new IndexEntry({
+          id: pickString(database, 'id'),
+          name,
+          resourceType: 'notion/database',
+          remoteTime: pickString(database, 'last_edited_time'),
+          vfsName: name,
+        }),
+      ])
+    }
+    if (index !== undefined) await index.setDir(idxKey, entries)
+    return entries.map(([name]) => `${prefix}/databases/${name}`)
+  }
 
+  const parts = key.split('/')
+  const lastSegment = parts[parts.length - 1] ?? ''
+
+  if (parts[0] === 'databases' && parts.length === 2) {
+    let parsedDatabase: { id: string; title: string }
+    try {
+      parsedDatabase = parseSegment(lastSegment)
+    } catch {
+      throw enoent(p)
+    }
+    if (index !== undefined) {
+      const listing = await index.listDir(idxKey)
+      if (listing.entries !== undefined && listing.entries !== null) {
+        return listing.entries.map((entry) => `${prefix}${entry}`)
+      }
+    }
+    const rows = await queryDatabase(accessor.transport, parsedDatabase.id)
+    const entries: [string, IndexEntry][] = [
+      [
+        'database.json',
+        new IndexEntry({
+          id: `${parsedDatabase.id}:database`,
+          name: 'database.json',
+          resourceType: 'file',
+          vfsName: 'database.json',
+        }),
+      ],
+    ]
+    for (const row of rows) {
+      if (row.object !== 'page') continue
+      const segment = pageSegmentName(row)
+      entries.push([
+        segment,
+        new IndexEntry({
+          id: pickString(row, 'id'),
+          name: segment,
+          resourceType: 'notion/page',
+          remoteTime: pickString(row, 'last_edited_time'),
+          vfsName: segment,
+        }),
+      ])
+    }
+    if (index !== undefined) await index.setDir(idxKey, entries)
+    return entries.map(([name]) => `${prefix}/${key}/${name}`)
+  }
+
+  if (
+    (parts[0] === 'pages' && parts.length >= 2) ||
+    (parts[0] === 'databases' && parts.length >= 3)
+  ) {
+    let parsed: { id: string; title: string }
+    try {
+      parsed = parseSegment(lastSegment)
+    } catch {
+      throw enoent(p)
+    }
+    if (index !== undefined) {
+      const listing = await index.listDir(idxKey)
+      if (listing.entries !== undefined && listing.entries !== null) {
+        return listing.entries.map((entry) => `${prefix}${entry}`)
+      }
+    }
     const refs = await getChildPages(accessor.transport, parsed.id)
     const entries: [string, IndexEntry][] = [
       [
@@ -117,10 +187,8 @@ export async function readdir(
         }),
       ])
     }
-    if (index !== undefined) await index.setDir(pageIdxKey, entries)
-
-    const base = `${prefix}/${key}`
-    return entries.map(([name]) => `${base}/${name}`)
+    if (index !== undefined) await index.setDir(idxKey, entries)
+    return entries.map(([name]) => `${prefix}/${key}/${name}`)
   }
 
   return []

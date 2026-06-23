@@ -62,6 +62,29 @@ async def test_readdir_teams(accessor, index):
 
 
 @pytest.mark.asyncio
+async def test_readdir_teams_keeps_prefix_on_warm_cache_hit(accessor, index):
+    teams = [{
+        "id": "TEAM1",
+        "key": "ENG",
+        "name": "Engineering",
+        "updatedAt": "2026-04-05T00:00:00Z",
+        "states": {
+            "nodes": []
+        },
+    }]
+    spec = PathSpec(original="/linear/teams",
+                    directory="/linear/teams",
+                    prefix="/linear")
+    with patch("mirage.core.linear.readdir.list_teams",
+               new_callable=AsyncMock,
+               return_value=teams):
+        cold = await readdir(accessor, spec, index)
+        warm = await readdir(accessor, spec, index)
+    assert cold == ["/linear/teams/ENG__Engineering__TEAM1"]
+    assert warm == cold
+
+
+@pytest.mark.asyncio
 async def test_readdir_team_members(accessor, index):
     await index.put(
         "/teams/ENG__Engineering__TEAM1",

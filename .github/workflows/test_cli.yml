@@ -46,7 +46,7 @@ jobs:
     name: Python CLI
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -328,7 +328,7 @@ jobs:
     name: TypeScript CLI
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install pnpm
         uses: pnpm/action-setup@v6
@@ -627,7 +627,7 @@ jobs:
       CROSS_DISK_ROOT: /tmp/mirage-cross-disk
       CROSS_REDIS_PREFIX: mirage-cross/
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install libfuse (mfusepy + @zkochan/fuse-native, for the CLI FUSE e2e)
         run: |

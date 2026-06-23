@@ -1,0 +1,207 @@
+---
+title: SharePoint
+description: Mount Microsoft SharePoint Online sites and document libraries as a Mirage filesystem with multi-site discovery, versioning, and shell commands.
+icon: microsoft
+---
+
+The SharePoint resource mounts Microsoft SharePoint Online at some prefix such
+as `/sharepoint/`. Unlike the single-drive OneDrive resource, it exposes the
+full enterprise topology: many sites, each with many document libraries. Site
+and drive names are resolved to Microsoft Graph ids automatically, so you mount
+once and browse everything you have access to. All operations involve network
+I/O to Microsoft Graph. Files are served as raw bytes (no Office filetype
+conversion). Uses aiohttp for async Graph access.
+
+For credential setup (tokens, app vs delegated auth, permissions), see the
+[SharePoint Setup](/home/setup/sharepoint) guide.
+
+## Config
+
+```python
+import os
+
+from mirage import MountMode, Workspace
+from mirage.resource.sharepoint import SharePointResource, SharePointConfig
+
+config = SharePointConfig(
+    access_token=os.environ["MS_GRAPH_DRIVE_TOKEN"],
+    # Optional:
+    # tenant_host="contoso.sharepoint.com",  # restrict to one tenant host
+    # site_filter="Engineering",             # narrow the site search
+    # timeout=30,
+    # max_retries=5,
+)
+
+resource = SharePointResource(config)
+ws = Workspace({"/sharepoint": resource}, mode=MountMode.WRITE)
+```
+
+`SharePointResource(config)` takes a `SharePointConfig` object with a Microsoft
+Graph bearer token. No drive id is required: the resource discovers sites and
+drives for you. Both `READ` and `WRITE` modes are supported.
+
+### Config Reference
+
+| Field          | Required | Description                                                       |
+| -------------- | -------- | ----------------------------------------------------------------- |
+| `access_token` | Yes      | Microsoft Graph OAuth2 bearer token (string or callable provider) |
+| `tenant_host`  | No       | Restrict resolution to a single SharePoint host                   |
+| `site_filter`  | No       | Search term passed to `/sites?search=` to narrow discovery        |
+| `timeout`      | No       | Request timeout in seconds (default `30`)                          |
+| `max_retries`  | No       | Max retries on `429`/`5xx` with backoff (default `5`)             |
+
+`access_token` accepts either a static string or a `Callable[[], str]` provider.
+With a callable, the resource refreshes the token on `401`, so long-running
+mounts survive token expiry.
+
+## Filesystem Layout
+
+SharePoint paths follow the structure `/{site}/{library}/{path}`. The first two
+levels are virtual (sites and drives), and everything below is a real Graph
+driveItem.
+
+- **Level 0** (`/sharepoint/`): lists all accessible sites
+- **Level 1** (`/sharepoint/{site}/`): lists document libraries (drives) in that site
+- **Level 2+** (`/sharepoint/{site}/{library}/...`): lists files and folders
+
+For example:
+
+```text
+/sharepoint/
+  Engineering/
+    Documents/
+      spec.md
+      deck.pptx
+    Reports/
+      q1.csv
+  Marketing/
+    Shared Documents/
+      brand.pdf
+```
+
+Path mapping: virtual `/sharepoint/Engineering/Documents/spec.md` resolves the
+site `Engineering` to a site id, the library `Documents` to a drive id, then
+reads the driveItem at `/root:/spec.md`.
+
+## Versioning and Snapshots
+
+SharePoint keeps per-file version history. The resource exposes it the same way
+the OneDrive and S3 backends do:
+
+- **Fingerprint** is the driveItem `cTag`, so normal reads and `stat` reflect
+  the current content without extra Graph calls.
+- **Snapshots** pin each path to a Graph driveItem version id. Replaying a
+  snapshot reads `/versions/{id}/content`, giving time-travel to the exact bytes
+  captured at snapshot time.
+- **Restore** writes a previous version back as the current one.
+
+This makes the SharePoint resource `SUPPORTS_SNAPSHOT = True`.
+
+## Cache
+
+The SharePoint resource caches site, drive, and directory listings via
+`IndexCacheStore` to reduce repeated Graph calls during traversal.
+
+## Example
+
+```python
+import asyncio
+import os
+
+from mirage import MountMode, Workspace
+from mirage.resource.sharepoint import SharePointResource, SharePointConfig
+
+config = SharePointConfig(access_token=os.environ["MS_GRAPH_DRIVE_TOKEN"])
+resource = SharePointResource(config)
+
+
+async def main() -> None:
+    ws = Workspace({"/sharepoint/": resource}, mode=MountMode.WRITE)
+
+    # list sites, then drives in the first site
+    r = await ws.execute("ls /sharepoint/")
+    print(await r.stdout_str())
+
+    r = await ws.execute("ls /sharepoint/Engineering/")
+    print(await r.stdout_str())
+
+    await ws.execute(
+        "echo 'hello from mirage' > /sharepoint/Engineering/Documents/note.txt")
+
+    r = await ws.execute("cat /sharepoint/Engineering/Documents/note.txt")
+    print(await r.stdout_str())
+
+    r = await ws.execute("tree /sharepoint/Engineering/Documents/")
+    print(await r.stdout_str())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+Runnable versions live at `examples/python/sharepoint/sharepoint.py` (command
+matrix) and `examples/python/sharepoint/sharepoint_vfs.py` (FUSE mount).
+
+## Shell Commands
+
+The SharePoint resource supports the full set of shell commands since it
+operates on real file content (text, binary, JSON, CSV, etc.). Large files
+benefit from range reads to avoid downloading entire items.
+
+### Read Commands
+
+| Command         | Notes                                      |
+| --------------- | ------------------------------------------ |
+| `cat`           | Read file content                          |
+| `head` / `tail` | First/last N lines                         |
+| `grep` / `rg`   | Pattern search (file or directory level)   |
+| `jq`            | Query JSON fields                          |
+| `wc`            | Line/word/byte counts                      |
+| `stat`          | File metadata (name, size, type, modified) |
+| `find`          | Recursive search with `-name`, `-maxdepth` |
+| `tree`          | Directory tree view                        |
+| `nl`            | Number lines                               |
+| `du`            | Disk usage summary                         |
+| `file`          | Detect file type                           |
+| `strings`       | Extract printable strings from binary      |
+| `xxd`           | Hex dump                                   |
+| `md5`           | MD5 checksum                               |
+| `sha256sum`     | SHA-256 checksum                           |
+
+### File Operations
+
+| Command | Notes                                 |
+| ------- | ------------------------------------- |
+| `cp`    | Copy files                            |
+| `mv`    | Move/rename files                     |
+| `rm`    | Remove files                          |
+| `mkdir` | Create directories                    |
+| `touch` | Create empty file or update timestamp |
+| `tee`   | Write stdin to file and stdout        |
+
+### Path Utilities
+
+| Command    | Notes                     |
+| ---------- | ------------------------- |
+| `basename` | Strip directory from path |
+| `dirname`  | Strip filename from path  |
+| `realpath` | Resolve path              |
+| `ls`       | List directory contents   |
+
+## Use Cases
+
+- **AI agents accessing org documents**: Mount enterprise SharePoint for agents to read and process files across many sites
+- **Multi-site discovery**: Browse every accessible site and library from a single mount, no drive ids to manage
+- **Versioned document workflows**: Snapshot and replay exact file states over time
+- **FUSE mounting**: Expose SharePoint through a virtual FUSE mount for external tools
+
+## SharePoint vs OneDrive
+
+Both backends talk to Microsoft Graph driveItems and behave identically below
+the drive level. Choose by topology:
+
+- Use **[OneDrive](/python/resource/onedrive)** for a single drive (personal
+  OneDrive, OneDrive for Business, or one targeted SharePoint library via
+  `drive_id` / `site_id`).
+- Use **SharePoint** for enterprise scenarios with many sites and libraries that
+  you want to discover and traverse without knowing drive ids up front.

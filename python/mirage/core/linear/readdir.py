@@ -51,7 +51,7 @@ async def readdir(
         if index is not None:
             listing = await index.list_dir(idx_key)
             if listing.entries is not None:
-                return listing.entries
+                return [f"{prefix}{entry}" for entry in listing.entries]
         teams = await list_teams(accessor.config)
         if accessor.config.team_ids:
             teams = [
@@ -114,7 +114,7 @@ async def readdir(
             team_id = result.entry.id
             listing = await index.list_dir(idx_key)
             if listing.entries is not None:
-                return listing.entries
+                return [f"{prefix}{entry}" for entry in listing.entries]
         else:
             raise enoent(virtual)
         users = await list_team_members(accessor.config, team_id)
@@ -152,7 +152,7 @@ async def readdir(
             team_id = result.entry.id
             listing = await index.list_dir(idx_key)
             if listing.entries is not None:
-                return listing.entries
+                return [f"{prefix}{entry}" for entry in listing.entries]
         else:
             raise enoent(virtual)
         issues = await list_team_issues(accessor.config, team_id)
@@ -204,7 +204,7 @@ async def readdir(
             team_id = result.entry.id
             listing = await index.list_dir(idx_key)
             if listing.entries is not None:
-                return listing.entries
+                return [f"{prefix}{entry}" for entry in listing.entries]
         else:
             raise enoent(virtual)
         projects = await list_team_projects(accessor.config, team_id)
@@ -241,7 +241,7 @@ async def readdir(
             team_id = result.entry.id
             listing = await index.list_dir(idx_key)
             if listing.entries is not None:
-                return listing.entries
+                return [f"{prefix}{entry}" for entry in listing.entries]
         else:
             raise enoent(virtual)
         cycles = await list_team_cycles(accessor.config, team_id)

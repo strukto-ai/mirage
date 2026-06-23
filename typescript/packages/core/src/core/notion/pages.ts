@@ -59,6 +59,25 @@ export async function searchTopLevelPages(transport: NotionTransport): Promise<J
   return filtered
 }
 
+export async function searchDatabases(transport: NotionTransport): Promise<Json[]> {
+  const baseArgs = { filter: { value: 'database', property: 'object' }, page_size: 100 }
+  return paginateTool(transport, 'API-post-search', baseArgs)
+}
+
+export async function getDatabase(transport: NotionTransport, databaseId: string): Promise<Json> {
+  return transport.callTool('API-retrieve-a-database', { database_id: databaseId })
+}
+
+export async function queryDatabase(
+  transport: NotionTransport,
+  databaseId: string,
+): Promise<Json[]> {
+  return paginateTool(transport, 'API-post-database-query', {
+    database_id: databaseId,
+    page_size: 100,
+  })
+}
+
 export async function getPage(transport: NotionTransport, pageId: string): Promise<Json> {
   return transport.callTool('API-retrieve-a-page', { page_id: pageId })
 }
