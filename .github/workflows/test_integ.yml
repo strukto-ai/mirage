@@ -122,7 +122,7 @@ jobs:
     env:
       REDIS_URL: redis://localhost:6379/0
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -215,7 +215,7 @@ jobs:
       AWS_ACCESS_KEY_ID: minio
       AWS_SECRET_ACCESS_KEY: minio123
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Node
         uses: actions/setup-node@v6
@@ -353,7 +353,7 @@ jobs:
       MONGODB_URI: mongodb://localhost:27017/?replicaSet=rs0
       POSTGRES_DSN: postgres://mirage:mirage@localhost:5432/mirage_integ
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -438,7 +438,7 @@ jobs:
       MONGODB_URI: mongodb://localhost:27017/?replicaSet=rs0
       POSTGRES_DSN: postgres://mirage:mirage@localhost:5432/mirage_integ
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Node
         uses: actions/setup-node@v6
@@ -527,7 +527,7 @@ jobs:
       NEXTCLOUD_USERNAME: admin
       NEXTCLOUD_PASSWORD: admin123
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -584,7 +584,7 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.ssh == 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -610,7 +610,7 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.ssh == 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Node
         uses: actions/setup-node@v6
@@ -645,7 +645,7 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.fuse == 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install libfuse (fusermount3 + libfuse2 for mfusepy, libfuse3 headers for fuse-native)
         run: |
