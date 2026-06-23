@@ -15,6 +15,7 @@
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.general import COMMANDS as GENERAL_COMMANDS
+from mirage.commands.builtin.generic_bind.adapter import FACTORY_READ_RESOURCES
 from mirage.ops.config import OpsMount
 from mirage.resource.base import BaseResource
 from mirage.resource.dev import DevResource
@@ -294,6 +295,12 @@ class MountRegistry:
 
         default = self._default_mount
         resolved = mount.resolve_command(cmd_name)
+        # Warm-read serving. Factory backends serve cached bytes in place via
+        # with_read_cache (their name is in FACTORY_READ_RESOURCES), keeping
+        # their real mount's safeguards and custom handlers. Bespoke backends
+        # have no such seam, and their standalone read commands can be wrong
+        # for cached state, so a fully-cached read is redirected to the cache
+        # mount as before. Under ALWAYS we evict stale entries first.
         if (default is not None and path_scopes and resolved is not None
                 and not resolved.write
                 and isinstance(default.resource, FileCacheMixin)
@@ -301,7 +308,8 @@ class MountRegistry:
             keys = [p.original for p in path_scopes]
             if self._consistency == ConsistencyPolicy.ALWAYS:
                 await self._evict_stale(mount, default.resource, path_scopes)
-            if await default.resource.all_cached(keys):
+            if (mount.resource.name not in FACTORY_READ_RESOURCES
+                    and await default.resource.all_cached(keys)):
                 mount = default
 
         return mount

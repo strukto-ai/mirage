@@ -43,4 +43,4 @@ async def file(
                               i=i)
 
 
-BUILDER = Builder('file', file, None, False, None)
+BUILDER = Builder('file', file, None, False, None, read=True)

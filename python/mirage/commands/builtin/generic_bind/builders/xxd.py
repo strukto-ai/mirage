@@ -59,4 +59,4 @@ async def xxd(
                              limit=limit)
 
 
-BUILDER = Builder('xxd', xxd, None, False, None)
+BUILDER = Builder('xxd', xxd, None, False, None, read=True)

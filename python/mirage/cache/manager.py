@@ -56,6 +56,23 @@ class CacheManager:
             return self._prefix + path
         return path
 
+    async def cached_bytes(self, path: PathSpec) -> bytes | None:
+        """Return cached bytes for ``path`` if present, else None.
+
+        Lookup only: never fetches from the backend. The single
+        read-cache check: the factory's cache-aware ops call it to serve
+        warm reads, and the VFS dispatcher uses it for the same decision.
+
+        Args:
+            path (PathSpec): the path to look up.
+        """
+        if not self._caches_reads or self._file_cache is None:
+            return None
+        virtual = self._virtual(path)
+        if await self._file_cache.exists(virtual):
+            return await self._file_cache.get(virtual)
+        return None
+
     async def invalidate_after_write(self, path: str | PathSpec) -> None:
         """Invalidate caches after a write to ``path``.
 

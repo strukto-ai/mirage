@@ -53,4 +53,4 @@ async def nl(
     )
 
 
-BUILDER = Builder('nl', nl, None, False, None)
+BUILDER = Builder('nl', nl, None, False, None, read=True)

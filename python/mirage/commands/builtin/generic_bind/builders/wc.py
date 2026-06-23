@@ -64,4 +64,9 @@ async def wc(
             b"\n", IOResult())
 
 
-BUILDER = Builder('wc', wc, make_file_read_provision, False, wc_aggregate)
+BUILDER = Builder('wc',
+                  wc,
+                  make_file_read_provision,
+                  False,
+                  wc_aggregate,
+                  read=True)

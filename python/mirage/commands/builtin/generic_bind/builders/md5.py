@@ -39,4 +39,4 @@ async def md5(
                              stdin=stdin)
 
 
-BUILDER = Builder('md5', md5, None, False, None)
+BUILDER = Builder('md5', md5, None, False, None, read=True)

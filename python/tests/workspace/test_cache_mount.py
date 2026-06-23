@@ -135,23 +135,26 @@ async def test_custom_stat_after_cache_promotion(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_custom_stat_after_cache_promotion_without_fix_falls_through(
-        tmp_path):
-    """Sanity check: without registering on cache_mount, the second stat
-    routes to built-in RAM stat (not the custom variant). This guards the
-    regression — if dispatch ever stops promoting to cache, this test
-    flips and the test above becomes redundant."""
+async def test_warm_read_stays_on_real_mount(tmp_path):
+    """Read-through: the second (cached) read must still run the REAL
+    mount's command, not reroute to cache_mount. Today the dispatcher
+    redirects warm reads to cache_mount, so the custom disk handler is
+    lost and built-in RAM stat answers instead. With read-through the
+    cached bytes are served while the command stays on the real mount,
+    so no double-registration on cache_mount is needed."""
     (tmp_path / "example.zzz").write_bytes(b"payload")
     disk = DiskResource(root=str(tmp_path))
     disk.caches_reads = True
     ws = Workspace({"/": disk}, mode=MountMode.READ)
     ws.mount("/").register_fns([stat_zzz_disk])
-    # Intentionally NOT calling ws.cache_mount.register_fns(...)
+    # Intentionally NOT registering stat_zzz_ram on cache_mount.
 
-    await ws.execute("stat /example.zzz")
+    first = await ws.execute("stat /example.zzz")
     second = await ws.execute("stat /example.zzz")
-    second_text = (await second.stdout_str())
-    assert "CUSTOM" not in second_text
+    assert "CUSTOM DISK STAT" in (await first.stdout_str())
+    assert "CUSTOM DISK STAT" in (await second.stdout_str()), (
+        "warm read rerouted to cache_mount and lost the real mount's "
+        "custom handler; read-through should keep it on the real mount")
 
 
 def test_set_default_mount_auto_registers_resource_ops():

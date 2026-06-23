@@ -43,4 +43,4 @@ async def strings(
                                  min_len=int(n) if n else 4)
 
 
-BUILDER = Builder('strings', strings, None, False, None)
+BUILDER = Builder('strings', strings, None, False, None, read=True)

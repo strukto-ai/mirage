@@ -47,4 +47,4 @@ async def comm(
     )
 
 
-BUILDER = Builder('comm', comm, None, False, None)
+BUILDER = Builder('comm', comm, None, False, None, read=True)

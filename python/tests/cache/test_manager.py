@@ -101,6 +101,47 @@ def test_pathspec_input_maps_to_virtual_key():
     assert _run(_pathspec_case()) is False
 
 
+async def _cached_hit_case() -> bytes | None:
+    cache, index = _stores()
+    await cache.set("/data/x.txt", b"cached")
+    manager = CacheManager(cache, index, "/data/", True)
+    spec = PathSpec(original="/data/x.txt",
+                    directory="/data/",
+                    prefix="/data/")
+    return await manager.cached_bytes(spec)
+
+
+def test_cached_bytes_returns_cached_value():
+    assert _run(_cached_hit_case()) == b"cached"
+
+
+async def _cached_miss_case() -> bytes | None:
+    cache, index = _stores()
+    manager = CacheManager(cache, index, "/data/", True)
+    spec = PathSpec(original="/data/x.txt",
+                    directory="/data/",
+                    prefix="/data/")
+    return await manager.cached_bytes(spec)
+
+
+def test_cached_bytes_miss_returns_none():
+    assert _run(_cached_miss_case()) is None
+
+
+async def _cached_local_case() -> bytes | None:
+    cache, index = _stores()
+    await cache.set("/data/x.txt", b"cached")
+    manager = CacheManager(cache, index, "/data/", False)
+    spec = PathSpec(original="/data/x.txt",
+                    directory="/data/",
+                    prefix="/data/")
+    return await manager.cached_bytes(spec)
+
+
+def test_cached_bytes_local_mount_returns_none():
+    assert _run(_cached_local_case()) is None
+
+
 async def _no_index_case() -> bool:
     cache, _ = _stores()
     await cache.set("/data/a.txt", b"x")

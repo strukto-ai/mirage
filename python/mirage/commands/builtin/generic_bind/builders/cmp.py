@@ -50,4 +50,4 @@ async def cmp_cmd(
                              skip=int(i) if i is not None else None)
 
 
-BUILDER = Builder('cmp', cmp_cmd, None, False, None)
+BUILDER = Builder('cmp', cmp_cmd, None, False, None, read=True)

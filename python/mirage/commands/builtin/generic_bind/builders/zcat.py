@@ -41,4 +41,4 @@ async def zcat(
                               stdin=stdin)
 
 
-BUILDER = Builder('zcat', zcat, None, False, None)
+BUILDER = Builder('zcat', zcat, None, False, None, read=True)

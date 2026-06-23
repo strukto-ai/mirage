@@ -49,4 +49,4 @@ async def rg(
     )
 
 
-BUILDER = Builder('rg', rg, None, False, None)
+BUILDER = Builder('rg', rg, None, False, None, read=True)

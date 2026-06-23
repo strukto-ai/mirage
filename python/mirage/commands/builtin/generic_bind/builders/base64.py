@@ -47,4 +47,4 @@ async def base64(
                                 wrap=int(w) if w is not None else None)
 
 
-BUILDER = Builder('base64', base64, None, False, None)
+BUILDER = Builder('base64', base64, None, False, None, read=True)

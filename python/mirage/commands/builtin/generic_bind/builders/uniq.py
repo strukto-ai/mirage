@@ -57,4 +57,4 @@ async def uniq(
     )
 
 
-BUILDER = Builder('uniq', uniq, None, False, None)
+BUILDER = Builder('uniq', uniq, None, False, None, read=True)

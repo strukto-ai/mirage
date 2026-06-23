@@ -53,5 +53,9 @@ async def head(
     return generic_head(source, n=n_int, c=c_int), IOResult()
 
 
-BUILDER = Builder('head', head, make_head_tail_provision, False,
-                  header_aggregate)
+BUILDER = Builder('head',
+                  head,
+                  make_head_tail_provision,
+                  False,
+                  header_aggregate,
+                  read=True)
