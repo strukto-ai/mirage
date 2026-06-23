@@ -12,8 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic.crossmount.ops import (CrossResult,
-                                                            DispatchIO)
+import functools
+
+from mirage.commands.builtin.generic.crossmount.primitives import (CrossResult,
+                                                                   relay,
+                                                                   stream)
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.generic.head import head_multi
 from mirage.commands.builtin.generic.tail import tail_multi
@@ -27,34 +30,34 @@ from mirage.types import PathSpec
 
 
 async def run_read(cmd_name: str, scopes: list[PathSpec], text_args: list[str],
-                   flag_kwargs: dict, io: DispatchIO) -> CrossResult:
+                   flag_kwargs: dict, dispatch) -> CrossResult:
     """Aggregate a multi-file read whose operands span mounts.
 
-    These are the N-ary read commands: many files in, one aggregated stream
-    out. This is the same wiring a backend's read family uses, with the ops
-    backed by ``dispatch`` instead of one accessor: each operand is read (and,
-    for grep, stat'd) through its owning mount, and the shared generic command
-    does the cat/head/tail/wc/grep work, so cross-mount output matches the
-    single-mount commands. Returns the same ``(out, IOResult)`` a generic
-    command returns; the caller builds the record.
+    Pure wiring: each operand is read (and for grep stat'd) via its owning
+    mount via ``dispatch``-relayed primitives, and the shared generic command
+    does the cat/head/tail/wc/grep work, so output matches the single-mount
+    commands. The caller builds the execution record.
 
     Args:
         cmd_name (str): One of cat, head, tail, wc, grep, rg.
         scopes (list[PathSpec]): Resolved file operands spanning mounts.
         text_args (list[str]): Positional text operands (grep pattern).
         flag_kwargs (dict): Flags parsed against the shared command spec.
-        io (DispatchIO): Dispatch-backed ops bundle.
+        dispatch (Callable): Workspace operation dispatcher.
     """
+    p = functools.partial
+    read_bytes = p(relay, dispatch, "read")
+    read_stream = p(stream, dispatch)
     show_headers = len(scopes) > 1
 
     if cmd_name in ("grep", "rg"):
         return await generic_grep(scopes,
                                   text_args,
                                   flag_kwargs,
-                                  readdir=io.readdir,
-                                  stat=io.stat,
-                                  read_bytes=io.read_bytes,
-                                  read_stream=io.read_stream,
+                                  readdir=p(relay, dispatch, "readdir"),
+                                  stat=p(relay, dispatch, "stat"),
+                                  read_bytes=read_bytes,
+                                  read_stream=read_stream,
                                   accessor=None)
 
     if cmd_name in ("head", "tail"):
@@ -71,13 +74,13 @@ async def run_read(cmd_name: str, scopes: list[PathSpec], text_args: list[str],
                 n_int = lines
         if cmd_name == "head":
             out = head_multi(scopes,
-                             read=io.read_stream,
+                             read=read_stream,
                              n=n_int,
                              c=c,
                              show_headers=show_headers)
         else:
             out = tail_multi(scopes,
-                             read=io.read_stream,
+                             read=read_stream,
                              n=n_int,
                              c=c,
                              from_line=from_line,
@@ -87,7 +90,7 @@ async def run_read(cmd_name: str, scopes: list[PathSpec], text_args: list[str],
     if cmd_name == "wc":
         fl = FlagView(flag_kwargs, spec=SPECS["wc"])
         body = await wc_format_multi(scopes,
-                                     read=io.read_stream,
+                                     read=read_stream,
                                      args_l=fl.bool("args_l"),
                                      w=fl.bool("w"),
                                      c=fl.bool("c"),
@@ -97,6 +100,6 @@ async def run_read(cmd_name: str, scopes: list[PathSpec], text_args: list[str],
 
     reads: dict[str, bytes] = {}
     for scope in scopes:
-        reads[scope.original] = await io.read_bytes(None, scope)
+        reads[scope.original] = await read_bytes(None, scope)
     return async_chain(*reads.values()), IOResult(reads=dict(reads),
                                                   cache=list(reads))

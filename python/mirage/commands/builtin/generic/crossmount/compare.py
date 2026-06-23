@@ -13,10 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import dataclasses
+import functools
 
 from mirage.commands.builtin.generic.cmp import cmp_cmd as generic_cmp
-from mirage.commands.builtin.generic.crossmount.ops import (CrossResult,
-                                                            DispatchIO)
+from mirage.commands.builtin.generic.crossmount.primitives import (CrossResult,
+                                                                   relay)
 from mirage.commands.builtin.generic.diff import diff as generic_diff
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
@@ -28,26 +29,28 @@ def _flat(scopes: list[PathSpec]) -> list[PathSpec]:
 
 
 async def run_compare(cmd_name: str, scopes: list[PathSpec], flag_kwargs: dict,
-                      io: DispatchIO) -> CrossResult:
+                      dispatch) -> CrossResult:
     """Compare two files that live on different mounts.
 
-    Both files are read through the dispatch-backed ``io`` and handed to the
-    shared generic diff/cmp, so output matches the single-mount commands.
-    Returns the same ``(out, IOResult)`` a generic command returns; the caller
-    builds the record.
+    Pure wiring: both files are read through ``dispatch`` primitives and
+    handed to the shared generic diff/cmp, so output matches the single-mount
+    commands. The caller builds the execution record.
 
     Args:
         cmd_name (str): ``diff`` or ``cmp``.
         scopes (list[PathSpec]): The two path operands.
         flag_kwargs (dict): Flags parsed against the shared command spec.
-        io (DispatchIO): Dispatch-backed ops bundle.
+        dispatch (Callable): Workspace operation dispatcher.
     """
+    p = functools.partial
+    read_bytes = p(relay, dispatch, "read")
+    flat = _flat(scopes)
     if cmd_name == "diff":
         fl = FlagView(flag_kwargs, spec=SPECS["diff"])
-        return await generic_diff(_flat(scopes),
-                                  read_bytes=io.read_bytes,
-                                  readdir_fn=io.readdir,
-                                  stat_fn=io.stat,
+        return await generic_diff(flat,
+                                  read_bytes=read_bytes,
+                                  readdir_fn=p(relay, dispatch, "readdir"),
+                                  stat_fn=p(relay, dispatch, "stat"),
                                   accessor=None,
                                   i=fl.bool("i"),
                                   w=fl.bool("w"),
@@ -59,8 +62,8 @@ async def run_compare(cmd_name: str, scopes: list[PathSpec], flag_kwargs: dict,
     fl = FlagView(flag_kwargs, spec=SPECS["cmp"])
     limit = fl.str("n")
     skip = fl.str("i")
-    return await generic_cmp(_flat(scopes),
-                             read_bytes=io.read_bytes,
+    return await generic_cmp(flat,
+                             read_bytes=read_bytes,
                              accessor=None,
                              silent=fl.bool("s"),
                              verbose=fl.bool("args_l"),
