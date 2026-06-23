@@ -17,7 +17,7 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.mv import mv as generic_mv
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -45,5 +45,4 @@ async def mv(
                             index=index)
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('mv', mv, None, True, None)
+BUILDER = Builder('mv', mv, None, True, None)

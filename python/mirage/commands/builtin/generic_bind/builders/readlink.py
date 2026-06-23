@@ -16,7 +16,7 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.readlink import \
     readlink as generic_readlink
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -40,5 +40,4 @@ async def readlink(
     return await generic_readlink(paths, f=f, e=e, m=m, n=n)
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('readlink', readlink, None, False, None)
+BUILDER = Builder('readlink', readlink, None, False, None)

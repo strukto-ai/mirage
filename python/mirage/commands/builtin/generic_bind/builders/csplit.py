@@ -14,41 +14,42 @@
 
 from collections.abc import AsyncIterator
 
-from mirage.accessor.s3 import S3Accessor
+from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.gunzip import gunzip as generic_gunzip
-from mirage.commands.registry import command
-from mirage.commands.spec import SPECS
-from mirage.core.s3.glob import resolve_glob
-from mirage.core.s3.read import read_bytes
-from mirage.core.s3.unlink import unlink
-from mirage.core.s3.write import write_bytes
+from mirage.commands.builtin.generic.csplit import csplit as generic_csplit
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.builders.common import \
+    resolve_or_empty
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("gunzip", resource="s3", spec=SPECS["gunzip"], write=True)
-async def gunzip(
-    accessor: S3Accessor,
+async def csplit(
+    ops: CommandIO,
+    accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
+    f: str | PathSpec | None = None,
+    n: str | None = None,
+    b: str | None = None,
     k: bool = False,
-    f: bool = False,
-    c: bool = False,
-    t: bool = False,
-    index: IndexCacheStore = None,
-    **_extra: object,
+    s: bool = False,
+    index: IndexCacheStore | None = None,
+    **flags,
 ) -> tuple[ByteSource | None, IOResult]:
-    if paths:
-        paths = await resolve_glob(accessor, paths, index)
-    return await generic_gunzip(paths,
-                                read_bytes=read_bytes,
-                                write_bytes=write_bytes,
-                                unlink=unlink,
+    paths = await resolve_or_empty(ops, accessor, paths, index)
+    return await generic_csplit(paths,
+                                texts,
+                                read_bytes=ops.read_bytes,
+                                write_bytes=ops.write,
                                 accessor=accessor,
                                 stdin=stdin,
-                                keep=k,
-                                force=f,
-                                to_stdout=c,
-                                test_only=t)
+                                prefix=f or "xx",
+                                digits=int(n) if n else 2,
+                                suffix_format=b,
+                                keep_on_error=k,
+                                silent=s)
+
+
+BUILDER = Builder('csplit', csplit, None, True, None)

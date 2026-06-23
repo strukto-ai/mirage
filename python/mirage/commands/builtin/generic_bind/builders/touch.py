@@ -14,7 +14,7 @@
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -42,5 +42,4 @@ async def touch(
     return None, IOResult()
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('touch', touch, None, True, None)
+BUILDER = Builder('touch', touch, None, True, None)

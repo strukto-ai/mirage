@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -48,5 +48,4 @@ async def ln(
     return output, IOResult(writes={dest_path.strip_prefix: data})
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('ln', ln, None, True, None)
+BUILDER = Builder('ln', ln, None, True, None)

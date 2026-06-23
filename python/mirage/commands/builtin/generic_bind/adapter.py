@@ -17,12 +17,21 @@ import logging
 import posixpath
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import NamedTuple
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.types import PathSpec
 
 logger = logging.getLogger(__name__)
+
+
+class Builder(NamedTuple):
+    name: str
+    fn: Callable
+    provision: Callable | None = None
+    write: bool = False
+    aggregate: Callable | None = None
 
 
 def make_resolve_glob(readdir: Callable,

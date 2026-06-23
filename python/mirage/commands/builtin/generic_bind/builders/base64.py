@@ -18,7 +18,7 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.base64_cmd import \
     base64_cmd as generic_base64
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
 from mirage.io.types import ByteSource, IOResult
@@ -46,5 +46,4 @@ async def base64(
                                 wrap=int(w) if w is not None else None)
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('base64', base64, None, False, None)
+BUILDER = Builder('base64', base64, None, False, None)

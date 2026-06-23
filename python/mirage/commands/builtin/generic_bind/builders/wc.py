@@ -20,7 +20,7 @@ from mirage.commands.builtin.aggregators import wc_aggregate
 from mirage.commands.builtin.generic.wc import format_multi, format_wc
 from mirage.commands.builtin.generic.wc import wc as generic_wc
 from mirage.commands.builtin.generic.wc import wc_lines as generic_wc_lines
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.builtin.generic_bind.provision import \
     make_file_read_provision
 from mirage.commands.builtin.utils.stream import _resolve_source
@@ -63,5 +63,4 @@ async def wc(
             b"\n", IOResult())
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('wc', wc, make_file_read_provision, False, wc_aggregate)
+BUILDER = Builder('wc', wc, make_file_read_provision, False, wc_aggregate)

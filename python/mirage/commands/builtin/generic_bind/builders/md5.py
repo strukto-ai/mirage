@@ -15,7 +15,7 @@
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.md5 import md5 as generic_md5
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
 from mirage.io.types import ByteSource, IOResult
@@ -38,5 +38,4 @@ async def md5(
                              stdin=stdin)
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('md5', md5, None, False, None)
+BUILDER = Builder('md5', md5, None, False, None)

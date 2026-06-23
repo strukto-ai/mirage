@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tr import tr as generic_tr
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
 from mirage.io.types import ByteSource, IOResult
@@ -49,5 +49,4 @@ async def tr(
     )
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('tr', tr, None, False, None)
+BUILDER = Builder('tr', tr, None, False, None)

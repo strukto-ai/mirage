@@ -18,7 +18,7 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.unexpand import \
     unexpand as generic_unexpand
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
 from mirage.io.types import ByteSource, IOResult
@@ -45,5 +45,4 @@ async def unexpand(
                                   all_spaces=a)
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('unexpand', unexpand, None, False, None)
+BUILDER = Builder('unexpand', unexpand, None, False, None)

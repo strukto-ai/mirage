@@ -17,7 +17,7 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.find import find as generic_find
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -59,5 +59,4 @@ async def find(
                               empty=empty)
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('find', find, None, False, None)
+BUILDER = Builder('find', find, None, False, None)

@@ -12,21 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.disk.cmp import cmp_cmd
-from mirage.commands.builtin.disk.csplit import csplit
-from mirage.commands.builtin.disk.diff import diff
-from mirage.commands.builtin.disk.gunzip import gunzip
-from mirage.commands.builtin.disk.gzip import gzip
-from mirage.commands.builtin.disk.mktemp import mktemp
-from mirage.commands.builtin.disk.patch import patch
 from mirage.commands.builtin.disk.sed import sed
-from mirage.commands.builtin.disk.shuf import shuf
-from mirage.commands.builtin.disk.split import split
-from mirage.commands.builtin.disk.tar import tar
-from mirage.commands.builtin.disk.tsort import tsort
-from mirage.commands.builtin.disk.unzip import unzip as unzip_cmd
-from mirage.commands.builtin.disk.zcat import zcat
-from mirage.commands.builtin.disk.zip_cmd import zip_cmd
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
@@ -72,19 +58,5 @@ _DISK_CMD_OPS = CommandIO(
 COMMANDS = [
     *make_filetype_commands("disk", _ft_resolve_glob, _read),
     *make_generic_commands("disk", _DISK_CMD_OPS),
-    cmp_cmd,
-    csplit,
-    diff,
-    gunzip,
-    gzip,
-    mktemp,
-    patch,
     sed,
-    shuf,
-    split,
-    tar,
-    tsort,
-    unzip_cmd,
-    zcat,
-    zip_cmd,
 ]

@@ -18,7 +18,7 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.aggregators import prefix_aggregate
 from mirage.commands.builtin.generic.grep import grep as generic_grep
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -49,5 +49,4 @@ async def grep(
     )
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('grep', grep, None, False, prefix_aggregate)
+BUILDER = Builder('grep', grep, None, False, prefix_aggregate)

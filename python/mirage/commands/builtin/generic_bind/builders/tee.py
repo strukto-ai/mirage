@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tee import tee as generic_tee
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -44,5 +44,4 @@ async def tee(
                              append=a)
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('tee', tee, None, True, None)
+BUILDER = Builder('tee', tee, None, True, None)

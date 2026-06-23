@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.comm import comm as generic_comm
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -47,5 +47,4 @@ async def comm(
     )
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('comm', comm, None, False, None)
+BUILDER = Builder('comm', comm, None, False, None)

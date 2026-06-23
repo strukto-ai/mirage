@@ -18,7 +18,7 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.aggregators import concat_aggregate
 from mirage.commands.builtin.generic.cat import cat as generic_cat
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.builtin.generic_bind.provision import \
     make_file_read_provision
 from mirage.commands.builtin.utils.stream import _resolve_source
@@ -80,5 +80,5 @@ async def cat(
     return source, IOResult()
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('cat', cat, make_file_read_provision, False, concat_aggregate)
+BUILDER = Builder('cat', cat, make_file_read_provision, False,
+                  concat_aggregate)

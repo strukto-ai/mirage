@@ -42,22 +42,22 @@ def make_generic_commands(
     skip = overrides or set()
     prov_over = provision_overrides or {}
     commands: list[Callable] = []
-    for name, builder, provision_builder, write, aggregate in _BUILDERS:
-        if name in skip:
+    for b in _BUILDERS:
+        if b.name in skip:
             continue
-        bound = functools.partial(builder, ops)
-        if name in prov_over:
-            provision = prov_over[name]
-        elif provision_builder is not None:
-            provision = provision_builder(ops.stat)
+        bound = functools.partial(b.fn, ops)
+        if b.name in prov_over:
+            provision = prov_over[b.name]
+        elif b.provision is not None:
+            provision = b.provision(ops.stat)
         else:
             provision = None
-        agg = aggregate if ops.local else None
+        agg = b.aggregate if ops.local else None
         commands.append(
-            command(name,
+            command(b.name,
                     resource=resource,
-                    spec=SPECS[name],
+                    spec=SPECS[b.name],
                     provision=provision,
                     aggregate=agg,
-                    write=write)(bound))
+                    write=b.write)(bound))
     return commands

@@ -15,7 +15,7 @@
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.file import file_cmd as generic_file
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -42,5 +42,4 @@ async def file(
                               i=i)
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('file', file, None, False, None)
+BUILDER = Builder('file', file, None, False, None)

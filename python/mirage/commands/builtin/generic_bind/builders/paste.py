@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.paste import paste as generic_paste
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
 from mirage.io.types import ByteSource, IOResult
@@ -44,5 +44,4 @@ async def paste(
                                serial=s)
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('paste', paste, None, False, None)
+BUILDER = Builder('paste', paste, None, False, None)

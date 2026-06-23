@@ -18,7 +18,7 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.sha256sum import \
     sha256sum as generic_sha256sum
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
 from mirage.io.types import ByteSource, IOResult
@@ -44,5 +44,4 @@ async def sha256sum(
                                    check=c)
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('sha256sum', sha256sum, None, False, None)
+BUILDER = Builder('sha256sum', sha256sum, None, False, None)

@@ -14,23 +14,18 @@
 
 from collections.abc import AsyncIterator
 
-from mirage.accessor.s3 import S3Accessor
+from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.gzip import extract_level
 from mirage.commands.builtin.generic.gzip import gzip as generic_gzip
-from mirage.commands.registry import command
-from mirage.commands.spec import SPECS
-from mirage.core.s3.glob import resolve_glob
-from mirage.core.s3.read import read_bytes
-from mirage.core.s3.unlink import unlink
-from mirage.core.s3.write import write_bytes
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("gzip", resource="s3", spec=SPECS["gzip"], write=True)
 async def gzip(
-    accessor: S3Accessor,
+    ops: CommandIO,
+    accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
@@ -38,16 +33,16 @@ async def gzip(
     k: bool = False,
     f: bool = False,
     c: bool = False,
-    index: IndexCacheStore = None,
-    **_extra: object,
+    index: IndexCacheStore | None = None,
+    **flags,
 ) -> tuple[ByteSource | None, IOResult]:
-    level = extract_level(_extra)
+    level = extract_level(flags)
     if paths:
-        paths = await resolve_glob(accessor, paths, index)
+        paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_gzip(paths,
-                              read_bytes=read_bytes,
-                              write_bytes=write_bytes,
-                              unlink=unlink,
+                              read_bytes=ops.read_bytes,
+                              write_bytes=ops.write,
+                              unlink=ops.unlink,
                               accessor=accessor,
                               stdin=stdin,
                               decompress=d,
@@ -55,3 +50,6 @@ async def gzip(
                               force=f,
                               to_stdout=c,
                               level=level)
+
+
+BUILDER = Builder('gzip', gzip, None, True, None)

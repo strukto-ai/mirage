@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.rg import rg as generic_rg
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -48,5 +48,4 @@ async def rg(
     )
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('rg', rg, None, False, None)
+BUILDER = Builder('rg', rg, None, False, None)

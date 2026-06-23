@@ -15,21 +15,7 @@
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.redis.cmp import cmp_cmd
-from mirage.commands.builtin.redis.csplit import csplit
-from mirage.commands.builtin.redis.diff import diff
-from mirage.commands.builtin.redis.gunzip import gunzip
-from mirage.commands.builtin.redis.gzip import gzip
-from mirage.commands.builtin.redis.mktemp import mktemp
-from mirage.commands.builtin.redis.patch import patch
 from mirage.commands.builtin.redis.sed import sed
-from mirage.commands.builtin.redis.shuf import shuf
-from mirage.commands.builtin.redis.split import split
-from mirage.commands.builtin.redis.tar import tar
-from mirage.commands.builtin.redis.tsort import tsort
-from mirage.commands.builtin.redis.unzip import unzip as unzip_cmd
-from mirage.commands.builtin.redis.zcat import zcat
-from mirage.commands.builtin.redis.zip_cmd import zip_cmd
 from mirage.core.redis.constants import SCOPE_ERROR
 from mirage.core.redis.copy import copy as _copy
 from mirage.core.redis.du import du as _du
@@ -73,19 +59,5 @@ _REDIS_CMD_OPS = CommandIO(
 COMMANDS = [
     *make_filetype_commands("redis", _ft_resolve_glob, _ft_read),
     *make_generic_commands("redis", _REDIS_CMD_OPS),
-    cmp_cmd,
-    csplit,
-    diff,
-    gunzip,
-    gzip,
-    mktemp,
-    patch,
     sed,
-    shuf,
-    split,
-    tar,
-    tsort,
-    unzip_cmd,
-    zcat,
-    zip_cmd,
 ]

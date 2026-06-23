@@ -14,20 +14,17 @@
 
 from collections.abc import AsyncIterator
 
-from mirage.accessor.disk import DiskAccessor
+from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.shuf import shuf as generic_shuf
-from mirage.commands.registry import command
-from mirage.commands.spec import SPECS
-from mirage.core.disk.glob import resolve_glob
-from mirage.core.disk.read import read_bytes
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("shuf", resource="disk", spec=SPECS["shuf"])
 async def shuf(
-    accessor: DiskAccessor,
+    ops: CommandIO,
+    accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
@@ -35,19 +32,22 @@ async def shuf(
     e: bool = False,
     z: bool = False,
     r: bool = False,
-    index: IndexCacheStore = None,
-    **_extra: object,
+    index: IndexCacheStore | None = None,
+    **flags,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
-        paths = await resolve_glob(accessor, paths, index)
-    elif accessor.root is None:
+        paths = await ops.resolve_glob(accessor, paths, index)
+    elif not ops.is_mounted(accessor):
         paths = []
     return await generic_shuf(paths,
                               texts,
-                              read_bytes=read_bytes,
+                              read_bytes=ops.read_bytes,
                               accessor=accessor,
                               stdin=stdin,
                               count=int(n) if n is not None else None,
                               echo=e,
                               zero_terminated=z,
                               with_replacement=r)
+
+
+BUILDER = Builder('shuf', shuf, None, False, None)

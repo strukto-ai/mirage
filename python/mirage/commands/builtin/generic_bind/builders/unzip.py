@@ -14,22 +14,17 @@
 
 from collections.abc import AsyncIterator
 
-from mirage.accessor.ram import RAMAccessor
+from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.unzip import unzip as generic_unzip
-from mirage.commands.registry import command
-from mirage.commands.spec import SPECS
-from mirage.core.ram.glob import resolve_glob
-from mirage.core.ram.mkdir import mkdir as _mkdir
-from mirage.core.ram.read import read_bytes as _read_bytes
-from mirage.core.ram.write import write_bytes as _write_bytes
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("unzip", resource="ram", spec=SPECS["unzip"], write=True)
 async def unzip(
-    accessor: RAMAccessor,
+    ops: CommandIO,
+    accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
@@ -39,16 +34,16 @@ async def unzip(
     q: bool = False,
     p: bool = False,
     t: bool = False,
-    index: IndexCacheStore = None,
-    **_extra: object,
+    index: IndexCacheStore | None = None,
+    **flags,
 ) -> tuple[ByteSource | None, IOResult]:
-    if accessor.store is None or not paths:
+    if not ops.is_mounted(accessor) or not paths:
         raise ValueError("unzip: missing operand")
-    paths = await resolve_glob(accessor, paths, index)
+    paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_unzip(paths,
-                               read_bytes=_read_bytes,
-                               write_bytes=_write_bytes,
-                               mkdir_fn=_mkdir,
+                               read_bytes=ops.read_bytes,
+                               write_bytes=ops.write,
+                               mkdir_fn=ops.mkdir,
                                accessor=accessor,
                                o=o,
                                args_l=args_l,
@@ -56,3 +51,6 @@ async def unzip(
                                q=q,
                                p=p,
                                t=t)
+
+
+BUILDER = Builder('unzip', unzip, None, True, None)

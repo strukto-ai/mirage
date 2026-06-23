@@ -15,21 +15,7 @@
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.ram.cmp import cmp_cmd
-from mirage.commands.builtin.ram.csplit import csplit
-from mirage.commands.builtin.ram.diff import diff
-from mirage.commands.builtin.ram.gunzip import gunzip
-from mirage.commands.builtin.ram.gzip import gzip
-from mirage.commands.builtin.ram.mktemp import mktemp
-from mirage.commands.builtin.ram.patch import patch
 from mirage.commands.builtin.ram.sed import sed
-from mirage.commands.builtin.ram.shuf import shuf
-from mirage.commands.builtin.ram.split import split
-from mirage.commands.builtin.ram.tar import tar
-from mirage.commands.builtin.ram.tsort import tsort
-from mirage.commands.builtin.ram.unzip import unzip as unzip_cmd
-from mirage.commands.builtin.ram.zcat import zcat
-from mirage.commands.builtin.ram.zip_cmd import zip_cmd
 from mirage.core.ram.constants import SCOPE_ERROR
 from mirage.core.ram.copy import copy as _copy
 from mirage.core.ram.du import du as _du
@@ -73,19 +59,5 @@ _RAM_CMD_OPS = CommandIO(
 COMMANDS = [
     *make_filetype_commands("ram", _ft_resolve_glob, _ft_read),
     *make_generic_commands("ram", _RAM_CMD_OPS),
-    cmp_cmd,
-    csplit,
-    diff,
-    gunzip,
-    gzip,
-    mktemp,
-    patch,
     sed,
-    shuf,
-    split,
-    tar,
-    tsort,
-    unzip_cmd,
-    zcat,
-    zip_cmd,
 ]

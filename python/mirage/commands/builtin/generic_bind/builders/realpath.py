@@ -16,7 +16,7 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.realpath import \
     realpath as generic_realpath
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -40,5 +40,4 @@ async def realpath(
                                   m=m)
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('realpath', realpath, None, False, None)
+BUILDER = Builder('realpath', realpath, None, False, None)

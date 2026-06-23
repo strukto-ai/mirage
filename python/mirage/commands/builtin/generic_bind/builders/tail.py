@@ -19,7 +19,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.aggregators import header_aggregate
 from mirage.commands.builtin.generic.tail import tail as generic_tail
 from mirage.commands.builtin.generic.tail import tail_multi
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.builtin.generic_bind.provision import \
     make_head_tail_provision
 from mirage.commands.builtin.tail_helper import _parse_n
@@ -66,5 +66,5 @@ async def tail(
                         from_line=from_line), IOResult()
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('tail', tail, make_head_tail_provision, False, header_aggregate)
+BUILDER = Builder('tail', tail, make_head_tail_provision, False,
+                  header_aggregate)

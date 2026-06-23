@@ -17,7 +17,7 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.du import du as generic_du
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -54,5 +54,4 @@ async def du(
     return out.encode(), IOResult()
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('du', du, None, False, None)
+BUILDER = Builder('du', du, None, False, None)

@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.strings import strings as generic_strings
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
 from mirage.io.types import ByteSource, IOResult
@@ -42,5 +42,4 @@ async def strings(
                                  min_len=int(n) if n else 4)
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('strings', strings, None, False, None)
+BUILDER = Builder('strings', strings, None, False, None)

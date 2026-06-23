@@ -17,7 +17,7 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cp import cp as generic_cp
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -51,5 +51,4 @@ async def cp(
                             index=index)
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('cp', cp, None, True, None)
+BUILDER = Builder('cp', cp, None, True, None)

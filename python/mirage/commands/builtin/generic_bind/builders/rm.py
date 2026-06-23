@@ -14,7 +14,7 @@
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.builtin.utils.output import format_optional_records
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
@@ -64,5 +64,4 @@ async def rm(
     return output, IOResult(writes=removed)
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('rm', rm, None, True, None)
+BUILDER = Builder('rm', rm, None, True, None)

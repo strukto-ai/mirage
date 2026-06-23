@@ -14,31 +14,30 @@
 
 from collections.abc import AsyncIterator
 
-from mirage.accessor.s3 import S3Accessor
+from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.tsort import tsort as generic_tsort
-from mirage.commands.registry import command
-from mirage.commands.spec import SPECS
-from mirage.core.s3.glob import resolve_glob
-from mirage.core.s3.read import read_bytes
+from mirage.commands.builtin.generic.zcat import zcat as generic_zcat
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.builders.common import \
+    resolve_or_empty
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("tsort", resource="s3", spec=SPECS["tsort"])
-async def tsort(
-    accessor: S3Accessor,
+async def zcat(
+    ops: CommandIO,
+    accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
-    index: IndexCacheStore = None,
-    **_extra: object,
+    index: IndexCacheStore | None = None,
+    **flags,
 ) -> tuple[ByteSource | None, IOResult]:
-    if paths:
-        paths = await resolve_glob(accessor, paths, index)
-    else:
-        paths = []
-    return await generic_tsort(paths,
-                               read_bytes=read_bytes,
-                               accessor=accessor,
-                               stdin=stdin)
+    paths = await resolve_or_empty(ops, accessor, paths, index)
+    return await generic_zcat(paths,
+                              read_bytes=ops.read_bytes,
+                              accessor=accessor,
+                              stdin=stdin)
+
+
+BUILDER = Builder('zcat', zcat, None, False, None)

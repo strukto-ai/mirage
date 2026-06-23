@@ -14,21 +14,19 @@
 
 from collections.abc import AsyncIterator
 
-from mirage.accessor.disk import DiskAccessor
+from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.split import split as generic_split
-from mirage.commands.registry import command
-from mirage.commands.spec import SPECS
-from mirage.core.disk.glob import resolve_glob
-from mirage.core.disk.stream import read_stream
-from mirage.core.disk.write import write_bytes
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.builders.common import \
+    resolve_or_empty
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("split", resource="disk", spec=SPECS["split"], write=True)
 async def split(
-    accessor: DiskAccessor,
+    ops: CommandIO,
+    accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
@@ -37,16 +35,13 @@ async def split(
     n: str | None = None,
     d: bool = False,
     a: str | None = None,
-    index: IndexCacheStore = None,
-    **_extra: object,
+    index: IndexCacheStore | None = None,
+    **flags,
 ) -> tuple[ByteSource | None, IOResult]:
-    if paths and accessor.root is not None:
-        paths = await resolve_glob(accessor, paths, index)
-    else:
-        paths = []
+    paths = await resolve_or_empty(ops, accessor, paths, index)
     return await generic_split(paths,
-                               read_stream=read_stream,
-                               write_bytes=write_bytes,
+                               read_stream=ops.read_stream,
+                               write_bytes=ops.write,
                                accessor=accessor,
                                stdin=stdin,
                                lines_per_file=int(args_l) if args_l else 0,
@@ -54,3 +49,6 @@ async def split(
                                n_chunks=int(n) if n else 0,
                                suffix_len=int(a) if a else 2,
                                numeric_suffix=d)
+
+
+BUILDER = Builder('split', split, None, True, None)

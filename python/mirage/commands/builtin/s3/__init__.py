@@ -19,27 +19,14 @@ from mirage.commands.builtin.generic_bind.provision import (
     make_search_provision, metadata_provision)
 from mirage.commands.builtin.s3._provision import \
     file_read_provision as _ft_provision
-from mirage.commands.builtin.s3.cmp import cmp_cmd
-from mirage.commands.builtin.s3.csplit import csplit
-from mirage.commands.builtin.s3.diff import diff
 from mirage.commands.builtin.s3.du import du
-from mirage.commands.builtin.s3.gunzip import gunzip
-from mirage.commands.builtin.s3.gzip import gzip
 from mirage.commands.builtin.s3.mkdir import mkdir
-from mirage.commands.builtin.s3.mktemp import mktemp
 from mirage.commands.builtin.s3.patch import patch
 from mirage.commands.builtin.s3.rm import rm
 from mirage.commands.builtin.s3.sed import sed
-from mirage.commands.builtin.s3.shuf import shuf
-from mirage.commands.builtin.s3.split import split
 from mirage.commands.builtin.s3.stat import stat
-from mirage.commands.builtin.s3.tar import tar
 from mirage.commands.builtin.s3.tee import tee
 from mirage.commands.builtin.s3.touch import touch
-from mirage.commands.builtin.s3.tsort import tsort
-from mirage.commands.builtin.s3.unzip import unzip as unzip_cmd
-from mirage.commands.builtin.s3.zcat import zcat
-from mirage.commands.builtin.s3.zip_cmd import zip_cmd
 from mirage.core.s3.constants import SCOPE_ERROR
 from mirage.core.s3.copy import copy as _copy
 from mirage.core.s3.du import du as _du
@@ -82,7 +69,7 @@ _S3_CMD_OPS = CommandIO(
 # s3-specific behaviours kept as overrides: no real directories (mkdir -p,
 # rm not-empty), write-tracking (touch/tee), du_multi aggregation, and the
 # index-threaded, missing-operand stat.
-_S3_OVERRIDES = {"stat", "du", "rm", "mkdir", "tee", "touch"}
+_S3_OVERRIDES = {"stat", "du", "rm", "mkdir", "tee", "touch", "patch"}
 
 COMMANDS = [
     *make_filetype_commands(
@@ -98,25 +85,12 @@ COMMANDS = [
             "find": metadata_provision,
         },
     ),
-    cmp_cmd,
-    csplit,
-    diff,
     du,
-    gunzip,
-    gzip,
     mkdir,
-    mktemp,
     patch,
     rm,
     sed,
-    shuf,
-    split,
     stat,
-    tar,
     tee,
     touch,
-    tsort,
-    unzip_cmd,
-    zcat,
-    zip_cmd,
 ]

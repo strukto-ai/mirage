@@ -17,7 +17,7 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.ls import ls as generic_ls
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import LsSortBy, PathSpec
 
@@ -73,5 +73,4 @@ async def ls(
     )
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('ls', ls, None, False, None)
+BUILDER = Builder('ls', ls, None, False, None)

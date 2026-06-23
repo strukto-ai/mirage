@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cut import cut as generic_cut
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
 from mirage.io.types import ByteSource, IOResult
@@ -50,5 +50,4 @@ async def cut(
                              z=z)
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('cut', cut, None, False, None)
+BUILDER = Builder('cut', cut, None, False, None)

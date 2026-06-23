@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.look import look as generic_look
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
 from mirage.io.types import ByteSource, IOResult
@@ -45,5 +45,4 @@ async def look(
                               fold_case=f)
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('look', look, None, False, None)
+BUILDER = Builder('look', look, None, False, None)

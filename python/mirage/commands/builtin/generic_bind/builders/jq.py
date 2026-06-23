@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.jq import jq as generic_jq
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
 from mirage.commands.builtin.generic_bind.provision import make_jq_provision
@@ -49,5 +49,4 @@ async def jq(
                             s=s)
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('jq', jq, make_jq_provision, False, None)
+BUILDER = Builder('jq', jq, make_jq_provision, False, None)

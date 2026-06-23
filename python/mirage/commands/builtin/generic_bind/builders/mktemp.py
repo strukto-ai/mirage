@@ -12,31 +12,31 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.ram import RAMAccessor
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.mktemp import mktemp as generic_mktemp
-from mirage.commands.registry import command
-from mirage.commands.spec import SPECS
-from mirage.core.ram.mkdir import mkdir as mkdir_core
-from mirage.core.ram.write import write_bytes
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("mktemp", resource="ram", spec=SPECS["mktemp"], write=True)
 async def mktemp(
-    accessor: RAMAccessor,
+    ops: CommandIO,
+    accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
     d: bool = False,
     p: str | None = None,
     t: bool = False,
-    **_extra: object,
+    **flags,
 ) -> tuple[ByteSource | None, IOResult]:
     return await generic_mktemp(*texts,
-                                mkdir_fn=mkdir_core,
-                                write_bytes_fn=write_bytes,
+                                mkdir_fn=ops.mkdir,
+                                write_bytes_fn=ops.write,
                                 accessor=accessor,
                                 d=d,
                                 p=p,
                                 t=t)
+
+
+BUILDER = Builder('mktemp', mktemp, None, True, None)

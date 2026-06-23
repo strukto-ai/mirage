@@ -12,22 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.s3 import S3Accessor
+from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.diff import diff as generic_diff
-from mirage.commands.registry import command
-from mirage.commands.spec import SPECS
-from mirage.core.s3.glob import resolve_glob
-from mirage.core.s3.read import read_bytes
-from mirage.core.s3.readdir import readdir
-from mirage.core.s3.stat import stat
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("diff", resource="s3", spec=SPECS["diff"])
 async def diff(
-    accessor: S3Accessor,
+    ops: CommandIO,
+    accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
@@ -38,14 +33,16 @@ async def diff(
     u: bool = False,
     q: bool = False,
     r: bool = False,
-    index: IndexCacheStore = None,
-    **_extra: object,
+    index: IndexCacheStore | None = None,
+    **flags,
 ) -> tuple[ByteSource | None, IOResult]:
-    paths = await resolve_glob(accessor, paths, index)
+    if not ops.is_mounted(accessor):
+        raise ValueError("diff: no resource")
+    paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_diff(paths,
-                              read_bytes=read_bytes,
-                              readdir_fn=readdir,
-                              stat_fn=stat,
+                              read_bytes=ops.read_bytes,
+                              readdir_fn=ops.readdir,
+                              stat_fn=ops.stat,
                               accessor=accessor,
                               index=index,
                               i=i,
@@ -55,3 +52,6 @@ async def diff(
                               u=u,
                               q=q,
                               r=r)
+
+
+BUILDER = Builder('diff', diff, None, False, None)

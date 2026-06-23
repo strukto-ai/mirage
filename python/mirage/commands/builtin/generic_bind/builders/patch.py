@@ -14,31 +14,35 @@
 
 from collections.abc import AsyncIterator
 
-from mirage.accessor.redis import RedisAccessor
-from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.tsort import tsort as generic_tsort
-from mirage.commands.registry import command
-from mirage.commands.spec import SPECS
-from mirage.core.redis.glob import resolve_glob
-from mirage.core.redis.read import read_bytes
+from mirage.accessor.base import Accessor
+from mirage.commands.builtin.generic.patch import patch as generic_patch
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("tsort", resource="redis", spec=SPECS["tsort"])
-async def tsort(
-    accessor: RedisAccessor,
+async def patch(
+    ops: CommandIO,
+    accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
-    index: IndexCacheStore = None,
-    **_extra: object,
+    p: str | None = None,
+    R: bool = False,
+    i: PathSpec | None = None,
+    N: bool = False,
+    **flags,
 ) -> tuple[ByteSource | None, IOResult]:
-    if paths and accessor.store is not None:
-        paths = await resolve_glob(accessor, paths, index)
-    else:
-        paths = []
-    return await generic_tsort(paths,
-                               read_bytes=read_bytes,
+    return await generic_patch(paths,
+                               read_bytes=ops.read_bytes,
+                               write_bytes=ops.write,
+                               has_resource=ops.is_mounted(accessor),
                                accessor=accessor,
-                               stdin=stdin)
+                               stdin=stdin,
+                               p=p,
+                               R=R,
+                               i=i,
+                               N=N)
+
+
+BUILDER = Builder('patch', patch, None, True, None)

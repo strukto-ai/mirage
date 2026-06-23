@@ -14,7 +14,7 @@
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.dirname import dirname as generic_dirname
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -30,5 +30,4 @@ async def dirname(
     return await generic_dirname(*texts)
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('dirname', dirname, None, False, None)
+BUILDER = Builder('dirname', dirname, None, False, None)

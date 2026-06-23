@@ -17,7 +17,7 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tree import tree as generic_tree
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -52,5 +52,4 @@ async def tree(
     )
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('tree', tree, None, False, None)
+BUILDER = Builder('tree', tree, None, False, None)

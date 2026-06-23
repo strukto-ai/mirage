@@ -14,31 +14,36 @@
 
 from collections.abc import AsyncIterator
 
-from mirage.accessor.ram import RAMAccessor
+from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.zcat import zcat as generic_zcat
-from mirage.commands.registry import command
-from mirage.commands.spec import SPECS
-from mirage.core.ram.glob import resolve_glob
-from mirage.core.ram.read import read_bytes
+from mirage.commands.builtin.generic.zip_cmd import zip_cmd as generic_zip
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("zcat", resource="ram", spec=SPECS["zcat"])
-async def zcat(
-    accessor: RAMAccessor,
+async def zip_cmd(
+    ops: CommandIO,
+    accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
-    index: IndexCacheStore = None,
-    **_extra: object,
+    r: bool = False,
+    j: bool = False,
+    q: bool = False,
+    index: IndexCacheStore | None = None,
+    **flags,
 ) -> tuple[ByteSource | None, IOResult]:
-    if paths and accessor.store is not None:
-        paths = await resolve_glob(accessor, paths, index)
-    else:
-        paths = []
-    return await generic_zcat(paths,
-                              read_bytes=read_bytes,
-                              accessor=accessor,
-                              stdin=stdin)
+    if not ops.is_mounted(accessor) or len(paths) < 2:
+        raise ValueError("zip: usage: zip archive.zip file1 [file2 ...]")
+    paths = await ops.resolve_glob(accessor, paths, index)
+    return await generic_zip(paths,
+                             read_bytes=ops.read_bytes,
+                             write_bytes=ops.write,
+                             accessor=accessor,
+                             r=r,
+                             j=j,
+                             q=q)
+
+
+BUILDER = Builder('zip', zip_cmd, None, True, None)

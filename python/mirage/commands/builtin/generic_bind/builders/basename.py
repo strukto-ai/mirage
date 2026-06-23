@@ -15,7 +15,7 @@
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.basename import \
     basename as generic_basename
-from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -31,5 +31,4 @@ async def basename(
     return await generic_basename(*texts)
 
 
-# (name, builder, provision_builder, write, aggregate)
-BUILDER = ('basename', basename, None, False, None)
+BUILDER = Builder('basename', basename, None, False, None)
