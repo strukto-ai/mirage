@@ -95,8 +95,8 @@ async def run_read(cmd_name: str, scopes: list[PathSpec], text_args: list[str],
                                      L=fl.bool("L"))
         return body, IOResult()
 
+    reads: dict[str, bytes] = {}
     for scope in scopes:
-        await io.read_bytes(None, scope)
-    reads = io.reads
+        reads[scope.original] = await io.read_bytes(None, scope)
     return async_chain(*reads.values()), IOResult(reads=dict(reads),
                                                   cache=list(reads))

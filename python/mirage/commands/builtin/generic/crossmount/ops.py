@@ -15,7 +15,7 @@
 import functools
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, Callable
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
@@ -30,45 +30,54 @@ def _as_pathspec(path: PathSpec | str) -> PathSpec:
     return PathSpec.from_str_path(path, "")
 
 
-async def _fetch(dispatch: Callable, path: PathSpec) -> bytes:
-    data, _ = await dispatch("read", _as_pathspec(path))
+async def _op(dispatch: Callable,
+              op: str,
+              accessor: object,
+              path: PathSpec,
+              index: object = None,
+              **kwargs: Any) -> Any:
+    # The one primitive: route any op for any path to its owning mount. The
+    # generics call ops as (accessor, path, index); dispatch ignores both and
+    # keys off the path, so this is also the single place a raw str is coerced.
+    data, _ = await dispatch(op, _as_pathspec(path), **kwargs)
     return data
 
 
-async def _read_bytes(dispatch: Callable,
-                      reads: dict[str, bytes],
-                      accessor: object,
-                      path: PathSpec,
-                      index: object = None) -> bytes:
-    path_ps = _as_pathspec(path)
-    data = await _fetch(dispatch, path_ps)
-    if isinstance(data, bytes):
-        reads[path_ps.original] = data
-    return data
+async def _stream(dispatch: Callable,
+                  accessor: object,
+                  path: PathSpec,
+                  index: object = None) -> AsyncIterator[bytes]:
+    yield await _op(dispatch, "read", accessor, path)
 
 
-async def _read_stream(dispatch: Callable,
-                       reads: dict[str, bytes],
-                       accessor: object,
-                       path: PathSpec,
-                       index: object = None) -> AsyncIterator[bytes]:
-    yield await _read_bytes(dispatch, reads, accessor, path, index)
+async def _is_dir(dispatch: Callable, path: PathSpec) -> bool:
+    try:
+        file_stat = await _op(dispatch, "stat", None, path)
+    except FileNotFoundError:
+        return False
+    return file_stat.type == FileType.DIRECTORY
 
 
-async def _stat(dispatch: Callable,
-                accessor: object,
-                path: PathSpec,
-                index: object = None):
-    file_stat, _ = await dispatch("stat", _as_pathspec(path))
-    return file_stat
-
-
-async def _readdir(dispatch: Callable,
-                   accessor: object,
-                   path: PathSpec,
-                   index: object = None) -> list[str]:
-    children, _ = await dispatch("readdir", _as_pathspec(path))
-    return children
+async def _walk(dispatch: Callable, src: PathSpec) -> list[tuple[str, bool]]:
+    # Top-down (parents before children) list of (path, is_dir). The type is
+    # captured here, while the tree is intact, so a caller that deletes as it
+    # goes never re-stats a path whose virtual parent dir has since vanished
+    # (e.g. on S3, where an empty prefix stops existing).
+    src_path = _as_pathspec(src).original
+    file_stat = await _op(dispatch, "stat", None, src_path)
+    if file_stat.type != FileType.DIRECTORY:
+        return [(src_path, False)]
+    entries = [(src_path, True)]
+    queue = [src_path]
+    while queue:
+        directory = queue.pop(0)
+        for child in await _op(dispatch, "readdir", None, directory):
+            child_stat = await _op(dispatch, "stat", None, child)
+            is_dir = child_stat.type == FileType.DIRECTORY
+            entries.append((child, is_dir))
+            if is_dir:
+                queue.append(child)
+    return entries
 
 
 async def _find(dispatch: Callable,
@@ -76,87 +85,44 @@ async def _find(dispatch: Callable,
                 src: PathSpec,
                 type: str | None = None,
                 index: object = None) -> list[str]:
-    src = _as_pathspec(src)
-    file_stat, _ = await dispatch("stat", src)
-    if file_stat.type != FileType.DIRECTORY:
-        return [src.original]
-    entries = [src.original]
-    queue = [src]
-    while queue:
-        directory = queue.pop(0)
-        children, _ = await dispatch("readdir", directory)
-        for child in children:
-            child_ps = _as_pathspec(child)
-            entries.append(child_ps.original)
-            child_stat, _ = await dispatch("stat", child_ps)
-            if child_stat.type == FileType.DIRECTORY:
-                queue.append(child_ps)
-    return entries
+    return [path for path, _ in await _walk(dispatch, src)]
 
 
 async def _copy(dispatch: Callable, accessor: object, src: PathSpec,
                 target: PathSpec) -> None:
-    src_ps = _as_pathspec(src)
-    dst_ps = _as_pathspec(target)
-    file_stat, _ = await dispatch("stat", src_ps)
+    file_stat = await _op(dispatch, "stat", None, src)
     if file_stat.type == FileType.DIRECTORY:
-        try:
-            await dispatch("mkdir", dst_ps)
-        except FileExistsError:
-            pass
+        # cp -r merges into an existing directory; only create when absent so a
+        # real conflict (a file already at the target) still raises.
+        if not await _is_dir(dispatch, target):
+            await _op(dispatch, "mkdir", None, target)
         return
-    data = await _fetch(dispatch, src_ps)
-    await dispatch("write", dst_ps, data=data)
-
-
-async def _copy_tree(dispatch: Callable, src_dir: PathSpec,
-                     dst_dir: PathSpec) -> None:
-    try:
-        await dispatch("mkdir", dst_dir)
-    except FileExistsError:
-        pass
-    children, _ = await dispatch("readdir", src_dir)
-    for child in children:
-        name = child.rstrip("/").rsplit("/", 1)[-1]
-        child_src = _as_pathspec(child)
-        child_dst = _as_pathspec(dst_dir.child(name))
-        child_stat, _ = await dispatch("stat", child_src)
-        if child_stat.type == FileType.DIRECTORY:
-            await _copy_tree(dispatch, child_src, child_dst)
-        else:
-            data = await _fetch(dispatch, child_src)
-            await dispatch("write", child_dst, data=data)
-
-
-async def _remove_tree(dispatch: Callable, src_dir: PathSpec) -> None:
-    children, _ = await dispatch("readdir", src_dir)
-    for child in children:
-        child_src = _as_pathspec(child)
-        child_stat, _ = await dispatch("stat", child_src)
-        if child_stat.type == FileType.DIRECTORY:
-            await _remove_tree(dispatch, child_src)
-        else:
-            await dispatch("unlink", child_src)
-    await dispatch("rmdir", src_dir)
+    data = await _op(dispatch, "read", None, src)
+    await _op(dispatch, "write", None, target, data=data)
 
 
 async def _rename(dispatch: Callable, accessor: object, src: PathSpec,
                   target: PathSpec) -> None:
-    src_ps = _as_pathspec(src)
-    dst_ps = _as_pathspec(target)
-    file_stat, _ = await dispatch("stat", src_ps)
-    if file_stat.type == FileType.DIRECTORY:
-        await _copy_tree(dispatch, src_ps, dst_ps)
-        await _remove_tree(dispatch, src_ps)
+    file_stat = await _op(dispatch, "stat", None, src)
+    if file_stat.type != FileType.DIRECTORY:
+        data = await _op(dispatch, "read", None, src)
+        await _op(dispatch, "write", None, target, data=data)
+        await _op(dispatch, "unlink", None, src)
         return
-    data = await _fetch(dispatch, src_ps)
-    await dispatch("write", dst_ps, data=data)
-    await dispatch("unlink", src_ps)
+    # No atomic rename across mounts: copy the tree (parents first), then
+    # remove the source (children first), using types captured by the single
+    # walk so a vanished virtual dir is never re-stat'd.
+    src_base = _as_pathspec(src).original.rstrip("/")
+    dst_base = _as_pathspec(target).original.rstrip("/")
+    entries = await _walk(dispatch, src)
+    for path, _ in entries:
+        await _copy(dispatch, accessor, path, dst_base + path[len(src_base):])
+    for path, is_dir in reversed(entries):
+        await _op(dispatch, "rmdir" if is_dir else "unlink", None, path)
 
 
 @dataclass(frozen=True, slots=True)
 class DispatchIO:
-    reads: dict[str, bytes]
     read_bytes: Callable
     read_stream: Callable
     stat: Callable
@@ -167,13 +133,11 @@ class DispatchIO:
 
 
 def build_dispatch_io(dispatch: Callable) -> DispatchIO:
-    reads: dict[str, bytes] = {}
     return DispatchIO(
-        reads=reads,
-        read_bytes=functools.partial(_read_bytes, dispatch, reads),
-        read_stream=functools.partial(_read_stream, dispatch, reads),
-        stat=functools.partial(_stat, dispatch),
-        readdir=functools.partial(_readdir, dispatch),
+        read_bytes=functools.partial(_op, dispatch, "read"),
+        read_stream=functools.partial(_stream, dispatch),
+        stat=functools.partial(_op, dispatch, "stat"),
+        readdir=functools.partial(_op, dispatch, "readdir"),
         copy=functools.partial(_copy, dispatch),
         find=functools.partial(_find, dispatch),
         rename=functools.partial(_rename, dispatch),
