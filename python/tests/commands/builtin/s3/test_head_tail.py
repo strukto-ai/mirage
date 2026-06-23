@@ -12,15 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import importlib
-
 import pytest
 
 from mirage.accessor.s3 import S3Accessor
+from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.builders.read import _head, _tail
 from mirage.types import PathSpec
 
-s3_head = importlib.import_module("mirage.commands.builtin.s3.head")
-s3_tail = importlib.import_module("mirage.commands.builtin.s3.tail")
+
+def _ops(chunks):
+    return CommandIO(readdir=None,
+                     read_bytes=None,
+                     read_stream=_streamer(chunks),
+                     stat=None,
+                     ready=lambda a: True,
+                     local=False)
 
 
 def _paths(*names: str) -> list[PathSpec]:
@@ -53,44 +59,32 @@ def _streamer(chunks_by_path):
 
 
 @pytest.mark.asyncio
-async def test_head_multi_streaming_with_headers(monkeypatch):
+async def test_head_multi_streaming_with_headers():
     chunks = {
         "/data/a.txt": [b"a1\n", b"a2\na3\n"],
         "/data/b.txt": [b"b1\nb2\n"],
     }
-
-    async def fake_resolve_glob(accessor, paths, index=None):
-        return paths
-
-    monkeypatch.setattr(s3_head, "resolve_glob", fake_resolve_glob)
-    monkeypatch.setattr(s3_head, "read_stream", _streamer(chunks))
-
     acc = S3Accessor.__new__(S3Accessor)
-    out, _ = await s3_head.head(acc,
-                                _paths("/data/a.txt", "/data/b.txt"),
-                                n="2")
+    out, _ = await _head(_ops(chunks),
+                         acc,
+                         _paths("/data/a.txt", "/data/b.txt"),
+                         n="2")
     data = await _collect(out)
     assert data == (b"==> /data/a.txt <==\na1\na2\n"
                     b"\n==> /data/b.txt <==\nb1\nb2\n")
 
 
 @pytest.mark.asyncio
-async def test_tail_multi_streaming_with_headers(monkeypatch):
+async def test_tail_multi_streaming_with_headers():
     chunks = {
         "/data/a.txt": [b"a1\na2\n", b"a3\n"],
         "/data/b.txt": [b"b1\nb2\nb3\n"],
     }
-
-    async def fake_resolve_glob(accessor, paths, index=None):
-        return paths
-
-    monkeypatch.setattr(s3_tail, "resolve_glob", fake_resolve_glob)
-    monkeypatch.setattr(s3_tail, "read_stream", _streamer(chunks))
-
     acc = S3Accessor.__new__(S3Accessor)
-    out, _ = await s3_tail.tail(acc,
-                                _paths("/data/a.txt", "/data/b.txt"),
-                                n="2")
+    out, _ = await _tail(_ops(chunks),
+                         acc,
+                         _paths("/data/a.txt", "/data/b.txt"),
+                         n="2")
     data = await _collect(out)
     assert data == (b"==> /data/a.txt <==\na2\na3\n"
                     b"\n==> /data/b.txt <==\nb2\nb3\n")

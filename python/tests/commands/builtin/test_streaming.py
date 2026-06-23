@@ -15,14 +15,16 @@
 import pytest
 
 from mirage.accessor import NOOPAccessor
-from mirage.commands.builtin.ram.cat import cat
-from mirage.commands.builtin.ram.cut import cut
-from mirage.commands.builtin.ram.grep import grep
-from mirage.commands.builtin.ram.head import head
-from mirage.commands.builtin.ram.nl import nl
-from mirage.commands.builtin.ram.tr import tr
-from mirage.commands.builtin.ram.uniq import uniq
-from mirage.commands.builtin.ram.wc import wc
+from mirage.commands import COMMANDS as _CMDS
+
+cat = _CMDS["cat"]
+cut = _CMDS["cut"]
+grep = _CMDS["grep"]
+head = _CMDS["head"]
+nl = _CMDS["nl"]
+tr = _CMDS["tr"]
+uniq = _CMDS["uniq"]
+wc = _CMDS["wc"]
 
 _NOOP = NOOPAccessor()
 

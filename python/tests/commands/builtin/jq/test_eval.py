@@ -12,15 +12,32 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import json
-from unittest.mock import AsyncMock, patch
+from functools import partial
 
 import pytest
 
+from mirage.accessor.s3 import S3Accessor
+from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.generic_bind.builders.transforms import _jq
 from mirage.core.jq import JQ_EMPTY, jq_eval
-from mirage.types import MountMode
+from mirage.types import MountMode, PathSpec
 
 from .conftest import collect, jq, mem_ws, run_raw, write_to_backend
+
+
+async def _const_bytes(data, accessor, path, index=None):
+    return data
+
+
+async def _collect_jq(ops, accessor, paths, expr):
+    out, _ = await _jq(ops, accessor, paths, expr)
+    if isinstance(out, bytes):
+        return out
+    if hasattr(out, "__aiter__"):
+        return b"".join([chunk async for chunk in out])
+    return b"".join(out)
 
 
 def test_jq_dot_returns_full_object(backend):
@@ -976,52 +993,41 @@ class TestJqS3Backend:
         result = json.loads(collect(stdout))
         assert result == 3
 
-    @patch("mirage.commands.builtin.s3.jq.read_bytes",
-           new_callable=AsyncMock,
-           return_value=b'{"name": "from-s3"}')
-    def test_path_with_mock(self, mock_read):
-        ws = self._s3_ws()
-        stdout, _ = run_raw(ws, "jq .name /s3/data.json")
-        result = json.loads(collect(stdout))
-        assert result == "from-s3"
+    def _run_jq_path(self, data, expr):
+        ops = CommandIO(readdir=None,
+                        read_bytes=partial(_const_bytes, data),
+                        read_stream=None,
+                        stat=None,
+                        ready=lambda a: True,
+                        local=False)
+        path = PathSpec(original="/s3/data.json",
+                        directory="/s3",
+                        prefix="",
+                        resolved=True)
+        return asyncio.run(
+            _collect_jq(ops, S3Accessor.__new__(S3Accessor), [path], expr))
 
-    @patch("mirage.commands.builtin.s3.jq.read_bytes",
-           new_callable=AsyncMock,
-           return_value=b'[{"id": 1}, {"id": 2}]')
-    def test_path_array_iteration_mock(self, mock_read):
-        ws = self._s3_ws()
-        stdout, _ = run_raw(ws, "jq '.[].id' /s3/data.json")
-        lines = collect(stdout).strip().splitlines()
-        result = [json.loads(line) for line in lines]
+    def test_path_with_mock(self):
+        out = self._run_jq_path(b'{"name": "from-s3"}', ".name")
+        assert json.loads(out) == "from-s3"
+
+    def test_path_array_iteration_mock(self):
+        out = self._run_jq_path(b'[{"id": 1}, {"id": 2}]', ".[].id")
+        result = [json.loads(line) for line in out.strip().splitlines()]
         assert result == [1, 2]
 
-    @patch("mirage.commands.builtin.s3.jq.read_bytes",
-           new_callable=AsyncMock,
-           return_value=b'{"items": [1, 2, 3]}')
-    def test_path_pipe_length_mock(self, mock_read):
-        ws = self._s3_ws()
-        stdout, _ = run_raw(ws, "jq '.items | length' /s3/data.json")
-        result = json.loads(collect(stdout))
-        assert result == 3
+    def test_path_pipe_length_mock(self):
+        out = self._run_jq_path(b'{"items": [1, 2, 3]}', ".items | length")
+        assert json.loads(out) == 3
 
-    @patch("mirage.commands.builtin.s3.jq.read_bytes",
-           new_callable=AsyncMock,
-           return_value=b'[10, 20, 30]')
-    def test_spread_iteration_mock(self, mock_read):
-        ws = self._s3_ws()
-        stdout, _ = run_raw(ws, "jq '.[]' /s3/data.json")
-        lines = collect(stdout).strip().splitlines()
-        result = [json.loads(line) for line in lines]
+    def test_spread_iteration_mock(self):
+        out = self._run_jq_path(b'[10, 20, 30]', ".[]")
+        result = [json.loads(line) for line in out.strip().splitlines()]
         assert result == [10, 20, 30]
 
-    @patch("mirage.commands.builtin.s3.jq.read_bytes",
-           new_callable=AsyncMock,
-           return_value=b'[10, 20, 30]')
-    def test_no_spread_dot_mock(self, mock_read):
-        ws = self._s3_ws()
-        stdout, _ = run_raw(ws, "jq '.' /s3/data.json")
-        result = json.loads(collect(stdout))
-        assert result == [10, 20, 30]
+    def test_no_spread_dot_mock(self):
+        out = self._run_jq_path(b'[10, 20, 30]', ".")
+        assert json.loads(out) == [10, 20, 30]
 
     def test_spread_stdin(self):
         ws = self._s3_ws()

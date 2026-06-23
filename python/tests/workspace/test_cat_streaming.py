@@ -15,10 +15,16 @@
 import asyncio
 from collections.abc import AsyncIterator
 
-from mirage.commands.builtin.ram import cat as ram_cat
+from mirage.commands import COMMANDS as _CMDS
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
+
+ram_cat = _CMDS["cat"]
+
+
+def _cat_ops():
+    return ram_cat.__wrapped__.args[0]
 
 
 def _spying_stream(real_stream, pulled: list[str]):
@@ -50,33 +56,34 @@ def _seeded_ws() -> Workspace:
     return ws
 
 
-def test_multi_cat_head_skips_second_file(monkeypatch):
+def _spy_cat_reads(ws, command, pulled):
+    ops = _cat_ops()
+    real = ops.read_stream
+    object.__setattr__(ops, "read_stream", _spying_stream(real, pulled))
+    try:
+        return asyncio.run(_run_and_collect(ws, command))
+    finally:
+        object.__setattr__(ops, "read_stream", real)
+
+
+async def _run_and_collect(ws, command):
+    result = await ws.execute(command)
+    out = await result.stdout_str()
+    await ws.close()
+    return out
+
+
+def test_multi_cat_head_skips_second_file():
     ws = _seeded_ws()
     pulled: list[str] = []
-    cmd_globals = ram_cat.__wrapped__.__globals__
-    monkeypatch.setitem(cmd_globals, "_stream_core",
-                        _spying_stream(cmd_globals["_stream_core"], pulled))
-
-    async def run():
-        result = await ws.execute("cat /data/a.txt /data/b.txt | head -n 1")
-        assert await result.stdout_str() == "a1\n"
-        await ws.close()
-
-    asyncio.run(run())
+    out = _spy_cat_reads(ws, "cat /data/a.txt /data/b.txt | head -n 1", pulled)
+    assert out == "a1\n"
     assert pulled == ["/data/a.txt"]
 
 
-def test_multi_cat_full_reads_both_files(monkeypatch):
+def test_multi_cat_full_reads_both_files():
     ws = _seeded_ws()
     pulled: list[str] = []
-    cmd_globals = ram_cat.__wrapped__.__globals__
-    monkeypatch.setitem(cmd_globals, "_stream_core",
-                        _spying_stream(cmd_globals["_stream_core"], pulled))
-
-    async def run():
-        result = await ws.execute("cat /data/a.txt /data/b.txt")
-        assert await result.stdout_str() == "a1\na2\na3\nb1\nb2\n"
-        await ws.close()
-
-    asyncio.run(run())
+    out = _spy_cat_reads(ws, "cat /data/a.txt /data/b.txt", pulled)
+    assert out == "a1\na2\na3\nb1\nb2\n"
     assert pulled == ["/data/a.txt", "/data/b.txt"]

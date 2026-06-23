@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 import pytest
 
-from mirage.commands.builtin.s3.cat import cat as s3_cat
+from mirage.commands.builtin.s3 import COMMANDS as _S3_COMMANDS
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Config, S3Resource
@@ -27,6 +27,9 @@ from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
 
 DATA_DIR = Path(__file__).resolve().parents[3] / "data"
+
+s3_cat = next(fn for fn in _S3_COMMANDS for rc in fn._registered_commands
+              if rc.name == "cat" and rc.filetype is None)
 LAST_MODIFIED = datetime(2026, 3, 26, tzinfo=timezone.utc)
 
 _CORE_MODULES = [

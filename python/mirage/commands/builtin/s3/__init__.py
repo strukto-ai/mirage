@@ -13,138 +13,110 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
+from mirage.commands.builtin.generic_bind import (CommandIO,
+                                                  make_generic_commands)
+from mirage.commands.builtin.generic_bind.provision import (
+    make_search_provision, metadata_provision)
 from mirage.commands.builtin.s3._provision import \
     file_read_provision as _ft_provision
-from mirage.commands.builtin.s3.awk import awk
-from mirage.commands.builtin.s3.base64_cmd import base64_cmd
-from mirage.commands.builtin.s3.basename import basename
-from mirage.commands.builtin.s3.cat import cat
 from mirage.commands.builtin.s3.cmp import cmp_cmd
-from mirage.commands.builtin.s3.column import column
-from mirage.commands.builtin.s3.comm import comm
-from mirage.commands.builtin.s3.cp import cp
 from mirage.commands.builtin.s3.csplit import csplit
-from mirage.commands.builtin.s3.cut import cut
 from mirage.commands.builtin.s3.diff import diff
-from mirage.commands.builtin.s3.dirname import dirname
 from mirage.commands.builtin.s3.du import du
-from mirage.commands.builtin.s3.expand import expand
-from mirage.commands.builtin.s3.file import file
-from mirage.commands.builtin.s3.find import find
-from mirage.commands.builtin.s3.fmt import fmt
-from mirage.commands.builtin.s3.fold import fold
-from mirage.commands.builtin.s3.grep import grep
 from mirage.commands.builtin.s3.gunzip import gunzip
 from mirage.commands.builtin.s3.gzip import gzip
-from mirage.commands.builtin.s3.head import head
-from mirage.commands.builtin.s3.iconv import iconv
-from mirage.commands.builtin.s3.join import join
-from mirage.commands.builtin.s3.jq import jq
-from mirage.commands.builtin.s3.ln import ln
-from mirage.commands.builtin.s3.look import look
-from mirage.commands.builtin.s3.ls import ls
-from mirage.commands.builtin.s3.md5 import md5
 from mirage.commands.builtin.s3.mkdir import mkdir
 from mirage.commands.builtin.s3.mktemp import mktemp
-from mirage.commands.builtin.s3.mv import mv
-from mirage.commands.builtin.s3.nl import nl
-from mirage.commands.builtin.s3.paste import paste
 from mirage.commands.builtin.s3.patch import patch
-from mirage.commands.builtin.s3.readlink import readlink
-from mirage.commands.builtin.s3.realpath import realpath
-from mirage.commands.builtin.s3.rev import rev
-from mirage.commands.builtin.s3.rg import rg
 from mirage.commands.builtin.s3.rm import rm
 from mirage.commands.builtin.s3.sed import sed
-from mirage.commands.builtin.s3.sha256sum import sha256sum
 from mirage.commands.builtin.s3.shuf import shuf
-from mirage.commands.builtin.s3.sort import sort
 from mirage.commands.builtin.s3.split import split
 from mirage.commands.builtin.s3.stat import stat
-from mirage.commands.builtin.s3.strings import strings
-from mirage.commands.builtin.s3.tac import tac
-from mirage.commands.builtin.s3.tail import tail
 from mirage.commands.builtin.s3.tar import tar
 from mirage.commands.builtin.s3.tee import tee
 from mirage.commands.builtin.s3.touch import touch
-from mirage.commands.builtin.s3.tr import tr
-from mirage.commands.builtin.s3.tree import tree
 from mirage.commands.builtin.s3.tsort import tsort
-from mirage.commands.builtin.s3.unexpand import unexpand
-from mirage.commands.builtin.s3.uniq import uniq
 from mirage.commands.builtin.s3.unzip import unzip as unzip_cmd
-from mirage.commands.builtin.s3.wc import wc
-from mirage.commands.builtin.s3.xxd import xxd
 from mirage.commands.builtin.s3.zcat import zcat
-from mirage.commands.builtin.s3.zgrep import zgrep
 from mirage.commands.builtin.s3.zip_cmd import zip_cmd
+from mirage.core.s3.constants import SCOPE_ERROR
+from mirage.core.s3.copy import copy as _copy
+from mirage.core.s3.du import du as _du
+from mirage.core.s3.du import du_all as _du_all
+from mirage.core.s3.exists import exists as _exists
+from mirage.core.s3.find import find as _find
 from mirage.core.s3.glob import resolve_glob as _ft_resolve_glob
-from mirage.core.s3.read import read_bytes as _ft_read
+from mirage.core.s3.mkdir import mkdir as _mkdir
+from mirage.core.s3.read import read_bytes as _read
+from mirage.core.s3.readdir import readdir as _readdir
+from mirage.core.s3.rename import rename as _rename
+from mirage.core.s3.rm import rm_r as _rm_r
+from mirage.core.s3.rmdir import rmdir as _rmdir
+from mirage.core.s3.stat import stat as _stat
+from mirage.core.s3.stream import read_stream as _read_stream
+from mirage.core.s3.unlink import unlink as _unlink
+from mirage.core.s3.write import write_bytes as _write
+
+_S3_CMD_OPS = CommandIO(
+    readdir=_readdir,
+    read_bytes=_read,
+    read_stream=_read_stream,
+    stat=_stat,
+    ready=lambda a: True,
+    local=False,
+    scope_cap=SCOPE_ERROR,
+    write=_write,
+    exists=_exists,
+    mkdir=_mkdir,
+    unlink=_unlink,
+    rmdir=_rmdir,
+    rm_r=_rm_r,
+    rename=_rename,
+    copy=_copy,
+    find=_find,
+    du_total=_du,
+    du_all=_du_all,
+)
+
+# s3-specific behaviours kept as overrides: no real directories (mkdir -p,
+# rm not-empty), write-tracking (touch/tee), du_multi aggregation, and the
+# index-threaded, missing-operand stat.
+_S3_OVERRIDES = {"stat", "du", "rm", "mkdir", "tee", "touch"}
 
 COMMANDS = [
     *make_filetype_commands(
-        "s3", _ft_resolve_glob, _ft_read, provision=_ft_provision),
-    awk,
-    base64_cmd,
-    basename,
-    cat,
+        "s3", _ft_resolve_glob, _read, provision=_ft_provision),
+    *make_generic_commands(
+        "s3",
+        _S3_CMD_OPS,
+        overrides=_S3_OVERRIDES,
+        provision_overrides={
+            "grep": make_search_provision(_stat),
+            "rg": make_search_provision(_stat),
+            "ls": metadata_provision,
+            "find": metadata_provision,
+        },
+    ),
     cmp_cmd,
-    column,
-    comm,
-    cp,
     csplit,
-    cut,
     diff,
-    dirname,
     du,
-    expand,
-    file,
-    find,
-    fmt,
-    fold,
-    grep,
     gunzip,
     gzip,
-    head,
-    iconv,
-    join,
-    jq,
-    ln,
-    look,
-    ls,
-    md5,
     mkdir,
     mktemp,
-    mv,
-    nl,
-    paste,
     patch,
-    readlink,
-    realpath,
-    rev,
-    rg,
     rm,
     sed,
-    sha256sum,
     shuf,
-    sort,
     split,
     stat,
-    strings,
-    tac,
-    tail,
     tar,
     tee,
     touch,
-    tr,
-    tree,
     tsort,
-    unexpand,
-    uniq,
     unzip_cmd,
-    wc,
-    xxd,
     zcat,
-    zgrep,
     zip_cmd,
 ]

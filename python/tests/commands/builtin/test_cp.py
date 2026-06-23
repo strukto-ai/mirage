@@ -14,8 +14,10 @@
 
 import asyncio
 
-from mirage.commands.builtin.ram.cp import cp as cp_cmd
+from mirage.commands import COMMANDS as _CMDS
 from mirage.core.ram.write import write_bytes
+
+cp_cmd = _CMDS["cp"]
 
 
 def _cat_sync(backend, path):
