@@ -29,8 +29,7 @@ from mirage.shell.job_table import JobTable
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
 from mirage.types import PathSpec
 from mirage.workspace.executor.control import ReturnSignal
-from mirage.workspace.executor.cross_mount import (handle_cross_mount,
-                                                   is_cross_mount)
+from mirage.workspace.executor.cross import handle_cross_mount, is_cross_mount
 from mirage.workspace.executor.fanout import (_fan_out_traversal,
                                               _should_fan_out)
 from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
@@ -276,10 +275,6 @@ async def handle_command(
     # Cross-mount: paths span different mounts (e.g. cp /ram/a /disk/b).
     # Use dispatch to read/write across mounts directly.
     path_scopes = [p for p in parts[1:] if isinstance(p, PathSpec)]
-    text_only = [
-        p.original if isinstance(p, PathSpec) else p for p in parts[1:]
-    ]
-
     raw_argv = [
         p.original if isinstance(p, PathSpec) else p for p in parts[1:]
     ]
@@ -307,15 +302,13 @@ async def handle_command(
                                       stderr=msg.encode())
 
     if is_cross_mount(cmd_name, path_scopes, registry):
-        flag_kwargs = {}
         # Cross-mount execution bypasses a resource command handler. Parse
-        # against the shared spec so flags do not depend on the source mount.
-        command_spec = SPECS.get(cmd_name)
-        if command_spec is not None:
-            parsed = parse_command(command_spec, raw_argv, cwd=session.cwd)
-            flag_kwargs = parse_to_kwargs(parsed)
+        # against the shared spec so flags and text operands do not depend on
+        # the source mount.
+        parsed = parse_command(SPECS[cmd_name], raw_argv, cwd=session.cwd)
         stdout, io, exec_node = await handle_cross_mount(
-            cmd_name, path_scopes, text_only, flag_kwargs, dispatch, cmd_str)
+            cmd_name, path_scopes, parsed.texts(), parse_to_kwargs(parsed),
+            dispatch, cmd_str)
         if io.safeguard is None:
             mounts = []
             for s in path_scopes:

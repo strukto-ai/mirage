@@ -1677,8 +1677,8 @@ def test_cross_mount_diff_different():
     io = _exec(ws, "diff /disk/a.txt /ram/b.txt")
     assert io.exit_code == 1
     out = _stdout(io)
-    assert b"---" in out
-    assert b"+++" in out
+    assert b"< aaa" in out
+    assert b"> bbb" in out
 
 
 def test_cross_mount_cmp_same():

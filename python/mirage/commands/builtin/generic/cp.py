@@ -76,6 +76,10 @@ async def cp(
             errors.append(f"cp: cannot copy a directory, '{src.original}', "
                           f"into itself, '{target.original}'")
             continue
+        if not recursive and await is_directory(stat, src, index):
+            errors.append("cp: -r not specified; omitting directory "
+                          f"'{src.original}'")
+            continue
         if recursive:
             src_base = src.strip_prefix.rstrip("/")
             dst_base = target.strip_prefix.rstrip("/")

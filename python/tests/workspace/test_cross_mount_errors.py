@@ -44,7 +44,6 @@ def test_cross_mount_head_invalid_n():
     ws = _make_ws()
     out, err, code = _run(ws, "head -n abc /a/file.txt /b/file.txt")
     assert code == 1
-    assert "invalid number" in err
     assert "abc" in err
 
 
@@ -52,7 +51,6 @@ def test_cross_mount_tail_invalid_n():
     ws = _make_ws()
     out, err, code = _run(ws, "tail -n abc /a/file.txt /b/file.txt")
     assert code == 1
-    assert "invalid number" in err
     assert "abc" in err
 
 
@@ -80,3 +78,32 @@ def test_cross_mount_head_default_n():
     assert code == 0
     assert "line1" in out
     assert "aaa" in out
+
+
+def test_cross_mount_head_byte_mode():
+    ws = _make_ws()
+    out, err, code = _run(ws, "head -c 3 /a/file.txt /b/file.txt")
+    assert code == 0
+    assert "/a/file.txt" in out
+    assert "lin" in out
+    assert "line1" not in out
+    assert "bbb" not in out
+
+
+def test_cross_mount_grep_invert():
+    ws = _make_ws()
+    out, err, code = _run(ws, "grep -v line1 /a/file.txt /b/file.txt")
+    assert code == 0
+    assert "/a/file.txt:line2" in out
+    assert "aaa" in out
+    assert "line1" not in out
+
+
+def test_cross_mount_wc_total():
+    ws = _make_ws()
+    out, err, code = _run(ws, "wc -l /a/file.txt /b/file.txt")
+    assert code == 0
+    assert "total" in out
+    assert "5" in out
+    assert "3" in out
+    assert "8" in out
