@@ -14,6 +14,8 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor.base import Accessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.aggregators import header_aggregate
 from mirage.commands.builtin.generic.tail import tail as generic_tail
 from mirage.commands.builtin.generic.tail import tail_multi
@@ -28,7 +30,7 @@ from mirage.types import PathSpec
 
 async def tail(
     ops: CommandIO,
-    accessor: object,
+    accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
@@ -36,7 +38,7 @@ async def tail(
     c: str | None = None,
     q: bool = False,
     v: bool = False,
-    index: object = None,
+    index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     n_int: int | None = None

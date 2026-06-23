@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.base import Accessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.stat import stat as generic_stat
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.provision import stat_provision
@@ -21,13 +23,13 @@ from mirage.types import PathSpec
 
 async def stat(
     ops: CommandIO,
-    accessor: object,
+    accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
     c: str | None = None,
     f: str | None = None,
-    index: object = None,
+    index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):

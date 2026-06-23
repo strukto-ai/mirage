@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.base import Accessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.readlink import \
     readlink as generic_readlink
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
@@ -21,7 +23,7 @@ from mirage.types import PathSpec
 
 async def readlink(
     ops: CommandIO,
-    accessor: object,
+    accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
@@ -29,7 +31,7 @@ async def readlink(
     e: bool = False,
     m: bool = False,
     n: bool = False,
-    index: object = None,
+    index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:

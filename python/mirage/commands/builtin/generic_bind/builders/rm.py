@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.base import Accessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.utils.output import format_optional_records
 from mirage.io.types import ByteSource, IOResult
@@ -20,7 +22,7 @@ from mirage.types import FileType, PathSpec
 
 async def rm(
     ops: CommandIO,
-    accessor: object,
+    accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
@@ -29,7 +31,7 @@ async def rm(
     f: bool = False,
     v: bool = False,
     d: bool = False,
-    index: object = None,
+    index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor) or not paths:

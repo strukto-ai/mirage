@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.base import Accessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -19,13 +21,13 @@ from mirage.types import PathSpec
 
 async def mkdir(
     ops: CommandIO,
-    accessor: object,
+    accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
     p: bool = False,
     v: bool = False,
-    index: object = None,
+    index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor) or not paths:

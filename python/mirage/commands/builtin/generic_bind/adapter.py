@@ -18,6 +18,8 @@ import posixpath
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from mirage.accessor.base import Accessor
+from mirage.cache.index import IndexCacheStore
 from mirage.types import PathSpec
 
 logger = logging.getLogger(__name__)
@@ -33,8 +35,8 @@ def make_resolve_glob(readdir: Callable,
             truncation.
     """
 
-    async def resolve_glob(accessor: object, paths: list[PathSpec],
-                           index: object) -> list[PathSpec]:
+    async def resolve_glob(accessor: Accessor, paths: list[PathSpec],
+                           index: IndexCacheStore | None) -> list[PathSpec]:
         result: list[PathSpec] = []
         for p in paths:
             if isinstance(p, str):

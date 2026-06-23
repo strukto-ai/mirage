@@ -14,6 +14,8 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor.base import Accessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.aggregators import header_aggregate
 from mirage.commands.builtin.generic.head import head as generic_head
 from mirage.commands.builtin.generic.head import head_multi
@@ -27,13 +29,13 @@ from mirage.types import PathSpec
 
 async def head(
     ops: CommandIO,
-    accessor: object,
+    accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     n: str | None = None,
     c: str | None = None,
-    index: object = None,
+    index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     n_int = int(n) if n is not None else None

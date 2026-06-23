@@ -14,6 +14,8 @@
 
 from functools import partial
 
+from mirage.accessor.base import Accessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tree import tree as generic_tree
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.io.types import ByteSource, IOResult
@@ -22,7 +24,7 @@ from mirage.types import PathSpec
 
 async def tree(
     ops: CommandIO,
-    accessor: object,
+    accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
@@ -31,7 +33,7 @@ async def tree(
     args_I: str | None = None,
     d: bool = False,
     P: str | None = None,
-    index: object = None,
+    index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):

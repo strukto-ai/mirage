@@ -14,6 +14,8 @@
 
 from functools import partial
 
+from mirage.accessor.base import Accessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.mv import mv as generic_mv
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.io.types import ByteSource, IOResult
@@ -22,14 +24,14 @@ from mirage.types import PathSpec
 
 async def mv(
     ops: CommandIO,
-    accessor: object,
+    accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
     f: bool = False,
     n: bool = False,
     v: bool = False,
-    index: object = None,
+    index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor) or len(paths) < 2:

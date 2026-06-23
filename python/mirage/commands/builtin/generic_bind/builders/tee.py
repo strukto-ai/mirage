@@ -14,6 +14,8 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor.base import Accessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tee import tee as generic_tee
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.io.types import ByteSource, IOResult
@@ -22,12 +24,12 @@ from mirage.types import PathSpec
 
 async def tee(
     ops: CommandIO,
-    accessor: object,
+    accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     a: bool = False,
-    index: object = None,
+    index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:

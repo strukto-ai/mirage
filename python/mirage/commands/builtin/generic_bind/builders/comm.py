@@ -14,6 +14,8 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor.base import Accessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.comm import comm as generic_comm
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.io.types import ByteSource, IOResult
@@ -22,13 +24,13 @@ from mirage.types import PathSpec
 
 async def comm(
     ops: CommandIO,
-    accessor: object,
+    accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     check_order: bool = False,
     nocheck_order: bool = False,
-    index: object = None,
+    index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor) or len(paths) < 2:

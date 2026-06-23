@@ -14,6 +14,8 @@
 
 from functools import partial
 
+from mirage.accessor.base import Accessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cp import cp as generic_cp
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.io.types import ByteSource, IOResult
@@ -22,7 +24,7 @@ from mirage.types import PathSpec
 
 async def cp(
     ops: CommandIO,
-    accessor: object,
+    accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
@@ -32,7 +34,7 @@ async def cp(
     f: bool = False,
     n: bool = False,
     v: bool = False,
-    index: object = None,
+    index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor) or len(paths) < 2:

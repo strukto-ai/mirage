@@ -14,6 +14,8 @@
 
 from functools import partial
 
+from mirage.accessor.base import Accessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.ls import ls as generic_ls
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.io.types import ByteSource, IOResult
@@ -22,7 +24,7 @@ from mirage.types import LsSortBy, PathSpec
 
 async def ls(
     ops: CommandIO,
-    accessor: object,
+    accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: bytes | None = None,
@@ -37,7 +39,7 @@ async def ls(
     R: bool = False,
     d: bool = False,
     F: bool = False,
-    index: object = None,
+    index: IndexCacheStore | None = None,
     cwd: PathSpec | str = "/",
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:

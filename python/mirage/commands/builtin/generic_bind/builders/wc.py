@@ -14,6 +14,8 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor.base import Accessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.aggregators import wc_aggregate
 from mirage.commands.builtin.generic.wc import format_multi, format_wc
 from mirage.commands.builtin.generic.wc import wc as generic_wc
@@ -28,7 +30,7 @@ from mirage.types import PathSpec
 
 async def wc(
     ops: CommandIO,
-    accessor: object,
+    accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
@@ -37,7 +39,7 @@ async def wc(
     c: bool = False,
     m: bool = False,
     L: bool = False,
-    index: object = None,
+    index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths and ops.is_mounted(accessor):

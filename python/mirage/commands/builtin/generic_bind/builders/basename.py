@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.basename import \
     basename as generic_basename
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
@@ -21,7 +22,7 @@ from mirage.types import PathSpec
 
 async def basename(
     ops: CommandIO,
-    accessor: object,
+    accessor: Accessor,
     paths: list[PathSpec] | None = None,
     *texts: str,
     stdin: bytes | None = None,

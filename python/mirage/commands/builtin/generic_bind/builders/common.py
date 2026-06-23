@@ -12,13 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.base import Accessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.types import PathSpec
 
 
-async def resolve_or_empty(ops: CommandIO, accessor: object,
+async def resolve_or_empty(ops: CommandIO, accessor: Accessor,
                            paths: list[PathSpec],
-                           index: object) -> list[PathSpec]:
+                           index: IndexCacheStore | None) -> list[PathSpec]:
     if paths and ops.is_mounted(accessor):
         return await ops.resolve_glob(accessor, paths, index)
     return []

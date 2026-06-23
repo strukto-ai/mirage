@@ -14,6 +14,8 @@
 
 from collections.abc import AsyncIterator
 
+from mirage.accessor.base import Accessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.aggregators import prefix_aggregate
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
@@ -23,12 +25,12 @@ from mirage.types import PathSpec
 
 async def grep(
     ops: CommandIO,
-    accessor: object,
+    accessor: Accessor,
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     prefix: str = "",
-    index: object = None,
+    index: IndexCacheStore | None = None,
     **flags,
 ) -> tuple[ByteSource | None, IOResult]:
     resolved = (await ops.resolve_glob(accessor, paths, index)

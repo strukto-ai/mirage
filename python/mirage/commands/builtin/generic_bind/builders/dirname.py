@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.dirname import dirname as generic_dirname
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.io.types import ByteSource, IOResult
@@ -20,7 +21,7 @@ from mirage.types import PathSpec
 
 async def dirname(
     ops: CommandIO,
-    accessor: object,
+    accessor: Accessor,
     paths: list[PathSpec] | None = None,
     *texts: str,
     stdin: bytes | None = None,

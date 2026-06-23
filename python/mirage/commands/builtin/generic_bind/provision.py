@@ -14,6 +14,7 @@
 
 from collections.abc import Callable
 
+from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.core.jq import is_jsonl_path, is_streamable_jsonl_expr
 from mirage.provision.types import Precision, ProvisionResult
@@ -22,7 +23,7 @@ from mirage.types import PathSpec
 
 async def _resolve_sizes(
     stat: Callable,
-    accessor: object,
+    accessor: Accessor,
     paths: list[PathSpec],
     index: IndexCacheStore | None,
 ) -> tuple[list[tuple[str, int]], int]:
@@ -52,9 +53,9 @@ def make_file_read_provision(stat: Callable) -> Callable:
     """Cost estimate for full file reads (cat, wc), generic over stat."""
 
     async def file_read_provision(
-        accessor: object,
+        accessor: Accessor,
         paths: list[PathSpec],
-        *_args: object,
+        *_args: str,
         command: str = "",
         index: IndexCacheStore | None = None,
         **kwargs,
@@ -82,9 +83,9 @@ def make_head_tail_provision(stat: Callable) -> Callable:
     """Cost estimate for partial reads (head, tail), generic over stat."""
 
     async def head_tail_provision(
-        accessor: object,
+        accessor: Accessor,
         paths: list[PathSpec],
-        *_args: object,
+        *_args: str,
         command: str = "",
         n: str | int | None = None,
         c: str | int | None = None,
@@ -121,9 +122,9 @@ def make_head_tail_provision(stat: Callable) -> Callable:
 
 
 async def metadata_provision(
-    accessor: object,
+    accessor: Accessor,
     paths: list[PathSpec],
-    *_args: object,
+    *_args: str,
     command: str = "",
     index: IndexCacheStore | None = None,
     **kwargs,
@@ -140,9 +141,9 @@ async def metadata_provision(
 
 
 async def stat_provision(
-    accessor: object = None,
+    accessor: Accessor | None = None,
     paths: list[PathSpec] | None = None,
-    *_args: object,
+    *_args: str,
     **kwargs,
 ) -> ProvisionResult:
     """Cost estimate for stat: the command string, no reads."""
@@ -154,7 +155,7 @@ def make_jq_provision(stat: Callable) -> Callable:
     """Provision for jq: streamable jsonl reads a range, else whole file."""
 
     async def jq_provision(
-        accessor: object,
+        accessor: Accessor,
         paths: list[PathSpec] | None = None,
         *texts: str,
         index: IndexCacheStore | None = None,
@@ -196,7 +197,7 @@ def make_search_provision(stat: Callable) -> Callable:
     base = make_file_read_provision(stat)
 
     async def search_provision(
-        accessor: object,
+        accessor: Accessor,
         paths: list[PathSpec],
         *texts: str,
         command: str = "",
