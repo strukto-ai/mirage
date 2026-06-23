@@ -14,12 +14,13 @@
 
 from mirage.types import PathSpec
 
-TRANSFER_COMMANDS = frozenset({"cp", "mv", "diff", "cmp"})
-MULTI_READ_COMMANDS = frozenset({"cat", "head", "tail", "wc", "grep", "rg"})
+TRANSFER_COMMANDS = frozenset({"cp", "mv"})
+COMPARE_COMMANDS = frozenset({"diff", "cmp"})
+READ_COMMANDS = frozenset({"cat", "head", "tail", "wc", "grep", "rg"})
 
 
 def is_cross_mount(cmd_name: str, scopes: list[PathSpec], registry) -> bool:
-    allowed = TRANSFER_COMMANDS | MULTI_READ_COMMANDS
+    allowed = TRANSFER_COMMANDS | COMPARE_COMMANDS | READ_COMMANDS
     if cmd_name not in allowed or len(scopes) < 2:
         return False
     mounts = set()

@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.workspace.executor.cross.detect import is_cross_mount
-from mirage.workspace.executor.cross.dispatch import handle_cross_mount
+from mirage.commands.builtin.generic.crossmount.detect import is_cross_mount
+from mirage.commands.builtin.generic.crossmount.route import handle_cross_mount
 
 __all__ = ["is_cross_mount", "handle_cross_mount"]

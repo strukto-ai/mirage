@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.generic.crossmount.ops import (CrossResult,
+                                                            DispatchIO)
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.generic.head import head_multi
 from mirage.commands.builtin.generic.tail import tail_multi
@@ -22,12 +24,10 @@ from mirage.commands.spec.types import FlagView
 from mirage.io import IOResult
 from mirage.io.stream import async_chain
 from mirage.types import PathSpec
-from mirage.workspace.executor.cross.adapter import CrossResult, DispatchIO
 
 
-async def run_aggregate(cmd_name: str, scopes: list[PathSpec],
-                        text_args: list[str], flag_kwargs: dict,
-                        io: DispatchIO) -> CrossResult:
+async def run_read(cmd_name: str, scopes: list[PathSpec], text_args: list[str],
+                   flag_kwargs: dict, io: DispatchIO) -> CrossResult:
     """Aggregate a multi-file read whose operands span mounts.
 
     These are the N-ary read commands: many files in, one aggregated stream
@@ -36,7 +36,7 @@ async def run_aggregate(cmd_name: str, scopes: list[PathSpec],
     for grep, stat'd) through its owning mount, and the shared generic command
     does the cat/head/tail/wc/grep work, so cross-mount output matches the
     single-mount commands. Returns the same ``(out, IOResult)`` a generic
-    command returns; the caller builds the execution record.
+    command returns; the caller builds the record.
 
     Args:
         cmd_name (str): One of cat, head, tail, wc, grep, rg.
@@ -56,13 +56,6 @@ async def run_aggregate(cmd_name: str, scopes: list[PathSpec],
                                   read_bytes=io.read_bytes,
                                   read_stream=io.read_stream,
                                   accessor=None)
-
-    if cmd_name == "cat":
-        for scope in scopes:
-            await io.read_bytes(None, scope)
-        reads = io.reads
-        return async_chain(*reads.values()), IOResult(reads=dict(reads),
-                                                      cache=list(reads))
 
     if cmd_name in ("head", "tail"):
         fl = FlagView(flag_kwargs, spec=SPECS[cmd_name])

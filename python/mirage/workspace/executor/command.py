@@ -17,6 +17,8 @@ from typing import NamedTuple
 
 from mirage.commands.builtin.find_parse import (FindParseError, find_expr_tail,
                                                 parse_find_expression)
+from mirage.commands.builtin.generic.crossmount import (handle_cross_mount,
+                                                        is_cross_mount)
 from mirage.commands.builtin.utils.safeguard import maybe_with_timeout
 from mirage.commands.safeguard import resolve_across_mounts, resolve_safeguard
 from mirage.commands.spec import (SPECS, OperandKind, flag_kwarg_name,
@@ -29,7 +31,6 @@ from mirage.shell.job_table import JobTable
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
 from mirage.types import PathSpec
 from mirage.workspace.executor.control import ReturnSignal
-from mirage.workspace.executor.cross import handle_cross_mount, is_cross_mount
 from mirage.workspace.executor.fanout import (_fan_out_traversal,
                                               _should_fan_out)
 from mirage.workspace.executor.find_action_dispatch import _apply_find_actions

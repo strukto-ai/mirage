@@ -14,14 +14,15 @@
 
 from typing import Callable
 
+from mirage.commands.builtin.generic.crossmount.compare import run_compare
+from mirage.commands.builtin.generic.crossmount.detect import (
+    COMPARE_COMMANDS, READ_COMMANDS, TRANSFER_COMMANDS)
+from mirage.commands.builtin.generic.crossmount.ops import (CrossResult,
+                                                            build_dispatch_io)
+from mirage.commands.builtin.generic.crossmount.read import run_read
+from mirage.commands.builtin.generic.crossmount.transfer import run_transfer
 from mirage.io import IOResult
 from mirage.types import PathSpec
-from mirage.workspace.executor.aggregate import run_aggregate
-from mirage.workspace.executor.cross.adapter import (CrossResult,
-                                                     build_dispatch_io)
-from mirage.workspace.executor.cross.detect import (MULTI_READ_COMMANDS,
-                                                    TRANSFER_COMMANDS)
-from mirage.workspace.executor.transfer import run_transfer
 
 
 async def handle_cross_mount(
@@ -31,18 +32,18 @@ async def handle_cross_mount(
     flag_kwargs: dict,
     dispatch: Callable,
 ) -> CrossResult:
-    """Execute a command whose path operands span mounts, via the generics.
+    """Run a command whose path operands span mounts, via the generics.
 
     Cross-mount is a peer of the generic single-mount commands, not a second
     implementation: every path operand is read or written through ``dispatch``
     (which routes it to its owning mount), and the shared generic command does
-    the actual work. Two-operand transfer and compare commands (cp/mv/diff/cmp)
-    go to ``run_transfer``; N-ary read commands (cat/head/tail/wc/grep) go to
-    ``run_aggregate``. Returns the same ``(out, IOResult)`` a generic command
-    returns, so the caller builds the execution record uniformly.
+    the actual work. ``cp``/``mv`` go to ``run_transfer``; ``diff``/``cmp`` to
+    ``run_compare``; the N-ary read commands to ``run_read``. Returns the same
+    ``(out, IOResult)`` a generic command returns, so the caller builds the
+    execution record uniformly.
 
     Args:
-        cmd_name (str): Command name, such as ``cp``, ``mv``, or ``cat``.
+        cmd_name (str): Command name, such as ``cp``, ``diff``, or ``cat``.
         scopes (list[PathSpec]): Path operands in command-line order.
         text_args (list[str]): Positional text operands (e.g. grep pattern).
         flag_kwargs (dict): Flags parsed from the shared command spec.
@@ -52,9 +53,10 @@ async def handle_cross_mount(
     try:
         if cmd_name in TRANSFER_COMMANDS:
             return await run_transfer(cmd_name, scopes, flag_kwargs, io)
-        if cmd_name in MULTI_READ_COMMANDS:
-            return await run_aggregate(cmd_name, scopes, text_args,
-                                       flag_kwargs, io)
+        if cmd_name in COMPARE_COMMANDS:
+            return await run_compare(cmd_name, scopes, flag_kwargs, io)
+        if cmd_name in READ_COMMANDS:
+            return await run_read(cmd_name, scopes, text_args, flag_kwargs, io)
     except (FileNotFoundError, NotADirectoryError, IsADirectoryError,
             PermissionError) as exc:
         return None, IOResult(exit_code=1,
