@@ -17,7 +17,8 @@ from collections.abc import AsyncIterator
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tar import tar as generic_tar
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          with_index)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -46,7 +47,7 @@ async def tar(
         raise ValueError("tar: missing operand")
     paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_tar(paths,
-                             read_bytes=ops.read_bytes,
+                             read_bytes=with_index(ops.read_bytes, index),
                              write_bytes=ops.write,
                              mkdir_fn=ops.mkdir,
                              accessor=accessor,

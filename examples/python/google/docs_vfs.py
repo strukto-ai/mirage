@@ -50,7 +50,7 @@ async def main():
 
         if docs:
             first = docs[0]
-            path = f"/gdocs{first}"
+            path = f"/gdocs/owned/{first}"
             print("\n--- open() + read first doc ---")
             with open(path) as f:
                 content = f.read()

@@ -15,7 +15,8 @@
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.file import file_cmd as generic_file
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          with_index)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -35,8 +36,8 @@ async def file(
         raise ValueError("file: missing operand")
     paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_file(paths,
-                              read_bytes=ops.read_bytes,
-                              stat_fn=ops.stat,
+                              read_bytes=with_index(ops.read_bytes, index),
+                              stat_fn=with_index(ops.stat, index),
                               accessor=accessor,
                               b=b,
                               i=i)

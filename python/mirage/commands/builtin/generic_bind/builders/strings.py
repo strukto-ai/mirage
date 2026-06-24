@@ -17,7 +17,8 @@ from collections.abc import AsyncIterator
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.strings import strings as generic_strings
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          with_index)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
 from mirage.io.types import ByteSource, IOResult
@@ -36,7 +37,7 @@ async def strings(
 ) -> tuple[ByteSource | None, IOResult]:
     paths = await resolve_or_empty(ops, accessor, paths, index)
     return await generic_strings(paths,
-                                 read_bytes=ops.read_bytes,
+                                 read_bytes=with_index(ops.read_bytes, index),
                                  accessor=accessor,
                                  stdin=stdin,
                                  min_len=int(n) if n else 4)

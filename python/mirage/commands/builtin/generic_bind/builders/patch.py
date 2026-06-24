@@ -15,8 +15,10 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.base import Accessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.patch import patch as generic_patch
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          with_index)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -31,10 +33,11 @@ async def patch(
     R: bool = False,
     i: PathSpec | None = None,
     N: bool = False,
+    index: IndexCacheStore | None = None,
     **flags,
 ) -> tuple[ByteSource | None, IOResult]:
     return await generic_patch(paths,
-                               read_bytes=ops.read_bytes,
+                               read_bytes=with_index(ops.read_bytes, index),
                                write_bytes=ops.write,
                                has_resource=ops.is_mounted(accessor),
                                accessor=accessor,

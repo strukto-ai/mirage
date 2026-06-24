@@ -41,7 +41,7 @@ async def jq(
     paths = await resolve_or_empty(ops, accessor, paths, index)
     return await generic_jq(paths,
                             *texts,
-                            read_bytes=ops.read_bytes,
+                            read_bytes=with_index(ops.read_bytes, index),
                             read_stream=with_index(ops.read_stream, index),
                             accessor=accessor,
                             stdin=stdin,

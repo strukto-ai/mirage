@@ -17,7 +17,8 @@ from collections.abc import AsyncIterator
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cmp import cmp_cmd as generic_cmp
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          with_index)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -40,7 +41,7 @@ async def cmp_cmd(
         raise ValueError('cmp: requires two paths')
     paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_cmp(paths,
-                             read_bytes=ops.read_bytes,
+                             read_bytes=with_index(ops.read_bytes, index),
                              accessor=accessor,
                              silent=s,
                              verbose=args_l,

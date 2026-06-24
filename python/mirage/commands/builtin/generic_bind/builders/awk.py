@@ -41,7 +41,7 @@ async def awk(
     return await generic_awk(
         paths,
         texts,
-        read_bytes=ops.read_bytes,
+        read_bytes=with_index(ops.read_bytes, index),
         read_stream=with_index(ops.read_stream, index),
         accessor=accessor,
         stdin=stdin,

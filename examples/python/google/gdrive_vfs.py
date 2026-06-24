@@ -53,7 +53,7 @@ async def main():
                 gslide = e
 
         if gdoc:
-            path = f"/gdrive{gdoc}"
+            path = f"/gdrive/{gdoc}"
             print(f"\n--- open() Google Doc: {gdoc} ---")
             with open(path) as f:
                 content = f.read()
@@ -62,7 +62,7 @@ async def main():
                 print(f"  preview: {content[:200]}...")
 
         if gsheet:
-            path = f"/gdrive{gsheet}"
+            path = f"/gdrive/{gsheet}"
             print(f"\n--- open() Google Sheet: {gsheet} ---")
             with open(path) as f:
                 content = f.read()
@@ -73,7 +73,7 @@ async def main():
                 print(f"  sheets: {num_sheets}")
 
         if gslide:
-            path = f"/gdrive{gslide}"
+            path = f"/gdrive/{gslide}"
             print(f"\n--- open() Google Slides: {gslide} ---")
             with open(path) as f:
                 content = f.read()
@@ -83,7 +83,7 @@ async def main():
 
         print("\n--- os.path.exists() ---")
         if gdoc:
-            print(f"  {gdoc}: {vos.path.exists(f'/gdrive{gdoc}')}")
+            print(f"  {gdoc}: {vos.path.exists(f'/gdrive/{gdoc}')}")
         print(f"  nonexistent: {vos.path.exists('/gdrive/nope.txt')}")
 
         print("\n--- bash history ---")
