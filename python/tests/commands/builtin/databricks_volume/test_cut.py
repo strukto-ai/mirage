@@ -14,10 +14,6 @@
 
 import pytest
 
-from mirage.cache.index import RAMIndexCacheStore
-from mirage.commands.builtin.databricks_volume import cut as cut_command
-from mirage.types import PathSpec
-
 
 @pytest.mark.asyncio
 async def test_workspace_execute_databricks_volume_cut(
@@ -27,23 +23,3 @@ async def test_workspace_execute_databricks_volume_cut(
 
     assert io.exit_code == 0
     assert io.stdout == b"score\n2\n3\n"
-
-
-@pytest.mark.asyncio
-async def test_databricks_volume_cut_forwards_index(
-    index_tracker,
-    expected_index: RAMIndexCacheStore,
-    materialize_output,
-):
-    source, _io = await cut_command(
-        object(),
-        [PathSpec.from_str_path("/dbx/sample.csv", "/dbx")],
-        index=expected_index,
-        d=",",
-        f="1",
-    )
-
-    await materialize_output(source)
-
-    assert index_tracker.seen_indexes
-    assert all(index is expected_index for index in index_tracker.seen_indexes)

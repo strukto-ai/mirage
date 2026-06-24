@@ -14,10 +14,6 @@
 
 import pytest
 
-from mirage.cache.index import RAMIndexCacheStore
-from mirage.commands.builtin.databricks_volume import awk as awk_command
-from mirage.types import PathSpec
-
 
 @pytest.mark.asyncio
 async def test_workspace_execute_databricks_volume_awk(
@@ -27,22 +23,3 @@ async def test_workspace_execute_databricks_volume_awk(
 
     assert io.exit_code == 0
     assert io.stdout == b"name,score\nann,2\nbob,3\n"
-
-
-@pytest.mark.asyncio
-async def test_databricks_volume_awk_forwards_index(
-    index_tracker,
-    expected_index: RAMIndexCacheStore,
-    materialize_output,
-):
-    source, _io = await awk_command(
-        object(),
-        [PathSpec.from_str_path("/dbx/sample.csv", "/dbx")],
-        "{print $1}",
-        index=expected_index,
-    )
-
-    await materialize_output(source)
-
-    assert index_tracker.seen_indexes
-    assert all(index is expected_index for index in index_tracker.seen_indexes)

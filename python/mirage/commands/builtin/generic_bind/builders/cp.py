@@ -17,9 +17,27 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cp import cp as generic_cp
+from mirage.commands.builtin.generic.find import parse_find_args, walk_find
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+
+
+async def _walk_find(readdir, stat, index, src, type=None) -> list[str]:
+    return await walk_find(src,
+                           readdir=readdir,
+                           stat=stat,
+                           is_dir_name=lambda _name: None,
+                           index=index,
+                           args=parse_find_args((), type=type))
+
+
+def _make_find(ops: CommandIO, accessor: Accessor,
+               index: IndexCacheStore | None) -> object:
+    if ops.find is not None:
+        return partial(ops.find, accessor)
+    return partial(_walk_find, partial(ops.readdir, accessor),
+                   partial(ops.stat, accessor), index)
 
 
 async def cp(
@@ -43,7 +61,7 @@ async def cp(
     dir_copy = partial(ops.dir_copy, accessor) if ops.dir_copy else None
     return await generic_cp(paths,
                             copy=partial(ops.copy, accessor),
-                            find=partial(ops.find, accessor),
+                            find=_make_find(ops, accessor, index),
                             find_type="f",
                             stat=partial(ops.stat, accessor),
                             recursive=r or R or a,

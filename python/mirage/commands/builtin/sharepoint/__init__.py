@@ -13,138 +13,77 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
+from mirage.commands.builtin.generic_bind import (CommandIO,
+                                                  make_generic_commands)
+from mirage.commands.builtin.generic_bind.provision import (
+    make_search_provision, metadata_provision)
 from mirage.commands.builtin.sharepoint._provision import \
     file_read_provision as _ft_provision
-from mirage.commands.builtin.sharepoint.awk import awk
-from mirage.commands.builtin.sharepoint.base64_cmd import base64_cmd
-from mirage.commands.builtin.sharepoint.basename import basename
-from mirage.commands.builtin.sharepoint.cat import cat
-from mirage.commands.builtin.sharepoint.cmp import cmp_cmd
-from mirage.commands.builtin.sharepoint.column import column
-from mirage.commands.builtin.sharepoint.comm import comm
-from mirage.commands.builtin.sharepoint.cp import cp
-from mirage.commands.builtin.sharepoint.csplit import csplit
-from mirage.commands.builtin.sharepoint.cut import cut
-from mirage.commands.builtin.sharepoint.diff import diff
-from mirage.commands.builtin.sharepoint.dirname import dirname
 from mirage.commands.builtin.sharepoint.du import du
-from mirage.commands.builtin.sharepoint.expand import expand
-from mirage.commands.builtin.sharepoint.file import file
-from mirage.commands.builtin.sharepoint.find import find
-from mirage.commands.builtin.sharepoint.fmt import fmt
-from mirage.commands.builtin.sharepoint.fold import fold
-from mirage.commands.builtin.sharepoint.grep import grep
-from mirage.commands.builtin.sharepoint.gunzip import gunzip
-from mirage.commands.builtin.sharepoint.gzip import gzip
-from mirage.commands.builtin.sharepoint.head import head
-from mirage.commands.builtin.sharepoint.iconv import iconv
-from mirage.commands.builtin.sharepoint.join import join
-from mirage.commands.builtin.sharepoint.jq import jq
-from mirage.commands.builtin.sharepoint.ln import ln
-from mirage.commands.builtin.sharepoint.look import look
-from mirage.commands.builtin.sharepoint.ls import ls
-from mirage.commands.builtin.sharepoint.md5 import md5
-from mirage.commands.builtin.sharepoint.mkdir import mkdir
-from mirage.commands.builtin.sharepoint.mktemp import mktemp
-from mirage.commands.builtin.sharepoint.mv import mv
-from mirage.commands.builtin.sharepoint.nl import nl
-from mirage.commands.builtin.sharepoint.paste import paste
-from mirage.commands.builtin.sharepoint.patch import patch
-from mirage.commands.builtin.sharepoint.readlink import readlink
-from mirage.commands.builtin.sharepoint.realpath import realpath
-from mirage.commands.builtin.sharepoint.rev import rev
-from mirage.commands.builtin.sharepoint.rg import rg
-from mirage.commands.builtin.sharepoint.rm import rm
 from mirage.commands.builtin.sharepoint.sed import sed
-from mirage.commands.builtin.sharepoint.sha256sum import sha256sum
-from mirage.commands.builtin.sharepoint.shuf import shuf
-from mirage.commands.builtin.sharepoint.sort import sort
-from mirage.commands.builtin.sharepoint.split import split
-from mirage.commands.builtin.sharepoint.stat import stat
-from mirage.commands.builtin.sharepoint.strings import strings
-from mirage.commands.builtin.sharepoint.tac import tac
-from mirage.commands.builtin.sharepoint.tail import tail
-from mirage.commands.builtin.sharepoint.tar import tar
-from mirage.commands.builtin.sharepoint.tee import tee
-from mirage.commands.builtin.sharepoint.touch import touch
-from mirage.commands.builtin.sharepoint.tr import tr
-from mirage.commands.builtin.sharepoint.tree import tree
-from mirage.commands.builtin.sharepoint.tsort import tsort
-from mirage.commands.builtin.sharepoint.unexpand import unexpand
-from mirage.commands.builtin.sharepoint.uniq import uniq
-from mirage.commands.builtin.sharepoint.unzip import unzip as unzip_cmd
-from mirage.commands.builtin.sharepoint.wc import wc
-from mirage.commands.builtin.sharepoint.xxd import xxd
-from mirage.commands.builtin.sharepoint.zcat import zcat
-from mirage.commands.builtin.sharepoint.zgrep import zgrep
-from mirage.commands.builtin.sharepoint.zip_cmd import zip_cmd
+from mirage.core.sharepoint.copy import copy as _copy
+from mirage.core.sharepoint.create import create as _create
+from mirage.core.sharepoint.du import du as _du
+from mirage.core.sharepoint.du import du_all as _du_all
+from mirage.core.sharepoint.exists import exists as _exists
+from mirage.core.sharepoint.find import find as _find
 from mirage.core.sharepoint.glob import resolve_glob as _ft_resolve_glob
-from mirage.core.sharepoint.read import read_bytes as _ft_read
+from mirage.core.sharepoint.mkdir import mkdir as _mkdir
+from mirage.core.sharepoint.read import read_bytes as _read
+from mirage.core.sharepoint.readdir import readdir as _readdir
+from mirage.core.sharepoint.rename import rename as _rename
+from mirage.core.sharepoint.rm import rm_r as _rm_r
+from mirage.core.sharepoint.rmdir import rmdir as _rmdir
+from mirage.core.sharepoint.stat import stat as _stat
+from mirage.core.sharepoint.stream import read_stream as _read_stream
+from mirage.core.sharepoint.truncate import truncate as _truncate
+from mirage.core.sharepoint.unlink import unlink as _unlink
+from mirage.core.sharepoint.write import write_bytes as _write
+
+# SharePoint files are read and written through the generic factory (with
+# filetype commands for columnar files); sed has no generic builder and du
+# keeps a wrapper because its du_all returns a flat list (du_multi contract)
+# rather than the generic (list, total) tuple, matching OneDrive. Folder copy
+# is server-side via the dir_copy field.
+_SHAREPOINT_CMD_OPS = CommandIO(
+    readdir=_readdir,
+    read_bytes=_read,
+    read_stream=_read_stream,
+    stat=_stat,
+    is_mounted=lambda a: True,
+    local=False,
+    write=_write,
+    exists=_exists,
+    mkdir=_mkdir,
+    unlink=_unlink,
+    rmdir=_rmdir,
+    rm_r=_rm_r,
+    rename=_rename,
+    copy=_copy,
+    dir_copy=_copy,
+    create=_create,
+    truncate=_truncate,
+    find=_find,
+    du_total=_du,
+    du_all=_du_all,
+)
+
+_SHAREPOINT_OVERRIDES = {"du"}
 
 COMMANDS = [
     *make_filetype_commands(
-        "sharepoint", _ft_resolve_glob, _ft_read, provision=_ft_provision),
-    awk,
-    base64_cmd,
-    basename,
-    cat,
-    cmp_cmd,
-    column,
-    comm,
-    cp,
-    csplit,
-    cut,
-    diff,
-    dirname,
+        "sharepoint", _ft_resolve_glob, _read, provision=_ft_provision),
+    *make_generic_commands(
+        "sharepoint",
+        _SHAREPOINT_CMD_OPS,
+        overrides=_SHAREPOINT_OVERRIDES,
+        provision_overrides={
+            "grep": make_search_provision(_stat),
+            "rg": make_search_provision(_stat),
+            "ls": metadata_provision,
+            "find": metadata_provision,
+        },
+    ),
     du,
-    expand,
-    file,
-    find,
-    fmt,
-    fold,
-    grep,
-    gunzip,
-    gzip,
-    head,
-    iconv,
-    join,
-    jq,
-    ln,
-    look,
-    ls,
-    md5,
-    mkdir,
-    mktemp,
-    mv,
-    nl,
-    paste,
-    patch,
-    readlink,
-    realpath,
-    rev,
-    rg,
-    rm,
     sed,
-    sha256sum,
-    shuf,
-    sort,
-    split,
-    stat,
-    strings,
-    tac,
-    tail,
-    tar,
-    tee,
-    touch,
-    tr,
-    tree,
-    tsort,
-    unexpand,
-    uniq,
-    unzip_cmd,
-    wc,
-    xxd,
-    zcat,
-    zgrep,
-    zip_cmd,
 ]
