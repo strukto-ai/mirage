@@ -62,7 +62,6 @@ describe('ResourceName', () => {
     expect(ResourceName.DISCORD).toBe('discord')
     expect(ResourceName.GMAIL).toBe('gmail')
     expect(ResourceName.TRELLO).toBe('trello')
-    expect(ResourceName.TELEGRAM).toBe('telegram')
     expect(ResourceName.MONGODB).toBe('mongodb')
     expect(ResourceName.NOTION).toBe('notion')
     expect(ResourceName.LANGFUSE).toBe('langfuse')
@@ -86,8 +85,8 @@ describe('ResourceName', () => {
     expect(ResourceName.QINGSTOR).toBe('qingstor')
   })
 
-  it('contains exactly 48 entries', () => {
-    expect(Object.keys(ResourceName)).toHaveLength(48)
+  it('contains exactly 47 entries', () => {
+    expect(Object.keys(ResourceName)).toHaveLength(47)
   })
 
   it('is frozen at runtime', () => {

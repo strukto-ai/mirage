@@ -57,7 +57,7 @@ await ws.execute('cat /s3/events/2026-05-06.parquet | jq .user')
 ## Giới thiệu
 
 - **Một giao diện thay vì N SDK và M MCP.** Mọi dịch vụ đều dùng cùng một ngữ nghĩa hệ thống tệp, và pipeline kết hợp giữa các dịch vụ tự nhiên như trên đĩa cục bộ.
-- **Khoảng 50 backend tích hợp sẵn:** RAM, Disk, Redis, S3 / R2 / OCI / Supabase / GCS, Gmail / GDrive / GDocs / GSheets / GSlides, GitHub / Linear / Notion / Trello, Slack / Discord / Telegram / Email, MongoDB / Postgres / LanceDB, SSH và nhiều hơn nữa, được gắn cạnh nhau dưới một gốc duy nhất.
+- **Khoảng 50 backend tích hợp sẵn:** RAM, Disk, Redis, S3 / R2 / OCI / Supabase / GCS, Gmail / GDrive / GDocs / GSheets / GSlides, GitHub / Linear / Notion / Trello, Slack / Discord / Email, MongoDB / Postgres / LanceDB, SSH và nhiều hơn nữa, được gắn cạnh nhau dưới một gốc duy nhất.
 - **Workspace di động:** clone, snapshot và đánh phiên bản workspace; phiên chạy agent di chuyển giữa các máy mà không cần khởi động lại hay cấu hình lại hệ thống.
 - **Nhúng được:** SDK Python và TypeScript chạy ngay trong tiến trình của FastAPI, Express, ứng dụng trình duyệt hoặc bất kỳ runtime bất đồng bộ nào; không cần tiến trình riêng.
 - **Tích hợp agent:** OpenAI Agents SDK, Vercel AI SDK, LangChain, Pydantic AI, CAMEL và OpenHands qua SDK; các coding agent như Claude Code và Codex qua CLI nhẹ + daemon.

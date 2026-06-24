@@ -36,7 +36,6 @@
       "s3",
       "slack",
       "ssh",
-      "telegram",
       "trello"
     ]
   },

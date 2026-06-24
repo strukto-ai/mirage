@@ -123,7 +123,6 @@ export const ResourceName = Object.freeze({
   DISCORD: 'discord',
   GMAIL: 'gmail',
   TRELLO: 'trello',
-  TELEGRAM: 'telegram',
   MONGODB: 'mongodb',
   NOTION: 'notion',
   LANGFUSE: 'langfuse',
