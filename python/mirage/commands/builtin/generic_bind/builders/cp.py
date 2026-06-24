@@ -40,6 +40,7 @@ async def cp(
     if not ops.is_mounted(accessor) or len(paths) < 2:
         raise ValueError("cp: requires src and dst")
     paths = await ops.resolve_glob(accessor, paths, index)
+    dir_copy = partial(ops.dir_copy, accessor) if ops.dir_copy else None
     return await generic_cp(paths,
                             copy=partial(ops.copy, accessor),
                             find=partial(ops.find, accessor),
@@ -48,7 +49,8 @@ async def cp(
                             recursive=r or R or a,
                             n=n,
                             v=v,
-                            index=index)
+                            index=index,
+                            dir_copy=dir_copy)
 
 
 BUILDER = Builder('cp', cp, None, True, None)
