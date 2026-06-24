@@ -70,4 +70,4 @@ async def rm(
     return output, IOResult(writes=removed)
 
 
-BUILDER = Builder('rm', rm, None, True, None, ('unlink', ))
+BUILDER = Builder('rm', rm, None, True, None)

@@ -49,4 +49,4 @@ async def gunzip(
                                 test_only=t)
 
 
-BUILDER = Builder('gunzip', gunzip, None, True, None, ('write', 'unlink'))
+BUILDER = Builder('gunzip', gunzip, None, True, None)

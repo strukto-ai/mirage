@@ -52,4 +52,4 @@ async def csplit(
                                 silent=s)
 
 
-BUILDER = Builder('csplit', csplit, None, True, None, ('write', ))
+BUILDER = Builder('csplit', csplit, None, True, None)

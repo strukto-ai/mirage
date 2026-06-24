@@ -49,4 +49,4 @@ async def iconv(
                                output_path=o)
 
 
-BUILDER = Builder('iconv', iconv, None, True, None, ('write', ))
+BUILDER = Builder('iconv', iconv, None, True, None)

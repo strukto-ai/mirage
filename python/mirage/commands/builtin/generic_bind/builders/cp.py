@@ -51,4 +51,4 @@ async def cp(
                             index=index)
 
 
-BUILDER = Builder('cp', cp, None, True, None, ('copy', 'find'))
+BUILDER = Builder('cp', cp, None, True, None)

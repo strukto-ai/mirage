@@ -51,4 +51,4 @@ async def split(
                                numeric_suffix=d)
 
 
-BUILDER = Builder('split', split, None, True, None, ('write', ))
+BUILDER = Builder('split', split, None, True, None)

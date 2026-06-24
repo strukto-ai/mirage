@@ -25,26 +25,22 @@ logger = logging.getLogger(__name__)
 
 
 def unsupported_commands(ops: CommandIO,
-                         overrides: set[str] | None = None) -> dict[str, list]:
-    """Commands the factory skips for these ops, mapped to the missing ops.
+                         overrides: set[str] | None = None) -> list[str]:
+    """Write commands the factory skips because the backend is read-only.
 
-    A command is skipped when the backend supplies none of the ops it needs
-    (e.g. a read-only backend has no ``write`` so ``tee`` cannot run). Used
-    by ``make_generic_commands`` to drop them and to report coverage gaps.
+    A read-only backend supplies no ``write`` op, so the byte-mutation
+    commands (tee, cp, gunzip, ...) cannot run and are dropped rather than
+    registered as commands that would crash when invoked. Used by
+    ``make_generic_commands`` and to report coverage gaps.
 
     Args:
         ops (CommandIO): the backend's IO adapter.
         overrides (set[str] | None): command names the backend ships itself.
     """
+    if ops.write is not None:
+        return []
     skip = overrides or set()
-    gaps: dict[str, list] = {}
-    for b in _BUILDERS:
-        if b.name in skip:
-            continue
-        missing = [op for op in b.requires if getattr(ops, op) is None]
-        if missing:
-            gaps[b.name] = missing
-    return gaps
+    return [b.name for b in _BUILDERS if b.write and b.name not in skip]
 
 
 def make_generic_commands(

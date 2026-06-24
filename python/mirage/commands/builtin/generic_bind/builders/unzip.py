@@ -53,4 +53,4 @@ async def unzip(
                                t=t)
 
 
-BUILDER = Builder('unzip', unzip, None, True, None, ('write', 'mkdir'))
+BUILDER = Builder('unzip', unzip, None, True, None)

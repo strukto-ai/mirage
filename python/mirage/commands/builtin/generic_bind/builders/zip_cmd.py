@@ -46,4 +46,4 @@ async def zip_cmd(
                              q=q)
 
 
-BUILDER = Builder('zip', zip_cmd, None, True, None, ('write', ))
+BUILDER = Builder('zip', zip_cmd, None, True, None)

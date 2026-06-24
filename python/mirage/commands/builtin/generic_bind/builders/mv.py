@@ -45,4 +45,4 @@ async def mv(
                             index=index)
 
 
-BUILDER = Builder('mv', mv, None, True, None, ('rename', ))
+BUILDER = Builder('mv', mv, None, True, None)

@@ -63,4 +63,4 @@ async def tar(
                              exclude=exclude)
 
 
-BUILDER = Builder('tar', tar, None, True, None, ('write', 'mkdir'))
+BUILDER = Builder('tar', tar, None, True, None)

@@ -39,4 +39,4 @@ async def mktemp(
                                 t=t)
 
 
-BUILDER = Builder('mktemp', mktemp, None, True, None, ('write', 'mkdir'))
+BUILDER = Builder('mktemp', mktemp, None, True, None)
