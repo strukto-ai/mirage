@@ -17,7 +17,9 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.find import find as generic_find
+from mirage.commands.builtin.generic.find import parse_find_args, walk_find
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -43,6 +45,10 @@ async def find(
     if not ops.is_mounted(accessor):
         raise ValueError("find: no resource")
     paths = await ops.resolve_glob(accessor, paths, index)
+    if ops.find is None:
+        return await _find_walk(ops, accessor, paths, texts, name, type, size,
+                                mtime, maxdepth, iname, path, mindepth, empty,
+                                index)
     stat = partial(ops.stat, accessor) if ops.local else None
     return await generic_find(paths,
                               texts,
@@ -57,6 +63,42 @@ async def find(
                               path=path,
                               mindepth=mindepth,
                               empty=empty)
+
+
+async def _find_walk(
+    ops: CommandIO,
+    accessor: Accessor,
+    paths: list[PathSpec],
+    texts: tuple[str, ...],
+    name: str | None,
+    type: str | None,
+    size: str | None,
+    mtime: str | None,
+    maxdepth: str | None,
+    iname: str | None,
+    path: str | None,
+    mindepth: str | None,
+    empty: bool,
+    index: IndexCacheStore | None,
+) -> tuple[ByteSource | None, IOResult]:
+    search = paths[0] if paths else PathSpec(original="/", directory="/")
+    args = parse_find_args(texts,
+                           name=name,
+                           type=type,
+                           size=size,
+                           mtime=mtime,
+                           maxdepth=maxdepth,
+                           iname=iname,
+                           path=path,
+                           mindepth=mindepth,
+                           empty=empty)
+    results = await walk_find(search,
+                              readdir=partial(ops.readdir, accessor),
+                              stat=partial(ops.stat, accessor),
+                              is_dir_name=lambda _name: None,
+                              index=index,
+                              args=args)
+    return format_records(results), IOResult()
 
 
 BUILDER = Builder('find', find, None, False, None)

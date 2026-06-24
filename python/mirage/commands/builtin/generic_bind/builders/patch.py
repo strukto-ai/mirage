@@ -45,4 +45,4 @@ async def patch(
                                N=N)
 
 
-BUILDER = Builder('patch', patch, None, True, None)
+BUILDER = Builder('patch', patch, None, True, None, ('write', ))

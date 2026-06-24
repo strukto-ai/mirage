@@ -13,12 +13,38 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
+import logging
 from collections.abc import Callable
 
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.builders import _BUILDERS
 from mirage.commands.config import command
 from mirage.commands.spec import SPECS
+
+logger = logging.getLogger(__name__)
+
+
+def unsupported_commands(ops: CommandIO,
+                         overrides: set[str] | None = None) -> dict[str, list]:
+    """Commands the factory skips for these ops, mapped to the missing ops.
+
+    A command is skipped when the backend supplies none of the ops it needs
+    (e.g. a read-only backend has no ``write`` so ``tee`` cannot run). Used
+    by ``make_generic_commands`` to drop them and to report coverage gaps.
+
+    Args:
+        ops (CommandIO): the backend's IO adapter.
+        overrides (set[str] | None): command names the backend ships itself.
+    """
+    skip = overrides or set()
+    gaps: dict[str, list] = {}
+    for b in _BUILDERS:
+        if b.name in skip:
+            continue
+        missing = [op for op in b.requires if getattr(ops, op) is None]
+        if missing:
+            gaps[b.name] = missing
+    return gaps
 
 
 def make_generic_commands(
@@ -41,9 +67,13 @@ def make_generic_commands(
     """
     skip = overrides or set()
     prov_over = provision_overrides or {}
+    gaps = unsupported_commands(ops, skip)
+    if gaps:
+        logger.info("%s: skipped %d unsupported commands: %s", resource,
+                    len(gaps), ", ".join(sorted(gaps)))
     commands: list[Callable] = []
     for b in _BUILDERS:
-        if b.name in skip:
+        if b.name in skip or b.name in gaps:
             continue
         bound = functools.partial(b.fn, ops)
         if b.name in prov_over:

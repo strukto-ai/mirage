@@ -48,4 +48,4 @@ async def ln(
     return output, IOResult(writes={dest_path.strip_prefix: data})
 
 
-BUILDER = Builder('ln', ln, None, True, None)
+BUILDER = Builder('ln', ln, None, True, None, ('write', ))

@@ -17,9 +17,32 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.du import du as generic_du
+from mirage.commands.builtin.generic.du import du_multi
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import FileType, PathSpec
+
+
+async def _du_walk(ops: CommandIO, accessor: Accessor,
+                   index: IndexCacheStore | None, path: PathSpec) -> int:
+    try:
+        s = await ops.stat(accessor, path, index)
+    except (FileNotFoundError, ValueError):
+        return 0
+    if s.type != FileType.DIRECTORY:
+        return s.size or 0
+    total = 0
+    try:
+        children = await ops.readdir(accessor, path, index)
+    except (FileNotFoundError, ValueError):
+        return 0
+    for child in children:
+        child_spec = PathSpec(original=child,
+                              directory=child,
+                              resolved=False,
+                              prefix=path.prefix)
+        total += await _du_walk(ops, accessor, index, child_spec)
+    return total
 
 
 async def du(
@@ -41,6 +64,17 @@ async def du(
     paths = await ops.resolve_glob(accessor, paths, index)
     if not paths:
         raise ValueError("du: missing operand")
+    depth = int(max_depth) if max_depth is not None else None
+    if ops.du_total is None:
+        out = await du_multi(paths,
+                             compute_total=partial(_du_walk, ops, accessor,
+                                                   index),
+                             h=h,
+                             s=s,
+                             a=a,
+                             max_depth=depth,
+                             c=c)
+        return out, IOResult()
     out = await generic_du(
         paths,
         compute_total=partial(ops.du_total, accessor),
@@ -48,7 +82,7 @@ async def du(
         s=s,
         a=a,
         h=h,
-        max_depth=int(max_depth) if max_depth is not None else None,
+        max_depth=depth,
         c=c,
     )
     return out.encode(), IOResult()

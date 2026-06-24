@@ -52,4 +52,4 @@ async def gzip(
                               level=level)
 
 
-BUILDER = Builder('gzip', gzip, None, True, None)
+BUILDER = Builder('gzip', gzip, None, True, None, ('write', 'unlink'))

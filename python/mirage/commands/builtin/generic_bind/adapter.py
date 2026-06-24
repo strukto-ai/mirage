@@ -32,6 +32,7 @@ class Builder(NamedTuple):
     provision: Callable | None = None
     write: bool = False
     aggregate: Callable | None = None
+    requires: tuple[str, ...] = ()
 
 
 def make_resolve_glob(readdir: Callable,

@@ -20,52 +20,11 @@ from mirage.commands.builtin.gdocs.gws_docs_documents_create import \
 from mirage.commands.builtin.gdocs.gws_docs_write import gws_docs_write
 from mirage.commands.builtin.gdrive._provision import \
     file_read_provision as _ft_provision
-from mirage.commands.builtin.gdrive.awk import awk
-from mirage.commands.builtin.gdrive.base64_cmd import base64_cmd
-from mirage.commands.builtin.gdrive.basename import basename
-from mirage.commands.builtin.gdrive.cat import cat
-from mirage.commands.builtin.gdrive.cmp import cmp_cmd
-from mirage.commands.builtin.gdrive.column import column
-from mirage.commands.builtin.gdrive.comm import comm
-from mirage.commands.builtin.gdrive.cut import cut
-from mirage.commands.builtin.gdrive.diff import diff
-from mirage.commands.builtin.gdrive.dirname import dirname
-from mirage.commands.builtin.gdrive.du import du
-from mirage.commands.builtin.gdrive.expand import expand
-from mirage.commands.builtin.gdrive.file import file
-from mirage.commands.builtin.gdrive.find import find
-from mirage.commands.builtin.gdrive.fmt import fmt
-from mirage.commands.builtin.gdrive.fold import fold
-from mirage.commands.builtin.gdrive.grep import grep
-from mirage.commands.builtin.gdrive.head import head
-from mirage.commands.builtin.gdrive.join import join
-from mirage.commands.builtin.gdrive.jq import jq
-from mirage.commands.builtin.gdrive.look import look
-from mirage.commands.builtin.gdrive.ls import ls
-from mirage.commands.builtin.gdrive.md5 import md5
-from mirage.commands.builtin.gdrive.nl import nl
-from mirage.commands.builtin.gdrive.paste import paste
-from mirage.commands.builtin.gdrive.readlink import readlink
-from mirage.commands.builtin.gdrive.realpath import realpath
-from mirage.commands.builtin.gdrive.rev import rev
-from mirage.commands.builtin.gdrive.rg import rg
 from mirage.commands.builtin.gdrive.sed import sed
-from mirage.commands.builtin.gdrive.sha256sum import sha256sum
-from mirage.commands.builtin.gdrive.shuf import shuf
-from mirage.commands.builtin.gdrive.sort import sort
-from mirage.commands.builtin.gdrive.stat import stat
-from mirage.commands.builtin.gdrive.strings import strings
-from mirage.commands.builtin.gdrive.tac import tac
-from mirage.commands.builtin.gdrive.tail import tail
-from mirage.commands.builtin.gdrive.tr import tr
-from mirage.commands.builtin.gdrive.tree import tree
-from mirage.commands.builtin.gdrive.tsort import tsort
-from mirage.commands.builtin.gdrive.unexpand import unexpand
-from mirage.commands.builtin.gdrive.uniq import uniq
-from mirage.commands.builtin.gdrive.wc import wc
-from mirage.commands.builtin.gdrive.xxd import xxd
-from mirage.commands.builtin.gdrive.zcat import zcat
-from mirage.commands.builtin.gdrive.zgrep import zgrep
+from mirage.commands.builtin.generic_bind import (CommandIO,
+                                                  make_generic_commands)
+from mirage.commands.builtin.generic_bind.provision import (
+    make_search_provision, metadata_provision)
 from mirage.commands.builtin.gsheets.gws_sheets_append import gws_sheets_append
 from mirage.commands.builtin.gsheets.gws_sheets_read import gws_sheets_read
 from mirage.commands.builtin.gsheets.gws_sheets_spreadsheets_batchUpdate import \
@@ -78,60 +37,41 @@ from mirage.commands.builtin.gslides.gws_slides_presentations_batchUpdate import
 from mirage.commands.builtin.gslides.gws_slides_presentations_create import \
     gws_slides_presentations_create  # noqa: E501
 from mirage.core.gdrive.glob import resolve_glob as _ft_resolve_glob
-from mirage.core.gdrive.read import read as _ft_read
+from mirage.core.gdrive.read import read as _read
+from mirage.core.gdrive.readdir import readdir as _readdir
+from mirage.core.gdrive.stat import stat as _stat
+from mirage.core.gdrive.stream import read_stream as _read_stream
+
+# Drive holds real byte files (read via the generic factory) but is written
+# only through the bespoke gws_* Workspace commands, so the generic
+# byte-mutation commands (cp/mv/tee/...) are intentionally absent. sed has no
+# generic builder and is kept as a wrapper.
+_GDRIVE_CMD_OPS = CommandIO(
+    readdir=_readdir,
+    read_bytes=_read,
+    read_stream=_read_stream,
+    stat=_stat,
+    is_mounted=lambda a: True,
+    local=False,
+)
 
 COMMANDS = [
     *make_filetype_commands("gdrive",
                             _ft_resolve_glob,
-                            _ft_read,
+                            _read,
                             read_takes_index=True,
                             provision=_ft_provision),
-    awk,
-    base64_cmd,
-    basename,
-    cat,
-    cmp_cmd,
-    column,
-    comm,
-    cut,
-    diff,
-    dirname,
-    du,
-    expand,
-    file,
-    find,
-    fmt,
-    fold,
-    grep,
-    head,
-    join,
-    jq,
-    look,
-    ls,
-    md5,
-    nl,
-    paste,
-    readlink,
-    realpath,
-    rev,
-    rg,
+    *make_generic_commands(
+        "gdrive",
+        _GDRIVE_CMD_OPS,
+        provision_overrides={
+            "grep": make_search_provision(_stat),
+            "rg": make_search_provision(_stat),
+            "ls": metadata_provision,
+            "find": metadata_provision,
+        },
+    ),
     sed,
-    sha256sum,
-    shuf,
-    sort,
-    stat,
-    strings,
-    tac,
-    tail,
-    tr,
-    tree,
-    tsort,
-    unexpand,
-    uniq,
-    wc,
-    xxd,
-    zcat,
-    zgrep,
     gws_docs_documents_create,
     gws_docs_documents_batchUpdate,
     gws_docs_write,

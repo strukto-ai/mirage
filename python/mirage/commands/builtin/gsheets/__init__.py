@@ -12,11 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.gsheets.basename import basename
-from mirage.commands.builtin.gsheets.cat import cat
-from mirage.commands.builtin.gsheets.dirname import dirname
-from mirage.commands.builtin.gsheets.find import find
-from mirage.commands.builtin.gsheets.grep import grep
+from functools import partial
+
+from mirage.commands.builtin.generic_bind import (CommandIO,
+                                                  make_generic_commands)
+from mirage.commands.builtin.generic_bind.provision import (
+    make_search_provision, metadata_provision)
 from mirage.commands.builtin.gsheets.gws_sheets_append import gws_sheets_append
 from mirage.commands.builtin.gsheets.gws_sheets_read import gws_sheets_read
 from mirage.commands.builtin.gsheets.gws_sheets_spreadsheets_batchUpdate import \
@@ -24,38 +25,39 @@ from mirage.commands.builtin.gsheets.gws_sheets_spreadsheets_batchUpdate import 
 from mirage.commands.builtin.gsheets.gws_sheets_spreadsheets_create import \
     gws_sheets_spreadsheets_create  # noqa: E501
 from mirage.commands.builtin.gsheets.gws_sheets_write import gws_sheets_write
-from mirage.commands.builtin.gsheets.head import head
-from mirage.commands.builtin.gsheets.jq import jq
-from mirage.commands.builtin.gsheets.ls import ls
-from mirage.commands.builtin.gsheets.nl import nl
-from mirage.commands.builtin.gsheets.realpath import realpath
-from mirage.commands.builtin.gsheets.rg import rg
 from mirage.commands.builtin.gsheets.rm import rm
-from mirage.commands.builtin.gsheets.stat import stat
-from mirage.commands.builtin.gsheets.tail import tail
-from mirage.commands.builtin.gsheets.tree import tree
-from mirage.commands.builtin.gsheets.wc import wc
+from mirage.commands.builtin.utils.wrap import stream_from_bytes
+from mirage.core.gsheets.read import read as _read
+from mirage.core.gsheets.readdir import readdir as _readdir
+from mirage.core.gsheets.stat import stat as _stat
+
+# A spreadsheet is written through the bespoke gws_sheets_* API commands, not
+# by writing raw bytes, so only the read ops feed the generic factory; the
+# generic byte-mutation commands (cp/mv/tee/...) are intentionally absent.
+_GSHEETS_CMD_OPS = CommandIO(
+    readdir=_readdir,
+    read_bytes=_read,
+    read_stream=partial(stream_from_bytes, _read),
+    stat=_stat,
+    is_mounted=lambda a: True,
+    local=False,
+)
 
 COMMANDS = [
-    basename,
-    cat,
-    dirname,
-    find,
-    head,
-    jq,
-    ls,
-    nl,
-    realpath,
-    rg,
+    *make_generic_commands(
+        "gsheets",
+        _GSHEETS_CMD_OPS,
+        provision_overrides={
+            "grep": make_search_provision(_stat),
+            "rg": make_search_provision(_stat),
+            "ls": metadata_provision,
+            "find": metadata_provision,
+        },
+    ),
     rm,
-    stat,
-    tail,
-    tree,
-    wc,
     gws_sheets_append,
     gws_sheets_read,
     gws_sheets_spreadsheets_batchUpdate,
     gws_sheets_spreadsheets_create,
     gws_sheets_write,
-    grep,
 ]

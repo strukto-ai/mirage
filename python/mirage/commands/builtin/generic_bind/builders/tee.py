@@ -44,4 +44,4 @@ async def tee(
                              append=a)
 
 
-BUILDER = Builder('tee', tee, None, True, None)
+BUILDER = Builder('tee', tee, None, True, None, ('write', ))

@@ -42,4 +42,4 @@ async def touch(
     return None, IOResult()
 
 
-BUILDER = Builder('touch', touch, None, True, None)
+BUILDER = Builder('touch', touch, None, True, None, ('write', ))
