@@ -13,34 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
-import logging
 from collections.abc import Callable
 
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.builders import _BUILDERS
 from mirage.commands.config import command
 from mirage.commands.spec import SPECS
-
-logger = logging.getLogger(__name__)
-
-
-def unsupported_commands(ops: CommandIO,
-                         overrides: set[str] | None = None) -> list[str]:
-    """Write commands the factory skips because the backend is read-only.
-
-    A read-only backend supplies no ``write`` op, so the byte-mutation
-    commands (tee, cp, gunzip, ...) cannot run and are dropped rather than
-    registered as commands that would crash when invoked. Used by
-    ``make_generic_commands`` and to report coverage gaps.
-
-    Args:
-        ops (CommandIO): the backend's IO adapter.
-        overrides (set[str] | None): command names the backend ships itself.
-    """
-    if ops.write is not None:
-        return []
-    skip = overrides or set()
-    return [b.name for b in _BUILDERS if b.write and b.name not in skip]
 
 
 def make_generic_commands(
@@ -63,13 +41,14 @@ def make_generic_commands(
     """
     skip = overrides or set()
     prov_over = provision_overrides or {}
-    gaps = unsupported_commands(ops, skip)
-    if gaps:
-        logger.info("%s: skipped %d unsupported commands: %s", resource,
-                    len(gaps), ", ".join(sorted(gaps)))
     commands: list[Callable] = []
     for b in _BUILDERS:
-        if b.name in skip or b.name in gaps:
+        if b.name in skip:
+            continue
+        # A read-only backend (no write op) can't run the byte-mutation
+        # commands (cp/mv/tee/gunzip/...), so don't register a command that
+        # would crash when invoked.
+        if b.write and ops.write is None:
             continue
         bound = functools.partial(b.fn, ops)
         if b.name in prov_over:
