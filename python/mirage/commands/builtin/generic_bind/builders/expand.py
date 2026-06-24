@@ -17,7 +17,8 @@ from collections.abc import AsyncIterator
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.expand import expand as generic_expand
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          with_index)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
 from mirage.io.types import ByteSource, IOResult
@@ -37,7 +38,7 @@ async def expand(
 ) -> tuple[ByteSource | None, IOResult]:
     paths = await resolve_or_empty(ops, accessor, paths, index)
     return await generic_expand(paths,
-                                read_bytes=ops.read_bytes,
+                                read_bytes=with_index(ops.read_bytes, index),
                                 accessor=accessor,
                                 stdin=stdin,
                                 tabsize=int(t) if t is not None else 8,

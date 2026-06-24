@@ -57,7 +57,7 @@ await ws.execute('cat /s3/events/2026-05-06.parquet | jq .user')
 ## About
 
 - **One interface instead of N SDKs and M MCPs.** Every service speaks the same filesystem semantics, and pipelines compose across services as naturally as on a local disk.
-- **Around 50 built-in backends:** RAM, Disk, Redis, S3 / R2 / OCI / Supabase / GCS, Gmail / GDrive / GDocs / GSheets / GSlides, GitHub / Linear / Notion / Trello, Slack / Discord / Telegram / Email, MongoDB / Postgres / LanceDB, SSH, and more, mounted side-by-side under a single root.
+- **Around 50 built-in backends:** RAM, Disk, Redis, S3 / R2 / OCI / Supabase / GCS, Gmail / GDrive / GDocs / GSheets / GSlides, GitHub / Linear / Notion / Trello, Slack / Discord / Email, MongoDB / Postgres / LanceDB, SSH, and more, mounted side-by-side under a single root.
 - **Portable workspaces:** clone, snapshot, and version a workspace; agent runs move between machines without restarting or reconfiguring the system.
 - **Embeddable:** the Python and TypeScript SDKs run in-process inside FastAPI, Express, browser apps, or any async runtime; no separate process required.
 - **Agent integrations:** OpenAI Agents SDK, Vercel AI SDK, LangChain, Pydantic AI, CAMEL, and OpenHands via the SDKs; coding agents like Claude Code and Codex via the lightweight CLI + daemon.

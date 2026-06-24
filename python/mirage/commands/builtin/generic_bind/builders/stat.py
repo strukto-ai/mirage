@@ -39,7 +39,8 @@ async def stat(
                               stat_fn=ops.stat,
                               accessor=accessor,
                               c=c,
-                              f=f)
+                              f=f,
+                              index=index)
 
 
 BUILDER = Builder('stat', stat, lambda _s: stat_provision, False, None)

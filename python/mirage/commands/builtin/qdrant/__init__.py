@@ -12,28 +12,46 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.qdrant.cat import cat
+from functools import partial
+
+from mirage.commands.builtin.generic_bind import (CommandIO,
+                                                  make_generic_commands)
+from mirage.commands.builtin.generic_bind.provision import (
+    make_search_provision, metadata_provision)
 from mirage.commands.builtin.qdrant.find import find
-from mirage.commands.builtin.qdrant.grep import grep
-from mirage.commands.builtin.qdrant.head import head
-from mirage.commands.builtin.qdrant.ls import ls
-from mirage.commands.builtin.qdrant.rg import rg
 from mirage.commands.builtin.qdrant.search import search
-from mirage.commands.builtin.qdrant.stat import stat
-from mirage.commands.builtin.qdrant.tail import tail
-from mirage.commands.builtin.qdrant.tree import tree
-from mirage.commands.builtin.qdrant.wc import wc
+from mirage.commands.builtin.utils.wrap import stream_from_bytes
+from mirage.core.qdrant.read import read as _read
+from mirage.core.qdrant.readdir import readdir as _readdir
+from mirage.core.qdrant.stat import stat as _stat
+
+# Qdrant points are read through the generic factory; find and search push down
+# to the Qdrant query API (kept bespoke). Qdrant is read-only, so the generic
+# byte-mutation commands are intentionally absent (no write op wired). There is
+# no native streaming read, so the stream op is synthesized from the whole-row
+# read.
+_QDRANT_CMD_OPS = CommandIO(
+    readdir=_readdir,
+    read_bytes=_read,
+    read_stream=partial(stream_from_bytes, _read),
+    stat=_stat,
+    is_mounted=lambda a: True,
+    local=False,
+)
+
+_QDRANT_OVERRIDES = {"find", "search"}
 
 COMMANDS = [
-    cat,
+    *make_generic_commands(
+        "qdrant",
+        _QDRANT_CMD_OPS,
+        overrides=_QDRANT_OVERRIDES,
+        provision_overrides={
+            "grep": make_search_provision(_stat),
+            "rg": make_search_provision(_stat),
+            "ls": metadata_provision,
+        },
+    ),
     find,
-    grep,
-    head,
-    ls,
-    rg,
     search,
-    stat,
-    tail,
-    tree,
-    wc,
 ]

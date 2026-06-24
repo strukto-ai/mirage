@@ -12,46 +12,48 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.gdocs.basename import basename
-from mirage.commands.builtin.gdocs.cat import cat
-from mirage.commands.builtin.gdocs.dirname import dirname
-from mirage.commands.builtin.gdocs.find import find
-from mirage.commands.builtin.gdocs.grep import grep
+from functools import partial
+
 from mirage.commands.builtin.gdocs.gws_docs_documents_batchUpdate import \
     gws_docs_documents_batchUpdate
 from mirage.commands.builtin.gdocs.gws_docs_documents_create import \
     gws_docs_documents_create
 from mirage.commands.builtin.gdocs.gws_docs_write import gws_docs_write
-from mirage.commands.builtin.gdocs.head import head
-from mirage.commands.builtin.gdocs.jq import jq
-from mirage.commands.builtin.gdocs.ls import ls
-from mirage.commands.builtin.gdocs.nl import nl
-from mirage.commands.builtin.gdocs.realpath import realpath
-from mirage.commands.builtin.gdocs.rg import rg
 from mirage.commands.builtin.gdocs.rm import rm
-from mirage.commands.builtin.gdocs.stat import stat
-from mirage.commands.builtin.gdocs.tail import tail
-from mirage.commands.builtin.gdocs.tree import tree
-from mirage.commands.builtin.gdocs.wc import wc
+from mirage.commands.builtin.generic_bind import (CommandIO,
+                                                  make_generic_commands)
+from mirage.commands.builtin.generic_bind.provision import (
+    make_search_provision, metadata_provision)
+from mirage.commands.builtin.utils.wrap import stream_from_bytes
+from mirage.core.gdocs.read import read as _read
+from mirage.core.gdocs.readdir import readdir as _readdir
+from mirage.core.gdocs.stat import stat as _stat
+
+# A Google Doc is written through the bespoke gws_docs_* API commands, not by
+# writing raw bytes, so only the read ops feed the generic factory; the
+# generic byte-mutation commands (cp/mv/tee/...) are intentionally absent.
+_GDOCS_CMD_OPS = CommandIO(
+    readdir=_readdir,
+    read_bytes=_read,
+    read_stream=partial(stream_from_bytes, _read),
+    stat=_stat,
+    is_mounted=lambda a: True,
+    local=False,
+)
 
 COMMANDS = [
-    basename,
-    cat,
-    dirname,
-    find,
-    head,
-    jq,
-    ls,
-    nl,
-    realpath,
-    rg,
+    *make_generic_commands(
+        "gdocs",
+        _GDOCS_CMD_OPS,
+        provision_overrides={
+            "grep": make_search_provision(_stat),
+            "rg": make_search_provision(_stat),
+            "ls": metadata_provision,
+            "find": metadata_provision,
+        },
+    ),
     rm,
-    stat,
-    tail,
-    tree,
-    wc,
     gws_docs_documents_batchUpdate,
     gws_docs_documents_create,
     gws_docs_write,
-    grep,
 ]

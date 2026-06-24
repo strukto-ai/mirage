@@ -17,7 +17,8 @@ from collections.abc import AsyncIterator
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.comm import comm as generic_comm
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          with_index)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -38,7 +39,7 @@ async def comm(
     paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_comm(
         paths,
-        read_bytes=ops.read_bytes,
+        read_bytes=with_index(ops.read_bytes, index),
         accessor=accessor,
         suppress1=bool(kwargs.get("args_1", False)),
         suppress2=bool(kwargs.get("2", False)),

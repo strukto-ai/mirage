@@ -45,6 +45,11 @@ def make_generic_commands(
     for b in _BUILDERS:
         if b.name in skip:
             continue
+        # A read-only backend (no write op) can't run the byte-mutation
+        # commands (cp/mv/tee/gunzip/...), so don't register a command that
+        # would crash when invoked.
+        if b.write and ops.write is None:
+            continue
         bound = functools.partial(b.fn, ops)
         if b.name in prov_over:
             provision = prov_over[b.name]

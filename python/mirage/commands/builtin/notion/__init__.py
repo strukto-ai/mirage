@@ -12,14 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.notion.basename import basename
-from mirage.commands.builtin.notion.cat import cat
-from mirage.commands.builtin.notion.dirname import dirname
-from mirage.commands.builtin.notion.find import find
-from mirage.commands.builtin.notion.grep import grep
-from mirage.commands.builtin.notion.head import head
-from mirage.commands.builtin.notion.jq import jq
-from mirage.commands.builtin.notion.ls import ls
+from mirage.commands.builtin.generic_bind import (CommandIO,
+                                                  make_generic_commands)
+from mirage.commands.builtin.generic_bind.provision import (
+    make_search_provision, metadata_provision)
 from mirage.commands.builtin.notion.notion_block_append import \
     notion_block_append
 from mirage.commands.builtin.notion.notion_comment_add import \
@@ -27,30 +23,38 @@ from mirage.commands.builtin.notion.notion_comment_add import \
 from mirage.commands.builtin.notion.notion_page_create import \
     notion_page_create
 from mirage.commands.builtin.notion.notion_search import notion_search
-from mirage.commands.builtin.notion.realpath import realpath
-from mirage.commands.builtin.notion.rg import rg
-from mirage.commands.builtin.notion.stat import stat
-from mirage.commands.builtin.notion.tail import tail
-from mirage.commands.builtin.notion.tree import tree
-from mirage.commands.builtin.notion.wc import wc
+from mirage.core.notion.find import find as _find
+from mirage.core.notion.read import read as _read
+from mirage.core.notion.readdir import readdir as _readdir
+from mirage.core.notion.stat import stat as _stat
+from mirage.core.notion.stream import read_stream as _read_stream
+
+# Notion pages/databases are read through the generic factory; writes go
+# through the bespoke notion_* commands, so the generic byte-mutation commands
+# are intentionally absent (no write op wired).
+_NOTION_CMD_OPS = CommandIO(
+    readdir=_readdir,
+    read_bytes=_read,
+    read_stream=_read_stream,
+    stat=_stat,
+    is_mounted=lambda a: True,
+    local=False,
+    find=_find,
+)
 
 COMMANDS = [
-    basename,
-    cat,
-    dirname,
-    find,
-    head,
-    jq,
-    ls,
+    *make_generic_commands(
+        "notion",
+        _NOTION_CMD_OPS,
+        provision_overrides={
+            "grep": make_search_provision(_stat),
+            "rg": make_search_provision(_stat),
+            "ls": metadata_provision,
+            "find": metadata_provision,
+        },
+    ),
     notion_block_append,
     notion_comment_add,
     notion_page_create,
     notion_search,
-    realpath,
-    rg,
-    stat,
-    tail,
-    tree,
-    wc,
-    grep,
 ]

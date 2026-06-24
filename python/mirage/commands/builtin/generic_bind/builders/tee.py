@@ -17,7 +17,8 @@ from collections.abc import AsyncIterator
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tee import tee as generic_tee
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          with_index)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -37,7 +38,7 @@ async def tee(
     paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_tee(paths,
                              texts,
-                             read_stream=ops.read_stream,
+                             read_stream=with_index(ops.read_stream, index),
                              write_bytes=ops.write,
                              accessor=accessor,
                              stdin=stdin,

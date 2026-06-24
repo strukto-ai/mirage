@@ -14,10 +14,6 @@
 
 import pytest
 
-from mirage.cache.index import RAMIndexCacheStore
-from mirage.commands.builtin.databricks_volume import wc as wc_command
-from mirage.types import PathSpec
-
 
 @pytest.mark.asyncio
 async def test_workspace_execute_databricks_volume_wc(
@@ -35,22 +31,3 @@ async def test_workspace_execute_databricks_volume_wc_resolves_glob(
 
     assert io.exit_code == 0
     assert b"/dbx/more.txt" in io.stdout
-
-
-@pytest.mark.asyncio
-async def test_databricks_volume_wc_forwards_index(
-    index_tracker,
-    expected_index: RAMIndexCacheStore,
-    materialize_output,
-):
-    source, _io = await wc_command(
-        object(),
-        [PathSpec.from_str_path("/dbx/sample.txt", "/dbx")],
-        index=expected_index,
-        args_l=True,
-    )
-
-    await materialize_output(source)
-
-    assert index_tracker.seen_indexes
-    assert all(index is expected_index for index in index_tracker.seen_indexes)

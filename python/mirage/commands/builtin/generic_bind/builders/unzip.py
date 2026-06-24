@@ -17,7 +17,8 @@ from collections.abc import AsyncIterator
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.unzip import unzip as generic_unzip
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          with_index)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -41,7 +42,7 @@ async def unzip(
         raise ValueError("unzip: missing operand")
     paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_unzip(paths,
-                               read_bytes=ops.read_bytes,
+                               read_bytes=with_index(ops.read_bytes, index),
                                write_bytes=ops.write,
                                mkdir_fn=ops.mkdir,
                                accessor=accessor,

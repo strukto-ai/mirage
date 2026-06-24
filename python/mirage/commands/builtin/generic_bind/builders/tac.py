@@ -17,7 +17,8 @@ from collections.abc import AsyncIterator
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tac import tac as generic_tac
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          with_index)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
 from mirage.io.types import ByteSource, IOResult
@@ -35,7 +36,7 @@ async def tac(
 ) -> tuple[ByteSource | None, IOResult]:
     paths = await resolve_or_empty(ops, accessor, paths, index)
     return await generic_tac(paths,
-                             read_stream=ops.read_stream,
+                             read_stream=with_index(ops.read_stream, index),
                              accessor=accessor,
                              stdin=stdin)
 

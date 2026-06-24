@@ -18,7 +18,8 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.aggregators import prefix_aggregate
 from mirage.commands.builtin.generic.grep import grep as generic_grep
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          with_index)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -42,7 +43,7 @@ async def grep(
         readdir=ops.readdir,
         stat=ops.stat,
         read_bytes=ops.read_bytes,
-        read_stream=ops.read_stream,
+        read_stream=with_index(ops.read_stream, index),
         accessor=accessor,
         stdin=stdin,
         index=index,

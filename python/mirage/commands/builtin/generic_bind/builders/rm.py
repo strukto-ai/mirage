@@ -49,8 +49,14 @@ async def rm(
             raise
         if s.type == FileType.DIRECTORY:
             if recursive:
+                if ops.rm_r is None:
+                    raise NotImplementedError(
+                        "rm: recursive remove not supported on this backend")
                 await ops.rm_r(accessor, p)
             elif d:
+                if ops.rmdir is None:
+                    raise NotImplementedError(
+                        "rm: directory remove not supported on this backend")
                 await ops.rmdir(accessor, p)
             else:
                 raise IsADirectoryError(

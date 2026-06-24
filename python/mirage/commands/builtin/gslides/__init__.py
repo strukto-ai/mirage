@@ -12,44 +12,46 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.gslides.basename import basename
-from mirage.commands.builtin.gslides.cat import cat
-from mirage.commands.builtin.gslides.dirname import dirname
-from mirage.commands.builtin.gslides.find import find
-from mirage.commands.builtin.gslides.grep import grep
+from functools import partial
+
+from mirage.commands.builtin.generic_bind import (CommandIO,
+                                                  make_generic_commands)
+from mirage.commands.builtin.generic_bind.provision import (
+    make_search_provision, metadata_provision)
 from mirage.commands.builtin.gslides.gws_slides_presentations_batchUpdate import \
     gws_slides_presentations_batchUpdate  # noqa: E501
 from mirage.commands.builtin.gslides.gws_slides_presentations_create import \
     gws_slides_presentations_create  # noqa: E501
-from mirage.commands.builtin.gslides.head import head
-from mirage.commands.builtin.gslides.jq import jq
-from mirage.commands.builtin.gslides.ls import ls
-from mirage.commands.builtin.gslides.nl import nl
-from mirage.commands.builtin.gslides.realpath import realpath
-from mirage.commands.builtin.gslides.rg import rg
 from mirage.commands.builtin.gslides.rm import rm
-from mirage.commands.builtin.gslides.stat import stat
-from mirage.commands.builtin.gslides.tail import tail
-from mirage.commands.builtin.gslides.tree import tree
-from mirage.commands.builtin.gslides.wc import wc
+from mirage.commands.builtin.utils.wrap import stream_from_bytes
+from mirage.core.gslides.read import read as _read
+from mirage.core.gslides.readdir import readdir as _readdir
+from mirage.core.gslides.stat import stat as _stat
+
+# A presentation is written through the bespoke gws_slides_* API commands, not
+# by writing raw bytes, so only the read ops feed the generic factory; the
+# generic byte-mutation commands (cp/mv/tee/...) are intentionally absent.
+_GSLIDES_CMD_OPS = CommandIO(
+    readdir=_readdir,
+    read_bytes=_read,
+    read_stream=partial(stream_from_bytes, _read),
+    stat=_stat,
+    is_mounted=lambda a: True,
+    local=False,
+)
 
 COMMANDS = [
-    basename,
-    cat,
-    dirname,
-    find,
-    head,
-    jq,
-    ls,
-    nl,
-    realpath,
-    rg,
+    *make_generic_commands(
+        "gslides",
+        _GSLIDES_CMD_OPS,
+        provision_overrides={
+            "grep": make_search_provision(_stat),
+            "rg": make_search_provision(_stat),
+            "ls": metadata_provision,
+            "find": metadata_provision,
+        },
+    ),
     rm,
-    stat,
-    tail,
-    tree,
-    wc,
     gws_slides_presentations_create,
     gws_slides_presentations_batchUpdate,
-    grep,
 ]

@@ -17,7 +17,8 @@ from collections.abc import AsyncIterator
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cut import cut as generic_cut
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          with_index)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
 from mirage.io.types import ByteSource, IOResult
@@ -40,7 +41,7 @@ async def cut(
 ) -> tuple[ByteSource | None, IOResult]:
     paths = await resolve_or_empty(ops, accessor, paths, index)
     return await generic_cut(paths,
-                             read_stream=ops.read_stream,
+                             read_stream=with_index(ops.read_stream, index),
                              accessor=accessor,
                              stdin=stdin,
                              f=f,

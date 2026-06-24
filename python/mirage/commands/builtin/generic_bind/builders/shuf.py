@@ -17,7 +17,8 @@ from collections.abc import AsyncIterator
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.shuf import shuf as generic_shuf
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          with_index)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -41,7 +42,7 @@ async def shuf(
         paths = []
     return await generic_shuf(paths,
                               texts,
-                              read_bytes=ops.read_bytes,
+                              read_bytes=with_index(ops.read_bytes, index),
                               accessor=accessor,
                               stdin=stdin,
                               count=int(n) if n is not None else None,

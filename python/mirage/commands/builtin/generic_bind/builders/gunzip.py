@@ -17,7 +17,8 @@ from collections.abc import AsyncIterator
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.gunzip import gunzip as generic_gunzip
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          with_index)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -38,7 +39,7 @@ async def gunzip(
     if paths:
         paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_gunzip(paths,
-                                read_bytes=ops.read_bytes,
+                                read_bytes=with_index(ops.read_bytes, index),
                                 write_bytes=ops.write,
                                 unlink=ops.unlink,
                                 accessor=accessor,

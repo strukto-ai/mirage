@@ -12,58 +12,50 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.github.awk import awk
-from mirage.commands.builtin.github.basename import basename
-from mirage.commands.builtin.github.cat import cat
-from mirage.commands.builtin.github.cut import cut
-from mirage.commands.builtin.github.diff import diff
-from mirage.commands.builtin.github.dirname import dirname
+from functools import partial
+
+from mirage.commands.builtin.generic_bind import (CommandIO,
+                                                  make_generic_commands)
+from mirage.commands.builtin.generic_bind.provision import metadata_provision
 from mirage.commands.builtin.github.du import du
-from mirage.commands.builtin.github.file import file
 from mirage.commands.builtin.github.find import find
 from mirage.commands.builtin.github.grep import grep
-from mirage.commands.builtin.github.head import head
-from mirage.commands.builtin.github.jq import jq
-from mirage.commands.builtin.github.ls import ls
-from mirage.commands.builtin.github.md5 import md5
-from mirage.commands.builtin.github.nl import nl
-from mirage.commands.builtin.github.realpath import realpath
 from mirage.commands.builtin.github.rg import rg
 from mirage.commands.builtin.github.sed import sed
-from mirage.commands.builtin.github.sha256sum import sha256sum
-from mirage.commands.builtin.github.sort import sort_cmd
-from mirage.commands.builtin.github.stat import stat
-from mirage.commands.builtin.github.tail import tail
-from mirage.commands.builtin.github.tr import tr
-from mirage.commands.builtin.github.tree import tree
-from mirage.commands.builtin.github.uniq import uniq
-from mirage.commands.builtin.github.wc import wc
+from mirage.commands.builtin.utils.wrap import stream_from_bytes
+from mirage.core.github.read import read as _read
+from mirage.core.github.readdir import readdir as _readdir
+from mirage.core.github.stat import stat as _stat
+
+# GitHub repo files are read through the generic factory; find keeps a wrapper
+# for the "no tree loaded" guard and native tree-backed walk, grep and rg push
+# down to the GitHub code-search API, du uses du_multi (flat-list contract) and
+# sed has no generic builder. GitHub is read-only, so the generic byte-mutation
+# commands are intentionally absent (no write op wired). There is no native
+# streaming read, so the stream op is synthesized from the whole-blob read.
+_GITHUB_CMD_OPS = CommandIO(
+    readdir=_readdir,
+    read_bytes=_read,
+    read_stream=partial(stream_from_bytes, _read),
+    stat=_stat,
+    is_mounted=lambda a: True,
+    local=False,
+)
+
+_GITHUB_OVERRIDES = {"du", "find", "grep", "rg", "sed"}
 
 COMMANDS = [
-    awk,
-    basename,
-    cat,
-    cut,
-    diff,
-    dirname,
+    *make_generic_commands(
+        "github",
+        _GITHUB_CMD_OPS,
+        overrides=_GITHUB_OVERRIDES,
+        provision_overrides={
+            "ls": metadata_provision,
+        },
+    ),
     du,
-    file,
     find,
-    head,
-    jq,
-    ls,
-    md5,
-    nl,
-    realpath,
+    grep,
     rg,
     sed,
-    sha256sum,
-    sort_cmd,
-    stat,
-    tail,
-    tr,
-    tree,
-    uniq,
-    wc,
-    grep,
 ]

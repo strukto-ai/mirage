@@ -32,7 +32,7 @@ resource = GSheetsResource(config=config)
 
 
 async def main():
-    ws = Workspace({"/gsheets": resource}, mode=MountMode.READ)
+    ws = Workspace({"/gsheets": resource}, mode=MountMode.WRITE)
 
     r = await ws.execute("ls /gsheets/owned/ | head -n 3")
     print("=== ls (first 3) ===")
@@ -72,7 +72,12 @@ async def main():
     body = json.dumps({"properties": {"title": "MIRAGE Sheets Test"}})
     r = await ws.execute("gws-sheets-spreadsheets-create"
                          f" --json '{body}'")
-    sheet = json.loads(await r.stdout_str())
+    out = await r.stdout_str()
+    if r.exit_code != 0 or not out.strip():
+        err = (await r.stderr_str()).strip() or "empty response"
+        print(f"  create failed (exit={r.exit_code}): {err}")
+        return
+    sheet = json.loads(out)
     sheet_id = sheet["spreadsheetId"]
     print(f"Created: {sheet_id}")
 
