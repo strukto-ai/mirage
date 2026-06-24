@@ -12,19 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.trello.basename import basename
-from mirage.commands.builtin.trello.cat import cat
-from mirage.commands.builtin.trello.dirname import dirname
+from mirage.commands.builtin.generic_bind import (CommandIO,
+                                                  make_generic_commands)
+from mirage.commands.builtin.generic_bind.provision import (
+    make_search_provision, metadata_provision)
 from mirage.commands.builtin.trello.find import find
-from mirage.commands.builtin.trello.grep import grep
-from mirage.commands.builtin.trello.head import head
-from mirage.commands.builtin.trello.jq import jq
-from mirage.commands.builtin.trello.ls import ls
-from mirage.commands.builtin.trello.realpath import realpath
-from mirage.commands.builtin.trello.rg import rg
-from mirage.commands.builtin.trello.stat import stat
-from mirage.commands.builtin.trello.tail import tail
-from mirage.commands.builtin.trello.tree import tree
 from mirage.commands.builtin.trello.trello_card_assign import \
     trello_card_assign
 from mirage.commands.builtin.trello.trello_card_comment_add import \
@@ -40,22 +32,39 @@ from mirage.commands.builtin.trello.trello_card_label_remove import \
 from mirage.commands.builtin.trello.trello_card_move import trello_card_move
 from mirage.commands.builtin.trello.trello_card_update import \
     trello_card_update
-from mirage.commands.builtin.trello.wc import wc
+from mirage.core.trello.read import read as _read
+from mirage.core.trello.readdir import readdir as _readdir
+from mirage.core.trello.stat import stat as _stat
+from mirage.core.trello.stream import read_stream as _read_stream
+
+# Trello boards/lists/cards are read through the generic factory; find keeps a
+# wrapper for its bespoke readdir-walk filtering, and the trello_card_*
+# commands are the bespoke write/platform surface. The generic byte-mutation
+# commands are intentionally absent (mutations go through the platform
+# commands, no write op wired).
+_TRELLO_CMD_OPS = CommandIO(
+    readdir=_readdir,
+    read_bytes=_read,
+    read_stream=_read_stream,
+    stat=_stat,
+    is_mounted=lambda a: True,
+    local=False,
+)
+
+_TRELLO_OVERRIDES = {"find"}
 
 COMMANDS = [
-    basename,
-    cat,
-    dirname,
+    *make_generic_commands(
+        "trello",
+        _TRELLO_CMD_OPS,
+        overrides=_TRELLO_OVERRIDES,
+        provision_overrides={
+            "grep": make_search_provision(_stat),
+            "rg": make_search_provision(_stat),
+            "ls": metadata_provision,
+        },
+    ),
     find,
-    grep,
-    head,
-    jq,
-    ls,
-    realpath,
-    rg,
-    stat,
-    tail,
-    tree,
     trello_card_assign,
     trello_card_comment_add,
     trello_card_comment_update,
@@ -64,5 +73,4 @@ COMMANDS = [
     trello_card_label_remove,
     trello_card_move,
     trello_card_update,
-    wc,
 ]
