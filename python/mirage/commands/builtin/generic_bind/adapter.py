@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import fnmatch
+import functools
 import logging
 import posixpath
 from collections.abc import Callable
@@ -24,6 +25,25 @@ from mirage.cache.index import IndexCacheStore
 from mirage.types import PathSpec
 
 logger = logging.getLogger(__name__)
+
+
+def with_index(fn: Callable | None,
+               index: IndexCacheStore | None) -> Callable | None:
+    """Bind the runtime cache index into a read op for the generics.
+
+    A generic command calls its injected reader as ``read(accessor, path)``
+    with no index, but index-backed backends (gdrive, gmail, slack, ...)
+    resolve a path to its real id through the index, so the bound index must
+    travel with the reader. Harmless for backends that ignore it. ``None``
+    passes through so a backend/test can still opt out of streaming.
+
+    Args:
+        fn (Callable | None): the read op, or None to opt out of streaming.
+        index (IndexCacheStore | None): the per-call cache index.
+    """
+    if fn is None:
+        return None
+    return functools.partial(fn, index=index)
 
 
 class Builder(NamedTuple):

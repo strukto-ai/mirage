@@ -47,13 +47,14 @@ async def cat(
             p = paths[0]
             if not ops.local:
                 await ops.stat(accessor, p, index)
-            cachable = CachableAsyncIterator(ops.read_stream(accessor, p))
+            cachable = CachableAsyncIterator(
+                ops.read_stream(accessor, p, index))
             io = IOResult(reads={p.strip_prefix: cachable},
                           cache=[p.strip_prefix])
             source: ByteSource = cachable
         elif ops.local:
             cachables = [
-                CachableAsyncIterator(ops.read_stream(accessor, p))
+                CachableAsyncIterator(ops.read_stream(accessor, p, index))
                 for p in paths
             ]
             io = IOResult(reads={
