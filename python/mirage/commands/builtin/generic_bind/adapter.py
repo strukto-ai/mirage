@@ -111,6 +111,7 @@ class CommandIO:
     rm_r: Callable | None = None
     rename: Callable | None = None
     copy: Callable | None = None
+    dir_copy: Callable | None = None
     create: Callable | None = None
     truncate: Callable | None = None
     find: Callable | None = None
