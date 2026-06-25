@@ -408,3 +408,54 @@ async def test_mount_background_readable():
                 subprocess.run(["fusermount", "-u", mountpoint],
                                capture_output=True)
             t.join(timeout=3)
+
+
+@pytest.mark.asyncio
+async def test_xattr_set_get_roundtrip(seed_ws):
+    fs = MirageFS(seed_ws)
+    fs.setxattr("/a.txt", "user.test", b"value", 0)
+    assert fs.getxattr("/a.txt", "user.test") == b"value"
+
+
+@pytest.mark.asyncio
+async def test_xattr_get_missing_raises(seed_ws):
+    fs = MirageFS(seed_ws)
+    with pytest.raises(OSError) as exc:
+        fs.getxattr("/a.txt", "user.absent")
+    assert exc.value.errno in (errno.ENODATA,
+                               getattr(errno, "ENOATTR", errno.ENODATA))
+
+
+@pytest.mark.asyncio
+async def test_xattr_list_and_remove(seed_ws):
+    fs = MirageFS(seed_ws)
+    fs.setxattr("/a.txt", "user.one", b"1", 0)
+    fs.setxattr("/a.txt", "user.two", b"2", 0)
+    assert sorted(fs.listxattr("/a.txt")) == ["user.one", "user.two"]
+    fs.removexattr("/a.txt", "user.one")
+    assert fs.listxattr("/a.txt") == ["user.two"]
+
+
+@pytest.mark.asyncio
+async def test_xattr_probe_succeeds(seed_ws):
+    fs = MirageFS(seed_ws)
+    assert fs.setxattr("/a.txt", "user.containers._probe", b"x", 0) == 0
+    assert fs.removexattr("/a.txt", "user.containers._probe") == 0
+
+
+@pytest.mark.asyncio
+async def test_xattr_cleared_on_unlink(seed_ws):
+    fs = MirageFS(seed_ws)
+    fs.setxattr("/a.txt", "user.keep", b"v", 0)
+    fs.unlink("/a.txt")
+    assert fs.listxattr("/sub") == []
+    assert "/a.txt" not in fs._xattrs
+
+
+@pytest.mark.asyncio
+async def test_xattr_follows_rename(seed_ws):
+    fs = MirageFS(seed_ws)
+    fs.setxattr("/a.txt", "user.keep", b"v", 0)
+    fs.rename("/a.txt", "/renamed.txt")
+    assert fs.getxattr("/renamed.txt", "user.keep") == b"v"
+    assert "/a.txt" not in fs._xattrs
