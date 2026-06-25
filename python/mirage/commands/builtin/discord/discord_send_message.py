@@ -44,5 +44,6 @@ async def discord_send_message(
         raise ValueError("--text is required")
     ref = message_id if message_id and isinstance(message_id, str) else None
     result = await send_message(accessor.config, channel_id, text, ref)
-    out = json.dumps(result, ensure_ascii=False).encode()
+    out = json.dumps(result, ensure_ascii=False,
+                 separators=(",", ":")).encode()
     return out, IOResult()

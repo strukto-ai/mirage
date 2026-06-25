@@ -57,5 +57,6 @@ async def gws_sheets_append(
         range_ = "A1"
     result = await append_values(accessor.token_manager, sheet_id, range_,
                                  values_json)
-    out = json.dumps(result, ensure_ascii=False).encode()
+    out = json.dumps(result, ensure_ascii=False,
+                 separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

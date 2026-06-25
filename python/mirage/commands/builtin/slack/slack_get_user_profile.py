@@ -36,5 +36,6 @@ async def slack_get_user_profile_cmd(
     if not user_id or not isinstance(user_id, str):
         raise ValueError("--user_id is required")
     user = await get_user_profile(accessor.config, user_id)
-    out = json.dumps(user, ensure_ascii=False).encode()
+    out = json.dumps(user, ensure_ascii=False,
+                 separators=(",", ":")).encode()
     return out, IOResult()

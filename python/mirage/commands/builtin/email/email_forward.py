@@ -48,5 +48,6 @@ async def email_forward(
         raise ValueError("--to is required")
     original = await fetch_message(accessor, folder, uid)
     result = await forward_message(accessor.config, original, to)
-    out = json.dumps(result, ensure_ascii=False).encode()
+    out = json.dumps(result, ensure_ascii=False,
+                 separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

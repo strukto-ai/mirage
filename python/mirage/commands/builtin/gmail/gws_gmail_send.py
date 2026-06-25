@@ -55,5 +55,6 @@ async def gws_gmail_send(
     if not body or not isinstance(body, str):
         raise ValueError("--body is required")
     result = await send_message(accessor.token_manager, to, subject, body)
-    out = json.dumps(result, ensure_ascii=False).encode()
+    out = json.dumps(result, ensure_ascii=False,
+                 separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

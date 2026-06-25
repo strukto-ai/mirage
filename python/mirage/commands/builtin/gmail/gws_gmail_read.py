@@ -42,5 +42,6 @@ async def gws_gmail_read(
     if not message_id or not isinstance(message_id, str):
         raise ValueError("--id is required")
     processed = await get_message_processed(accessor.token_manager, message_id)
-    out = json.dumps(processed, ensure_ascii=False).encode()
+    out = json.dumps(processed, ensure_ascii=False,
+                 separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

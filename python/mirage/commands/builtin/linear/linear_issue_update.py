@@ -71,4 +71,5 @@ async def linear_issue_update(
                                description=description)
     return yield_bytes(
         json.dumps(normalize_issue(issue),
-                   ensure_ascii=False).encode()), IOResult()
+                   ensure_ascii=False,
+                   separators=(",", ":")).encode()), IOResult()

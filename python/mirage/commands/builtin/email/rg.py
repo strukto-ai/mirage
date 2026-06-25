@@ -78,7 +78,8 @@ async def rg(
         file_prefix = paths[0].prefix if paths else ""
         for uid in uids:
             msg = await fetch_message(accessor, folder, uid)
-            msg_text = json.dumps(msg, ensure_ascii=False)
+            msg_text = json.dumps(msg, ensure_ascii=False,
+                      separators=(",", ":"))
             vfs_path = _build_vfs_path(file_prefix, folder, msg)
             lines = msg_text.splitlines()
             matched = grep_lines(vfs_path,

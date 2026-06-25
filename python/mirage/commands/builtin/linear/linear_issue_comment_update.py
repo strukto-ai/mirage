@@ -65,4 +65,5 @@ async def linear_issue_comment_update(
     else:
         payload = comment
     return yield_bytes(json.dumps(payload,
-                                  ensure_ascii=False).encode()), IOResult()
+                                  ensure_ascii=False,
+                                  separators=(",", ":")).encode()), IOResult()

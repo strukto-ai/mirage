@@ -36,5 +36,6 @@ async def slack_get_users(
     if not query or not isinstance(query, str):
         raise ValueError("--query is required")
     users = await search_users(accessor.config, query)
-    out = json.dumps(users, ensure_ascii=False).encode()
+    out = json.dumps(users, ensure_ascii=False,
+                 separators=(",", ":")).encode()
     return out, IOResult()

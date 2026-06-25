@@ -36,5 +36,6 @@ async def discord_get_server_info(
     if not guild_id or not isinstance(guild_id, str):
         raise ValueError("--guild_id is required")
     result = await discord_get(accessor.config, f"/guilds/{guild_id}")
-    out = json.dumps(result, ensure_ascii=False).encode()
+    out = json.dumps(result, ensure_ascii=False,
+                 separators=(",", ":")).encode()
     return out, IOResult()

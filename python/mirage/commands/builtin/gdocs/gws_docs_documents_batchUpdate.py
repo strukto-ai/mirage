@@ -48,5 +48,6 @@ async def gws_docs_documents_batchUpdate(
     if not doc_id:
         raise ValueError("--params must contain documentId")
     result = await batch_update(accessor.token_manager, doc_id, json_str)
-    out = json.dumps(result, ensure_ascii=False).encode()
+    out = json.dumps(result, ensure_ascii=False,
+                 separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

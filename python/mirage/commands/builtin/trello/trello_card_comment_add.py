@@ -56,4 +56,5 @@ async def trello_card_comment_add(
     comment = await comment_create(config, card_id=card_id, text=text)
     payload = normalize_comment(comment, card_id=card_id)
     return yield_bytes(json.dumps(payload,
-                                  ensure_ascii=False).encode()), IOResult()
+                                  ensure_ascii=False,
+                                  separators=(",", ":")).encode()), IOResult()

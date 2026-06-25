@@ -55,4 +55,5 @@ async def linear_issue_set_project(
                                project_id=project_id)
     return yield_bytes(
         json.dumps(normalize_issue(issue),
-                   ensure_ascii=False).encode()), IOResult()
+                   ensure_ascii=False,
+                   separators=(",", ":")).encode()), IOResult()

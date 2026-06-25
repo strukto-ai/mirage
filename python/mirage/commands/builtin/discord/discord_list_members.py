@@ -41,5 +41,6 @@ async def discord_list_members(
     if not query or not isinstance(query, str):
         raise ValueError("--query is required")
     members = await search_members(accessor.config, guild_id, query)
-    out = json.dumps(members, ensure_ascii=False).encode()
+    out = json.dumps(members, ensure_ascii=False,
+                 separators=(",", ":")).encode()
     return out, IOResult()

@@ -61,4 +61,5 @@ async def linear_issue_comment_add(
     comment = await comment_create(config, issue_id=issue_id, body=body)
     payload = normalize_comment(comment, issue_id=issue_id, issue_key=None)
     return yield_bytes(json.dumps(payload,
-                                  ensure_ascii=False).encode()), IOResult()
+                                  ensure_ascii=False,
+                                  separators=(",", ":")).encode()), IOResult()

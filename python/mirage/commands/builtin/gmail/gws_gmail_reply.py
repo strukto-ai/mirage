@@ -49,5 +49,6 @@ async def gws_gmail_reply(
     if not body or not isinstance(body, str):
         raise ValueError("--body is required")
     result = await reply_message(accessor.token_manager, message_id, body)
-    out = json.dumps(result, ensure_ascii=False).encode()
+    out = json.dumps(result, ensure_ascii=False,
+                 separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()
