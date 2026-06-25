@@ -1273,6 +1273,18 @@ baz,
 /data/sub/deep
 /data/user.json
 /data/users.json
+=== find_name_start ===
+/data
+=== find_maxdepth_zero ===
+/data
+=== find_mindepth_zero ===
+/data
+/data/disptree
+/data/disptree/d
+/data/guard
+/data/guard/sub
+/data/sub
+/data/sub/deep
 === find_size_lt ===
 /data
 /data/disptree
@@ -1783,8 +1795,8 @@ disptree/d
 disptree/d/y.txt
 disptree/x.txt
 === history_last_two ===
-470  (cd /data && ls -R disptree)
-471  (cd /data && find disptree)
+473  (cd /data && ls -R disptree)
+474  (cd /data && find disptree)
 === bash_history_tail ===
 (cd /data && ls -R disptree)
 (cd /data && find disptree)

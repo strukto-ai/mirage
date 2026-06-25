@@ -47,6 +47,7 @@ def _find_sync(
     mindepth: int | None = None,
     empty: bool = False,
     tree: PredNode | None = None,
+    start_name: str = "",
 ) -> list[str]:
     p = _resolve(root, path)
     base = "/" + path.strip("/")
@@ -63,7 +64,7 @@ def _find_sync(
     if p.is_dir():
         root_empty = (not any(p.iterdir())) if empty else None
         root_entry = FindEntry(key=base,
-                               name=base.rsplit("/", 1)[-1],
+                               name=start_name or base.rsplit("/", 1)[-1],
                                kind="d",
                                depth=0,
                                is_empty=root_empty)
@@ -161,7 +162,9 @@ async def find(
 ) -> list[str]:
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
+    start_name = ""
     if isinstance(path, PathSpec):
+        start_name = path.original.rstrip("/").rsplit("/", 1)[-1]
         path = path.strip_prefix
     return await asyncio.to_thread(
         _find_sync,
@@ -181,4 +184,5 @@ async def find(
         mindepth,
         empty,
         tree,
+        start_name,
     )

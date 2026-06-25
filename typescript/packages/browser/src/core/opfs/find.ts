@@ -15,7 +15,7 @@
 import type { PathSpec } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
 import { isNotFound, iterEntries, norm, resolveDirHandle } from './utils.ts'
-import { buildTree, keep, type PredNode } from '@struktoai/mirage-core'
+import { buildTree, keep, type PredNode, rstripSlash } from '@struktoai/mirage-core'
 
 export interface FindOptions {
   name?: string | null
@@ -138,6 +138,7 @@ export async function find(
 ): Promise<string[]> {
   const root = accessor.rootHandle
   const virtual = norm(p.stripPrefix)
+  const startName = rstripSlash(p.original).split('/').pop() ?? ''
   const results: string[] = []
   const tree =
     options.tree ??
@@ -171,7 +172,7 @@ export async function find(
       keep(
         {
           key: virtual,
-          name: virtual.slice(virtual.lastIndexOf('/') + 1),
+          name: startName || virtual.slice(virtual.lastIndexOf('/') + 1),
           kind: 'd',
           depth: 0,
           isEmpty: rootEmpty,

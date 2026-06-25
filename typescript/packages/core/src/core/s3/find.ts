@@ -26,6 +26,7 @@ export async function find(
 ): Promise<string[]> {
   const { ListObjectsV2Command } = await loadS3Module(accessor.config)
   const raw = rawPathOf(path)
+  const startName = rstripSlash(path.original).split('/').pop() ?? ''
   const pfx = s3Prefix(raw, accessor.config)
   const results: string[] = []
   const seen = { descendant: false, marker: false }
@@ -105,7 +106,7 @@ export async function find(
       keep(
         {
           key: rootKey,
-          name: rootKey.slice(rootKey.lastIndexOf('/') + 1),
+          name: rootKey === '/' ? startName : rootKey.slice(rootKey.lastIndexOf('/') + 1),
           kind: 'd',
           depth: 0,
           isEmpty: empty ? false : null,

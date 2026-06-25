@@ -58,7 +58,9 @@ async def find(
     """
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
+    start_name = ""
     if isinstance(path, PathSpec):
+        start_name = path.original.rstrip("/").rsplit("/", 1)[-1]
         path = path.strip_prefix
     config = accessor.config
     pfx = _prefix(path, config)
@@ -110,7 +112,7 @@ async def find(
     if (saw_descendant or dir_marker_seen) and (maxdepth is None
                                                 or maxdepth >= 0):
         root_key = "/" + stripped if stripped else "/"
-        root_name = stripped.rsplit("/", 1)[-1] if stripped else ""
+        root_name = stripped.rsplit("/", 1)[-1] if stripped else start_name
         root_entry = FindEntry(key=root_key,
                                name=root_name,
                                kind="d",

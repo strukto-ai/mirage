@@ -17,7 +17,7 @@ import { readdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 import type { PathSpec } from '@struktoai/mirage-core'
 import { norm, resolveSafe } from './utils.ts'
-import { buildTree, type PredNode, keep } from '@struktoai/mirage-core'
+import { buildTree, type PredNode, keep, rstripSlash } from '@struktoai/mirage-core'
 
 export interface FindOptions {
   name?: string | null
@@ -127,6 +127,7 @@ export async function find(
   options: FindOptions = {},
 ): Promise<string[]> {
   const virtual = norm(p.stripPrefix)
+  const startName = rstripSlash(p.original).split('/').pop() ?? ''
   const full = resolveSafe(accessor.root, virtual)
   const baseDepth = virtual === '/' ? 0 : (virtual.match(/\//g) ?? []).length
   const results: string[] = []
@@ -161,7 +162,7 @@ export async function find(
       keep(
         {
           key: virtual,
-          name: virtual.slice(virtual.lastIndexOf('/') + 1),
+          name: startName || virtual.slice(virtual.lastIndexOf('/') + 1),
           kind: 'd',
           depth: 0,
           isEmpty: rootEmpty,

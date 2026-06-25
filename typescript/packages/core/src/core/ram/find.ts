@@ -44,6 +44,7 @@ export function find(
   options: FindOptions = {},
 ): Promise<string[]> {
   const p = norm(path.stripPrefix)
+  const startName = rstripSlash(path.original).split('/').pop() ?? ''
   const prefix = rstripSlash(p) + '/'
   const baseDepth = p === '/' ? 0 : (p.match(/\//g) ?? []).length
   const results: string[] = []
@@ -77,7 +78,7 @@ export function find(
     const depth = key === '/' ? 0 : (key.match(/\//g) ?? []).length - baseDepth
     if (options.maxDepth !== null && options.maxDepth !== undefined && depth > options.maxDepth)
       continue
-    const basename = key.slice(key.lastIndexOf('/') + 1)
+    const basename = key === p ? startName : key.slice(key.lastIndexOf('/') + 1)
     let isEmpty: boolean | null = null
     if (empty) {
       isEmpty =

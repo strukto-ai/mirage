@@ -27,6 +27,7 @@ async def find(
 ) -> list[str]:
     if isinstance(path, str):
         path = PathSpec.from_str_path(path)
+    start_name = path.original.rstrip("/").rsplit("/", 1)[-1]
     target = path.strip_prefix
     pfx = target.strip("/")
     scan_path = pfx + "/" if pfx else "/"
@@ -104,7 +105,7 @@ async def find(
         return []
     if (saw_descendant or dir_exists) and (maxdepth is None or maxdepth >= 0):
         root_entry = FindEntry(key=base,
-                               name=base.rsplit("/", 1)[-1],
+                               name=start_name or base.rsplit("/", 1)[-1],
                                kind="d",
                                depth=0,
                                is_empty=False)

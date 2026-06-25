@@ -37,7 +37,9 @@ async def find(
 ) -> list[str]:
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
+    start_name = ""
     if isinstance(path, PathSpec):
+        start_name = path.original.rstrip("/").rsplit("/", 1)[-1]
         path = path.strip_prefix
     store = accessor.store
     p = norm(path)
@@ -76,7 +78,7 @@ async def find(
         if maxdepth is not None and depth > maxdepth:
             continue
 
-        basename = key.rsplit("/", 1)[-1]
+        basename = start_name if key == p else key.rsplit("/", 1)[-1]
         is_empty: bool | None = None
         if empty:
             is_empty = (await store.file_len(key)

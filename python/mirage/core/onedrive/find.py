@@ -60,6 +60,8 @@ async def find(
     empty: bool = False,
     tree: PredNode | None = None,
 ) -> list[str]:
+    orig = path.original if isinstance(path, PathSpec) else str(path)
+    start_name = orig.rstrip("/").rsplit("/", 1)[-1]
     _, base = split_path(path)
     results: list[str] = []
     saw_descendant = False
@@ -106,7 +108,7 @@ async def find(
             dir_exists = False
     if dir_exists and (maxdepth is None or maxdepth >= 0):
         root_key = "/" + base if base else "/"
-        root_name = base.rsplit("/", 1)[-1] if base else ""
+        root_name = base.rsplit("/", 1)[-1] if base else start_name
         root_entry = FindEntry(key=root_key,
                                name=root_name,
                                kind="d",

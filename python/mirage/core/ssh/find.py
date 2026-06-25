@@ -41,7 +41,9 @@ async def find(
 ) -> list[str]:
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
+    start_name = ""
     if isinstance(path, PathSpec):
+        start_name = path.original.rstrip("/").rsplit("/", 1)[-1]
         path = path.strip_prefix
     config = accessor.config
     sftp = await accessor.sftp()
@@ -60,7 +62,7 @@ async def find(
         if root_attrs is not None:
             is_dir = root_attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY
             root_entry = FindEntry(key=path,
-                                   name=path.rsplit("/", 1)[-1],
+                                   name=start_name or path.rsplit("/", 1)[-1],
                                    kind="d" if is_dir else "f",
                                    depth=0,
                                    is_empty=False if is_dir else

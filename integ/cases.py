@@ -465,6 +465,9 @@ CASES: list[tuple[str, str]] = [
     # ----- find more -----
     ("find_empty", "find /data -empty"),
     ("find_not_name", 'find /data -not -name "*.txt"'),
+    ("find_name_start", "find /data -name data"),
+    ("find_maxdepth_zero", "find /data -maxdepth 0"),
+    ("find_mindepth_zero", "find /data -mindepth 0 -type d"),
     ("find_size_lt", "find /data -size -5c"),
     ("find_depth", "find /data -depth -type f"),
     ("find_mtime", "find /data -mtime +0 -o -mtime -1"),
