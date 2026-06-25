@@ -50,5 +50,5 @@ async def gws_gmail_reply_all(
         raise ValueError("--body is required")
     result = await reply_all_message(accessor.token_manager, message_id, body)
     out = json.dumps(result, ensure_ascii=False,
-                 separators=(",", ":")).encode()
+                     separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

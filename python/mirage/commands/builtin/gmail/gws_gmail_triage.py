@@ -64,5 +64,5 @@ async def gws_gmail_triage(
             "snippet": raw.get("snippet", ""),
         })
     out = json.dumps(summaries, ensure_ascii=False,
-                 separators=(",", ":")).encode()
+                     separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

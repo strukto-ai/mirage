@@ -63,5 +63,5 @@ async def gws_sheets_write(
             resp.raise_for_status()
             result = await resp.json()
     out = json.dumps(result, ensure_ascii=False,
-                 separators=(",", ":")).encode()
+                     separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

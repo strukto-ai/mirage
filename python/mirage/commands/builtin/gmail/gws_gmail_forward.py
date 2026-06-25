@@ -50,5 +50,5 @@ async def gws_gmail_forward(
         raise ValueError("--to is required")
     result = await forward_message(accessor.token_manager, message_id, to)
     out = json.dumps(result, ensure_ascii=False,
-                 separators=(",", ":")).encode()
+                     separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

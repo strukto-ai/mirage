@@ -49,5 +49,5 @@ async def gws_slides_presentations_batchUpdate(
         raise ValueError("--params must contain presentationId")
     result = await batch_update(accessor.token_manager, pres_id, json_str)
     out = json.dumps(result, ensure_ascii=False,
-                 separators=(",", ":")).encode()
+                     separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

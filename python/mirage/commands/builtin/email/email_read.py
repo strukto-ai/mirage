@@ -43,5 +43,5 @@ async def email_read(
         raise ValueError("--folder is required")
     processed = await fetch_message(accessor, folder, uid)
     out = json.dumps(processed, ensure_ascii=False,
-                 separators=(",", ":")).encode()
+                     separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

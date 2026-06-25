@@ -61,9 +61,9 @@ async def email_triage(
     )
     if not uids:
         out = json.dumps([], ensure_ascii=False,
-                 separators=(",", ":")).encode()
+                         separators=(",", ":")).encode()
         return yield_bytes(out), IOResult()
     headers = await fetch_headers(accessor, folder, uids)
     out = json.dumps(headers, ensure_ascii=False,
-                 separators=(",", ":")).encode()
+                     separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

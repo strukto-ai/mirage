@@ -65,5 +65,4 @@ async def read(
     folder = parts[1] if prefix else parts[0]
     uid = result.entry.id
     msg = await fetch_message(accessor, folder, uid)
-    return json.dumps(msg, ensure_ascii=False,
-                 separators=(",", ":")).encode()
+    return json.dumps(msg, ensure_ascii=False, separators=(",", ":")).encode()

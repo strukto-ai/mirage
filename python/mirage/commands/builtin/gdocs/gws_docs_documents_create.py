@@ -46,5 +46,5 @@ async def gws_docs_documents_create(
         raise ValueError("JSON must contain 'title'")
     result = await create_doc(accessor.token_manager, title)
     out = json.dumps(result, ensure_ascii=False,
-                 separators=(",", ":")).encode()
+                     separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

@@ -43,5 +43,5 @@ async def gws_docs_write(
         raise ValueError("--text is required")
     result = await append_text(accessor.token_manager, doc_id, text)
     out = json.dumps(result, ensure_ascii=False,
-                 separators=(",", ":")).encode()
+                     separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

@@ -42,5 +42,5 @@ async def slack_post_message(
         raise ValueError("--text is required")
     result = await post_message(accessor.config, channel_id, text)
     out = json.dumps(result, ensure_ascii=False,
-                 separators=(",", ":")).encode()
+                     separators=(",", ":")).encode()
     return out, IOResult()

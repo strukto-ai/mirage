@@ -64,6 +64,6 @@ async def linear_issue_comment_update(
                                     issue_key=issue.get("identifier"))
     else:
         payload = comment
-    return yield_bytes(json.dumps(payload,
-                                  ensure_ascii=False,
-                                  separators=(",", ":")).encode()), IOResult()
+    return yield_bytes(
+        json.dumps(payload, ensure_ascii=False,
+                   separators=(",", ":")).encode()), IOResult()

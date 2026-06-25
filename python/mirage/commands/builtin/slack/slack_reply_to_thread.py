@@ -46,5 +46,5 @@ async def slack_reply(
         raise ValueError("--text is required")
     result = await reply_to_thread(accessor.config, channel_id, ts, text)
     out = json.dumps(result, ensure_ascii=False,
-                 separators=(",", ":")).encode()
+                     separators=(",", ":")).encode()
     return out, IOResult()

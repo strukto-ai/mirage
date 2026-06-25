@@ -44,8 +44,7 @@ def _filter_traces(
     lines: list[str] = []
     for t in traces:
         trace_id = t.get("id", "")
-        line_json = json.dumps(t, ensure_ascii=False,
-                      separators=(",", ":"))
+        line_json = json.dumps(t, ensure_ascii=False, separators=(",", ":"))
         if not pattern.search(line_json):
             continue
         line = f"traces/{trace_id}.json:{line_json}"
@@ -64,8 +63,7 @@ def _format_session_results(
         session_id = s.get("id", "")
         if not pattern.search(session_id):
             continue
-        line_json = json.dumps(s, ensure_ascii=False,
-                      separators=(",", ":"))
+        line_json = json.dumps(s, ensure_ascii=False, separators=(",", ":"))
         line = f"sessions/{session_id}:{line_json}"
         lines.append(line)
     if not lines:
@@ -86,8 +84,7 @@ def _format_prompt_results(
         if not pattern.search(prompt_name):
             continue
         seen.add(prompt_name)
-        line_json = json.dumps(p, ensure_ascii=False,
-                      separators=(",", ":"))
+        line_json = json.dumps(p, ensure_ascii=False, separators=(",", ":"))
         line = f"prompts/{prompt_name}:{line_json}"
         lines.append(line)
     if not lines:
@@ -104,8 +101,7 @@ def _format_dataset_results(
         dataset_name = d.get("name", "")
         if not pattern.search(dataset_name):
             continue
-        line_json = json.dumps(d, ensure_ascii=False,
-                      separators=(",", ":"))
+        line_json = json.dumps(d, ensure_ascii=False, separators=(",", ":"))
         line = f"datasets/{dataset_name}:{line_json}"
         lines.append(line)
     if not lines:

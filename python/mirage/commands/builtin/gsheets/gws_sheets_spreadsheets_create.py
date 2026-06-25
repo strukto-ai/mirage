@@ -46,5 +46,5 @@ async def gws_sheets_spreadsheets_create(
         raise ValueError("JSON must contain properties.title")
     result = await create_spreadsheet(accessor.token_manager, title)
     out = json.dumps(result, ensure_ascii=False,
-                 separators=(",", ":")).encode()
+                     separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

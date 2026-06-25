@@ -45,6 +45,7 @@ async def discord_add_reaction(
     if not reaction or not isinstance(reaction, str):
         raise ValueError("--reaction is required")
     await add_reaction(accessor.config, channel_id, message_id, reaction)
-    out = json.dumps({"ok": True}, ensure_ascii=False,
-                 separators=(",", ":")).encode()
+    out = json.dumps({
+        "ok": True
+    }, ensure_ascii=False, separators=(",", ":")).encode()
     return out, IOResult()

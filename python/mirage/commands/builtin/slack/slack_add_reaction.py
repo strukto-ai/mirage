@@ -46,5 +46,5 @@ async def slack_react(
         raise ValueError("--reaction is required")
     result = await add_reaction(accessor.config, channel_id, ts, reaction)
     out = json.dumps(result, ensure_ascii=False,
-                 separators=(",", ":")).encode()
+                     separators=(",", ":")).encode()
     return out, IOResult()

@@ -49,5 +49,5 @@ async def email_forward(
     original = await fetch_message(accessor, folder, uid)
     result = await forward_message(accessor.config, original, to)
     out = json.dumps(result, ensure_ascii=False,
-                 separators=(",", ":")).encode()
+                     separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

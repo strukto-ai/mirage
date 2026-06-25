@@ -47,5 +47,5 @@ async def email_send(
         raise ValueError("--body is required")
     result = await send_message(accessor.config, to, subject, body)
     out = json.dumps(result, ensure_ascii=False,
-                 separators=(",", ":")).encode()
+                     separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

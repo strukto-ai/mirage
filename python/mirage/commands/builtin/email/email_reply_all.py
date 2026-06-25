@@ -49,5 +49,5 @@ async def email_reply_all(
     original = await fetch_message(accessor, folder, uid)
     result = await reply_all_message(accessor.config, original, body)
     out = json.dumps(result, ensure_ascii=False,
-                 separators=(",", ":")).encode()
+                     separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

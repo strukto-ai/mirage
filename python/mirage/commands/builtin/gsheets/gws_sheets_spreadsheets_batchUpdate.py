@@ -49,5 +49,5 @@ async def gws_sheets_spreadsheets_batchUpdate(
         raise ValueError("--params must contain spreadsheetId")
     result = await batch_update(accessor.token_manager, sheet_id, json_str)
     out = json.dumps(result, ensure_ascii=False,
-                 separators=(",", ":")).encode()
+                     separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

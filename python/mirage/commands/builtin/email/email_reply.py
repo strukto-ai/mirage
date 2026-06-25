@@ -49,5 +49,5 @@ async def email_reply(
     original = await fetch_message(accessor, folder, uid)
     result = await reply_message(accessor.config, original, body)
     out = json.dumps(result, ensure_ascii=False,
-                 separators=(",", ":")).encode()
+                     separators=(",", ":")).encode()
     return yield_bytes(out), IOResult()

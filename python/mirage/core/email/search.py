@@ -101,8 +101,7 @@ async def search_and_format(
     pairs: list[tuple[str, str]] = []
     for uid in uids:
         msg = await fetch_message(accessor, folder, uid)
-        msg_text = json.dumps(msg, ensure_ascii=False,
-                      separators=(",", ":"))
+        msg_text = json.dumps(msg, ensure_ascii=False, separators=(",", ":"))
         vfs_path = _build_vfs_path(prefix, folder, msg)
         pairs.append((vfs_path, msg_text))
     return pairs
