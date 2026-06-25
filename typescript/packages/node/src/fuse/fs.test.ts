@@ -341,3 +341,81 @@ describe('MirageFS — release does not auto-flush', () => {
     expect(new TextDecoder().decode(after)).toBe('CLOBBER world\n')
   })
 })
+
+describe('MirageFS — xattr', () => {
+  it('round-trips set and get', async () => {
+    const ws = await mkWs()
+    const mfs = new MirageFS(ws)
+    await callOp(mfs, 'setxattr', '/data/greeting.txt', 'user.test', Buffer.from('value'), 0, 0)
+    const [code, value] = await callOp<[number, Buffer?]>(
+      mfs,
+      'getxattr',
+      '/data/greeting.txt',
+      'user.test',
+      0,
+    )
+    expect(code).toBe(0)
+    expect(value?.toString()).toBe('value')
+  })
+
+  it('returns no value for a missing attribute', async () => {
+    const ws = await mkWs()
+    const mfs = new MirageFS(ws)
+    const [code, value] = await callOp<[number, Buffer?]>(
+      mfs,
+      'getxattr',
+      '/data/greeting.txt',
+      'user.absent',
+      0,
+    )
+    expect(code).toBe(0)
+    expect(value).toBeUndefined()
+  })
+
+  it('lists and removes attributes', async () => {
+    const ws = await mkWs()
+    const mfs = new MirageFS(ws)
+    await callOp(mfs, 'setxattr', '/data/greeting.txt', 'user.one', Buffer.from('1'), 0, 0)
+    await callOp(mfs, 'setxattr', '/data/greeting.txt', 'user.two', Buffer.from('2'), 0, 0)
+    const [, list] = await callOp<[number, string[]]>(mfs, 'listxattr', '/data/greeting.txt')
+    expect([...list].sort()).toEqual(['user.one', 'user.two'])
+    await callOp(mfs, 'removexattr', '/data/greeting.txt', 'user.one')
+    const [, after] = await callOp<[number, string[]]>(mfs, 'listxattr', '/data/greeting.txt')
+    expect(after).toEqual(['user.two'])
+  })
+
+  it('accepts the container probe attribute', async () => {
+    const ws = await mkWs()
+    const mfs = new MirageFS(ws)
+    const [setCode] = await callOp<[number]>(
+      mfs,
+      'setxattr',
+      '/data/greeting.txt',
+      'user.containers._probe',
+      Buffer.from('x'),
+      0,
+      0,
+    )
+    expect(setCode).toBe(0)
+  })
+
+  it('follows a rename and clears on unlink', async () => {
+    const ws = await mkWs()
+    const mfs = new MirageFS(ws)
+    await callOp(mfs, 'setxattr', '/data/greeting.txt', 'user.keep', Buffer.from('v'), 0, 0)
+    await callOp(mfs, 'rename', '/data/greeting.txt', '/data/renamed.txt')
+    const [, moved] = await callOp<[number, Buffer?]>(
+      mfs,
+      'getxattr',
+      '/data/renamed.txt',
+      'user.keep',
+      0,
+    )
+    expect(moved?.toString()).toBe('v')
+    await callOp(mfs, 'unlink', '/data/renamed.txt')
+    // A new file at the same path must not inherit the deleted file's xattrs.
+    await ws.execute("echo 'new' > /data/renamed.txt")
+    const [, list] = await callOp<[number, string[]]>(mfs, 'listxattr', '/data/renamed.txt')
+    expect(list).toEqual([])
+  })
+})

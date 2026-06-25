@@ -31,6 +31,8 @@ from mirage.types import FileType
 _ENV_AGENT_ID = "MIRAGE_AGENT_ID"
 _MIRAGE_DIR = "/.mirage"
 _MIRAGE_WHOAMI = "/.mirage/whoami"
+# "attribute not found" errno: ENOATTR on macOS, ENODATA on Linux.
+_NO_XATTR = getattr(errno, "ENOATTR", None) or errno.ENODATA
 
 
 class MirageFS(fuse.Operations):
@@ -58,6 +60,9 @@ class MirageFS(fuse.Operations):
         else:
             self._prefixes = [m.prefix for m in self._ops._mounts]
         self._handles: dict[int, dict] = {}
+        # In-memory extended attributes, keyed by FUSE path. Backends have no
+        # POSIX xattrs, so these are advisory, not persisted (see setxattr).
+        self._xattrs: dict[str, dict[str, bytes]] = {}
         self._next_fh = 1
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(target=self._loop.run_forever,
@@ -248,6 +253,7 @@ class MirageFS(fuse.Operations):
             raise fuse.FuseOSError(errno.EACCES)
         except FileNotFoundError:
             raise fuse.FuseOSError(errno.ENOENT)
+        self._xattrs.pop(path, None)
 
     def rename(self, old: str, new: str, flags: int = 0) -> None:
         try:
@@ -256,6 +262,9 @@ class MirageFS(fuse.Operations):
             raise fuse.FuseOSError(errno.EACCES)
         except (FileNotFoundError, ValueError):
             raise fuse.FuseOSError(errno.ENOENT)
+        moved = self._xattrs.pop(old, None)
+        if moved is not None:
+            self._xattrs[new] = moved
 
     def rmdir(self, path: str) -> None:
         try:
@@ -266,6 +275,7 @@ class MirageFS(fuse.Operations):
             raise fuse.FuseOSError(errno.ENOTEMPTY)
         except (FileNotFoundError, ValueError):
             raise fuse.FuseOSError(errno.ENOENT)
+        self._xattrs.pop(path, None)
 
     def statfs(self, path: str) -> dict:
         return {
@@ -291,6 +301,38 @@ class MirageFS(fuse.Operations):
 
     def access(self, path: str, amode: int) -> None:
         self.getattr(path)
+
+    def setxattr(self,
+                 path: str,
+                 name: str,
+                 value: bytes,
+                 options: int,
+                 position: int = 0) -> int:
+        # Mirage backends (S3, etc.) have no POSIX extended attributes, so
+        # there is nothing to persist xattrs to. We keep them in memory per
+        # mount so tools that probe or set xattrs (sandbox runtimes, rsync
+        # -aX, tar --xattrs, cp -p, macOS Finder writing com.apple.*) succeed
+        # instead of failing with ENOTSUP. The values live only for the
+        # mount's lifetime and are intentionally not written to the backend.
+        self.getattr(path)
+        self._xattrs.setdefault(path, {})[name] = bytes(value)
+        return 0
+
+    def getxattr(self, path: str, name: str, position: int = 0) -> bytes:
+        self.getattr(path)
+        attrs = self._xattrs.get(path)
+        if attrs is None or name not in attrs:
+            raise fuse.FuseOSError(_NO_XATTR)
+        return attrs[name]
+
+    def listxattr(self, path: str) -> list[str]:
+        self.getattr(path)
+        return list(self._xattrs.get(path, {}).keys())
+
+    def removexattr(self, path: str, name: str) -> int:
+        self.getattr(path)
+        self._xattrs.get(path, {}).pop(name, None)
+        return 0
 
     def flush(self, path: str, fh) -> None:
         ctx = self._handles.get(fh)
