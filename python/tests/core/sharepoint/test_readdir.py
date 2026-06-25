@@ -174,6 +174,31 @@ async def test_readdir_subfolder():
 
 
 @pytest.mark.asyncio
+async def test_readdir_of_file_raises_not_a_directory():
+    _seed_caches()
+    index = RAMIndexCacheStore()
+    with aioresponses() as m:
+        m.get(f"{_BASE}/drives/{_DRIVE_ID}/root:/a.txt:/children",
+              status=404,
+              payload={"error": {
+                  "code": "itemNotFound",
+                  "message": "x"
+              }})
+        m.get(f"{_BASE}/drives/{_DRIVE_ID}/root:/a.txt",
+              payload={
+                  "id": "1",
+                  "name": "a.txt",
+                  "size": 3,
+                  "file": {}
+              })
+        path = PathSpec(original="/sp/Engineering/Documents/a.txt",
+                        directory="/sp/Engineering/Documents",
+                        prefix="/sp")
+        with pytest.raises(NotADirectoryError):
+            await readdir(_accessor(), path, index)
+
+
+@pytest.mark.asyncio
 async def test_readdir_cache_hit():
     _seed_caches()
     index = RAMIndexCacheStore()

@@ -45,3 +45,15 @@ async def test_du_all_returns_per_file_with_total(make_acc):
 async def test_du_missing_returns_zero(make_acc):
     acc = make_acc({})
     assert await du(acc, PathSpec.from_str_path("/nope")) == 0
+
+
+@pytest.mark.asyncio
+async def test_du_of_file_returns_its_own_size(make_acc):
+    acc = make_acc({"data/a.json": b"12345"})
+    assert await du(acc, PathSpec.from_str_path("/data/a.json")) == 5
+
+
+@pytest.mark.asyncio
+async def test_du_all_of_file_is_empty(make_acc):
+    acc = make_acc({"data/a.json": b"12345"})
+    assert await du_all(acc, PathSpec.from_str_path("/data/a.json")) == []

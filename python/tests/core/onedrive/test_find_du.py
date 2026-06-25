@@ -64,6 +64,34 @@ async def test_du_all_lists_files_plus_total():
 
 
 @pytest.mark.asyncio
+async def test_du_of_file_returns_its_own_size():
+    with aioresponses() as m:
+        m.get(_BASE + "/root:/a.txt",
+              payload={
+                  "id": "1",
+                  "name": "a.txt",
+                  "size": 3,
+                  "file": {}
+              })
+        total = await du(_accessor(), PathSpec.from_str_path("/a.txt"))
+    assert total == 3
+
+
+@pytest.mark.asyncio
+async def test_du_all_of_file_is_empty():
+    with aioresponses() as m:
+        m.get(_BASE + "/root:/a.txt",
+              payload={
+                  "id": "1",
+                  "name": "a.txt",
+                  "size": 3,
+                  "file": {}
+              })
+        rows = await du_all(_accessor(), PathSpec.from_str_path("/a.txt"))
+    assert rows == []
+
+
+@pytest.mark.asyncio
 async def test_find_returns_files_and_folders():
     with aioresponses() as m:
         _tree(m)
