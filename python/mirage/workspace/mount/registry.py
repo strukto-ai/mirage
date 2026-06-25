@@ -24,6 +24,15 @@ from mirage.workspace.mount.mount import Mount
 DEV_PREFIX = "/dev/"
 
 
+class MountCommandUnsupported(Exception):
+    """Raised when a path-bound command is unsupported by its backend."""
+
+    def __init__(self, cmd_name: str, backend: str) -> None:
+        self.cmd_name = cmd_name
+        self.backend = backend
+        super().__init__(f"{cmd_name}: not supported on the {backend} backend")
+
+
 class MountRegistry:
     """Longest-prefix-match router.
 
@@ -273,7 +282,11 @@ class MountRegistry:
         except ValueError:
             mount = None
 
-        if mount is None or mount.resolve_command(cmd_name) is None:
+        if mount is not None and mount.resolve_command(cmd_name) is None:
+            if path_scopes:
+                raise MountCommandUnsupported(cmd_name, mount.resource.name)
+            mount = self.mount_for_command(cmd_name)
+        elif mount is None:
             mount = self.mount_for_command(cmd_name)
 
         if mount is None:

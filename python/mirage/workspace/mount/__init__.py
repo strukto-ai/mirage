@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.workspace.mount.mount import Mount
-from mirage.workspace.mount.registry import MountRegistry
+from mirage.workspace.mount.registry import (MountCommandUnsupported,
+                                             MountRegistry)
 
-__all__ = ["Mount", "MountRegistry"]
+__all__ = ["Mount", "MountCommandUnsupported", "MountRegistry"]

@@ -37,7 +37,7 @@ from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
 from mirage.workspace.executor.fs_error import format_fs_error
 from mirage.workspace.executor.jobs import (handle_jobs, handle_kill,
                                             handle_ps, handle_wait)
-from mirage.workspace.mount import MountRegistry
+from mirage.workspace.mount import MountCommandUnsupported, MountRegistry
 from mirage.workspace.session import Session, assert_mount_allowed
 from mirage.workspace.types import ExecutionNode
 
@@ -355,7 +355,15 @@ async def handle_command(
                 stderr=err.encode(),
             ), ExecutionNode(command=cmd_str, exit_code=1)
 
-    mount = await registry.resolve_mount(cmd_name, path_scopes, session.cwd)
+    try:
+        mount = await registry.resolve_mount(cmd_name, path_scopes,
+                                             session.cwd)
+    except MountCommandUnsupported as exc:
+        err = f"{exc}\n".encode()
+        return None, IOResult(exit_code=1,
+                              stderr=err), ExecutionNode(command=cmd_str,
+                                                         exit_code=1,
+                                                         stderr=err)
     if mount is None:
         return None, IOResult(
             exit_code=127,
