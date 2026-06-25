@@ -17,7 +17,7 @@ from opendal.types import EntryMode
 
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
-                                               keep)
+                                               emit_start_path, keep)
 from mirage.types import PathSpec
 
 
@@ -41,6 +41,7 @@ async def find(
 ) -> list[str]:
     if isinstance(path, str):
         path = PathSpec.from_str_path(path)
+    start_name = path.original.rstrip("/").rsplit("/", 1)[-1]
     target = path.strip_prefix
     pfx = target.strip("/")
     scan_path = pfx + "/" if pfx else "/"
@@ -110,12 +111,14 @@ async def find(
                 results.append(ep)
     except NotFound:
         return []
-    if base != "/" and (saw_descendant or dir_exists) and (maxdepth is None
-                                                           or maxdepth >= 0):
-        root_entry = FindEntry(key=base,
-                               name=base.rsplit("/", 1)[-1],
-                               kind="d",
-                               depth=0)
-        if keep(root_entry, tree, mindepth):
-            results.append(base)
+    if saw_descendant or dir_exists:
+        emit_start_path(results,
+                        base,
+                        start_name or base.rsplit("/", 1)[-1],
+                        kind="d",
+                        is_empty=None,
+                        exists=True,
+                        tree=tree,
+                        maxdepth=maxdepth,
+                        mindepth=mindepth)
     return sorted(set(results))

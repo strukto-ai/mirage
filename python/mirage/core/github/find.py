@@ -15,7 +15,7 @@
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
-                                               keep)
+                                               emit_start_path, keep)
 from mirage.types import PathSpec
 
 
@@ -44,6 +44,7 @@ async def find(
         raise ValueError("find: no tree loaded")
     base = path.strip_prefix.strip("/")
     base_depth = 0 if base == "" else base.count("/") + 1
+    start_name = path.original.rstrip("/").rsplit("/", 1)[-1]
     results: list[str] = []
     tree = tree if tree is not None else build_tree(name=name,
                                                     iname=iname,
@@ -51,10 +52,17 @@ async def find(
                                                     type=type,
                                                     name_exclude=name_exclude,
                                                     or_names=or_names)
+    start_kind = "d" if base == "" else None
+    has_child = False
     for entry_path in sorted(index._entries):
         p = entry_path.lstrip("/")
-        if p != base and not p.startswith(base + "/" if base else ""):
+        if p == base:
+            meta = index._entries[entry_path]
+            start_kind = "d" if meta.resource_type == "folder" else "f"
             continue
+        if base and not p.startswith(base + "/"):
+            continue
+        has_child = True
         entry_meta = index._entries[entry_path]
         is_dir = entry_meta.resource_type == "folder"
         full_path = "/" + p
@@ -73,4 +81,14 @@ async def find(
         if max_size is not None and size > max_size:
             continue
         results.append(full_path)
-    return results
+    if start_kind is not None or has_child or base == "":
+        emit_start_path(results,
+                        "/" + base if base else "/",
+                        start_name,
+                        kind=start_kind or "d",
+                        is_empty=not has_child,
+                        exists=True,
+                        tree=tree,
+                        maxdepth=maxdepth,
+                        mindepth=mindepth)
+    return sorted(results)

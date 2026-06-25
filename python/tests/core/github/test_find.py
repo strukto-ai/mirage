@@ -45,7 +45,7 @@ def _spec(path: str, prefix: str = "") -> PathSpec:
 async def test_find_all_from_root():
     results = await find(None, _spec("/"), index=_index())
     assert results == [
-        "/README.md", "/src", "/src/main.py", "/src/utils",
+        "/", "/README.md", "/src", "/src/main.py", "/src/utils",
         "/src/utils/helpers.py"
     ]
 
@@ -92,7 +92,7 @@ async def test_find_strips_mount_prefix():
 @pytest.mark.asyncio
 async def test_find_size_filters():
     results = await find(None, _spec("/"), min_size=100, index=_index())
-    assert results == ["/src/main.py"]
+    assert results == ["/", "/src/main.py"]
 
 
 @pytest.mark.asyncio
