@@ -100,11 +100,7 @@ export async function find(
     } while (continuationToken !== undefined)
   })
   const rootKey = rstripSlash('/' + stripKeyPrefix(pfx, accessor.config)) || '/'
-  if (
-    rootKey !== '/' &&
-    (seen.descendant || seen.marker) &&
-    (options.maxDepth == null || options.maxDepth >= 0)
-  ) {
+  if ((seen.descendant || seen.marker) && (options.maxDepth == null || options.maxDepth >= 0)) {
     if (
       keep(
         {

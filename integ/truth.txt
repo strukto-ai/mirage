@@ -685,6 +685,7 @@ world
 === rg_c ===
 1
 === find_d ===
+/data
 /data/disptree
 /data/disptree/d
 /data/guard
@@ -722,6 +723,7 @@ world
 /data/sub/nested.txt
 /data/tabbed.txt
 === find_size_gt ===
+/data
 /data/a.txt
 /data/abc.csv
 /data/anchors.txt
@@ -1257,6 +1259,7 @@ baz,
 === find_empty ===
 /data/empty.txt
 === find_not_name ===
+/data
 /data/abc.csv
 /data/binary.bin
 /data/chat.jsonl
@@ -1271,6 +1274,7 @@ baz,
 /data/user.json
 /data/users.json
 === find_size_lt ===
+/data
 /data/disptree
 /data/disptree/d
 /data/disptree/d/y.txt
@@ -1320,6 +1324,7 @@ baz,
 /data/user.json
 /data/users.json
 === find_mtime ===
+/data
 /data/a.txt
 /data/abc.csv
 /data/anchors.txt
@@ -2059,6 +2064,12 @@ find: invalid argument '' to '-size'
 === find_bad_mtime ===
 exit=1
 find: invalid argument 'abc' to '-mtime'
+=== find_unknown_predicate ===
+exit=1
+find: unknown predicate '-regex'
+=== find_bogus_predicate ===
+exit=1
+find: unknown predicate '-boguspredicate'
 === sleep_zero ===
 sleep_zero ok
 === sleep_fraction ===

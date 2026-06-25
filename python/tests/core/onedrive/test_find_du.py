@@ -68,7 +68,7 @@ async def test_find_returns_files_and_folders():
     with aioresponses() as m:
         _tree(m)
         out = await find(_accessor(), PathSpec.from_str_path("/"))
-    assert out == ["/a.txt", "/sub", "/sub/b.txt"]
+    assert out == ["/", "/a.txt", "/sub", "/sub/b.txt"]
 
 
 @pytest.mark.asyncio

@@ -70,11 +70,11 @@ export function find(
     for (const key of accessor.store.files.keys()) candidates.push([key, 'f'])
   }
   if (options.type !== 'f') {
-    for (const key of accessor.store.dirs) if (key !== '/') candidates.push([key, 'd'])
+    for (const key of accessor.store.dirs) candidates.push([key, 'd'])
   }
   for (const [key, kind] of candidates) {
     if (key !== p && !key.startsWith(prefix)) continue
-    const depth = (key.match(/\//g) ?? []).length - baseDepth
+    const depth = key === '/' ? 0 : (key.match(/\//g) ?? []).length - baseDepth
     if (options.maxDepth !== null && options.maxDepth !== undefined && depth > options.maxDepth)
       continue
     const basename = key.slice(key.lastIndexOf('/') + 1)

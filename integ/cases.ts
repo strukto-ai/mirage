@@ -703,6 +703,8 @@ export const FIND_ARG_ERROR_CASES: ReadonlyArray<readonly [string, string]> = [
   ['find_bad_size', 'find /data -size abc'],
   ['find_empty_size', "find /data -size ''"],
   ['find_bad_mtime', 'find /data -mtime abc'],
+  ['find_unknown_predicate', "find /data -regex '.*deep.*'"],
+  ['find_bogus_predicate', 'find /data -boguspredicate'],
 ];
 
 export const SLEEP_CASES: ReadonlyArray<readonly [string, string, number]> = [

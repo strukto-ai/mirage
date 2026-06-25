@@ -102,8 +102,7 @@ async def find(
                 results.append(ep)
     except NotFound:
         return []
-    if base != "/" and (saw_descendant or dir_exists) and (maxdepth is None
-                                                           or maxdepth >= 0):
+    if (saw_descendant or dir_exists) and (maxdepth is None or maxdepth >= 0):
         root_entry = FindEntry(key=base,
                                name=base.rsplit("/", 1)[-1],
                                kind="d",

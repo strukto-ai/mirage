@@ -4,7 +4,8 @@ from datetime import datetime, timezone
 
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode,
-                                               args_to_tree, keep)
+                                               args_to_tree, keep,
+                                               tree_has_empty)
 from mirage.commands.builtin.find_helper import (_parse_depth, _parse_mtime,
                                                  _parse_size)
 from mirage.commands.builtin.find_parse import parse_find_expression
@@ -220,6 +221,28 @@ async def _stat_entry(
         return None
 
 
+async def _is_empty_entry(
+    readdir: Callable[[PathSpec, IndexCacheStore | None],
+                      Awaitable[list[str]]],
+    stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
+    path: str,
+    is_dir: bool,
+    prefix: str,
+    index: IndexCacheStore | None,
+) -> bool:
+    if is_dir:
+        spec = PathSpec(original=path,
+                        directory=path,
+                        resolved=False,
+                        prefix=prefix)
+        try:
+            return len(await readdir(spec, index)) == 0
+        except FileNotFoundError:
+            return False
+    st = await _stat_entry(stat, path, prefix, index)
+    return st is not None and (st.size or 0) == 0
+
+
 async def _walk_collect(
     readdir: Callable[[PathSpec, IndexCacheStore | None],
                       Awaitable[list[str]]],
@@ -268,31 +291,38 @@ async def walk_find(
     args: FindArgs,
 ) -> list[str]:
     collected: list[tuple[str, bool]] = []
-    # GNU depth convention: the search root is depth 0, its children are
-    # depth 1, so the walk starts at 1 and -maxdepth 0 lists nothing.
-    await _walk_collect(readdir, stat, is_dir_name, search_path, index,
-                        args.maxdepth, 1, collected)
     prefix = search_path.prefix
     search_key = search_path.strip_prefix.strip("/")
-    base_depth = search_key.count("/") if search_key else -1
-    if search_key and (args.maxdepth is None or args.maxdepth >= 0):
-        try:
-            root_stat = await stat(search_path, index)
-        except FileNotFoundError:
-            root_stat = None
-        if root_stat is not None:
-            root_p = prefix + "/" + search_key if prefix else "/" + search_key
-            collected.append((root_p, root_stat.type == FileType.DIRECTORY))
+    root_path = (search_path.original.rstrip("/")
+                 if search_path.original != "/" else "/")
+    root_stat = await _stat_entry(stat, root_path, prefix, index)
+    if root_stat is not None:
+        collected.append((root_path, root_stat.type == FileType.DIRECTORY))
+    # GNU depth convention: the search root is depth 0, its children are
+    # depth 1.
+    await _walk_collect(readdir, stat, is_dir_name, search_path, index,
+                        args.maxdepth, 1, collected)
     tree = args_to_tree(args)
+    need_empty = tree_has_empty(tree)
     results: list[str] = []
     for p, is_dir in sorted(collected):
         entry_name = p.rsplit("/", 1)[-1]
         key = p[len(prefix):] if prefix and p.startswith(prefix) else p
-        depth = key.strip("/").count("/") - base_depth
+        rel = key.strip("/")
+        if search_key:
+            depth = 0 if rel == search_key else rel.count(
+                "/") - search_key.count("/")
+        else:
+            depth = 0 if rel == "" else rel.count("/") + 1
+        is_empty = None
+        if need_empty:
+            is_empty = await _is_empty_entry(readdir, stat, p, is_dir, prefix,
+                                             index)
         entry = FindEntry(key=key,
                           name=entry_name,
                           kind="d" if is_dir else "f",
-                          depth=depth)
+                          depth=depth,
+                          is_empty=is_empty)
         if not keep(entry, tree, args.mindepth):
             continue
         need_size = not is_dir and (args.min_size is not None

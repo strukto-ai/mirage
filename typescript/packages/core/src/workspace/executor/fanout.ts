@@ -168,6 +168,14 @@ async function filterUnderPrefixes(
   return new TextEncoder().encode(outLines.join('\n') + '\n')
 }
 
+async function dropMountRootLine(stdout: ByteSource, mountRoot: string): Promise<Uint8Array> {
+  const data = await materialize(stdout)
+  const text = new TextDecoder().decode(data)
+  const outLines = text.split('\n').filter((line) => line !== '' && line !== mountRoot)
+  if (outLines.length === 0) return new Uint8Array()
+  return new TextEncoder().encode(outLines.join('\n') + '\n')
+}
+
 export async function fanOutTraversal(
   cmdName: string,
   paths: readonly PathSpec[],
@@ -233,6 +241,8 @@ export async function fanOutTraversal(
     }
     if (mount === primaryMount && descendantPrefixes.length > 0 && stdout !== null) {
       stdout = await filterUnderPrefixes(stdout, descendantPrefixes)
+    } else if (mount !== primaryMount && cmdName === 'find' && stdout !== null) {
+      stdout = await dropMountRootLine(stdout, rstripSlash(mount.prefix) || '/')
     }
     if (stdout !== null) {
       const data = await materialize(stdout)

@@ -98,18 +98,20 @@ async def find(
                     continue
             results.append(full_path)
     dir_exists = saw_descendant
-    if base and not dir_exists:
+    if not dir_exists:
         try:
             dir_exists = (await stat(accessor,
                                      path)).type == FileType.DIRECTORY
         except FileNotFoundError:
             dir_exists = False
-    if base and dir_exists and (maxdepth is None or maxdepth >= 0):
-        root_entry = FindEntry(key="/" + base,
-                               name=base.rsplit("/", 1)[-1],
+    if dir_exists and (maxdepth is None or maxdepth >= 0):
+        root_key = "/" + base if base else "/"
+        root_name = base.rsplit("/", 1)[-1] if base else ""
+        root_entry = FindEntry(key=root_key,
+                               name=root_name,
                                kind="d",
                                depth=0,
                                is_empty=False if empty else None)
         if keep(root_entry, tree, mindepth):
-            results.append("/" + base)
+            results.append(root_key)
     return sorted(results)

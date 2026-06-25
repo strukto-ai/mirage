@@ -157,7 +157,7 @@ export async function find(
     if (isNotFound(err)) return results
     throw err
   }
-  if (virtual !== '/' && (options.maxDepth == null || options.maxDepth >= 0)) {
+  if (options.maxDepth == null || options.maxDepth >= 0) {
     let rootEmpty: boolean | null = null
     if (options.empty === true) {
       rootEmpty = true

@@ -60,7 +60,7 @@ def _find_sync(
                                                     or_names=or_names,
                                                     empty=empty)
 
-    if base != "/" and p.is_dir():
+    if p.is_dir():
         root_empty = (not any(p.iterdir())) if empty else None
         root_entry = FindEntry(key=base,
                                name=base.rsplit("/", 1)[-1],

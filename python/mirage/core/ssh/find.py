@@ -52,7 +52,7 @@ async def find(
                                                     type=type,
                                                     name_exclude=name_exclude,
                                                     or_names=or_names)
-    if path.strip("/") and (maxdepth is None or maxdepth >= 0):
+    if maxdepth is None or maxdepth >= 0:
         try:
             root_attrs = await sftp.stat(_abs(config, path))
         except (asyncssh.SFTPError, OSError):

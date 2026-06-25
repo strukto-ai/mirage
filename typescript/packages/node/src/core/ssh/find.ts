@@ -172,7 +172,7 @@ export async function find(
       nameExclude: options.nameExclude,
       orNames: options.orNames,
     })
-  if (virtual !== '/' && (options.maxDepth == null || options.maxDepth >= 0)) {
+  if (options.maxDepth == null || options.maxDepth >= 0) {
     const st = await statRemote(accessor, joinRoot(accessor.config.root ?? '/', virtual))
     if (
       st !== null &&

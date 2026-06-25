@@ -84,6 +84,12 @@ def test_parse_find_args_unknown_type_left_as_string():
     assert parse_find_args((), type="symlink").type == "symlink"
 
 
+def test_parse_find_args_unknown_predicate_raises():
+    with pytest.raises(FindParseError,
+                       match="find: unknown predicate '-bogus'"):
+        parse_find_args(("-bogus", ))
+
+
 def test_parse_find_args_negation_builds_not_tree():
     args = parse_find_args(("-not", "-name", "*.pyc"))
     assert args.tree == Not(Name("*.pyc"))
@@ -204,7 +210,7 @@ def _root_spec() -> PathSpec:
 @pytest.mark.asyncio
 async def test_walk_find_tolerates_not_found_readdir():
     readdir = AsyncMock(side_effect=FileNotFoundError("/"))
-    stat = AsyncMock()
+    stat = AsyncMock(side_effect=FileNotFoundError("/"))
     results = await walk_find(_root_spec(),
                               readdir=readdir,
                               stat=stat,
@@ -212,6 +218,20 @@ async def test_walk_find_tolerates_not_found_readdir():
                               index=None,
                               args=FindArgs())
     assert results == []
+
+
+@pytest.mark.asyncio
+async def test_walk_find_emits_start_path_at_depth_zero():
+    readdir = AsyncMock(return_value=["/child.txt"])
+    stat = AsyncMock(return_value=FileStat(name="/", type=FileType.DIRECTORY))
+    results = await walk_find(_root_spec(),
+                              readdir=readdir,
+                              stat=stat,
+                              is_dir_name=lambda c: False,
+                              index=None,
+                              args=FindArgs(maxdepth=0))
+    assert results == ["/"]
+    readdir.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -238,6 +258,61 @@ async def test_walk_find_stat_fallback_treats_not_found_as_file():
                               index=None,
                               args=FindArgs(type=FindType.FILE))
     assert results == ["/mystery"]
+
+
+@pytest.mark.asyncio
+async def test_walk_find_empty_matches_empty_files_and_dirs():
+
+    async def readdir(spec: PathSpec, _index):
+        table = {
+            "/": ["/empty.txt", "/full.txt", "/empty-dir", "/full-dir"],
+            "/empty-dir": [],
+            "/full-dir": ["/full-dir/a.txt"],
+        }
+        return table[spec.original]
+
+    async def stat(spec: PathSpec, _index):
+        stats = {
+            "/": FileStat(name="/", type=FileType.DIRECTORY),
+            "/empty.txt": FileStat(name="empty.txt",
+                                   size=0,
+                                   type=FileType.TEXT),
+            "/full.txt": FileStat(name="full.txt", size=1, type=FileType.TEXT),
+            "/empty-dir": FileStat(name="empty-dir", type=FileType.DIRECTORY),
+            "/full-dir": FileStat(name="full-dir", type=FileType.DIRECTORY),
+            "/full-dir/a.txt": FileStat(name="a.txt",
+                                        size=1,
+                                        type=FileType.TEXT),
+        }
+        return stats[spec.original]
+
+    results = await walk_find(_root_spec(),
+                              readdir=readdir,
+                              stat=stat,
+                              is_dir_name=lambda c: c.endswith("dir"),
+                              index=None,
+                              args=parse_find_args(("-empty", )))
+    assert results == ["/empty-dir", "/empty.txt"]
+
+
+@pytest.mark.asyncio
+async def test_walk_find_not_negates_predicate():
+    readdir = AsyncMock(return_value=["/a.txt", "/b.md"])
+
+    async def stat(spec: PathSpec, _index):
+        if spec.original == "/":
+            return FileStat(name="/", type=FileType.DIRECTORY)
+        return FileStat(name=spec.original.rsplit("/", 1)[-1],
+                        size=1,
+                        type=FileType.TEXT)
+
+    results = await walk_find(_root_spec(),
+                              readdir=readdir,
+                              stat=stat,
+                              is_dir_name=lambda c: False,
+                              index=None,
+                              args=parse_find_args(("-not", "-name", "*.txt")))
+    assert results == ["/", "/b.md"]
 
 
 @pytest.mark.asyncio
@@ -322,3 +397,33 @@ def test_find_invalid_numeric_arg_exits_one_with_clean_stderr(expr):
     assert code == 1
     assert stderr.startswith("find: invalid argument ")
     assert stderr.endswith("\n")
+
+
+# ── Issue #312 parse-level regression tests ────────────────
+
+
+def test_parse_find_args_start_path_included():
+    args = parse_find_args(())
+    assert args.maxdepth is None
+
+
+def test_parse_find_args_maxdepth_zero():
+    args = parse_find_args(("-maxdepth", "0"))
+    assert args.maxdepth == 0
+
+
+def test_parse_find_args_empty_predicate():
+    args = parse_find_args(("-empty", ))
+    assert args.empty is True
+
+
+def test_parse_find_args_not_negation():
+    args = parse_find_args(("-not", "-name", "*.txt"))
+    assert isinstance(args.tree, Not)
+    assert isinstance(args.tree.kid, Name)
+    assert args.tree.kid.pattern == "*.txt"
+
+
+def test_parse_find_args_bogus_predicate_raises():
+    with pytest.raises(FindParseError, match="unknown predicate"):
+        parse_find_args(("-boguspredicate", ))

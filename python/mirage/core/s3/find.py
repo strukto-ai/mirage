@@ -107,13 +107,15 @@ async def find(
                         continue
                 results.append(full_path)
     stripped = path.strip("/")
-    if stripped and (saw_descendant or dir_marker_seen) and (maxdepth is None
-                                                             or maxdepth >= 0):
-        root_entry = FindEntry(key="/" + stripped,
-                               name=stripped.rsplit("/", 1)[-1],
+    if (saw_descendant or dir_marker_seen) and (maxdepth is None
+                                                or maxdepth >= 0):
+        root_key = "/" + stripped if stripped else "/"
+        root_name = stripped.rsplit("/", 1)[-1] if stripped else ""
+        root_entry = FindEntry(key=root_key,
+                               name=root_name,
                                kind="d",
                                depth=0,
                                is_empty=False if empty else None)
         if keep(root_entry, tree, mindepth):
-            results.append("/" + stripped)
+            results.append(root_key)
     return sorted(results)

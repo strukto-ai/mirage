@@ -42,7 +42,7 @@ async def find(
     store = accessor.store
     p = norm(path)
     prefix = p.rstrip("/") + "/"
-    base_depth = 0 if p == "/" else p.count("/")
+    base_depth = p.count("/")
     results: list[str] = []
     if tree is None:
         tree = build_tree(name=name,
@@ -62,14 +62,16 @@ async def find(
             candidates.append((key, "f"))
     if type != "f":
         for key in store.dirs:
-            if key != "/":
-                candidates.append((key, "d"))
+            candidates.append((key, "d"))
 
     for key, kind in candidates:
         if key != p and not key.startswith(prefix):
             continue
 
-        depth = key.count("/") - base_depth
+        if p == "/":
+            depth = 0 if key == "/" else key.strip("/").count("/") + 1
+        else:
+            depth = 0 if key == p else key.count("/") - base_depth
 
         if maxdepth is not None and depth > maxdepth:
             continue

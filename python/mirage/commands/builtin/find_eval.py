@@ -107,6 +107,16 @@ def tree_has_type(node: PredNode) -> bool:
     return False
 
 
+def tree_has_empty(node: PredNode) -> bool:
+    if isinstance(node, Empty):
+        return True
+    if isinstance(node, Not):
+        return tree_has_empty(node.kid)
+    if isinstance(node, (And, Or)):
+        return any(tree_has_empty(kid) for kid in node.kids)
+    return False
+
+
 def keep(entry: FindEntry, tree: PredNode, min_depth: int | None) -> bool:
     if min_depth is not None and entry.depth < min_depth:
         return False

@@ -141,7 +141,7 @@ export async function find(
       orNames: options.orNames,
       empty: options.empty,
     })
-  if (virtual !== '/' && (options.maxDepth == null || options.maxDepth >= 0)) {
+  if (options.maxDepth == null || options.maxDepth >= 0) {
     let isDir = false
     try {
       isDir = (await stat(full)).isDirectory()
