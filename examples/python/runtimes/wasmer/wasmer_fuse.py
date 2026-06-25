@@ -20,12 +20,11 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.s3 import S3Config, S3Resource
 
 load_dotenv(".env.development")
@@ -50,13 +49,11 @@ def main():
         sys.exit(1)
 
     print("=== Mirage FUSE-mounting S3 on the host ===")
-    with Workspace(
-        {"/s3/": S3Resource(s3_config())},
-            mode=MountMode.READ,
-            fuse_mounts={"/s3/": True},
-    ) as ws:
-        time.sleep(1)
-        host_s3 = ws.fuse_mountpoints["/s3/"]
+    with Workspace({
+            "/s3/":
+            Mount(S3Resource(s3_config()), mode=MountMode.READ, fuse=True)
+    }) as ws:
+        host_s3 = ws.fuse_mountpoint
         print(f"  host mountpoint: {host_s3}")
 
         print(

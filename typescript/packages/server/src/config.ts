@@ -245,10 +245,10 @@ export interface WorkspaceArgs {
     consistency: ConsistencyPolicy
     sessionId: string
     agentId: string
-    fuseMounts?: Record<string, boolean | string>
     cache?: FileCache & Resource
     index?: IndexConfig
   }
+  fuseMounts: Record<string, boolean | string>
 }
 
 function buildCache(
@@ -305,9 +305,9 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
       consistency,
       sessionId: cfg.defaultSessionId ?? 'default',
       agentId: cfg.defaultAgentId ?? 'default',
-      ...(Object.keys(fuseMounts).length > 0 ? { fuseMounts } : {}),
       ...(cache !== undefined ? { cache } : {}),
       ...(index !== undefined ? { index } : {}),
     },
+    fuseMounts,
   }
 }

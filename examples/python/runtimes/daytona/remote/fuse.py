@@ -18,7 +18,7 @@ import os
 import subprocess
 import time
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.s3 import S3Config, S3Resource
 
 cfg = S3Config(
@@ -29,24 +29,23 @@ cfg = S3Config(
 )
 
 with Workspace(
-    {"/s3/": S3Resource(cfg)},
+    {"/s3/": Mount(S3Resource(cfg), fuse=True)},
         mode=MountMode.READ,
-        fuse=True,
 ) as ws:
     time.sleep(1)
     mp = ws.fuse_mountpoint
     print(f"FUSE mountpoint: {mp}")
 
     print("\n--- native os.listdir() against FUSE path ---")
-    for e in os.listdir(f"{mp}/s3"):
+    for e in os.listdir(mp):
         print(f"  {e}")
 
     print("\n--- subprocess sees the same mount ---")
-    r = subprocess.run(["ls", f"{mp}/s3"], capture_output=True, text=True)
+    r = subprocess.run(["ls", mp], capture_output=True, text=True)
     print(r.stdout.rstrip())
 
     print("\n--- native open() reads through FUSE ---")
-    path = f"{mp}/s3/data/example.jsonl"
+    path = f"{mp}/data/example.jsonl"
     size = os.path.getsize(path)
     with open(path) as f:
         head = "".join(next(f) for _ in range(3))

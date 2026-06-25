@@ -41,7 +41,7 @@ The SDK 0.5.10 embeds the runtime in-process, so there is **no separate `msb ser
 From the repo root (so `.env.development` loads):
 
 ```bash
-./python/.venv/bin/python examples/python/microsandbox/microsandbox_fuse.py
+./python/.venv/bin/python examples/python/runtimes/microsandbox/microsandbox_fuse.py
 ```
 
 Expected tail:

@@ -13,14 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.types import MountMode
-from mirage.workspace.mount import Mount
+from mirage.workspace.mount import MountEntry
 
 HELP_HINT = (
     "Tip: run `man` to list every available command grouped by resource, "
     "`man <cmd>` for a single entry, and `<cmd> --help` for flag details.")
 
 
-def build_file_prompt(mounts: list[Mount]) -> str:
+def build_file_prompt(mounts: list[MountEntry]) -> str:
     parts: list[str] = [HELP_HINT]
     for m in mounts:
         prompt = m.resource.PROMPT

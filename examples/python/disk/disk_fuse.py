@@ -15,10 +15,9 @@
 import os
 import shutil
 import tempfile
-import time
 from pathlib import Path
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.disk import DiskResource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -29,13 +28,13 @@ shutil.copytree(DATA_DIR, Path(tmp) / "files", dirs_exist_ok=True)
 
 resource = DiskResource(root=tmp + "/files")
 
-with Workspace({"/data/": resource}, mode=MountMode.READ, fuse=True) as ws:
-    time.sleep(1)
+with Workspace({"/data/": Mount(resource, mode=MountMode.READ,
+                                fuse=True)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
 
-    data_path = f"{mp}/data"
+    data_path = mp
 
     print("--- os.listdir() ---")
     entries = os.listdir(data_path)
@@ -45,9 +44,9 @@ with Workspace({"/data/": resource}, mode=MountMode.READ, fuse=True) as ws:
 
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> Open another terminal and try:")
-    print(f">>>   ls -la {mp}/data/")
-    print(f">>>   cat {mp}/data/example.json")
-    print(f">>>   cat {mp}/data/example.json | jq .")
+    print(f">>>   ls -la {mp}/")
+    print(f">>>   cat {mp}/example.json")
+    print(f">>>   cat {mp}/example.json | jq .")
     print(">>> Press Enter to unmount and exit...")
     input()
 

@@ -13,10 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
-import time
 from pathlib import Path
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.ram import RAMResource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -36,13 +35,13 @@ for name in sorted(store.files):
     size = len(store.files[name])
     print(f"  {name} ({size:,} bytes)")
 
-with Workspace({"/data/": resource}, mode=MountMode.WRITE, fuse=True) as ws:
-    time.sleep(1)
+with Workspace({"/data/": Mount(resource, mode=MountMode.WRITE,
+                                fuse=True)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"\n=== FUSE MODE: mounted at {mp} ===\n")
 
-    data_path = f"{mp}/data"
+    data_path = mp
 
     print("--- os.listdir() ---")
     entries = os.listdir(data_path)
@@ -52,10 +51,10 @@ with Workspace({"/data/": resource}, mode=MountMode.WRITE, fuse=True) as ws:
 
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> Open another terminal and try:")
-    print(f">>>   ls -la {mp}/data/")
-    print(f">>>   cat {mp}/data/example.json")
-    print(f">>>   cat {mp}/data/example.json | jq .")
-    print(f">>>   cat {mp}/data/example.parquet")
+    print(f">>>   ls -la {mp}/")
+    print(f">>>   cat {mp}/example.json")
+    print(f">>>   cat {mp}/example.json | jq .")
+    print(f">>>   cat {mp}/example.parquet")
     print(">>> Press Enter to unmount and exit...")
     input()
 

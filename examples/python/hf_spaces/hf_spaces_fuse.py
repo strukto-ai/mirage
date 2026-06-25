@@ -13,11 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
-import time
 
 from dotenv import load_dotenv
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.hf_spaces import HfSpacesConfig, HfSpacesResource
 
 load_dotenv(".env.development")
@@ -28,21 +27,16 @@ config = HfSpacesConfig(
 )
 resource = HfSpacesResource(config)
 
-with Workspace(
-    {"/s/": resource},
-        mode=MountMode.READ,
-        fuse=True,
-) as ws:
-    time.sleep(1)
+with Workspace({"/s/": Mount(resource, mode=MountMode.READ, fuse=True)}) as ws:
     mp = ws.fuse_mountpoint
     print(f"=== FUSE: mounted at {mp} ===\n")
 
-    print(f"--- os.listdir({mp}/s) ---")
-    root_entries = os.listdir(f"{mp}/s")
+    print(f"--- os.listdir({mp}) ---")
+    root_entries = os.listdir(mp)
     for e in root_entries:
         print(f"  {e}")
 
-    readme = f"{mp}/s/README.md"
+    readme = f"{mp}/README.md"
     if os.path.exists(readme):
         size = os.path.getsize(readme)
         print(f"\n--- {readme} ({size} bytes), first 5 lines ---")
@@ -54,8 +48,8 @@ with Workspace(
 
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> In another terminal:")
-    print(f">>>   ls {mp}/s/")
-    print(f">>>   cat {mp}/s/README.md")
+    print(f">>>   ls {mp}/")
+    print(f">>>   cat {mp}/README.md")
     print(">>> Press Enter to unmount...")
     try:
         input()

@@ -14,11 +14,10 @@
 
 import json
 import os
-import time
 
 from dotenv import load_dotenv
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.slack import SlackConfig, SlackResource
 
 load_dotenv(".env.development")
@@ -29,19 +28,19 @@ config = SlackConfig(
 )
 resource = SlackResource(config=config)
 
-with Workspace({"/slack/": resource}, mode=MountMode.READ, fuse=True) as ws:
-    time.sleep(1)
+with Workspace({"/slack/": Mount(resource, mode=MountMode.READ,
+                                 fuse=True)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
 
     print("--- os.listdir() root ---")
-    sections = os.listdir(f"{mp}/slack")
+    sections = os.listdir(mp)
     for s in sections:
         print(f"  {s}")
 
     print("\n--- os.listdir() channels ---")
-    channels = os.listdir(f"{mp}/slack/channels")
+    channels = os.listdir(f"{mp}/channels")
     for ch in channels[:5]:
         print(f"  {ch}")
 
@@ -49,13 +48,13 @@ with Workspace({"/slack/": resource}, mode=MountMode.READ, fuse=True) as ws:
         ch = next((c for c in channels if "general" in c), channels[0])
 
         print(f"\n--- os.listdir() {ch} (last 5 dates) ---")
-        dates = os.listdir(f"{mp}/slack/channels/{ch}")
+        dates = os.listdir(f"{mp}/channels/{ch}")
         for d in dates[-5:]:
             print(f"  {d}")
 
         if dates:
             for d in reversed(dates):
-                path = f"{mp}/slack/channels/{ch}/{d}/chat.jsonl"
+                path = f"{mp}/channels/{ch}/{d}/chat.jsonl"
                 if not os.path.exists(path):
                     continue
                 with open(path) as f:
@@ -77,12 +76,12 @@ with Workspace({"/slack/": resource}, mode=MountMode.READ, fuse=True) as ws:
                 print("\n  (no messages found in recent dates)")
 
     print("\n--- os.listdir() users ---")
-    users = os.listdir(f"{mp}/slack/users")
+    users = os.listdir(f"{mp}/users")
     for u in users[:5]:
         print(f"  {u}")
 
     if users:
-        user_path = f"{mp}/slack/users/{users[0]}"
+        user_path = f"{mp}/users/{users[0]}"
         print(f"\n--- open() + read {users[0]} ---")
         with open(user_path) as f:
             text = f.read().strip()
@@ -99,8 +98,8 @@ with Workspace({"/slack/": resource}, mode=MountMode.READ, fuse=True) as ws:
 
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> Open another terminal and run:")
-    print(f">>>   ls {mp}/slack/")
-    print(f">>>   cat {mp}/slack/channels/<channel>/<date>/chat.jsonl")
+    print(f">>>   ls {mp}/")
+    print(f">>>   cat {mp}/channels/<channel>/<date>/chat.jsonl")
     print(">>> Press Enter to unmount and exit...")
     input()
 

@@ -57,7 +57,7 @@ import type { ExecuteFn } from './expand/node.ts'
 import type { DispatchFn } from './executor/cross_mount.ts'
 import type { ProvisionResult } from '../provision/types.ts'
 import { WorkspaceFS } from './fs.ts'
-import type { Mount } from './mount/mount.ts'
+import type { MountEntry } from './mount/mount.ts'
 import { MountRegistry } from './mount/registry.ts'
 import { handlePythonRepl } from './executor/python/handle.ts'
 import type { BridgeDispatchFn, MirageEntry } from './executor/python/mirage_bridge.ts'
@@ -190,27 +190,15 @@ export class Workspace {
   private readonly workspaceId: string = `ws-${String(Date.now())}-${Math.random().toString(36).slice(2, 10)}`
   private readonly closers: (() => Promise<void>)[] = []
   private readonly pythonRuntime: PyodideRuntime
-  private fuseMountpointValue: string | null = null
-  private fuseOwnedInProcess = false
   // Drift check state populated by Workspace.load. Empty during normal
   // runs. Drained on first dispatch/execute after load (see
   // {@link runPendingDriftCheck}).
   protected driftPolicy: DriftPolicy = DriftPolicy.OFF
   protected driftCheckPending = false
-  protected pendingDrift: { mount: Mount; path: string; fingerprint: string }[] = []
+  protected pendingDrift: { mount: MountEntry; path: string; fingerprint: string }[] = []
 
-  get fuseMountpoint(): string | null {
-    return this.fuseMountpointValue
-  }
-
-  get ownsFuseMount(): boolean {
-    return this.fuseOwnedInProcess
-  }
-
-  setFuseMountpoint(path: string | null, options: { owned?: boolean } = {}): void {
-    this.fuseMountpointValue = path
-    this.fuseOwnedInProcess = path !== null && options.owned === true
-  }
+  // FUSE lives entirely in the node Workspace (FUSE needs the OS; the browser
+  // can't mount), so the core Workspace carries no FUSE state.
 
   constructor(resources: Record<string, Resource>, options: WorkspaceOptions = {}) {
     this.registry = new MountRegistry(resources, options.mode ?? MountMode.READ, {
@@ -396,11 +384,11 @@ export class Workspace {
     return this.sessionManager.closeAll()
   }
 
-  mounts(): readonly Mount[] {
+  mounts(): readonly MountEntry[] {
     return this.registry.allMounts()
   }
 
-  mount(prefix: string): Mount | null {
+  mount(prefix: string): MountEntry | null {
     return this.registry.mountFor(prefix)
   }
 
@@ -408,7 +396,7 @@ export class Workspace {
    * Add a mount to a running workspace. Registers the resource's ops globally
    * on this workspace's OpsRegistry so dispatch can find them.
    */
-  addMount(prefix: string, resource: Resource, mode: MountMode = MountMode.READ): Mount {
+  addMount(prefix: string, resource: Resource, mode: MountMode = MountMode.READ): MountEntry {
     if (this.closed) throw new Error('Workspace is closed')
     const m = this.registry.mount(prefix, resource, mode)
     this.opsRegistry.registerResource(resource)
@@ -470,7 +458,7 @@ export class Workspace {
     }
   }
 
-  get cacheMount(): Mount {
+  get cacheMount(): MountEntry {
     const m = this.registry.defaultMount
     if (m === null) throw new Error('cache mount is initialized in constructor')
     return m

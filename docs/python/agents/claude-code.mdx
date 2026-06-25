@@ -17,18 +17,17 @@ Then install [Claude Code](https://docs.claude.com/en/docs/claude-code/setup) se
 ## Usage
 
 ```python
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Config, S3Resource
 
 s3 = S3Resource(S3Config(bucket="my-bucket"))
 
 with Workspace(
-    {"/": (RAMResource(), MountMode.WRITE),
-     "/s3": (s3, MountMode.READ)},
-    fuse_mounts={"/": True},
+    {"/": Mount(RAMResource(), mode=MountMode.WRITE, fuse=True),
+     "/s3": Mount(s3, mode=MountMode.READ)},
 ) as ws:
-    print(f"cd {ws.fuse_mountpoints['/']} && claude")
+    print(f"cd {ws.fuse_mountpoint} && claude")
     input("Press Enter when done...")
 ```
 

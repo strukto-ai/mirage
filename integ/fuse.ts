@@ -16,7 +16,12 @@ import { rmSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MountMode, RAMResource, Workspace } from "@struktoai/mirage-node";
+import {
+  Mount,
+  MountMode,
+  RAMResource,
+  Workspace,
+} from "@struktoai/mirage-node";
 
 // Per-mount FUSE: two mounts exposed at distinct OS paths simultaneously. Reads
 // go through the real kernel -> FUSE handler. Async fs APIs are required: the
@@ -34,21 +39,56 @@ async function main(): Promise<void> {
   // Non-existent pinned path: the mount must create it (mirrors the CLI flow).
   const pinned = join(tmpdir(), `mirage-fuse-data-${String(process.pid)}`);
   rmSync(pinned, { recursive: true, force: true });
-  const ws = new Workspace(
-    { "/data": data, "/logs": logs },
-    { mode: MountMode.WRITE, fuseMounts: { "/data": pinned, "/logs": true } },
-  );
+  // Mount through the public per-mount Mount spec (what examples/users write):
+  // /data pins its mountpoint and overrides the workspace default to WRITE;
+  // /logs gets a generated mountpoint and inherits the default READ.
+  const ws = new Workspace({
+    "/data": new Mount(data, { mode: MountMode.WRITE, fuse: pinned }),
+    "/logs": new Mount(logs, { fuse: true }),
+  });
   try {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    const points = ws.fuseMountpoints;
-    const dataMp = points["/data"] ?? "";
-    const logsMp = points["/logs"] ?? "";
+    await ws.fuseReady();
+    const dataMp = ws.fuseMountpoints["/data"];
+    const logsMp = ws.fuseMountpoints["/logs"];
 
-    process.stdout.write(`data_cat_a=${(await readFile(`${dataMp}/a.txt`, "utf8")).trim()}\n`);
-    process.stdout.write(`logs_cat_b=${(await readFile(`${logsMp}/b.txt`, "utf8")).trim()}\n`);
-    process.stdout.write(`logs_size_b=${(await stat(`${logsMp}/b.txt`)).size}\n`);
+    process.stdout.write(
+      `data_cat_a=${(await readFile(`${dataMp}/a.txt`, "utf8")).trim()}\n`,
+    );
+    process.stdout.write(
+      `logs_cat_b=${(await readFile(`${logsMp}/b.txt`, "utf8")).trim()}\n`,
+    );
+    process.stdout.write(
+      `logs_size_b=${(await stat(`${logsMp}/b.txt`)).size}\n`,
+    );
     process.stdout.write(`data_pinned=${dataMp === pinned ? "yes" : "no"}\n`);
-    process.stdout.write(`distinct_mounts=${dataMp !== logsMp ? "yes" : "no"}\n`);
+    process.stdout.write(
+      `distinct_mounts=${dataMp !== logsMp ? "yes" : "no"}\n`,
+    );
+
+    const [, , dataMode] = await ws.resolve("/data");
+    const [, , logsMode] = await ws.resolve("/logs");
+    process.stdout.write(
+      `data_mode_is_write=${dataMode === MountMode.WRITE ? "yes" : "no"}\n`,
+    );
+    process.stdout.write(
+      `logs_mode_is_read=${logsMode === MountMode.READ ? "yes" : "no"}\n`,
+    );
+
+    let singular = "no";
+    try {
+      void ws.fuseMountpoint;
+    } catch {
+      singular = "yes";
+    }
+    process.stdout.write(`singular_raises_multi=${singular}\n`);
+
+    let collision = "no";
+    try {
+      await ws.addFuseMount("/collide", pinned);
+    } catch {
+      collision = "yes";
+    }
+    process.stdout.write(`collision_rejected=${collision}\n`);
   } finally {
     await ws.close();
   }

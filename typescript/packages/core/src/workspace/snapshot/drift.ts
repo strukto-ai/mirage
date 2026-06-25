@@ -14,7 +14,7 @@
 
 import type { OpRecord } from '../../observe/record.ts'
 import type { FileStat } from '../../types.ts'
-import type { Mount } from '../mount/mount.ts'
+import type { MountEntry } from '../mount/mount.ts'
 
 /**
  * Raised at load time when a remote resource's live fingerprint differs
@@ -50,8 +50,8 @@ export interface FingerprintEntry {
 }
 
 interface RegistryLike {
-  mountFor(path: string): Mount | null
-  allMounts(): readonly Mount[]
+  mountFor(path: string): MountEntry | null
+  allMounts(): readonly MountEntry[]
 }
 
 /**

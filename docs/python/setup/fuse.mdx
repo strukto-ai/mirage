@@ -31,18 +31,20 @@ uv add "mirage-ai[fuse]"
 ## Verify
 
 ```python
-from mirage import Workspace, MountMode
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.ram import RAMResource
 
 with Workspace(
-    {"/data": RAMResource()},
-    mode=MountMode.WRITE,
-    fuse_mounts={"/data": True},
-) as ws:
+    {"/data": Mount(RAMResource(), mode=MountMode.WRITE, fuse=True)}) as ws:
     print("mountpoints:", ws.fuse_mountpoints)
 ```
 
 If the printed path exists under `/tmp/mirage-*`, FUSE is wired up correctly.
+
+The `Workspace` constructor blocks until every `fuse` mount is live, so the
+mountpoint is ready to read as soon as the `with` block is entered, no sleep
+needed. (In TypeScript, where mounts are async, you `await ws.fuseReady()`
+instead.)
 
 ## Per-mount FUSE
 

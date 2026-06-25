@@ -14,11 +14,10 @@
 
 import json
 import os
-import time
 
 from dotenv import load_dotenv
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.github_ci import GitHubCIConfig, GitHubCIResource
 
 load_dotenv(".env.development")
@@ -31,26 +30,26 @@ config = GitHubCIConfig(
 )
 resource = GitHubCIResource(config=config)
 
-with Workspace({"/ci/": resource}, mode=MountMode.READ, fuse=True) as ws:
-    time.sleep(1)
+with Workspace({"/ci/": Mount(resource, mode=MountMode.READ,
+                              fuse=True)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
 
     # ── list root ────────────────────────────────
     print("--- os.listdir() root ---")
-    entries = os.listdir(f"{mp}/ci")
+    entries = os.listdir(mp)
     for e in entries:
         print(f"  {e}")
 
     # ── list workflows ───────────────────────────
     print("\n--- os.listdir() workflows ---")
-    workflows = os.listdir(f"{mp}/ci/workflows")
+    workflows = os.listdir(f"{mp}/workflows")
     for wf in workflows[:10]:
         print(f"  {wf}")
 
     if workflows:
-        wf_path = f"{mp}/ci/workflows/{workflows[0]}"
+        wf_path = f"{mp}/workflows/{workflows[0]}"
         print(f"\n--- open() + read {workflows[0]} ---")
         with open(wf_path) as f:
             data = json.loads(f.read())
@@ -59,7 +58,7 @@ with Workspace({"/ci/": resource}, mode=MountMode.READ, fuse=True) as ws:
 
     # ── list runs ────────────────────────────────
     print("\n--- os.listdir() runs ---")
-    runs = os.listdir(f"{mp}/ci/runs")
+    runs = os.listdir(f"{mp}/runs")
     for r in runs[:5]:
         print(f"  {r}")
     if len(runs) > 5:
@@ -67,7 +66,7 @@ with Workspace({"/ci/": resource}, mode=MountMode.READ, fuse=True) as ws:
 
     if runs:
         run = runs[0]
-        run_dir = f"{mp}/ci/runs/{run}"
+        run_dir = f"{mp}/runs/{run}"
 
         # ── list run contents ────────────────────
         print(f"\n--- os.listdir() {run} ---")
@@ -118,9 +117,9 @@ with Workspace({"/ci/": resource}, mode=MountMode.READ, fuse=True) as ws:
     # ── interactive ──────────────────────────────
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> Open another terminal and run:")
-    print(f">>>   ls {mp}/ci/")
-    print(f">>>   ls {mp}/ci/runs/")
-    print(f">>>   cat {mp}/ci/runs/<run>/run.json")
+    print(f">>>   ls {mp}/")
+    print(f">>>   ls {mp}/runs/")
+    print(f">>>   cat {mp}/runs/<run>/run.json")
     print(">>> Press Enter to unmount and exit...")
     input()
 

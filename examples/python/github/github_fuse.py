@@ -13,11 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
-import time
 
 from dotenv import load_dotenv
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.github import GitHubConfig, GitHubResource
 
 load_dotenv(".env.development")
@@ -31,40 +30,40 @@ resource = GitHubResource(
     ref="main",
 )
 
-with Workspace({"/github/": resource}, mode=MountMode.READ, fuse=True) as ws:
-    time.sleep(1)
+with Workspace({"/github/": Mount(resource, mode=MountMode.READ,
+                                  fuse=True)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
 
     print("--- os.listdir() root ---")
-    entries = os.listdir(f"{mp}/github")
+    entries = os.listdir(mp)
     for e in entries[:10]:
         print(f"  {e}")
     if len(entries) > 10:
         print(f"  ... ({len(entries)} total)")
 
     print("\n--- os.listdir() python/mirage/ ---")
-    core = os.listdir(f"{mp}/github/python/mirage")
+    core = os.listdir(f"{mp}/python/mirage")
     for c in core[:10]:
         print(f"  {c}")
 
     print("\n--- os.listdir() python/mirage/core/ ---")
-    core_dirs = os.listdir(f"{mp}/github/python/mirage/core")
+    core_dirs = os.listdir(f"{mp}/python/mirage/core")
     for d in core_dirs[:10]:
         print(f"  {d}")
     if len(core_dirs) > 10:
         print(f"  ... ({len(core_dirs)} total)")
 
     print("\n--- open() + read python/pyproject.toml (first 5 lines) ---")
-    with open(f"{mp}/github/python/pyproject.toml") as f:
+    with open(f"{mp}/python/pyproject.toml") as f:
         for i, line in enumerate(f):
             if i >= 5:
                 break
             print(f"  {line.rstrip()}")
 
     print("\n--- open() + read python/mirage/types.py (first 5 lines) ---")
-    with open(f"{mp}/github/python/mirage/types.py") as f:
+    with open(f"{mp}/python/mirage/types.py") as f:
         for i, line in enumerate(f):
             if i >= 5:
                 break
@@ -72,8 +71,8 @@ with Workspace({"/github/": resource}, mode=MountMode.READ, fuse=True) as ws:
 
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> Open another terminal and run:")
-    print(f">>>   ls {mp}/github/")
-    print(f">>>   cat {mp}/github/README.md")
+    print(f">>>   ls {mp}/")
+    print(f">>>   cat {mp}/README.md")
     print(">>> Press Enter to unmount and exit...")
     input()
 

@@ -18,7 +18,7 @@ from mirage.commands.config import RegisteredCommand
 from mirage.commands.spec import SPECS, CommandSpec
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
-from mirage.workspace.mount.mount import Mount
+from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.registry import DEV_PREFIX, MountRegistry
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
@@ -26,7 +26,7 @@ from mirage.workspace.types import ExecutionNode
 
 @dataclass
 class _ManHit:
-    mount: Mount
+    mount: MountEntry
     cmd: RegisteredCommand
     is_general: bool
 
@@ -121,14 +121,14 @@ def _render_shell_builtin_man(name: str, spec: CommandSpec) -> str:
 
 
 def _render_man_index(session: Session, registry: MountRegistry) -> str:
-    by_kind: dict[str, Mount] = {}
+    by_kind: dict[str, MountEntry] = {}
     for m in registry.mounts():
         if m.prefix == DEV_PREFIX:
             continue
         if m.resource.name not in by_kind:
             by_kind[m.resource.name] = m
     try:
-        cwd_mount: Mount | None = registry.mount_for(session.cwd)
+        cwd_mount: MountEntry | None = registry.mount_for(session.cwd)
     except ValueError:
         cwd_mount = None
     cwd_kind: str | None = None

@@ -18,6 +18,8 @@ from mirage.resource.ram import RAMResource
 from mirage.commands.registry import command
 from mirage.types import FileStat, MountMode
 from mirage.workspace import (ExecutionNode, Workspace, WorkspaceRunner)
+from mirage.workspace.fuse import FuseManager
+from mirage.workspace.mount.spec import Mount
 from mirage.types import ConsistencyPolicy
 
 __all__ = [
@@ -28,6 +30,8 @@ __all__ = [
     "ConsistencyPolicy",
     "ExecutionNode",
     "FileStat",
+    "FuseManager",
+    "Mount",
     "MountMode",
     "command",
 ]

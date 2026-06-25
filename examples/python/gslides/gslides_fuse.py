@@ -14,11 +14,10 @@
 
 import json
 import os
-import time
 
 from dotenv import load_dotenv
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.gslides import GSlidesConfig, GSlidesResource
 
 load_dotenv(".env.development")
@@ -30,19 +29,19 @@ config = GSlidesConfig(
 )
 resource = GSlidesResource(config=config)
 
-with Workspace({"/gslides/": resource}, mode=MountMode.READ, fuse=True) as ws:
-    time.sleep(1)
+with Workspace({"/gslides/": Mount(resource, mode=MountMode.READ,
+                                   fuse=True)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
 
     print("--- os.listdir() root ---")
-    roots = os.listdir(f"{mp}/gslides")
+    roots = os.listdir(mp)
     for r in roots:
         print(f"  {r}")
 
     for section in ("owned", "shared"):
-        section_path = f"{mp}/gslides/{section}"
+        section_path = f"{mp}/{section}"
         if not os.path.isdir(section_path):
             continue
         slides = os.listdir(section_path)
@@ -66,8 +65,8 @@ with Workspace({"/gslides/": resource}, mode=MountMode.READ, fuse=True) as ws:
 
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> Open another terminal and run:")
-    print(f">>>   ls {mp}/gslides/")
-    print(f">>>   ls {mp}/gslides/owned/")
+    print(f">>>   ls {mp}/")
+    print(f">>>   ls {mp}/owned/")
     print(">>> Press Enter to unmount and exit...")
     input()
 

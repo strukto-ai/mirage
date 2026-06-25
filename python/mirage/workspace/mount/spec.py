@@ -12,17 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import pytest
+from dataclasses import dataclass, field
 
-from mirage.resource.ram import RAMResource
-from mirage.workspace import Workspace
+from mirage.commands.safeguard import CommandSafeguard
+from mirage.resource.base import BaseResource
+from mirage.types import MountMode
 
 
-@pytest.mark.asyncio
-async def test_workspace_set_fuse_mountpoint():
-    ws = Workspace(resources={"/data": RAMResource()})
-    assert ws.fuse_mountpoint is None
-    ws.set_fuse_mountpoint("/tmp/test")
-    assert ws.fuse_mountpoint == "/tmp/test"
-    ws.set_fuse_mountpoint(None)
-    assert ws.fuse_mountpoint is None
+@dataclass(frozen=True)
+class Mount:
+    resource: BaseResource
+    mode: MountMode | None = None
+    fuse: bool | str = False
+    command_safeguards: dict[str,
+                             CommandSafeguard] = field(default_factory=dict)

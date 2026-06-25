@@ -13,11 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
-import time
 
 from dotenv import load_dotenv
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.hf_buckets import HfBucketsConfig, HfBucketsResource
 
 load_dotenv(".env.development")
@@ -28,24 +27,20 @@ config = HfBucketsConfig(
 )
 resource = HfBucketsResource(config)
 
-with Workspace(
-    {"/hf/": resource},
-        mode=MountMode.READ,
-        fuse=True,
-) as ws:
-    time.sleep(1)
+with Workspace({"/hf/": Mount(resource, mode=MountMode.READ,
+                              fuse=True)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
 
-    print(f"--- os.listdir({mp}/hf) ---")
-    root_entries = os.listdir(f"{mp}/hf")
+    print(f"--- os.listdir({mp}) ---")
+    root_entries = os.listdir(mp)
     for e in root_entries:
         print(f"  {e}")
 
-    data_dir = f"{mp}/hf"
-    if "data" in root_entries and os.path.isdir(f"{mp}/hf/data"):
-        data_dir = f"{mp}/hf/data"
+    data_dir = mp
+    if "data" in root_entries and os.path.isdir(f"{mp}/data"):
+        data_dir = f"{mp}/data"
         print(f"\n--- os.listdir({data_dir}) ---")
         for e in os.listdir(data_dir):
             print(f"  {e}")
@@ -71,7 +66,7 @@ with Workspace(
 
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> Open another terminal and run:")
-    print(f">>>   ls {mp}/hf/data/")
+    print(f">>>   ls {mp}/data/")
     if target:
         print(f">>>   cat {target}")
     print(">>> Press Enter to unmount and exit...")

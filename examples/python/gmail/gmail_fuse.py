@@ -14,11 +14,10 @@
 
 import json
 import os
-import time
 
 from dotenv import load_dotenv
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.gmail import GmailConfig, GmailResource
 
 load_dotenv(".env.development")
@@ -30,18 +29,18 @@ config = GmailConfig(
 )
 resource = GmailResource(config=config)
 
-with Workspace({"/gmail/": resource}, mode=MountMode.READ, fuse=True) as ws:
-    time.sleep(1)
+with Workspace({"/gmail/": Mount(resource, mode=MountMode.READ,
+                                 fuse=True)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
 
     print("--- os.listdir() labels ---")
-    labels = os.listdir(f"{mp}/gmail")
+    labels = os.listdir(mp)
     for lb in labels:
         print(f"  {lb}")
 
-    inbox_path = f"{mp}/gmail/INBOX"
+    inbox_path = f"{mp}/INBOX"
     if os.path.isdir(inbox_path):
         print("\n--- os.listdir() INBOX (dates) ---")
         dates = os.listdir(inbox_path)
@@ -68,8 +67,8 @@ with Workspace({"/gmail/": resource}, mode=MountMode.READ, fuse=True) as ws:
 
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> Open another terminal and run:")
-    print(f">>>   ls {mp}/gmail/")
-    print(f">>>   ls {mp}/gmail/INBOX/")
+    print(f">>>   ls {mp}/")
+    print(f">>>   ls {mp}/INBOX/")
     print(">>> Press Enter to unmount and exit...")
     input()
 

@@ -24,7 +24,7 @@ from mirage.resource.disk import DiskResource
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
-from mirage.workspace.mount import Mount
+from mirage.workspace.mount import MountEntry
 
 ECHO_SPEC = CommandSpec(positional=(Operand(kind=OperandKind.PATH), ))
 
@@ -76,7 +76,7 @@ async def hello_op(accessor, path, *args, **kwargs) -> str:
 
 def test_cache_mount_is_default_mount():
     ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
-    assert isinstance(ws.cache_mount, Mount)
+    assert isinstance(ws.cache_mount, MountEntry)
     assert ws.cache_mount is ws._registry.default_mount
     assert ws.cache_mount.prefix == "/_default/"
 

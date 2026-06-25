@@ -94,18 +94,18 @@ For tools that need a real filesystem path (CLI tools, editors, system utilities
 workspace under FUSE:
 
 ```ts
-import { DropboxResource, FuseManager, MountMode, Workspace } from '@struktoai/mirage-node'
+import { DropboxResource, Mount, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const ws = new Workspace({ '/dropbox': dropbox }, { mode: MountMode.READ })
-const fm = new FuseManager()
-const mp = await fm.setup(ws)
+const ws = new Workspace({ '/dropbox': new Mount(dropbox, { mode: MountMode.READ, fuse: true }) })
+await ws.fuseReady()
+const mp = ws.fuseMountpoint
 
-// Now `${mp}/dropbox/` is a real filesystem path:
-//   ls ${mp}/dropbox/
-//   find ${mp}/dropbox -name '*.parquet'
-//   cat ${mp}/dropbox/data/example.json | jq .
+// The dropbox subtree is exposed at the mountpoint root, so `${mp}/` is a real path:
+//   ls ${mp}/
+//   find ${mp} -name '*.parquet'
+//   cat ${mp}/data/example.json | jq .
 
-await fm.close(ws)
+await ws.close()
 ```
 
 Requires [macFUSE](https://osxfuse.github.io/) on macOS or libfuse on Linux. See
