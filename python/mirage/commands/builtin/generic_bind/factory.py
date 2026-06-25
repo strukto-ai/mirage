@@ -18,8 +18,7 @@ from dataclasses import replace
 
 from mirage.accessor.base import Accessor
 from mirage.cache.context import active_cache_manager
-from mirage.commands.builtin.generic_bind.adapter import (
-    FACTORY_READ_RESOURCES, CommandIO)
+from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.builders import _BUILDERS
 from mirage.commands.config import command
 from mirage.commands.spec import SPECS
@@ -54,26 +53,63 @@ async def _cached_read_bytes(read_bytes: Callable, accessor: Accessor,
     return await read_bytes(accessor, path, *args, **kwargs)
 
 
+def _cached_stat(stat: Callable, accessor: Accessor, path: PathSpec, *args,
+                 **kwargs):
+    manager = active_cache_manager()
+    return _cached_stat_result(manager, stat, accessor, path, *args, **kwargs)
+
+
+async def _cached_stat_result(manager, stat: Callable, accessor: Accessor,
+                              path: PathSpec, *args, **kwargs):
+    result = await stat(accessor, path, *args, **kwargs)
+    if (result is not None and getattr(result, "size", None) is None
+            and manager is not None and isinstance(path, PathSpec)):
+        cached = await manager.cached_bytes(path)
+        if cached is not None:
+            result = result.model_copy(update={"size": len(cached)})
+    return result
+
+
 def with_read_cache(ops: CommandIO) -> CommandIO:
     """Return ``ops`` whose byte reads serve cached bytes when warm.
 
     The factory hands this to every ``read=True`` command so a warm read
     is served from the file cache without the command knowing about it,
     mirroring how readdir/stat already serve the index cache inside the
-    op. The manager is captured eagerly (when the ops method is called,
-    inside the command's cache-manager scope) rather than read lazily at
-    stream-drain time, when that scope is already gone.
-    ``CacheManager.cached_bytes`` is a no-op (returns None) for local or
-    non-caching mounts, so this is safe to apply uniformly.
+    op. Content (read_stream/read_bytes) and the size a render-dependent
+    backend can't know on its own (stat, filled from the cached byte
+    length) are both served, so a warm read-only command stays on its
+    real mount and needs no redirect to the cache mount. The manager is
+    captured eagerly (when the ops method is called, inside the command's
+    cache-manager scope) rather than read lazily at stream-drain time,
+    when that scope is already gone. ``CacheManager.cached_bytes`` is a
+    no-op (returns None) for local or non-caching mounts, so this is safe
+    to apply uniformly.
 
     Args:
         ops (CommandIO): the backend's IO adapter.
     """
     return replace(
-        ops,
+        with_stat_cache(ops),
         read_stream=functools.partial(_cached_read_stream, ops.read_stream),
         read_bytes=functools.partial(_cached_read_bytes, ops.read_bytes),
     )
+
+
+def with_stat_cache(ops: CommandIO) -> CommandIO:
+    """Return ``ops`` whose ``stat`` fills size from the cache when warm.
+
+    Metadata commands (ls, stat, du) don't read content, but for a
+    render-dependent backend the only place a cached file's size exists
+    is the file cache (the rendered bytes). This fills that size in on
+    the real mount, so a warm ``stat``/``ls -l`` reports it without a
+    redirect to the cache mount. No-op when the backend already knows the
+    size or the path isn't cached.
+
+    Args:
+        ops (CommandIO): the backend's IO adapter.
+    """
+    return replace(ops, stat=functools.partial(_cached_stat, ops.stat))
 
 
 def make_generic_commands(
@@ -94,7 +130,6 @@ def make_generic_commands(
             provision functions that replace the catalog default (for a
             backend whose cost model genuinely differs).
     """
-    FACTORY_READ_RESOURCES.add(resource)
     skip = overrides or set()
     prov_over = provision_overrides or {}
     commands: list[Callable] = []
@@ -106,8 +141,13 @@ def make_generic_commands(
         # would crash when invoked.
         if b.write and ops.write is None:
             continue
-        read_ops = with_read_cache(ops) if b.read else ops
-        bound = functools.partial(b.fn, read_ops)
+        if b.read:
+            cmd_ops = with_read_cache(ops)
+        elif not b.write:
+            cmd_ops = with_stat_cache(ops)
+        else:
+            cmd_ops = ops
+        bound = functools.partial(b.fn, cmd_ops)
         if b.name in prov_over:
             provision = prov_over[b.name]
         elif b.provision is not None:

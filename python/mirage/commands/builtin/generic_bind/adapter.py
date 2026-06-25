@@ -26,8 +26,6 @@ from mirage.types import PathSpec
 
 logger = logging.getLogger(__name__)
 
-FACTORY_READ_RESOURCES: set[str] = set()
-
 
 def with_index(fn: Callable | None,
                index: IndexCacheStore | None) -> Callable | None:

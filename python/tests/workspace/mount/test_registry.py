@@ -320,15 +320,15 @@ def _remote_registry_with_cache():
 
 
 @pytest.mark.asyncio
-async def test_resolve_mount_redirects_cached_read_to_cache():
-    # ssh is a bespoke backend (not on the factory seam), so a fully-cached
-    # read-only command is redirected to the cache mount, where the generic
-    # commands serve it correctly.
+async def test_resolve_mount_keeps_cached_read_on_real_mount():
+    # Warm reads are served in place by with_read_cache, so a cached
+    # read-only command stays on its real mount (keeping its safeguards and
+    # custom handlers) instead of being redirected to the cache mount.
     reg, cache = _remote_registry_with_cache()
     await cache.set("/ssh/a.txt", b"hi")
     scope = PathSpec(original="/ssh/a.txt", directory="/ssh", resolved=True)
     mount = await reg.resolve_mount("cat", [scope], "/ssh")
-    assert mount.prefix == "/_default/"
+    assert mount.prefix == "/ssh/"
 
 
 @pytest.mark.asyncio
