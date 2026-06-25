@@ -24,6 +24,20 @@ async def get_detail(config, document_id):
 
 
 @pytest.mark.asyncio
+async def test_find_name_matches_mount_root_start_path(monkeypatch,
+                                                       dify_accessor,
+                                                       dify_index,
+                                                       knowledge_root):
+    monkeypatch.setattr(tree, "list_all_documents", list_nested_documents)
+    monkeypatch.setattr(stat, "get_document_detail", get_detail)
+    results = await find.find(dify_accessor,
+                              knowledge_root,
+                              name="knowledge",
+                              index=dify_index)
+    assert results == ["/knowledge"]
+
+
+@pytest.mark.asyncio
 async def test_find_filters_name_type_size_and_depth(monkeypatch,
                                                      dify_accessor, dify_index,
                                                      knowledge_root):

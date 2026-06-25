@@ -27,6 +27,17 @@ async def test_find_all(chroma_accessor, chroma_index, knowledge_root):
 
 
 @pytest.mark.asyncio
+async def test_find_name_matches_mount_root_start_path(chroma_accessor,
+                                                       chroma_index,
+                                                       knowledge_root):
+    results = await find(chroma_accessor,
+                         knowledge_root,
+                         name="knowledge",
+                         index=chroma_index)
+    assert results == ["/knowledge"]
+
+
+@pytest.mark.asyncio
 async def test_find_by_name(chroma_accessor, chroma_index, knowledge_root):
     results = await find(chroma_accessor,
                          knowledge_root,

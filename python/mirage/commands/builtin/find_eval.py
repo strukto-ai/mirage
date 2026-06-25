@@ -134,6 +134,9 @@ def emit_start_path(
     tree: PredNode,
     maxdepth: int | None,
     mindepth: int | None,
+    size: int | None = None,
+    min_size: int | None = None,
+    max_size: int | None = None,
 ) -> None:
     """Append the search start path to results when it matches.
 
@@ -142,6 +145,11 @@ def emit_start_path(
     ``find <dir>``, ``-type d`` on the root, ``-maxdepth 0`` (just the
     start), ``-mindepth 0`` (start included), and ``-name``/``-iname``
     against the start's own basename all behave the same everywhere.
+
+    Size filtering applies only to a file start path; directory roots
+    pass ``size=None`` and skip it. Backends whose start path can be a
+    file (ram/redis/chroma/dify/notion) pass the start's size so
+    ``find <file> -size`` filters the start like GNU does.
 
     Args:
         results (list[str]): Mount-relative result keys to append to.
@@ -153,6 +161,9 @@ def emit_start_path(
         tree (PredNode): Predicate tree.
         maxdepth (int | None): ``-maxdepth`` value.
         mindepth (int | None): ``-mindepth`` value.
+        size (int | None): Start path size in bytes when it is a file.
+        min_size (int | None): ``-size +`` lower bound in bytes.
+        max_size (int | None): ``-size -`` upper bound in bytes.
     """
     if not exists:
         return
@@ -163,8 +174,14 @@ def emit_start_path(
                       kind=kind,
                       depth=0,
                       is_empty=is_empty)
-    if keep(entry, tree, mindepth):
-        results.append(start_key)
+    if not keep(entry, tree, mindepth):
+        return
+    if kind == "f" and size is not None:
+        if min_size is not None and size < min_size:
+            return
+        if max_size is not None and size > max_size:
+            return
+    results.append(start_key)
 
 
 def _type_kind(type_arg: FindType | str | None) -> str | None:

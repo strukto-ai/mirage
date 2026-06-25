@@ -14,7 +14,8 @@
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
-                                               compute_nonempty_dirs, keep)
+                                               compute_nonempty_dirs,
+                                               emit_start_path, keep)
 from mirage.types import PathSpec
 from mirage.utils.path import norm
 
@@ -66,25 +67,36 @@ async def find(
         for key in store.dirs:
             candidates.append((key, "d"))
 
+    root_kind: str | None = None
+    root_is_empty: bool | None = None
+    root_size: int | None = None
     for key, kind in candidates:
         if key != p and not key.startswith(prefix):
             continue
 
+        if key == p:
+            root_kind = kind
+            if empty:
+                root_is_empty = (len(store.files[key])
+                                 == 0) if kind == "f" else key not in nonempty
+            if kind == "f":
+                root_size = len(store.files[key])
+            continue
+
         if p == "/":
-            depth = 0 if key == "/" else key.strip("/").count("/") + 1
+            depth = key.strip("/").count("/") + 1
         else:
-            depth = 0 if key == p else key.count("/") - base_depth
+            depth = key.count("/") - base_depth
 
         if maxdepth is not None and depth > maxdepth:
             continue
 
-        basename = start_name if key == p else key.rsplit("/", 1)[-1]
         is_empty: bool | None = None
         if empty:
             is_empty = (len(store.files[key])
                         == 0) if kind == "f" else key not in nonempty
         entry = FindEntry(key=key,
-                          name=basename,
+                          name=key.rsplit("/", 1)[-1],
                           kind=kind,
                           depth=depth,
                           is_empty=is_empty)
@@ -99,5 +111,19 @@ async def find(
                 continue
 
         results.append(key)
+
+    if root_kind is not None:
+        emit_start_path(results,
+                        p,
+                        start_name,
+                        kind=root_kind,
+                        is_empty=root_is_empty,
+                        exists=True,
+                        tree=tree,
+                        maxdepth=maxdepth,
+                        mindepth=mindepth,
+                        size=root_size,
+                        min_size=min_size,
+                        max_size=max_size)
 
     return sorted(results)
