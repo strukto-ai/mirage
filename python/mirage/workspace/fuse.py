@@ -18,13 +18,15 @@ import sys
 import tempfile
 from threading import Thread
 
+from mirage.fuse.mount import mount_background
+from mirage.ops import Ops
+
 
 class FuseManager:
 
     def __init__(self) -> None:
         self._mountpoint: str | None = None
         self._thread: Thread | None = None
-        self._auto: bool = False
         # True only for tempfile mountpoints Mirage created and may delete.
         self._owns_mountpoint: bool = False
 
@@ -32,30 +34,24 @@ class FuseManager:
     def mountpoint(self) -> str | None:
         return self._mountpoint
 
-    @mountpoint.setter
-    def mountpoint(self, path: str | None) -> None:
-        self._mountpoint = path
-        self._owns_mountpoint = False
-
     def setup(self,
-              ws: object,
-              root_prefix: str = "",
-              mountpoint: str | None = None) -> None:
-        from mirage.fuse.mount import mount_background
+              ops: Ops,
+              prefix: str = "/",
+              mountpoint: str | None = None) -> str:
         if mountpoint:
             # Caller/deployment-owned mountpoints may be reused across process
             # restarts, container lifecycles, or volume mounts. Mirage should
             # unmount them, but must not delete the directory itself.
-            os.makedirs(mountpoint, exist_ok=True)
             self._mountpoint = mountpoint
             self._owns_mountpoint = False
+            os.makedirs(mountpoint, exist_ok=True)
         else:
             self._mountpoint = tempfile.mkdtemp(prefix="mirage-")
             self._owns_mountpoint = True
-        self._thread = mount_background(ws,
+        self._thread = mount_background(ops,
                                         self._mountpoint,
-                                        root_prefix=root_prefix)
-        self._auto = True
+                                        root_prefix=prefix)
+        return self._mountpoint
 
     def unmount(self) -> None:
         if not self._mountpoint:
@@ -75,8 +71,6 @@ class FuseManager:
                 pass
         self._mountpoint = None
         self._owns_mountpoint = False
-        self._auto = False
 
     def close(self) -> None:
-        if self._mountpoint and self._auto:
-            self.unmount()
+        self.unmount()

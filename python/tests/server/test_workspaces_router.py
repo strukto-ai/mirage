@@ -287,6 +287,79 @@ async def test_idle_timer_canceled_when_new_workspace_created():
         assert not exit_event.is_set()
 
 
+@pytest.mark.asyncio
+async def test_create_workspace_bridges_fuse_through_manager(monkeypatch):
+    calls = []
+
+    def _fake_add(self, prefix, mountpoint=None):
+        calls.append((prefix, mountpoint))
+        return mountpoint or "/tmp/fake"
+
+    monkeypatch.setattr("mirage.workspace.workspace.Workspace.add_fuse_mount",
+                        _fake_add)
+    app, _ = _make_app_with_short_grace(grace=10.0)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport,
+                           base_url="http://test") as client:
+        body = {
+            "config": {
+                "mounts": {
+                    "/data/": {
+                        "resource": "ram",
+                        "fuse": True
+                    },
+                    "/pinned/": {
+                        "resource": "ram",
+                        "fuse": "/tmp/pinned"
+                    },
+                },
+            },
+        }
+        r = await client.post("/v1/workspaces", json=body)
+        assert r.status_code == 201, r.text
+    assert ("/data/", None) in calls
+    assert any(mp == "/tmp/pinned" for _, mp in calls)
+
+
+@pytest.mark.asyncio
+async def test_create_workspace_rolls_back_on_fuse_failure(monkeypatch):
+    closed = []
+
+    def _boom_add(self, prefix, mountpoint=None):
+        if not closed:
+            orig = self.close
+
+            async def _spy():
+                closed.append(True)
+                await orig()
+
+            self.close = _spy
+        raise ValueError("boom collision")
+
+    monkeypatch.setattr("mirage.workspace.workspace.Workspace.add_fuse_mount",
+                        _boom_add)
+    app, _ = _make_app_with_short_grace(grace=10.0)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport,
+                           base_url="http://test") as client:
+        body = {
+            "config": {
+                "mounts": {
+                    "/data/": {
+                        "resource": "ram",
+                        "fuse": True
+                    },
+                },
+            },
+        }
+        r = await client.post("/v1/workspaces", json=body)
+        assert r.status_code == 409, r.text
+
+        r = await client.get("/v1/workspaces")
+        assert r.json() == []
+    assert closed == [True]
+
+
 def test_registry_zero_grace_fires_immediately():
 
     async def _run():

@@ -16,7 +16,7 @@ import os
 import time
 from pathlib import Path
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.ram import RAMResource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -33,13 +33,14 @@ for fpath in sorted(DATA_DIR.iterdir()):
 
 print(f"Seeded {len(store.files)} files from {DATA_DIR}")
 
-with Workspace({"/data/": resource}, mode=MountMode.READ, fuse=True) as ws:
+with Workspace({"/data/": Mount(resource, fuse=True)},
+               mode=MountMode.READ) as ws:
     time.sleep(1)
     mp = ws.fuse_mountpoint
 
     print(f"\n=== FUSE MODE (READ): mounted at {mp} ===\n")
 
-    data_path = f"{mp}/data"
+    data_path = mp
     entries = sorted(os.listdir(data_path))
     for e in entries:
         size = os.path.getsize(f"{data_path}/{e}")

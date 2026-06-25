@@ -14,11 +14,10 @@
 
 import json
 import os
-import time
 
 from dotenv import load_dotenv
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.linear import LinearConfig, LinearResource
 
 load_dotenv(".env.development")
@@ -26,20 +25,20 @@ load_dotenv(".env.development")
 config = LinearConfig(api_key=os.environ["LINEAR_API_KEY"])
 resource = LinearResource(config=config)
 
-with Workspace({"/linear/": resource}, mode=MountMode.READ, fuse=True) as ws:
-    time.sleep(1)
+with Workspace({"/linear/": Mount(resource, mode=MountMode.READ,
+                                  fuse=True)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
 
     print("--- os.listdir() teams ---")
-    teams = os.listdir(f"{mp}/linear/teams")
+    teams = os.listdir(f"{mp}/teams")
     for t in teams[:5]:
         print(f"  {t}")
 
     if teams:
         team = teams[0]
-        team_path = f"{mp}/linear/teams/{team}"
+        team_path = f"{mp}/teams/{team}"
 
         print(f"\n--- os.listdir() {team} ---")
         contents = os.listdir(team_path)
@@ -55,7 +54,7 @@ with Workspace({"/linear/": resource}, mode=MountMode.READ, fuse=True) as ws:
 
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> Open another terminal and run:")
-    print(f">>>   ls {mp}/linear/teams/")
+    print(f">>>   ls {mp}/teams/")
     print(">>> Press Enter to unmount and exit...")
     input()
 

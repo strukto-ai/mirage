@@ -14,11 +14,10 @@
 
 import json
 import os
-import time
 
 from dotenv import load_dotenv
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.gsheets import GSheetsConfig, GSheetsResource
 
 load_dotenv(".env.development")
@@ -30,19 +29,19 @@ config = GSheetsConfig(
 )
 resource = GSheetsResource(config=config)
 
-with Workspace({"/gsheets/": resource}, mode=MountMode.READ, fuse=True) as ws:
-    time.sleep(1)
+with Workspace({"/gsheets/": Mount(resource, mode=MountMode.READ,
+                                   fuse=True)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
 
     print("--- os.listdir() root ---")
-    roots = os.listdir(f"{mp}/gsheets")
+    roots = os.listdir(mp)
     for r in roots:
         print(f"  {r}")
 
     for section in ("owned", "shared"):
-        section_path = f"{mp}/gsheets/{section}"
+        section_path = f"{mp}/{section}"
         if not os.path.isdir(section_path):
             continue
         sheets = os.listdir(section_path)
@@ -64,8 +63,8 @@ with Workspace({"/gsheets/": resource}, mode=MountMode.READ, fuse=True) as ws:
 
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> Open another terminal and run:")
-    print(f">>>   ls {mp}/gsheets/")
-    print(f">>>   ls {mp}/gsheets/owned/")
+    print(f">>>   ls {mp}/")
+    print(f">>>   ls {mp}/owned/")
     print(">>> Press Enter to unmount and exit...")
     input()
 

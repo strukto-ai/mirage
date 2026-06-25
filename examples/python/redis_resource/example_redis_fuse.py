@@ -14,9 +14,8 @@
 
 import asyncio
 import os
-import time
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.redis import RedisResource
 
 REDIS_URL = "redis://localhost:6379/0"
@@ -37,13 +36,13 @@ print("Seeded Redis with sample files")
 
 resource = RedisResource(url=REDIS_URL, key_prefix=KEY_PREFIX)
 
-with Workspace({"/data/": resource}, mode=MountMode.WRITE, fuse=True) as ws:
-    time.sleep(1)
+with Workspace({"/data/": Mount(resource, mode=MountMode.WRITE,
+                                fuse=True)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"\n=== FUSE MODE: mounted at {mp} ===\n")
 
-    data_path = f"{mp}/data"
+    data_path = mp
 
     print("--- os.listdir() ---")
     entries = os.listdir(data_path)
@@ -57,9 +56,9 @@ with Workspace({"/data/": resource}, mode=MountMode.WRITE, fuse=True) as ws:
 
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> Open another terminal and try:")
-    print(f">>>   ls -la {mp}/data/")
-    print(f">>>   cat {mp}/data/hello.txt")
-    print(f">>>   cat {mp}/data/example.json | jq .")
+    print(f">>>   ls -la {mp}/")
+    print(f">>>   cat {mp}/hello.txt")
+    print(f">>>   cat {mp}/example.json | jq .")
     print(">>> Press Enter to unmount and exit...")
     input()
 

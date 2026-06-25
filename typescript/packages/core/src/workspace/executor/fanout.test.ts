@@ -17,7 +17,7 @@ import { materialize } from '../../io/types.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { MountRegistry } from '../mount/registry.ts'
-import type { Mount } from '../mount/mount.ts'
+import type { MountEntry } from '../mount/mount.ts'
 import { Session } from '../session/session.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
 import type { DispatchFn } from './cross_mount.ts'
@@ -31,7 +31,7 @@ const NEVER_DISPATCH: DispatchFn = () => {
   throw new Error('dispatch should not have been called')
 }
 
-function wireMount(mount: Mount): void {
+function wireMount(mount: MountEntry): void {
   const cmds = mount.resource.commands?.()
   if (cmds !== undefined) {
     for (const cmd of cmds) {

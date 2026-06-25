@@ -20,109 +20,96 @@
 // Point it at a SeaweedFS S3 gateway (default http://localhost:8333).
 // Loads credentials from .env.development at the repo root.
 import {
-  FuseManager,
+  Mount,
   MountMode,
   SeaweedFSResource,
   Workspace,
   type SeaweedFSConfig,
-} from '@struktoai/mirage-node'
-import dotenv from 'dotenv'
-import { resolve, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+} from "@struktoai/mirage-node";
+import dotenv from "dotenv";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const __HERE = dirname(fileURLToPath(import.meta.url))
-dotenv.config({ path: resolve(__HERE, '../../../.env.development') })
+const __HERE = dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: resolve(__HERE, "../../../.env.development") });
 
 const SEED_KEYS = [
-  '/seaweedfs/data/example.jsonl',
-  '/seaweedfs/data/config.json',
-  '/seaweedfs/notes.txt',
-]
+  "/seaweedfs/data/example.jsonl",
+  "/seaweedfs/data/config.json",
+  "/seaweedfs/notes.txt",
+];
 
 function configFromEnv(): SeaweedFSConfig {
   return {
-    bucket: process.env.SEAWEEDFS_BUCKET ?? 'mirage-demo',
-    endpoint: process.env.SEAWEEDFS_ENDPOINT ?? 'http://localhost:8333',
-    accessKeyId: process.env.SEAWEEDFS_ACCESS_KEY ?? 'any',
-    secretAccessKey: process.env.SEAWEEDFS_SECRET_KEY ?? 'any',
-  }
+    bucket: process.env.SEAWEEDFS_BUCKET ?? "mirage-demo",
+    endpoint: process.env.SEAWEEDFS_ENDPOINT ?? "http://localhost:8333",
+    accessKeyId: process.env.SEAWEEDFS_ACCESS_KEY ?? "any",
+    secretAccessKey: process.env.SEAWEEDFS_SECRET_KEY ?? "any",
+  };
 }
 
 async function seed(ws: Workspace): Promise<void> {
   await ws.execute(
     `echo '{"event":"queue-operation","tool":"mirage"}' > /seaweedfs/data/example.jsonl`,
-  )
-  await ws.execute(`echo '{"event":"read","tool":"mirage"}' >> /seaweedfs/data/example.jsonl`)
+  );
+  await ws.execute(
+    `echo '{"event":"read","tool":"mirage"}' >> /seaweedfs/data/example.jsonl`,
+  );
   await ws.execute(
     `echo '{"event":"queue-operation","tool":"other"}' >> /seaweedfs/data/example.jsonl`,
-  )
+  );
   await ws.execute(
     `echo '{"name":"mirage","version":1,"tags":["s3","seaweedfs"]}' > /seaweedfs/data/config.json`,
-  )
-  await ws.execute('echo "hello from seaweedfs" > /seaweedfs/notes.txt')
+  );
+  await ws.execute('echo "hello from seaweedfs" > /seaweedfs/notes.txt');
 }
 
 async function main(): Promise<void> {
-  const cfg = configFromEnv()
-  const ws = new Workspace(
-    { '/seaweedfs/': new SeaweedFSResource(cfg) },
-    { mode: MountMode.WRITE },
-  )
+  const cfg = configFromEnv();
+  const ws = new Workspace({
+    "/seaweedfs/": new Mount(new SeaweedFSResource(cfg), {
+      mode: MountMode.WRITE,
+      fuse: true,
+    }),
+  });
 
   try {
-    await seed(ws)
+    await seed(ws);
+    await ws.fuseReady();
+    const mp = ws.fuseMountpoint as string;
 
-    const fm = new FuseManager()
-    const mp = await fm.setup(ws)
-    let cleaned = false
-    const handler = (sig: NodeJS.Signals): void => {
-      if (cleaned) return
-      cleaned = true
-      void (async (): Promise<void> => {
-        try {
-          for (const key of SEED_KEYS) await ws.execute(`rm ${key}`)
-        } catch {}
-        try {
-          await fm.close(ws)
-        } catch {}
-        try {
-          await ws.close()
-        } catch {}
-        console.error(`\n>>> unmounted ${mp}`)
-        process.exit(sig === 'SIGINT' ? 130 : 143)
-      })()
-    }
-    process.on('SIGINT', handler)
-    process.on('SIGTERM', handler)
-
-    console.log(`=== FUSE MODE — SeaweedFS at ${cfg.endpoint} (bucket ${cfg.bucket}) ===`)
-    console.log(`  mountpoint = ${mp}\n`)
+    console.log(
+      `=== FUSE MODE — SeaweedFS at ${cfg.endpoint} (bucket ${cfg.bucket}) ===`,
+    );
+    console.log(`  mountpoint = ${mp}\n`);
 
     try {
-      console.log('--- virtual executor: stats via /seaweedfs ---')
-      const ls = await ws.execute('ls /seaweedfs/data')
-      console.log(`  ls /seaweedfs/data : ${ls.stdoutText.trim().split('\n').join(', ')}`)
-      const stat = await ws.execute('stat /seaweedfs/data/example.jsonl')
-      console.log(`  stat example.jsonl : ${stat.stdoutText.trim()}`)
-      const grep = await ws.execute('grep -c queue-operation /seaweedfs/data/example.jsonl')
-      console.log(`  grep -c            : ${grep.stdoutText.trim()}`)
+      console.log("--- virtual executor: stats via /seaweedfs ---");
+      const ls = await ws.execute("ls /seaweedfs/data");
+      console.log(
+        `  ls /seaweedfs/data : ${ls.stdoutText.trim().split("\n").join(", ")}`,
+      );
+      const stat = await ws.execute("stat /seaweedfs/data/example.jsonl");
+      console.log(`  stat example.jsonl : ${stat.stdoutText.trim()}`);
+      const grep = await ws.execute(
+        "grep -c queue-operation /seaweedfs/data/example.jsonl",
+      );
+      console.log(`  grep -c            : ${grep.stdoutText.trim()}`);
 
-      console.log()
-      console.log('>>> Mount is live. From ANOTHER terminal you can:')
-      console.log(`>>>   ls  ${mp}/seaweedfs/data/`)
-      console.log(`>>>   cat ${mp}/seaweedfs/data/config.json`)
-      console.log(`>>>   wc -l ${mp}/seaweedfs/data/example.jsonl`)
+      console.log();
+      console.log(">>> Mount is live. From ANOTHER terminal you can:");
+      console.log(`>>>   ls  ${mp}/data/`);
+      console.log(`>>>   cat ${mp}/data/config.json`);
+      console.log(`>>>   wc -l ${mp}/data/example.jsonl`);
     } finally {
-      for (const key of SEED_KEYS) await ws.execute(`rm ${key}`)
-      await fm.close(ws)
-      console.log(`\nafter unmount: ws.fuseMountpoint = ${ws.fuseMountpoint ?? 'null'}`)
+      for (const key of SEED_KEYS) await ws.execute(`rm ${key}`);
     }
   } finally {
-    await ws.close()
+    await ws.close();
   }
 }
 
 main().catch((err: unknown) => {
-  console.error(err)
-  process.exit(1)
-})
+  console.error(err);
+  process.exit(1);
+});

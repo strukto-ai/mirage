@@ -21,7 +21,10 @@ import time
 import uuid
 from dataclasses import asdict
 
-import mfusepy as fuse
+try:
+    import mfusepy as fuse
+except ImportError:
+    fuse = None
 
 from mirage.bridge.sync import run_async_from_sync
 from mirage.fuse.platform.macos import is_macos_metadata
@@ -33,9 +36,12 @@ _MIRAGE_DIR = "/.mirage"
 _MIRAGE_WHOAMI = "/.mirage/whoami"
 # "attribute not found" errno: ENOATTR on macOS, ENODATA on Linux.
 _NO_XATTR = getattr(errno, "ENOATTR", None) or errno.ENODATA
+# Base class only when mfusepy is installed; otherwise the module still imports
+# (FUSE is the optional [fuse] extra) but instantiating MirageFS raises.
+_FUSE_OPERATIONS = fuse.Operations if fuse is not None else object
 
 
-class MirageFS(fuse.Operations):
+class MirageFS(_FUSE_OPERATIONS):
 
     use_ns = True
 
@@ -43,12 +49,10 @@ class MirageFS(fuse.Operations):
                  ws_or_ops,
                  agent_id: str | None = None,
                  root_prefix: str = "") -> None:
-        if isinstance(ws_or_ops, Ops):
-            self._ops = ws_or_ops
-            self.ws = None
-        else:
-            self.ws = ws_or_ops
-            self._ops = ws_or_ops.ops
+        if fuse is None:
+            raise RuntimeError("FUSE support requires the 'fuse' extra: "
+                               'install "mirage-ai[fuse]"')
+        self._ops = ws_or_ops if isinstance(ws_or_ops, Ops) else ws_or_ops.ops
         self.agent_id = (agent_id or os.environ.get(_ENV_AGENT_ID)
                          or f"agent-{uuid.uuid4().hex[:8]}")
         self._now = time.time_ns()

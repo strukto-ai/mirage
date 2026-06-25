@@ -3,3 +3,7 @@ logs_cat_b=beta
 logs_size_b=5
 data_pinned=yes
 distinct_mounts=yes
+data_mode_is_write=yes
+logs_mode_is_read=yes
+singular_raises_multi=yes
+collision_rejected=yes

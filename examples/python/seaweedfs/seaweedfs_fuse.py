@@ -14,11 +14,10 @@
 
 import asyncio
 import os
-import time
 
 from dotenv import load_dotenv
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.seaweedfs import SeaweedFSConfig, SeaweedFSResource
 
 load_dotenv(".env.development")
@@ -53,36 +52,32 @@ async def cleanup(ws: Workspace) -> None:
         await ws.execute(f"rm {key}")
 
 
-with Workspace(
-    {"/seaweedfs/": resource},
-        mode=MountMode.WRITE,
-        fuse=True,
-) as ws:
+mounts = {"/seaweedfs/": Mount(resource, mode=MountMode.WRITE, fuse=True)}
+with Workspace(mounts) as ws:
     asyncio.run(seed(ws))
-    time.sleep(1)
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: SeaweedFS mounted at {mp} ===\n")
 
     print("--- os.listdir() ---")
-    for e in os.listdir(f"{mp}/seaweedfs/data"):
+    for e in os.listdir(f"{mp}/data"):
         print(f"  {e}")
 
     print("\n--- open() + read ---")
-    with open(f"{mp}/seaweedfs/data/example.jsonl") as f:
+    with open(f"{mp}/data/example.jsonl") as f:
         for i, line in enumerate(f):
             if i >= 3:
                 break
             print(f"  [{i}] {line.strip()[:100]}...")
 
     print("\n--- os.path.getsize() ---")
-    size = os.path.getsize(f"{mp}/seaweedfs/data/example.jsonl")
+    size = os.path.getsize(f"{mp}/data/example.jsonl")
     print(f"  size: {size} bytes")
 
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> Open another terminal and run:")
-    print(f">>>   ls {mp}/seaweedfs/data/")
-    print(f">>>   cat {mp}/seaweedfs/data/config.json")
+    print(f">>>   ls {mp}/data/")
+    print(f">>>   cat {mp}/data/config.json")
     print(">>> Press Enter to unmount and exit...")
     try:
         input()

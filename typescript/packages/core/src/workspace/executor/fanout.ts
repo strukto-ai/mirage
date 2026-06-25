@@ -15,7 +15,7 @@
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
 import { PathSpec } from '../../types.ts'
-import type { Mount } from '../mount/mount.ts'
+import type { MountEntry } from '../mount/mount.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { ExecutionNode } from '../types.ts'
 import { resolveAcrossMounts } from '../../commands/safeguard.ts'
@@ -108,7 +108,7 @@ function adjustDepthTexts(
 
 function synthesizeFindMountEntries(
   targetPath: string,
-  descendants: readonly Mount[],
+  descendants: readonly MountEntry[],
   texts: readonly string[],
 ): string {
   let expr: FindExpr
@@ -182,7 +182,7 @@ export async function fanOutTraversal(
   texts: readonly string[],
   flagKwargs: Record<string, string | boolean | string[]>,
   registry: MountRegistry,
-  primaryMount: Mount,
+  primaryMount: MountEntry,
   cwd: string,
   cmdStr: string,
   stdin: ByteSource | null,
@@ -197,7 +197,7 @@ export async function fanOutTraversal(
   let finalExit = 0
   let successSeen = false
 
-  const mountsToRun: Mount[] = [primaryMount, ...descendants]
+  const mountsToRun: MountEntry[] = [primaryMount, ...descendants]
   for (const mount of mountsToRun) {
     let subPaths: PathSpec[]
     let subFlags: Record<string, string | boolean | string[]>

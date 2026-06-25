@@ -14,11 +14,10 @@
 
 import json
 import os
-import time
 
 from dotenv import load_dotenv
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.discord import DiscordConfig, DiscordResource
 
 load_dotenv(".env.development")
@@ -26,15 +25,15 @@ load_dotenv(".env.development")
 config = DiscordConfig(token=os.environ["DISCORD_BOT_TOKEN"])
 resource = DiscordResource(config=config)
 
-with Workspace({"/discord/": resource}, mode=MountMode.READ, fuse=True) as ws:
-    time.sleep(1)
+with Workspace({"/discord/": Mount(resource, mode=MountMode.READ,
+                                   fuse=True)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
 
     # ── list guilds ──────────────────────────────
     print("--- os.listdir() guilds ---")
-    guilds = os.listdir(f"{mp}/discord")
+    guilds = os.listdir(mp)
     for g in guilds:
         print(f"  {g}")
 
@@ -45,13 +44,13 @@ with Workspace({"/discord/": resource}, mode=MountMode.READ, fuse=True) as ws:
 
         # ── list guild contents ──────────────────
         print(f"\n--- os.listdir() {guild} ---")
-        contents = os.listdir(f"{mp}/discord/{guild}")
+        contents = os.listdir(f"{mp}/{guild}")
         for c in contents:
             print(f"  {c}")
 
         # ── list channels ────────────────────────
         print(f"\n--- os.listdir() {guild}/channels ---")
-        channels = os.listdir(f"{mp}/discord/{guild}/channels")
+        channels = os.listdir(f"{mp}/{guild}/channels")
         for ch in channels:
             print(f"  {ch}")
 
@@ -60,14 +59,14 @@ with Workspace({"/discord/": resource}, mode=MountMode.READ, fuse=True) as ws:
 
             # ── list date files ──────────────────
             print(f"\n--- os.listdir() {ch} (last 5 dates) ---")
-            dates = os.listdir(f"{mp}/discord/{guild}/channels/{ch}")
+            dates = os.listdir(f"{mp}/{guild}/channels/{ch}")
             for d in dates[-5:]:
                 print(f"  {d}")
 
             # ── read chat.jsonl ──────────────────
             if dates:
                 target = dates[-1]
-                date_dir = f"{mp}/discord/{guild}/channels/{ch}/{target}"
+                date_dir = f"{mp}/{guild}/channels/{ch}/{target}"
                 chat_path = f"{date_dir}/chat.jsonl"
                 print(f"\n--- open() + read {target}/chat.jsonl ---")
                 with open(chat_path) as f:
@@ -102,12 +101,12 @@ with Workspace({"/discord/": resource}, mode=MountMode.READ, fuse=True) as ws:
 
         # ── list members ─────────────────────────
         print(f"\n--- os.listdir() {guild}/members ---")
-        members = os.listdir(f"{mp}/discord/{guild}/members")
+        members = os.listdir(f"{mp}/{guild}/members")
         for m in members:
             print(f"  {m}")
 
         if members:
-            member_path = f"{mp}/discord/{guild}/members/{members[0]}"
+            member_path = f"{mp}/{guild}/members/{members[0]}"
             print(f"\n--- open() + read {members[0]} ---")
             with open(member_path) as f:
                 text = f.read().strip()
@@ -125,8 +124,8 @@ with Workspace({"/discord/": resource}, mode=MountMode.READ, fuse=True) as ws:
     # ── interactive: browse the mount in another terminal ──
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> Open another terminal and run:")
-    print(f">>>   ls {mp}/discord/")
-    print(f">>>   cat {mp}/discord/<guild>/channels/<ch>/<date>/chat.jsonl")
+    print(f">>>   ls {mp}/")
+    print(f">>>   cat {mp}/<guild>/channels/<ch>/<date>/chat.jsonl")
     print(">>> Press Enter to unmount and exit...")
     input()
 

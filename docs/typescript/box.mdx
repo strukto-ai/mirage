@@ -132,16 +132,16 @@ Only `fs.promises.*` is patched, sync forms aren't supported.
 ## FUSE mode
 
 ```ts
-import { BoxResource, FuseManager, MountMode, Workspace } from '@struktoai/mirage-node'
+import { BoxResource, Mount, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const ws = new Workspace({ '/box': box }, { mode: MountMode.READ })
-const fm = new FuseManager()
-const mp = await fm.setup(ws)
-// ${mp}/box/ is now a real filesystem path:
-//   ls ${mp}/box/
-//   find ${mp}/box -type f
-//   cat ${mp}/box/example.json | jq .
-await fm.close(ws)
+const ws = new Workspace({ '/box': new Mount(box, { mode: MountMode.READ, fuse: true }) })
+await ws.fuseReady()
+const mp = ws.fuseMountpoint
+// The box subtree is exposed at the mountpoint root, so ${mp}/ is a real path:
+//   ls ${mp}/
+//   find ${mp} -type f
+//   cat ${mp}/example.json | jq .
+await ws.close()
 ```
 
 Requires [macFUSE](https://osxfuse.github.io/) on macOS or libfuse on Linux.

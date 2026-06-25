@@ -35,7 +35,7 @@ we drive the actively-maintained `wasmer` CLI as a subprocess instead.
 From the repo root (so `.env.development` loads):
 
 ```bash
-./python/.venv/bin/python examples/python/wasmer/wasmer_fuse.py
+./python/.venv/bin/python examples/python/runtimes/wasmer/wasmer_fuse.py
 ```
 
 Expected tail:

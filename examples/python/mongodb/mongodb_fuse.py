@@ -15,11 +15,10 @@
 import json
 import os
 import sys
-import time
 
 from dotenv import load_dotenv
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.mongodb import MongoDBConfig, MongoDBResource
 
 load_dotenv(".env.development")
@@ -31,51 +30,47 @@ VIEW = "high_rated_films"
 config = MongoDBConfig(uri=os.environ["MONGODB_URI"], databases=[DB])
 resource = MongoDBResource(config=config)
 
-with Workspace(
-    {"/mongodb/": resource},
-        mode=MountMode.READ,
-        fuse=True,
-) as ws:
-    time.sleep(1)
+with Workspace({"/mongodb/": Mount(resource, mode=MountMode.READ,
+                                   fuse=True)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
 
     print("--- listdir() root (databases) ---")
-    for db in os.listdir(f"{mp}/mongodb"):
+    for db in os.listdir(mp):
         print(f"  {db}")
 
     print(f"\n--- listdir() /mongodb/{DB} (entities) ---")
-    for entry in os.listdir(f"{mp}/mongodb/{DB}"):
+    for entry in os.listdir(f"{mp}/{DB}"):
         print(f"  {entry}")
 
     print(f"\n--- listdir() /mongodb/{DB}/collections ---")
-    for col in os.listdir(f"{mp}/mongodb/{DB}/collections"):
+    for col in os.listdir(f"{mp}/{DB}/collections"):
         print(f"  {col}")
 
     print(f"\n--- listdir() /mongodb/{DB}/views ---")
-    for v in os.listdir(f"{mp}/mongodb/{DB}/views"):
+    for v in os.listdir(f"{mp}/{DB}/views"):
         print(f"  {v}")
 
     print(f"\n--- listdir() /mongodb/{DB}/collections/{COLL} (entity) ---")
-    for entry in os.listdir(f"{mp}/mongodb/{DB}/collections/{COLL}"):
+    for entry in os.listdir(f"{mp}/{DB}/collections/{COLL}"):
         print(f"  {entry}")
 
     print("\n--- open() database.json ---")
-    with open(f"{mp}/mongodb/{DB}/database.json") as f:
+    with open(f"{mp}/{DB}/database.json") as f:
         db_meta = json.loads(f.read())
     print(f"  collections: {len(db_meta.get('collections', []))}")
     print(f"  views: {len(db_meta.get('views', []))}")
 
     print(f"\n--- open() schema.json for {COLL} ---")
-    with open(f"{mp}/mongodb/{DB}/collections/{COLL}/schema.json") as f:
+    with open(f"{mp}/{DB}/collections/{COLL}/schema.json") as f:
         schema = json.loads(f.read())
     print(f"  kind: {schema.get('kind')}")
     print(f"  fields: {len(schema.get('fields', []))}")
     print(f"  indexes: {len(schema.get('indexes', []))}")
 
     print(f"\n--- open() + read documents.jsonl for {COLL} ---")
-    path = f"{mp}/mongodb/{DB}/collections/{COLL}/documents.jsonl"
+    path = f"{mp}/{DB}/collections/{COLL}/documents.jsonl"
     with open(path) as f:
         text = f.read().strip()
     lines = [ln for ln in text.splitlines() if ln.strip()]
@@ -85,7 +80,7 @@ with Workspace(
         print(f"  {doc.get('title', '?')}")
 
     print(f"\n--- open() + read view documents for {VIEW} ---")
-    view_path = f"{mp}/mongodb/{DB}/views/{VIEW}/documents.jsonl"
+    view_path = f"{mp}/{DB}/views/{VIEW}/documents.jsonl"
     with open(view_path) as f:
         view_text = f.read().strip()
     view_lines = [ln for ln in view_text.splitlines() if ln.strip()]
@@ -96,10 +91,8 @@ with Workspace(
 
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> Open another terminal and try:")
-    print(f">>>   ls {mp}/mongodb/{DB}/collections/")
-    print(
-        f">>>   head -n 3 {mp}/mongodb/{DB}/collections/{COLL}/documents.jsonl"
-    )
+    print(f">>>   ls {mp}/{DB}/collections/")
+    print(f">>>   head -n 3 {mp}/{DB}/collections/{COLL}/documents.jsonl")
     if sys.stdin.isatty():
         print(">>> Press Enter to unmount and exit...")
         input()

@@ -18,7 +18,7 @@ from mirage.cache.file import io as cache_io
 from mirage.cache.manager import CacheManager
 from mirage.io import IOResult
 from mirage.types import ConsistencyPolicy, FileStat, PathSpec
-from mirage.workspace.mount import Mount, MountRegistry
+from mirage.workspace.mount import MountEntry, MountRegistry
 from mirage.workspace.session import assert_mount_allowed
 
 _DISPATCH_READ_OPS = frozenset({"read", "read_bytes"})
@@ -115,7 +115,8 @@ class Dispatcher:
             return
         await self.invalidate_after_write(mount, path)
 
-    async def invalidate_after_write(self, mount: Mount, path: str) -> None:
+    async def invalidate_after_write(self, mount: MountEntry,
+                                     path: str) -> None:
         manager = mount.cache_manager
         if manager is None:
             manager = CacheManager(self._cache,

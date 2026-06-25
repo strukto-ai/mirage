@@ -392,7 +392,7 @@ async def test_mount_background_readable():
     ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
     await ws.execute("tee /hello.txt", stdin=b"hi from memory")
     with tempfile.TemporaryDirectory() as mountpoint:
-        t = mount_background(ws, mountpoint, agent_id="test-agent")
+        t = mount_background(ws.ops, mountpoint, agent_id="test-agent")
         try:
             import time
             time.sleep(1)

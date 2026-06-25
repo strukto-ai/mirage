@@ -18,12 +18,12 @@ import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { baseImage, remoteEnv } from './remote_env.js'
+import { fuseImage, remoteEnv } from './remote_env.js'
 
 const __HERE = dirname(fileURLToPath(import.meta.url))
-dotenv.config({ path: resolve(__HERE, '../../../.env.development') })
+dotenv.config({ path: resolve(__HERE, '../../../../.env.development') })
 
-const REMOTE_SCRIPT = resolve(__HERE, '../../python/daytona/remote/vfs.py')
+const REMOTE_SCRIPT = resolve(__HERE, '../../../python/runtimes/daytona/remote/fuse.py')
 
 async function main(): Promise<void> {
   const apiKey = process.env.DAYTONA_API_KEY
@@ -33,10 +33,10 @@ async function main(): Promise<void> {
 
   const daytona = new Daytona({ apiKey })
 
-  console.log('=== building image (debian-slim + git + mirage-ai[s3]) ===')
+  console.log('=== building image (debian-slim + git + fuse3 + mirage-ai[s3]) ===')
   const sandbox = await daytona.create(
     {
-      image: baseImage(),
+      image: fuseImage(),
       resources: { cpu: 1, memory: 1, disk: 1 },
     } as CreateSandboxFromImageParams,
     {
@@ -47,6 +47,17 @@ async function main(): Promise<void> {
   console.log(`\n=== sandbox up: ${sandbox.id} ===\n`)
 
   try {
+    const probe = await sandbox.process.executeCommand(
+      'test -e /dev/fuse && echo HAS_FUSE || echo NO_FUSE; ' +
+        'fusermount3 --version 2>&1 | head -1 || true',
+      undefined,
+      undefined,
+      15,
+    )
+    console.log('=== sandbox FUSE probe ===')
+    console.log(probe.result.trimEnd())
+    console.log()
+
     await sandbox.fs.uploadFile(readFileSync(REMOTE_SCRIPT), '/tmp/run.py')
     const result = await sandbox.process.executeCommand(
       'python /tmp/run.py',

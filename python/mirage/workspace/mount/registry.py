@@ -19,7 +19,7 @@ from mirage.ops.config import OpsMount
 from mirage.resource.base import BaseResource
 from mirage.resource.dev import DevResource
 from mirage.types import ConsistencyPolicy, MountMode, PathSpec
-from mirage.workspace.mount.mount import Mount
+from mirage.workspace.mount.mount import MountEntry
 
 DEV_PREFIX = "/dev/"
 
@@ -42,8 +42,8 @@ class MountRegistry:
     """
 
     def __init__(self) -> None:
-        self._mounts: list[Mount] = []
-        self._default_mount: Mount | None = None
+        self._mounts: list[MountEntry] = []
+        self._default_mount: MountEntry | None = None
         self._consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
         self._file_cache: FileCacheMixin | None = None
         self.mount(DEV_PREFIX, DevResource(), MountMode.WRITE)
@@ -68,7 +68,7 @@ class MountRegistry:
         if self._default_mount is not None:
             self._attach_manager(self._default_mount)
 
-    def _attach_manager(self, m: Mount) -> None:
+    def _attach_manager(self, m: MountEntry) -> None:
         m.cache_manager = CacheManager(self._file_cache, m.resource.index,
                                        m.prefix, m.resource.caches_reads)
 
@@ -78,7 +78,7 @@ class MountRegistry:
         Used when a command has no path args and cwd
         doesn't match any mount.
         """
-        m = Mount("/_default/", resource, MountMode.WRITE)
+        m = MountEntry("/_default/", resource, MountMode.WRITE)
         for cmd in resource.commands():
             m.register(cmd)
         for cmd in GENERAL_COMMANDS:
@@ -95,7 +95,7 @@ class MountRegistry:
         resource: BaseResource,
         mode: MountMode = MountMode.READ,
         consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY,
-    ) -> Mount:
+    ) -> MountEntry:
         """Mount a resource and return the Mount object."""
         stripped = prefix.strip("/")
         norm_prefix = ("/" + stripped + "/" if stripped else "/")
@@ -103,7 +103,7 @@ class MountRegistry:
             if existing.prefix == norm_prefix:
                 raise ValueError(f"duplicate mount prefix: "
                                  f"{norm_prefix!r}")
-        m = Mount(norm_prefix, resource, mode, consistency)
+        m = MountEntry(norm_prefix, resource, mode, consistency)
         for cmd in resource.commands():
             m.register(cmd)
         for cmd in GENERAL_COMMANDS:
@@ -116,7 +116,7 @@ class MountRegistry:
         self._mounts.sort(key=lambda x: len(x.prefix), reverse=True)
         return m
 
-    def unmount(self, prefix: str) -> Mount:
+    def unmount(self, prefix: str) -> MountEntry:
         """Remove a mount by exact prefix and return it.
 
         Per-mount commands and ops live on the Mount instance and die with
@@ -151,7 +151,7 @@ class MountRegistry:
                 return m.resource, resource_path, m.mode
         raise ValueError(f"no mount matches path: {path!r}")
 
-    def mount_for_prefix(self, prefix: str) -> Mount:
+    def mount_for_prefix(self, prefix: str) -> MountEntry:
         for m in self._mounts:
             if m.prefix == prefix:
                 return m
@@ -162,7 +162,7 @@ class MountRegistry:
         norm = "/" + stripped + "/" if stripped else "/"
         return any(m.prefix == norm for m in self._mounts)
 
-    def descendant_mounts(self, path: str) -> list[Mount]:
+    def descendant_mounts(self, path: str) -> list[MountEntry]:
         """Mounts whose prefix is strictly under `path`.
 
         Used by traversal commands (find, tree, du, grep -r) to fan out
@@ -174,7 +174,7 @@ class MountRegistry:
         """
         stripped = path.strip("/")
         norm = "/" + stripped + "/" if stripped else "/"
-        out: list[Mount] = []
+        out: list[MountEntry] = []
         for m in self._mounts:
             if m.prefix == norm:
                 continue
@@ -218,7 +218,7 @@ class MountRegistry:
         out.sort()
         return out
 
-    def mount_for(self, path: str) -> Mount:
+    def mount_for(self, path: str) -> MountEntry:
         """Find the mount that handles this path."""
         norm = "/" + path.strip("/")
         for m in self._mounts:
@@ -238,7 +238,7 @@ class MountRegistry:
                 return True
         return False
 
-    def mount_for_command(self, cmd_name: str) -> Mount | None:
+    def mount_for_command(self, cmd_name: str) -> MountEntry | None:
         """Find a mount that has this command registered.
 
         Prefers the default mount (cache resource), then
@@ -257,7 +257,7 @@ class MountRegistry:
         cmd_name: str,
         path_scopes: list[PathSpec],
         cwd: str,
-    ) -> Mount | None:
+    ) -> MountEntry | None:
         """Resolve which mount should handle a command.
 
         Resolution order:
@@ -308,7 +308,7 @@ class MountRegistry:
 
     async def _evict_stale(
         self,
-        real_mount: Mount,
+        real_mount: MountEntry,
         cache: FileCacheMixin,
         path_scopes: list[PathSpec],
     ) -> None:
@@ -335,10 +335,10 @@ class MountRegistry:
                 await cache.remove(key)
 
     @property
-    def default_mount(self) -> Mount | None:
+    def default_mount(self) -> MountEntry | None:
         return self._default_mount
 
-    def mounts(self) -> list[Mount]:
+    def mounts(self) -> list[MountEntry]:
         return list(self._mounts)
 
     def ops_mounts(self) -> list[OpsMount]:
@@ -382,12 +382,12 @@ class MountRegistry:
     def group_by_mount(
         self,
         paths: list[str],
-    ) -> list[tuple[Mount, list[str]]]:
+    ) -> list[tuple[MountEntry, list[str]]]:
         """Group virtual paths by their mount.
 
         Returns list of (mount, resource_paths).
         """
-        groups: dict[int, tuple[Mount, list[str]]] = {}
+        groups: dict[int, tuple[MountEntry, list[str]]] = {}
         for path in paths:
             mount = self.mount_for(path)
             _, resource_path, _ = self.resolve(path)

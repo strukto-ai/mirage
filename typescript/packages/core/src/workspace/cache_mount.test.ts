@@ -19,7 +19,7 @@ import { IOResult } from '../io/types.ts'
 import type { RegisteredOp } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import { MountMode, ResourceName, type PathSpec } from '../types.ts'
-import { Mount } from './mount/mount.ts'
+import { MountEntry } from './mount/mount.ts'
 import { Workspace } from './workspace.ts'
 
 const ENC = new TextEncoder()
@@ -55,7 +55,7 @@ function mkWs(): Workspace {
 describe('Workspace.cacheMount accessor', () => {
   it('returns a Mount that is the registry default mount', () => {
     const ws = mkWs()
-    expect(ws.cacheMount).toBeInstanceOf(Mount)
+    expect(ws.cacheMount).toBeInstanceOf(MountEntry)
     expect(ws.cacheMount).toBe(ws.registry.defaultMount)
     expect(ws.cacheMount.prefix).toBe('/_default/')
   })
