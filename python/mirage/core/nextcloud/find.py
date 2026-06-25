@@ -3,7 +3,7 @@ from opendal.types import EntryMode
 
 from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
-                                               keep)
+                                               emit_start_path, keep)
 from mirage.types import PathSpec
 
 
@@ -103,12 +103,14 @@ async def find(
                 results.append(ep)
     except NotFound:
         return []
-    if (saw_descendant or dir_exists) and (maxdepth is None or maxdepth >= 0):
-        root_entry = FindEntry(key=base,
-                               name=start_name or base.rsplit("/", 1)[-1],
-                               kind="d",
-                               depth=0,
-                               is_empty=False)
-        if keep(root_entry, tree, mindepth):
-            results.append(base)
+    if saw_descendant or dir_exists:
+        emit_start_path(results,
+                        base,
+                        start_name or base.rsplit("/", 1)[-1],
+                        kind="d",
+                        is_empty=False,
+                        exists=True,
+                        tree=tree,
+                        maxdepth=maxdepth,
+                        mindepth=mindepth)
     return sorted(set(results))

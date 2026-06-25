@@ -16,7 +16,7 @@ import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
-                                               keep)
+                                               emit_start_path, keep)
 from mirage.core.ssh._client import _abs
 from mirage.types import PathSpec
 
@@ -61,14 +61,16 @@ async def find(
             root_attrs = None
         if root_attrs is not None:
             is_dir = root_attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY
-            root_entry = FindEntry(key=path,
-                                   name=start_name or path.rsplit("/", 1)[-1],
-                                   kind="d" if is_dir else "f",
-                                   depth=0,
-                                   is_empty=False if is_dir else
-                                   (root_attrs.size or 0) == 0)
-            if keep(root_entry, tree, mindepth):
-                results.append(path)
+            emit_start_path(results,
+                            path,
+                            start_name or path.rsplit("/", 1)[-1],
+                            kind="d" if is_dir else "f",
+                            is_empty=False if is_dir else
+                            (root_attrs.size or 0) == 0,
+                            exists=True,
+                            tree=tree,
+                            maxdepth=maxdepth,
+                            mindepth=mindepth)
     await _walk(sftp, config, path, results, 0, maxdepth, mindepth, tree,
                 min_size, max_size, mtime_min, mtime_max)
     return sorted(results)

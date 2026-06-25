@@ -14,7 +14,7 @@
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
-                                               keep)
+                                               emit_start_path, keep)
 from mirage.core.s3._client import (_client_kwargs, _prefix, _strip_prefix,
                                     async_session)
 from mirage.types import PathSpec
@@ -109,15 +109,16 @@ async def find(
                         continue
                 results.append(full_path)
     stripped = path.strip("/")
-    if (saw_descendant or dir_marker_seen) and (maxdepth is None
-                                                or maxdepth >= 0):
+    if saw_descendant or dir_marker_seen:
         root_key = "/" + stripped if stripped else "/"
         root_name = stripped.rsplit("/", 1)[-1] if stripped else start_name
-        root_entry = FindEntry(key=root_key,
-                               name=root_name,
-                               kind="d",
-                               depth=0,
-                               is_empty=False if empty else None)
-        if keep(root_entry, tree, mindepth):
-            results.append(root_key)
+        emit_start_path(results,
+                        root_key,
+                        root_name,
+                        kind="d",
+                        is_empty=False if empty else None,
+                        exists=True,
+                        tree=tree,
+                        maxdepth=maxdepth,
+                        mindepth=mindepth)
     return sorted(results)

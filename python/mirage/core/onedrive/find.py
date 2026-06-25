@@ -18,7 +18,7 @@ import aiohttp
 
 from mirage.accessor.onedrive import OneDriveAccessor
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
-                                               keep)
+                                               emit_start_path, keep)
 from mirage.core.onedrive._client import (graph_list, item_url, new_session,
                                           split_path)
 from mirage.core.onedrive.stat import stat
@@ -106,14 +106,16 @@ async def find(
                                      path)).type == FileType.DIRECTORY
         except FileNotFoundError:
             dir_exists = False
-    if dir_exists and (maxdepth is None or maxdepth >= 0):
+    if dir_exists:
         root_key = "/" + base if base else "/"
         root_name = base.rsplit("/", 1)[-1] if base else start_name
-        root_entry = FindEntry(key=root_key,
-                               name=root_name,
-                               kind="d",
-                               depth=0,
-                               is_empty=False if empty else None)
-        if keep(root_entry, tree, mindepth):
-            results.append(root_key)
+        emit_start_path(results,
+                        root_key,
+                        root_name,
+                        kind="d",
+                        is_empty=False if empty else None,
+                        exists=True,
+                        tree=tree,
+                        maxdepth=maxdepth,
+                        mindepth=mindepth)
     return sorted(results)

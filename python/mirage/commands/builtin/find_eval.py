@@ -123,6 +123,50 @@ def keep(entry: FindEntry, tree: PredNode, min_depth: int | None) -> bool:
     return eval_predicate(tree, entry)
 
 
+def emit_start_path(
+    results: list[str],
+    start_key: str,
+    start_name: str,
+    *,
+    kind: str,
+    is_empty: bool | None,
+    exists: bool,
+    tree: PredNode,
+    maxdepth: int | None,
+    mindepth: int | None,
+) -> None:
+    """Append the search start path to results when it matches.
+
+    Shared by every backend find op so the start path is emitted
+    uniformly. GNU lists the start path itself at depth 0, so bare
+    ``find <dir>``, ``-type d`` on the root, ``-maxdepth 0`` (just the
+    start), ``-mindepth 0`` (start included), and ``-name``/``-iname``
+    against the start's own basename all behave the same everywhere.
+
+    Args:
+        results (list[str]): Mount-relative result keys to append to.
+        start_key (str): Mount-relative key of the start path.
+        start_name (str): Basename of the start path as written.
+        kind (str): "d" for a directory or "f" for a file.
+        is_empty (bool | None): Emptiness for ``-empty``; None if unknown.
+        exists (bool): Whether the start path exists.
+        tree (PredNode): Predicate tree.
+        maxdepth (int | None): ``-maxdepth`` value.
+        mindepth (int | None): ``-mindepth`` value.
+    """
+    if not exists:
+        return
+    if maxdepth is not None and maxdepth < 0:
+        return
+    entry = FindEntry(key=start_key,
+                      name=start_name,
+                      kind=kind,
+                      depth=0,
+                      is_empty=is_empty)
+    if keep(entry, tree, mindepth):
+        results.append(start_key)
+
+
 def _type_kind(type_arg: FindType | str | None) -> str | None:
     if type_arg is None:
         return None

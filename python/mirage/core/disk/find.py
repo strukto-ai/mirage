@@ -19,7 +19,7 @@ from pathlib import Path
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
-                                               keep)
+                                               emit_start_path, keep)
 from mirage.types import PathSpec
 
 
@@ -63,14 +63,15 @@ def _find_sync(
 
     if p.is_dir():
         root_empty = (not any(p.iterdir())) if empty else None
-        root_entry = FindEntry(key=base,
-                               name=start_name or base.rsplit("/", 1)[-1],
-                               kind="d",
-                               depth=0,
-                               is_empty=root_empty)
-        if (maxdepth is None or maxdepth >= 0) and keep(
-                root_entry, tree, mindepth):
-            results.append(base)
+        emit_start_path(results,
+                        base,
+                        start_name or base.rsplit("/", 1)[-1],
+                        kind="d",
+                        is_empty=root_empty,
+                        exists=True,
+                        tree=tree,
+                        maxdepth=maxdepth,
+                        mindepth=mindepth)
 
     for dirpath, dirnames, filenames in os.walk(p):
         dp = Path(dirpath)
