@@ -21,6 +21,10 @@ quickstart
 /knowledge/guides/quickstart
 /knowledge/policies/privacy
 /knowledge/policies/refunds
+=== find_root_maxdepth0 ===
+/knowledge
+=== find_root_name ===
+/knowledge
 === stat_fmt ===
 190 /knowledge/guides/auth
 === cat_auth ===

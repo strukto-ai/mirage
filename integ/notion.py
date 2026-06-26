@@ -305,6 +305,8 @@ CASES: list[tuple[str, str]] = [
     ("wc_l_two", f"wc -l {DIR_A}/page.json {DIR_B}/page.json"),
     ("stat_page_json", f"stat {DIR_A}/page.json"),
     ("find_json", f"find {MOUNT}/pages/ -name page.json"),
+    ("find_root_maxdepth0", f"find {MOUNT} -maxdepth 0"),
+    ("find_root_name", f"find {MOUNT} -name notion"),
     ("pipe_grep", f"cat {DIR_B}/page.json | grep -c alpha"),
     ("grep_file", f"grep -n alpha {DIR_B}/page.json"),
     ("grep_multi", f"grep -c alpha {DIR_A}/page.json {DIR_B}/page.json"),

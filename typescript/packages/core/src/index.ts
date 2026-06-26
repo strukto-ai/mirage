@@ -1130,10 +1130,13 @@ export { fnmatch } from './utils/fnmatch.ts'
 export {
   buildTree,
   computeNonemptyDirs,
+  emitStartPath,
+  type EmitStartPathOptions,
   evalPredicate,
   type FindEntry,
   keep,
   type PredNode,
+  startBasename,
 } from './commands/builtin/findEval.ts'
 export { enoent, enotdir, errorVirtualPath, type FsError, gnuStrerror } from './utils/errors.ts'
 

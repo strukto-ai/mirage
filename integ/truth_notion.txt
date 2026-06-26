@@ -204,6 +204,10 @@ name=page.json size=2979 modified=None type=json
 /notion/pages/Notes__bbbb2222-3333-4444-5555-666677778888/page.json
 /notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777/Q1_Goals__cccc1111-2222-3333-4444-555566667777/page.json
 /notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777/page.json
+=== find_root_maxdepth0 ===
+/notion
+=== find_root_name ===
+/notion
 === pipe_grep ===
 3
 === grep_file ===

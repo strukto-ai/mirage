@@ -15,7 +15,10 @@
 import { createServer, type Server } from "node:http";
 import { Server as McpServer } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import { NotionResource as BrowserNotionResource } from "@struktoai/mirage-browser";
 import { MemoryOAuthClientProvider } from "@struktoai/mirage-core";
 import { MountMode, NotionResource, Workspace } from "@struktoai/mirage-node";
@@ -81,7 +84,12 @@ function database(databaseId: string, title: string): Json {
     title: [{ type: "text", plain_text: title, text: { content: title } }],
     properties: {
       Name: { id: "title", name: "Name", type: "title", title: {} },
-      Priority: { id: "pri", name: "Priority", type: "number", number: { format: "number" } },
+      Priority: {
+        id: "pri",
+        name: "Priority",
+        type: "number",
+        number: { format: "number" },
+      },
     },
   };
 }
@@ -90,12 +98,26 @@ function text(content: string, annotations: Json = {}): Json {
   return { type: "text", plain_text: content, annotations, text: { content } };
 }
 
-function block(blockId: string, btype: string, payload: Json, hasChildren = false): Json {
-  return { object: "block", id: blockId, type: btype, has_children: hasChildren, [btype]: payload };
+function block(
+  blockId: string,
+  btype: string,
+  payload: Json,
+  hasChildren = false,
+): Json {
+  return {
+    object: "block",
+    id: blockId,
+    type: btype,
+    has_children: hasChildren,
+    [btype]: payload,
+  };
 }
 
 const PAGES: Record<string, Json> = {
-  [PAGE_A]: page(PAGE_A, "Project Roadmap", { type: "workspace", workspace: true }),
+  [PAGE_A]: page(PAGE_A, "Project Roadmap", {
+    type: "workspace",
+    workspace: true,
+  }),
   [PAGE_B]: page(PAGE_B, "Notes", { type: "workspace", workspace: true }),
   [PAGE_C]: page(PAGE_C, "Q1 Goals", { type: "page_id", page_id: PAGE_A }),
 };
@@ -104,10 +126,22 @@ const BLOCKS: Record<string, Json[]> = {
   [PAGE_A]: [
     block("b-a1", "heading_1", { rich_text: [text("Roadmap")] }),
     block("b-a2", "paragraph", {
-      rich_text: [text("Ship the "), text("beta", { bold: true }), text(" soon")],
+      rich_text: [
+        text("Ship the "),
+        text("beta", { bold: true }),
+        text(" soon"),
+      ],
     }),
-    block(BLOCK_NESTED, "bulleted_list_item", { rich_text: [text("phase one")] }, true),
-    block("b-a4", "code", { rich_text: [text("print(1)")], language: "python" }),
+    block(
+      BLOCK_NESTED,
+      "bulleted_list_item",
+      { rich_text: [text("phase one")] },
+      true,
+    ),
+    block("b-a4", "code", {
+      rich_text: [text("print(1)")],
+      language: "python",
+    }),
     block(PAGE_C, "child_page", { title: "Q1 Goals" }, true),
   ],
   [PAGE_B]: [
@@ -115,7 +149,11 @@ const BLOCKS: Record<string, Json[]> = {
     block("b-b2", "to_do", { rich_text: [text("done item")], checked: true }),
   ],
   [PAGE_C]: [block("b-c1", "paragraph", { rich_text: [text("Q1 contents")] })],
-  [BLOCK_NESTED]: [block("b-d1", "bulleted_list_item", { rich_text: [text("phase one detail")] })],
+  [BLOCK_NESTED]: [
+    block("b-d1", "bulleted_list_item", {
+      rich_text: [text("phase one detail")],
+    }),
+  ],
 };
 
 const DATABASES: Record<string, Json> = {
@@ -130,12 +168,16 @@ const DB_ROWS: Record<string, Json[]> = {
 };
 
 const ROW_PAGES: Record<string, Json> = Object.fromEntries(
-  Object.values(DB_ROWS).flatMap((rows) => rows.map((row) => [String(row.id), row])),
+  Object.values(DB_ROWS).flatMap((rows) =>
+    rows.map((row) => [String(row.id), row]),
+  ),
 );
 
 function searchResults(args: Json): Json[] {
   const filter = (args.filter ?? {}) as Json;
-  return filter.value === "database" ? Object.values(DATABASES) : Object.values(PAGES);
+  return filter.value === "database"
+    ? Object.values(DATABASES)
+    : Object.values(PAGES);
 }
 
 function startMockServer(): Promise<{ server: Server; port: number }> {
@@ -151,7 +193,12 @@ function startMockServer(): Promise<{ server: Server; port: number }> {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(payload));
       };
-      if (req.method === "GET" && parts.length === 3 && parts[0] === "v1" && parts[1] === "pages") {
+      if (
+        req.method === "GET" &&
+        parts.length === 3 &&
+        parts[0] === "v1" &&
+        parts[1] === "pages"
+      ) {
         const found = PAGES[parts[2] ?? ""] ?? ROW_PAGES[parts[2] ?? ""];
         if (found !== undefined) {
           sendJson(found);
@@ -185,7 +232,12 @@ function startMockServer(): Promise<{ server: Server; port: number }> {
         });
         return;
       }
-      if (req.method === "POST" && parts.length === 2 && parts[0] === "v1" && parts[1] === "search") {
+      if (
+        req.method === "POST" &&
+        parts.length === 2 &&
+        parts[0] === "v1" &&
+        parts[1] === "search"
+      ) {
         sendJson({
           object: "list",
           results: searchResults(body),
@@ -216,7 +268,8 @@ function startMockServer(): Promise<{ server: Server; port: number }> {
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
       const address = server.address();
-      if (address === null || typeof address === "string") throw new Error("no port");
+      if (address === null || typeof address === "string")
+        throw new Error("no port");
       resolve({ server, port: address.port });
     });
   });
@@ -224,17 +277,26 @@ function startMockServer(): Promise<{ server: Server; port: number }> {
 
 function toolPayload(name: string, args: Record<string, unknown>): unknown {
   if (name === "API-post-search") {
-    return { object: "list", results: searchResults(args), has_more: false, next_cursor: null };
+    return {
+      object: "list",
+      results: searchResults(args),
+      has_more: false,
+      next_cursor: null,
+    };
   }
   if (name === "API-retrieve-a-page") {
-    const found = PAGES[String(args.page_id)] ?? ROW_PAGES[String(args.page_id)];
-    if (found === undefined) throw new Error(`mock notion: unknown page ${String(args.page_id)}`);
+    const found =
+      PAGES[String(args.page_id)] ?? ROW_PAGES[String(args.page_id)];
+    if (found === undefined)
+      throw new Error(`mock notion: unknown page ${String(args.page_id)}`);
     return found;
   }
   if (name === "API-retrieve-a-database") {
     const found = DATABASES[String(args.database_id)];
     if (found === undefined)
-      throw new Error(`mock notion: unknown database ${String(args.database_id)}`);
+      throw new Error(
+        `mock notion: unknown database ${String(args.database_id)}`,
+      );
     return found;
   }
   if (name === "API-post-database-query") {
@@ -261,10 +323,14 @@ function buildMcpServer(): McpServer {
     { name: "mock-notion-mcp", version: "0.0.0" },
     { capabilities: { tools: {} } },
   );
-  server.setRequestHandler(ListToolsRequestSchema, () => Promise.resolve({ tools: [] }));
+  server.setRequestHandler(ListToolsRequestSchema, () =>
+    Promise.resolve({ tools: [] }),
+  );
   server.setRequestHandler(CallToolRequestSchema, (req) => {
     const payload = toolPayload(req.params.name, req.params.arguments ?? {});
-    return Promise.resolve({ content: [{ type: "text", text: JSON.stringify(payload) }] });
+    return Promise.resolve({
+      content: [{ type: "text", text: JSON.stringify(payload) }],
+    });
   });
   return server;
 }
@@ -273,7 +339,9 @@ function startMockMcpServer(): Promise<{ server: Server; port: number }> {
   const server = createServer((req, res) => {
     void (async () => {
       const mcp = buildMcpServer();
-      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+      });
       res.on("close", () => {
         void transport.close();
         void mcp.close();
@@ -288,7 +356,8 @@ function startMockMcpServer(): Promise<{ server: Server; port: number }> {
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
       const address = server.address();
-      if (address === null || typeof address === "string") throw new Error("no port");
+      if (address === null || typeof address === "string")
+        throw new Error("no port");
       resolve({ server, port: address.port });
     });
   });
@@ -309,6 +378,8 @@ const CASES: ReadonlyArray<readonly [string, string]> = [
   ["wc_l_two", `wc -l ${DIR_A}/page.json ${DIR_B}/page.json`],
   ["stat_page_json", `stat ${DIR_A}/page.json`],
   ["find_json", `find ${MOUNT}/pages/ -name page.json`],
+  ["find_root_maxdepth0", `find ${MOUNT} -maxdepth 0`],
+  ["find_root_name", `find ${MOUNT} -name notion`],
   ["pipe_grep", `cat ${DIR_B}/page.json | grep -c alpha`],
   ["grep_file", `grep -n alpha ${DIR_B}/page.json`],
   ["grep_multi", `grep -c alpha ${DIR_A}/page.json ${DIR_B}/page.json`],
@@ -327,13 +398,21 @@ const EXIT_CODE_CASES: ReadonlyArray<readonly [string, string]> = [
   ["grep_rc_no_match_exit", `grep -rc zzz ${MOUNT}/pages/`],
 ];
 
-async function runCase(ws: Workspace, name: string, cmd: string): Promise<string> {
+async function runCase(
+  ws: Workspace,
+  name: string,
+  cmd: string,
+): Promise<string> {
   const result = await ws.execute(cmd);
   const out = DEC.decode(result.stdout);
   return `=== ${name} ===\n` + (out.endsWith("\n") ? out : out + "\n");
 }
 
-async function runExitCase(ws: Workspace, name: string, cmd: string): Promise<string> {
+async function runExitCase(
+  ws: Workspace,
+  name: string,
+  cmd: string,
+): Promise<string> {
   const result = await ws.execute(cmd);
   const out = DEC.decode(result.stdout);
   let rendered = `=== ${name} ===\nexit=${String(result.exitCode)}\n`;
@@ -348,7 +427,10 @@ async function main(): Promise<void> {
     apiKey: "integ-test",
     baseUrl: `http://127.0.0.1:${String(port)}/v1`,
   });
-  const restWs = new Workspace({ [MOUNT]: restResource }, { mode: MountMode.READ });
+  const restWs = new Workspace(
+    { [MOUNT]: restResource },
+    { mode: MountMode.READ },
+  );
   const authProvider = new MemoryOAuthClientProvider({
     clientMetadata: { redirect_uris: ["http://127.0.0.1/cb"] },
     redirect: () => {},
@@ -357,13 +439,22 @@ async function main(): Promise<void> {
     authProvider,
     serverUrl: `http://127.0.0.1:${String(mcpPort)}/mcp`,
   });
-  const mcpWs = new Workspace({ [MOUNT]: mcpResource }, { mode: MountMode.READ });
+  const mcpWs = new Workspace(
+    { [MOUNT]: mcpResource },
+    { mode: MountMode.READ },
+  );
   try {
     const allCases: ReadonlyArray<
-      readonly [string, string, (ws: Workspace, name: string, cmd: string) => Promise<string>]
+      readonly [
+        string,
+        string,
+        (ws: Workspace, name: string, cmd: string) => Promise<string>,
+      ]
     > = [
       ...CASES.map(([name, cmd]) => [name, cmd, runCase] as const),
-      ...EXIT_CODE_CASES.map(([name, cmd]) => [name, cmd, runExitCase] as const),
+      ...EXIT_CODE_CASES.map(
+        ([name, cmd]) => [name, cmd, runExitCase] as const,
+      ),
     ];
     let mismatches = 0;
     for (const [name, cmd, run] of allCases) {

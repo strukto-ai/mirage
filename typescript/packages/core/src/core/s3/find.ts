@@ -17,7 +17,7 @@ import type { PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import { loadS3Module, rawPathOf, s3Prefix, stripKeyPrefix, withClient } from './_client.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-import { buildTree, keep } from '../../commands/builtin/findEval.ts'
+import { buildTree, emitStartPath, keep, startBasename } from '../../commands/builtin/findEval.ts'
 
 export async function find(
   accessor: S3Accessor,
@@ -26,7 +26,7 @@ export async function find(
 ): Promise<string[]> {
   const { ListObjectsV2Command } = await loadS3Module(accessor.config)
   const raw = rawPathOf(path)
-  const startName = rstripSlash(path.original).split('/').pop() ?? ''
+  const startName = startBasename(path.original)
   const pfx = s3Prefix(raw, accessor.config)
   const results: string[] = []
   const seen = { descendant: false, marker: false }
@@ -101,22 +101,15 @@ export async function find(
     } while (continuationToken !== undefined)
   })
   const rootKey = rstripSlash('/' + stripKeyPrefix(pfx, accessor.config)) || '/'
-  if ((seen.descendant || seen.marker) && (options.maxDepth == null || options.maxDepth >= 0)) {
-    if (
-      keep(
-        {
-          key: rootKey,
-          name: rootKey === '/' ? startName : rootKey.slice(rootKey.lastIndexOf('/') + 1),
-          kind: 'd',
-          depth: 0,
-          isEmpty: empty ? false : null,
-        },
-        tree,
-        options.minDepth,
-      )
-    ) {
-      results.push(rootKey)
-    }
+  if (seen.descendant || seen.marker) {
+    emitStartPath(results, rootKey, startName, {
+      kind: 'd',
+      isEmpty: empty ? false : null,
+      exists: true,
+      tree,
+      maxDepth: options.maxDepth,
+      minDepth: options.minDepth,
+    })
   }
   return results.sort()
 }

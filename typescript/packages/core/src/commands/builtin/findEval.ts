@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { fnmatch } from '../../utils/fnmatch.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 
 export interface FindEntry {
   key: string
@@ -69,6 +70,54 @@ export function keep(
 ): boolean {
   if (minDepth !== null && minDepth !== undefined && entry.depth < minDepth) return false
   return evalPredicate(tree, entry)
+}
+
+// Basename of a find start path, as GNU prints and matches it. Single source
+// of truth for the start path's own name across every backend find op; reads
+// `path.original` so the name is correct whether the start is the mount root
+// or a nested directory. Returns '' for the bare root '/'.
+export function startBasename(original: string): string {
+  return rstripSlash(original).split('/').pop() ?? ''
+}
+
+export interface EmitStartPathOptions {
+  kind: 'f' | 'd'
+  isEmpty?: boolean | null
+  exists: boolean
+  tree: PredNode
+  maxDepth: number | null | undefined
+  minDepth: number | null | undefined
+  size?: number | null | undefined
+  minSize?: number | null | undefined
+  maxSize?: number | null | undefined
+}
+
+// Append the search start path to results when it matches. Shared by every
+// backend find op so the start path is emitted uniformly: bare `find <dir>`,
+// `-type d` on the root, `-maxdepth 0`, `-mindepth 0`, and `-name` against the
+// start's own basename all behave the same everywhere. Size filtering applies
+// only to a file start path; directory roots pass size undefined and skip it.
+export function emitStartPath(
+  results: string[],
+  startKey: string,
+  startName: string,
+  opts: EmitStartPathOptions,
+): void {
+  if (!opts.exists) return
+  if (opts.maxDepth !== null && opts.maxDepth !== undefined && opts.maxDepth < 0) return
+  const entry: FindEntry = {
+    key: startKey,
+    name: startName,
+    kind: opts.kind,
+    depth: 0,
+    isEmpty: opts.isEmpty ?? null,
+  }
+  if (!keep(entry, opts.tree, opts.minDepth)) return
+  if (opts.kind === 'f' && opts.size !== null && opts.size !== undefined) {
+    if (opts.minSize !== null && opts.minSize !== undefined && opts.size < opts.minSize) return
+    if (opts.maxSize !== null && opts.maxSize !== undefined && opts.size > opts.maxSize) return
+  }
+  results.push(startKey)
 }
 
 export interface BuildTreeOptions {

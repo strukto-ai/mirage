@@ -15,8 +15,15 @@
 import type { PathSpec } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { norm } from './utils.ts'
-import { rstripSlash } from '@struktoai/mirage-core'
-import { buildTree, computeNonemptyDirs, keep, type PredNode } from '@struktoai/mirage-core'
+import {
+  buildTree,
+  computeNonemptyDirs,
+  emitStartPath,
+  keep,
+  type PredNode,
+  rstripSlash,
+  startBasename,
+} from '@struktoai/mirage-core'
 
 export interface FindOptions {
   name?: string | null
@@ -39,7 +46,7 @@ export async function find(
   options: FindOptions = {},
 ): Promise<string[]> {
   const p = norm(path.stripPrefix)
-  const startName = rstripSlash(path.original).split('/').pop() ?? ''
+  const startName = startBasename(path.original)
   const store = accessor.store
   const prefix = rstripSlash(p) + '/'
   const baseDepth = p === '/' ? 0 : (p.match(/\//g) ?? []).length
@@ -70,12 +77,23 @@ export async function find(
       candidates.push([key, 'd'])
     }
   }
+  let rootKind: 'f' | 'd' | null = null
+  let rootIsEmpty: boolean | null = null
+  let rootSize: number | null = null
   for (const [key, kind] of candidates) {
     if (key !== p && !key.startsWith(prefix)) continue
-    const depth = key === '/' ? 0 : (key.match(/\//g) ?? []).length - baseDepth
+    if (key === p) {
+      rootKind = kind
+      if (empty) {
+        rootIsEmpty = kind === 'f' ? (await store.fileLen(key)) === 0 : !nonempty.has(key)
+      }
+      if (kind === 'f') rootSize = await store.fileLen(key)
+      continue
+    }
+    const depth = (key.match(/\//g) ?? []).length - baseDepth
     if (options.maxDepth !== null && options.maxDepth !== undefined && depth > options.maxDepth)
       continue
-    const basename = key === p ? startName : key.slice(key.lastIndexOf('/') + 1)
+    const basename = key.slice(key.lastIndexOf('/') + 1)
     let isEmpty: boolean | null = null
     if (empty) {
       isEmpty = kind === 'f' ? (await store.fileLen(key)) === 0 : !nonempty.has(key)
@@ -93,6 +111,19 @@ export async function find(
         continue
     }
     results.push(key)
+  }
+  if (rootKind !== null) {
+    emitStartPath(results, p, startName, {
+      kind: rootKind,
+      isEmpty: rootIsEmpty,
+      exists: true,
+      tree,
+      maxDepth: options.maxDepth,
+      minDepth: options.minDepth,
+      size: rootSize,
+      minSize: options.minSize,
+      maxSize: options.maxSize,
+    })
   }
   results.sort()
   return results
