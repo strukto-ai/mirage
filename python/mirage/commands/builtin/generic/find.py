@@ -1,9 +1,8 @@
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.find_eval import (FindEntry, PredNode,
+from mirage.commands.builtin.find_eval import (FindArgs, FindEntry,
                                                args_to_tree, keep,
                                                tree_has_empty)
 from mirage.commands.builtin.find_helper import (_parse_depth, _parse_mtime,
@@ -13,24 +12,6 @@ from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, FindType, PathSpec
 from mirage.utils.path import rebase_display
-
-
-@dataclass
-class FindArgs:
-    name: str | None = None
-    iname: str | None = None
-    path_pattern: str | None = None
-    type: FindType | str | None = None
-    min_size: int | None = None
-    max_size: int | None = None
-    mtime_min: float | None = None
-    mtime_max: float | None = None
-    maxdepth: int | None = None
-    mindepth: int | None = None
-    name_exclude: str | None = None
-    or_names: list[str] | None = None
-    empty: bool = False
-    tree: PredNode | None = None
 
 
 def parse_find_args(

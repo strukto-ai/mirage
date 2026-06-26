@@ -3,7 +3,8 @@ from opendal.types import EntryMode
 
 from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
-                                               emit_start_path, keep)
+                                               emit_start_path, keep,
+                                               start_basename)
 from mirage.types import PathSpec
 
 
@@ -27,7 +28,7 @@ async def find(
 ) -> list[str]:
     if isinstance(path, str):
         path = PathSpec.from_str_path(path)
-    start_name = path.original.rstrip("/").rsplit("/", 1)[-1]
+    start_name = start_basename(path)
     target = path.strip_prefix
     pfx = target.strip("/")
     scan_path = pfx + "/" if pfx else "/"
@@ -106,7 +107,7 @@ async def find(
     if saw_descendant or dir_exists:
         emit_start_path(results,
                         base,
-                        start_name or base.rsplit("/", 1)[-1],
+                        start_name,
                         kind="d",
                         is_empty=False,
                         exists=True,

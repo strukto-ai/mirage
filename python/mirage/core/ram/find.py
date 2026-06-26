@@ -15,7 +15,8 @@
 from mirage.accessor.ram import RAMAccessor
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
                                                compute_nonempty_dirs,
-                                               emit_start_path, keep)
+                                               emit_start_path, keep,
+                                               start_basename)
 from mirage.types import PathSpec
 from mirage.utils.path import norm
 
@@ -38,9 +39,8 @@ async def find(
 ) -> list[str]:
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
-    start_name = ""
+    start_name = start_basename(path)
     if isinstance(path, PathSpec):
-        start_name = path.original.rstrip("/").rsplit("/", 1)[-1]
         path = path.strip_prefix
     store = accessor.store
     p = norm(path)

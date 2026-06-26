@@ -18,7 +18,8 @@ import aiohttp
 
 from mirage.accessor.onedrive import OneDriveAccessor
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
-                                               emit_start_path, keep)
+                                               emit_start_path, keep,
+                                               start_basename)
 from mirage.core.onedrive._client import (graph_list, item_url, new_session,
                                           split_path)
 from mirage.core.onedrive.stat import stat
@@ -60,8 +61,7 @@ async def find(
     empty: bool = False,
     tree: PredNode | None = None,
 ) -> list[str]:
-    orig = path.original if isinstance(path, PathSpec) else str(path)
-    start_name = orig.rstrip("/").rsplit("/", 1)[-1]
+    start_name = start_basename(path)
     _, base = split_path(path)
     results: list[str] = []
     saw_descendant = False
@@ -108,10 +108,9 @@ async def find(
             dir_exists = False
     if dir_exists:
         root_key = "/" + base if base else "/"
-        root_name = base.rsplit("/", 1)[-1] if base else start_name
         emit_start_path(results,
                         root_key,
-                        root_name,
+                        start_name,
                         kind="d",
                         is_empty=False if empty else None,
                         exists=True,

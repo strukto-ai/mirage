@@ -4,9 +4,9 @@ import aiohttp
 
 from mirage.accessor.sharepoint import SharePointAccessor
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
-                                               emit_start_path, keep)
-from mirage.core.sharepoint._client import (graph_list, item_url, new_session,
-                                            split_path)
+                                               emit_start_path, keep,
+                                               start_basename)
+from mirage.core.sharepoint._client import graph_list, item_url, new_session
 from mirage.core.sharepoint._resolver import resolve
 from mirage.core.sharepoint.stat import stat
 from mirage.types import FileType, PathSpec
@@ -51,8 +51,7 @@ async def find(
     empty: bool = False,
     tree: PredNode | None = None,
 ) -> list[str]:
-    _, base_stripped = split_path(path)
-    start_name = path.original.rstrip("/").rsplit("/", 1)[-1]
+    start_name = start_basename(path)
     resolved = await resolve(accessor, path)
     if resolved.drive_id is None:
         return []
@@ -104,10 +103,9 @@ async def find(
             dir_exists = False
     if dir_exists:
         root_key = "/" + item_base if item_base else "/"
-        root_name = item_base.rsplit("/", 1)[-1] if item_base else start_name
         emit_start_path(results,
                         root_key,
-                        root_name,
+                        start_name,
                         kind="d",
                         is_empty=False if empty else None,
                         exists=True,

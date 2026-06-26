@@ -14,12 +14,26 @@
 
 from dataclasses import dataclass
 from fnmatch import fnmatch
-from typing import TYPE_CHECKING
 
-from mirage.types import FindType
+from mirage.types import FindType, PathSpec
 
-if TYPE_CHECKING:
-    from mirage.commands.builtin.generic.find import FindArgs
+
+def start_basename(path: PathSpec | str) -> str:
+    """Basename of a find start path, as GNU would print and match it.
+
+    Single source of truth for the start path's own name across every
+    backend find op. Reads ``path.original`` (the path as written, with
+    its mount prefix) so the name is correct whether the start is the
+    mount root or a nested directory.
+
+    Args:
+        path (PathSpec | str): The find start path.
+
+    Returns:
+        str: The start path's basename, or "" for the bare root "/".
+    """
+    original = path.original if isinstance(path, PathSpec) else str(path)
+    return original.rstrip("/").rsplit("/", 1)[-1]
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,7 +250,25 @@ def compute_nonempty_dirs(keys: list[str]) -> set[str]:
     return nonempty
 
 
-def args_to_tree(args: "FindArgs") -> PredNode:
+@dataclass
+class FindArgs:
+    name: str | None = None
+    iname: str | None = None
+    path_pattern: str | None = None
+    type: FindType | str | None = None
+    min_size: int | None = None
+    max_size: int | None = None
+    mtime_min: float | None = None
+    mtime_max: float | None = None
+    maxdepth: int | None = None
+    mindepth: int | None = None
+    name_exclude: str | None = None
+    or_names: list[str] | None = None
+    empty: bool = False
+    tree: PredNode | None = None
+
+
+def args_to_tree(args: FindArgs) -> PredNode:
     if args.tree is not None:
         return args.tree
     return build_tree(name=args.name,

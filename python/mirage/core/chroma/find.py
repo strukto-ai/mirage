@@ -1,6 +1,7 @@
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
-                                               keep, tree_has_type)
+                                               keep, start_basename,
+                                               tree_has_type)
 from mirage.core.chroma.path import resolve_path
 from mirage.core.chroma.stat import stat
 from mirage.core.chroma.walk import walk
@@ -41,7 +42,7 @@ async def find(
                                                     name_exclude=name_exclude,
                                                     or_names=or_names)
     needs_kind = tree_has_type(tree)
-    start_name = path.original.rstrip("/").rsplit("/", 1)[-1]
+    start_name = start_basename(path)
     filtered: list[str] = []
     for item in results:
         if await _matches(accessor, item, path.prefix, index,

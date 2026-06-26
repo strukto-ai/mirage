@@ -14,7 +14,8 @@
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
-                                               emit_start_path, keep)
+                                               emit_start_path, keep,
+                                               start_basename)
 from mirage.core.s3._client import (_client_kwargs, _prefix, _strip_prefix,
                                     async_session)
 from mirage.types import PathSpec
@@ -58,10 +59,8 @@ async def find(
     """
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
-    start_name = ""
-    if isinstance(path, PathSpec):
-        start_name = path.original.rstrip("/").rsplit("/", 1)[-1]
-        path = path.strip_prefix
+    start_name = start_basename(path)
+    path = path.strip_prefix
     config = accessor.config
     pfx = _prefix(path, config)
     results: list[str] = []
@@ -111,10 +110,9 @@ async def find(
     stripped = path.strip("/")
     if saw_descendant or dir_marker_seen:
         root_key = "/" + stripped if stripped else "/"
-        root_name = stripped.rsplit("/", 1)[-1] if stripped else start_name
         emit_start_path(results,
                         root_key,
-                        root_name,
+                        start_name,
                         kind="d",
                         is_empty=False if empty else None,
                         exists=True,

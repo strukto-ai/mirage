@@ -19,7 +19,8 @@ from pathlib import Path
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
-                                               emit_start_path, keep)
+                                               emit_start_path, keep,
+                                               start_basename)
 from mirage.types import PathSpec
 
 
@@ -65,7 +66,7 @@ def _find_sync(
         root_empty = (not any(p.iterdir())) if empty else None
         emit_start_path(results,
                         base,
-                        start_name or base.rsplit("/", 1)[-1],
+                        start_name,
                         kind="d",
                         is_empty=root_empty,
                         exists=True,
@@ -163,10 +164,8 @@ async def find(
 ) -> list[str]:
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
-    start_name = ""
-    if isinstance(path, PathSpec):
-        start_name = path.original.rstrip("/").rsplit("/", 1)[-1]
-        path = path.strip_prefix
+    start_name = start_basename(path)
+    path = path.strip_prefix
     return await asyncio.to_thread(
         _find_sync,
         accessor.root,

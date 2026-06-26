@@ -96,6 +96,26 @@ async def test_find_size_filters():
 
 
 @pytest.mark.asyncio
+async def test_find_file_start_path():
+    results = await find(None, _spec("/src/main.py"), index=_index())
+    assert results == ["/src/main.py"]
+
+
+@pytest.mark.asyncio
+async def test_find_size_filters_file_start():
+    too_big = await find(None,
+                         _spec("/src/main.py"),
+                         max_size=50,
+                         index=_index())
+    assert too_big == []
+    big_enough = await find(None,
+                            _spec("/src/main.py"),
+                            min_size=100,
+                            index=_index())
+    assert big_enough == ["/src/main.py"]
+
+
+@pytest.mark.asyncio
 async def test_find_no_index_raises():
     with pytest.raises(ValueError):
         await find(None, _spec("/"), index=None)

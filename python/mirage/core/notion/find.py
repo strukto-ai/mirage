@@ -15,7 +15,7 @@
 from mirage.accessor.notion import NotionAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
-                                               keep)
+                                               keep, start_basename)
 from mirage.core.notion.readdir import readdir
 from mirage.core.notion.stat import stat
 from mirage.types import FileStat, FileType, PathSpec
@@ -60,7 +60,7 @@ async def find(
 ) -> list[str]:
     if isinstance(path, str):
         path = PathSpec.from_str_path(path)
-    start_name = path.original.rstrip("/").rsplit("/", 1)[-1]
+    start_name = start_basename(path)
     base = path.strip_prefix
     base = "/" + base.strip("/") if base.strip("/") else "/"
     base_depth = 0 if base == "/" else base.count("/")
