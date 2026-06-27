@@ -78,6 +78,16 @@ list=1 detail=1 segments=0 retrieve=0
 list=1 detail=3 segments=0 retrieve=0
 === calls_cat ===
 list=1 detail=0 segments=1 retrieve=0
+=== warm_cat ===
+segments_before=1 segments_after=1 served_from_cache=True
+=== warm_grep ===
+segments_before=1 segments_after=1 served_from_cache=True
+=== warm_head ===
+segments_before=1 segments_after=1 served_from_cache=True
+=== warm_tail ===
+segments_before=1 segments_after=1 served_from_cache=True
+=== warm_wc ===
+segments_before=1 segments_after=1 served_from_cache=True
 === nf_cat ===
 exit=1
 cat: /knowledge/__nf_missing__.txt: No such file or directory

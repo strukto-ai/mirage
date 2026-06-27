@@ -12,73 +12,132 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
-from pathlib import Path
+import pytest
 
-import mirage
+from mirage.cache.context import push_cache_manager
+from mirage.cache.file.ram import RAMFileCacheStore
+from mirage.cache.manager import CacheManager
+from mirage.commands.builtin.generic.grep import grep as generic_grep
+from mirage.commands.builtin.generic.head import head_multi
+from mirage.commands.builtin.generic.rg import rg as generic_rg
+from mirage.commands.builtin.generic.tail import tail_multi
+from mirage.commands.builtin.generic.wc import format_multi
+from mirage.io.types import materialize
+from mirage.types import FileStat, FileType, PathSpec
 
-_ROOT = Path(mirage.__file__).resolve().parent
-_RESOURCE_DIR = _ROOT / "resource"
-_BUILTIN_DIR = _ROOT / "commands" / "builtin"
-
-# A command module reads file content when it imports a raw backend reader
-# from the backend's read/stream module.
-_READER_IMPORT = re.compile(
-    r"from mirage\.core\.\w+\.read import .*\bread\b|"
-    r"from mirage\.core\.\w+\.stream import .*(read_stream|range_read)|"
-    r"read_bytes_with_index")
-# It is cache-aware iff it routes that reader through the shared wrappers.
-_CACHE_AWARE = re.compile(r"cache_aware_read|cached_prefix_bytes")
-
-# Read-then-write commands (tee, cp, sed -i, ...) must read FRESH so the
-# write is not based on a stale cached copy; warm-serve is for pure readers.
-# ``sed`` is registered write=True inside make_sed (not visible in the
-# command file), so it is named explicitly.
-_FRESH_READ_COMMANDS = {"sed.py"}
+_PAYLOAD = b"alpha\nbeta\n"
 
 
-def _caching_backends() -> set[str]:
-    """Backends whose resource serves reads from the file cache.
+class _CountingReader:
 
-    Detected from the resource source: any ``caches_reads`` set to a
-    non-``False`` value (literal ``True`` or a runtime expression such as
-    lancedb's ``config.uri.startswith(...)``).
-    """
-    out: set[str] = set()
-    for d in _RESOURCE_DIR.iterdir():
-        if not d.is_dir():
-            continue
-        text = "\n".join(p.read_text() for p in d.glob("*.py"))
-        for line in text.splitlines():
-            if "caches_reads" not in line or "=" not in line:
-                continue
-            rhs = line.split("=", 1)[1].strip()
-            if rhs and not rhs.startswith("False"):
-                out.add(d.name)
-                break
-    return out
+    def __init__(self, data: bytes) -> None:
+        self.data = data
+        self.calls = 0
+
+    async def __call__(self, accessor, path, *args, **kwargs) -> bytes:
+        self.calls += 1
+        return self.data
 
 
-def test_bespoke_read_commands_are_cache_aware():
-    caching = _caching_backends()
-    assert "s3" in caching and "dify" in caching, caching
-    offenders: list[str] = []
-    for backend in sorted(caching):
-        cmd_dir = _BUILTIN_DIR / backend
-        if not cmd_dir.is_dir():
-            continue
-        for f in sorted(cmd_dir.glob("*.py")):
-            # Skip helper modules (not commands) and read-then-write
-            # commands, which must read fresh rather than serve warm.
-            if f.name.startswith("_") or f.name in _FRESH_READ_COMMANDS:
-                continue
-            text = f.read_text()
-            if "write=True" in text:
-                continue
-            if _READER_IMPORT.search(text) and not _CACHE_AWARE.search(text):
-                offenders.append(f"{backend}/{f.name}")
-    assert not offenders, (
-        "bespoke read commands on caching backends inject a raw reader "
-        "instead of a cache-aware one (wrap it with "
-        "mirage.cache.read_through.cache_aware_read_*): " +
-        ", ".join(offenders))
+def _spec() -> PathSpec:
+    return PathSpec(original="/s3/a.txt", directory="/s3/", prefix="/s3/")
+
+
+async def _warm_manager() -> CacheManager:
+    cache = RAMFileCacheStore()
+    await cache.set("/s3/a.txt", _PAYLOAD)
+    return CacheManager(cache, None, "/s3/", True)
+
+
+async def _stat(accessor, path, index=None) -> FileStat:
+    return FileStat(name="a.txt", type=FileType.TEXT, size=len(_PAYLOAD))
+
+
+async def _readdir(accessor, path, index=None) -> list[str]:
+    return ["/s3/a.txt"]
+
+
+async def _drain(source) -> bytes:
+    return b"".join([c async for c in source])
+
+
+# Every read-content command funnels its file read through one of these shared
+# consumers, which wrap the injected reader with cache_aware_* at the choke
+# point. A backend can therefore pass a RAW reader and warm reads still serve
+# from cache. These tests pin that guarantee: with a warm manager active, the
+# consumer must NOT call the backend reader. If a consumer loses its wrap, the
+# call count goes non-zero and the matching test fails.
+
+
+@pytest.mark.asyncio
+async def test_head_multi_serves_cache_without_backend():
+    # head_multi is built in-scope but drained AFTER the manager scope is
+    # popped (mirroring the mount lifecycle), so this also pins eager capture:
+    # a lazily-captured manager would be gone by drain and the read would miss.
+    reader = _CountingReader(_PAYLOAD)
+    manager = await _warm_manager()
+    prev = push_cache_manager(manager)
+    source = head_multi([_spec()], read=reader, n=1)
+    push_cache_manager(prev)
+    out = await _drain(source)
+    assert out == b"alpha\n"
+    assert reader.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_tail_multi_serves_cache_without_backend():
+    reader = _CountingReader(_PAYLOAD)
+    manager = await _warm_manager()
+    prev = push_cache_manager(manager)
+    source = tail_multi([_spec()], read=reader, n=1)
+    push_cache_manager(prev)
+    out = await _drain(source)
+    assert out == b"beta\n"
+    assert reader.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_wc_format_multi_serves_cache_without_backend():
+    reader = _CountingReader(_PAYLOAD)
+    manager = await _warm_manager()
+    prev = push_cache_manager(manager)
+    try:
+        out = await format_multi([_spec()], read=reader, args_l=True)
+    finally:
+        push_cache_manager(prev)
+    assert b"2" in out
+    assert reader.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_generic_grep_serves_cache_without_backend():
+    reader = _CountingReader(_PAYLOAD)
+    manager = await _warm_manager()
+    prev = push_cache_manager(manager)
+    try:
+        out, io = await generic_grep([_spec()], ("alpha", ), {},
+                                     readdir=_readdir,
+                                     stat=_stat,
+                                     read_bytes=reader,
+                                     read_stream=None)
+    finally:
+        push_cache_manager(prev)
+    assert b"alpha" in await materialize(out)
+    assert reader.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_generic_rg_serves_cache_without_backend():
+    reader = _CountingReader(_PAYLOAD)
+    manager = await _warm_manager()
+    prev = push_cache_manager(manager)
+    try:
+        out, io = await generic_rg([_spec()], ("alpha", ), {},
+                                   readdir=_readdir,
+                                   stat=_stat,
+                                   read_bytes=reader,
+                                   read_stream=None)
+    finally:
+        push_cache_manager(prev)
+    assert b"alpha" in await materialize(out)
+    assert reader.calls == 0

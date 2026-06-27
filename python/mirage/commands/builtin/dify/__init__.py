@@ -12,12 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.dify.cat import cat
+from mirage.commands.builtin.dify.cat import make_cat
 from mirage.commands.builtin.dify.find import find
 from mirage.commands.builtin.dify.search import search
 from mirage.commands.builtin.dify.sed import sed
 from mirage.commands.builtin.generic_bind import (CommandIO,
-                                                  make_generic_commands)
+                                                  make_generic_commands,
+                                                  with_read_cache)
 from mirage.commands.builtin.generic_bind.provision import (
     make_search_provision, metadata_provision)
 from mirage.core.dify.read import read_bytes as _read
@@ -43,6 +44,8 @@ _DIFY_CMD_OPS = CommandIO(
 
 _DIFY_OVERRIDES = {"cat", "find"}
 
+_DIFY_CACHED_OPS = with_read_cache(_DIFY_CMD_OPS)
+
 COMMANDS = [
     *make_generic_commands(
         "dify",
@@ -54,7 +57,7 @@ COMMANDS = [
             "ls": metadata_provision,
         },
     ),
-    cat,
+    make_cat(_DIFY_CACHED_OPS),
     find,
     search,
     sed,

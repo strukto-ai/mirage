@@ -16,8 +16,7 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.cache.read_through import (cache_aware_read_stream,
-                                       cached_prefix_bytes)
+from mirage.cache.read_through import cached_prefix_bytes
 from mirage.commands.builtin.generic.head import head as generic_head
 from mirage.commands.builtin.generic.head import head_multi
 from mirage.commands.builtin.utils.stream import _resolve_source
@@ -28,8 +27,6 @@ from mirage.core.databricks_volume.stream import range_read, read_stream
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-_read_stream = cache_aware_read_stream(read_stream)
 
 
 @command("head", resource="databricks_volume", spec=SPECS["head"])
@@ -56,7 +53,7 @@ async def head(
                 data = await range_read(accessor, paths[0], 0, c_int)
             return yield_bytes(data), IOResult()
         return head_multi(paths,
-                          read=_read_stream,
+                          read=read_stream,
                           accessor=accessor,
                           index=index,
                           n=n_int,

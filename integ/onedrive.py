@@ -105,6 +105,20 @@ EXIT_CODE_CASES: list[tuple[str, str]] = [
     ("grep_no_match", "grep -q zzzznomatch {m}/data/example.jsonl"),
 ]
 
+# Warm-read coherence: a cat warms the file cache for example.jsonl (one
+# download), then each read-only command reads the same file and must be served
+# from cache, leaving the download count unchanged. cat reads directly;
+# grep/head/tail/wc funnel through the shared generic consumers, and head/tail
+# return a lazily-drained stream, so this also pins the eager-capture fix (a
+# regression would download again at drain).
+WARM_READ_CASES: list[tuple[str, str]] = [
+    ("warm_cat", "cat {m}/data/example.jsonl"),
+    ("warm_grep", "grep mirage {m}/data/example.jsonl"),
+    ("warm_head", "head -n 1 {m}/data/example.jsonl"),
+    ("warm_tail", "tail -n 1 {m}/data/example.jsonl"),
+    ("warm_wc", "wc -l {m}/data/example.jsonl"),
+]
+
 TIMEOUT_CASES: list[tuple[str, str]] = [
     ("timeout_sleep_fires", "sleep 2"),
 ]
@@ -174,6 +188,18 @@ async def _measure_calls(server, name: str, cmd: str) -> None:
     print(f"children={children} item={items}")
 
 
+async def _warm_read(server, name: str, cmd: str) -> None:
+    ws = _build_workspace()
+    server.calls.clear()
+    await (await ws.execute(f"cat {MOUNT}/data/example.jsonl")).stdout_str()
+    before = server.calls.get("download", 0)
+    await (await ws.execute(cmd.format(m=MOUNT))).stdout_str()
+    after = server.calls.get("download", 0)
+    print(f"=== {name} ===")
+    print(f"downloads_before={before} downloads_after={after} "
+          f"served_from_cache={after == before}")
+
+
 # Cache consistency mirroring integ/s3.py: read once (caches v1), mutate the
 # object out-of-band on the fake Graph (new cTag), then read again. ALWAYS
 # stats the backend and evicts the stale cache entry on every read so the
@@ -209,6 +235,8 @@ async def main() -> None:
             await _measure(ws, f"stream:{name}", tmpl.format(m=MOUNT))
         for name, tmpl in INDEX_CASES:
             await _measure_calls(server, f"calls:{name}", tmpl.format(m=MOUNT))
+        for name, tmpl in WARM_READ_CASES:
+            await _warm_read(server, f"warm:{name}", tmpl)
         for name, tmpl in EXIT_CODE_CASES:
             await _run_exit(ws, f"exit:{name}", tmpl.format(m=MOUNT))
         prev_sleep = _safeguard.DEFAULT_COMMAND_SAFEGUARDS.get("sleep")

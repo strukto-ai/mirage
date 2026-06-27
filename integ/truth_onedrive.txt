@@ -140,6 +140,16 @@ bytes=10414430 lines=1 out0='5766'
 children=1 item=0
 === calls:tree ===
 children=2 item=0
+=== warm:warm_cat ===
+downloads_before=1 downloads_after=1 served_from_cache=True
+=== warm:warm_grep ===
+downloads_before=1 downloads_after=1 served_from_cache=True
+=== warm:warm_head ===
+downloads_before=1 downloads_after=1 served_from_cache=True
+=== warm:warm_tail ===
+downloads_before=1 downloads_after=1 served_from_cache=True
+=== warm:warm_wc ===
+downloads_before=1 downloads_after=1 served_from_cache=True
 === exit:grep_match ===
 exit=0
 === exit:grep_no_match ===

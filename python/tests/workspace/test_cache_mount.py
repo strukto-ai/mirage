@@ -22,7 +22,7 @@ from mirage.io.types import IOResult
 from mirage.ops.registry import op
 from mirage.resource.disk import DiskResource
 from mirage.resource.ram import RAMResource
-from mirage.types import MountMode, PathSpec
+from mirage.types import ConsistencyPolicy, MountMode, PathSpec
 from mirage.workspace import Workspace
 from mirage.workspace.mount import MountEntry
 
@@ -155,6 +155,30 @@ async def test_warm_read_stays_on_real_mount(tmp_path):
     assert "CUSTOM DISK STAT" in (await second.stdout_str()), (
         "warm read rerouted to cache_mount and lost the real mount's "
         "custom handler; read-through should keep it on the real mount")
+
+
+@pytest.mark.asyncio
+async def test_cross_mount_read_serves_cache(tmp_path):
+    """A cross-mount read relays each operand through ``execute_op``. The
+    op-layer read-through serves a warm operand from cache there, since the
+    consumer's cache-aware wrap is inert at the cross-mount command level
+    (no single mount manager active). Proven under LAZY by mutating the file
+    out-of-band: the cross-mount read still returns the cached v1."""
+    (tmp_path / "a.txt").write_bytes(b"v1\n")
+    disk = DiskResource(root=str(tmp_path))
+    disk.caches_reads = True
+    ws = Workspace({
+        "/d/": disk,
+        "/r/": RAMResource()
+    },
+                   mode=MountMode.WRITE,
+                   consistency=ConsistencyPolicy.LAZY)
+    await ws.execute("echo hi > /r/b.txt")
+    await (await ws.execute("cat /d/a.txt")).stdout_str()
+    (tmp_path / "a.txt").write_bytes(b"v2\n")
+    out = await (await ws.execute("cat /d/a.txt /r/b.txt")).stdout_str()
+    assert "v1" in out and "v2" not in out, (
+        f"cross-mount read did not serve the warm operand from cache: {out!r}")
 
 
 def test_set_default_mount_auto_registers_resource_ops():

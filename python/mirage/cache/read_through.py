@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import inspect
 from collections.abc import AsyncIterator, Callable
 
 from mirage.cache.context import active_cache_manager
@@ -74,6 +75,43 @@ def cache_aware_read_bytes(raw: Callable) -> Callable:
             if cached is not None:
                 return cached
         return await raw(accessor, path, *args, **kwargs)
+
+    return reader
+
+
+def cache_aware_read(raw: Callable) -> Callable:
+    """Wrap a polymorphic reader so warm reads serve cached bytes.
+
+    For the ``read`` contract used by ``head_multi`` / ``tail_multi`` /
+    wc ``format_multi``: the reader is called as ``read(accessor, path,
+    ...)`` and may return bytes, an awaitable of bytes, or an async byte
+    iterator. On a warm hit the wrapped reader returns the cached bytes;
+    otherwise it calls the raw reader and returns whatever it produced
+    unchanged, so the consumer's own ``isawaitable`` / ``ensure_stream``
+    normalization still applies. No-op for local or non-caching mounts.
+
+    The active cache manager is captured **eagerly**, when this wrapper
+    is applied, not when the wrapped reader is later called: a consumer
+    that yields lazily (``head_multi``) is drained after the mount's
+    cache-manager scope is gone, so reading the contextvar at drain time
+    would always miss. Apply this wrapper inside the command's scope
+    (which the consumers do) so the captured manager travels with the
+    stream, mirroring :func:`cache_aware_read_stream`.
+
+    Args:
+        raw (Callable): the backend reader (bytes / awaitable / stream).
+    """
+    manager = active_cache_manager()
+
+    async def reader(accessor, path: PathSpec, *args, **kwargs):
+        if manager is not None and isinstance(path, PathSpec):
+            cached = await manager.cached_bytes(path)
+            if cached is not None:
+                return cached
+        result = raw(accessor, path, *args, **kwargs)
+        if inspect.isawaitable(result):
+            return await result
+        return result
 
     return reader
 
