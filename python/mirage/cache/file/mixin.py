@@ -65,12 +65,6 @@ class FileCacheMixin:
         """
         raise NotImplementedError
 
-    async def all_cached(self, keys: list[str]) -> bool:
-        for k in keys:
-            if not await self.exists(k):
-                return False
-        return True
-
     async def multi_get(self, keys: list[str]) -> list[bytes | None]:
         return [await self.get(k) for k in keys]
 

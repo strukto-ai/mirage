@@ -60,8 +60,10 @@ class CacheManager:
         """Return cached bytes for ``path`` if present, else None.
 
         Lookup only: never fetches from the backend. The single
-        read-cache check: the factory's cache-aware ops call it to serve
-        warm reads, and the VFS dispatcher uses it for the same decision.
+        read-cache check, called by the shared read-through wrappers
+        (``mirage.cache.read_through``) that every read command reads
+        through, so warm reads are served from the file cache without the
+        command knowing about it.
 
         Args:
             path (PathSpec): the path to look up.

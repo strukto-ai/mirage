@@ -17,6 +17,7 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.cache.read_through import cache_aware_read_bytes
 from mirage.commands.builtin.discord._provision import file_read_provision
 from mirage.commands.builtin.generic.head import head as generic_head
 from mirage.commands.builtin.generic.head import head_multi
@@ -85,7 +86,7 @@ async def head(
 
         paths = await resolve_glob(accessor, paths, index)
         return head_multi(paths,
-                          read=discord_read,
+                          read=cache_aware_read_bytes(discord_read),
                           accessor=accessor,
                           index=index,
                           n=n_int,

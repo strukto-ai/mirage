@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.email import EmailAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.cache.read_through import cache_aware_read_bytes
 from mirage.commands.builtin.email._provision import file_read_provision
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.grep_helper import (compile_pattern,
@@ -90,7 +91,7 @@ async def grep(
         flags,
         readdir=_readdir,
         stat=_stat,
-        read_bytes=email_read,
+        read_bytes=cache_aware_read_bytes(email_read),
         read_stream=None,
         accessor=accessor,
         stdin=stdin,

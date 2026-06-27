@@ -17,6 +17,7 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.cache.read_through import cache_aware_read_bytes
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.grep_helper import pattern_arg
 from mirage.commands.builtin.slack._provision import file_read_provision
@@ -113,7 +114,7 @@ async def grep(
         flags,
         readdir=_readdir,
         stat=_stat,
-        read_bytes=slack_read,
+        read_bytes=cache_aware_read_bytes(slack_read),
         read_stream=None,
         accessor=accessor,
         stdin=stdin,

@@ -18,39 +18,13 @@ from dataclasses import replace
 
 from mirage.accessor.base import Accessor
 from mirage.cache.context import active_cache_manager
+from mirage.cache.read_through import (cache_aware_read_bytes,
+                                       cache_aware_read_stream)
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.builders import _BUILDERS
 from mirage.commands.config import command
 from mirage.commands.spec import SPECS
 from mirage.types import PathSpec
-
-
-def _cached_read_stream(read_stream: Callable, accessor: Accessor,
-                        path: PathSpec, *args, **kwargs):
-    manager = active_cache_manager()
-    return _cached_stream(manager, read_stream, accessor, path, *args,
-                          **kwargs)
-
-
-async def _cached_stream(manager, read_stream: Callable, accessor: Accessor,
-                         path: PathSpec, *args, **kwargs):
-    if manager is not None and isinstance(path, PathSpec):
-        cached = await manager.cached_bytes(path)
-        if cached is not None:
-            yield cached
-            return
-    async for chunk in read_stream(accessor, path, *args, **kwargs):
-        yield chunk
-
-
-async def _cached_read_bytes(read_bytes: Callable, accessor: Accessor,
-                             path: PathSpec, *args, **kwargs) -> bytes:
-    manager = active_cache_manager()
-    if manager is not None and isinstance(path, PathSpec):
-        cached = await manager.cached_bytes(path)
-        if cached is not None:
-            return cached
-    return await read_bytes(accessor, path, *args, **kwargs)
 
 
 def _cached_stat(stat: Callable, accessor: Accessor, path: PathSpec, *args,
@@ -91,8 +65,8 @@ def with_read_cache(ops: CommandIO) -> CommandIO:
     """
     return replace(
         with_stat_cache(ops),
-        read_stream=functools.partial(_cached_read_stream, ops.read_stream),
-        read_bytes=functools.partial(_cached_read_bytes, ops.read_bytes),
+        read_stream=cache_aware_read_stream(ops.read_stream),
+        read_bytes=cache_aware_read_bytes(ops.read_bytes),
     )
 
 

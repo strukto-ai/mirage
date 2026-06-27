@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.langfuse import LangfuseAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.cache.read_through import cache_aware_read_bytes
 from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.grep_helper import compile_pattern, pattern_arg
 from mirage.commands.builtin.langfuse.grep import (_filter_traces,
@@ -92,7 +93,7 @@ async def rg(
         flags,
         readdir=_readdir,
         stat=_stat,
-        read_bytes=langfuse_read,
+        read_bytes=cache_aware_read_bytes(langfuse_read),
         read_stream=None,
         accessor=accessor,
         stdin=stdin,

@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.cache.read_through import cache_aware_read_bytes
 from mirage.commands.builtin.constants import PatternType
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.grep_helper import classify_pattern, pattern_arg
@@ -136,7 +137,7 @@ async def grep(
         flags,
         readdir=github_readdir,
         stat=github_stat,
-        read_bytes=github_read,
+        read_bytes=cache_aware_read_bytes(github_read),
         read_stream=None,
         accessor=accessor,
         stdin=stdin,

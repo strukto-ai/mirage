@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.github_ci import GitHubCIAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.cache.read_through import cache_aware_read_bytes
 from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -46,7 +47,7 @@ async def rg(
         flags,
         readdir=_readdir,
         stat=_stat,
-        read_bytes=ci_read,
+        read_bytes=cache_aware_read_bytes(ci_read),
         read_stream=None,
         accessor=accessor,
         stdin=stdin,
