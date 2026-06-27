@@ -31,7 +31,7 @@ def registry():
     """Minimal registry with a RAM mount at root."""
     reg = MountRegistry()
     res = RAMResource()
-    reg.set_default_mount(res)
+    reg.set_root_mount(res)
     reg.mount("/", res, MountMode.WRITE)
     return reg
 

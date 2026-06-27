@@ -43,7 +43,7 @@ class MountRegistry:
 
     def __init__(self) -> None:
         self._mounts: list[MountEntry] = []
-        self._default_mount: MountEntry | None = None
+        self._root_mount: MountEntry | None = None
         self._consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
         self._file_cache: FileCacheMixin | None = None
         self.mount(DEV_PREFIX, DevResource(), MountMode.WRITE)
@@ -57,7 +57,7 @@ class MountRegistry:
 
         Called once by Workspace after the cache store exists. Mounts
         added later get their manager in ``mount()`` /
-        ``set_default_mount()``.
+        ``set_root_mount()``.
 
         Args:
             cache (FileCacheMixin | None): Workspace file cache store.
@@ -65,20 +65,24 @@ class MountRegistry:
         self._file_cache = cache
         for m in self._mounts:
             self._attach_manager(m)
-        if self._default_mount is not None:
-            self._attach_manager(self._default_mount)
+        if self._root_mount is not None:
+            self._attach_manager(self._root_mount)
 
     def _attach_manager(self, m: MountEntry) -> None:
         m.cache_manager = CacheManager(self._file_cache, m.resource.index,
                                        m.prefix, m.resource.caches_reads)
 
-    def set_default_mount(self, resource: BaseResource) -> None:
-        """Set a default fallback mount (cache resource).
+    def set_root_mount(self, resource: BaseResource) -> None:
+        """Set the virtual root mount at ``/``.
 
-        Used when a command has no path args and cwd
-        doesn't match any mount.
+        Anchors root listing (``ls /``) and resolves commands with no
+        path args whose cwd matches no mount. Kept out of ``_mounts`` so
+        it never shadows a real mount in longest-prefix routing; it is the
+        neutral fallback only. The resource is an empty placeholder; the
+        file cache is a hidden store attached separately via
+        ``attach_file_cache``.
         """
-        m = MountEntry("/_default/", resource, MountMode.WRITE)
+        m = MountEntry("/", resource, MountMode.WRITE)
         for cmd in resource.commands():
             m.register(cmd)
         for cmd in GENERAL_COMMANDS:
@@ -87,7 +91,7 @@ class MountRegistry:
             m.register_op(ro)
         if self._file_cache is not None:
             self._attach_manager(m)
-        self._default_mount = m
+        self._root_mount = m
 
     def mount(
         self,
@@ -241,12 +245,11 @@ class MountRegistry:
     def mount_for_command(self, cmd_name: str) -> MountEntry | None:
         """Find a mount that has this command registered.
 
-        Prefers the default mount (cache resource), then
-        searches other mounts.
+        Prefers the virtual root mount, then searches other mounts.
         """
-        if (self._default_mount is not None
-                and self._default_mount.resolve_command(cmd_name) is not None):
-            return self._default_mount
+        if (self._root_mount is not None
+                and self._root_mount.resolve_command(cmd_name) is not None):
+            return self._root_mount
         for m in self._mounts:
             if m.resolve_command(cmd_name) is not None:
                 return m
@@ -263,9 +266,10 @@ class MountRegistry:
         Resolution order:
         1. First PathSpec path (or cwd) → mount_for(path)
         2. If mount lacks the command → mount_for_command(cmd_name)
-        3. If a read-only command's paths are all cached → use cache
-           mount instead. Write commands always stay on the real mount
-           so mutations reach the backend rather than just the cache.
+        3. For a read-only command on a caching backend under ALWAYS
+           consistency, evict stale entries from the hidden file cache so
+           the in-place read-through serves fresh bytes. The command always
+           stays on its real mount; the cache is never a mount.
 
         Args:
             cmd_name (str): command name.
@@ -334,8 +338,8 @@ class MountRegistry:
                 await cache.remove(key)
 
     @property
-    def default_mount(self) -> MountEntry | None:
-        return self._default_mount
+    def root_mount(self) -> MountEntry | None:
+        return self._root_mount
 
     @property
     def file_cache(self) -> FileCacheMixin | None:

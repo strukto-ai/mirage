@@ -315,7 +315,7 @@ def _remote_registry_with_cache():
     reg.mount("/ssh/", SSHResource(SSHConfig(host="example", root="/srv")),
               MountMode.WRITE)
     cache = RAMFileCacheStore()
-    reg.set_default_mount(cache)
+    reg.set_root_mount(cache)
     return reg, cache
 
 
@@ -358,7 +358,7 @@ def _path_bound_registry_with_default():
     reg.mount("/limited/", _LimitedResource(), MountMode.WRITE)
     fallback = _FallbackResource()
     fallback.register(_fallback_only)
-    reg.set_default_mount(fallback)
+    reg.set_root_mount(fallback)
     return reg
 
 
@@ -379,4 +379,4 @@ async def test_resolve_mount_allows_default_without_path_binding():
     reg = _path_bound_registry_with_default()
     mount = await reg.resolve_mount("fallback-only", [], "/limited")
     assert mount is not None
-    assert mount.prefix == "/_default/"
+    assert mount.prefix == "/"

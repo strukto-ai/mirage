@@ -2379,11 +2379,11 @@ def test_unmount_closes_resource_when_owned():
 
 
 def test_unmount_rejects_reserved_prefixes():
-    """unmount of cache root / history view / dev / unknown prefix raises."""
+    """unmount of virtual root / history view / dev / unknown prefix raises."""
     ws = _ws()
     import pytest
 
-    with pytest.raises(ValueError, match="cache root"):
+    with pytest.raises(ValueError, match="virtual root"):
         asyncio.run(ws.unmount("/"))
     with pytest.raises(ValueError, match="history view"):
         asyncio.run(ws.unmount("/.bash_history"))

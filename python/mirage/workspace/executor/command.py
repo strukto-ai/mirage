@@ -446,7 +446,7 @@ async def handle_command(
                 io.exit_code = 1
 
     prefix = mount.prefix.rstrip("/")
-    if prefix and mount is not registry.default_mount:
+    if prefix:
         io.reads = {prefix + k: v for k, v in io.reads.items()}
         io.writes = {prefix + k: v for k, v in io.writes.items()}
         io.cache = [prefix + p for p in io.cache]

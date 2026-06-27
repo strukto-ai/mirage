@@ -29,8 +29,8 @@ def _build_ws(n_lines: int) -> Workspace:
 
 def _override(ws: Workspace, name: str, safeguard: CommandSafeguard) -> None:
     mounts = list(ws._registry._mounts)
-    if ws._registry.default_mount is not None:
-        mounts.append(ws._registry.default_mount)
+    if ws._registry.root_mount is not None:
+        mounts.append(ws._registry.root_mount)
     for m in mounts:
         m.command_safeguards[name] = safeguard
 

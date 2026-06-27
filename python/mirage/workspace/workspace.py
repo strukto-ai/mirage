@@ -105,7 +105,7 @@ class Workspace:
             max_drain = cache.max_drain_bytes if cache is not None else None
             self._cache = RAMFileCacheStore(cache_limit=limit,
                                             max_drain_bytes=max_drain)
-        self._registry.set_default_mount(RAMResource())
+        self._registry.set_root_mount(RAMResource())
         self._locked_paths: set[str] = set()
         self._closed = False
         self._drift_policy: DriftPolicy = DriftPolicy.OFF
@@ -184,12 +184,6 @@ class Workspace:
         return self._cache
 
     @property
-    def cache_mount(self) -> MountEntry:
-        m = self._registry.default_mount
-        assert m is not None, "cache mount is initialized in __init__"
-        return m
-
-    @property
     def max_drain_bytes(self) -> int | None:
         return self._cache.max_drain_bytes
 
@@ -223,8 +217,8 @@ class Workspace:
             raise RuntimeError("Workspace is closed")
         stripped = prefix.strip("/")
         norm = ("/" + stripped + "/" if stripped else "/")
-        if norm in ("/", "/_default/"):
-            raise ValueError(f"cannot unmount cache root: {prefix!r}")
+        if norm == "/":
+            raise ValueError(f"cannot unmount the virtual root: {prefix!r}")
         if norm == "/dev/":
             raise ValueError("cannot unmount reserved prefix: '/dev/'")
         if norm == HISTORY_PREFIX + "/":
@@ -516,16 +510,16 @@ class Workspace:
     def _infrastructure_mount_prefixes(self) -> set[str]:
         """Mount prefixes a session is always allowed to touch.
 
-        The cache mount (where text-processing commands like ``wc``
+        The virtual root (where text-processing commands like ``wc``
         without a path argument resolve), the device mount, and the
         history view are infrastructure: they hold no user
         credentials, and rejecting them would break common shell
         idioms or the history builtin.
         """
         prefixes = {"/dev", HISTORY_PREFIX}
-        default_mount = self._registry.default_mount
-        if default_mount is not None:
-            prefixes.add("/" + default_mount.prefix.strip("/"))
+        root_mount = self._registry.root_mount
+        if root_mount is not None:
+            prefixes.add("/" + root_mount.prefix.strip("/"))
         return prefixes
 
     def get_session(self, session_id: str) -> Session:

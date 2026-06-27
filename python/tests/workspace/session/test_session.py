@@ -124,13 +124,13 @@ def test_fork_copies_every_field_including_allowed_mounts():
         shell_options={"errexit": True},
         readonly_vars={"HOME"},
         arrays={"ARGV": ["a", "b"]},
-        allowed_mounts=frozenset({"/s3", "/dev", "/_default"}),
+        allowed_mounts=frozenset({"/s3", "/dev", "/"}),
     )
     forked = original.fork()
     assert forked.session_id == "orig"
     assert forked.cwd == "/disk"
     assert forked.env == {"FOO": "bar"}
-    assert forked.allowed_mounts == frozenset({"/s3", "/dev", "/_default"})
+    assert forked.allowed_mounts == frozenset({"/s3", "/dev", "/"})
     assert forked.shell_options == {"errexit": True}
     assert "HOME" in forked.readonly_vars
     assert forked.arrays == {"ARGV": ["a", "b"]}
