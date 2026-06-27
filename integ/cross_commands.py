@@ -140,6 +140,73 @@ async def check_move(ws: Workspace, dst: str, label: str) -> None:
     check(f"{label}: mv removes source", code != 0)
 
 
+async def check_cross_mount_cache(ws: Workspace, s3_client,
+                                  label: str) -> None:
+    # A cross-mount read relays through the dispatcher; that relayed path must
+    # serve warm bytes from the file cache, not re-fetch the backend. Warm the
+    # S3 object with a single-mount cat, mutate it out-of-band via boto3, then
+    # exercise the whole read family with the cached operand on /s3 and a live
+    # operand on /ram. Under LAZY the cached v1 (keepme/mid/last) must win for
+    # every command; a relayed path that skipped the cache would fetch v2
+    # (nomatch) and these checks would fail. wc discriminates on line count
+    # (cached 3 vs v2's 1) and grep on a v1-only token.
+    s3_client.put_object(Bucket=S3_BUCKET,
+                         Key="cache/x.txt",
+                         Body=b"keepme\nmid\nlast\n")
+    out, _, _ = await run(ws, "cat /s3/cache/x.txt")
+    check(f"{label}: warm read caches v1", out == "keepme\nmid\nlast\n")
+    s3_client.put_object(Bucket=S3_BUCKET,
+                         Key="cache/x.txt",
+                         Body=b"nomatch\n")
+    src = "/ram/dir/a.txt"
+    x = "/s3/cache/x.txt"
+    out, _, _ = await run(ws, f"cat {src} {x}")
+    check(f"{label}: cross cat serves cached",
+          out == "aaa\nkeepme\nmid\nlast\n")
+    out, _, _ = await run(ws, f"head -n 1 {src} {x}")
+    check(f"{label}: cross head serves cached", "keepme" in out
+          and "nomatch" not in out)
+    out, _, _ = await run(ws, f"tail -n 1 {src} {x}")
+    check(f"{label}: cross tail serves cached", "last" in out
+          and "nomatch" not in out)
+    out, _, _ = await run(ws, f"wc -l {src} {x}")
+    check(f"{label}: cross wc serves cached", "4 total" in out)
+    out, _, _ = await run(ws, f"grep keepme {src} {x}")
+    check(f"{label}: cross grep serves cached", f"{x}:keepme" in out)
+
+
+async def check_glob_cache(ws: Workspace, s3_client, label: str) -> None:
+    # Glob multi-file warm serving on a single remote mount: warm every file
+    # under glob/, mutate one out-of-band, then run the read family over
+    # glob/*.txt. The glob expands to both files; each must serve its cached
+    # bytes (a.txt's stale v1, not v2). a.txt's v2 grows to two lines so wc and
+    # the line-shape commands discriminate cache from backend; grep keys on a
+    # v1-only token.
+    s3_client.put_object(Bucket=S3_BUCKET,
+                         Key="glob/a.txt",
+                         Body=b"alpha-v1\n")
+    s3_client.put_object(Bucket=S3_BUCKET,
+                         Key="glob/b.txt",
+                         Body=b"bravo-v1\n")
+    await run(ws, "cat /s3/glob/a.txt /s3/glob/b.txt")
+    s3_client.put_object(Bucket=S3_BUCKET,
+                         Key="glob/a.txt",
+                         Body=b"alpha-v2\nEXTRA\n")
+    g = "/s3/glob/*.txt"
+    out, _, _ = await run(ws, f"head -n 1 {g}")
+    check(f"{label}: glob head serves cached", "alpha-v1" in out
+          and "alpha-v2" not in out)
+    out, _, _ = await run(ws, f"tail -n 1 {g}")
+    check(f"{label}: glob tail serves cached", "alpha-v1" in out
+          and "EXTRA" not in out)
+    out, _, _ = await run(ws, f"wc -l {g}")
+    check(f"{label}: glob wc serves cached", "2 total" in out
+          and "3 total" not in out)
+    out, _, _ = await run(ws, f"grep alpha-v1 {g}")
+    check(f"{label}: glob grep serves cached", "/s3/glob/a.txt:alpha-v1"
+          in out)
+
+
 async def exercise(ws: Workspace, dst: str, label: str,
                    expect_dirs: bool) -> None:
     print(f"===== ram -> {label} =====")
@@ -157,8 +224,8 @@ async def main() -> None:
     server.start()
     host, port = server.get_host_and_port()
     endpoint = f"http://{host}:{port}"
-    boto3.client("s3", endpoint_url=endpoint,
-                 **CREDS).create_bucket(Bucket=S3_BUCKET)
+    s3_client = boto3.client("s3", endpoint_url=endpoint, **CREDS)
+    s3_client.create_bucket(Bucket=S3_BUCKET)
 
     mounts = {"/ram": RAMResource(), "/ram2": RAMResource()}
     mounts["/s3"] = S3Resource(
@@ -182,6 +249,8 @@ async def main() -> None:
         else:
             print("SKIP redis (REDIS_URL unset)")
         await exercise(ws, "/s3", "s3", expect_dirs=False)
+        await check_cross_mount_cache(ws, s3_client, "s3")
+        await check_glob_cache(ws, s3_client, "s3")
     finally:
         server.stop()
 
