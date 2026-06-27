@@ -16,17 +16,23 @@ import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
 from mirage.core.ssh._client import _abs
-from mirage.types import PathSpec
+from mirage.core.ssh.stat import stat
+from mirage.types import FileType, PathSpec
 
 
 async def du(accessor: SSHAccessor, path: PathSpec) -> int:
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
-    if isinstance(path, PathSpec):
-        path = path.strip_prefix
+    try:
+        info = await stat(accessor, path)
+    except FileNotFoundError:
+        info = None
+    if info is not None and info.type != FileType.DIRECTORY:
+        return info.size or 0
+    target = path.strip_prefix if isinstance(path, PathSpec) else path
     config = accessor.config
     sftp = await accessor.sftp()
-    return await _du_walk(sftp, _abs(config, path))
+    return await _du_walk(sftp, _abs(config, target))
 
 
 async def du_all(
@@ -35,12 +41,17 @@ async def du_all(
 ) -> tuple[list[tuple[str, int]], int]:
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
-    if isinstance(path, PathSpec):
-        path = path.strip_prefix
+    try:
+        info = await stat(accessor, path)
+    except FileNotFoundError:
+        info = None
+    if info is not None and info.type != FileType.DIRECTORY:
+        return [], info.size or 0
+    target = path.strip_prefix if isinstance(path, PathSpec) else path
     config = accessor.config
     sftp = await accessor.sftp()
     entries: list[tuple[str, int]] = []
-    total = await _du_walk_all(sftp, config, path, entries)
+    total = await _du_walk_all(sftp, config, target, entries)
     entries.sort()
     return entries, total
 
