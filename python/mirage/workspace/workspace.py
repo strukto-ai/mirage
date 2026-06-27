@@ -42,6 +42,7 @@ from mirage.ops.os_patch import make_os_module
 from mirage.provision import ProvisionResult
 from mirage.resource.base import BaseResource
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
+from mirage.resource.ram import RAMResource
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
 from mirage.types import (DEFAULT_AGENT_ID, DEFAULT_SESSION_ID,
@@ -104,7 +105,7 @@ class Workspace:
             max_drain = cache.max_drain_bytes if cache is not None else None
             self._cache = RAMFileCacheStore(cache_limit=limit,
                                             max_drain_bytes=max_drain)
-        self._registry.set_default_mount(self._cache)
+        self._registry.set_default_mount(RAMResource())
         self._locked_paths: set[str] = set()
         self._closed = False
         self._drift_policy: DriftPolicy = DriftPolicy.OFF

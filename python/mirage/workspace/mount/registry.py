@@ -292,20 +292,16 @@ class MountRegistry:
         if mount is None:
             return None
 
-        default = self._default_mount
         resolved = mount.resolve_command(cmd_name)
-        # Warm reads are served in place by with_read_cache (content + the
-        # size a render-dependent backend can't compute itself), so a command
-        # stays on its real mount and keeps its safeguards/custom handlers
-        # rather than being redirected to the cache mount. Under ALWAYS we
-        # still evict stale cached entries here so the read-through serves
-        # fresh bytes.
-        if (default is not None and path_scopes and resolved is not None
-                and not resolved.write
-                and isinstance(default.resource, FileCacheMixin)
+        # Warm reads are served in place by with_read_cache, so a read-only
+        # command stays on its real mount. The cache is a hidden store (not a
+        # mount); under ALWAYS we evict stale entries from it here so the
+        # read-through serves fresh bytes.
+        if (self._file_cache is not None and path_scopes
+                and resolved is not None and not resolved.write
                 and mount.resource.caches_reads
                 and self._consistency == ConsistencyPolicy.ALWAYS):
-            await self._evict_stale(mount, default.resource, path_scopes)
+            await self._evict_stale(mount, self._file_cache, path_scopes)
 
         return mount
 
@@ -340,6 +336,10 @@ class MountRegistry:
     @property
     def default_mount(self) -> MountEntry | None:
         return self._default_mount
+
+    @property
+    def file_cache(self) -> FileCacheMixin | None:
+        return self._file_cache
 
     def mounts(self) -> list[MountEntry]:
         return list(self._mounts)
