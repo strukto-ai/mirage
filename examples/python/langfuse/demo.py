@@ -14,6 +14,7 @@
 
 import asyncio
 import os
+import time
 
 from dotenv import load_dotenv
 
@@ -47,6 +48,12 @@ async def _run(ws, cmd):
     if not out and not err:
         print(f"  (empty, exit={r.exit_code})")
     return r
+
+
+async def _timed(ws, cmd):
+    start = time.perf_counter()
+    out = await (await ws.execute(cmd)).stdout_str()
+    return (time.perf_counter() - start) * 1000, out
 
 
 async def main():
@@ -172,6 +179,27 @@ async def main():
     await ws.execute('cd "/langfuse/prompts"')
     await _run(ws, "pwd")
     await _run(ws, "ls")
+
+    print("\n" + "=" * 60)
+    print("CACHING: warm reads served from cache (no backend fetch)")
+    print("=" * 60)
+    r = await ws.execute('find "/langfuse/prompts/" -name "*.json"')
+    prompt_files = (await r.stdout_str()).strip().splitlines()
+    if prompt_files:
+        cache_file = prompt_files[0].strip()
+        cold_ms, body = await _timed(ws, f'cat "{cache_file}"')
+        warm_ms, _ = await _timed(ws, f'cat "{cache_file}"')
+        grep_ms, _ = await _timed(ws, f'grep . "{cache_file}"')
+        head_ms, _ = await _timed(ws, f'head -n 1 "{cache_file}"')
+        tail_ms, _ = await _timed(ws, f'tail -n 1 "{cache_file}"')
+        wc_ms, _ = await _timed(ws, f'wc -l "{cache_file}"')
+        print(f"  file={cache_file} size={len(body)}B")
+        print(
+            f"  cold cat={cold_ms:.0f}ms  warm cat={warm_ms:.0f}ms  "
+            f"grep={grep_ms:.0f}ms head={head_ms:.0f}ms tail={tail_ms:.0f}ms "
+            f"wc={wc_ms:.0f}ms")
+        print(f"  served_from_cache={warm_ms < cold_ms / 5} "
+              f"(warm speedup {cold_ms / max(warm_ms, 0.001):.0f}x)")
 
 
 if __name__ == "__main__":
