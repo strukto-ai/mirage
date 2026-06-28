@@ -142,6 +142,28 @@ async def test_stat_index_fast_path_matches_sdk(accessor, files, index,
 
 
 @pytest.mark.asyncio
+async def test_stat_directory_index_fast_path_matches_sdk(
+    accessor,
+    files,
+    index,
+    remote_root,
+):
+    files.directories[f"{remote_root}/reports"] = [
+        directory_entry(f"{remote_root}/reports/archive"),
+    ]
+    files.directory_metadata.add(f"{remote_root}/reports/archive")
+    await readdir(accessor, PathSpec.from_str_path("/volume/reports",
+                                                   "/volume"), index)
+    path = PathSpec.from_str_path("/volume/reports/archive", "/volume")
+    fast = await stat(accessor, path, index)
+    slow = await stat(accessor, path, RAMIndexCacheStore(ttl=600))
+    assert fast == slow
+    assert files.get_directory_metadata_calls == [
+        f"{remote_root}/reports/archive"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_stat_root_does_not_call_sdk(accessor, files):
     path = PathSpec.from_str_path("/volume", "/volume")
     result = await stat(accessor, path)

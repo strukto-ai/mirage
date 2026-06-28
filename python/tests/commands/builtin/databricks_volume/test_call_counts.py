@@ -1,3 +1,4 @@
+import time
 from functools import partial
 
 import pytest
@@ -17,6 +18,9 @@ from tests.core.databricks_volume.conftest import (FakeClient, FakeFiles,
                                                    directory_entry, file_entry)
 
 MODIFIED_MS = 1_700_000_000_000
+FROZEN_NOW_S = 1_700_000_000
+DAY_S = 86_400
+AGES_DAYS = (1, 2, 3, 10, 20)
 
 
 def _rig(
@@ -152,12 +156,19 @@ async def test_find_size_reads_size_from_index():
 
 
 @pytest.mark.asyncio
-async def test_find_mtime_reads_modified_from_index():
+async def test_find_mtime_reads_modified_from_index(monkeypatch):
+    monkeypatch.setattr(time, "time", lambda: float(FROZEN_NOW_S))
     accessor, files, index, root = _rig()
-    _seed_flat(files, root, count=5)
+    files.directories[f"{root}/sub"] = [
+        file_entry(f"{root}/sub/f{i}.txt",
+                   size=i + 1,
+                   modified=(FROZEN_NOW_S - age * DAY_S) * 1000)
+        for i, age in enumerate(AGES_DAYS)
+    ]
     files.directory_metadata.add(f"{root}/sub")
-    results = await _run_find(accessor, index, mtime="-100000")
-    assert len(results) == 5
+    results = await _run_find(accessor, index, mtime="-5")
+    assert sorted(r.rsplit("/", 1)[-1]
+                  for r in results) == ["f0.txt", "f1.txt", "f2.txt"]
     assert files.list_directory_calls == [f"{root}/sub"]
     child_metadata = [c for c in files.get_metadata_calls if "/sub/" in c]
     assert child_metadata == []

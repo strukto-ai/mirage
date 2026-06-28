@@ -77,7 +77,7 @@ async def _directory_stat_or_raise(
 async def stat(
     accessor: DatabricksVolumeAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> FileStat:
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)

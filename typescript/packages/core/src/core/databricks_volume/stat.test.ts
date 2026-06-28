@@ -101,6 +101,27 @@ describe('stat index fast path', () => {
     const slow = await stat(makeAccessor(), spec('/volume/reports/a.txt'))
     expect(fast).toEqual(slow)
   })
+
+  it('returns the same directory FileStat from the index as from the SDK', async () => {
+    const { fetch } = routedFetch((call) => {
+      if (call.method === 'GET' && call.url.includes('/fs/directories/')) {
+        return jsonResponse({
+          contents: [{ path: `${TEST_ROOT}/reports/sub`, is_directory: true }],
+        })
+      }
+      if (call.method === 'HEAD' && call.url.includes('/fs/files/')) {
+        return notFoundResponse()
+      }
+      return new Response(null, { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetch)
+    const index = new RAMIndexCacheStore()
+    await readdir(makeAccessor(), spec('/volume/reports'), index)
+    const fast = await stat(makeAccessor(), spec('/volume/reports/sub'), index)
+    const slow = await stat(makeAccessor(), spec('/volume/reports/sub'))
+    expect(fast.type).toBe(FileType.DIRECTORY)
+    expect(fast).toEqual(slow)
+  })
 })
 
 describe('stat', () => {
