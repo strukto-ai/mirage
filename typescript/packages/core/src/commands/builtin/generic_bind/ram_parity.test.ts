@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { RAM_OPS } from '../ram/ops.ts'
+import { RAM_CMD_OPS } from '../ram/ops.ts'
 import type { CommandFnResult, CommandOpts, RegisteredCommand } from '../../config.ts'
 import { type ByteSource, IOResult, materialize } from '../../../io/types.ts'
 import { RAMResource } from '../../../resource/ram/ram.ts'
@@ -63,7 +63,7 @@ async function render(result: CommandFnResult): Promise<{ out: string; exit: num
   return { out, exit: io.exitCode }
 }
 
-const FACTORY = makeGenericCommands(ResourceName.RAM, RAM_OPS)
+const FACTORY = makeGenericCommands(ResourceName.RAM, RAM_CMD_OPS)
 
 function factoryCmd(name: string): RegisteredCommand {
   const cmd = FACTORY.find((c) => c.name === name)

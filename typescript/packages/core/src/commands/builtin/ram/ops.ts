@@ -30,7 +30,7 @@ import { unlink as ramUnlink } from '../../../core/ram/unlink.ts'
 import { writeBytes as ramWrite } from '../../../core/ram/write.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
 
-export const RAM_OPS: CommandIO<RAMAccessor> = {
+export const RAM_CMD_OPS: CommandIO<RAMAccessor> = {
   readdir: ramReaddir,
   readBytes: ramRead,
   readStream: ramStream,
