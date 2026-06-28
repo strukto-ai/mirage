@@ -90,7 +90,7 @@ export type DuAllOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   index?: IndexCacheStore,
-) => Promise<Array<[string, number]>>
+) => Promise<[[string, number][], number]>
 
 export type ResolveGlobOp<A extends Accessor = Accessor> = (
   accessor: A,
