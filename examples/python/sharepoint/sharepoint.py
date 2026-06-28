@@ -91,6 +91,9 @@ def build_tests(base: str, test_dir: str, test_file: str):
         ("rm link", f'rm "{test_dir}/link.txt"'),
         ("rm moved", f'rm "{test_dir}/moved.txt"'),
         ("cat > write2", f'echo "second file" > "{test_dir}/file2.txt"'),
+        ("sed -f", f"echo 's/hello/HELLO/' | tee \"{test_dir}/prog.sed\""
+         f" > /dev/null && sed -f \"{test_dir}/prog.sed\" \"{test_file}\""
+         f" && rm \"{test_dir}/prog.sed\""),
         ("grep -r", f'grep -r hello "{test_dir}"'),
         ("grep -rl", f'grep -rl hello "{test_dir}"'),
         ("find -name", f'find "{test_dir}" -name "*.txt"'),

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import type { PathSpec } from '../../../types.ts'
+import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { executeProgram, parseOneCommand, parseProgram, type SedCommand } from '../sed_helper.ts'
 import { readStdinAsync } from '../utils/stream.ts'
@@ -28,11 +28,23 @@ export async function sedGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<CommandFnResult> {
-  // The script comes from -e expressions (joined with newlines, GNU-style) when
-  // any were given, otherwise from the first positional operand.
+  // The script comes from -e expressions and -f script files (joined with
+  // newlines, -e then -f as grep does) when any were given, otherwise from the
+  // first positional operand.
   const eVals = opts.flags.e
   const eList = Array.isArray(eVals) ? eVals : typeof eVals === 'string' ? [eVals] : []
-  const script = eList.length > 0 ? eList.join('\n') : texts[0]
+  const fVals = opts.flags.f
+  const fList = Array.isArray(fVals) ? fVals : typeof fVals === 'string' ? [fVals] : []
+  const scriptParts = [...eList]
+  for (const filePath of fList) {
+    const spec = PathSpec.fromStrPath(filePath, paths[0]?.prefix ?? opts.mountPrefix ?? '')
+    let text = DEC.decode(await materialize(stream(spec)))
+    if (text.endsWith('\n')) text = text.slice(0, -1)
+    scriptParts.push(text)
+  }
+  const flagScript = eList.length > 0 || fList.length > 0
+  if (!flagScript && texts[0] !== undefined) scriptParts.push(texts[0])
+  const script = scriptParts.length > 0 ? scriptParts.join('\n') : undefined
   if (script === undefined) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('sed: missing script\n') })]
   }

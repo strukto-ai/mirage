@@ -980,6 +980,30 @@ EARTH
 foo
 bar
 baz
+=== sed_f_file ===
+hello
+EARTH
+foo
+bar
+baz
+=== sed_f_multi ===
+hello
+EARTH
+FOO
+bar
+baz
+=== sed_ef_combined ===
+hello
+EARTH
+FOO
+bar
+baz
+=== sed_f_stdin ===
+hello
+EARTH
+foo
+bar
+baz
 === sed_amp ===
 hello
 [world]
@@ -1795,8 +1819,8 @@ disptree/d
 disptree/d/y.txt
 disptree/x.txt
 === history_last_two ===
-473  (cd /data && ls -R disptree)
-474  (cd /data && find disptree)
+477  (cd /data && ls -R disptree)
+478  (cd /data && find disptree)
 === bash_history_tail ===
 (cd /data && ls -R disptree)
 (cd /data && find disptree)

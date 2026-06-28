@@ -298,6 +298,25 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   // Multiple -e expressions apply in sequence; -e with a file argument.
   ['sed_multi_e', "echo a | sed -e 's/a/b/' -e 's/b/c/'"],
   ['sed_e_file', 'sed -e s/world/EARTH/ /data/a.txt'],
+  // -f reads the script from a file (script lives on the data mount). The
+  // script file is created and removed inside the case so directory listings
+  // stay unpolluted.
+  [
+    'sed_f_file',
+    "echo 's/world/EARTH/' | tee /data/prog.sed > /dev/null && sed -f /data/prog.sed /data/a.txt && rm /data/prog.sed",
+  ],
+  [
+    'sed_f_multi',
+    "echo 's/world/EARTH/;s/foo/FOO/' | tee /data/prog.sed > /dev/null && sed -f /data/prog.sed /data/a.txt && rm /data/prog.sed",
+  ],
+  [
+    'sed_ef_combined',
+    "echo 's/foo/FOO/' | tee /data/prog.sed > /dev/null && sed -e s/world/EARTH/ -f /data/prog.sed /data/a.txt && rm /data/prog.sed",
+  ],
+  [
+    'sed_f_stdin',
+    "echo 's/world/EARTH/' | tee /data/prog.sed > /dev/null && cat /data/a.txt | sed -f /data/prog.sed && rm /data/prog.sed",
+  ],
   // Broader GNU sed surface: & whole-match, s flags, addresses, hold/branch,
   // multi-command, alt delimiters, a/i/c forms.
   ['sed_amp', "sed 's/world/[&]/' /data/a.txt"],

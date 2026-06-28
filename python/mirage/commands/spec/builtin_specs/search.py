@@ -86,11 +86,26 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-i"),
             # -e takes a script and may repeat; joined with newlines.
             Option(short="-e", value_kind=OperandKind.TEXT, repeatable=True),
+            # -f reads the script from a file and may repeat (like grep -f);
+            # its value is a PATH so it routes and is read from the mount.
+            Option(short="-f", value_kind=OperandKind.PATH, repeatable=True),
             Option(short="-n"),
             Option(short="-E"),
             Option(short="-r"),
         ),
-        positional=(Operand(kind=OperandKind.TEXT, provided_by=("-e", )), ),
+        # provided_by lists the flags that can supply this positional slot's
+        # value; when any is present the parser skips the slot so the next
+        # word is not mis-grabbed. For sed the first operand is the script
+        # (TEXT), but only when neither -e nor -f gave one (GNU: "if no -e or
+        # -f, the first non-option argument is the script"). Examples:
+        #   sed 's/a/b/' f.txt        -> 's/a/b/' is the script; f.txt a file
+        #   sed -e 's/a/b/' f.txt     -> -e is the script; f.txt reflows to
+        #                                a file path in rest (slot skipped)
+        #   sed -f prog.sed f.txt     -> prog.sed is the script; f.txt a file
+        # Without provided_by, the -e/-f forms would mislabel f.txt as the
+        # script (TEXT) and never read it as a file.
+        positional=(Operand(kind=OperandKind.TEXT,
+                            provided_by=("-e", "-f")), ),
         rest=Operand(kind=OperandKind.PATH),
     ),
     'jq':
