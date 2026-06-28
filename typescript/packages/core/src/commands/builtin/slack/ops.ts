@@ -13,29 +13,26 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SlackAccessor } from '../../../accessor/slack.ts'
-import { resolveSlackGlob } from '../../../core/slack/glob.ts'
+import type { IndexCacheStore } from '../../../cache/index/index.ts'
+import { read as slackRead } from '../../../core/slack/read.ts'
+import { readdir as slackReaddir } from '../../../core/slack/readdir.ts'
 import { stat as slackStat } from '../../../core/slack/stat.ts'
-import { ResourceName, type PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { statGeneric } from '../generic/stat.ts'
-import { metadataProvision } from './_provision.ts'
+import type { PathSpec } from '../../../types.ts'
+import type { CommandIO } from '../generic_bind/index.ts'
 
-async function statCommand(
+async function* slackReadStream(
   accessor: SlackAccessor,
-  paths: PathSpec[],
-  _texts: string[],
-  opts: CommandOpts,
-): Promise<CommandFnResult> {
-  const resolved =
-    paths.length > 0 ? await resolveSlackGlob(accessor, paths, opts.index ?? undefined) : []
-  return statGeneric(resolved, opts, (p) => slackStat(accessor, p, opts.index ?? undefined))
+  path: PathSpec,
+  index?: IndexCacheStore,
+): AsyncIterable<Uint8Array> {
+  yield await slackRead(accessor, path, index)
 }
 
-export const SLACK_STAT = command({
-  name: 'stat',
-  resource: ResourceName.SLACK,
-  spec: specOf('stat'),
-  fn: statCommand,
-  provision: metadataProvision,
-})
+export const SLACK_CMD_OPS: CommandIO<SlackAccessor> = {
+  readdir: slackReaddir,
+  readBytes: slackRead,
+  readStream: slackReadStream,
+  stat: slackStat,
+  isMounted: () => true,
+  local: false,
+}

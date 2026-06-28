@@ -12,14 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ResourceName } from '../../../types.ts'
-import { command } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { basenameFn } from '../generic/basename.ts'
+import type { GDocsAccessor } from '../../../accessor/gdocs.ts'
+import { read as gdocsRead, stream as gdocsStream } from '../../../core/gdocs/read.ts'
+import { readdir as gdocsReaddir } from '../../../core/gdocs/readdir.ts'
+import { stat as gdocsStat } from '../../../core/gdocs/stat.ts'
+import type { CommandIO } from '../generic_bind/index.ts'
 
-export const GSHEETS_BASENAME = command({
-  name: 'basename',
-  resource: ResourceName.GSHEETS,
-  spec: specOf('basename'),
-  fn: basenameFn,
-})
+export const GDOCS_CMD_OPS: CommandIO<GDocsAccessor> = {
+  readdir: gdocsReaddir,
+  readBytes: gdocsRead,
+  readStream: gdocsStream,
+  stat: gdocsStat,
+  isMounted: () => true,
+  local: false,
+}

@@ -15,7 +15,9 @@
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { FakeSlackTransport, makeFakeResource } from './_test_util.ts'
-import { SLACK_DIRNAME } from './dirname.ts'
+import { SLACK_COMMANDS } from './index.ts'
+
+const SLACK_DIRNAME = SLACK_COMMANDS.filter((c) => c.name === 'dirname' && c.filetype == null)
 
 const DEC = new TextDecoder()
 

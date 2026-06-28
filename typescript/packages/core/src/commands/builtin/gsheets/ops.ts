@@ -12,14 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ResourceName } from '../../../types.ts'
-import { command } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { dirnameFn } from '../generic/dirname.ts'
+import type { GSheetsAccessor } from '../../../accessor/gsheets.ts'
+import { read as gsheetsRead, stream as gsheetsStream } from '../../../core/gsheets/read.ts'
+import { readdir as gsheetsReaddir } from '../../../core/gsheets/readdir.ts'
+import { stat as gsheetsStat } from '../../../core/gsheets/stat.ts'
+import type { CommandIO } from '../generic_bind/index.ts'
 
-export const GDRIVE_DIRNAME = command({
-  name: 'dirname',
-  resource: ResourceName.GDRIVE,
-  spec: specOf('dirname'),
-  fn: dirnameFn,
-})
+export const GSHEETS_CMD_OPS: CommandIO<GSheetsAccessor> = {
+  readdir: gsheetsReaddir,
+  readBytes: gsheetsRead,
+  readStream: gsheetsStream,
+  stat: gsheetsStat,
+  isMounted: () => true,
+  local: false,
+}

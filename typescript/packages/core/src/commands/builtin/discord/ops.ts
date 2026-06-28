@@ -13,29 +13,26 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiscordAccessor } from '../../../accessor/discord.ts'
-import { resolveDiscordGlob } from '../../../core/discord/glob.ts'
+import type { IndexCacheStore } from '../../../cache/index/index.ts'
+import { read as discordRead } from '../../../core/discord/read.ts'
+import { readdir as discordReaddir } from '../../../core/discord/readdir.ts'
 import { stat as discordStat } from '../../../core/discord/stat.ts'
-import { ResourceName, type PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { statGeneric } from '../generic/stat.ts'
-import { metadataProvision } from './_provision.ts'
+import type { PathSpec } from '../../../types.ts'
+import type { CommandIO } from '../generic_bind/index.ts'
 
-async function statCommand(
+async function* discordReadStream(
   accessor: DiscordAccessor,
-  paths: PathSpec[],
-  _texts: string[],
-  opts: CommandOpts,
-): Promise<CommandFnResult> {
-  const resolved =
-    paths.length > 0 ? await resolveDiscordGlob(accessor, paths, opts.index ?? undefined) : []
-  return statGeneric(resolved, opts, (p) => discordStat(accessor, p, opts.index ?? undefined))
+  path: PathSpec,
+  index?: IndexCacheStore,
+): AsyncIterable<Uint8Array> {
+  yield await discordRead(accessor, path, index)
 }
 
-export const DISCORD_STAT = command({
-  name: 'stat',
-  resource: ResourceName.DISCORD,
-  spec: specOf('stat'),
-  fn: statCommand,
-  provision: metadataProvision,
-})
+export const DISCORD_CMD_OPS: CommandIO<DiscordAccessor> = {
+  readdir: discordReaddir,
+  readBytes: discordRead,
+  readStream: discordReadStream,
+  stat: discordStat,
+  isMounted: () => true,
+  local: false,
+}

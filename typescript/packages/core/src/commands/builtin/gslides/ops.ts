@@ -13,29 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GSlidesAccessor } from '../../../accessor/gslides.ts'
-import { resolveGlob } from '../../../core/gslides/glob.ts'
+import { read as gslidesRead, stream as gslidesStream } from '../../../core/gslides/read.ts'
+import { readdir as gslidesReaddir } from '../../../core/gslides/readdir.ts'
 import { stat as gslidesStat } from '../../../core/gslides/stat.ts'
-import { ResourceName, type PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { realpathGeneric } from '../generic/realpath.ts'
+import type { CommandIO } from '../generic_bind/index.ts'
 
-async function realpathCommand(
-  accessor: GSlidesAccessor,
-  paths: PathSpec[],
-  texts: string[],
-  opts: CommandOpts,
-): Promise<CommandFnResult> {
-  const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  return realpathGeneric(resolved, texts, opts, (p) =>
-    gslidesStat(accessor, p, opts.index ?? undefined),
-  )
+export const GSLIDES_CMD_OPS: CommandIO<GSlidesAccessor> = {
+  readdir: gslidesReaddir,
+  readBytes: gslidesRead,
+  readStream: gslidesStream,
+  stat: gslidesStat,
+  isMounted: () => true,
+  local: false,
 }
-
-export const GSLIDES_REALPATH = command({
-  name: 'realpath',
-  resource: ResourceName.GSLIDES,
-  spec: specOf('realpath'),
-  fn: realpathCommand,
-})

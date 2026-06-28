@@ -12,14 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ResourceName } from '../../../types.ts'
-import { command } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { basenameFn } from '../generic/basename.ts'
+import type { GDriveAccessor } from '../../../accessor/gdrive.ts'
+import { read as gdriveRead, stream as gdriveStream } from '../../../core/gdrive/read.ts'
+import { readdir as gdriveReaddir } from '../../../core/gdrive/readdir.ts'
+import { stat as gdriveStat } from '../../../core/gdrive/stat.ts'
+import type { CommandIO } from '../generic_bind/index.ts'
 
-export const GDOCS_BASENAME = command({
-  name: 'basename',
-  resource: ResourceName.GDOCS,
-  spec: specOf('basename'),
-  fn: basenameFn,
-})
+export const GDRIVE_CMD_OPS: CommandIO<GDriveAccessor> = {
+  readdir: gdriveReaddir,
+  readBytes: gdriveRead,
+  readStream: gdriveStream,
+  stat: gdriveStat,
+  isMounted: () => true,
+  local: false,
+}

@@ -16,7 +16,9 @@ import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { FakeSlackTransport, makeFakeResource } from './_test_util.ts'
-import { SLACK_REALPATH } from './realpath.ts'
+import { SLACK_COMMANDS } from './index.ts'
+
+const SLACK_REALPATH = SLACK_COMMANDS.filter((c) => c.name === 'realpath' && c.filetype == null)
 
 const DEC = new TextDecoder()
 
