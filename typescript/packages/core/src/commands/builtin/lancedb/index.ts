@@ -12,29 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { LanceDBAccessor } from '../../../accessor/lancedb.ts'
+import { ResourceName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
-import { LANCEDB_CAT } from './cat.ts'
+import { makeGenericCommands } from '../generic_bind/index.ts'
 import { LANCEDB_FIND } from './find.ts'
-import { LANCEDB_GREP } from './grep.ts'
-import { LANCEDB_HEAD } from './head.ts'
-import { LANCEDB_LS } from './ls.ts'
-import { LANCEDB_RG } from './rg.ts'
+import { LANCEDB_CMD_OPS } from './ops.ts'
 import { LANCEDB_SEARCH } from './search.ts'
-import { LANCEDB_STAT } from './stat.ts'
-import { LANCEDB_TAIL } from './tail.ts'
-import { LANCEDB_TREE } from './tree.ts'
-import { LANCEDB_WC } from './wc.ts'
+
+const LANCEDB_OVERRIDES = new Set(['find', 'search', 'du'])
 
 export const LANCEDB_COMMANDS: readonly RegisteredCommand[] = [
-  ...LANCEDB_LS,
-  ...LANCEDB_STAT,
-  ...LANCEDB_CAT,
-  ...LANCEDB_TREE,
-  ...LANCEDB_WC,
+  ...makeGenericCommands<LanceDBAccessor>(ResourceName.LANCEDB, LANCEDB_CMD_OPS, {
+    overrides: LANCEDB_OVERRIDES,
+  }),
   ...LANCEDB_FIND,
   ...LANCEDB_SEARCH,
-  ...LANCEDB_GREP,
-  ...LANCEDB_RG,
-  ...LANCEDB_HEAD,
-  ...LANCEDB_TAIL,
 ]

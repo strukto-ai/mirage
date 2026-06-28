@@ -13,27 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { QdrantAccessor } from '../../../accessor/qdrant.ts'
-import { resolveGlob } from '../../../core/qdrant/glob.ts'
+import { read as qdrantRead } from '../../../core/qdrant/read.ts'
+import { readdir as qdrantReaddir } from '../../../core/qdrant/readdir.ts'
+import { stat as qdrantStat } from '../../../core/qdrant/stat.ts'
 import { stream as qdrantStream } from '../../../core/qdrant/stream.ts'
-import { ResourceName, type PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { wcGeneric } from '../generic/wc.ts'
+import type { CommandIO } from '../generic_bind/index.ts'
 
-async function wcCommand(
-  accessor: QdrantAccessor,
-  paths: PathSpec[],
-  texts: string[],
-  opts: CommandOpts,
-): Promise<CommandFnResult> {
-  const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  return wcGeneric(resolved, texts, opts, (p) => qdrantStream(accessor, p, opts.index ?? undefined))
+export const QDRANT_CMD_OPS: CommandIO<QdrantAccessor> = {
+  readdir: qdrantReaddir,
+  readBytes: qdrantRead,
+  readStream: qdrantStream,
+  stat: qdrantStat,
+  isMounted: () => true,
+  local: false,
 }
-
-export const QDRANT_WC = command({
-  name: 'wc',
-  resource: ResourceName.QDRANT,
-  spec: specOf('wc'),
-  fn: wcCommand,
-})

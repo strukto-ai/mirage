@@ -12,55 +12,38 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RegisteredCommand } from '../../config.ts'
-import { DATABRICKS_VOLUME_AWK } from './awk.ts'
-import { DATABRICKS_VOLUME_CAT } from './cat.ts'
-import { DATABRICKS_VOLUME_CP } from './cp.ts'
-import { DATABRICKS_VOLUME_CUT } from './cut.ts'
-import { DATABRICKS_VOLUME_DIFF } from './diff.ts'
+import type { DatabricksVolumeAccessor } from '../../../accessor/databricks_volume.ts'
+import { ResourceName } from '../../../types.ts'
+import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
+import { makeGenericCommands } from '../generic_bind/index.ts'
 import { DATABRICKS_VOLUME_FIND } from './find.ts'
-import { DATABRICKS_VOLUME_GREP } from './grep.ts'
 import { DATABRICKS_VOLUME_HEAD } from './head.ts'
-import { DATABRICKS_VOLUME_JQ } from './jq.ts'
-import { DATABRICKS_VOLUME_LS } from './ls.ts'
 import { DATABRICKS_VOLUME_MKDIR } from './mkdir.ts'
-import { DATABRICKS_VOLUME_MV } from './mv.ts'
-import { DATABRICKS_VOLUME_NL } from './nl.ts'
-import { DATABRICKS_VOLUME_RG } from './rg.ts'
+import { DATABRICKS_VOLUME_CMD_OPS } from './ops.ts'
+import { fileReadProvision, metadataProvision } from './provision.ts'
 import { DATABRICKS_VOLUME_RM } from './rm.ts'
 import { DATABRICKS_VOLUME_SED } from './sed.ts'
-import { DATABRICKS_VOLUME_SORT } from './sort.ts'
-import { DATABRICKS_VOLUME_STAT } from './stat.ts'
-import { DATABRICKS_VOLUME_TAIL } from './tail.ts'
 import { DATABRICKS_VOLUME_TOUCH } from './touch.ts'
-import { DATABRICKS_VOLUME_TR } from './tr.ts'
-import { DATABRICKS_VOLUME_TREE } from './tree.ts'
-import { DATABRICKS_VOLUME_UNIQ } from './uniq.ts'
-import { DATABRICKS_VOLUME_WC } from './wc.ts'
+
+const DATABRICKS_VOLUME_OVERRIDES = new Set(['head', 'sed', 'du', 'mkdir', 'touch', 'rm', 'find'])
 
 export const DATABRICKS_VOLUME_COMMANDS: readonly RegisteredCommand[] = [
-  ...DATABRICKS_VOLUME_AWK,
-  ...DATABRICKS_VOLUME_CAT,
-  ...DATABRICKS_VOLUME_CP,
-  ...DATABRICKS_VOLUME_CUT,
-  ...DATABRICKS_VOLUME_DIFF,
+  ...makeGenericCommands<DatabricksVolumeAccessor>(
+    ResourceName.DATABRICKS_VOLUME,
+    DATABRICKS_VOLUME_CMD_OPS,
+    {
+      overrides: DATABRICKS_VOLUME_OVERRIDES,
+      provisionOverrides: {
+        grep: fileReadProvision as ProvisionFn,
+        rg: fileReadProvision as ProvisionFn,
+        ls: metadataProvision as ProvisionFn,
+      },
+    },
+  ),
   ...DATABRICKS_VOLUME_FIND,
-  ...DATABRICKS_VOLUME_GREP,
   ...DATABRICKS_VOLUME_HEAD,
-  ...DATABRICKS_VOLUME_JQ,
-  ...DATABRICKS_VOLUME_LS,
   ...DATABRICKS_VOLUME_MKDIR,
-  ...DATABRICKS_VOLUME_MV,
-  ...DATABRICKS_VOLUME_NL,
-  ...DATABRICKS_VOLUME_RG,
+  ...DATABRICKS_VOLUME_TOUCH,
   ...DATABRICKS_VOLUME_RM,
   ...DATABRICKS_VOLUME_SED,
-  ...DATABRICKS_VOLUME_SORT,
-  ...DATABRICKS_VOLUME_STAT,
-  ...DATABRICKS_VOLUME_TAIL,
-  ...DATABRICKS_VOLUME_TOUCH,
-  ...DATABRICKS_VOLUME_TR,
-  ...DATABRICKS_VOLUME_TREE,
-  ...DATABRICKS_VOLUME_UNIQ,
-  ...DATABRICKS_VOLUME_WC,
 ]

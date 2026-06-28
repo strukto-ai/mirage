@@ -12,29 +12,32 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RegisteredCommand } from '../../config.ts'
+import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
+import { ResourceName } from '../../../types.ts'
+import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
+import { makeGenericCommands } from '../generic_bind/index.ts'
+import { metadataProvision } from './_provision.ts'
 import { MONGODB_CAT } from './cat.ts'
 import { MONGODB_FIND } from './find.ts'
 import { MONGODB_GREP } from './grep.ts'
-import { MONGODB_HEAD } from './head.ts'
-import { MONGODB_JQ } from './jq.ts'
-import { MONGODB_LS } from './ls.ts'
+import { MONGODB_CMD_OPS } from './ops.ts'
 import { MONGODB_RG } from './rg.ts'
-import { MONGODB_STAT } from './stat.ts'
 import { MONGODB_TAIL } from './tail.ts'
-import { MONGODB_TREE } from './tree.ts'
 import { MONGODB_WC } from './wc.ts'
 
+const MONGODB_OVERRIDES = new Set(['cat', 'find', 'grep', 'rg', 'tail', 'wc', 'du'])
+
 export const MONGODB_COMMANDS: readonly RegisteredCommand[] = [
-  ...MONGODB_LS,
-  ...MONGODB_STAT,
+  ...makeGenericCommands<MongoDBAccessor>(ResourceName.MONGODB, MONGODB_CMD_OPS, {
+    overrides: MONGODB_OVERRIDES,
+    provisionOverrides: {
+      ls: metadataProvision as ProvisionFn,
+    },
+  }),
   ...MONGODB_CAT,
-  ...MONGODB_HEAD,
-  ...MONGODB_TAIL,
-  ...MONGODB_WC,
   ...MONGODB_FIND,
-  ...MONGODB_TREE,
-  ...MONGODB_JQ,
   ...MONGODB_GREP,
   ...MONGODB_RG,
+  ...MONGODB_TAIL,
+  ...MONGODB_WC,
 ]

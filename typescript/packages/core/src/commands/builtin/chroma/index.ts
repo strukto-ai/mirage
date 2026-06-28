@@ -12,39 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ChromaAccessor } from '../../../accessor/chroma.ts'
+import { ResourceName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
-import { CHROMA_AWK } from './awk.ts'
-import { CHROMA_CAT } from './cat.ts'
-import { CHROMA_CUT } from './cut.ts'
+import { makeGenericCommands } from '../generic_bind/index.ts'
 import { CHROMA_FIND } from './find.ts'
-import { CHROMA_GREP } from './grep.ts'
-import { CHROMA_HEAD } from './head.ts'
-import { CHROMA_LS } from './ls.ts'
-import { CHROMA_RG } from './rg.ts'
+import { CHROMA_CMD_OPS } from './ops.ts'
 import { CHROMA_SEARCH } from './search.ts'
 import { CHROMA_SED } from './sed.ts'
-import { CHROMA_SORT } from './sort.ts'
-import { CHROMA_STAT } from './stat.ts'
-import { CHROMA_TAIL } from './tail.ts'
-import { CHROMA_TREE } from './tree.ts'
-import { CHROMA_UNIQ } from './uniq.ts'
-import { CHROMA_WC } from './wc.ts'
+
+const CHROMA_OVERRIDES = new Set(['find', 'search', 'sed', 'du'])
 
 export const CHROMA_COMMANDS: readonly RegisteredCommand[] = [
-  ...CHROMA_AWK,
-  ...CHROMA_CAT,
-  ...CHROMA_CUT,
+  ...makeGenericCommands<ChromaAccessor>(ResourceName.CHROMA, CHROMA_CMD_OPS, {
+    overrides: CHROMA_OVERRIDES,
+  }),
   ...CHROMA_FIND,
-  ...CHROMA_GREP,
-  ...CHROMA_HEAD,
-  ...CHROMA_LS,
-  ...CHROMA_RG,
   ...CHROMA_SEARCH,
   ...CHROMA_SED,
-  ...CHROMA_SORT,
-  ...CHROMA_STAT,
-  ...CHROMA_TAIL,
-  ...CHROMA_TREE,
-  ...CHROMA_UNIQ,
-  ...CHROMA_WC,
 ]

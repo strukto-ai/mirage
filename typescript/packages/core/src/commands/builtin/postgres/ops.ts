@@ -13,32 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PostgresAccessor } from '../../../accessor/postgres.ts'
-import { resolveGlob } from '../../../core/postgres/glob.ts'
+import { read as postgresRead, readStream as postgresStream } from '../../../core/postgres/read.ts'
 import { readdir as postgresReaddir } from '../../../core/postgres/readdir.ts'
 import { stat as postgresStat } from '../../../core/postgres/stat.ts'
-import { ResourceName, type PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { treeGeneric } from '../generic/tree.ts'
+import type { CommandIO } from '../generic_bind/index.ts'
 
-async function treeCommand(
-  accessor: PostgresAccessor,
-  paths: PathSpec[],
-  _texts: string[],
-  opts: CommandOpts,
-): Promise<CommandFnResult> {
-  const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-  return treeGeneric(
-    resolved,
-    opts,
-    (p) => postgresReaddir(accessor, p, opts.index ?? undefined),
-    (p) => postgresStat(accessor, p, opts.index ?? undefined),
-  )
+export const POSTGRES_CMD_OPS: CommandIO<PostgresAccessor> = {
+  readdir: postgresReaddir,
+  readBytes: postgresRead,
+  readStream: postgresStream,
+  stat: postgresStat,
+  isMounted: () => true,
+  local: false,
 }
-
-export const POSTGRES_TREE = command({
-  name: 'tree',
-  resource: ResourceName.POSTGRES,
-  spec: specOf('tree'),
-  fn: treeCommand,
-})

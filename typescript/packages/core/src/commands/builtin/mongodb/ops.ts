@@ -12,20 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { QdrantAccessor } from '../../../accessor/qdrant.ts'
-import { ResourceName } from '../../../types.ts'
-import type { RegisteredCommand } from '../../config.ts'
-import { makeGenericCommands } from '../generic_bind/index.ts'
-import { QDRANT_FIND } from './find.ts'
-import { QDRANT_CMD_OPS } from './ops.ts'
-import { QDRANT_SEARCH } from './search.ts'
+import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
+import { read as mongodbRead } from '../../../core/mongodb/read.ts'
+import { readdir as mongodbReaddir } from '../../../core/mongodb/readdir.ts'
+import { stat as mongodbStat } from '../../../core/mongodb/stat.ts'
+import { readStream as mongodbStream } from '../../../core/mongodb/stream.ts'
+import type { CommandIO } from '../generic_bind/index.ts'
 
-const QDRANT_OVERRIDES = new Set(['find', 'search', 'du'])
-
-export const QDRANT_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<QdrantAccessor>(ResourceName.QDRANT, QDRANT_CMD_OPS, {
-    overrides: QDRANT_OVERRIDES,
-  }),
-  ...QDRANT_FIND,
-  ...QDRANT_SEARCH,
-]
+export const MONGODB_CMD_OPS: CommandIO<MongoDBAccessor> = {
+  readdir: mongodbReaddir,
+  readBytes: mongodbRead,
+  readStream: (accessor, path) => mongodbStream(accessor, path),
+  stat: mongodbStat,
+  isMounted: () => true,
+  local: false,
+}

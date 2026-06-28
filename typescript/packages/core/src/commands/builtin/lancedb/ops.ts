@@ -12,20 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { QdrantAccessor } from '../../../accessor/qdrant.ts'
-import { ResourceName } from '../../../types.ts'
-import type { RegisteredCommand } from '../../config.ts'
-import { makeGenericCommands } from '../generic_bind/index.ts'
-import { QDRANT_FIND } from './find.ts'
-import { QDRANT_CMD_OPS } from './ops.ts'
-import { QDRANT_SEARCH } from './search.ts'
+import type { LanceDBAccessor } from '../../../accessor/lancedb.ts'
+import { read as lancedbRead } from '../../../core/lancedb/read.ts'
+import { readdir as lancedbReaddir } from '../../../core/lancedb/readdir.ts'
+import { stat as lancedbStat } from '../../../core/lancedb/stat.ts'
+import { stream as lancedbStream } from '../../../core/lancedb/stream.ts'
+import type { CommandIO } from '../generic_bind/index.ts'
 
-const QDRANT_OVERRIDES = new Set(['find', 'search', 'du'])
-
-export const QDRANT_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<QdrantAccessor>(ResourceName.QDRANT, QDRANT_CMD_OPS, {
-    overrides: QDRANT_OVERRIDES,
-  }),
-  ...QDRANT_FIND,
-  ...QDRANT_SEARCH,
-]
+export const LANCEDB_CMD_OPS: CommandIO<LanceDBAccessor> = {
+  readdir: lancedbReaddir,
+  readBytes: lancedbRead,
+  readStream: lancedbStream,
+  stat: lancedbStat,
+  isMounted: () => true,
+  local: false,
+}

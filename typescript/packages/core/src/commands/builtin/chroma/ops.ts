@@ -13,33 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ChromaAccessor } from '../../../accessor/chroma.ts'
-import { resolveGlob } from '../../../core/chroma/glob.ts'
+import { readBytes as chromaRead, readStream as chromaStream } from '../../../core/chroma/read.ts'
 import { readdir as chromaReaddir } from '../../../core/chroma/readdir.ts'
 import { stat as chromaStat } from '../../../core/chroma/stat.ts'
-import { ResourceName, type PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { lsGeneric } from '../generic/ls.ts'
+import type { CommandIO } from '../generic_bind/index.ts'
 
-async function lsCommand(
-  accessor: ChromaAccessor,
-  paths: PathSpec[],
-  _texts: string[],
-  opts: CommandOpts,
-): Promise<CommandFnResult> {
-  const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  return lsGeneric(
-    resolved,
-    opts,
-    (p) => chromaReaddir(accessor, p, opts.index ?? undefined),
-    (p) => chromaStat(accessor, p, opts.index ?? undefined),
-  )
+export const CHROMA_CMD_OPS: CommandIO<ChromaAccessor> = {
+  readdir: chromaReaddir,
+  readBytes: chromaRead,
+  readStream: chromaStream,
+  stat: chromaStat,
+  isMounted: () => true,
+  local: false,
 }
-
-export const CHROMA_LS = command({
-  name: 'ls',
-  resource: ResourceName.CHROMA,
-  spec: specOf('ls'),
-  fn: lsCommand,
-})

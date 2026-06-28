@@ -18,13 +18,11 @@ import { materialize } from '../../../io/types.ts'
 import type { Resource } from '../../../resource/base.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { BOX_AWK } from '../box/awk.ts'
-import { DATABRICKS_VOLUME_AWK } from '../databricks_volume/awk.ts'
 import { DROPBOX_AWK } from '../dropbox/awk.ts'
 import { GITHUB_AWK } from '../github/awk.ts'
 
 const BESPOKE_AWK: [string, RegisteredCommand][] = [
   ...BOX_AWK.map((c): [string, RegisteredCommand] => ['box', c]),
-  ...DATABRICKS_VOLUME_AWK.map((c): [string, RegisteredCommand] => ['databricks_volume', c]),
   ...DROPBOX_AWK.map((c): [string, RegisteredCommand] => ['dropbox', c]),
   ...GITHUB_AWK.map((c): [string, RegisteredCommand] => ['github', c]),
 ]
