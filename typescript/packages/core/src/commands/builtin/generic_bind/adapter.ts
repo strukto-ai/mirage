@@ -17,6 +17,7 @@ import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import type { FindOptions } from '../../../resource/base.ts'
 import { type FileStat, PathSpec } from '../../../types.ts'
 import { fnmatch } from '../../../utils/fnmatch.ts'
+import type { AggregateFn, CommandFnResult, CommandOpts, ProvisionFn } from '../../config.ts'
 
 export type ReaddirOp<A extends Accessor = Accessor> = (
   accessor: A,
@@ -150,4 +151,33 @@ export interface CommandIO<A extends Accessor = Accessor> {
 
 export function resolveGlobOf<A extends Accessor = Accessor>(ops: CommandIO<A>): ResolveGlobOp<A> {
   return makeResolveGlob(ops.readdir, ops.maxGlobMatches)
+}
+
+export type BuilderFn<A extends Accessor = Accessor> = (
+  ops: CommandIO<A>,
+  accessor: A,
+  paths: PathSpec[],
+  texts: string[],
+  opts: CommandOpts,
+) => Promise<CommandFnResult>
+
+export interface Builder<A extends Accessor = Accessor> {
+  name: string
+  fn: BuilderFn<A>
+  provision?: (stat: StatOp<A>) => ProvisionFn<A>
+  write?: boolean
+  aggregate?: AggregateFn
+  read?: boolean
+}
+
+export async function resolveOrEmpty<A extends Accessor = Accessor>(
+  ops: CommandIO<A>,
+  accessor: A,
+  paths: PathSpec[],
+  index?: IndexCacheStore,
+): Promise<PathSpec[]> {
+  if (paths.length > 0 && ops.isMounted(accessor)) {
+    return resolveGlobOf(ops)(accessor, paths, index)
+  }
+  return []
 }
