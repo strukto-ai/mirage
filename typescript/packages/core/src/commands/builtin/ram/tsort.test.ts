@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { RAMResource } from '../../../resource/ram/ram.ts'
-import { RAM_TSORT } from './tsort.ts'
+const RAM_TSORT = RAM_COMMANDS.filter((c) => c.name === 'tsort' && c.filetype == null)
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()

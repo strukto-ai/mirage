@@ -19,7 +19,7 @@ import { materialize } from '../../../../io/types.ts'
 import { RAMResource } from '../../../../resource/ram/ram.ts'
 import { PathSpec } from '../../../../types.ts'
 import { RAM_COMMANDS } from '../index.ts'
-import { RAM_CAT } from './cat.ts'
+const RAM_CAT = RAM_COMMANDS.filter((c) => c.name === 'cat' && c.filetype == null)
 
 const RAM_CAT_FEATHER = RAM_COMMANDS.filter((c) => c.name === 'cat' && c.filetype === '.feather')
 const RAM_CAT_PARQUET = RAM_COMMANDS.filter((c) => c.name === 'cat' && c.filetype === '.parquet')

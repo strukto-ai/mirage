@@ -18,7 +18,7 @@ import { materialize } from '../../../../io/types.ts'
 import { RAMResource } from '../../../../resource/ram/ram.ts'
 import { PathSpec } from '../../../../types.ts'
 import { RAM_COMMANDS } from '../index.ts'
-import { RAM_LS } from './ls.ts'
+const RAM_LS = RAM_COMMANDS.filter((c) => c.name === 'ls' && c.filetype == null)
 
 const RAM_LS_PARQUET = RAM_COMMANDS.filter((c) => c.name === 'ls' && c.filetype === '.parquet')
 
