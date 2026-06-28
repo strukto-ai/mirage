@@ -23,8 +23,6 @@ export const JQ_BUILDER: Builder = {
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
     return jqGeneric(resolved, texts, opts, (p) => ops.readStream(accessor, p, idx))
   },
-  provision:
-    (stat) =>
-    (accessor, paths, texts) =>
-      jqProvisionGeneric(paths, texts, (p) => stat(accessor, p)),
+  provision: (stat) => (accessor, paths, texts) =>
+    jqProvisionGeneric(paths, texts, (p) => stat(accessor, p)),
 }

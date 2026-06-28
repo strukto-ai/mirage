@@ -19,11 +19,11 @@ import { makeGenericCommands } from './factory.ts'
 
 function makeOps(overrides: Partial<CommandIO> = {}): CommandIO {
   return {
-    // eslint-disable-next-line require-yield, @typescript-eslint/no-empty-function
+    // eslint-disable-next-line @typescript-eslint/no-empty-function
     readStream: async function* () {},
     readBytes: () => Promise.resolve(new Uint8Array()),
     readdir: () => Promise.resolve([]),
-    stat: () => Promise.resolve(new FileStat({ name: 'x', type: FileType.FILE })),
+    stat: () => Promise.resolve(new FileStat({ name: 'x', type: FileType.TEXT })),
     isMounted: () => true,
     local: true,
     ...overrides,
