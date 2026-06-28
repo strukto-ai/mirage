@@ -12,14 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ResourceName } from '../../../types.ts'
-import { command } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { basenameFn } from '../generic/basename.ts'
+import type { GitHubAccessor } from '../../../accessor/github.ts'
+import { read as githubRead, stream as githubStream } from '../../../core/github/read.ts'
+import { readdir as githubReaddir } from '../../../core/github/readdir.ts'
+import { stat as githubStat } from '../../../core/github/stat.ts'
+import type { CommandIO } from '../generic_bind/index.ts'
 
-export const GMAIL_BASENAME = command({
-  name: 'basename',
-  resource: ResourceName.GMAIL,
-  spec: specOf('basename'),
-  fn: basenameFn,
-})
+export const GITHUB_CMD_OPS: CommandIO<GitHubAccessor> = {
+  readdir: githubReaddir,
+  readBytes: githubRead,
+  readStream: githubStream,
+  stat: githubStat,
+  isMounted: () => true,
+  local: false,
+}

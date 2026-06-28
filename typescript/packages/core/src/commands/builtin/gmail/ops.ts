@@ -13,29 +13,26 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GmailAccessor } from '../../../accessor/gmail.ts'
-import { resolveGlob } from '../../../core/gmail/glob.ts'
+import type { IndexCacheStore } from '../../../cache/index/index.ts'
+import { read as gmailRead } from '../../../core/gmail/read.ts'
+import { readdir as gmailReaddir } from '../../../core/gmail/readdir.ts'
 import { stat as gmailStat } from '../../../core/gmail/stat.ts'
-import { ResourceName, type PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { realpathGeneric } from '../generic/realpath.ts'
+import type { PathSpec } from '../../../types.ts'
+import type { CommandIO } from '../generic_bind/index.ts'
 
-async function realpathCommand(
+async function* gmailReadStream(
   accessor: GmailAccessor,
-  paths: PathSpec[],
-  texts: string[],
-  opts: CommandOpts,
-): Promise<CommandFnResult> {
-  const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  return realpathGeneric(resolved, texts, opts, (p) =>
-    gmailStat(accessor, p, opts.index ?? undefined),
-  )
+  path: PathSpec,
+  index?: IndexCacheStore,
+): AsyncIterable<Uint8Array> {
+  yield await gmailRead(accessor, path, index)
 }
 
-export const GMAIL_REALPATH = command({
-  name: 'realpath',
-  resource: ResourceName.GMAIL,
-  spec: specOf('realpath'),
-  fn: realpathCommand,
-})
+export const GMAIL_CMD_OPS: CommandIO<GmailAccessor> = {
+  readdir: gmailReaddir,
+  readBytes: gmailRead,
+  readStream: gmailReadStream,
+  stat: gmailStat,
+  isMounted: () => true,
+  local: false,
+}

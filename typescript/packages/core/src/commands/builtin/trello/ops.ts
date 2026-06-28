@@ -13,32 +13,26 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { TrelloAccessor } from '../../../accessor/trello.ts'
-import { resolveTrelloGlob } from '../../../core/trello/glob.ts'
+import type { IndexCacheStore } from '../../../cache/index/index.ts'
+import { read as trelloRead } from '../../../core/trello/read.ts'
 import { readdir as trelloReaddir } from '../../../core/trello/readdir.ts'
 import { stat as trelloStat } from '../../../core/trello/stat.ts'
-import { ResourceName, type PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { treeGeneric } from '../generic/tree.ts'
+import type { PathSpec } from '../../../types.ts'
+import type { CommandIO } from '../generic_bind/index.ts'
 
-async function treeCommand(
+async function* trelloReadStream(
   accessor: TrelloAccessor,
-  paths: PathSpec[],
-  _texts: string[],
-  opts: CommandOpts,
-): Promise<CommandFnResult> {
-  const resolved = await resolveTrelloGlob(accessor, paths, opts.index ?? undefined)
-  return treeGeneric(
-    resolved,
-    opts,
-    (p) => trelloReaddir(accessor, p, opts.index ?? undefined),
-    (p) => trelloStat(accessor, p, opts.index ?? undefined),
-  )
+  path: PathSpec,
+  index?: IndexCacheStore,
+): AsyncIterable<Uint8Array> {
+  yield await trelloRead(accessor, path, index)
 }
 
-export const TRELLO_TREE = command({
-  name: 'tree',
-  resource: ResourceName.TRELLO,
-  spec: specOf('tree'),
-  fn: treeCommand,
-})
+export const TRELLO_CMD_OPS: CommandIO<TrelloAccessor> = {
+  readdir: trelloReaddir,
+  readBytes: trelloRead,
+  readStream: trelloReadStream,
+  stat: trelloStat,
+  isMounted: () => true,
+  local: false,
+}

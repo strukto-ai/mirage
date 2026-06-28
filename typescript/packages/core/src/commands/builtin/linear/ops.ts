@@ -13,16 +13,26 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { LinearAccessor } from '../../../accessor/linear.ts'
+import type { IndexCacheStore } from '../../../cache/index/index.ts'
+import { read as linearRead } from '../../../core/linear/read.ts'
+import { readdir as linearReaddir } from '../../../core/linear/readdir.ts'
 import { stat as linearStat } from '../../../core/linear/stat.ts'
-import { ResourceName } from '../../../types.ts'
-import { command } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { realpathGeneric } from '../generic/realpath.ts'
+import type { PathSpec } from '../../../types.ts'
+import type { CommandIO } from '../generic_bind/index.ts'
 
-export const LINEAR_REALPATH = command({
-  name: 'realpath',
-  resource: ResourceName.LINEAR,
-  spec: specOf('realpath'),
-  fn: (accessor: LinearAccessor, paths, texts, opts) =>
-    realpathGeneric(paths, texts, opts, (p) => linearStat(accessor, p, opts.index ?? undefined)),
-})
+async function* linearReadStream(
+  accessor: LinearAccessor,
+  path: PathSpec,
+  index?: IndexCacheStore,
+): AsyncIterable<Uint8Array> {
+  yield await linearRead(accessor, path, index)
+}
+
+export const LINEAR_CMD_OPS: CommandIO<LinearAccessor> = {
+  readdir: linearReaddir,
+  readBytes: linearRead,
+  readStream: linearReadStream,
+  stat: linearStat,
+  isMounted: () => true,
+  local: false,
+}

@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RegisteredCommand } from '../../config.ts'
-import { GMAIL_BASENAME } from './basename.ts'
-import { GMAIL_CAT } from './cat.ts'
-import { GMAIL_DIRNAME } from './dirname.ts'
+import type { GmailAccessor } from '../../../accessor/gmail.ts'
+import { ResourceName } from '../../../types.ts'
+import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
+import { makeGenericCommands } from '../generic_bind/index.ts'
 import { GMAIL_FIND } from './find.ts'
 import { GMAIL_GREP } from './grep.ts'
 import { GMAIL_GWS_DELETE } from './gws_gmail_delete.ts'
@@ -25,33 +25,22 @@ import { GMAIL_GWS_REPLY } from './gws_gmail_reply.ts'
 import { GMAIL_GWS_REPLY_ALL } from './gws_gmail_reply_all.ts'
 import { GMAIL_GWS_SEND } from './gws_gmail_send.ts'
 import { GMAIL_GWS_TRIAGE } from './gws_gmail_triage.ts'
-import { GMAIL_HEAD } from './head.ts'
-import { GMAIL_JQ } from './jq.ts'
-import { GMAIL_LS } from './ls.ts'
-import { GMAIL_NL } from './nl.ts'
-import { GMAIL_REALPATH } from './realpath.ts'
+import { GMAIL_CMD_OPS } from './ops.ts'
+import { metadataProvision } from './provision.ts'
 import { GMAIL_RG } from './rg.ts'
-import { GMAIL_STAT } from './stat.ts'
-import { GMAIL_TAIL } from './tail.ts'
-import { GMAIL_TREE } from './tree.ts'
-import { GMAIL_WC } from './wc.ts'
+
+const GMAIL_OVERRIDES = new Set(['grep', 'rg', 'find', 'du'])
 
 export const GMAIL_COMMANDS: readonly RegisteredCommand[] = [
-  ...GMAIL_BASENAME,
-  ...GMAIL_CAT,
-  ...GMAIL_DIRNAME,
+  ...makeGenericCommands<GmailAccessor>(ResourceName.GMAIL, GMAIL_CMD_OPS, {
+    overrides: GMAIL_OVERRIDES,
+    provisionOverrides: {
+      ls: metadataProvision as ProvisionFn,
+    },
+  }),
   ...GMAIL_FIND,
   ...GMAIL_GREP,
-  ...GMAIL_HEAD,
-  ...GMAIL_JQ,
-  ...GMAIL_LS,
-  ...GMAIL_NL,
-  ...GMAIL_REALPATH,
   ...GMAIL_RG,
-  ...GMAIL_STAT,
-  ...GMAIL_TAIL,
-  ...GMAIL_TREE,
-  ...GMAIL_WC,
   ...GMAIL_GWS_SEND,
   ...GMAIL_GWS_REPLY,
   ...GMAIL_GWS_REPLY_ALL,

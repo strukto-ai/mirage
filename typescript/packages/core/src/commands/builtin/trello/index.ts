@@ -12,20 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RegisteredCommand } from '../../config.ts'
-import { TRELLO_BASENAME } from './basename.ts'
-import { TRELLO_CAT } from './cat.ts'
-import { TRELLO_DIRNAME } from './dirname.ts'
+import type { TrelloAccessor } from '../../../accessor/trello.ts'
+import { ResourceName } from '../../../types.ts'
+import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
+import { fileReadProvision, metadataProvision } from './_provision.ts'
+import { makeGenericCommands } from '../generic_bind/index.ts'
 import { TRELLO_FIND } from './find.ts'
-import { TRELLO_GREP } from './grep.ts'
-import { TRELLO_HEAD } from './head.ts'
-import { TRELLO_JQ } from './jq.ts'
-import { TRELLO_LS } from './ls.ts'
-import { TRELLO_REALPATH } from './realpath.ts'
-import { TRELLO_RG } from './rg.ts'
-import { TRELLO_STAT } from './stat.ts'
-import { TRELLO_TAIL } from './tail.ts'
-import { TRELLO_TREE } from './tree.ts'
+import { TRELLO_CMD_OPS } from './ops.ts'
 import { TRELLO_CARD_ASSIGN } from './trello_card_assign.ts'
 import { TRELLO_CARD_COMMENT_ADD } from './trello_card_comment_add.ts'
 import { TRELLO_CARD_COMMENT_UPDATE } from './trello_card_comment_update.ts'
@@ -34,29 +27,25 @@ import { TRELLO_CARD_LABEL_ADD } from './trello_card_label_add.ts'
 import { TRELLO_CARD_LABEL_REMOVE } from './trello_card_label_remove.ts'
 import { TRELLO_CARD_MOVE } from './trello_card_move.ts'
 import { TRELLO_CARD_UPDATE } from './trello_card_update.ts'
-import { TRELLO_WC } from './wc.ts'
+
+const TRELLO_OVERRIDES = new Set(['find', 'du'])
 
 export const TRELLO_COMMANDS: readonly RegisteredCommand[] = [
-  ...TRELLO_LS,
-  ...TRELLO_TREE,
-  ...TRELLO_CAT,
-  ...TRELLO_HEAD,
-  ...TRELLO_TAIL,
-  ...TRELLO_WC,
+  ...makeGenericCommands<TrelloAccessor>(ResourceName.TRELLO, TRELLO_CMD_OPS, {
+    overrides: TRELLO_OVERRIDES,
+    provisionOverrides: {
+      grep: fileReadProvision as ProvisionFn,
+      rg: fileReadProvision as ProvisionFn,
+      ls: metadataProvision as ProvisionFn,
+    },
+  }),
   ...TRELLO_FIND,
-  ...TRELLO_GREP,
-  ...TRELLO_RG,
-  ...TRELLO_STAT,
-  ...TRELLO_JQ,
-  ...TRELLO_BASENAME,
-  ...TRELLO_DIRNAME,
-  ...TRELLO_REALPATH,
-  ...TRELLO_CARD_CREATE,
-  ...TRELLO_CARD_UPDATE,
-  ...TRELLO_CARD_MOVE,
   ...TRELLO_CARD_ASSIGN,
-  ...TRELLO_CARD_LABEL_ADD,
-  ...TRELLO_CARD_LABEL_REMOVE,
   ...TRELLO_CARD_COMMENT_ADD,
   ...TRELLO_CARD_COMMENT_UPDATE,
+  ...TRELLO_CARD_CREATE,
+  ...TRELLO_CARD_LABEL_ADD,
+  ...TRELLO_CARD_LABEL_REMOVE,
+  ...TRELLO_CARD_MOVE,
+  ...TRELLO_CARD_UPDATE,
 ]

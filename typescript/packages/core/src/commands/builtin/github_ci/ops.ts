@@ -12,17 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { GitHubAccessor } from '../../../accessor/github.ts'
-import { stat as githubStat } from '../../../core/github/stat.ts'
-import { ResourceName } from '../../../types.ts'
-import { command } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { realpathGeneric } from '../generic/realpath.ts'
+import type { GitHubCIAccessor } from '../../../accessor/github_ci.ts'
+import { read as githubCiRead, stream as githubCiStream } from '../../../core/github_ci/read.ts'
+import { readdir as githubCiReaddir } from '../../../core/github_ci/readdir.ts'
+import { stat as githubCiStat } from '../../../core/github_ci/stat.ts'
+import type { CommandIO } from '../generic_bind/index.ts'
 
-export const GITHUB_REALPATH = command({
-  name: 'realpath',
-  resource: ResourceName.GITHUB,
-  spec: specOf('realpath'),
-  fn: (accessor: GitHubAccessor, paths, texts, opts) =>
-    realpathGeneric(paths, texts, opts, (p) => githubStat(accessor, p, opts.index ?? undefined)),
-})
+export const GITHUB_CI_CMD_OPS: CommandIO<GitHubCIAccessor> = {
+  readdir: githubCiReaddir,
+  readBytes: githubCiRead,
+  readStream: githubCiStream,
+  stat: githubCiStat,
+  isMounted: () => true,
+  local: false,
+}

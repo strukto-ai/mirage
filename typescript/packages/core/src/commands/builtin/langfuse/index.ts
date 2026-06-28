@@ -12,29 +12,26 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RegisteredCommand } from '../../config.ts'
-import { LANGFUSE_CAT } from './cat.ts'
+import type { LangfuseAccessor } from '../../../accessor/langfuse.ts'
+import { ResourceName } from '../../../types.ts'
+import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
+import { metadataProvision } from './_provision.ts'
 import { LANGFUSE_FIND } from './find.ts'
 import { LANGFUSE_GREP } from './grep.ts'
-import { LANGFUSE_HEAD } from './head.ts'
-import { LANGFUSE_JQ } from './jq.ts'
-import { LANGFUSE_LS } from './ls.ts'
+import { makeGenericCommands } from '../generic_bind/index.ts'
+import { LANGFUSE_CMD_OPS } from './ops.ts'
 import { LANGFUSE_RG } from './rg.ts'
-import { LANGFUSE_STAT } from './stat.ts'
-import { LANGFUSE_TAIL } from './tail.ts'
-import { LANGFUSE_TREE } from './tree.ts'
-import { LANGFUSE_WC } from './wc.ts'
+
+const LANGFUSE_OVERRIDES = new Set(['find', 'grep', 'rg', 'du'])
 
 export const LANGFUSE_COMMANDS: readonly RegisteredCommand[] = [
-  ...LANGFUSE_LS,
-  ...LANGFUSE_TREE,
-  ...LANGFUSE_CAT,
-  ...LANGFUSE_HEAD,
-  ...LANGFUSE_TAIL,
-  ...LANGFUSE_WC,
+  ...makeGenericCommands<LangfuseAccessor>(ResourceName.LANGFUSE, LANGFUSE_CMD_OPS, {
+    overrides: LANGFUSE_OVERRIDES,
+    provisionOverrides: {
+      ls: metadataProvision as ProvisionFn,
+    },
+  }),
   ...LANGFUSE_FIND,
   ...LANGFUSE_GREP,
   ...LANGFUSE_RG,
-  ...LANGFUSE_STAT,
-  ...LANGFUSE_JQ,
 ]

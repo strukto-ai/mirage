@@ -12,27 +12,26 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RegisteredCommand } from '../../config.ts'
-import { GITHUB_CI_CAT } from './cat.ts'
+import type { GitHubCIAccessor } from '../../../accessor/github_ci.ts'
+import { ResourceName } from '../../../types.ts'
+import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
+import { makeGenericCommands } from '../generic_bind/index.ts'
 import { GITHUB_CI_FIND } from './find.ts'
 import { GITHUB_CI_GREP } from './grep.ts'
-import { GITHUB_CI_HEAD } from './head.ts'
-import { GITHUB_CI_LS } from './ls.ts'
+import { GITHUB_CI_CMD_OPS } from './ops.ts'
+import { metadataProvision } from './provision.ts'
 import { GITHUB_CI_RG } from './rg.ts'
-import { GITHUB_CI_STAT } from './stat.ts'
-import { GITHUB_CI_TAIL } from './tail.ts'
-import { GITHUB_CI_TREE } from './tree.ts'
-import { GITHUB_CI_WC } from './wc.ts'
+
+const GITHUB_CI_OVERRIDES = new Set(['find', 'grep', 'rg', 'du'])
 
 export const GITHUB_CI_COMMANDS: readonly RegisteredCommand[] = [
-  ...GITHUB_CI_LS,
-  ...GITHUB_CI_TREE,
-  ...GITHUB_CI_CAT,
-  ...GITHUB_CI_HEAD,
-  ...GITHUB_CI_TAIL,
-  ...GITHUB_CI_WC,
+  ...makeGenericCommands<GitHubCIAccessor>(ResourceName.GITHUB_CI, GITHUB_CI_CMD_OPS, {
+    overrides: GITHUB_CI_OVERRIDES,
+    provisionOverrides: {
+      ls: metadataProvision as ProvisionFn,
+    },
+  }),
   ...GITHUB_CI_FIND,
   ...GITHUB_CI_GREP,
   ...GITHUB_CI_RG,
-  ...GITHUB_CI_STAT,
 ]
