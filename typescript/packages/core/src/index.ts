@@ -218,6 +218,15 @@ export {
   type FiletypeCommandsOptions,
 } from './commands/builtin/filetype_factory/factory.ts'
 export {
+  type Builder,
+  type BuilderFn,
+  type CommandIO,
+  type MakeGenericCommandsOptions,
+  makeGenericCommands,
+  makeResolveGlob,
+  resolveGlobOf,
+} from './commands/builtin/generic_bind/index.ts'
+export {
   FILETYPE_ENTRIES,
   type FiletypeEntry,
   type FiletypeModule,

@@ -15,7 +15,7 @@
 import type { Accessor } from '../../../accessor/base.ts'
 import { type CommandFn, type ProvisionFn, type RegisteredCommand, command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import type { Builder, CommandIO } from './adapter.ts'
+import type { CommandIO } from './adapter.ts'
 import { BUILDERS } from './builders/index.ts'
 
 export interface MakeGenericCommandsOptions<A extends Accessor = Accessor> {
@@ -30,26 +30,29 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
 ): RegisteredCommand[] {
   const skip = options.overrides ?? new Set<string>()
   const provOver = options.provisionOverrides ?? {}
+  const opsBase = ops as CommandIO
   const commands: RegisteredCommand[] = []
-  for (const b of BUILDERS as readonly Builder<A>[]) {
+  for (const b of BUILDERS) {
     if (skip.has(b.name)) continue
     // A read-only backend (no write op) can't run byte-mutation commands
     // (cp/mv/tee/gunzip/...), so don't register a command that would crash
     // when invoked.
     if (b.write === true && ops.write === undefined) continue
-    const fn: CommandFn<A> = (accessor, paths, texts, opts) =>
-      b.fn(ops, accessor, paths, texts, opts)
-    const provision = provOver[b.name] ?? (b.provision !== undefined ? b.provision(ops.stat) : null)
-    const aggregate = ops.local !== false ? b.aggregate : undefined
+    const fn: CommandFn = (accessor, paths, texts, opts) =>
+      b.fn(opsBase, accessor, paths, texts, opts)
+    const provision =
+      (provOver[b.name] as ProvisionFn | undefined) ??
+      (b.provision !== undefined ? b.provision(opsBase.stat) : null)
+    const aggregate = ops.local !== false ? (b.aggregate ?? null) : null
     commands.push(
-      ...command<A>({
+      ...command({
         name: b.name,
         resource,
         spec: specOf(b.name),
         fn,
         provision,
-        aggregate: aggregate ?? null,
-        write: b.write,
+        aggregate,
+        write: b.write === true,
       }),
     )
   }
