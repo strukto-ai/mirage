@@ -56,6 +56,12 @@ export type ExistsOp<A extends Accessor = Accessor> = (
 
 export type PathOp<A extends Accessor = Accessor> = (accessor: A, path: PathSpec) => Promise<void>
 
+export type MkdirOp<A extends Accessor = Accessor> = (
+  accessor: A,
+  path: PathSpec,
+  parents?: boolean,
+) => Promise<void>
+
 export type RenameOp<A extends Accessor = Accessor> = (
   accessor: A,
   src: PathSpec,
@@ -135,7 +141,7 @@ export interface CommandIO<A extends Accessor = Accessor> {
   maxGlobMatches?: number
   write?: WriteOp<A>
   exists?: ExistsOp<A>
-  mkdir?: PathOp<A>
+  mkdir?: MkdirOp<A>
   unlink?: PathOp<A>
   rmdir?: PathOp<A>
   rmR?: PathOp<A>
@@ -159,7 +165,7 @@ export type BuilderFn<A extends Accessor = Accessor> = (
   paths: PathSpec[],
   texts: string[],
   opts: CommandOpts,
-) => Promise<CommandFnResult>
+) => Promise<CommandFnResult> | CommandFnResult
 
 export interface Builder<A extends Accessor = Accessor> {
   name: string
