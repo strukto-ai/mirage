@@ -16,7 +16,8 @@ import { describe, expect, it } from 'vitest'
 import { PathSpec, materialize, type Resource } from '@struktoai/mirage-core'
 import type { SSHAccessor } from '../../../../accessor/ssh.ts'
 import { makeFakeAccessor } from '../../../../core/ssh/_test_utils.ts'
-import { SSH_LS } from './ls.ts'
+import { SSH_COMMANDS } from '../index.ts'
+const SSH_LS = SSH_COMMANDS.filter((c) => c.name === 'ls' && c.filetype == null)
 
 const DEC = new TextDecoder()
 
