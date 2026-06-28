@@ -31,8 +31,5 @@ export const CAT_BUILDER: Builder = {
       (p) => ops.readStream(accessor, p, idx),
     )
   },
-  provision:
-    (stat) =>
-    (accessor, paths) =>
-      catProvisionGeneric(paths, (p) => stat(accessor, p)),
+  provision: (stat) => (accessor, paths) => catProvisionGeneric(paths, (p) => stat(accessor, p)),
 }

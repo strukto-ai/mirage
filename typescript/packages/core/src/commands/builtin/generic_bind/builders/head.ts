@@ -31,8 +31,6 @@ export const HEAD_BUILDER: Builder = {
       (p) => ops.readStream(accessor, p, idx),
     )
   },
-  provision:
-    (stat) =>
-    (accessor, paths, texts, opts) =>
-      headProvisionGeneric(paths, texts, opts, (p) => stat(accessor, p)),
+  provision: (stat) => (accessor, paths, texts, opts) =>
+    headProvisionGeneric(paths, texts, opts, (p) => stat(accessor, p)),
 }
