@@ -22,7 +22,6 @@ import { DATABRICKS_VOLUME_AWK } from '../databricks_volume/awk.ts'
 import { DROPBOX_AWK } from '../dropbox/awk.ts'
 import { GDRIVE_AWK } from '../gdrive/awk.ts'
 import { GITHUB_AWK } from '../github/awk.ts'
-import { S3_AWK } from '../s3/awk.ts'
 
 const BESPOKE_AWK: [string, RegisteredCommand][] = [
   ...BOX_AWK.map((c): [string, RegisteredCommand] => ['box', c]),
@@ -30,7 +29,6 @@ const BESPOKE_AWK: [string, RegisteredCommand][] = [
   ...DROPBOX_AWK.map((c): [string, RegisteredCommand] => ['dropbox', c]),
   ...GDRIVE_AWK.map((c): [string, RegisteredCommand] => ['gdrive', c]),
   ...GITHUB_AWK.map((c): [string, RegisteredCommand] => ['github', c]),
-  ...S3_AWK.map((c): [string, RegisteredCommand] => ['s3', c]),
 ]
 
 describe('bespoke awk with no paths and no stdin', () => {
