@@ -58,6 +58,13 @@ async def test_find_all():
 
 
 @pytest.mark.asyncio
+async def test_find_name_matches_mount_root_start_path():
+    spec = PathSpec(original="/db", directory="/db", prefix="/db")
+    out = await find_mod.find(None, spec, name="db")
+    assert out == ["/"]
+
+
+@pytest.mark.asyncio
 async def test_find_type_file():
     out = await find_mod.find(None, PathSpec.from_str_path("/db"), type="f")
     assert out == ["/db/page1.md", "/db/sub/page2.md"]

@@ -24,8 +24,8 @@ import { sedGeneric } from './sed.ts'
 const ENC = new TextEncoder()
 
 /**
- * When the script is supplied via -e, GNU sed treats every bare argument as a
- * file. The arg parser instead routes the first bare arg into the positional
+ * When the script is supplied via -e/-f, GNU sed treats every bare argument as
+ * a file. The arg parser instead routes the first bare arg into the positional
  * `text` (script) slot, so recover it as a path operand here.
  */
 function positionalAsPaths(texts: string[], opts: CommandOpts): PathSpec[] {
@@ -84,9 +84,10 @@ export function makeSed<A extends Accessor>(backend: SedBackend<A>) {
           }),
         ]
       }
-      // With -e the positional operand is a file, not the script (see above).
+      // With -e/-f the positional operand is a file, not the script (see above).
       const usingE = opts.flags.e !== undefined && opts.flags.e !== false
-      const operands = usingE ? [...positionalAsPaths(texts, opts), ...paths] : paths
+      const usingF = opts.flags.f !== undefined && opts.flags.f !== false
+      const operands = usingE || usingF ? [...positionalAsPaths(texts, opts), ...paths] : paths
       const resolved =
         glob !== undefined && operands.length > 0 ? await glob(accessor, operands, opts) : operands
       const writeFn =

@@ -2,10 +2,17 @@ from mirage.accessor.sharepoint import SharePointAccessor
 from mirage.core.sharepoint._client import new_session
 from mirage.core.sharepoint._resolver import resolve
 from mirage.core.sharepoint.find import iter_tree
-from mirage.types import PathSpec
+from mirage.core.sharepoint.stat import stat
+from mirage.types import FileType, PathSpec
 
 
 async def du(accessor: SharePointAccessor, path: PathSpec) -> int:
+    try:
+        info = await stat(accessor, path)
+    except FileNotFoundError:
+        info = None
+    if info is not None and info.type != FileType.DIRECTORY:
+        return info.size or 0
     resolved = await resolve(accessor, path)
     if resolved.drive_id is None:
         return 0
@@ -23,6 +30,12 @@ async def du(accessor: SharePointAccessor, path: PathSpec) -> int:
 
 async def du_all(accessor: SharePointAccessor,
                  path: PathSpec) -> list[tuple[str, int]]:
+    try:
+        info = await stat(accessor, path)
+    except FileNotFoundError:
+        info = None
+    if info is not None and info.type != FileType.DIRECTORY:
+        return []
     resolved = await resolve(accessor, path)
     if resolved.drive_id is None:
         return []

@@ -37,7 +37,7 @@ afterEach(() => {
 describe('core/disk/find', () => {
   it('returns all entries when no filters', async () => {
     const out = await find(accessor, spec('/'))
-    expect(out).toEqual(['/a.json', '/b.txt', '/sub', '/sub/c.json'])
+    expect(out).toEqual(['/', '/a.json', '/b.txt', '/sub', '/sub/c.json'])
   })
 
   it('filters by name pattern (*.json)', async () => {
@@ -52,7 +52,7 @@ describe('core/disk/find', () => {
 
   it('filters by type "d" (directories only)', async () => {
     const out = await find(accessor, spec('/'), { type: 'd' })
-    expect(out).toEqual(['/sub'])
+    expect(out).toEqual(['/', '/sub'])
   })
 
   it('respects maxDepth', async () => {

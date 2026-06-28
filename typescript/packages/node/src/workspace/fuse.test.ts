@@ -33,10 +33,11 @@ vi.mock('node:fs', () => ({
   rmdirSync: mocks.rmdirSync,
 }))
 
+// FuseManager is a passive primitive: it only forwards ws to the (mocked)
+// mount() and tears the handle down. It never touches the workspace registry,
+// so a trivial stub suffices.
 function workspaceStub(): Workspace {
-  return {
-    setFuseMountpoint: vi.fn(),
-  } as unknown as Workspace
+  return {} as unknown as Workspace
 }
 
 describe('FuseManager (without a real mount)', () => {
@@ -49,19 +50,6 @@ describe('FuseManager (without a real mount)', () => {
   it('starts with mountpoint=null', () => {
     const fm = new FuseManager()
     expect(fm.mountpoint).toBeNull()
-  })
-
-  it('allows assigning an external mountpoint via setter', () => {
-    const fm = new FuseManager()
-    fm.mountpoint = '/tmp/test-fuse'
-    expect(fm.mountpoint).toBe('/tmp/test-fuse')
-  })
-
-  it('close() is a no-op when the mount is externally set (not auto)', async () => {
-    const fm = new FuseManager()
-    fm.mountpoint = '/tmp/test-fuse'
-    await fm.close()
-    expect(fm.mountpoint).toBe('/tmp/test-fuse')
   })
 
   it('close() is a no-op when no mountpoint is set', async () => {
@@ -83,7 +71,7 @@ describe('FuseManager (without a real mount)', () => {
     const fm = new FuseManager()
 
     await fm.setup(ws, { mountpoint: '/tmp/caller-owned' })
-    await fm.close(ws)
+    await fm.close()
 
     expect(unmount).toHaveBeenCalledOnce()
     expect(mocks.rmdirSync).not.toHaveBeenCalled()
@@ -103,7 +91,7 @@ describe('FuseManager (without a real mount)', () => {
     const fm = new FuseManager()
 
     await fm.setup(ws)
-    await fm.close(ws)
+    await fm.close()
 
     expect(unmount).toHaveBeenCalledOnce()
     expect(mocks.rmdirSync).toHaveBeenCalledWith('/tmp/generated')

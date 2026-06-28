@@ -30,7 +30,6 @@ async def comm(
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     check_order: bool = False,
-    nocheck_order: bool = False,
     index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -48,4 +47,4 @@ async def comm(
     )
 
 
-BUILDER = Builder('comm', comm, None, False, None)
+BUILDER = Builder('comm', comm, None, False, None, read=True)

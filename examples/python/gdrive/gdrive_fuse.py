@@ -13,11 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
-import time
 
 from dotenv import load_dotenv
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.gdrive import GoogleDriveConfig, GoogleDriveResource
 
 load_dotenv(".env.development")
@@ -29,19 +28,19 @@ config = GoogleDriveConfig(
 )
 resource = GoogleDriveResource(config=config)
 
-with Workspace({"/gdrive/": resource}, mode=MountMode.READ, fuse=True) as ws:
-    time.sleep(1)
+with Workspace({"/gdrive/": Mount(resource, mode=MountMode.READ,
+                                  fuse=True)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
 
     print("--- os.listdir() root ---")
-    entries = os.listdir(f"{mp}/gdrive")
+    entries = os.listdir(mp)
     for e in entries[:10]:
         print(f"  {e}")
 
     for e in entries:
-        path = f"{mp}/gdrive/{e}"
+        path = f"{mp}/{e}"
         if os.path.isfile(path):
             print(f"\n--- reading {e} ---")
             with open(path, "rb") as f:
@@ -51,7 +50,7 @@ with Workspace({"/gdrive/": resource}, mode=MountMode.READ, fuse=True) as ws:
 
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> Open another terminal and run:")
-    print(f">>>   ls {mp}/gdrive/")
+    print(f">>>   ls {mp}/")
     print(">>> Press Enter to unmount and exit...")
     input()
 

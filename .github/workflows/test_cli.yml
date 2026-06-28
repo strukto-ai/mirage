@@ -607,6 +607,7 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
     name: Cross-language snapshot interop
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       redis:
         image: redis:7

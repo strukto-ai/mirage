@@ -20,7 +20,7 @@ import { RAMResource } from '../../resource/ram/ram.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { FileStat, FileType, MountMode } from '../../types.ts'
 import { MountRegistry } from '../mount/registry.ts'
-import type { Mount } from '../mount/mount.ts'
+import type { MountEntry } from '../mount/mount.ts'
 import { Session } from '../session/session.ts'
 import type { DispatchFn } from './cross_mount.ts'
 import {
@@ -45,7 +45,7 @@ import {
 } from './builtins/index.ts'
 import { ReturnSignal } from './command.ts'
 
-function wireMount(mount: Mount): void {
+function wireMount(mount: MountEntry): void {
   const cmds = mount.resource.commands?.()
   if (cmds !== undefined) {
     for (const cmd of cmds) {

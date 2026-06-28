@@ -14,7 +14,9 @@
 
 from mirage.accessor.redis import RedisAccessor
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
-                                               compute_nonempty_dirs, keep)
+                                               compute_nonempty_dirs,
+                                               emit_start_path, keep,
+                                               start_basename)
 from mirage.types import PathSpec
 from mirage.utils.path import norm
 
@@ -37,12 +39,13 @@ async def find(
 ) -> list[str]:
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
+    start_name = start_basename(path)
     if isinstance(path, PathSpec):
         path = path.strip_prefix
     store = accessor.store
     p = norm(path)
     prefix = p.rstrip("/") + "/"
-    base_depth = 0 if p == "/" else p.count("/")
+    base_depth = p.count("/")
     results: list[str] = []
     tree = tree if tree is not None else build_tree(name=name,
                                                     iname=iname,
@@ -62,25 +65,38 @@ async def find(
             candidates.append((key, "f"))
     if type != "f":
         for key in all_dirs:
-            if key != "/":
-                candidates.append((key, "d"))
+            candidates.append((key, "d"))
 
+    root_kind: str | None = None
+    root_is_empty: bool | None = None
+    root_size: int | None = None
     for key, kind in candidates:
         if key != p and not key.startswith(prefix):
             continue
 
-        depth = key.count("/") - base_depth
+        if key == p:
+            root_kind = kind
+            if empty:
+                root_is_empty = (await store.file_len(key)
+                                 == 0) if kind == "f" else key not in nonempty
+            if kind == "f":
+                root_size = await store.file_len(key)
+            continue
+
+        if p == "/":
+            depth = key.strip("/").count("/") + 1
+        else:
+            depth = key.count("/") - base_depth
 
         if maxdepth is not None and depth > maxdepth:
             continue
 
-        basename = key.rsplit("/", 1)[-1]
         is_empty: bool | None = None
         if empty:
             is_empty = (await store.file_len(key)
                         == 0) if kind == "f" else key not in nonempty
         entry = FindEntry(key=key,
-                          name=basename,
+                          name=key.rsplit("/", 1)[-1],
                           kind=kind,
                           depth=depth,
                           is_empty=is_empty)
@@ -95,5 +111,19 @@ async def find(
                 continue
 
         results.append(key)
+
+    if root_kind is not None:
+        emit_start_path(results,
+                        p,
+                        start_name,
+                        kind=root_kind,
+                        is_empty=root_is_empty,
+                        exists=True,
+                        tree=tree,
+                        maxdepth=maxdepth,
+                        mindepth=mindepth,
+                        size=root_size,
+                        min_size=min_size,
+                        max_size=max_size)
 
     return sorted(results)

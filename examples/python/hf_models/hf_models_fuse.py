@@ -13,11 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
-import time
 
 from dotenv import load_dotenv
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.hf_models import HfModelsConfig, HfModelsResource
 
 load_dotenv(".env.development")
@@ -28,22 +27,17 @@ config = HfModelsConfig(
 )
 resource = HfModelsResource(config)
 
-with Workspace(
-    {"/m/": resource},
-        mode=MountMode.READ,
-        fuse=True,
-) as ws:
-    time.sleep(1)
+with Workspace({"/m/": Mount(resource, mode=MountMode.READ, fuse=True)}) as ws:
     mp = ws.fuse_mountpoint
     print(f"=== FUSE: mounted at {mp} ===\n")
 
-    print(f"--- os.listdir({mp}/m) ---")
-    root_entries = os.listdir(f"{mp}/m")
+    print(f"--- os.listdir({mp}) ---")
+    root_entries = os.listdir(mp)
     for e in root_entries:
         print(f"  {e}")
 
     if "config.json" in root_entries:
-        cfg_path = f"{mp}/m/config.json"
+        cfg_path = f"{mp}/config.json"
         size = os.path.getsize(cfg_path)
         print(f"\n--- {cfg_path} ({size} bytes) ---")
         with open(cfg_path) as f:
@@ -51,8 +45,8 @@ with Workspace(
 
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> In another terminal:")
-    print(f">>>   ls -lh {mp}/m/")
-    print(f">>>   cat {mp}/m/config.json | jq .")
+    print(f">>>   ls -lh {mp}/")
+    print(f">>>   cat {mp}/config.json | jq .")
     print(">>> Press Enter to unmount...")
     try:
         input()

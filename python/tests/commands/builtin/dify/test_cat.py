@@ -1,11 +1,27 @@
 import pytest
 
-from mirage.commands.builtin.dify.cat import cat
+from mirage.commands.builtin.dify.cat import make_cat
+from mirage.commands.builtin.generic_bind import CommandIO, with_read_cache
 from mirage.core.dify import read, tree
+from mirage.core.dify.read import read_bytes as _read_bytes
+from mirage.core.dify.read import read_stream as _read_stream
+from mirage.core.dify.readdir import readdir as _readdir
+from mirage.core.dify.stat import stat as _stat
 from mirage.io.types import materialize
 from mirage.types import PathSpec
 
 from .conftest import document
+
+cat = make_cat(
+    with_read_cache(
+        CommandIO(
+            readdir=_readdir,
+            read_bytes=_read_bytes,
+            read_stream=_read_stream,
+            stat=_stat,
+            is_mounted=lambda a: True,
+            local=False,
+        )))
 
 
 async def list_basic_documents(config):

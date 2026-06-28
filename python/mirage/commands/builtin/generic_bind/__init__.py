@@ -14,6 +14,10 @@
 
 from mirage.commands.builtin.generic_bind.adapter import (CommandIO,
                                                           make_resolve_glob)
-from mirage.commands.builtin.generic_bind.factory import make_generic_commands
+from mirage.commands.builtin.generic_bind.factory import (
+    make_generic_commands, with_read_cache, with_stat_cache)
 
-__all__ = ["CommandIO", "make_resolve_glob", "make_generic_commands"]
+__all__ = [
+    "CommandIO", "make_resolve_glob", "make_generic_commands",
+    "with_read_cache", "with_stat_cache"
+]

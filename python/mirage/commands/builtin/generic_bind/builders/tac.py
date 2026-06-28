@@ -41,4 +41,4 @@ async def tac(
                              stdin=stdin)
 
 
-BUILDER = Builder('tac', tac, None, False, None)
+BUILDER = Builder('tac', tac, None, False, None, read=True)

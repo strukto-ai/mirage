@@ -51,4 +51,4 @@ async def cut(
                              z=z)
 
 
-BUILDER = Builder('cut', cut, None, False, None)
+BUILDER = Builder('cut', cut, None, False, None, read=True)

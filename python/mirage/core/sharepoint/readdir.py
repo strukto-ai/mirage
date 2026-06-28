@@ -1,14 +1,17 @@
 from mirage.accessor.sharepoint import SharePointAccessor
 from mirage.cache.index import IndexCacheStore, IndexEntry, ResourceType
-from mirage.core.sharepoint._client import graph_list, item_url
+from mirage.core.sharepoint._client import GraphError, graph_list, item_url
 from mirage.core.sharepoint._resolver import list_drives, list_sites, resolve
-from mirage.types import PathSpec
+from mirage.core.sharepoint.stat import stat
+from mirage.types import FileType, PathSpec
+from mirage.utils.errors import enoent
 
 
 async def readdir(accessor: SharePointAccessor, path: PathSpec,
                   index: IndexCacheStore) -> list[str]:
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
+    original = path
     prefix = path.prefix or ""
     raw = path.directory if path.pattern else path.original
     if prefix and raw.startswith(prefix):
@@ -59,7 +62,15 @@ async def readdir(accessor: SharePointAccessor, path: PathSpec,
     url = item_url(drive_id,
                    "/" + item_path if item_path else "/",
                    action="/children")
-    children = await graph_list(accessor.config, url)
+    try:
+        children = await graph_list(accessor.config, url)
+    except GraphError as exc:
+        if exc.status != 404:
+            raise
+        info = await stat(accessor, original)
+        if info.type != FileType.DIRECTORY:
+            raise NotADirectoryError(virtual_key) from exc
+        raise enoent(virtual_key) from exc
     base = "/" + stripped if stripped else ""
     names: list[str] = []
     index_entries: list[tuple[str, IndexEntry]] = []

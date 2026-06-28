@@ -57,7 +57,7 @@ await ws.execute('cat /s3/events/2026-05-06.parquet | jq .user')
 ## 关于
 
 - **一个接口，而不是 N 个 SDK 和 M 个 MCP。** 每个服务都使用同一套文件系统语义，管道可以像在本地磁盘上一样跨服务组合。
-- **约 50 个内置后端：** RAM、Disk、Redis、S3 / R2 / OCI / Supabase / GCS、Gmail / GDrive / GDocs / GSheets / GSlides、GitHub / Linear / Notion / Trello、Slack / Discord / Telegram / Email、MongoDB / Postgres / LanceDB、SSH 等，并排挂载在同一个根目录下。
+- **约 50 个内置后端：** RAM、Disk、Redis、S3 / R2 / OCI / Supabase / GCS、Gmail / GDrive / GDocs / GSheets / GSlides、GitHub / Linear / Notion / Trello、Slack / Discord / Email、MongoDB / Postgres / LanceDB、SSH 等，并排挂载在同一个根目录下。
 - **可移植的工作区：** 克隆、快照和版本化工作区；Agent 运行可以在机器之间迁移，而不必重启或重新配置系统。
 - **可嵌入：** Python 和 TypeScript SDK 直接运行在 FastAPI、Express、浏览器应用或任何异步运行时的进程内，不需要单独的进程。
 - **Agent 集成：** 通过 SDK 支持 OpenAI Agents SDK、Vercel AI SDK、LangChain、Pydantic AI、CAMEL 和 OpenHands；通过轻量 CLI + daemon 支持 Claude Code 和 Codex 等编码 Agent。

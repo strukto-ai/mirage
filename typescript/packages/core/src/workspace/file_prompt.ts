@@ -13,13 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { MountMode } from '../types.ts'
-import type { Mount } from './mount/mount.ts'
+import type { MountEntry } from './mount/mount.ts'
 import { rstripSlash } from '../utils/slash.ts'
 
 const HELP_HINT =
   'Tip: run `man` to list every available command grouped by resource, `man <cmd>` for a single entry, and `<cmd> --help` for flag details.'
 
-export function buildFilePrompt(mounts: readonly Mount[]): string {
+export function buildFilePrompt(mounts: readonly MountEntry[]): string {
   const parts: string[] = [HELP_HINT]
   for (const m of mounts) {
     const r = m.resource as { prompt?: string; writePrompt?: string }

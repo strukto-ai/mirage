@@ -19,7 +19,7 @@ import type { NotionStatAccessor } from './stat.ts'
 import { readdir } from './readdir.ts'
 import { stat } from './stat.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import { buildTree, keep } from '../../commands/builtin/findEval.ts'
+import { buildTree, keep, startBasename } from '../../commands/builtin/findEval.ts'
 
 async function collect(
   accessor: NotionStatAccessor,
@@ -47,6 +47,7 @@ export async function find(
   options: FindOptions = {},
   index?: IndexCacheStore,
 ): Promise<string[]> {
+  const startName = startBasename(path.original)
   const stripped = stripSlash(path.stripPrefix)
   const base = stripped !== '' ? `/${stripped}` : '/'
   const baseDepth = base === '/' ? 0 : (base.match(/\//g) ?? []).length
@@ -71,7 +72,7 @@ export async function find(
     const relStripped = stripSlash(rel)
     rel = relStripped !== '' ? `/${relStripped}` : '/'
     const isDir = fileStat.type === FileType.DIRECTORY
-    const entryName = rel.split('/').pop() ?? rel
+    const entryName = rel === base ? startName : (rel.split('/').pop() ?? rel)
     const depth = rel === base ? 0 : (rel.match(/\//g) ?? []).length - baseDepth
     if (options.maxDepth !== undefined && options.maxDepth !== null && depth > options.maxDepth) {
       continue

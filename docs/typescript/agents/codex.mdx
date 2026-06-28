@@ -17,15 +17,14 @@ See [TypeScript FUSE setup](/typescript/setup/fuse) for the pnpm `onlyBuiltDepen
 ## Usage
 
 ```ts
-import { MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { Mount, MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
 
-const ws = new Workspace(
-  { '/': new RAMResource() },
-  { mode: MountMode.WRITE, fuseMounts: { '/': true } },
-)
-await ws.execute('true') // wait for mount
+const ws = new Workspace({
+  '/': new Mount(new RAMResource(), { mode: MountMode.WRITE, fuse: true }),
+})
+await ws.fuseReady()
 
-console.log(`cd ${ws.fuseMountpoints['/']} && codex`)
+console.log(`cd ${ws.fuseMountpoint} && codex`)
 // ... run codex in another terminal, then:
 await ws.close()
 ```

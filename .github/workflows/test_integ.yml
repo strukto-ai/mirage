@@ -203,6 +203,9 @@ jobs:
       - name: Run cross-mount commands (ram -> ram/redis/s3 via moto)
         run: ./python/.venv/bin/python integ/cross_commands.py
 
+      - name: Run virtual-root mount switching (ram/disk/yaml)
+        run: ./python/.venv/bin/python integ/root.py
+
   integ-ts:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.ts == 'true') }}

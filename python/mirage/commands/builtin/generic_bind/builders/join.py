@@ -52,4 +52,4 @@ async def join(
                               output_format=o)
 
 
-BUILDER = Builder('join', join, None, False, None)
+BUILDER = Builder('join', join, None, False, None, read=True)

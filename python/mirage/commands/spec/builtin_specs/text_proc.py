@@ -160,7 +160,7 @@ SPECS: dict[str, CommandSpec] = {
     'csplit':
     CommandSpec(
         options=(
-            Option(short="-f", value_kind=OperandKind.TEXT),
+            Option(short="-f", value_kind=OperandKind.PATH),
             Option(short="-n", value_kind=OperandKind.TEXT),
             Option(short="-b", value_kind=OperandKind.TEXT),
             Option(short="-k"),

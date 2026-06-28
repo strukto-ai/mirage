@@ -4,9 +4,9 @@ import aiohttp
 
 from mirage.accessor.sharepoint import SharePointAccessor
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
-                                               keep)
-from mirage.core.sharepoint._client import (graph_list, item_url, new_session,
-                                            split_path)
+                                               emit_start_path, keep,
+                                               start_basename)
+from mirage.core.sharepoint._client import graph_list, item_url, new_session
 from mirage.core.sharepoint._resolver import resolve
 from mirage.core.sharepoint.stat import stat
 from mirage.types import FileType, PathSpec
@@ -51,7 +51,7 @@ async def find(
     empty: bool = False,
     tree: PredNode | None = None,
 ) -> list[str]:
-    _, base_stripped = split_path(path)
+    start_name = start_basename(path)
     resolved = await resolve(accessor, path)
     if resolved.drive_id is None:
         return []
@@ -95,18 +95,21 @@ async def find(
                     continue
             results.append(full_path)
     dir_exists = saw_descendant
-    if item_base and not dir_exists:
+    if not dir_exists:
         try:
             dir_exists = (await stat(accessor,
                                      path)).type == FileType.DIRECTORY
         except FileNotFoundError:
             dir_exists = False
-    if item_base and dir_exists and (maxdepth is None or maxdepth >= 0):
-        root_entry = FindEntry(key="/" + item_base,
-                               name=item_base.rsplit("/", 1)[-1],
-                               kind="d",
-                               depth=0,
-                               is_empty=False if empty else None)
-        if keep(root_entry, tree, mindepth):
-            results.append("/" + item_base)
+    if dir_exists:
+        root_key = "/" + item_base if item_base else "/"
+        emit_start_path(results,
+                        root_key,
+                        start_name,
+                        kind="d",
+                        is_empty=False if empty else None,
+                        exists=True,
+                        tree=tree,
+                        maxdepth=maxdepth,
+                        mindepth=mindepth)
     return sorted(results)

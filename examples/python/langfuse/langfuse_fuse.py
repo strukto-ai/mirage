@@ -14,11 +14,10 @@
 
 import json
 import os
-import time
 
 from dotenv import load_dotenv
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.langfuse import LangfuseConfig, LangfuseResource
 
 load_dotenv(".env.development")
@@ -30,18 +29,14 @@ config = LangfuseConfig(
 )
 resource = LangfuseResource(config=config)
 
-with Workspace(
-    {"/langfuse/": resource},
-        mode=MountMode.READ,
-        fuse=True,
-) as ws:
-    time.sleep(1)
+with Workspace({"/langfuse/": Mount(resource, mode=MountMode.READ,
+                                    fuse=True)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
 
     print("--- os.listdir() top-level ---")
-    top_level = os.listdir(f"{mp}/langfuse")
+    top_level = os.listdir(mp)
     for entry in top_level:
         print(f"  {entry}")
 
@@ -49,7 +44,7 @@ with Workspace(
         print("  no entries found")
     else:
         print("\n--- os.listdir() traces ---")
-        traces = os.listdir(f"{mp}/langfuse/traces")
+        traces = os.listdir(f"{mp}/traces")
         for t in traces[:5]:
             print(f"  {t}")
         if len(traces) > 5:
@@ -57,7 +52,7 @@ with Workspace(
 
         if traces:
             first_trace = traces[0]
-            path = f"{mp}/langfuse/traces/{first_trace}"
+            path = f"{mp}/traces/{first_trace}"
             print(f"\n--- open() + read {first_trace} ---")
             with open(path) as f:
                 content = f.read().strip()
@@ -73,19 +68,19 @@ with Workspace(
                 print("  (empty)")
 
         print("\n--- os.listdir() prompts ---")
-        prompts = os.listdir(f"{mp}/langfuse/prompts")
+        prompts = os.listdir(f"{mp}/prompts")
         for p in prompts:
             print(f"  {p}")
 
         print("\n--- os.listdir() datasets ---")
-        datasets = os.listdir(f"{mp}/langfuse/datasets")
+        datasets = os.listdir(f"{mp}/datasets")
         for d in datasets:
             print(f"  {d}")
 
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> Open another terminal and run:")
-    print(f">>>   ls {mp}/langfuse/")
-    print(f">>>   cat {mp}/langfuse/traces/<trace-id>.json")
+    print(f">>>   ls {mp}/")
+    print(f">>>   cat {mp}/traces/<trace-id>.json")
     print(">>> Press Enter to unmount and exit...")
     input()
 

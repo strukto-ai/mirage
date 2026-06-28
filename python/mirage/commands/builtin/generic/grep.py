@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from functools import partial
 
 from mirage.cache.index import IndexCacheStore
+from mirage.cache.read_through import (cache_aware_read_bytes,
+                                       cache_aware_read_stream)
 from mirage.commands.builtin.grep_helper import (  # yapf: disable
     compile_pattern, count_exit_stream, count_records_have_matches,
     grep_files_only, grep_lines, grep_recursive, grep_stream, resolve_pattern)
@@ -114,6 +116,9 @@ async def grep(
     Returns:
         tuple[ByteSource | None, IOResult]: Output stream and exit metadata.
     """
+    read_bytes = cache_aware_read_bytes(read_bytes)
+    if read_stream is not None:
+        read_stream = cache_aware_read_stream(read_stream)
     fl = FlagView(flags, spec=SPECS["grep"])
     pattern, never_match = await resolve_pattern(
         texts, fl, read_bytes, accessor, index,

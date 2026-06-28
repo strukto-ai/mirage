@@ -19,7 +19,8 @@ from pathlib import Path
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
-                                               keep)
+                                               emit_start_path, keep,
+                                               start_basename)
 from mirage.types import PathSpec
 
 
@@ -47,6 +48,7 @@ def _find_sync(
     mindepth: int | None = None,
     empty: bool = False,
     tree: PredNode | None = None,
+    start_name: str = "",
 ) -> list[str]:
     p = _resolve(root, path)
     base = "/" + path.strip("/")
@@ -60,16 +62,17 @@ def _find_sync(
                                                     or_names=or_names,
                                                     empty=empty)
 
-    if base != "/" and p.is_dir():
+    if p.is_dir():
         root_empty = (not any(p.iterdir())) if empty else None
-        root_entry = FindEntry(key=base,
-                               name=base.rsplit("/", 1)[-1],
-                               kind="d",
-                               depth=0,
-                               is_empty=root_empty)
-        if (maxdepth is None or maxdepth >= 0) and keep(
-                root_entry, tree, mindepth):
-            results.append(base)
+        emit_start_path(results,
+                        base,
+                        start_name,
+                        kind="d",
+                        is_empty=root_empty,
+                        exists=True,
+                        tree=tree,
+                        maxdepth=maxdepth,
+                        mindepth=mindepth)
 
     for dirpath, dirnames, filenames in os.walk(p):
         dp = Path(dirpath)
@@ -161,8 +164,8 @@ async def find(
 ) -> list[str]:
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
-    if isinstance(path, PathSpec):
-        path = path.strip_prefix
+    start_name = start_basename(path)
+    path = path.strip_prefix
     return await asyncio.to_thread(
         _find_sync,
         accessor.root,
@@ -181,4 +184,5 @@ async def find(
         mindepth,
         empty,
         tree,
+        start_name,
     )

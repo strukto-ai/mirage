@@ -579,8 +579,8 @@ name = "beautifulsoup4"
 version = "4.14.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "soupsieve", marker = "(python_full_version < '3.12' and extra == 'extra-9-mirage-ai-camel') or (python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-all') or (python_full_version >= '3.12' and extra != 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openhands') or (extra != 'extra-9-mirage-ai-all' and extra == 'extra-9-mirage-ai-camel')" },
-    { name = "typing-extensions", marker = "(python_full_version < '3.12' and extra == 'extra-9-mirage-ai-camel') or (python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-all') or (python_full_version >= '3.12' and extra != 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openhands') or (extra != 'extra-9-mirage-ai-all' and extra == 'extra-9-mirage-ai-camel')" },
+    { name = "soupsieve", marker = "python_full_version >= '3.12' or extra == 'extra-9-mirage-ai-camel'" },
+    { name = "typing-extensions", marker = "python_full_version >= '3.12' or extra == 'extra-9-mirage-ai-camel'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c3/b0/1c6a16426d389813b48d95e26898aff79abbde42ad353958ad95cc8c9b21/beautifulsoup4-4.14.3.tar.gz", hash = "sha256:6292b1c5186d356bba669ef9f7f051757099565ad9ada5dd630bd9de5fa7fb86", size = 627737, upload-time = "2025-11-30T15:08:26.084Z" }
 wheels = [
@@ -1735,8 +1735,8 @@ dependencies = [
     { name = "opentelemetry-api", marker = "python_full_version >= '3.12'" },
     { name = "packaging", marker = "python_full_version >= '3.12'" },
     { name = "platformdirs", marker = "python_full_version >= '3.12'" },
-    { name = "py-key-value-aio", extra = ["filetree", "keyring", "memory"], marker = "(python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-all') or (python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-openhands') or (extra == 'extra-9-mirage-ai-all' and extra == 'extra-9-mirage-ai-camel') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openai') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openhands') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-pydantic-ai')" },
-    { name = "pydantic", version = "2.12.5", source = { registry = "https://pypi.org/simple" }, extra = ["email"], marker = "(python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-all') or (python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-openhands') or (extra == 'extra-9-mirage-ai-all' and extra == 'extra-9-mirage-ai-camel') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openai') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openhands') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-pydantic-ai')" },
+    { name = "py-key-value-aio", extra = ["filetree", "keyring", "memory"], marker = "(python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-all') or (python_full_version >= '3.12' and extra != 'extra-9-mirage-ai-camel') or (extra == 'extra-9-mirage-ai-all' and extra == 'extra-9-mirage-ai-camel') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openai') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openhands') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-pydantic-ai')" },
+    { name = "pydantic", version = "2.12.5", source = { registry = "https://pypi.org/simple" }, extra = ["email"], marker = "(python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-all') or (python_full_version >= '3.12' and extra != 'extra-9-mirage-ai-camel') or (extra == 'extra-9-mirage-ai-all' and extra == 'extra-9-mirage-ai-camel') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openai') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openhands') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-pydantic-ai')" },
     { name = "pyperclip", marker = "python_full_version >= '3.12'" },
     { name = "python-dotenv", marker = "python_full_version >= '3.12'" },
     { name = "pyyaml", marker = "python_full_version >= '3.12'" },
@@ -2850,14 +2850,14 @@ wheels = [
 
 [[package]]
 name = "joserfc"
-version = "1.6.5"
+version = "1.7.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cryptography" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3b/dc/5f768c2e391e9afabe5d18e3221346deb5fb6338565f1ccc9e7c6d7befdd/joserfc-1.6.5.tar.gz", hash = "sha256:1482a7db78fb4602e44ed89e51b599d052e091288c7c532c5b694e20149dec48", size = 231881, upload-time = "2026-05-06T04:58:13.408Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/44/90/25cb27518750218e4f850be63d8bbb2343efaad1c01c3571aaa4b3c33bd7/joserfc-1.7.1.tar.gz", hash = "sha256:77d0b76514879c68c6f433bc5b7357a4ab72008ff1e33d8379fd11d72bd8ca81", size = 233181, upload-time = "2026-06-08T07:21:33.412Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/54/3b/ad1cb22e75c963b1f07c8a2329bf47227ce7e4361df5eb2fb101b2ce33ef/joserfc-1.6.5-py3-none-any.whl", hash = "sha256:e9878a0f8243fe7b95e11fdda81374ca9f7a689e302751579d3dfdeec559675e", size = 70464, upload-time = "2026-05-06T04:58:11.668Z" },
+    { url = "https://files.pythonhosted.org/packages/b3/00/fa62404c3e347f946faa13aa21085205f9cc06ad17671e37f81a51662ae8/joserfc-1.7.1-py3-none-any.whl", hash = "sha256:b3e3d655612e2e1ef67b2600f2f420e12e537b020208fab1761fad647319c164", size = 70423, upload-time = "2026-06-08T07:21:32.001Z" },
 ]
 
 [[package]]
@@ -3712,8 +3712,8 @@ name = "markdownify"
 version = "1.2.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "beautifulsoup4", marker = "(python_full_version < '3.12' and extra == 'extra-9-mirage-ai-camel') or (python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-all') or (python_full_version >= '3.12' and extra != 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openhands') or (extra != 'extra-9-mirage-ai-all' and extra == 'extra-9-mirage-ai-camel')" },
-    { name = "six", marker = "(python_full_version < '3.12' and extra == 'extra-9-mirage-ai-camel') or (python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-all') or (python_full_version >= '3.12' and extra != 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openhands') or (extra != 'extra-9-mirage-ai-all' and extra == 'extra-9-mirage-ai-camel')" },
+    { name = "beautifulsoup4", marker = "python_full_version >= '3.12' or extra == 'extra-9-mirage-ai-camel'" },
+    { name = "six", marker = "python_full_version >= '3.12' or extra == 'extra-9-mirage-ai-camel'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/3f/bc/c8c8eea5335341306b0fa7e1cb33c5e1c8d24ef70ddd684da65f41c49c92/markdownify-1.2.2.tar.gz", hash = "sha256:b274f1b5943180b031b699b199cbaeb1e2ac938b75851849a31fd0c3d6603d09", size = 18816, upload-time = "2025-11-16T19:21:18.565Z" }
 wheels = [
@@ -4847,15 +4847,15 @@ name = "openai"
 version = "2.30.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "anyio", marker = "(python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-openhands') or extra == 'extra-9-mirage-ai-all' or extra == 'extra-9-mirage-ai-camel' or extra == 'extra-9-mirage-ai-openai'" },
-    { name = "distro", marker = "(python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-openhands') or extra == 'extra-9-mirage-ai-all' or extra == 'extra-9-mirage-ai-camel' or extra == 'extra-9-mirage-ai-openai'" },
-    { name = "httpx", marker = "(python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-openhands') or extra == 'extra-9-mirage-ai-all' or extra == 'extra-9-mirage-ai-camel' or extra == 'extra-9-mirage-ai-openai'" },
-    { name = "jiter", marker = "(python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-openhands') or extra == 'extra-9-mirage-ai-all' or extra == 'extra-9-mirage-ai-camel' or extra == 'extra-9-mirage-ai-openai'" },
+    { name = "anyio" },
+    { name = "distro" },
+    { name = "httpx" },
+    { name = "jiter" },
     { name = "pydantic", version = "2.12.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-mirage-ai-camel'" },
-    { name = "pydantic", version = "2.12.5", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-openhands') or extra == 'extra-9-mirage-ai-all' or extra == 'extra-9-mirage-ai-openai' or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openhands') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-pydantic-ai')" },
-    { name = "sniffio", marker = "(python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-openhands') or extra == 'extra-9-mirage-ai-all' or extra == 'extra-9-mirage-ai-camel' or extra == 'extra-9-mirage-ai-openai'" },
-    { name = "tqdm", marker = "(python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-openhands') or extra == 'extra-9-mirage-ai-all' or extra == 'extra-9-mirage-ai-camel' or extra == 'extra-9-mirage-ai-openai'" },
-    { name = "typing-extensions", marker = "(python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-openhands') or extra == 'extra-9-mirage-ai-all' or extra == 'extra-9-mirage-ai-camel' or extra == 'extra-9-mirage-ai-openai'" },
+    { name = "pydantic", version = "2.12.5", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-9-mirage-ai-all' or extra != 'extra-9-mirage-ai-camel' or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openai') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openhands') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-pydantic-ai')" },
+    { name = "sniffio" },
+    { name = "tqdm" },
+    { name = "typing-extensions" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/88/15/52580c8fbc16d0675d516e8749806eda679b16de1e4434ea06fb6feaa610/openai-2.30.0.tar.gz", hash = "sha256:92f7661c990bda4b22a941806c83eabe4896c3094465030dd882a71abe80c885", size = 676084, upload-time = "2026-03-25T22:08:59.96Z" }
 wheels = [
@@ -4971,10 +4971,10 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "agent-client-protocol", marker = "python_full_version >= '3.12'" },
     { name = "deprecation", marker = "python_full_version >= '3.12'" },
-    { name = "fakeredis", extra = ["lua"], marker = "(python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-all') or (python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-openhands') or (extra == 'extra-9-mirage-ai-all' and extra == 'extra-9-mirage-ai-camel') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openai') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openhands') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-pydantic-ai')" },
+    { name = "fakeredis", extra = ["lua"], marker = "(python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-all') or (python_full_version >= '3.12' and extra != 'extra-9-mirage-ai-camel') or (extra == 'extra-9-mirage-ai-all' and extra == 'extra-9-mirage-ai-camel') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openai') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openhands') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-pydantic-ai')" },
     { name = "fastmcp", marker = "python_full_version >= '3.12'" },
     { name = "filelock", marker = "python_full_version >= '3.12'" },
-    { name = "httpx", extra = ["socks"], marker = "(python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-all') or (python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-openhands') or (extra == 'extra-9-mirage-ai-all' and extra == 'extra-9-mirage-ai-camel') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openai') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openhands') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-pydantic-ai')" },
+    { name = "httpx", extra = ["socks"], marker = "(python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-all') or (python_full_version >= '3.12' and extra != 'extra-9-mirage-ai-camel') or (extra == 'extra-9-mirage-ai-all' and extra == 'extra-9-mirage-ai-camel') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openai') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openhands') or (extra == 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-pydantic-ai')" },
     { name = "litellm", marker = "python_full_version >= '3.12'" },
     { name = "lmnr", marker = "python_full_version >= '3.12'" },
     { name = "pydantic", version = "2.12.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
@@ -10118,8 +10118,8 @@ name = "tiktoken"
 version = "0.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "regex", marker = "(python_full_version < '3.12' and extra == 'extra-9-mirage-ai-camel') or (python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-all') or (python_full_version >= '3.12' and extra != 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openhands') or (extra != 'extra-9-mirage-ai-all' and extra == 'extra-9-mirage-ai-camel')" },
-    { name = "requests", marker = "(python_full_version < '3.12' and extra == 'extra-9-mirage-ai-camel') or (python_full_version >= '3.12' and extra == 'extra-9-mirage-ai-all') or (python_full_version >= '3.12' and extra != 'extra-9-mirage-ai-camel' and extra == 'extra-9-mirage-ai-openhands') or (extra != 'extra-9-mirage-ai-all' and extra == 'extra-9-mirage-ai-camel')" },
+    { name = "regex", marker = "python_full_version >= '3.12' or extra == 'extra-9-mirage-ai-camel'" },
+    { name = "requests", marker = "python_full_version >= '3.12' or extra == 'extra-9-mirage-ai-camel'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7d/ab/4d017d0f76ec3171d469d80fc03dfbb4e48a4bcaddaa831b31d526f05edc/tiktoken-0.12.0.tar.gz", hash = "sha256:b18ba7ee2b093863978fcb14f74b3707cdc8d4d4d3836853ce7ec60772139931", size = 37806, upload-time = "2025-10-06T20:22:45.419Z" }
 wheels = [

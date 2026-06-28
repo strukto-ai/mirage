@@ -17,7 +17,13 @@ import type { PathSpec } from '@struktoai/mirage-core'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { isDirectoryAttrs, joinRoot, stripPrefix } from './utils.ts'
 import { norm } from '@struktoai/mirage-core'
-import { buildTree, keep, type PredNode } from '@struktoai/mirage-core'
+import {
+  buildTree,
+  emitStartPath,
+  keep,
+  type PredNode,
+  startBasename,
+} from '@struktoai/mirage-core'
 
 export interface FindOptions {
   name?: string | null
@@ -155,6 +161,7 @@ export async function find(
   options: FindOptions = {},
 ): Promise<string[]> {
   const virtual = norm(stripPrefix(p))
+  const startName = startBasename(p.original)
   const results: string[] = []
   const baseDepth = (virtual.match(/\//g) ?? []).length
   const typeKind: 'f' | 'd' | null = isFileType(options.type)
@@ -172,24 +179,16 @@ export async function find(
       nameExclude: options.nameExclude,
       orNames: options.orNames,
     })
-  if (virtual !== '/' && (options.maxDepth == null || options.maxDepth >= 0)) {
+  if (options.maxDepth == null || options.maxDepth >= 0) {
     const st = await statRemote(accessor, joinRoot(accessor.config.root ?? '/', virtual))
-    if (
-      st !== null &&
-      keep(
-        {
-          key: virtual,
-          name: virtual.slice(virtual.lastIndexOf('/') + 1),
-          kind: st.isDir ? 'd' : 'f',
-          depth: 0,
-          isEmpty: st.isDir ? false : st.size === 0,
-        },
-        tree,
-        options.minDepth,
-      )
-    ) {
-      results.push(virtual)
-    }
+    emitStartPath(results, virtual, startName, {
+      kind: st?.isDir ? 'd' : 'f',
+      isEmpty: st === null ? null : st.isDir ? false : st.size === 0,
+      exists: st !== null,
+      tree,
+      maxDepth: options.maxDepth,
+      minDepth: options.minDepth,
+    })
   }
   await walk({ accessor, options, results, baseDepth, tree }, virtual, 0)
   results.sort()

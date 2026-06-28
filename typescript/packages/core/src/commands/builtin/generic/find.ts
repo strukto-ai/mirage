@@ -179,7 +179,9 @@ export async function findGeneric(
       const displayPath =
         root.original === '/'
           ? key
-          : rstripSlash(root.original) + key.slice(rootKey === '/' ? 0 : rootKey.length)
+          : rootKey === '/' && key === '/'
+            ? rstripSlash(root.original)
+            : rstripSlash(root.original) + key.slice(rootKey === '/' ? 0 : rootKey.length)
       rootMatches.push(displayPath)
     }
     matches.push(...rebaseDisplay(rootMatches, root.original, root.display))

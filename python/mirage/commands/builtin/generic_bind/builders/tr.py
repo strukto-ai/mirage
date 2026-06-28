@@ -50,4 +50,4 @@ async def tr(
     )
 
 
-BUILDER = Builder('tr', tr, None, False, None)
+BUILDER = Builder('tr', tr, None, False, None, read=True)

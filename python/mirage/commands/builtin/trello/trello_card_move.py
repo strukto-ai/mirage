@@ -46,4 +46,5 @@ async def trello_card_move(
     card = await card_move(config, card_id=card_id, list_id=list_id)
     return yield_bytes(
         json.dumps(normalize_card(card),
-                   ensure_ascii=False).encode()), IOResult()
+                   ensure_ascii=False,
+                   separators=(",", ":")).encode()), IOResult()

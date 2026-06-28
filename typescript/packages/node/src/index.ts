@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export * from '@struktoai/mirage-core'
-export { Workspace } from './workspace.ts'
+export { Workspace, type NodeWorkspaceOptions } from './workspace.ts'
+export { Mount, type MountSpecOptions } from './workspace/mount_spec.ts'
 export {
   DiskResource,
   type DiskResourceOptions,

@@ -58,7 +58,7 @@ await ws.execute('cat /s3/events/2026-05-06.parquet | jq .user')
 ## À propos
 
 - **Une seule interface au lieu de N SDK et M MCP.** Chaque service parle la même sémantique de système de fichiers, et les pipelines se composent entre services aussi naturellement que sur un disque local.
-- **Une cinquantaine de backends intégrés :** RAM, Disk, Redis, S3 / R2 / OCI / Supabase / GCS, Gmail / GDrive / GDocs / GSheets / GSlides, GitHub / Linear / Notion / Trello, Slack / Discord / Telegram / Email, MongoDB / Postgres / LanceDB, SSH et plus encore, montés côte à côte sous une même racine.
+- **Une cinquantaine de backends intégrés :** RAM, Disk, Redis, S3 / R2 / OCI / Supabase / GCS, Gmail / GDrive / GDocs / GSheets / GSlides, GitHub / Linear / Notion / Trello, Slack / Discord / Email, MongoDB / Postgres / LanceDB, SSH et plus encore, montés côte à côte sous une même racine.
 - **Espaces de travail portables :** cloner, snapshotter et versionner un espace de travail ; les exécutions d'agents se déplacent entre machines sans redémarrage ni reconfiguration du système.
 - **Embarquable :** les SDK Python et TypeScript s'exécutent dans le processus, au sein de FastAPI, Express, d'applications navigateur ou de tout runtime asynchrone ; aucun processus séparé n'est requis.
 - **Intégrations d'agents :** OpenAI Agents SDK, Vercel AI SDK, LangChain, Pydantic AI, CAMEL et OpenHands via les SDK ; les agents de code comme Claude Code et Codex via le CLI léger + daemon.

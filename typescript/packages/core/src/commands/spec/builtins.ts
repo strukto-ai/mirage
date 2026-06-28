@@ -302,11 +302,19 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ short: '-i' }),
       // -e takes a script and may repeat; multiple -e are joined with newlines.
       new Option({ short: '-e', valueKind: OperandKind.TEXT, repeatable: true }),
+      // -f reads the script from a file and may repeat (like grep -f); its value
+      // is a PATH so it routes and is read from the mount.
+      new Option({ short: '-f', valueKind: OperandKind.PATH, repeatable: true }),
       new Option({ short: '-n' }),
       new Option({ short: '-E' }),
       new Option({ short: '-r' }),
     ],
-    positional: [new Operand({ kind: OperandKind.TEXT })],
+    // providedBy lists the flags that can supply this positional slot's value;
+    // when any is present the parser skips the slot so the next word is not
+    // mis-grabbed. For sed the first operand is the script (TEXT) only when
+    // neither -e nor -f gave one (GNU). With -e/-f the slot is skipped and the
+    // first operand reflows to a file path in rest.
+    positional: [new Operand({ kind: OperandKind.TEXT, providedBy: ['-e', '-f'] })],
     rest: new Operand({ kind: OperandKind.PATH }),
   }),
   echo: new CommandSpec({

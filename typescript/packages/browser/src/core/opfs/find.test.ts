@@ -26,7 +26,7 @@ describe('opfs/find', () => {
     await mkdir(accessor, spec('/sub'))
     await writeBytes(accessor, spec('/sub/c.json'), new Uint8Array())
     const out = await find(accessor, spec('/'))
-    expect(out.sort()).toEqual(['/a.json', '/b.txt', '/sub', '/sub/c.json'])
+    expect(out.sort()).toEqual(['/', '/a.json', '/b.txt', '/sub', '/sub/c.json'])
   })
 
   it('filters by name pattern', async () => {

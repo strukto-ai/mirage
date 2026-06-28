@@ -110,6 +110,9 @@ export class MirageFS {
   private readonly root: string
   private readonly prefixes: string[]
   private readonly handles = new Map<number, Handle>()
+  // In-memory extended attributes, keyed by FUSE path. Backends have no POSIX
+  // xattrs, so these are advisory and never persisted; see setxattr.
+  private readonly xattrs = new Map<string, Map<string, Buffer>>()
   private readonly prefetchCache = new Map<string, PrefetchEntry>()
   private readonly prefetchInflight = new Map<string, Promise<Uint8Array | null>>()
   private nextFh = 1
@@ -277,6 +280,10 @@ export class MirageFS {
       chmod: this.chmod.bind(this),
       chown: this.chown.bind(this),
       access: this.access.bind(this),
+      setxattr: this.setxattr.bind(this),
+      getxattr: this.getxattr.bind(this),
+      listxattr: this.listxattr.bind(this),
+      removexattr: this.removexattr.bind(this),
       statfs: this.statfs.bind(this),
     }
   }
@@ -479,6 +486,7 @@ export class MirageFS {
     void (async () => {
       try {
         await this.ws.fs.unlink(this.resolve(path))
+        this.xattrs.delete(path)
         cb(0)
       } catch (err) {
         cb(classifyError(err))
@@ -490,6 +498,11 @@ export class MirageFS {
     void (async () => {
       try {
         await this.ws.fs.rename(this.resolve(src), this.resolve(dst))
+        const moved = this.xattrs.get(src)
+        if (moved !== undefined) {
+          this.xattrs.delete(src)
+          this.xattrs.set(dst, moved)
+        }
         cb(0)
       } catch (err) {
         cb(classifyError(err))
@@ -514,6 +527,7 @@ export class MirageFS {
           // error (e.g. ENOENT for missing path).
         }
         await this.ws.fs.rmdir(this.resolve(path))
+        this.xattrs.delete(path)
         cb(0)
       } catch (err) {
         cb(classifyError(err))
@@ -580,6 +594,73 @@ export class MirageFS {
 
   private access(path: string, _amode: number, cb: (code: number) => void): void {
     this.getattrValidate(path, cb)
+  }
+
+  // Mirage backends (S3, etc.) have no POSIX extended attributes, so there is
+  // nothing to persist xattrs to. We keep them in memory per mount so tools that
+  // probe or set xattrs (sandbox runtimes, rsync -aX, tar --xattrs, cp -p, macOS
+  // Finder writing com.apple.*) succeed instead of failing with ENOTSUP. The
+  // values live only for the mount's lifetime and are never written to the
+  // backend.
+  private setxattr(
+    path: string,
+    name: string,
+    value: Buffer,
+    _position: number,
+    _flags: number,
+    cb: (code: number) => void,
+  ): void {
+    this.getattr(path, (code) => {
+      if (code !== 0) {
+        cb(code)
+        return
+      }
+      let attrs = this.xattrs.get(path)
+      if (attrs === undefined) {
+        attrs = new Map()
+        this.xattrs.set(path, attrs)
+      }
+      attrs.set(name, Buffer.from(value))
+      cb(0)
+    })
+  }
+
+  private getxattr(
+    path: string,
+    name: string,
+    _position: number,
+    cb: (code: number, value?: Buffer) => void,
+  ): void {
+    this.getattr(path, (code) => {
+      if (code !== 0) {
+        cb(code)
+        return
+      }
+      // A missing value tells fuse-native to report ENOATTR/ENODATA.
+      cb(0, this.xattrs.get(path)?.get(name))
+    })
+  }
+
+  private listxattr(path: string, cb: (code: number, list?: string[]) => void): void {
+    this.getattr(path, (code) => {
+      if (code !== 0) {
+        cb(code)
+        return
+      }
+      const attrs = this.xattrs.get(path)
+      cb(0, attrs ? [...attrs.keys()] : [])
+    })
+  }
+
+  private removexattr(path: string, name: string, cb: (code: number) => void): void {
+    this.getattr(path, (code) => {
+      if (code !== 0) {
+        cb(code)
+        return
+      }
+      this.xattrs.get(path)?.delete(name)
+      cb(0)
+    })
   }
 
   private getattrValidate(path: string, cb: (code: number) => void): void {

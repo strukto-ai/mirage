@@ -52,4 +52,4 @@ async def awk(
     )
 
 
-BUILDER = Builder('awk', awk, None, False, None)
+BUILDER = Builder('awk', awk, None, False, None, read=True)

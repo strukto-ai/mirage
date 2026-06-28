@@ -222,6 +222,8 @@ PER_MOUNT_CASES: list[tuple[str, str]] = [
     ("tree", "tree {root}"),
     ("find_md", "find {root} -name '*.md'"),
     ("find_type_f", "find {root} -type f | sort"),
+    ("find_root_maxdepth0", "find {root} -maxdepth 0"),
+    ("find_root_name", "find {root} -name knowledge"),
     ("stat_fmt", "stat -c '%s %n' {root}guides/auth"),
     ("cat_auth", "cat {root}guides/auth"),
     ("head_1", "head -n 1 {root}guides/quickstart"),
@@ -259,6 +261,19 @@ ACCOUNTING_CASES: list[tuple[str, list[str]]] = [
     ("calls_cat", ["cat {root}guides/auth"]),
 ]
 
+# Warm-read coherence: a cat warms the file cache for guides/auth (one segments
+# fetch), then each read-only command reads the same file and must be served
+# from cache, leaving the segments call count unchanged. cat reads the document
+# directly; grep/head/tail/wc funnel through the shared generic consumers. A
+# regression in cache-serving would bump segments_after above segments_before.
+WARM_READ_CASES: list[tuple[str, str]] = [
+    ("warm_cat", "cat {root}guides/auth"),
+    ("warm_grep", "grep token {root}guides/auth"),
+    ("warm_head", "head -n 1 {root}guides/auth"),
+    ("warm_tail", "tail -n 1 {root}guides/auth"),
+    ("warm_wc", "wc -l {root}guides/auth"),
+]
+
 
 def _build_workspace(base_url: str) -> Workspace:
     resource = DifyResource(
@@ -286,6 +301,19 @@ async def _measure_calls(base_url: str, name: str, cmds: list[str]) -> None:
           f"retrieve={API_CALLS.get('retrieve', 0)}")
 
 
+async def _warm_read(base_url: str, name: str, cmd: str) -> None:
+    ws = _build_workspace(base_url)
+    API_CALLS.clear()
+    warmup = f"cat {MOUNT}guides/auth"
+    await (await ws.execute(warmup)).stdout_str()
+    warm_segments = API_CALLS.get("segments", 0)
+    await (await ws.execute(cmd.format(root=MOUNT))).stdout_str()
+    after_segments = API_CALLS.get("segments", 0)
+    print(f"=== {name} ===")
+    print(f"segments_before={warm_segments} segments_after={after_segments} "
+          f"served_from_cache={after_segments == warm_segments}")
+
+
 async def main() -> None:
     server = ThreadingHTTPServer(("127.0.0.1", 0), DifyMockHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -300,6 +328,8 @@ async def main() -> None:
             await _run(ws, name, tmpl.format(root=MOUNT))
         for name, cmds in ACCOUNTING_CASES:
             await _measure_calls(base_url, name, cmds)
+        for name, tmpl in WARM_READ_CASES:
+            await _warm_read(base_url, name, tmpl)
         await run_not_found(ws, MOUNT)
     finally:
         server.shutdown()

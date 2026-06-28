@@ -15,9 +15,11 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import {
+  type CommandSafeguard,
   createShellParser,
   type ExecuteOptions,
   type ExecuteResult,
+  type MountMode,
   type ProvisionResult,
   type Resource,
   type ShellParser,
@@ -25,6 +27,7 @@ import {
   type WorkspaceOptions,
 } from '@struktoai/mirage-core'
 import { FuseManager } from './workspace/fuse.ts'
+import { Mount } from './workspace/mount_spec.ts'
 import './compression_codecs.ts'
 
 const requireCjs = createRequire(import.meta.url)
@@ -42,49 +45,50 @@ function loadShellParser(): Promise<ShellParser> {
   return cachedParser
 }
 
-export interface NodeWorkspaceOptions extends WorkspaceOptions {
-  /**
-   * Per-mount FUSE exposure: `{ '/data': true, '/s3': '/tmp/s3' }`. A value of
-   * `true` mounts at a fresh temp dir; a string pins the mountpoint (created if
-   * missing). Each entry becomes its own FUSE mount scoped to that prefix.
-   */
-  fuseMounts?: Record<string, boolean | string>
-}
+export type NodeWorkspaceOptions = WorkspaceOptions
 
 export class Workspace extends CoreWorkspace {
-  private readonly autoFuseManagers = new Map<string, FuseManager>()
-  private readonly fuseMountpointsMap = new Map<string, string>()
   private fuseSetupPromise: Promise<void> | null = null
+  private readonly fuseMountpointsMap = new Map<string, string>()
+  private readonly fuseManagers = new Map<string, FuseManager>()
 
-  constructor(resources: Record<string, Resource>, options: NodeWorkspaceOptions = {}) {
-    super(resources, {
+  constructor(resources: Record<string, Resource | Mount>, options: NodeWorkspaceOptions = {}) {
+    const bareResources: Record<string, Resource> = {}
+    const modeOverrides: Record<string, MountMode> = { ...(options.modeOverrides ?? {}) }
+    const commandSafeguards: Record<string, Record<string, CommandSafeguard>> = {
+      ...(options.commandSafeguards ?? {}),
+    }
+    const fuseTargets: [string, boolean | string][] = []
+    for (const [prefix, value] of Object.entries(resources)) {
+      if (value instanceof Mount) {
+        bareResources[prefix] = value.resource
+        if (value.options.mode !== undefined) modeOverrides[prefix] = value.options.mode
+        if (value.options.commandSafeguards !== undefined)
+          commandSafeguards[prefix] = value.options.commandSafeguards
+        if (value.options.fuse !== undefined && value.options.fuse !== false)
+          fuseTargets.push([prefix, value.options.fuse])
+      } else {
+        bareResources[prefix] = value
+      }
+    }
+    super(bareResources, {
       ...options,
+      ...(Object.keys(modeOverrides).length > 0 ? { modeOverrides } : {}),
+      ...(Object.keys(commandSafeguards).length > 0 ? { commandSafeguards } : {}),
       shellParserFactory: options.shellParserFactory ?? loadShellParser,
     })
-    const fuseMounts = options.fuseMounts ?? {}
-    const setups: Promise<void>[] = []
-    for (const [prefix, target] of Object.entries(fuseMounts)) {
-      if (target === false) continue
-      const fm = new FuseManager()
-      this.autoFuseManagers.set(prefix, fm)
-      const opts = {
-        rootPrefix: prefix,
-        ...(typeof target === 'string' ? { mountpoint: target } : {}),
-      }
-      // Kick off mount eagerly; await inside execute() / close() so callers
-      // don't need to await the constructor (Python mirrors this).
+    if (fuseTargets.length > 0) {
+      // Kick off mounts eagerly; await inside fuseReady() / execute() / close()
+      // so callers don't need to await the constructor (Python mirrors this).
       //
       // A failed auto-mount (e.g. libfuse absent on the host) degrades to an
       // unmounted but fully usable workspace, mirroring Python: there the mount
       // runs on a daemon thread so its failure never reaches the main process.
-      // On Node's single event loop we must swallow it here, otherwise the
-      // unhandled rejection would terminate the process under Node's default
-      // unhandled-rejection policy.
-      setups.push(
-        fm.setup(this, opts).then(
-          (mountpoint) => {
-            this.fuseMountpointsMap.set(prefix, mountpoint)
-          },
+      // On Node's single event loop we swallow it here, otherwise the unhandled
+      // rejection would terminate the process under Node's default policy.
+      const setups = fuseTargets.map(([prefix, target]) =>
+        this.addFuseMount(prefix, typeof target === 'string' ? target : undefined).then(
+          () => undefined,
           (err: unknown) => {
             process.stderr.write(
               `mirage: FUSE auto-mount failed for ${prefix}, continuing without it: ${
@@ -94,18 +98,68 @@ export class Workspace extends CoreWorkspace {
           },
         ),
       )
-    }
-    if (setups.length > 0) {
       this.fuseSetupPromise = Promise.all(setups).then(() => undefined)
     }
   }
 
-  /** Map each FUSE-exposed mount prefix to its live mountpoint. */
+  private registerFuseMount(prefix: string, mountpoint: string): void {
+    for (const [otherPrefix, otherMp] of this.fuseMountpointsMap) {
+      if (otherMp === mountpoint && otherPrefix !== prefix) {
+        throw new Error(
+          `FUSE mountpoint ${mountpoint} already used by prefix ${otherPrefix}; mounts need distinct paths`,
+        )
+      }
+    }
+    this.fuseMountpointsMap.set(prefix, mountpoint)
+  }
+
+  /**
+   * Mount a workspace subtree under FUSE and own its lifecycle. Each mount gets
+   * its own {@link FuseManager}, so a workspace can expose any number of FUSE
+   * subtrees at once. A pinned mountpoint is collision-checked BEFORE mounting,
+   * so a clash never leaves a partial kernel mount.
+   */
+  async addFuseMount(prefix: string, mountpoint?: string): Promise<string> {
+    if (mountpoint !== undefined) this.registerFuseMount(prefix, mountpoint)
+    const fm = new FuseManager()
+    this.fuseManagers.set(prefix, fm)
+    try {
+      const mp = await fm.setup(this, {
+        rootPrefix: prefix,
+        ...(mountpoint !== undefined ? { mountpoint } : {}),
+      })
+      if (mountpoint === undefined) this.registerFuseMount(prefix, mp)
+      return mp
+    } catch (err) {
+      // The mount never came up; drop the manager and any registered path so
+      // fuseMountpoints does not misreport it as live.
+      this.fuseManagers.delete(prefix)
+      this.fuseMountpointsMap.delete(prefix)
+      throw err
+    }
+  }
+
+  async removeFuseMount(prefix: string): Promise<void> {
+    const fm = this.fuseManagers.get(prefix)
+    this.fuseManagers.delete(prefix)
+    if (fm !== undefined) await fm.unmount()
+    this.fuseMountpointsMap.delete(prefix)
+  }
+
   get fuseMountpoints(): Record<string, string> {
     return Object.fromEntries(this.fuseMountpointsMap)
   }
 
-  private async ensureFuseReady(): Promise<void> {
+  get fuseMountpoint(): string | null {
+    if (this.fuseMountpointsMap.size === 0) return null
+    if (this.fuseMountpointsMap.size > 1) {
+      throw new Error('multiple FUSE mounts active; use fuseMountpoints to select one by prefix')
+    }
+    return this.fuseMountpointsMap.values().next().value ?? null
+  }
+
+  /** Await the eager per-mount fuse mounts started in the constructor. */
+  async fuseReady(): Promise<void> {
     if (this.fuseSetupPromise !== null) {
       await this.fuseSetupPromise
       this.fuseSetupPromise = null
@@ -128,15 +182,15 @@ export class Workspace extends CoreWorkspace {
     command: string,
     options: ExecuteOptions = {},
   ): Promise<ExecuteResult | ProvisionResult> {
-    await this.ensureFuseReady()
+    await this.fuseReady()
     return super.execute(command, options)
   }
 
   override async close(): Promise<void> {
-    await this.ensureFuseReady().catch(() => undefined)
-    for (const fm of this.autoFuseManagers.values()) {
-      await fm.close(this)
-    }
+    await this.fuseReady().catch(() => undefined)
+    for (const fm of this.fuseManagers.values()) await fm.unmount()
+    this.fuseManagers.clear()
+    this.fuseMountpointsMap.clear()
     await super.close()
   }
 }

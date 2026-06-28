@@ -520,7 +520,7 @@ export {
   getWhileParts,
 } from './shell/helpers.ts'
 export { MountRegistry } from './workspace/mount/registry.ts'
-export { Mount, type MountInit } from './workspace/mount/mount.ts'
+export { MountEntry, type MountInit } from './workspace/mount/mount.ts'
 export { normMountPrefix } from './workspace/snapshot/utils.ts'
 export {
   command,
@@ -1130,10 +1130,13 @@ export { fnmatch } from './utils/fnmatch.ts'
 export {
   buildTree,
   computeNonemptyDirs,
+  emitStartPath,
+  type EmitStartPathOptions,
   evalPredicate,
   type FindEntry,
   keep,
   type PredNode,
+  startBasename,
 } from './commands/builtin/findEval.ts'
 export { enoent, enotdir, errorVirtualPath, type FsError, gnuStrerror } from './utils/errors.ts'
 

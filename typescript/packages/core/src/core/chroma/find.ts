@@ -21,6 +21,7 @@ import {
   type FindEntry,
   keep,
   type PredNode,
+  startBasename,
   treeHasType,
 } from '../../commands/builtin/findEval.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../utils/slash.ts'
@@ -53,8 +54,11 @@ async function matches(
   options: FindOptions,
   tree: PredNode,
   needsKind: boolean,
+  startName: string,
 ): Promise<boolean> {
-  const itemName = rstripSlash(item).split('/').pop() ?? ''
+  const rootNorm = rstripSlash(root) !== '' ? rstripSlash(root) : '/'
+  const itemNorm = rstripSlash(item) !== '' ? rstripSlash(item) : '/'
+  const itemName = itemNorm === rootNorm ? startName : (rstripSlash(item).split('/').pop() ?? '')
   const spec = PathSpec.fromStrPath(item, prefix)
   let kind: 'd' | 'f' = 'f'
   if (needsKind) {
@@ -109,10 +113,21 @@ export async function find(
       orNames: options.orNames,
     })
   const needsKind = treeHasType(tree)
+  const startName = startBasename(path.original)
   const filtered: string[] = []
   for (const item of results) {
     if (
-      await matches(accessor, item, path.prefix, index, path.stripPrefix, options, tree, needsKind)
+      await matches(
+        accessor,
+        item,
+        path.prefix,
+        index,
+        path.stripPrefix,
+        options,
+        tree,
+        needsKind,
+        startName,
+      )
     ) {
       filtered.push(item)
     }

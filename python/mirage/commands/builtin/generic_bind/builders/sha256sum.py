@@ -46,4 +46,4 @@ async def sha256sum(
         check=c)
 
 
-BUILDER = Builder('sha256sum', sha256sum, None, False, None)
+BUILDER = Builder('sha256sum', sha256sum, None, False, None, read=True)

@@ -107,8 +107,6 @@ async def _run(ws: Workspace, name: str, cmd: str) -> None:
 def _set_cat_safeguard(ws: Workspace, max_lines: int) -> None:
     sg = CommandSafeguard(max_lines=max_lines)
     mounts = list(ws._registry._mounts)
-    if ws._registry.default_mount is not None:
-        mounts.append(ws._registry.default_mount)
     for m in mounts:
         m.command_safeguards["cat"] = sg
 

@@ -51,4 +51,4 @@ async def shuf(
                               with_replacement=r)
 
 
-BUILDER = Builder('shuf', shuf, None, False, None)
+BUILDER = Builder('shuf', shuf, None, False, None, read=True)

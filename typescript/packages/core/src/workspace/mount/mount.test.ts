@@ -21,7 +21,7 @@ import { revisionFor } from '../../observe/context.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
 import type { Resource } from '../../resource/base.ts'
 import { MountMode, PathSpec } from '../../types.ts'
-import { Mount } from './mount.ts'
+import { MountEntry } from './mount.ts'
 
 class StubResource implements Resource {
   readonly kind = 'ram'
@@ -38,25 +38,29 @@ const BASIC_SPEC = new CommandSpec({ rest: new Operand({ kind: OperandKind.PATH 
 const OK_CMD: CommandFn = () => [null, new IOResult({ exitCode: 0 })]
 const OK_CMD_STDOUT: CommandFn = () => [new TextEncoder().encode('ok'), new IOResult()]
 
-function makeMount(mode: MountMode = MountMode.WRITE): Mount {
-  return new Mount({ prefix: '/ram/', resource: new StubResource(), mode })
+function makeMount(mode: MountMode = MountMode.WRITE): MountEntry {
+  return new MountEntry({ prefix: '/ram/', resource: new StubResource(), mode })
 }
 
 describe('Mount constructor validation', () => {
   it('requires prefix to start with /', () => {
-    expect(() => new Mount({ prefix: 'ram/', resource: new StubResource() })).toThrow(/start with/)
+    expect(() => new MountEntry({ prefix: 'ram/', resource: new StubResource() })).toThrow(
+      /start with/,
+    )
   })
 
   it('requires prefix to end with /', () => {
-    expect(() => new Mount({ prefix: '/ram', resource: new StubResource() })).toThrow(/end with/)
+    expect(() => new MountEntry({ prefix: '/ram', resource: new StubResource() })).toThrow(
+      /end with/,
+    )
   })
 
   it('rejects double-slash prefixes', () => {
-    expect(() => new Mount({ prefix: '//ram/', resource: new StubResource() })).toThrow(/\/\//)
+    expect(() => new MountEntry({ prefix: '//ram/', resource: new StubResource() })).toThrow(/\/\//)
   })
 
   it('defaults mode to READ', () => {
-    const m = new Mount({ prefix: '/ram/', resource: new StubResource() })
+    const m = new MountEntry({ prefix: '/ram/', resource: new StubResource() })
     expect(m.mode).toBe(MountMode.READ)
   })
 })

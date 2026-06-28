@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { OpRecord } from '../../observe/record.ts'
 import type { Resource } from '../../resource/base.ts'
 import { FileStat } from '../../types.ts'
-import type { Mount } from '../mount/mount.ts'
+import type { MountEntry } from '../mount/mount.ts'
 import {
   captureFingerprints,
   checkDrift,
@@ -25,18 +25,18 @@ import {
 } from './drift.ts'
 
 interface RegistryLike {
-  mountFor(path: string): Mount | null
-  allMounts(): readonly Mount[]
+  mountFor(path: string): MountEntry | null
+  allMounts(): readonly MountEntry[]
 }
 
-function makeMount(prefix: string, supportsSnapshot: boolean): Mount {
+function makeMount(prefix: string, supportsSnapshot: boolean): MountEntry {
   const resource: Resource = {
     kind: 's3',
     supportsSnapshot,
     open: () => Promise.resolve(),
     close: () => Promise.resolve(),
   }
-  const m: Partial<Mount> & {
+  const m: Partial<MountEntry> & {
     prefix: string
     resource: Resource
     revisions: Map<string, string>
@@ -45,7 +45,7 @@ function makeMount(prefix: string, supportsSnapshot: boolean): Mount {
     resource,
     revisions: new Map(),
   }
-  return m as Mount
+  return m as MountEntry
 }
 
 function makeStatFn(stats?: Record<string, FileStat>): (path: string) => Promise<FileStat> {
@@ -58,9 +58,9 @@ function makeStatFn(stats?: Record<string, FileStat>): (path: string) => Promise
   }
 }
 
-function makeRegistry(mounts: Mount[]): RegistryLike {
+function makeRegistry(mounts: MountEntry[]): RegistryLike {
   return {
-    mountFor: (path: string): Mount | null => {
+    mountFor: (path: string): MountEntry | null => {
       for (const m of mounts) {
         if (path.startsWith(m.prefix.replace(/\/$/, ''))) return m
       }

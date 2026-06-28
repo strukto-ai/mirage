@@ -12,86 +12,79 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readdir, readFile } from 'node:fs/promises'
-import { createInterface } from 'node:readline/promises'
-import { resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import dotenv from 'dotenv'
+import { readdir, readFile } from "node:fs/promises";
+import { createInterface } from "node:readline/promises";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import dotenv from "dotenv";
 import {
-  FuseManager,
   GSlidesResource,
+  Mount,
   MountMode,
   Workspace,
   type GSlidesConfig,
-} from '@struktoai/mirage-node'
+} from "@struktoai/mirage-node";
 
-const __HERE = fileURLToPath(new URL('.', import.meta.url))
-dotenv.config({ path: resolve(__HERE, '../../../.env.development'), override: true })
+const __HERE = fileURLToPath(new URL(".", import.meta.url));
+dotenv.config({
+  path: resolve(__HERE, "../../../.env.development"),
+  override: true,
+});
 
 function buildConfig(): GSlidesConfig {
-  const clientId = process.env.GOOGLE_CLIENT_ID ?? ''
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET ?? ''
-  const refreshToken = process.env.GOOGLE_REFRESH_TOKEN ?? ''
-  if (clientId === '' || clientSecret === '' || refreshToken === '') {
-    throw new Error('GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REFRESH_TOKEN are required')
+  const clientId = process.env.GOOGLE_CLIENT_ID ?? "";
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET ?? "";
+  const refreshToken = process.env.GOOGLE_REFRESH_TOKEN ?? "";
+  if (clientId === "" || clientSecret === "" || refreshToken === "") {
+    throw new Error(
+      "GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REFRESH_TOKEN are required",
+    );
   }
-  return { clientId, clientSecret, refreshToken }
+  return { clientId, clientSecret, refreshToken };
 }
-
-
-async function gracefulCleanup(fm: FuseManager, ws: Workspace, mp: string): Promise<void> {
-  try { await fm.close(ws) } catch {}
-  try { await ws.close() } catch {}
-  console.error(`\n>>> unmounted ${mp}`)
-}
-
 async function main(): Promise<void> {
-  const resource = new GSlidesResource(buildConfig())
-  const ws = new Workspace({ '/gslides': resource }, { mode: MountMode.READ })
-  const fm = new FuseManager()
-  const mp = await fm.setup(ws)
-  let cleaned = false
-  const handler = (sig: NodeJS.Signals): void => {
-    if (cleaned) return
-    cleaned = true
-    void gracefulCleanup(fm, ws, mp).then(() => process.exit(sig === "SIGINT" ? 130 : 143))
-  }
-  process.on("SIGINT", handler)
-  process.on("SIGTERM", handler)
+  const resource = new GSlidesResource(buildConfig());
+  const ws = new Workspace({
+    "/gslides": new Mount(resource, { mode: MountMode.READ, fuse: true }),
+  });
+  await ws.fuseReady();
+  const mp = ws.fuseMountpoint as string;
   try {
-    console.log(`=== FUSE MODE: mounted at ${mp} ===\n`)
+    console.log(`=== FUSE MODE: mounted at ${mp} ===\n`);
 
-    console.log(`--- readdir() ${mp}/gslides ---`)
-    for (const r of await readdir(`${mp}/gslides`)) console.log(`  ${r}`)
+    console.log(`--- readdir() ${mp} ---`);
+    for (const r of await readdir(mp)) console.log(`  ${r}`);
 
-    console.log(`\n--- readdir() ${mp}/gslides/owned (first 5) ---`)
-    const owned = await readdir(`${mp}/gslides/owned`)
-    for (const o of owned.slice(0, 5)) console.log(`  ${o}`)
-    if (owned.length > 5) console.log(`  ... (${String(owned.length)} total)`)
+    console.log(`\n--- readdir() ${mp}/owned (first 5) ---`);
+    const owned = await readdir(`${mp}/owned`);
+    for (const o of owned.slice(0, 5)) console.log(`  ${o}`);
+    if (owned.length > 5) console.log(`  ... (${String(owned.length)} total)`);
 
     if (owned[0] !== undefined) {
-      const path = `${mp}/gslides/owned/${owned[0]}`
-      console.log(`\n--- readFile() ${owned[0]} (first 200 chars) ---`)
-      const text = await readFile(path, 'utf-8')
-      console.log(text.slice(0, 200))
+      const path = `${mp}/owned/${owned[0]}`;
+      console.log(`\n--- readFile() ${owned[0]} (first 200 chars) ---`);
+      const text = await readFile(path, "utf-8");
+      console.log(text.slice(0, 200));
     }
 
-    console.log(`\n>>> FUSE mounted at: ${mp}`)
-    console.log('>>> Try in another terminal:')
-    console.log(`>>>   ls ${mp}/gslides/owned/`)
-    console.log(`>>>   cat ${mp}/gslides/owned/<file> | jq .title`)
-    console.log('>>> Press Enter to unmount and exit...')
+    console.log(`\n>>> FUSE mounted at: ${mp}`);
+    console.log(">>> Try in another terminal:");
+    console.log(`>>>   ls ${mp}/owned/`);
+    console.log(`>>>   cat ${mp}/owned/<file> | jq .title`);
+    console.log(">>> Press Enter to unmount and exit...");
 
-    const rl = createInterface({ input: process.stdin, output: process.stdout })
-    await rl.question('')
-    rl.close()
+    const rl = createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    await rl.question("");
+    rl.close();
   } finally {
-    await fm.close(ws)
-    await ws.close()
+    await ws.close();
   }
 }
 
 main().catch((err: unknown) => {
-  console.error(err)
-  process.exit(1)
-})
+  console.error(err);
+  process.exit(1);
+});

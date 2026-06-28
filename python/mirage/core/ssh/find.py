@@ -16,7 +16,8 @@ import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
-                                               keep)
+                                               emit_start_path, keep,
+                                               start_basename)
 from mirage.core.ssh._client import _abs
 from mirage.types import PathSpec
 
@@ -41,6 +42,7 @@ async def find(
 ) -> list[str]:
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
+    start_name = start_basename(path)
     if isinstance(path, PathSpec):
         path = path.strip_prefix
     config = accessor.config
@@ -52,21 +54,23 @@ async def find(
                                                     type=type,
                                                     name_exclude=name_exclude,
                                                     or_names=or_names)
-    if path.strip("/") and (maxdepth is None or maxdepth >= 0):
+    if maxdepth is None or maxdepth >= 0:
         try:
             root_attrs = await sftp.stat(_abs(config, path))
         except (asyncssh.SFTPError, OSError):
             root_attrs = None
         if root_attrs is not None:
             is_dir = root_attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY
-            root_entry = FindEntry(key=path,
-                                   name=path.rsplit("/", 1)[-1],
-                                   kind="d" if is_dir else "f",
-                                   depth=0,
-                                   is_empty=False if is_dir else
-                                   (root_attrs.size or 0) == 0)
-            if keep(root_entry, tree, mindepth):
-                results.append(path)
+            emit_start_path(results,
+                            path,
+                            start_name,
+                            kind="d" if is_dir else "f",
+                            is_empty=False if is_dir else
+                            (root_attrs.size or 0) == 0,
+                            exists=True,
+                            tree=tree,
+                            maxdepth=maxdepth,
+                            mindepth=mindepth)
     await _walk(sftp, config, path, results, 0, maxdepth, mindepth, tree,
                 min_size, max_size, mtime_min, mtime_max)
     return sorted(results)

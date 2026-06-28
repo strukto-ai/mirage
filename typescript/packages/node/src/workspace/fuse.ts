@@ -92,42 +92,34 @@ class FuseCleanupRegistry {
 
 const CLEANUP = new FuseCleanupRegistry()
 
+// Passive mounting primitive: it mounts a workspace subtree and tears it down.
+// Registry/lifecycle ownership lives on the node Workspace (addFuseMount /
+// removeFuseMount), mirroring Python's FuseManager.
 export class FuseManager {
   private handle: FuseHandle | null = null
-  private externalMountpoint: string | null = null
-  private auto = false
   private cleanupEntry: CleanupEntry | null = null
 
   get mountpoint(): string | null {
-    if (this.handle !== null) return this.handle.mountpoint
-    return this.externalMountpoint
-  }
-
-  set mountpoint(path: string | null) {
-    this.externalMountpoint = path
+    return this.handle?.mountpoint ?? null
   }
 
   async setup(ws: Workspace, options: MountOptions = {}): Promise<string> {
     if (this.handle !== null) return this.handle.mountpoint
-    this.handle = await mount(ws, options)
-    this.auto = true
-    this.externalMountpoint = null
+    const handle = await mount(ws, options)
+    this.handle = handle
     this.cleanupEntry = {
-      mountpoint: this.handle.mountpoint,
-      handle: this.handle,
+      mountpoint: handle.mountpoint,
+      handle,
       // Preserve the ownership decision made by mount(); unmount cleanup must
       // not infer ownership from path shape or whether the directory exists.
-      ownsMountpoint: this.handle.ownsMountpoint,
+      ownsMountpoint: handle.ownsMountpoint,
     }
     CLEANUP.register(this.cleanupEntry)
-    ws.setFuseMountpoint(this.handle.mountpoint, { owned: true })
-    return this.handle.mountpoint
+    return handle.mountpoint
   }
 
-  async unmount(ws?: Workspace): Promise<void> {
+  async unmount(): Promise<void> {
     if (this.handle === null) {
-      if (ws !== undefined) ws.setFuseMountpoint(null)
-      this.externalMountpoint = null
       return
     }
     const mp = this.handle.mountpoint
@@ -140,8 +132,6 @@ export class FuseManager {
         this.cleanupEntry = null
       }
       this.handle = null
-      this.auto = false
-      ws?.setFuseMountpoint(null)
       removeMountpointIfOwned({
         mountpoint: mp,
         ownsMountpoint: cleanupEntry?.ownsMountpoint ?? false,
@@ -149,7 +139,7 @@ export class FuseManager {
     }
   }
 
-  async close(ws?: Workspace): Promise<void> {
-    if (this.auto) await this.unmount(ws)
+  async close(): Promise<void> {
+    await this.unmount()
   }
 }

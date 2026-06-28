@@ -12,90 +12,83 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readdir, readFile } from 'node:fs/promises'
-import { createInterface } from 'node:readline/promises'
-import { resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import dotenv from 'dotenv'
+import { readdir, readFile } from "node:fs/promises";
+import { createInterface } from "node:readline/promises";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import dotenv from "dotenv";
 import {
-  FuseManager,
+  Mount,
   MountMode,
   NotionResource,
   Workspace,
   type NotionConfig,
-} from '@struktoai/mirage-node'
+} from "@struktoai/mirage-node";
 
-const __HERE = fileURLToPath(new URL('.', import.meta.url))
-dotenv.config({ path: resolve(__HERE, '../../../.env.development') })
+const __HERE = fileURLToPath(new URL(".", import.meta.url));
+dotenv.config({ path: resolve(__HERE, "../../../.env.development") });
 
 function buildConfig(): NotionConfig {
-  const apiKey = process.env.NOTION_API_KEY
-  if (apiKey === undefined || apiKey === '') {
-    throw new Error('NOTION_API_KEY env var is required')
+  const apiKey = process.env.NOTION_API_KEY;
+  if (apiKey === undefined || apiKey === "") {
+    throw new Error("NOTION_API_KEY env var is required");
   }
-  return { apiKey }
+  return { apiKey };
 }
 
 async function main(): Promise<void> {
-  const resource = new NotionResource(buildConfig())
-  const ws = new Workspace({ '/notion': resource }, { mode: MountMode.READ })
-  const fm = new FuseManager()
-  const mp = await fm.setup(ws)
-  let cleaned = false
-  const handler = (sig: NodeJS.Signals): void => {
-    if (cleaned) return
-    cleaned = true
-    void (async (): Promise<void> => {
-      try { await fm.close(ws) } catch {}
-      try { await ws.close() } catch {}
-      console.error(`\n>>> unmounted ${mp}`)
-      process.exit(sig === "SIGINT" ? 130 : 143)
-    })()
-  }
-  process.on("SIGINT", handler)
-  process.on("SIGTERM", handler)
+  const resource = new NotionResource(buildConfig());
+  const ws = new Workspace({
+    "/notion": new Mount(resource, { mode: MountMode.READ, fuse: true }),
+  });
+  await ws.fuseReady();
+  const mp = ws.fuseMountpoint as string;
   try {
-    console.log(`=== FUSE MODE: mounted at ${mp} ===\n`)
+    console.log(`=== FUSE MODE: mounted at ${mp} ===\n`);
 
-    console.log('--- readdir() /notion/pages ---')
-    const pages = await readdir(`${mp}/notion/pages`)
-    for (const p of pages.slice(0, 5)) console.log(`  ${p}`)
+    console.log("--- readdir() /notion/pages ---");
+    const pages = await readdir(`${mp}/pages`);
+    for (const p of pages.slice(0, 5)) console.log(`  ${p}`);
 
     if (pages.length === 0) {
-      console.log('  (no pages)')
-      return
+      console.log("  (no pages)");
+      return;
     }
-    const pagePath = `${mp}/notion/pages/${pages[0]!}`
+    const pagePath = `${mp}/pages/${pages[0]!}`;
 
-    console.log(`\n--- readdir() ${pages[0]!} ---`)
-    for (const c of await readdir(pagePath)) console.log(`  ${c}`)
+    console.log(`\n--- readdir() ${pages[0]!} ---`);
+    for (const c of await readdir(pagePath)) console.log(`  ${c}`);
 
-    console.log('\n--- readFile() page.json ---')
-    const bytes = await readFile(`${pagePath}/page.json`, 'utf-8')
-    const data = JSON.parse(bytes) as { title?: string; url?: string }
-    console.log(`  title: ${data.title ?? ''}`)
-    console.log(`  url: ${data.url ?? ''}`)
+    console.log("\n--- readFile() page.json ---");
+    const bytes = await readFile(`${pagePath}/page.json`, "utf-8");
+    const data = JSON.parse(bytes) as { title?: string; url?: string };
+    console.log(`  title: ${data.title ?? ""}`);
+    console.log(`  url: ${data.url ?? ""}`);
 
-    console.log(`\n>>> FUSE mounted at: ${mp}`)
-    console.log('>>> Open another terminal and run:')
-    console.log(`>>>   ls ${mp}/notion/pages/`)
-    console.log(`>>>   cat ${mp}/notion/pages/<page>/page.json | jq .title`)
-    console.log('>>> Press Enter to unmount and exit...')
+    console.log(`\n>>> FUSE mounted at: ${mp}`);
+    console.log(">>> Open another terminal and run:");
+    console.log(`>>>   ls ${mp}/pages/`);
+    console.log(`>>>   cat ${mp}/pages/<page>/page.json | jq .title`);
+    console.log(">>> Press Enter to unmount and exit...");
 
-    const rl = createInterface({ input: process.stdin, output: process.stdout })
-    await rl.question('')
-    rl.close()
+    const rl = createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    await rl.question("");
+    rl.close();
 
-    const records = ws.records
-    const total = records.reduce((acc, r) => acc + (r.bytes ?? 0), 0)
-    console.log(`\nStats: ${String(records.length)} ops, ${String(total)} bytes transferred`)
+    const records = ws.records;
+    const total = records.reduce((acc, r) => acc + (r.bytes ?? 0), 0);
+    console.log(
+      `\nStats: ${String(records.length)} ops, ${String(total)} bytes transferred`,
+    );
   } finally {
-    await fm.close()
-    await ws.close()
+    await ws.close();
   }
 }
 
 main().catch((err: unknown) => {
-  console.error(err)
-  process.exit(1)
-})
+  console.error(err);
+  process.exit(1);
+});

@@ -50,4 +50,4 @@ async def grep(
     )
 
 
-BUILDER = Builder('grep', grep, None, False, prefix_aggregate)
+BUILDER = Builder('grep', grep, None, False, prefix_aggregate, read=True)

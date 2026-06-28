@@ -81,5 +81,9 @@ async def cat(
     return source, IOResult()
 
 
-BUILDER = Builder('cat', cat, make_file_read_provision, False,
-                  concat_aggregate)
+BUILDER = Builder('cat',
+                  cat,
+                  make_file_read_provision,
+                  False,
+                  concat_aggregate,
+                  read=True)

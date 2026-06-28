@@ -62,6 +62,27 @@ async def test_readdir_folder_records_file_and_folder_entries():
 
 
 @pytest.mark.asyncio
+async def test_readdir_of_file_raises_not_a_directory():
+    index = RAMIndexCacheStore()
+    with aioresponses() as m:
+        m.get(_BASE + "/root:/a.txt:/children",
+              status=404,
+              payload={"error": {
+                  "code": "itemNotFound",
+                  "message": "x"
+              }})
+        m.get(_BASE + "/root:/a.txt",
+              payload={
+                  "id": "1",
+                  "name": "a.txt",
+                  "size": 3,
+                  "file": {}
+              })
+        with pytest.raises(NotADirectoryError):
+            await readdir(_accessor(), PathSpec.from_str_path("/a.txt"), index)
+
+
+@pytest.mark.asyncio
 async def test_readdir_paginates_nextlink():
     index = RAMIndexCacheStore()
     page2 = _BASE + "/root/children?$skiptoken=x"

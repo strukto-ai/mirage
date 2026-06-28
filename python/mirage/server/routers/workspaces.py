@@ -41,9 +41,16 @@ async def create_workspace(req: CreateWorkspaceRequest,
     kwargs = req.config.to_workspace_kwargs()
     ws = Workspace(**kwargs)
     try:
+        for prefix, target in req.config.fuse_mounts().items():
+            mountpoint = target if isinstance(target, str) else None
+            ws.add_fuse_mount(prefix, mountpoint)
         entry = registry.add(ws, workspace_id=req.id)
     except ValueError as e:
+        await ws.close()
         raise HTTPException(status_code=409, detail=str(e))
+    except Exception:
+        await ws.close()
+        raise
     return await make_detail(entry)
 
 

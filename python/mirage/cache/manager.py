@@ -56,6 +56,25 @@ class CacheManager:
             return self._prefix + path
         return path
 
+    async def cached_bytes(self, path: PathSpec) -> bytes | None:
+        """Return cached bytes for ``path`` if present, else None.
+
+        Lookup only: never fetches from the backend. The single
+        read-cache check, called by the shared read-through wrappers
+        (``mirage.cache.read_through``) that every read command reads
+        through, so warm reads are served from the file cache without the
+        command knowing about it.
+
+        Args:
+            path (PathSpec): the path to look up.
+        """
+        if not self._caches_reads or self._file_cache is None:
+            return None
+        virtual = self._virtual(path)
+        if await self._file_cache.exists(virtual):
+            return await self._file_cache.get(virtual)
+        return None
+
     async def invalidate_after_write(self, path: str | PathSpec) -> None:
         """Invalidate caches after a write to ``path``.
 

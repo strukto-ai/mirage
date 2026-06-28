@@ -14,11 +14,10 @@
 
 import json
 import os
-import time
 
 from dotenv import load_dotenv
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.gdocs import GDocsConfig, GDocsResource
 
 load_dotenv(".env.development")
@@ -30,19 +29,19 @@ config = GDocsConfig(
 )
 resource = GDocsResource(config=config)
 
-with Workspace({"/gdocs/": resource}, mode=MountMode.READ, fuse=True) as ws:
-    time.sleep(1)
+with Workspace({"/gdocs/": Mount(resource, mode=MountMode.READ,
+                                 fuse=True)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
 
     print("--- os.listdir() root ---")
-    roots = os.listdir(f"{mp}/gdocs")
+    roots = os.listdir(mp)
     for r in roots:
         print(f"  {r}")
 
     for section in ("owned", "shared"):
-        section_path = f"{mp}/gdocs/{section}"
+        section_path = f"{mp}/{section}"
         if not os.path.isdir(section_path):
             continue
         docs = os.listdir(section_path)
@@ -63,8 +62,8 @@ with Workspace({"/gdocs/": resource}, mode=MountMode.READ, fuse=True) as ws:
 
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> Open another terminal and run:")
-    print(f">>>   ls {mp}/gdocs/")
-    print(f">>>   ls {mp}/gdocs/owned/")
+    print(f">>>   ls {mp}/")
+    print(f">>>   ls {mp}/owned/")
     print(">>> Press Enter to unmount and exit...")
     input()
 

@@ -45,4 +45,4 @@ async def paste(
                                serial=s)
 
 
-BUILDER = Builder('paste', paste, None, False, None)
+BUILDER = Builder('paste', paste, None, False, None, read=True)

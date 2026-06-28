@@ -44,6 +44,31 @@ YML
 
   $cli daemon stop >/dev/null 2>&1 </dev/null || true
   sleep 1
+
+  # Collision rejection: two mounts whose fuse: resolves to the SAME OS path must
+  # be rejected at workspace-create time (server returns 409, CLI exits non-zero),
+  # and the server must not leak a partial mount. Self-contained sub-check that
+  # never touches the main cf workspace.
+  local collide_mp="/tmp/cli-fuse-$lang-collide-mp"
+  local yaml_collide="/tmp/cli-fuse-$lang-collide.yaml"
+  cat > "$yaml_collide" <<YML
+mode: WRITE
+mounts:
+  /one:
+    resource: ram
+    fuse: $collide_mp
+  /two:
+    resource: ram
+    fuse: $collide_mp
+YML
+  $cli workspace delete cfx >/dev/null 2>&1 </dev/null || true
+  if $cli workspace create "$yaml_collide" --id cfx >/dev/null 2>&1 </dev/null; then
+    echo "collision_rejected=no"
+    $cli workspace delete cfx >/dev/null 2>&1 </dev/null || true
+  else
+    echo "collision_rejected=yes"
+  fi
+
   $cli workspace delete cf >/dev/null 2>&1 </dev/null || true
   $cli workspace create "$yaml" --id cf >/dev/null </dev/null
 
@@ -95,11 +120,33 @@ YML
   echo "logs_dir_survives=$([ -d "$lmnt" ] && echo yes || echo no)"
   echo "gen_dir_removed=$([ -n "$auto_mp" ] && [ ! -d "$auto_mp" ] && echo yes || echo no)"
 
+  # Reuse a pinned mountpoint across re-create: the caller-owned $dmnt directory
+  # survived the cf delete above, so a NEW workspace pinned to the SAME path must
+  # mount fine and serve a file through the kernel.
+  local reuse_yaml="/tmp/cli-fuse-$lang-reuse.yaml"
+  cat > "$reuse_yaml" <<YML
+mode: WRITE
+mounts:
+  /data:
+    resource: ram
+    fuse: $dmnt
+YML
+  $cli workspace delete cf2 >/dev/null 2>&1 </dev/null || true
+  $cli workspace create "$reuse_yaml" --id cf2 >/dev/null </dev/null
+  $cli execute -w cf2 -c 'echo reused > /data/r.txt' </dev/null >/dev/null
+  for i in $(seq 1 50); do
+    [ -f "$dmnt/r.txt" ] && break
+    sleep 0.2
+  done
+  echo "reuse_after_recreate=$(cat "$dmnt/r.txt" 2>/dev/null)"
+  $cli workspace delete cf2 >/dev/null 2>&1 </dev/null || true
+
   $cli daemon stop >/dev/null 2>&1 </dev/null || true
   fusermount -u "$dmnt" 2>/dev/null || umount "$dmnt" 2>/dev/null || true
   fusermount -u "$lmnt" 2>/dev/null || umount "$lmnt" 2>/dev/null || true
   [ -n "$auto_mp" ] && { fusermount -u "$auto_mp" 2>/dev/null || umount "$auto_mp" 2>/dev/null || true; }
-  rm -rf "$dmnt" "$lmnt" ${auto_mp:+"$auto_mp"}
+  fusermount -u "$collide_mp" 2>/dev/null || umount "$collide_mp" 2>/dev/null || true
+  rm -rf "$dmnt" "$lmnt" "$collide_mp" "$yaml_collide" "$reuse_yaml" ${auto_mp:+"$auto_mp"}
 }
 
 echo "===== probing Python CLI ====="
@@ -145,6 +192,8 @@ expect "distinct" "yes"
 expect "data_dir_survives" "yes"
 expect "logs_dir_survives" "yes"
 expect "gen_dir_removed" "yes"
+expect "collision_rejected" "yes"
+expect "reuse_after_recreate" "reused"
 
 if [ "$fail" != "0" ]; then
   echo

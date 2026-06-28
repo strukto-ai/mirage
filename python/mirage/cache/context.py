@@ -32,6 +32,9 @@ class CacheInvalidator(Protocol):
     async def invalidate_after_unlink(self, path: str | PathSpec) -> None:
         ...
 
+    async def cached_bytes(self, path: PathSpec) -> bytes | None:
+        ...
+
 
 _active: ContextVar[CacheInvalidator | None] = ContextVar(
     "_active_cache_manager", default=None)

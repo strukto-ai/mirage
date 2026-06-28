@@ -145,7 +145,7 @@ A session can be created with an explicit allowlist of mount prefixes. Any comma
 
 This is a soft boundary, enforced inside the daemon process, not an OS or process-level isolation. Use it to shrink the blast radius of prompt-injection in multi-agent workspaces: a Slack-only agent cannot pivot to read `/linear`, `/github`, or any other mount it was not given.
 
-The check fires for every code path that reaches a mount: shell commands (`cat`, `ls`, ...), redirects (`>`, `<`), cross-mount `cp`/`mv`, `wget -O`, `curl -o`, command substitution `$(...)`, subshells `(...)`, pipes, `&&`/`||` chains, background jobs, and the programmatic `ws.ops.read/write/...` API. Two infrastructure prefixes are always allowed regardless of the allowlist: the history view (`/.bash_history`, which the `history` builtin and the GNU histfile render from) and the cache mount (`/_default`, where stateless text-processing commands like `wc` live).
+The check fires for every code path that reaches a mount: shell commands (`cat`, `ls`, ...), redirects (`>`, `<`), cross-mount `cp`/`mv`, `wget -O`, `curl -o`, command substitution `$(...)`, subshells `(...)`, pipes, `&&`/`||` chains, background jobs, and the programmatic `ws.ops.read/write/...` API. Two infrastructure prefixes are always allowed regardless of the allowlist: the history view (`/.bash_history`, which the `history` builtin and the GNU histfile render from) and the virtual root (`/`, where stateless text-processing commands like `wc` resolve when given no path).
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">

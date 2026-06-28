@@ -35,7 +35,7 @@ describe('core/ssh/find', () => {
       ]),
     })
     const out = await find(accessor, spec('/'))
-    expect(out).toEqual(['/a.json', '/b.txt', '/sub', '/sub/c.json'])
+    expect(out).toEqual(['/', '/a.json', '/b.txt', '/sub', '/sub/c.json'])
   })
 
   it('filters by name pattern (*.json)', async () => {
@@ -66,7 +66,7 @@ describe('core/ssh/find', () => {
       ]),
     })
     const out = await find(accessor, spec('/'), { type: 'd' })
-    expect(out).toEqual(['/sub'])
+    expect(out).toEqual(['/', '/sub'])
   })
 
   it('respects maxDepth', async () => {
@@ -99,7 +99,7 @@ describe('core/ssh/find', () => {
       ]),
     })
     const out = await find(accessor, spec('/'), { maxSize: 5 })
-    expect(out).toEqual(['/one.txt', '/sub'])
+    expect(out).toEqual(['/', '/one.txt', '/sub'])
   })
 
   it('does not emit the start directory under -type f', async () => {

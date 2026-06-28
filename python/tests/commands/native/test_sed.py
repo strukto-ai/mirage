@@ -202,6 +202,35 @@ def test_sed_e_with_file(env):
         "sed -e s/hello/bye/ ef.txt")
 
 
+def test_sed_f_script_file(env):
+    env.create_file("prog.sed", b"s/hello/HI/\n")
+    env.create_file("inf.txt", b"hello world\n")
+    assert env.mirage("sed -f /data/prog.sed /data/inf.txt") == env.native(
+        "sed -f prog.sed inf.txt")
+
+
+def test_sed_f_multiple_commands(env):
+    env.create_file("prog2.sed", b"s/hello/HI/\ns/world/EARTH/\n")
+    env.create_file("inf2.txt", b"hello world\n")
+    assert env.mirage("sed -f /data/prog2.sed /data/inf2.txt") == env.native(
+        "sed -f prog2.sed inf2.txt")
+
+
+def test_sed_e_and_f_combined(env):
+    env.create_file("prog3.sed", b"s/world/EARTH/\n")
+    env.create_file("inf3.txt", b"hello world\n")
+    assert env.mirage(
+        "sed -e s/hello/HI/ -f /data/prog3.sed /data/inf3.txt") == env.native(
+            "sed -e s/hello/HI/ -f prog3.sed inf3.txt")
+
+
+def test_sed_f_stdin(env):
+    env.create_file("prog4.sed", b"s/hello/HI/\n")
+    data = b"hello world\n"
+    assert env.mirage("sed -f /data/prog4.sed",
+                      stdin=data) == env.native("sed -f prog4.sed", stdin=data)
+
+
 def test_sed_negate_line(env):
     data = b"a\nb\nc\n"
     assert env.mirage("sed '2!d'", stdin=data) == env.native("sed '2!d'",

@@ -16,7 +16,7 @@ import type { RegisteredCommand } from '../../../commands/config.ts'
 import { BUILTIN_SPECS } from '../../../commands/spec/builtins.ts'
 import type { CommandSpec } from '../../../commands/spec/types.ts'
 import { IOResult } from '../../../io/types.ts'
-import type { Mount } from '../../mount/mount.ts'
+import type { MountEntry } from '../../mount/mount.ts'
 import { DEV_PREFIX } from '../../mount/registry.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
 import type { Session } from '../../session/session.ts'
@@ -24,7 +24,7 @@ import { ExecutionNode } from '../../types.ts'
 import type { Result } from './scope.ts'
 
 interface ManHit {
-  mount: Mount
+  mount: MountEntry
   cmd: RegisteredCommand
   isGeneral: boolean
 }
@@ -93,7 +93,7 @@ function renderManEntry(name: string, hits: ManHit[]): string {
 }
 
 function renderManIndex(session: Session, registry: MountRegistry): string {
-  const byKind = new Map<string, Mount>()
+  const byKind = new Map<string, MountEntry>()
   for (const m of registry.allMounts()) {
     if (m.prefix === DEV_PREFIX) continue
     if (!byKind.has(m.resource.kind)) byKind.set(m.resource.kind, m)

@@ -37,7 +37,7 @@ from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
 from mirage.workspace.executor.fs_error import format_fs_error
 from mirage.workspace.executor.jobs import (handle_jobs, handle_kill,
                                             handle_ps, handle_wait)
-from mirage.workspace.mount import MountRegistry
+from mirage.workspace.mount import MountCommandUnsupported, MountRegistry
 from mirage.workspace.session import Session, assert_mount_allowed
 from mirage.workspace.types import ExecutionNode
 
@@ -171,10 +171,20 @@ def _parse_flags(
 
         # Recover PathSpec for PATH flag values; repeatable PATH flags
         # arrive as a list of resolved paths and become list[PathSpec].
+        # A relative PATH flag value cwd-resolved by parse_command (e.g.
+        # csplit -f part -> /data/part) is absent from scope_map, so build a
+        # PathSpec for it just like positional paths do, otherwise it never
+        # gets the mount prefix stripped.
         repeat_path_keys = {
             flag_kwarg_name(name)
             for opt in spec.options
             if opt.value_kind == OperandKind.PATH and opt.repeatable
+            for name in (opt.short, opt.long) if name
+        }
+        single_path_keys = {
+            flag_kwarg_name(name)
+            for opt in spec.options
+            if opt.value_kind == OperandKind.PATH and not opt.repeatable
             for name in (opt.short, opt.long) if name
         }
         for key, value in flag_kwargs.items():
@@ -186,6 +196,12 @@ def _parse_flags(
                                  directory=part[:part.rfind("/") + 1] or "/",
                                  resolved=True)) for part in value
                 ]
+            elif key in single_path_keys and isinstance(value, str):
+                flag_kwargs[key] = scope_map.get(
+                    value,
+                    PathSpec(original=value,
+                             directory=value[:value.rfind("/") + 1] or "/",
+                             resolved=True))
             elif isinstance(value, str) and value in scope_map:
                 flag_kwargs[key] = scope_map[value]
 
@@ -355,7 +371,15 @@ async def handle_command(
                 stderr=err.encode(),
             ), ExecutionNode(command=cmd_str, exit_code=1)
 
-    mount = await registry.resolve_mount(cmd_name, path_scopes, session.cwd)
+    try:
+        mount = await registry.resolve_mount(cmd_name, path_scopes,
+                                             session.cwd)
+    except MountCommandUnsupported as exc:
+        err = f"{exc}\n".encode()
+        return None, IOResult(exit_code=1,
+                              stderr=err), ExecutionNode(command=cmd_str,
+                                                         exit_code=1,
+                                                         stderr=err)
     if mount is None:
         return None, IOResult(
             exit_code=127,
@@ -438,7 +462,7 @@ async def handle_command(
                 io.exit_code = 1
 
     prefix = mount.prefix.rstrip("/")
-    if prefix and mount is not registry.default_mount:
+    if prefix:
         io.reads = {prefix + k: v for k, v in io.reads.items()}
         io.writes = {prefix + k: v for k, v in io.writes.items()}
         io.cache = [prefix + p for p in io.cache]

@@ -12,13 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.linear.basename import basename
-from mirage.commands.builtin.linear.cat import cat
-from mirage.commands.builtin.linear.dirname import dirname
+from mirage.commands.builtin.generic_bind import (CommandIO,
+                                                  make_generic_commands)
+from mirage.commands.builtin.generic_bind.provision import (
+    make_search_provision, metadata_provision)
 from mirage.commands.builtin.linear.find import find
-from mirage.commands.builtin.linear.grep import grep
-from mirage.commands.builtin.linear.head import head
-from mirage.commands.builtin.linear.jq import jq
 from mirage.commands.builtin.linear.linear_issue_add_label import \
     linear_issue_add_label
 from mirage.commands.builtin.linear.linear_issue_assign import \
@@ -38,29 +36,39 @@ from mirage.commands.builtin.linear.linear_issue_transition import \
 from mirage.commands.builtin.linear.linear_issue_update import \
     linear_issue_update
 from mirage.commands.builtin.linear.linear_search import linear_search
-from mirage.commands.builtin.linear.ls import ls
-from mirage.commands.builtin.linear.realpath import realpath
-from mirage.commands.builtin.linear.rg import rg
-from mirage.commands.builtin.linear.stat import stat
-from mirage.commands.builtin.linear.tail import tail
-from mirage.commands.builtin.linear.tree import tree
-from mirage.commands.builtin.linear.wc import wc
+from mirage.core.linear.read import read as _read
+from mirage.core.linear.readdir import readdir as _readdir
+from mirage.core.linear.stat import stat as _stat
+from mirage.core.linear.stream import read_stream as _read_stream
+
+# Linear issues/projects/teams are read through the generic factory; find keeps
+# a wrapper for its bespoke readdir-walk filtering, and the linear_issue_* and
+# linear_search commands are the bespoke write/search surface. The generic
+# byte-mutation commands are intentionally absent (mutations go through the
+# platform commands, no write op wired).
+_LINEAR_CMD_OPS = CommandIO(
+    readdir=_readdir,
+    read_bytes=_read,
+    read_stream=_read_stream,
+    stat=_stat,
+    is_mounted=lambda a: True,
+    local=False,
+)
+
+_LINEAR_OVERRIDES = {"find"}
 
 COMMANDS = [
-    basename,
-    cat,
-    dirname,
+    *make_generic_commands(
+        "linear",
+        _LINEAR_CMD_OPS,
+        overrides=_LINEAR_OVERRIDES,
+        provision_overrides={
+            "grep": make_search_provision(_stat),
+            "rg": make_search_provision(_stat),
+            "ls": metadata_provision,
+        },
+    ),
     find,
-    grep,
-    head,
-    jq,
-    ls,
-    realpath,
-    rg,
-    stat,
-    tail,
-    tree,
-    wc,
     linear_issue_add_label,
     linear_issue_assign,
     linear_issue_comment_add,

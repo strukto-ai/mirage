@@ -102,15 +102,19 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         modeOverrides,
         sessionId: args.options.sessionId,
         agentId: args.options.agentId,
-        ...(args.options.fuseMounts !== undefined ? { fuseMounts: args.options.fuseMounts } : {}),
         ...(Object.keys(commandSafeguards).length > 0 ? { commandSafeguards } : {}),
         ...(args.options.cache !== undefined ? { cache: args.options.cache } : {}),
         ...(args.options.index !== undefined ? { index: args.options.index } : {}),
       })
       let entry
       try {
+        for (const [prefix, target] of Object.entries(args.fuseMounts)) {
+          const mountpoint = typeof target === 'string' ? target : undefined
+          await ws.addFuseMount(prefix, mountpoint)
+        }
         entry = deps.registry.add(ws, body.id)
       } catch (e) {
+        await ws.close()
         return reply.status(409).send({ detail: (e as Error).message })
       }
       return reply.status(201).send(await makeDetail(entry))

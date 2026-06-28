@@ -96,9 +96,7 @@ async def handle_command_provision(
     if not result.command:
         result.command = cmd_str
 
-    default = registry.default_mount
-    cache = default.resource if default is not None else None
-    hits = await _check_cache_hits(cache, parts)
+    hits = await _check_cache_hits(registry.file_cache, parts)
     if hits > 0:
         result.cache_hits = hits
         result.cache_read_low = result.network_read_low

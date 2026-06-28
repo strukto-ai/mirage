@@ -47,4 +47,4 @@ async def column(
                                 output_separator=o)
 
 
-BUILDER = Builder('column', column, None, False, None)
+BUILDER = Builder('column', column, None, False, None, read=True)

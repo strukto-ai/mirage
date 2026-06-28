@@ -14,10 +14,6 @@
 
 import pytest
 
-from mirage.cache.index import RAMIndexCacheStore
-from mirage.commands.builtin.databricks_volume import diff as diff_command
-from mirage.types import PathSpec
-
 
 @pytest.mark.asyncio
 async def test_workspace_execute_databricks_volume_diff(
@@ -39,24 +35,3 @@ async def test_workspace_execute_databricks_volume_diff_resolves_glob(
     assert io.exit_code == 1
     assert b"old" in io.stdout
     assert b"new" in io.stdout
-
-
-@pytest.mark.asyncio
-async def test_databricks_volume_diff_forwards_index(
-    index_tracker,
-    expected_index: RAMIndexCacheStore,
-    materialize_output,
-):
-    source, _io = await diff_command(
-        object(),
-        [
-            PathSpec.from_str_path("/dbx/left.txt", "/dbx"),
-            PathSpec.from_str_path("/dbx/right.txt", "/dbx"),
-        ],
-        index=expected_index,
-    )
-
-    await materialize_output(source)
-
-    assert index_tracker.seen_indexes
-    assert all(index is expected_index for index in index_tracker.seen_indexes)

@@ -66,5 +66,9 @@ async def tail(
                         from_line=from_line), IOResult()
 
 
-BUILDER = Builder('tail', tail, make_head_tail_provision, False,
-                  header_aggregate)
+BUILDER = Builder('tail',
+                  tail,
+                  make_head_tail_provision,
+                  False,
+                  header_aggregate,
+                  read=True)

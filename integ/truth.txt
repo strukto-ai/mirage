@@ -685,6 +685,7 @@ world
 === rg_c ===
 1
 === find_d ===
+/data
 /data/disptree
 /data/disptree/d
 /data/guard
@@ -722,6 +723,7 @@ world
 /data/sub/nested.txt
 /data/tabbed.txt
 === find_size_gt ===
+/data
 /data/a.txt
 /data/abc.csv
 /data/anchors.txt
@@ -973,6 +975,30 @@ Xb
 === sed_multi_e ===
 c
 === sed_e_file ===
+hello
+EARTH
+foo
+bar
+baz
+=== sed_f_file ===
+hello
+EARTH
+foo
+bar
+baz
+=== sed_f_multi ===
+hello
+EARTH
+FOO
+bar
+baz
+=== sed_ef_combined ===
+hello
+EARTH
+FOO
+bar
+baz
+=== sed_f_stdin ===
 hello
 EARTH
 foo
@@ -1257,6 +1283,7 @@ baz,
 === find_empty ===
 /data/empty.txt
 === find_not_name ===
+/data
 /data/abc.csv
 /data/binary.bin
 /data/chat.jsonl
@@ -1270,7 +1297,20 @@ baz,
 /data/sub/deep
 /data/user.json
 /data/users.json
+=== find_name_start ===
+/data
+=== find_maxdepth_zero ===
+/data
+=== find_mindepth_zero ===
+/data
+/data/disptree
+/data/disptree/d
+/data/guard
+/data/guard/sub
+/data/sub
+/data/sub/deep
 === find_size_lt ===
+/data
 /data/disptree
 /data/disptree/d
 /data/disptree/d/y.txt
@@ -1320,6 +1360,7 @@ baz,
 /data/user.json
 /data/users.json
 === find_mtime ===
+/data
 /data/a.txt
 /data/abc.csv
 /data/anchors.txt
@@ -1778,8 +1819,8 @@ disptree/d
 disptree/d/y.txt
 disptree/x.txt
 === history_last_two ===
-470  (cd /data && ls -R disptree)
-471  (cd /data && find disptree)
+477  (cd /data && ls -R disptree)
+478  (cd /data && find disptree)
 === bash_history_tail ===
 (cd /data && ls -R disptree)
 (cd /data && find disptree)
@@ -2059,6 +2100,12 @@ find: invalid argument '' to '-size'
 === find_bad_mtime ===
 exit=1
 find: invalid argument 'abc' to '-mtime'
+=== find_unknown_predicate ===
+exit=1
+find: unknown predicate '-regex'
+=== find_bogus_predicate ===
+exit=1
+find: unknown predicate '-boguspredicate'
 === sleep_zero ===
 sleep_zero ok
 === sleep_fraction ===

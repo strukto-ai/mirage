@@ -33,10 +33,14 @@ from mirage.types import PathSpec
 
 def _positional_as_paths(texts: tuple[str, ...],
                          cwd: PathSpec | None) -> list[PathSpec]:
-    """Treat positional operands as files (GNU rule when -e gives the script).
+    """Treat positional operands as files (GNU rule when -e/-f give script).
 
     The arg parser routes the first bare arg into the positional ``text``
     (script) slot, so recover it as a path operand carrying the mount prefix.
+
+    Args:
+        texts (tuple[str, ...]): positional operands that are really files.
+        cwd (PathSpec | None): current directory for relative resolution.
     """
     base = cwd.original if cwd is not None else "/"
     prefix = cwd.prefix if cwd is not None else ""
@@ -61,6 +65,31 @@ MakeRead = Callable[[object, IndexCacheStore | None, list[PathSpec]], Callable]
 GlobWhen = Callable[[object, IndexCacheStore | None], bool]
 
 
+async def _scripts_from_files(
+    make_read: MakeRead,
+    accessor: object,
+    index: IndexCacheStore | None,
+    f_files: list[PathSpec],
+) -> list[str]:
+    """Read each -f script file through the backend reader.
+
+    Args:
+        make_read (MakeRead): builds the backend read_bytes callable.
+        accessor (object): backend accessor.
+        index (IndexCacheStore | None): optional cache index.
+        f_files (list[PathSpec]): -f script-file paths.
+    """
+    out: list[str] = []
+    for pf in f_files:
+        reader = make_read(accessor, index, [pf])
+        data = await reader(accessor, pf)
+        text = data.decode(errors="replace")
+        if text.endswith("\n"):
+            text = text[:-1]
+        out.append(text)
+    return out
+
+
 def make_sed(
     *,
     resource: str | list[str],
@@ -79,24 +108,33 @@ def make_sed(
         stdin: AsyncIterator[bytes] | bytes | None = None,
         i: bool = False,
         e: object = None,
+        f: object = None,
         n: bool = False,
         E: bool = False,
         index: IndexCacheStore = None,
         **_extra: object,
     ) -> tuple[ByteSource | None, IOResult]:
-        # The script comes from -e expressions (joined with newlines) when any
-        # were given, otherwise from the first positional operand.
+        # The script comes from -e expressions and -f script files (joined
+        # with newlines, -e then -f as grep does) when any were given,
+        # otherwise from the first positional operand.
         e_list = e if isinstance(e,
                                  list) else ([e] if isinstance(e, str) else [])
-        script = "\n".join(e_list) if e_list else (texts[0] if texts else None)
+        f_files = f if isinstance(
+            f, list) else ([f] if isinstance(f, PathSpec) else [])
+        script_parts = list(e_list) + await _scripts_from_files(
+            make_read, accessor, index, f_files)
+        flag_script = bool(e_list or f_files)
+        if not flag_script and texts:
+            script_parts.append(texts[0])
+        script = "\n".join(script_parts) if script_parts else None
         if script is None:
             raise ValueError("sed: usage: sed EXPRESSION [path]")
         if inplace_error is not None and i:
             exc_type, message = inplace_error
             raise exc_type(message)
         operands = list(paths)
-        if e_list:
-            # With -e the positional operand is a file, not the script.
+        if flag_script:
+            # With -e/-f the positional operand is a file, not the script.
             cwd = _extra.get("cwd")
             operands = _positional_as_paths(
                 texts, cwd if isinstance(cwd, PathSpec) else None) + operands

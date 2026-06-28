@@ -19,7 +19,7 @@ import pytest
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
 from mirage.workspace.mount import MountRegistry
-from mirage.workspace.mount.mount import Mount
+from mirage.workspace.mount.mount import MountEntry
 
 
 def _run(coro):
@@ -30,27 +30,27 @@ def _run(coro):
 
 
 def test_mount_accepts_root_prefix():
-    m = Mount("/", RAMResource())
+    m = MountEntry("/", RAMResource())
     assert m.prefix == "/"
 
 
 def test_mount_rejects_no_leading_slash():
     with pytest.raises(ValueError, match="must start with /"):
-        Mount("data/", RAMResource())
+        MountEntry("data/", RAMResource())
 
 
 def test_mount_rejects_no_trailing_slash():
     with pytest.raises(ValueError, match="must end with /"):
-        Mount("/data", RAMResource())
+        MountEntry("/data", RAMResource())
 
 
 def test_mount_rejects_double_slash():
     with pytest.raises(ValueError, match="must not contain //"):
-        Mount("/data//sub/", RAMResource())
+        MountEntry("/data//sub/", RAMResource())
 
 
 def test_mount_valid_prefix():
-    m = Mount("/data/", RAMResource())
+    m = MountEntry("/data/", RAMResource())
     assert m.prefix == "/data/"
 
 
