@@ -42,6 +42,7 @@ export async function cpGeneric(
   verbose: boolean,
   index?: IndexCacheStore,
   backendKey?: BackendKeyFn,
+  dirCopy?: CopyFn,
 ): Promise<CommandFnResult> {
   const keyOf = backendKey ?? backendKeyDefault
   const sources = paths.slice(0, -1)
@@ -69,6 +70,16 @@ export async function cpGeneric(
     if (recursive) {
       const srcBase = rstripSlash(src.stripPrefix)
       const dstBase = rstripSlash(target.stripPrefix)
+      if (dirCopy !== undefined) {
+        if (noClobber && (await pathExists(stat, target))) continue
+        await dirCopy(src, target)
+        for (const entry of await find(src, { type: 'f' })) {
+          const entryDst = dstBase + entry.slice(srcBase.length)
+          writes[entryDst] = new Uint8Array()
+          if (verbose) lines.push(`'${entry}' -> '${entryDst}'`)
+        }
+        continue
+      }
       for (const entry of await find(src, { type: 'f' })) {
         const entryDst = dstBase + entry.slice(srcBase.length)
         const entryDstSpec = PathSpec.fromStrPath(entryDst, target.prefix)

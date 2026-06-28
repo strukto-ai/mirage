@@ -19,12 +19,20 @@ PROMPT = """\
       page.json
       <child-page-title>__<child-id>/
         page.json
-  Hierarchical page tree. cat page.json shows metadata, the page body
-  rendered as markdown, and raw blocks (nested blocks under "children").
+  databases/
+    <database-title>__<database-id>/
+      database.json
+      <row-page-title>__<page-id>/
+        page.json
+  Hierarchical page tree plus shared databases. cat page.json shows
+  metadata, the page body rendered as markdown, and raw blocks (nested
+  blocks under "children"). cat database.json shows the database metadata
+  and its typed property schema (not the rows); ls the database dir to
+  list row pages.
 
-  <page-title> is sanitized; don't construct it, ls the parent dir.
-  Use the <page-id> from a path segment as page_id/block_id in write
-  commands."""
+  Titles are sanitized; don't construct paths, ls the parent dir.
+  Use the <page-id>/<database-id> from a path segment as
+  page_id/database_id/block_id in write commands."""
 
 WRITE_PROMPT = """\
   Write commands:

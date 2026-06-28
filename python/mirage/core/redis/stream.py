@@ -52,6 +52,7 @@ async def read_stream(
 ) -> AsyncIterator[bytes]:
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
+    virtual = path.original if isinstance(path, PathSpec) else path
     if isinstance(path, PathSpec):
         prefix = path.prefix
         path = path.original
@@ -59,5 +60,8 @@ async def read_stream(
         rest = path[len(prefix):]
         if prefix.endswith("/") or rest == "" or rest.startswith("/"):
             path = rest or "/"
-    async for chunk in stream(accessor, path):
-        yield chunk
+    try:
+        async for chunk in stream(accessor, path):
+            yield chunk
+    except FileNotFoundError as exc:
+        raise enoent(virtual) from exc

@@ -18,6 +18,7 @@ export interface CIArtifact {
   id: number
   name?: string
   size_in_bytes?: number
+  updated_at?: string
   [k: string]: unknown
 }
 

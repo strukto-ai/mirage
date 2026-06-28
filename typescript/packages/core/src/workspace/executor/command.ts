@@ -23,7 +23,7 @@ import { CallStack } from '../../shell/call_stack.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/types.ts'
 import { PathSpec } from '../../types.ts'
-import type { Mount } from '../mount/mount.ts'
+import type { MountEntry } from '../mount/mount.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { PyodideRuntime } from './python/runtime.ts'
 import type { Session } from '../session/session.ts'
@@ -158,7 +158,7 @@ export async function handleCommand(
       cmdStr,
     )
     if (csIo.safeguard === null) {
-      const mounts: Mount[] = []
+      const mounts: MountEntry[] = []
       for (const s of pathScopes) {
         const m = registry.mountFor(s.original)
         if (m !== null) mounts.push(m)
@@ -337,7 +337,7 @@ export async function handleCommand(
 
 function parseFlags(
   parts: readonly (string | PathSpec)[],
-  mount: Mount,
+  mount: MountEntry,
   cmdName: string,
   cwd: string,
 ): [PathSpec[], string[], Record<string, string | boolean | string[]>, string[]] {

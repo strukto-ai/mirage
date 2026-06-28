@@ -110,8 +110,9 @@ class FakeFiles:
             raise IsADirectoryError(path)
         self.downloads[path] = data
         self.metadata[path] = SimpleNamespace(
-            is_directory=False,
-            file_size=len(data),
+            content_length=len(data),
+            content_type=None,
+            last_modified=None,
         )
         self._upsert_directory_entry(
             parent,
@@ -220,8 +221,9 @@ def seed_file(files: FakeFiles, path: str, data: bytes) -> None:
     parent = path.rsplit("/", 1)[0]
     files.downloads[path] = data
     files.metadata[path] = SimpleNamespace(
-        is_directory=False,
-        file_size=len(data),
+        content_length=len(data),
+        content_type=None,
+        last_modified=None,
     )
     files.directories.setdefault(parent, [])
     files.directories[parent].append(
@@ -308,9 +310,9 @@ async def test_read_stat_readdir_range_stream_and_exists():
     root = "/Volumes/main/default/agent_files/root"
     files.downloads[f"{root}/reports/latest.md"] = b"abcdef"
     files.metadata[f"{root}/reports/latest.md"] = SimpleNamespace(
-        is_directory=False,
-        file_size=6,
-        modification_time=1_700_000_000_000,
+        content_length=6,
+        content_type=None,
+        last_modified="Tue, 14 Nov 2023 22:13:20 GMT",
     )
     files.metadata[f"{root}/reports"] = SimpleNamespace(is_directory=True)
     files.directories[f"{root}/reports"] = [
@@ -339,6 +341,7 @@ async def test_read_stat_readdir_range_stream_and_exists():
         PathSpec.from_str_path("/volume/reports/latest.md", "/volume"))
     assert file_stat.name == "latest.md"
     assert file_stat.size == 6
+    assert file_stat.modified == "2023-11-14T22:13:20+00:00"
     assert await resource.exists(
         PathSpec.from_str_path("/volume/reports/latest.md", "/volume"))
     assert not await resource.exists(
@@ -356,8 +359,9 @@ async def test_workspace_read_mode_uses_registered_ops():
     root = "/Volumes/main/default/agent_files/root"
     files.downloads[f"{root}/latest.md"] = b"hello"
     files.metadata[f"{root}/latest.md"] = SimpleNamespace(
-        is_directory=False,
-        file_size=5,
+        content_length=5,
+        content_type=None,
+        last_modified=None,
     )
     ws = Workspace({"/volume": make_resource(files)}, mode=MountMode.READ)
 
@@ -555,8 +559,9 @@ async def test_workspace_execute_uses_databricks_volume_mount_for_ls():
     root = "/Volumes/main/default/agent_files/root"
     files.directory_metadata.add(root)
     files.metadata[f"{root}/debug_output.json"] = SimpleNamespace(
-        is_directory=False,
-        file_size=18,
+        content_length=18,
+        content_type=None,
+        last_modified=None,
     )
     files.directories[root] = [
         SimpleNamespace(
@@ -589,8 +594,9 @@ async def test_workspace_execute_databricks_volume_stat_and_cat():
     root = "/Volumes/main/default/agent_files/root"
     files.downloads[f"{root}/debug_output.json"] = b'{"ok": true}\nsecond\n'
     files.metadata[f"{root}/debug_output.json"] = SimpleNamespace(
-        is_directory=False,
-        file_size=20,
+        content_length=20,
+        content_type=None,
+        last_modified=None,
     )
     ws = Workspace({"/dbx/": make_resource(files)}, mode=MountMode.READ)
 
@@ -613,12 +619,14 @@ async def test_workspace_execute_databricks_volume_find_files():
     files.directory_metadata.update({root, f"{root}/nested"})
     files.metadata[f"{root}/nested"] = SimpleNamespace(is_directory=True)
     files.metadata[f"{root}/debug_output.json"] = SimpleNamespace(
-        is_directory=False,
-        file_size=2,
+        content_length=2,
+        content_type=None,
+        last_modified=None,
     )
     files.metadata[f"{root}/nested/result.txt"] = SimpleNamespace(
-        is_directory=False,
-        file_size=2,
+        content_length=2,
+        content_type=None,
+        last_modified=None,
     )
     files.directories[root] = [
         SimpleNamespace(
@@ -657,12 +665,14 @@ async def test_workspace_execute_databricks_volume_recursive_grep_and_rg():
     files.metadata[f"{root}/nested/deeper"] = SimpleNamespace(
         is_directory=True)
     files.metadata[f"{root}/nested/info.txt"] = SimpleNamespace(
-        is_directory=False,
-        file_size=17,
+        content_length=17,
+        content_type=None,
+        last_modified=None,
     )
     files.metadata[f"{root}/nested/deeper/notes.md"] = SimpleNamespace(
-        is_directory=False,
-        file_size=26,
+        content_length=26,
+        content_type=None,
+        last_modified=None,
     )
     files.downloads[f"{root}/nested/info.txt"] = b"alpha debug line\n"
     files.downloads[f"{root}/nested/deeper/notes.md"] = (

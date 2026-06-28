@@ -122,6 +122,16 @@ async def main():
     r = await ws.execute("grep -ic license /m/README.md")
     print(f"  matches: {(await r.stdout_str()).strip()}")
 
+    # ── sed: read-transform on the read-only HF mount ───
+    print("\n=== sed -n '1,3p' /m/config.json (print first 3 lines) ===")
+    r = await ws.execute("sed -n '1,3p' /m/config.json")
+    print(await r.stdout_str())
+
+    print("=== cat /m/config.json | sed 's/\"//g' | head -n 3"
+          " (strip quotes) ===")
+    r = await ws.execute("cat /m/config.json | sed 's/\"//g' | head -n 3")
+    print(await r.stdout_str())
+
     # ── find variants ───────────────────────────────────
     print("\n=== find /m/ -name '*.json' ===")
     r = await ws.execute("find /m/ -name '*.json'")

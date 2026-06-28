@@ -14,6 +14,7 @@
 
 import { timingSafeEqual } from 'node:crypto'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import { RateLimiterMemory, RateLimiterRes } from 'rate-limiter-flexible'
 
 import { AuthMode, type AuthConfig } from './config.ts'
 import { JWTVerificationError, verifyJwt } from './jwt.ts'
@@ -21,6 +22,8 @@ import { JWTVerificationError, verifyJwt } from './jwt.ts'
 const BEARER_PREFIX = 'Bearer '
 const HEALTH_PATHS = new Set(['/v1/health'])
 const JWT_SHAPE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/
+const AUTH_RATE_LIMIT_POINTS = 2000
+const AUTH_RATE_LIMIT_WINDOW_SECONDS = 60
 
 function constantTimeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a)
@@ -50,6 +53,24 @@ export function registerAuth(app: FastifyInstance, config: AuthConfig): void {
     )
     return
   }
+  const limiter = new RateLimiterMemory({
+    points: AUTH_RATE_LIMIT_POINTS,
+    duration: AUTH_RATE_LIMIT_WINDOW_SECONDS,
+  })
+  app.addHook('onRequest', async (req, reply) => {
+    if (HEALTH_PATHS.has(req.url)) return
+    try {
+      await limiter.consume(req.ip)
+    } catch (e) {
+      if (e instanceof RateLimiterRes) {
+        reply.header('Retry-After', String(Math.ceil(e.msBeforeNext / 1000)))
+        console.warn(`rate-limiting request from ${req.ip}`)
+        await reply.code(429).send({ detail: 'Too Many Requests' })
+        return
+      }
+      throw e
+    }
+  })
   app.addHook('onRequest', async (req, reply) => {
     if (HEALTH_PATHS.has(req.url)) return
     const token = extractBearer(req)

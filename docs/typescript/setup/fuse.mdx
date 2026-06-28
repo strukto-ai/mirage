@@ -66,12 +66,12 @@ Or, if you're not using a pnpm workspace, in `package.json`:
 ## Verify
 
 ```ts
-import { MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { Mount, MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
 
-const ws = new Workspace(
-  { '/data': new RAMResource() },
-  { mode: MountMode.WRITE, fuseMounts: { '/data': true } },
-)
+const ws = new Workspace({
+  '/data': new Mount(new RAMResource(), { mode: MountMode.WRITE, fuse: true }),
+})
+await ws.fuseReady()
 
 await ws.execute('echo hello | tee /data/x.txt')
 console.log('mountpoints:', ws.fuseMountpoints)
@@ -81,6 +81,8 @@ await ws.close() // auto-unmounts
 ```
 
 If `ws.fuseMountpoints` prints a `/tmp/mirage-fuse-XXXXXX` path and no error is thrown, the binding is wired up correctly.
+
+Mounts are async, so `await ws.fuseReady()` once after constructing the workspace; it resolves when every `fuse` mount is live (and rejects if one fails to mount). Until then `ws.fuseMountpoints` may be empty. (In Python, where mounts are synchronous, the constructor blocks until ready instead.)
 
 ## Per-mount FUSE
 
@@ -100,7 +102,7 @@ mounts:
     fuse: true             # temp directory
 ```
 
-Programmatically, pass `fuseMounts: { '/data': '/tmp/data-repo', '/s3': true }`.
+Programmatically, set `fuse` per mount: `{ '/data': new Mount(dataResource, { fuse: '/tmp/data-repo' }), '/s3': new Mount(s3Resource, { fuse: true }) }`.
 `ws.fuseMountpoints` returns a `{ prefix: path }` map of the live mountpoints.
 
 <Note>

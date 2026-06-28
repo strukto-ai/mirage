@@ -12,28 +12,43 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.langfuse.cat import cat
+from mirage.commands.builtin.generic_bind import (CommandIO,
+                                                  make_generic_commands)
+from mirage.commands.builtin.generic_bind.provision import metadata_provision
 from mirage.commands.builtin.langfuse.find import find
 from mirage.commands.builtin.langfuse.grep import grep
-from mirage.commands.builtin.langfuse.head import head
-from mirage.commands.builtin.langfuse.jq import jq
-from mirage.commands.builtin.langfuse.ls import ls
 from mirage.commands.builtin.langfuse.rg import rg
-from mirage.commands.builtin.langfuse.stat import stat
-from mirage.commands.builtin.langfuse.tail import tail
-from mirage.commands.builtin.langfuse.tree import tree
-from mirage.commands.builtin.langfuse.wc import wc
+from mirage.core.langfuse.read import read as _read
+from mirage.core.langfuse.readdir import readdir as _readdir
+from mirage.core.langfuse.stat import stat as _stat
+from mirage.core.langfuse.stream import read_stream as _read_stream
+
+# Langfuse traces/observations/sessions/prompts are read through the generic
+# factory; find, grep and rg keep wrappers because grep matches structured
+# fields (session id, prompt name) and rg/find push down to the Langfuse search
+# API. Langfuse is read-only, so the generic byte-mutation commands are
+# intentionally absent (no write op wired).
+_LANGFUSE_CMD_OPS = CommandIO(
+    readdir=_readdir,
+    read_bytes=_read,
+    read_stream=_read_stream,
+    stat=_stat,
+    is_mounted=lambda a: True,
+    local=False,
+)
+
+_LANGFUSE_OVERRIDES = {"find", "grep", "rg"}
 
 COMMANDS = [
-    cat,
+    *make_generic_commands(
+        "langfuse",
+        _LANGFUSE_CMD_OPS,
+        overrides=_LANGFUSE_OVERRIDES,
+        provision_overrides={
+            "ls": metadata_provision,
+        },
+    ),
     find,
-    head,
-    jq,
-    ls,
-    stat,
-    tail,
-    tree,
-    wc,
     grep,
     rg,
 ]

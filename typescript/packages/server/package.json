@@ -60,6 +60,7 @@
     "fastify": "^5.8.5",
     "isomorphic-git": "^1.38.1",
     "jose": "^6.2.3",
+    "rate-limiter-flexible": "^11.2.0",
     "yaml": "^2.6.0"
   },
   "devDependencies": {

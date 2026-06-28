@@ -13,9 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
-import time
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.ssh import SSHConfig, SSHResource
 
 # ~/.ssh/config:
@@ -32,18 +31,14 @@ config = SSHConfig(
 )
 resource = SSHResource(config)
 
-with Workspace(
-    {"/ssh/": resource},
-        mode=MountMode.WRITE,
-        fuse=True,
-) as ws:
-    time.sleep(1)
+with Workspace({"/ssh/": Mount(resource, mode=MountMode.WRITE,
+                               fuse=True)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
 
     print("--- os.listdir() top-level ---")
-    top_level = os.listdir(f"{mp}/ssh")
+    top_level = os.listdir(mp)
     for entry in top_level:
         print(f"  {entry}")
 
@@ -51,7 +46,7 @@ with Workspace(
         print("  no entries found")
     else:
         print(f"\n--- open() + read {top_level[0]} ---")
-        path = f"{mp}/ssh/{top_level[0]}"
+        path = f"{mp}/{top_level[0]}"
         if os.path.isfile(path):
             with open(path) as f:
                 content = f.read().strip()
@@ -62,20 +57,20 @@ with Workspace(
 
         print("\n--- os.stat() ---")
         for entry in top_level:
-            st = os.stat(f"{mp}/ssh/{entry}")
-            kind = "dir" if os.path.isdir(f"{mp}/ssh/{entry}") else "file"
+            st = os.stat(f"{mp}/{entry}")
+            kind = "dir" if os.path.isdir(f"{mp}/{entry}") else "file"
             print(f"  {entry}: {kind}, {st.st_size} bytes")
 
         print("\n--- os.walk() ---")
-        for root, dirs, files in os.walk(f"{mp}/ssh"):
-            rel = os.path.relpath(root, f"{mp}/ssh")
+        for root, dirs, files in os.walk(mp):
+            rel = os.path.relpath(root, mp)
             for f in files:
                 print(f"  {os.path.join(rel, f)}")
 
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> Open another terminal and run:")
-    print(f">>>   ls {mp}/ssh/")
-    print(f">>>   cat {mp}/ssh/readme.txt")
+    print(f">>>   ls {mp}/")
+    print(f">>>   cat {mp}/readme.txt")
     print(">>> Press Enter to unmount and exit...")
     input()
 

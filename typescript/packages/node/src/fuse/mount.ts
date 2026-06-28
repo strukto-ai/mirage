@@ -22,10 +22,13 @@ import { MirageFS } from './fs.ts'
 
 export interface FuseHandle {
   mountpoint: string
+  /** Whether Mirage created this mountpoint directory and may remove it later. */
+  ownsMountpoint: boolean
   unmount: () => Promise<void>
 }
 
 export interface MountOptions {
+  /** Caller/deployment-owned mountpoint. Mirage mounts here but does not delete it. */
   mountpoint?: string
   agentId?: string
   /** Scope the mount to a single workspace mount prefix (subtree exposure). */
@@ -83,12 +86,14 @@ export function forceUnmount(mountpoint: string): void {
 export async function mount(ws: Workspace, options: MountOptions = {}): Promise<FuseHandle> {
   const Fuse = await loadFuse()
   let mountpoint: string
+  let ownsMountpoint = false
   if (options.mountpoint !== undefined) {
-    // Pinned path: create it if missing, mirroring Python's os.makedirs.
+    // Pinned path: create if missing, but keep ownership with the caller.
     mkdirSync(options.mountpoint, { recursive: true })
     mountpoint = options.mountpoint
   } else {
     mountpoint = mkdtempSync(join(tmpdir(), 'mirage-fuse-'))
+    ownsMountpoint = true
   }
   const agentId = options.agentId
   const mfs = new MirageFS(ws, {
@@ -116,6 +121,7 @@ export async function mount(ws: Workspace, options: MountOptions = {}): Promise<
   })
   return {
     mountpoint,
+    ownsMountpoint,
     unmount: () =>
       new Promise<void>((resolve, reject) => {
         fuse.unmount((err) => {

@@ -33,7 +33,7 @@ describe.each(NATIVE_BACKENDS)('native tar (%s backend)', (kind) => {
     }
   })
 
-  it.skip('tar j create list (bzip2 not available in Node without deps)', async () => {
+  it('tar j create list (bzip2)', async () => {
     const env = makeEnv(kind)
     try {
       env.createFile('a.txt', ENC.encode('aaa\n'))
@@ -48,7 +48,7 @@ describe.each(NATIVE_BACKENDS)('native tar (%s backend)', (kind) => {
     }
   })
 
-  it.skip('tar J create list (xz not available in Node without deps)', async () => {
+  it('tar J create list (xz)', async () => {
     const env = makeEnv(kind)
     try {
       env.createFile('a.txt', ENC.encode('aaa\n'))

@@ -12,22 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { command, specOf, sedGeneric } from '@struktoai/mirage-core'
+import { makeSed } from '@struktoai/mirage-core'
 import type { HfAccessor } from '../../../accessor/hf.ts'
 import { HF_RESOURCES } from '../../../accessor/hf.ts'
 import { stream as hfStream } from '../../../core/hf/stream.ts'
 import { write as hfWrite } from '../../../core/hf/write.ts'
 
-export const HF_SED = command({
-  name: 'sed',
+export const HF_SED = makeSed<HfAccessor>({
   resource: [...HF_RESOURCES],
-  spec: specOf('sed'),
-  fn: (accessor: HfAccessor, paths, texts, opts) =>
-    sedGeneric(
-      paths,
-      texts,
-      opts,
-      (p) => hfStream(accessor, p),
-      (p, d) => hfWrite(accessor, p, d),
-    ),
+  stream: (a, p) => hfStream(a, p),
+  write: (a, p, d) => hfWrite(a, p, d),
 })

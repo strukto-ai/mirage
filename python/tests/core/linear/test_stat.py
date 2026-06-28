@@ -59,6 +59,7 @@ async def test_stat_team_entry(accessor, index):
     result = await stat(accessor, "/teams/ENG__Engineering__TEAM1", index)
     assert result.type == FileType.DIRECTORY
     assert result.extra["team_id"] == "TEAM1"
+    assert result.modified == "2026-04-05T00:00:00Z"
 
 
 @pytest.mark.asyncio
@@ -80,6 +81,7 @@ async def test_stat_issue_directory(accessor, index):
     )
     assert result.type == FileType.DIRECTORY
     assert result.extra["issue_id"] == "ISSUE1"
+    assert result.modified == "2026-04-05T00:00:00Z"
 
 
 @pytest.mark.asyncio

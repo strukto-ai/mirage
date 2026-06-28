@@ -16,20 +16,10 @@ import type { RAMAccessor } from '../../../accessor/ram.ts'
 import { stream as ramStream } from '../../../core/ram/stream.ts'
 import { writeBytes as ramWrite } from '../../../core/ram/write.ts'
 import { ResourceName } from '../../../types.ts'
-import { command } from '../../config.ts'
-import { sedGeneric } from '../generic/sed.ts'
-import { specOf } from '../../spec/builtins.ts'
+import { makeSed } from '../generic/sed_command.ts'
 
-export const RAM_SED = command({
-  name: 'sed',
+export const RAM_SED = makeSed<RAMAccessor>({
   resource: ResourceName.RAM,
-  spec: specOf('sed'),
-  fn: (accessor: RAMAccessor, paths, texts, opts) =>
-    sedGeneric(
-      paths,
-      texts,
-      opts,
-      (p) => ramStream(accessor, p),
-      (p, d) => ramWrite(accessor, p, d),
-    ),
+  stream: (a, p) => ramStream(a, p),
+  write: (a, p, d) => ramWrite(a, p, d),
 })

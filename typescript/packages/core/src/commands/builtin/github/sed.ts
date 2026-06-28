@@ -15,41 +15,12 @@
 import type { GitHubAccessor } from '../../../accessor/github.ts'
 import { resolveGlob } from '../../../core/github/glob.ts'
 import { stream as githubStream } from '../../../core/github/read.ts'
-import { IOResult } from '../../../io/types.ts'
-import { ResourceName, type PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { sedGeneric } from '../generic/sed.ts'
+import { ResourceName } from '../../../types.ts'
+import { makeSed } from '../generic/sed_command.ts'
 
-const ENC = new TextEncoder()
-
-async function sedCommand(
-  accessor: GitHubAccessor,
-  paths: PathSpec[],
-  texts: string[],
-  opts: CommandOpts,
-): Promise<CommandFnResult> {
-  if (opts.flags.i === true) {
-    return [
-      null,
-      new IOResult({
-        exitCode: 1,
-        stderr: ENC.encode('sed -i not supported on read-only GitHub mount\n'),
-      }),
-    ]
-  }
-  const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  const stream = (p: PathSpec): AsyncIterable<Uint8Array> =>
-    githubStream(accessor, p, opts.index ?? undefined)
-  return sedGeneric(resolved, texts, opts, stream, () =>
-    Promise.reject(new Error('sed: github mount is read-only')),
-  )
-}
-
-export const GITHUB_SED = command({
-  name: 'sed',
+export const GITHUB_SED = makeSed<GitHubAccessor>({
   resource: ResourceName.GITHUB,
-  spec: specOf('sed'),
-  fn: sedCommand,
+  stream: (a, p, opts) => githubStream(a, p, opts.index ?? undefined),
+  glob: (a, paths, opts) => resolveGlob(a, paths, opts.index ?? undefined),
+  readOnlyMount: 'GitHub',
 })

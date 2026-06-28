@@ -15,41 +15,12 @@
 import type { DropboxAccessor } from '../../../accessor/dropbox.ts'
 import { resolveGlob } from '../../../core/dropbox/glob.ts'
 import { stream as dropboxStream } from '../../../core/dropbox/read.ts'
-import { IOResult } from '../../../io/types.ts'
-import { ResourceName, type PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { sedGeneric } from '../generic/sed.ts'
+import { ResourceName } from '../../../types.ts'
+import { makeSed } from '../generic/sed_command.ts'
 
-const ENC = new TextEncoder()
-
-async function sedCommand(
-  accessor: DropboxAccessor,
-  paths: PathSpec[],
-  texts: string[],
-  opts: CommandOpts,
-): Promise<CommandFnResult> {
-  if (opts.flags.i === true) {
-    return [
-      null,
-      new IOResult({
-        exitCode: 1,
-        stderr: ENC.encode('sed -i not supported on read-only Dropbox mount\n'),
-      }),
-    ]
-  }
-  const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  const stream = (p: PathSpec): AsyncIterable<Uint8Array> =>
-    dropboxStream(accessor, p, opts.index ?? undefined)
-  return sedGeneric(resolved, texts, opts, stream, () =>
-    Promise.reject(new Error('sed: dropbox mount is read-only')),
-  )
-}
-
-export const DROPBOX_SED = command({
-  name: 'sed',
+export const DROPBOX_SED = makeSed<DropboxAccessor>({
   resource: ResourceName.DROPBOX,
-  spec: specOf('sed'),
-  fn: sedCommand,
+  stream: (a, p, opts) => dropboxStream(a, p, opts.index ?? undefined),
+  glob: (a, paths, opts) => resolveGlob(a, paths, opts.index ?? undefined),
+  readOnlyMount: 'Dropbox',
 })

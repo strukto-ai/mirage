@@ -15,10 +15,12 @@
 import asyncio
 import logging
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 
 import aiobotocore.client
 import boto3
+import moto.s3.models as _s3_models
 from cases import run_not_found
 from moto.server import ThreadedMotoServer
 
@@ -30,6 +32,11 @@ from mirage.resource.minio import MinIOConfig, MinIOResource
 from mirage.resource.s3 import S3Config, S3Resource
 from mirage.resource.seaweedfs import SeaweedFSConfig, SeaweedFSResource
 from mirage.types import CommandSafeguard, ConsistencyPolicy
+
+# Freeze the timestamp moto stamps onto every object so LastModified (and thus
+# the `ls -l` mtime column resolved from the index) is deterministic.
+_FROZEN_MTIME = datetime(2026, 3, 31, 12, 0, 0, tzinfo=timezone.utc)
+_s3_models.utcnow = lambda: _FROZEN_MTIME
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 SEED_OBJECTS = [
@@ -134,6 +141,19 @@ STREAMING_CASES: list[tuple[str, str]] = [
     ("cat_wc_full", "cat {m}/data/example.jsonl | wc -l"),
 ]
 
+# Warm-read serving: a cat warms the file cache for the object, then each
+# read-only command reads the same object and is served entirely from cache,
+# pulling zero backend bytes. cat goes through the generic read-through and
+# grep/head/tail/wc through the shared consumers; a regression that stopped
+# serving warm reads would re-fetch the object and bytes would jump above 0.
+WARM_SERVE_CASES: list[tuple[str, str]] = [
+    ("warm_cat", "cat {m}/data/example.jsonl"),
+    ("warm_grep", "grep mirage {m}/data/example.jsonl"),
+    ("warm_head", "head -n 1 {m}/data/example.jsonl"),
+    ("warm_tail", "tail -n 1 {m}/data/example.jsonl"),
+    ("warm_wc", "wc -l {m}/data/example.jsonl"),
+]
+
 # Index fast-path accounting: run from a fresh workspace (empty index) and
 # count backend API calls. readdir populates the index, so per-entry stat
 # issues zero HeadObject calls. GetObject reads are dropped from the report so
@@ -233,8 +253,6 @@ async def _run_exit(ws: Workspace, name: str, cmd: str) -> None:
 def _set_cat_safeguard(ws: Workspace, max_lines: int) -> None:
     sg = CommandSafeguard(max_lines=max_lines)
     mounts = list(ws._registry._mounts)
-    if ws._registry.default_mount is not None:
-        mounts.append(ws._registry.default_mount)
     for m in mounts:
         m.command_safeguards["cat"] = sg
 
@@ -249,6 +267,16 @@ async def _measure(ws: Workspace, name: str, cmd: str) -> None:
     first = lines[0][:48] if lines else ""
     print(f"=== {name} ===")
     print(f"bytes={net} lines={len(lines)} out0={first!r}")
+
+
+async def _warm_serve(endpoint: str, name: str, mount: str, cmd: str) -> None:
+    ws = _build_workspace(endpoint)
+    await (await ws.execute(f"cat {mount}/data/example.jsonl")).stdout_str()
+    before = sum(rec.bytes for rec in ws.ops.records)
+    await (await ws.execute(cmd)).stdout_str()
+    net = sum(rec.bytes for rec in ws.ops.records) - before
+    print(f"=== {name} ===")
+    print(f"bytes={net} served_from_cache={net == 0}")
 
 
 async def _measure_calls(endpoint: str, name: str, cmd: str) -> None:
@@ -334,6 +362,11 @@ async def main() -> None:
             for name, tmpl in STREAMING_CASES:
                 await _measure(ws, f"{tag}:stream:{name}",
                                tmpl.format(m=mount))
+        for mount in MOUNTS:
+            tag = mount.lstrip("/")
+            for name, tmpl in WARM_SERVE_CASES:
+                await _warm_serve(endpoint, f"{tag}:warm:{name}", mount,
+                                  tmpl.format(m=mount))
         for mount in MOUNTS:
             tag = mount.lstrip("/")
             for name, tmpl in INDEX_CASES:

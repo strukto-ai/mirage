@@ -15,10 +15,14 @@
 import pytest
 
 from mirage.cache.file.ram import RAMFileCacheStore
+from mirage.commands.registry import command
+from mirage.commands.spec.types import CommandSpec
+from mirage.io.types import IOResult
+from mirage.resource.base import BaseResource
 from mirage.resource.ram import RAMResource
 from mirage.resource.ssh import SSHConfig, SSHResource
 from mirage.types import MountMode, PathSpec
-from mirage.workspace.mount import MountRegistry
+from mirage.workspace.mount import MountCommandUnsupported, MountRegistry
 
 # ── mount_for ──────────────────────────────────
 
@@ -311,17 +315,20 @@ def _remote_registry_with_cache():
     reg.mount("/ssh/", SSHResource(SSHConfig(host="example", root="/srv")),
               MountMode.WRITE)
     cache = RAMFileCacheStore()
-    reg.set_default_mount(cache)
+    reg.attach_file_cache(cache)
     return reg, cache
 
 
 @pytest.mark.asyncio
-async def test_resolve_mount_redirects_cached_read_to_cache():
+async def test_resolve_mount_keeps_cached_read_on_real_mount():
+    # Warm reads are served in place by with_read_cache, so a cached
+    # read-only command stays on its real mount (keeping its safeguards and
+    # custom handlers) instead of being redirected to the cache mount.
     reg, cache = _remote_registry_with_cache()
     await cache.set("/ssh/a.txt", b"hi")
     scope = PathSpec(original="/ssh/a.txt", directory="/ssh", resolved=True)
     mount = await reg.resolve_mount("cat", [scope], "/ssh")
-    assert mount.prefix == "/_default/"
+    assert mount.prefix == "/ssh/"
 
 
 @pytest.mark.asyncio
@@ -331,3 +338,45 @@ async def test_resolve_mount_keeps_cached_write_on_remote():
     scope = PathSpec(original="/ssh/a.txt", directory="/ssh", resolved=True)
     mount = await reg.resolve_mount("rm", [scope], "/ssh")
     assert mount.prefix == "/ssh/"
+
+
+class _LimitedResource(BaseResource):
+    name = "limited"
+
+
+class _FallbackResource(BaseResource):
+    name = "fallback"
+
+
+@command("fallback-only", resource="fallback", spec=CommandSpec())
+async def _fallback_only(_store, paths, *texts, **kw):
+    return b"fallback", IOResult()
+
+
+def _path_bound_registry_with_default():
+    reg = MountRegistry()
+    reg.mount("/limited/", _LimitedResource(), MountMode.WRITE)
+    fallback = _FallbackResource()
+    fallback.register(_fallback_only)
+    reg.mount("/", fallback, MountMode.WRITE)
+    return reg
+
+
+@pytest.mark.asyncio
+async def test_resolve_mount_rejects_path_bound_unsupported_command():
+    reg = _path_bound_registry_with_default()
+    scope = PathSpec(original="/limited/file.txt",
+                     directory="/limited",
+                     resolved=True)
+    with pytest.raises(
+            MountCommandUnsupported,
+            match="fallback-only: not supported on the limited backend"):
+        await reg.resolve_mount("fallback-only", [scope], "/limited")
+
+
+@pytest.mark.asyncio
+async def test_resolve_mount_allows_default_without_path_binding():
+    reg = _path_bound_registry_with_default()
+    mount = await reg.resolve_mount("fallback-only", [], "/limited")
+    assert mount is not None
+    assert mount.prefix == "/"

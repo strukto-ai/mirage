@@ -35,3 +35,13 @@ async def test_readdir_populates_index_cache(make_acc):
     assert lookup.entry is not None
     assert lookup.entry.size == 5
     assert lookup.entry.resource_type == "file"
+
+
+@pytest.mark.asyncio
+async def test_readdir_stores_remote_time_for_files(make_acc):
+    acc = make_acc({"f.txt": b"hello"})
+    cache = RAMIndexCacheStore(ttl=60)
+    await readdir(acc, PathSpec.from_str_path("/"), cache)
+    lookup = await cache.get("/f.txt")
+    assert lookup.entry is not None
+    assert lookup.entry.remote_time == "2026-01-01T00:00:00+00:00"

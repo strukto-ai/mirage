@@ -14,6 +14,7 @@
 
 import asyncio
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import IndexCacheStore
@@ -24,15 +25,23 @@ from mirage.utils.errors import enoent
 from mirage.utils.filetype import guess_type
 
 
-def _modified(value) -> str | None:
-    if value is None:
+def modified_to_iso(value) -> str | None:
+    if value is None or value == "":
         return None
     if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc).isoformat()
     if isinstance(value, (int, float)):
         timestamp = value / 1000 if value > 10_000_000_000 else value
         return datetime.fromtimestamp(timestamp, timezone.utc).isoformat()
-    return str(value)
+    try:
+        parsed = parsedate_to_datetime(str(value))
+    except (TypeError, ValueError):
+        return str(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat()
 
 
 def _is_directory(metadata) -> bool:
@@ -68,13 +77,30 @@ async def _directory_stat_or_raise(
 async def stat(
     accessor: DatabricksVolumeAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> FileStat:
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
     stripped = path.strip_prefix.strip("/")
     if not stripped:
         return FileStat(name="/", type=FileType.DIRECTORY)
+    if index is not None:
+        prefix = path.prefix
+        virtual_key = (prefix.rstrip("/") + "/" + stripped if prefix else "/" +
+                       stripped)
+        lookup = await index.get(virtual_key)
+        if lookup.entry is not None:
+            entry = lookup.entry
+            if entry.resource_type == "folder":
+                return FileStat(name=entry.name, type=FileType.DIRECTORY)
+            return FileStat(name=entry.name,
+                            size=entry.size,
+                            modified=entry.remote_time or None,
+                            type=guess_type(entry.name))
+        parent = virtual_key.rsplit("/", 1)[0] or "/"
+        parent_listing = await index.list_dir(parent)
+        if parent_listing.entries is not None:
+            raise enoent(path)
     remote_path = backend_path(accessor.config, path)
     try:
         metadata = await asyncio.to_thread(accessor.files.get_metadata,
@@ -86,8 +112,8 @@ async def stat(
     name = _name_from_backend_path(remote_path)
     if _is_directory(metadata):
         return FileStat(name=name, type=FileType.DIRECTORY)
-    size = getattr(metadata, "file_size", None)
-    modified = _modified(getattr(metadata, "modification_time", None))
+    size = getattr(metadata, "content_length", None)
+    modified = modified_to_iso(getattr(metadata, "last_modified", None))
     return FileStat(name=name,
                     size=size,
                     modified=modified,

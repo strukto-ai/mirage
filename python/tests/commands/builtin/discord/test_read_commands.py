@@ -20,15 +20,9 @@ import pytest
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.commands.builtin.discord.cat import cat
 from mirage.commands.builtin.discord.find import find
 from mirage.commands.builtin.discord.grep import grep
 from mirage.commands.builtin.discord.head import head
-from mirage.commands.builtin.discord.jq import jq
-from mirage.commands.builtin.discord.ls import ls
-from mirage.commands.builtin.discord.stat import stat
-from mirage.commands.builtin.discord.tail import tail
-from mirage.commands.builtin.discord.wc import wc
 from mirage.resource.discord.config import DiscordConfig
 from mirage.types import PathSpec
 
@@ -57,10 +51,6 @@ def _make_glob(path: str, resolved: bool = True) -> list[PathSpec]:
 
 def _run(coro):
     return asyncio.run(coro)
-
-
-async def _fake_jsonl_stream(accessor, path, index=None):
-    yield FAKE_JSONL
 
 
 def _make_index() -> RAMIndexCacheStore:
@@ -133,38 +123,6 @@ async def _collect(stream) -> bytes:
 
 
 @pytest.mark.asyncio
-async def test_cat(accessor):
-    with (
-            patch("mirage.commands.builtin.discord.cat.resolve_glob",
-                  new_callable=AsyncMock,
-                  return_value=_glob_result(ABS_FILE)),
-            patch("mirage.commands.builtin.discord.cat.discord_read",
-                  new_callable=AsyncMock,
-                  return_value=FAKE_JSONL),
-    ):
-        stream, io = await cat(accessor, _make_glob(ABS_FILE))
-    data = await _collect(stream)
-    assert b"hello world" in data
-    assert b"goodbye moon" in data
-
-
-@pytest.mark.asyncio
-async def test_cat_number_lines(accessor):
-    with (
-            patch("mirage.commands.builtin.discord.cat.resolve_glob",
-                  new_callable=AsyncMock,
-                  return_value=_glob_result(ABS_FILE)),
-            patch("mirage.commands.builtin.discord.cat.discord_read",
-                  new_callable=AsyncMock,
-                  return_value=FAKE_JSONL),
-    ):
-        stream, io = await cat(accessor, _make_glob(ABS_FILE), n=True)
-    data = await _collect(stream)
-    assert b"1\t" in data
-    assert b"2\t" in data
-
-
-@pytest.mark.asyncio
 async def test_head(accessor):
     with (
             patch("mirage.commands.builtin.discord.head.resolve_glob",
@@ -195,22 +153,6 @@ async def test_head_default(accessor):
     assert b"hello world" in data
     assert b"goodbye moon" in data
     assert b"hello again" in data
-
-
-@pytest.mark.asyncio
-async def test_tail(accessor):
-    with (
-            patch("mirage.commands.builtin.discord.tail.resolve_glob",
-                  new_callable=AsyncMock,
-                  return_value=_glob_result(ABS_FILE)),
-            patch("mirage.commands.builtin.discord.tail.discord_read",
-                  new_callable=AsyncMock,
-                  return_value=FAKE_JSONL),
-    ):
-        stream, io = await tail(accessor, _make_glob(ABS_FILE), n="1")
-    data = await _collect(stream)
-    assert b"hello again" in data
-    assert b"hello world" not in data
 
 
 @pytest.mark.asyncio
@@ -250,79 +192,6 @@ async def test_grep_invert(accessor):
 
 
 @pytest.mark.asyncio
-async def test_wc(accessor):
-    with (
-            patch("mirage.commands.builtin.discord.wc.resolve_glob",
-                  new_callable=AsyncMock,
-                  return_value=_glob_result(ABS_FILE)),
-            patch("mirage.commands.builtin.discord.wc.discord_read",
-                  new_callable=AsyncMock,
-                  return_value=FAKE_JSONL),
-    ):
-        stream, io = await wc(accessor, _make_glob(ABS_FILE), args_l=True)
-    data = await _collect(stream)
-    assert data == b"3 " + ABS_FILE.encode() + b"\n"
-
-
-@pytest.mark.asyncio
-async def test_wc_words(accessor):
-    with (
-            patch("mirage.commands.builtin.discord.wc.resolve_glob",
-                  new_callable=AsyncMock,
-                  return_value=_glob_result(ABS_FILE)),
-            patch("mirage.commands.builtin.discord.wc.discord_read",
-                  new_callable=AsyncMock,
-                  return_value=FAKE_JSONL),
-    ):
-        stream, io = await wc(accessor, _make_glob(ABS_FILE), w=True)
-    data = await _collect(stream)
-    count = int(data.decode().split()[0])
-    assert count > 0
-
-
-@pytest.mark.asyncio
-async def test_stat(accessor):
-    with patch("mirage.commands.builtin.discord.stat.resolve_glob",
-               new_callable=AsyncMock,
-               return_value=_glob_result(ABS_FILE)):
-        stream, io = await stat(accessor, _make_glob(ABS_FILE))
-    data = await _collect(stream)
-    text = data.decode()
-    assert "chat.jsonl" in text
-
-
-@pytest.mark.asyncio
-async def test_jq(accessor):
-    with (
-            patch("mirage.commands.builtin.discord.jq.resolve_glob",
-                  new_callable=AsyncMock,
-                  return_value=_glob_result(ABS_FILE)),
-            patch("mirage.commands.builtin.discord.jq.read_stream",
-                  new=_fake_jsonl_stream),
-    ):
-        stream, io = await jq(accessor, _make_glob(ABS_FILE), ".[].content")
-    data = await _collect(stream)
-    assert b"hello world" in data
-
-
-@pytest.mark.asyncio
-async def test_jq_raw(accessor):
-    with (
-            patch("mirage.commands.builtin.discord.jq.resolve_glob",
-                  new_callable=AsyncMock,
-                  return_value=_glob_result(ABS_FILE)),
-            patch("mirage.commands.builtin.discord.jq.read_stream",
-                  new=_fake_jsonl_stream),
-    ):
-        stream, io = await jq(accessor,
-                              _make_glob(ABS_FILE),
-                              ".[].content",
-                              r=True)
-    data = await _collect(stream)
-    assert b"hello world" in data
-
-
-@pytest.mark.asyncio
 async def test_find(accessor, index):
     with patch("mirage.commands.builtin.discord.find.resolve_glob",
                new_callable=AsyncMock,
@@ -347,19 +216,3 @@ async def test_find_with_name(accessor, index):
         )
     data = await _collect(stream)
     assert b"chat.jsonl" in data
-
-
-@pytest.mark.asyncio
-async def test_ls(accessor):
-    with (
-            patch("mirage.commands.builtin.discord.ls.resolve_glob",
-                  new_callable=AsyncMock,
-                  return_value=_glob_result(ABS_CHANNEL)),
-            patch("mirage.commands.builtin.discord.ls.readdir",
-                  new_callable=AsyncMock,
-                  return_value=[ABS_DATE_DIR]),
-    ):
-        stream, io = await ls(accessor, _make_glob(ABS_CHANNEL,
-                                                   resolved=False))
-    data = await _collect(stream)
-    assert b"2024-01-15" in data

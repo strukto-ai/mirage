@@ -1,0 +1,60 @@
+---
+title: Qdrant
+icon: database
+description: Set up a Qdrant connection for the Qdrant resource.
+---
+
+[Qdrant](https://qdrant.tech/) mounts a collection as a read-only filesystem: group-by payload fields
+become nested folders, each point is a `.json` payload file (plus a `.txt` text
+file and an optional blob), and semantic search is the `search` command.
+
+## Connection
+
+### Local / self-hosted
+
+Point `host`/`port` at a running Qdrant (defaults `localhost:6333`):
+
+```bash
+# .env.development
+QDRANT_HOST=localhost
+QDRANT_PORT=6333
+```
+
+### Qdrant Cloud
+
+Use `url` plus an `api_key`:
+
+```bash
+# .env.development
+QDRANT_URL=https://xyz.us-east4-0.gcp.cloud.qdrant.io
+QDRANT_API_KEY=...
+```
+
+## Search
+
+Search is the `search "<query>" <path>` command. It returns ranked points as
+their canonical `<id>.txt` (or `<id>.json`) file paths plus a similarity score,
+so results compose with `cat`, `wc`, and pipes (`grep`/`rg` stay lexical).
+
+The query text is turned into a vector two ways:
+
+- **Local (default):** the `qdrant-client[fastembed]` extra embeds the query in
+  process with `embedding_model` (default `sentence-transformers/all-MiniLM-L6-v2`).
+- **Server-side:** set `cloud_inference` to let a Qdrant Cloud (inference-enabled)
+  cluster embed the query. The TypeScript backend always uses this path.
+
+Either way the collection must already store vectors produced by the same model.
+
+## Limits
+
+The resource is read-only and bounds how much an agent can pull:
+
+- `search_limit` (10): default top-k returned by `search`.
+- `max_rows` (1,000): hard ceiling on points listed per folder.
+
+Folder listings filter on payload fields. A filtered listing scrolls first and
+only creates keyword payload indexes for the `group_by` fields if Qdrant reports
+one is required. `max_rows` caps how many points are scanned per folder.
+
+See the [Python](/python/resource/qdrant) and [TypeScript](/typescript/setup/qdrant)
+resource pages for full config.

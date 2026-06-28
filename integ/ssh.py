@@ -22,7 +22,7 @@ import asyncssh
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from cases import run_cases  # noqa: E402
+from cases import assert_real_mtime, run_cases  # noqa: E402
 
 from mirage import MountMode, Workspace  # noqa: E402
 from mirage.resource.ssh import SSHConfig, SSHResource  # noqa: E402
@@ -57,6 +57,7 @@ async def main() -> None:
             SSHConfig(host="127.0.0.1", port=port, username="integ", root="/"))
         ws = Workspace({"/data": resource}, mode=MountMode.WRITE)
         await run_cases(ws)
+        await assert_real_mtime(ws)
         await resource.accessor.close()
     finally:
         server.close()

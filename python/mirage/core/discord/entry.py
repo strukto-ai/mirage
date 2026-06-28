@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from enum import Enum
 
 from mirage.cache.index.config import IndexEntry
+from mirage.core.discord.history import DISCORD_EPOCH
+from mirage.core.timeutil import epoch_to_iso
 from mirage.utils.naming import make_id_name
 
 
@@ -43,9 +45,25 @@ def member_filename(m: dict) -> str:
 
 def snowflake_to_date(snowflake: str) -> str:
     """Convert a Discord snowflake to a UTC YYYY-MM-DD date string."""
-    ms = (int(snowflake) >> 22) + 1420070400000
+    ms = (int(snowflake) >> 22) + DISCORD_EPOCH
     return datetime.fromtimestamp(ms / 1000,
                                   tz=timezone.utc).strftime("%Y-%m-%d")
+
+
+def snowflake_to_iso(snowflake: str) -> str | None:
+    """Convert a Discord snowflake to a UTC ISO-8601 timestamp (second
+    precision, matching the TypeScript converter).
+
+    Args:
+        snowflake (str): the Discord snowflake id (empty/invalid -> None).
+    """
+    if not snowflake:
+        return None
+    try:
+        ms = (int(snowflake) >> 22) + DISCORD_EPOCH
+    except (TypeError, ValueError):
+        return None
+    return epoch_to_iso(ms // 1000)
 
 
 def guild_entry(g: dict) -> IndexEntry:

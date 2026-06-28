@@ -3,6 +3,7 @@ from collections import deque
 from collections.abc import AsyncIterator
 from typing import Any, Callable
 
+from mirage.cache.read_through import cache_aware_read
 from mirage.types import PathSpec
 from mirage.utils.stream import ensure_stream
 
@@ -72,7 +73,7 @@ async def tail(
         yield line
 
 
-async def tail_multi(
+def tail_multi(
     paths: list[PathSpec],
     *,
     read: Callable[..., Any],
@@ -90,6 +91,11 @@ async def tail_multi(
     before each file (POSIX/GNU tail with multiple files), separated by a blank
     line between files. The per-file source is produced lazily by ``read``.
 
+    This is a plain ``def`` returning the async generator: the cache-aware
+    wrap captures the active manager now, when the command calls
+    ``tail_multi`` inside the mount's cache-manager scope, not when the
+    returned stream is drained later (after that scope is gone).
+
     Args:
         paths (list[PathSpec]): Resolved paths; only ``.original`` is read.
         read (Callable[..., Any]): Reader called as ``read(accessor, path,
@@ -102,6 +108,27 @@ async def tail_multi(
         from_line (int | None): 1-based start line for ``tail -n +N``.
         show_headers (bool): Emit ``==> path <==`` banners between files.
     """
+    return _tail_multi(paths,
+                       read=cache_aware_read(read),
+                       accessor=accessor,
+                       index=index,
+                       n=n,
+                       c=c,
+                       from_line=from_line,
+                       show_headers=show_headers)
+
+
+async def _tail_multi(
+    paths: list[PathSpec],
+    *,
+    read: Callable[..., Any],
+    accessor: object = None,
+    index: object = None,
+    n: int | None = None,
+    c: int | None = None,
+    from_line: int | None = None,
+    show_headers: bool = False,
+) -> AsyncIterator[bytes]:
     for i, p in enumerate(paths):
         if show_headers:
             header = f"==> {p.display} <==\n"

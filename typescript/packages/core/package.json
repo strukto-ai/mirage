@@ -50,6 +50,7 @@
   "devDependencies": {
     "@aws-sdk/client-s3": "^3.0.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "@qdrant/js-client-rest": "^1.18.0",
     "chromadb": "^3.4.3",
     "hyparquet-writer": "^0.13.0",
     "pyodide": "^0.29.3",
@@ -71,11 +72,15 @@
     "zod": "^4.3.6"
   },
   "peerDependencies": {
+    "@qdrant/js-client-rest": "^1.18.0",
     "chromadb": "^3.4.3",
     "pyodide": "^0.29.0",
     "redis": "^5.0.0"
   },
   "peerDependenciesMeta": {
+    "@qdrant/js-client-rest": {
+      "optional": true
+    },
     "chromadb": {
       "optional": true
     },

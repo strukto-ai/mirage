@@ -79,6 +79,7 @@ async def stat(
         return FileStat(
             name=result.entry.vfs_name,
             type=FileType.DIRECTORY,
+            modified=result.entry.remote_time or None,
             extra={"workspace_id": result.entry.id},
         )
 
@@ -107,6 +108,7 @@ async def stat(
         return FileStat(
             name=result.entry.vfs_name,
             type=FileType.DIRECTORY,
+            modified=result.entry.remote_time or None,
             extra={"board_id": result.entry.id},
         )
 
@@ -136,6 +138,7 @@ async def stat(
         return FileStat(
             name=result.entry.vfs_name,
             type=FileType.JSON,
+            modified=result.entry.remote_time or None,
             extra={"member_id": result.entry.id},
         )
 
@@ -149,6 +152,7 @@ async def stat(
         return FileStat(
             name=result.entry.vfs_name,
             type=FileType.JSON,
+            modified=result.entry.remote_time or None,
             extra={"label_id": result.entry.id},
         )
 
@@ -162,6 +166,7 @@ async def stat(
         return FileStat(
             name=result.entry.vfs_name,
             type=FileType.DIRECTORY,
+            modified=result.entry.remote_time or None,
             extra={"list_id": result.entry.id},
         )
 
@@ -192,6 +197,7 @@ async def stat(
         return FileStat(
             name=result.entry.vfs_name,
             type=FileType.DIRECTORY,
+            modified=result.entry.remote_time or None,
             extra={"card_id": result.entry.id},
         )
 

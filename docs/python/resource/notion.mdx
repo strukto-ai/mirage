@@ -36,6 +36,12 @@ ws = Workspace({"/notion": resource}, mode=MountMode.WRITE)
       <child-page-title>__<child-id>/
         page.json
         ...
+  databases/
+    <database-title>__<database-id>/
+      database.json
+      <row-page-title>__<page-id>/
+        page.json
+        ...
 ```
 
 Example:
@@ -51,11 +57,26 @@ Example:
         page.json
     Meeting-Notes__m3n4o5p6/
       page.json
+  databases/
+    Tasks__4a3b21915e77/
+      database.json
+      Write-proposal__62212c5affe6/
+        page.json
+      Build-dashboards__f988c5a145ef/
+        page.json
+    Roadmap__2c4d6a7f5bf3/
+      database.json
 ```
 
-The hierarchy mirrors Notion's page tree. Each page directory contains
-a `page.json` file with the page metadata and content. Child pages
-appear as nested directories.
+The `pages/` hierarchy mirrors Notion's standalone page tree. The
+`databases/` hierarchy lists databases shared with the integration and
+then the row pages returned by querying each database. Each database
+directory contains `database.json` with the database metadata and its
+typed property schema (the columns), but not the rows themselves; the
+rows are the row-page directories alongside it, so `ls` the database
+directory to enumerate them. Each page directory contains a `page.json`
+file with the page metadata and content. Child pages appear as nested
+directories.
 
 `page.json` carries the page metadata (`page_id`, `title`, `url`,
 timestamps, `parent_type`/`parent_id`, `created_by`/`last_edited_by`),
@@ -63,6 +84,61 @@ a `markdown` field with the page body rendered as Markdown, and the raw
 `blocks`. Blocks with children embed them recursively under a
 `children` key, and the Markdown renders nested blocks with
 indentation.
+
+`database.json` carries the database metadata (`database_id`, `title`,
+`url`, timestamps, `parent`, `archived`, `is_inline`) and `properties`,
+the database's typed column schema. It does not embed the rows; read a
+row's `page.json` for its content, since a database row is itself a page
+with `parent_type` of `database_id`.
+
+### database.json
+
+The database's identity plus its typed column schema (Notion's own
+property objects), with no rows inline. `ls` the database directory to
+enumerate row pages:
+
+```json
+{
+  "database_id": "2c4d6a7f-5bf3-8036-bed2-d1c95826f76b",
+  "title": "Item",
+  "url": "https://www.notion.so/2c4d6a7f5bf38036bed2d1c95826f76b",
+  "created_time": "2025-12-09T23:36:00.000Z",
+  "last_edited_time": "2026-04-15T12:30:00.000Z",
+  "parent": { "type": "workspace", "workspace": true },
+  "archived": false,
+  "is_inline": false,
+  "properties": {
+    "Name": { "id": "title", "type": "title", "title": {} },
+    "Number": { "id": "e%5BNQ", "type": "number", "number": { "format": "number" } },
+    "Date": { "id": "%3BgQq", "type": "date", "date": {} }
+  }
+}
+```
+
+To create a row, `notion-page-create` with a `database_id` parent and a
+`properties` object whose keys match this schema.
+
+### page.json
+
+A page (including a database row). Notion blocks render to `markdown`
+and stay available raw under `blocks`:
+
+```json
+{
+  "page_id": "2c4d6a7f-5bf3-8022-826b-ed4700254ed2",
+  "title": "item_0",
+  "url": "https://www.notion.so/item_0-2c4d6a7f5bf38022826bed4700254ed2",
+  "created_time": "2025-12-09T23:36:00.000Z",
+  "last_edited_time": "2025-12-09T23:44:00.000Z",
+  "parent_type": "database_id",
+  "parent_id": "2c4d6a7f-5bf3-8036-bed2-d1c95826f76b",
+  "archived": false,
+  "created_by": "faa6ebe0-0686-466d-96b3-2480ddda715b",
+  "last_edited_by": "faa6ebe0-0686-466d-96b3-2480ddda715b",
+  "markdown": "",
+  "blocks": []
+}
+```
 
 ## Cache
 
@@ -92,6 +168,10 @@ async def main():
 
     # List top-level pages
     r = await ws.execute("ls /notion/pages/")
+    print(await r.stdout_str())
+
+    # List shared databases and rows in a database
+    r = await ws.execute("ls /notion/databases/")
     print(await r.stdout_str())
 
     # Read a page

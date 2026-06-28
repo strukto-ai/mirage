@@ -15,41 +15,12 @@
 import type { GDriveAccessor } from '../../../accessor/gdrive.ts'
 import { resolveGlob } from '../../../core/gdrive/glob.ts'
 import { stream as gdriveStream } from '../../../core/gdrive/read.ts'
-import { IOResult } from '../../../io/types.ts'
-import { ResourceName, type PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { sedGeneric } from '../generic/sed.ts'
+import { ResourceName } from '../../../types.ts'
+import { makeSed } from '../generic/sed_command.ts'
 
-const ENC = new TextEncoder()
-
-async function sedCommand(
-  accessor: GDriveAccessor,
-  paths: PathSpec[],
-  texts: string[],
-  opts: CommandOpts,
-): Promise<CommandFnResult> {
-  if (opts.flags.i === true) {
-    return [
-      null,
-      new IOResult({
-        exitCode: 1,
-        stderr: ENC.encode('sed -i not supported on read-only Google Drive mount\n'),
-      }),
-    ]
-  }
-  const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  const stream = (p: PathSpec): AsyncIterable<Uint8Array> =>
-    gdriveStream(accessor, p, opts.index ?? undefined)
-  return sedGeneric(resolved, texts, opts, stream, () =>
-    Promise.reject(new Error('sed: gdrive mount is read-only')),
-  )
-}
-
-export const GDRIVE_SED = command({
-  name: 'sed',
+export const GDRIVE_SED = makeSed<GDriveAccessor>({
   resource: ResourceName.GDRIVE,
-  spec: specOf('sed'),
-  fn: sedCommand,
+  stream: (a, p, opts) => gdriveStream(a, p, opts.index ?? undefined),
+  glob: (a, paths, opts) => resolveGlob(a, paths, opts.index ?? undefined),
+  readOnlyMount: 'Google Drive',
 })

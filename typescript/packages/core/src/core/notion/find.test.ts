@@ -65,6 +65,17 @@ describe('notion core find', () => {
     expect(out).toEqual(['/db', '/db/page1.md', '/db/sub', '/db/sub/page2.md'])
   })
 
+  it('matches the mount root by its own basename', async () => {
+    const spec = new PathSpec({
+      original: '/db',
+      directory: '/db',
+      resolved: false,
+      prefix: '/db',
+    })
+    const out = await find(accessor, spec, { name: 'db' })
+    expect(out).toEqual(['/'])
+  })
+
   it('filters to files with type f', async () => {
     const out = await find(accessor, root(), { type: 'f' })
     expect(out).toEqual(['/db/page1.md', '/db/sub/page2.md'])

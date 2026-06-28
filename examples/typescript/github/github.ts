@@ -140,6 +140,7 @@ async function main(): Promise<void> {
     'sort | uniq',
     "grep 'import' /github/python/mirage/types.py | sort | uniq",
   )
+  await header(ws, 'uniq (file path, streams via github read)', 'uniq /github/python/mirage/types.py')
   await header(ws, 'sha256sum', 'sha256sum /github/python/mirage/types.py')
   await header(ws, 'file', 'file /github/python/mirage/types.py')
   await header(ws, 'basename', 'basename /github/python/mirage/core/s3/read.py')

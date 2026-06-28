@@ -1,0 +1,88 @@
+---
+title: SharePoint
+icon: microsoft
+description: Get a Microsoft Graph access token for the SharePoint resource.
+---
+
+The SharePoint resource talks to Microsoft SharePoint Online through the
+[Microsoft Graph API](https://learn.microsoft.com/en-us/graph/). It
+authenticates with an OAuth2 **bearer access token**. Unlike OneDrive, you do
+**not** need a drive id: the resource discovers sites and document libraries for
+you, so a token with the right SharePoint permissions is all it needs.
+
+## Credentials
+
+You only need an **access token**. Pick whichever path fits.
+
+### Option A: App-only (client credentials)
+
+Best for scripted, automated, and CI runs. There is no signed-in user, and it
+works for SharePoint because the resource uses `/sites` and `/sites/{id}/drives`
+(no `/me` context required).
+
+1. In the [Microsoft Entra admin center](https://entra.microsoft.com), go to
+   **Identity** -> **Applications** -> **App registrations** -> **New registration**.
+1. Under **API permissions** -> **Microsoft Graph** -> **Application
+   permissions**, add `Sites.Read.All` for read-only, or `Sites.ReadWrite.All`
+   (plus `Files.ReadWrite.All` for writes) for full access. Click
+   **Grant admin consent**.
+1. Under **Certificates & secrets**, create a **client secret**.
+1. Request a token with the client-credentials flow:
+
+```bash
+TENANT_ID="<your tenant id>"
+CLIENT_ID="<your app client id>"
+CLIENT_SECRET="<your client secret>"
+
+curl -s -X POST "https://login.microsoftonline.com/$TENANT_ID/oauth2/v2.0/token" \
+  -d "client_id=$CLIENT_ID" \
+  -d "client_secret=$CLIENT_SECRET" \
+  -d "scope=https://graph.microsoft.com/.default" \
+  -d "grant_type=client_credentials" | jq -r .access_token
+```
+
+### Option B: Delegated (Graph Explorer)
+
+Fastest way to try it as yourself. The token lasts about an hour, which is
+plenty for a test run.
+
+1. Open [Graph Explorer](https://developer.microsoft.com/graph/graph-explorer) and **Sign in**.
+1. Run any SharePoint query (for example `GET /sites?search=*`) and consent when prompted.
+1. Open the **Access token** tab and copy the token.
+
+This is a **delegated** token scoped to your own SharePoint access.
+
+<Note>
+A static token is short-lived (about 60 minutes). For long-running mounts, pass
+a `Callable[[], str]` provider as `access_token` instead of a string. The
+resource refreshes on `401`, so the mount survives token expiry.
+</Note>
+
+### Verify access
+
+With your token exported as `TOKEN`:
+
+```bash
+# list sites you can see (name + id)
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://graph.microsoft.com/v1.0/sites?search=*" | jq '.value[] | {displayName, id}'
+
+# list the document libraries (drives) in a site
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://graph.microsoft.com/v1.0/sites/{site-id}/drives" | jq '.value[] | {name, id}'
+```
+
+### Set environment variables
+
+```bash
+# .env.development
+MS_GRAPH_DRIVE_TOKEN=<token>
+```
+
+<Note>
+Snapshots and version pinning rely on SharePoint **version history**, which is
+on by default. Older versions are only readable while the library retains them
+(the version cap is configurable, and an admin can disable versioning).
+</Note>
+
+For Python configuration, see the [Python SharePoint resource](/python/resource/sharepoint) guide.

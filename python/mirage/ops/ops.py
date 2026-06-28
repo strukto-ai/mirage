@@ -280,16 +280,26 @@ class Ops:
         return sum(r.bytes for r in self.records if r.is_cache)
 
     def is_mounted(self, path: str) -> bool:
-        """Check if a path is under a known mount.
+        """Check if a path is under an explicit mount.
+
+        Used by the open()/os interception to decide whether a path is a
+        workspace path (route through ops) or a real OS path (pass through).
+        The catch-all virtual root at ``/`` is skipped on purpose: it matches
+        every absolute path, so counting it would hijack real filesystem
+        paths (a FUSE mountpoint, ``/tmp``) into ops. Routing to the root for
+        ops themselves still happens via ``_resolve``; this gate is only about
+        what the interception should leave alone.
 
         Args:
             path (str): Virtual path.
 
         Returns:
-            bool: True if path matches a mount prefix.
+            bool: True if path is under a mount other than the virtual root.
         """
-        try:
-            self._resolve(path)
-            return True
-        except ValueError:
-            return False
+        norm = "/" + path.strip("/")
+        for m in self._mounts:
+            if m.prefix == "/":
+                continue
+            if norm == m.prefix.rstrip("/") or norm.startswith(m.prefix):
+                return True
+        return False

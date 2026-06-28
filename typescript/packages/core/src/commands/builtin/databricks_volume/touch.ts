@@ -39,7 +39,7 @@ async function touchCommand(
     if (createOnly) continue
     if (!(await dbxExists(accessor, p))) {
       await dbxWrite(accessor, p, new Uint8Array(0))
-      writes[p.original] = new Uint8Array()
+      writes[p.stripPrefix] = new Uint8Array()
     }
   }
   return [null, new IOResult({ writes })]

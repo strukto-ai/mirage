@@ -12,54 +12,62 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.databricks_volume.awk import awk
-from mirage.commands.builtin.databricks_volume.cat import cat
-from mirage.commands.builtin.databricks_volume.cp import cp
-from mirage.commands.builtin.databricks_volume.cut import cut
-from mirage.commands.builtin.databricks_volume.diff import diff
-from mirage.commands.builtin.databricks_volume.find import find
-from mirage.commands.builtin.databricks_volume.grep import grep
 from mirage.commands.builtin.databricks_volume.head import head
-from mirage.commands.builtin.databricks_volume.jq import jq
-from mirage.commands.builtin.databricks_volume.ls import ls
-from mirage.commands.builtin.databricks_volume.mkdir import mkdir
-from mirage.commands.builtin.databricks_volume.mv import mv
-from mirage.commands.builtin.databricks_volume.nl import nl
-from mirage.commands.builtin.databricks_volume.rg import rg
-from mirage.commands.builtin.databricks_volume.rm import rm
 from mirage.commands.builtin.databricks_volume.sed import sed
-from mirage.commands.builtin.databricks_volume.sort import sort
-from mirage.commands.builtin.databricks_volume.stat import stat
-from mirage.commands.builtin.databricks_volume.tail import tail
-from mirage.commands.builtin.databricks_volume.touch import touch
-from mirage.commands.builtin.databricks_volume.tr import tr
-from mirage.commands.builtin.databricks_volume.tree import tree
-from mirage.commands.builtin.databricks_volume.uniq import uniq
-from mirage.commands.builtin.databricks_volume.wc import wc
+from mirage.commands.builtin.generic_bind import (CommandIO,
+                                                  make_generic_commands)
+from mirage.commands.builtin.generic_bind.provision import (
+    make_search_provision, metadata_provision)
+from mirage.core.databricks_volume.copy import copy as _copy
+from mirage.core.databricks_volume.create import create as _create
+from mirage.core.databricks_volume.exists import exists as _exists
+from mirage.core.databricks_volume.mkdir import mkdir as _mkdir
+from mirage.core.databricks_volume.read import read_bytes as _read
+from mirage.core.databricks_volume.readdir import readdir as _readdir
+from mirage.core.databricks_volume.rename import rename as _rename
+from mirage.core.databricks_volume.rm import rm_recursive as _rm_r
+from mirage.core.databricks_volume.rmdir import rmdir as _rmdir
+from mirage.core.databricks_volume.stat import stat as _stat
+from mirage.core.databricks_volume.stream import read_stream as _read_stream
+from mirage.core.databricks_volume.unlink import unlink as _unlink
+from mirage.core.databricks_volume.write import write_bytes as _write
+
+# Databricks Volume files are read and written through the generic factory;
+# head keeps a wrapper because -c fetches only the first N bytes via a single
+# range request instead of streaming the whole file, and sed has no generic
+# builder.
+_DATABRICKS_CMD_OPS = CommandIO(
+    readdir=_readdir,
+    read_bytes=_read,
+    read_stream=_read_stream,
+    stat=_stat,
+    is_mounted=lambda a: True,
+    local=False,
+    write=_write,
+    exists=_exists,
+    mkdir=_mkdir,
+    unlink=_unlink,
+    rmdir=_rmdir,
+    rm_r=_rm_r,
+    rename=_rename,
+    copy=_copy,
+    create=_create,
+)
+
+_DATABRICKS_OVERRIDES = {"head", "sed"}
 
 COMMANDS = [
-    awk,
-    cat,
-    cp,
-    cut,
-    diff,
-    find,
-    grep,
+    *make_generic_commands(
+        "databricks_volume",
+        _DATABRICKS_CMD_OPS,
+        overrides=_DATABRICKS_OVERRIDES,
+        provision_overrides={
+            "grep": make_search_provision(_stat),
+            "rg": make_search_provision(_stat),
+            "ls": metadata_provision,
+            "find": metadata_provision,
+        },
+    ),
     head,
-    jq,
-    ls,
-    mkdir,
-    mv,
-    nl,
-    rm,
-    rg,
     sed,
-    sort,
-    stat,
-    tail,
-    touch,
-    tree,
-    tr,
-    uniq,
-    wc,
 ]

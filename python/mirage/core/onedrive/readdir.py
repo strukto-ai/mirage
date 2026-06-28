@@ -13,15 +13,18 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.onedrive import OneDriveAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
-from mirage.core.onedrive._client import graph_list, item_url
-from mirage.types import PathSpec
+from mirage.cache.index import IndexCacheStore, IndexEntry, ResourceType
+from mirage.core.onedrive._client import GraphError, graph_list, item_url
+from mirage.core.onedrive.stat import stat
+from mirage.types import FileType, PathSpec
+from mirage.utils.errors import enoent
 
 
 async def readdir(accessor: OneDriveAccessor, path: PathSpec,
                   index: IndexCacheStore) -> list[str]:
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
+    original = path
     prefix = path.prefix or ""
     raw = path.directory if path.pattern else path.original
     if prefix and raw.startswith(prefix):
@@ -38,7 +41,15 @@ async def readdir(accessor: OneDriveAccessor, path: PathSpec,
     url = item_url(accessor.config,
                    "/" + stripped if stripped else "/",
                    action="/children")
-    children = await graph_list(accessor.config, url)
+    try:
+        children = await graph_list(accessor.config, url)
+    except GraphError as exc:
+        if exc.status != 404:
+            raise
+        info = await stat(accessor, original)
+        if info.type != FileType.DIRECTORY:
+            raise NotADirectoryError(virtual_key) from exc
+        raise enoent(virtual_key) from exc
     base = "/" + stripped if stripped else ""
     names: list[str] = []
     index_entries: list[tuple[str, IndexEntry]] = []
@@ -47,12 +58,19 @@ async def readdir(accessor: OneDriveAccessor, path: PathSpec,
         key = f"{base}/{cname}"
         names.append(key)
         if "folder" in child:
-            entry = IndexEntry(id=key, name=cname, resource_type="folder")
+            entry = IndexEntry(id=key,
+                               name=cname,
+                               resource_type=ResourceType.FOLDER,
+                               size=child.get("size"),
+                               remote_time=child.get("lastModifiedDateTime",
+                                                     ""))
         else:
             entry = IndexEntry(id=key,
                                name=cname,
-                               resource_type="file",
-                               size=child.get("size"))
+                               resource_type=ResourceType.FILE,
+                               size=child.get("size"),
+                               remote_time=child.get("lastModifiedDateTime",
+                                                     ""))
         index_entries.append((cname, entry))
     names = sorted(names)
     virtual_entries = sorted((prefix + e if prefix else e) for e in names)

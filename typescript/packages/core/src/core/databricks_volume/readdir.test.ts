@@ -68,6 +68,26 @@ describe('readdir', () => {
     expect(err.code).toBe('ENOENT')
   })
 
+  it('stores size, type, and modified time in the index cache', async () => {
+    const { fetch } = routedFetch(() =>
+      jsonResponse({
+        contents: [
+          { path: `${TEST_ROOT}/a.txt`, file_size: 6, last_modified: 1_700_000_000_000 },
+          { path: `${TEST_ROOT}/d`, is_directory: true },
+        ],
+      }),
+    )
+    vi.stubGlobal('fetch', fetch)
+    const index = new RAMIndexCacheStore()
+    await readdir(makeAccessor(), spec('/volume/'), index)
+    const file = await index.get('/volume/a.txt')
+    expect(file.entry?.resourceType).toBe('file')
+    expect(file.entry?.size).toBe(6)
+    expect(file.entry?.remoteTime).toBe('2023-11-14T22:13:20.000Z')
+    const dir = await index.get('/volume/d')
+    expect(dir.entry?.resourceType).toBe('folder')
+  })
+
   it('serves and fills the index cache', async () => {
     const { fetch, calls } = routedFetch(() =>
       jsonResponse({ contents: [{ path: `${TEST_ROOT}/a.txt`, file_size: 1 }] }),

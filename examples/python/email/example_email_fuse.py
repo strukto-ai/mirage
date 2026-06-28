@@ -14,11 +14,10 @@
 
 import json
 import os
-import time
 
 from dotenv import load_dotenv
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.email import EmailConfig, EmailResource
 
 load_dotenv(".env.development")
@@ -32,14 +31,14 @@ config = EmailConfig(
 )
 resource = EmailResource(config=config)
 
-with Workspace({"/email/": resource}, mode=MountMode.READ, fuse=True) as ws:
-    time.sleep(1)
+with Workspace({"/email/": Mount(resource, mode=MountMode.READ,
+                                 fuse=True)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
 
     print("--- os.listdir() folders ---")
-    folders = os.listdir(f"{mp}/email")
+    folders = os.listdir(mp)
     for f in folders:
         print(f"  {f}")
 
@@ -47,7 +46,7 @@ with Workspace({"/email/": resource}, mode=MountMode.READ, fuse=True) as ws:
     if not any("Inbox" in f or "INBOX" in f for f in folders):
         folder = folders[0] if folders else ""
 
-    folder_path = f"{mp}/email/{folder}"
+    folder_path = f"{mp}/{folder}"
     if os.path.isdir(folder_path):
         print(f"\n--- os.listdir() {folder} (dates) ---")
         dates = os.listdir(folder_path)
@@ -74,8 +73,8 @@ with Workspace({"/email/": resource}, mode=MountMode.READ, fuse=True) as ws:
 
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> Open another terminal and run:")
-    print(f">>>   ls {mp}/email/")
-    print(f">>>   ls {mp}/email/{folder}/")
+    print(f">>>   ls {mp}/")
+    print(f">>>   ls {mp}/{folder}/")
     print(">>> Press Enter to unmount and exit...")
     input()
 

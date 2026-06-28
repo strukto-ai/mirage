@@ -14,7 +14,7 @@
 
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import { gzip, gunzip } from '../../../utils/compress.ts'
+import { gzip, gunzip, getCompressionCodec } from '../../../utils/compress.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { readTar, writeTar, type TarEntry } from '../tar_helper.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
@@ -22,17 +22,52 @@ import { fnmatch } from '../../../utils/fnmatch.ts'
 
 const ENC = new TextEncoder()
 
+type Compression = 'gzip' | 'bzip2' | 'xz' | null
+
 function makePathSpec(original: string, prefix: string): PathSpec {
   return new PathSpec({ original, directory: original, resolved: true, prefix })
 }
 
-function hasGzipMagic(data: Uint8Array): boolean {
-  return data.byteLength >= 2 && data[0] === 0x1f && data[1] === 0x8b
+function detectCompression(data: Uint8Array): Compression {
+  if (data.byteLength >= 2 && data[0] === 0x1f && data[1] === 0x8b) return 'gzip'
+  if (data.byteLength >= 3 && data[0] === 0x42 && data[1] === 0x5a && data[2] === 0x68)
+    return 'bzip2'
+  if (
+    data.byteLength >= 6 &&
+    data[0] === 0xfd &&
+    data[1] === 0x37 &&
+    data[2] === 0x7a &&
+    data[3] === 0x58 &&
+    data[4] === 0x5a &&
+    data[5] === 0x00
+  ) {
+    return 'xz'
+  }
+  return null
 }
 
-async function decompress(data: Uint8Array, z: boolean): Promise<Uint8Array> {
-  if (z || hasGzipMagic(data)) return gunzip(data)
-  return data
+function compressionOf(opts: CommandOpts): Compression {
+  if (opts.flags.z === true) return 'gzip'
+  if (opts.flags.j === true) return 'bzip2'
+  if (opts.flags.J === true) return 'xz'
+  return null
+}
+
+async function compress(raw: Uint8Array, kind: Compression): Promise<Uint8Array> {
+  if (kind === null) return raw
+  if (kind === 'gzip') return gzip(raw)
+  const codec = getCompressionCodec(kind)
+  if (codec === undefined) throw new Error(`tar: ${kind} not supported`)
+  return codec.compress(raw)
+}
+
+async function decompress(data: Uint8Array, kind: Compression): Promise<Uint8Array> {
+  const detected = kind ?? detectCompression(data)
+  if (detected === null) return data
+  if (detected === 'gzip') return gunzip(data)
+  const codec = getCompressionCodec(detected)
+  if (codec === undefined) return data
+  return codec.decompress(data)
 }
 
 export async function tarGeneric(
@@ -45,10 +80,14 @@ export async function tarGeneric(
   const create = opts.flags.c === true
   const extract = opts.flags.x === true
   const list = opts.flags.t === true
-  const z = opts.flags.z === true
+  const compression = compressionOf(opts)
   const verbose = opts.flags.v === true
-  // -j (bzip2) / -J (xz) are not supported: Node's stdlib only ships gzip/deflate.
-  if (opts.flags.j === true || opts.flags.J === true) {
+  // gzip is built in; bzip2 (-j) / xz (-J) need a codec registered by the
+  // runtime package. Unregistered (e.g. browser core) -> not supported.
+  if (
+    (compression === 'bzip2' || compression === 'xz') &&
+    getCompressionCodec(compression) === undefined
+  ) {
     return [
       null,
       new IOResult({ exitCode: 1, stderr: ENC.encode('tar: bzip2/xz not supported\n') }),
@@ -85,7 +124,7 @@ export async function tarGeneric(
       if (verbose) verboseLines.push(name)
     }
     const raw = writeTar(entries)
-    const archive = z ? await gzip(raw) : raw
+    const archive = await compress(raw, compression)
     await write(makePathSpec(archivePath, mountPrefix), archive)
     const stdout = verbose ? ENC.encode(verboseLines.join('\n') + '\n') : null
     return [stdout, new IOResult({ writes: { [archivePath]: archive } })]
@@ -96,7 +135,7 @@ export async function tarGeneric(
       return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('tar: -f is required\n') })]
     }
     const raw = await materialize(stream(makePathSpec(archivePath, mountPrefix)))
-    const data = await decompress(raw, z)
+    const data = await decompress(raw, compression)
     const entries = readTar(data)
     const out: ByteSource = ENC.encode(entries.map((e) => e.name).join('\n') + '\n')
     return [out, new IOResult()]
@@ -107,7 +146,7 @@ export async function tarGeneric(
       return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('tar: -f is required\n') })]
     }
     const raw = await materialize(stream(makePathSpec(archivePath, mountPrefix)))
-    const data = await decompress(raw, z)
+    const data = await decompress(raw, compression)
     const writes: Record<string, Uint8Array> = {}
     for (const entry of readTar(data)) {
       if (!entry.isFile) continue

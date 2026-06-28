@@ -84,6 +84,8 @@ export async function readdir(
     const isDir = entry.is_directory === true
     names.push(fullPath)
     const name = rstripSlash(fullPath).split('/').pop() ?? fullPath
+    const remoteTime =
+      typeof entry.last_modified === 'number' ? new Date(entry.last_modified).toISOString() : ''
     indexEntries.push([
       name,
       new IndexEntry({
@@ -91,6 +93,7 @@ export async function readdir(
         name,
         resourceType: isDir ? 'folder' : 'file',
         size: !isDir && typeof entry.file_size === 'number' ? entry.file_size : null,
+        remoteTime,
       }),
     ])
   }

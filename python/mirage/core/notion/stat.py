@@ -14,6 +14,7 @@
 
 from mirage.accessor.notion import NotionAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.core.notion.pages import get_database
 from mirage.core.notion.pathing import split_suffix_id
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
@@ -38,7 +39,7 @@ async def stat(
 
     key = path.strip("/")
 
-    if not key or key == "pages":
+    if not key or key in ("pages", "databases"):
         return FileStat(name=key or "/", type=FileType.DIRECTORY)
 
     parts = key.split("/")
@@ -46,15 +47,43 @@ async def stat(
     if parts[-1] == "page.json":
         return FileStat(name="page.json", type=guess_type("page.json"))
 
-    if len(parts) >= 2 and parts[0] == "pages":
-        _, page_id = split_suffix_id(parts[-1])
+    if parts[-1] == "database.json" and len(
+            parts) >= 3 and parts[0] == "databases":
+        _, database_id = split_suffix_id(parts[-2])
+        return FileStat(
+            name="database.json",
+            type=guess_type("database.json"),
+            extra={"database_id": database_id},
+        )
+
+    if len(parts) == 2 and parts[0] == "databases":
+        _, database_id = split_suffix_id(parts[-1])
         if index is not None:
-            idx_key = "/" + key
-            result = await index.get(idx_key)
+            result = await index.get("/" + key)
             if result.entry is not None:
                 return FileStat(
                     name=result.entry.name,
                     type=FileType.DIRECTORY,
+                    extra={"database_id": database_id},
+                )
+        database = await get_database(accessor.config, database_id)
+        return FileStat(
+            name=parts[-1],
+            type=FileType.DIRECTORY,
+            modified=database.get("last_edited_time"),
+            extra={"database_id": database_id},
+        )
+
+    if (parts[0] == "pages" and len(parts) >= 2) or (parts[0] == "databases"
+                                                     and len(parts) >= 3):
+        _, page_id = split_suffix_id(parts[-1])
+        if index is not None:
+            result = await index.get("/" + key)
+            if result.entry is not None:
+                return FileStat(
+                    name=result.entry.name,
+                    type=FileType.DIRECTORY,
+                    modified=result.entry.remote_time or None,
                     extra={"page_id": page_id},
                 )
         return FileStat(

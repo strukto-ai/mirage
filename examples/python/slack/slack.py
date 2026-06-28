@@ -50,6 +50,10 @@ async def main():
     r = await ws.execute("ls /slack/channels/ | head -n 5")
     print(await r.stdout_str())
 
+    print("=== ls -l /slack/channels/ (mtime from created) ===")
+    r = await ws.execute("ls -l /slack/channels/ | head -n 5")
+    print(await r.stdout_str())
+
     print("=== ls /slack/users/ ===")
     r = await ws.execute("ls /slack/users/ | head -n 5")
     print(await r.stdout_str())

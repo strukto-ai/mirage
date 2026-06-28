@@ -186,6 +186,303 @@ describe.each(NATIVE_BACKENDS)('native sed (%s backend)', (kind) => {
     }
   })
 
+  it('sed anchored substitution matches native', async () => {
+    // Regression for #326: ^/$ must anchor per line, not at buffer ends.
+    const env = makeEnv(kind)
+    try {
+      const data = ENC.encode('#123\nls\n')
+      const m = await env.mirage("sed 's/^#[0-9]*$/#TS/'", data)
+      const n = await env.native("sed 's/^#[0-9]*$/#TS/'", data)
+      expect(m).toBe(n)
+      expect(m).toBe('#TS\nls\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('sed -E anchored substitution matches native', async () => {
+    const env = makeEnv(kind)
+    try {
+      const data = ENC.encode('#123\nls\n')
+      const m = await env.mirage("sed -E 's/^#[0-9]+$/#TS/'", data)
+      const n = await env.native("sed -E 's/^#[0-9]+$/#TS/'", data)
+      expect(m).toBe(n)
+      expect(m).toBe('#TS\nls\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('sed anchored address matches native', async () => {
+    const env = makeEnv(kind)
+    try {
+      const data = ENC.encode('12\nab\n34\n')
+      const m = await env.mirage("sed '/^[0-9]*$/d'", data)
+      const n = await env.native("sed '/^[0-9]*$/d'", data)
+      expect(m).toBe(n)
+      expect(m).toBe('ab\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('sed anchored substitution on a file argument matches native', async () => {
+    // The single-`s` fast-path (file args) must anchor per line too (#326).
+    const env = makeEnv(kind)
+    try {
+      env.createFile('anchors.txt', ENC.encode('#123\nls\n#456\nfoo bar\n'))
+      const m = await env.mirage("sed 's/^#[0-9]*$/#TS/' /data/anchors.txt")
+      const n = await env.native("sed 's/^#[0-9]*$/#TS/' anchors.txt")
+      expect(m).toBe(n)
+      expect(m).toBe('#TS\nls\n#TS\nfoo bar\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('sed non-global sub on a file replaces first match per line', async () => {
+    const env = makeEnv(kind)
+    try {
+      env.createFile('multi.txt', ENC.encode('oo\noo\noo\n'))
+      const m = await env.mirage("sed 's/o/O/' /data/multi.txt")
+      const n = await env.native("sed 's/o/O/' multi.txt")
+      expect(m).toBe(n)
+      expect(m).toBe('Oo\nOo\nOo\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('sed -i anchored substitution on a file matches native', async () => {
+    const env = makeEnv(kind)
+    try {
+      env.createFile('anchors_i.txt', ENC.encode('#123\nls\n#456\nfoo bar\n'))
+      await env.mirage("sed -i 's/^#[0-9]*$/#TS/' /data/anchors_i.txt")
+      const result = await env.mirage('cat /data/anchors_i.txt')
+      expect(result).toBe('#TS\nls\n#TS\nfoo bar\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('sed s/// numeric count replaces Nth match, matches native', async () => {
+    const env = makeEnv(kind)
+    try {
+      const data = ENC.encode('oooo\n')
+      const m = await env.mirage("sed 's/o/O/2'", data)
+      const n = await env.native("sed 's/o/O/2'", data)
+      expect(m).toBe(n)
+      expect(m).toBe('oOoo\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('sed s///p prints substituted line, matches native', async () => {
+    const env = makeEnv(kind)
+    try {
+      const data = ENC.encode('hi\nbye\n')
+      const m = await env.mirage("sed 's/hi/HI/p'", data)
+      const n = await env.native("sed 's/hi/HI/p'", data)
+      expect(m).toBe(n)
+      expect(m).toBe('HI\nHI\nbye\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('sed -n s///p prints only substituted lines, matches native', async () => {
+    const env = makeEnv(kind)
+    try {
+      const data = ENC.encode('hi\nbye\n')
+      const m = await env.mirage("sed -n 's/hi/HI/p'", data)
+      const n = await env.native("sed -n 's/hi/HI/p'", data)
+      expect(m).toBe(n)
+      expect(m).toBe('HI\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('sed y/// transliterates, matches native', async () => {
+    const env = makeEnv(kind)
+    try {
+      const data = ENC.encode('hello\n')
+      const m = await env.mirage("sed 'y/el/ip/'", data)
+      const n = await env.native("sed 'y/el/ip/'", data)
+      expect(m).toBe(n)
+      expect(m).toBe('hippo\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('sed c changes an addressed line, matches native', async () => {
+    const env = makeEnv(kind)
+    try {
+      const data = ENC.encode('a\nb\nc\n')
+      const m = await env.mirage("sed '2c\\\nX'", data)
+      const n = await env.native("sed '2c\\\nX'", data)
+      expect(m).toBe(n)
+      expect(m).toBe('a\nX\nc\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('sed c changes a line range once, matches native', async () => {
+    const env = makeEnv(kind)
+    try {
+      const data = ENC.encode('a\nb\nc\nd\n')
+      const m = await env.mirage("sed '2,3c\\\nX'", data)
+      const n = await env.native("sed '2,3c\\\nX'", data)
+      expect(m).toBe(n)
+      expect(m).toBe('a\nX\nd\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('sed BRE group + backref matches native', async () => {
+    const env = makeEnv(kind)
+    try {
+      const data = ENC.encode('foo\n')
+      const m = await env.mirage("sed 's/\\(foo\\)/[\\1]/'", data)
+      const n = await env.native("sed 's/\\(foo\\)/[\\1]/'", data)
+      expect(m).toBe(n)
+      expect(m).toBe('[foo]\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('sed BRE interval and bare + literal match native', async () => {
+    const env = makeEnv(kind)
+    try {
+      const d1 = ENC.encode('aaa\n')
+      expect(await env.mirage("sed 's/a\\{2\\}/X/'", d1)).toBe(
+        await env.native("sed 's/a\\{2\\}/X/'", d1),
+      )
+      const d2 = ENC.encode('a+b\n')
+      const m = await env.mirage("sed 's/a+/X/'", d2)
+      expect(m).toBe(await env.native("sed 's/a+/X/'", d2))
+      expect(m).toBe('Xb\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('sed -E group/quantifier/alternation match native', async () => {
+    const env = makeEnv(kind)
+    try {
+      const d1 = ENC.encode('foo\n')
+      expect(await env.mirage("sed -E 's/(foo)/[\\1]/'", d1)).toBe(
+        await env.native("sed -E 's/(foo)/[\\1]/'", d1),
+      )
+      const d2 = ENC.encode('aaab\n')
+      expect(await env.mirage("sed -E 's/a+/X/'", d2)).toBe(
+        await env.native("sed -E 's/a+/X/'", d2),
+      )
+      const d3 = ENC.encode('dog\n')
+      const m = await env.mirage("sed -E 's/cat|dog/PET/'", d3)
+      expect(m).toBe(await env.native("sed -E 's/cat|dog/PET/'", d3))
+      expect(m).toBe('PET\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('sed -r is an alias for -E, matches native', async () => {
+    const env = makeEnv(kind)
+    try {
+      const data = ENC.encode('aaab\n')
+      const m = await env.mirage("sed -r 's/a+/X/'", data)
+      const n = await env.native("sed -r 's/a+/X/'", data)
+      expect(m).toBe(n)
+      expect(m).toBe('Xb\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('sed multiple -e expressions apply in sequence, matches native', async () => {
+    const env = makeEnv(kind)
+    try {
+      const data = ENC.encode('a\n')
+      const m = await env.mirage("sed -e 's/a/b/' -e 's/b/c/'", data)
+      const n = await env.native("sed -e 's/a/b/' -e 's/b/c/'", data)
+      expect(m).toBe(n)
+      expect(m).toBe('c\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('sed -e with a file argument matches native', async () => {
+    const env = makeEnv(kind)
+    try {
+      env.createFile('ef.txt', ENC.encode('hello world\n'))
+      const m = await env.mirage('sed -e s/hello/bye/ /data/ef.txt')
+      const n = await env.native('sed -e s/hello/bye/ ef.txt')
+      expect(m).toBe(n)
+      expect(m).toBe('bye world\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('sed negated line address matches native', async () => {
+    const env = makeEnv(kind)
+    try {
+      const data = ENC.encode('a\nb\nc\n')
+      const m = await env.mirage("sed '2!d'", data)
+      const n = await env.native("sed '2!d'", data)
+      expect(m).toBe(n)
+      expect(m).toBe('b\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('sed negated regex address matches native', async () => {
+    const env = makeEnv(kind)
+    try {
+      const data = ENC.encode('a\nb\nc\n')
+      const m = await env.mirage("sed '/b/!d'", data)
+      const n = await env.native("sed '/b/!d'", data)
+      expect(m).toBe(n)
+      expect(m).toBe('b\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('sed preserves a missing final newline, matches native', async () => {
+    const env = makeEnv(kind)
+    try {
+      const data = ENC.encode('foo')
+      const m = await env.mirage("sed 's/o/O/'", data)
+      const n = await env.native("sed 's/o/O/'", data)
+      expect(m).toBe(n)
+      expect(m).toBe('fOo')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('sed escaped delimiter matches native', async () => {
+    const env = makeEnv(kind)
+    try {
+      const data = ENC.encode('a/b\n')
+      const m = await env.mirage("sed 's/a\\/b/c/'", data)
+      const n = await env.native("sed 's/a\\/b/c/'", data)
+      expect(m).toBe(n)
+      expect(m).toBe('c\n')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
   it('sed -i edits file in place', async () => {
     const env = makeEnv(kind)
     try {

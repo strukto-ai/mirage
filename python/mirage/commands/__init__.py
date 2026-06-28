@@ -14,61 +14,20 @@
 
 from typing import Callable
 
-from mirage.commands.builtin.ram.cat import cat
-from mirage.commands.builtin.ram.cp import cp
-from mirage.commands.builtin.ram.cut import cut
-from mirage.commands.builtin.ram.diff import diff
-from mirage.commands.builtin.ram.du import du
-from mirage.commands.builtin.ram.file import file
-from mirage.commands.builtin.ram.find import find
-from mirage.commands.builtin.ram.grep import grep
-from mirage.commands.builtin.ram.head import head
-from mirage.commands.builtin.ram.ls import ls
-from mirage.commands.builtin.ram.md5 import md5
-from mirage.commands.builtin.ram.mkdir import mkdir
-from mirage.commands.builtin.ram.mv import mv
-from mirage.commands.builtin.ram.nl import nl
-from mirage.commands.builtin.ram.rg import rg
-from mirage.commands.builtin.ram.rm import rm
-from mirage.commands.builtin.ram.sed import sed
-from mirage.commands.builtin.ram.sort import sort
-from mirage.commands.builtin.ram.stat import stat
-from mirage.commands.builtin.ram.tail import tail
-from mirage.commands.builtin.ram.tee import tee
-from mirage.commands.builtin.ram.touch import touch
-from mirage.commands.builtin.ram.tr import tr
-from mirage.commands.builtin.ram.tree import tree
-from mirage.commands.builtin.ram.uniq import uniq
-from mirage.commands.builtin.ram.wc import wc
+from mirage.commands.builtin.ram import COMMANDS as _RAM_COMMANDS
 from mirage.commands.spec import _resolve
 
-COMMANDS: dict[str, Callable] = {
-    "ls": ls,
-    "stat": stat,
-    "find": find,
-    "tree": tree,
-    "du": du,
-    "cat": cat,
-    "head": head,
-    "tail": tail,
-    "wc": wc,
-    "md5": md5,
-    "diff": diff,
-    "file": file,
-    "nl": nl,
-    "grep": grep,
-    "rg": rg,
-    "sort": sort,
-    "uniq": uniq,
-    "cut": cut,
-    "tr": tr,
-    "mkdir": mkdir,
-    "touch": touch,
-    "cp": cp,
-    "mv": mv,
-    "rm": rm,
-    "sed": sed,
-    "tee": tee,
-}
+_BY_NAME: dict[str, Callable] = {}
+for _fn in _RAM_COMMANDS:
+    for _rc in _fn._registered_commands:
+        if _rc.filetype is None and _rc.name not in _BY_NAME:
+            _BY_NAME[_rc.name] = _fn
+
+_GENERAL_NAMES = ("ls", "stat", "find", "tree", "du", "cat", "head", "tail",
+                  "wc", "md5", "diff", "file", "nl", "grep", "rg", "sort",
+                  "uniq", "cut", "tr", "mkdir", "touch", "cp", "mv", "rm",
+                  "sed", "tee")
+
+COMMANDS: dict[str, Callable] = {n: _BY_NAME[n] for n in _GENERAL_NAMES}
 
 __all__ = ["COMMANDS", "_resolve"]

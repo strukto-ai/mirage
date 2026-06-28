@@ -42,6 +42,7 @@ from mirage.ops.os_patch import make_os_module
 from mirage.provision import ProvisionResult
 from mirage.resource.base import BaseResource
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
+from mirage.resource.ram import RAMResource
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
 from mirage.types import (DEFAULT_AGENT_ID, DEFAULT_SESSION_ID,
@@ -52,7 +53,8 @@ from mirage.workspace.dispatcher import Dispatcher
 from mirage.workspace.executor.fs_error import format_fs_error
 from mirage.workspace.file_prompt import build_file_prompt
 from mirage.workspace.fuse import FuseManager
-from mirage.workspace.mount import Mount, MountRegistry
+from mirage.workspace.mount import MountEntry, MountRegistry
+from mirage.workspace.mount.spec import Mount
 from mirage.workspace.node import provision_node, run_command_tree
 from mirage.workspace.session import (Session, SessionManager,
                                       reset_current_session,
@@ -76,7 +78,7 @@ class Workspace:
 
     def __init__(
         self,
-        resources: dict[str, BaseResource | tuple],
+        resources: dict[str, BaseResource | tuple | Mount],
         cache_limit: str | int = "512MB",
         cache: CacheConfig | None = None,
         index: IndexConfig | None = None,
@@ -84,7 +86,6 @@ class Workspace:
         consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY,
         session_id: str = DEFAULT_SESSION_ID,
         agent_id: str = DEFAULT_AGENT_ID,
-        fuse_mounts: dict[str, bool | str] | None = None,
         observe: ObserverStore | None = None,
     ) -> None:
         self._registry = MountRegistry()
@@ -104,14 +105,13 @@ class Workspace:
             max_drain = cache.max_drain_bytes if cache is not None else None
             self._cache = RAMFileCacheStore(cache_limit=limit,
                                             max_drain_bytes=max_drain)
-        self._registry.set_default_mount(self._cache)
         self._locked_paths: set[str] = set()
         self._closed = False
         self._drift_policy: DriftPolicy = DriftPolicy.OFF
         self._drift_check_pending: bool = False
         # Queued at Workspace.load: (mount, path, expected_fingerprint).
         # First dispatch/execute drains via asyncio.gather, then clears.
-        self._pending_drift: list[tuple[Mount, str, str]] = []
+        self._pending_drift: list[tuple[MountEntry, str, str]] = []
         self.job_table = JobTable()
         self._current_agent_id: str = agent_id
         self._default_session_id = session_id
@@ -122,9 +122,17 @@ class Workspace:
         self._registry.attach_file_cache(self._cache)
         self._dispatcher = Dispatcher(self._registry, self._cache, consistency)
 
+        fuse_targets: list[tuple[str, bool | str]] = []
         for prefix, value in resources.items():
             mount_safeguards: dict = {}
-            if isinstance(value, tuple) and len(value) >= 2:
+            mount_fuse: bool | str = False
+            if isinstance(value, Mount):
+                prov = value.resource
+                mount_mode = value.mode if value.mode is not None else mode
+                if value.command_safeguards:
+                    mount_safeguards = dict(value.command_safeguards)
+                mount_fuse = value.fuse
+            elif isinstance(value, tuple) and len(value) >= 2:
                 prov = value[0]
                 mount_mode = value[1]
                 if len(value) >= 3 and value[2]:
@@ -137,8 +145,13 @@ class Workspace:
             mount_obj = self._registry.mount(prefix, prov, mount_mode)
             if mount_safeguards:
                 mount_obj.command_safeguards.update(mount_safeguards)
+            if mount_fuse:
+                fuse_targets.append((prefix, mount_fuse))
 
-        self._fuse = FuseManager()
+        if self._registry.root_mount is None:
+            self._registry.mount("/", RAMResource(), mode)
+
+        self._fuse_mountpoints: dict[str, str] = {}
         self._fuse_managers: dict[str, FuseManager] = {}
 
         self.observer = Observer(store=observe)
@@ -152,14 +165,9 @@ class Workspace:
                         agent_id=agent_id,
                         session_id=session_id)
 
-        if fuse_mounts:
-            for prefix, target in fuse_mounts.items():
-                if not target:
-                    continue
-                manager = FuseManager()
-                point = target if isinstance(target, str) else None
-                manager.setup(self, root_prefix=prefix, mountpoint=point)
-                self._fuse_managers[prefix] = manager
+        for prefix, fuse_target in fuse_targets:
+            mountpoint = fuse_target if isinstance(fuse_target, str) else None
+            self.add_fuse_mount(prefix, mountpoint)
 
     async def history(self) -> list[dict]:
         """Command events recorded by the hidden recorder.
@@ -176,12 +184,6 @@ class Workspace:
     @property
     def cache(self):
         return self._cache
-
-    @property
-    def cache_mount(self) -> Mount:
-        m = self._registry.default_mount
-        assert m is not None, "cache mount is initialized in __init__"
-        return m
 
     @property
     def max_drain_bytes(self) -> int | None:
@@ -217,8 +219,8 @@ class Workspace:
             raise RuntimeError("Workspace is closed")
         stripped = prefix.strip("/")
         norm = ("/" + stripped + "/" if stripped else "/")
-        if norm in ("/", "/_default/"):
-            raise ValueError(f"cannot unmount cache root: {prefix!r}")
+        if norm == "/":
+            raise ValueError(f"cannot unmount the virtual root: {prefix!r}")
         if norm == "/dev/":
             raise ValueError("cannot unmount reserved prefix: '/dev/'")
         if norm == HISTORY_PREFIX + "/":
@@ -226,31 +228,71 @@ class Workspace:
                              f"{HISTORY_PREFIX!r}")
         removed = self._registry.unmount(prefix)
         self._ops.unmount(prefix)
-        still_mounted = any(m.resource is removed.resource
-                            for m in self._registry.mounts())
-        if not still_mounted:
+        remaining = self._registry.mounts()
+        still_instance = any(m.resource is removed.resource for m in remaining)
+        still_kind = any(m.resource.name == removed.resource.name
+                         for m in remaining)
+        if not still_kind:
             self._ops._registry.unregister_resource(removed.resource.name)
+        if not still_instance:
             close = getattr(removed.resource, "close", None)
             if callable(close):
                 result = close()
                 if hasattr(result, "__await__"):
                     await result
 
-    def set_fuse_mountpoint(self, path: str | None) -> None:
-        self._fuse.mountpoint = path
+    def _register_fuse(self, prefix: str, mountpoint: str) -> None:
+        for other_prefix, other_mp in self._fuse_mountpoints.items():
+            if other_mp == mountpoint and other_prefix != prefix:
+                raise ValueError(
+                    f"FUSE mountpoint {mountpoint!r} already used by "
+                    f"prefix {other_prefix!r}; mounts need distinct paths")
+        self._fuse_mountpoints[prefix] = mountpoint
+
+    def _deregister_fuse(self, prefix: str) -> None:
+        self._fuse_mountpoints.pop(prefix, None)
+
+    def add_fuse_mount(self,
+                       prefix: str,
+                       mountpoint: str | None = None) -> str:
+        # Register a pinned path BEFORE mounting so a collision is rejected
+        # without leaving a partial mount. Each mount gets its own manager,
+        # so a workspace can expose any number of FUSE subtrees at once.
+        if mountpoint is not None:
+            self._register_fuse(prefix, mountpoint)
+        fm = FuseManager()
+        self._fuse_managers[prefix] = fm
+        try:
+            mp = fm.setup(self._ops, prefix, mountpoint)
+        except Exception:
+            # The mount never came up; drop the manager and any registered
+            # path so fuse_mountpoints does not misreport it as live.
+            self._fuse_managers.pop(prefix, None)
+            self._deregister_fuse(prefix)
+            raise
+        if mountpoint is None:
+            self._register_fuse(prefix, mp)
+        return mp
+
+    def remove_fuse_mount(self, prefix: str) -> None:
+        fm = self._fuse_managers.pop(prefix, None)
+        if fm is not None:
+            fm.unmount()
+        self._deregister_fuse(prefix)
 
     @property
     def fuse_mountpoint(self) -> str | None:
-        return self._fuse.mountpoint
+        if not self._fuse_mountpoints:
+            return None
+        if len(self._fuse_mountpoints) > 1:
+            raise RuntimeError(
+                "multiple FUSE mounts active; use fuse_mountpoints to "
+                "select one by prefix")
+        return next(iter(self._fuse_mountpoints.values()))
 
     @property
     def fuse_mountpoints(self) -> dict[str, str]:
-        """Map each FUSE-exposed mount prefix to its on-disk mountpoint."""
-        return {
-            prefix: manager.mountpoint
-            for prefix, manager in self._fuse_managers.items()
-            if manager.mountpoint is not None
-        }
+        return dict(self._fuse_mountpoints)
 
     @property
     def _cwd(self) -> str:
@@ -287,12 +329,13 @@ class Workspace:
         self._close_parts()
 
     def _close_parts(self) -> None:
-        self._fuse.close()
-        for manager in self._fuse_managers.values():
-            manager.close()
         if self._closed:
             return
         self._closed = True
+        for fm in list(self._fuse_managers.values()):
+            fm.unmount()
+        self._fuse_managers.clear()
+        self._fuse_mountpoints.clear()
         for job in self.job_table.running_jobs():
             self.job_table.kill(job.id)
         for task in self._cache._drain_tasks.values():
@@ -472,16 +515,16 @@ class Workspace:
     def _infrastructure_mount_prefixes(self) -> set[str]:
         """Mount prefixes a session is always allowed to touch.
 
-        The cache mount (where text-processing commands like ``wc``
+        The virtual root (where text-processing commands like ``wc``
         without a path argument resolve), the device mount, and the
         history view are infrastructure: they hold no user
         credentials, and rejecting them would break common shell
         idioms or the history builtin.
         """
         prefixes = {"/dev", HISTORY_PREFIX}
-        default_mount = self._registry.default_mount
-        if default_mount is not None:
-            prefixes.add("/" + default_mount.prefix.strip("/"))
+        root_mount = self._registry.root_mount
+        if root_mount is not None:
+            prefixes.add("/" + root_mount.prefix.strip("/"))
         return prefixes
 
     def get_session(self, session_id: str) -> Session:

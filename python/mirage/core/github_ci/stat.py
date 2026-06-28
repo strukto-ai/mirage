@@ -82,6 +82,7 @@ async def stat(
         return FileStat(
             name=lookup.entry.vfs_name or lookup.entry.name,
             type=FileType.JSON,
+            modified=lookup.entry.remote_time or None,
             extra={"workflow_id": lookup.entry.id},
         )
 
@@ -95,6 +96,7 @@ async def stat(
         return FileStat(
             name=lookup.entry.vfs_name or lookup.entry.name,
             type=FileType.DIRECTORY,
+            modified=lookup.entry.remote_time or None,
             extra={"run_id": lookup.entry.id},
         )
 
@@ -119,6 +121,7 @@ async def stat(
         return FileStat(
             name=lookup.entry.vfs_name or lookup.entry.name,
             type=FileType.JSON,
+            modified=lookup.entry.remote_time or None,
             extra={"job_id": lookup.entry.id},
         )
 
@@ -133,6 +136,7 @@ async def stat(
         return FileStat(
             name=lookup.entry.vfs_name or lookup.entry.name,
             type=FileType.TEXT,
+            modified=lookup.entry.remote_time or None,
             extra={"job_id": lookup.entry.id},
         )
 
@@ -147,6 +151,7 @@ async def stat(
             name=lookup.entry.vfs_name or lookup.entry.name,
             type=FileType.ZIP,
             size=lookup.entry.size,
+            modified=lookup.entry.remote_time or None,
             extra={"artifact_id": lookup.entry.id},
         )
 

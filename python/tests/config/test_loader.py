@@ -50,9 +50,8 @@ def test_load_full_yaml_with_env_interpolation():
     assert cfg.mounts["/s3"].config["bucket"] == "my-test-bucket"
     assert cfg.mounts["/s3"].config["aws_access_key_id"] == "AKIAEXAMPLE"
     assert cfg.mounts["/"].fuse == "/tmp/mirage-fuse-full"
-    assert cfg.to_workspace_kwargs()["fuse_mounts"] == {
-        "/": "/tmp/mirage-fuse-full"
-    }
+    assert cfg.fuse_mounts() == {"/": "/tmp/mirage-fuse-full"}
+    assert "fuse_mounts" not in cfg.to_workspace_kwargs()
 
 
 def test_missing_env_var_raises_with_full_list():

@@ -15,7 +15,13 @@
 import type { PathSpec } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
 import { isNotFound, iterEntries, norm, resolveDirHandle } from './utils.ts'
-import { buildTree, keep, type PredNode } from '@struktoai/mirage-core'
+import {
+  buildTree,
+  emitStartPath,
+  keep,
+  type PredNode,
+  startBasename,
+} from '@struktoai/mirage-core'
 
 export interface FindOptions {
   name?: string | null
@@ -138,6 +144,7 @@ export async function find(
 ): Promise<string[]> {
   const root = accessor.rootHandle
   const virtual = norm(p.stripPrefix)
+  const startName = startBasename(p.original)
   const results: string[] = []
   const tree =
     options.tree ??
@@ -157,7 +164,7 @@ export async function find(
     if (isNotFound(err)) return results
     throw err
   }
-  if (virtual !== '/' && (options.maxDepth == null || options.maxDepth >= 0)) {
+  if (options.maxDepth == null || options.maxDepth >= 0) {
     let rootEmpty: boolean | null = null
     if (options.empty === true) {
       rootEmpty = true
@@ -167,21 +174,14 @@ export async function find(
         break
       }
     }
-    if (
-      keep(
-        {
-          key: virtual,
-          name: virtual.slice(virtual.lastIndexOf('/') + 1),
-          kind: 'd',
-          depth: 0,
-          isEmpty: rootEmpty,
-        },
-        tree,
-        options.minDepth,
-      )
-    ) {
-      results.push(virtual)
-    }
+    emitStartPath(results, virtual, startName, {
+      kind: 'd',
+      isEmpty: rootEmpty,
+      exists: true,
+      tree,
+      maxDepth: options.maxDepth,
+      minDepth: options.minDepth,
+    })
   }
   await walk({ options, tree, results }, dir, virtual, 0)
   results.sort()

@@ -42,14 +42,21 @@ async def main():
         for label in labels:
             print(f"  {label}")
 
-        print("\n--- os.listdir() INBOX ---")
-        messages = vos.listdir("/gmail/INBOX")
+        print("\n--- os.listdir() INBOX (date folders) ---")
+        dates = vos.listdir("/gmail/INBOX")
+        for date in dates[:5]:
+            print(f"  {date}")
+
+        first_date = dates[0] if dates else None
+        entries = vos.listdir(
+            f"/gmail/INBOX/{first_date}") if first_date else []
+        messages = [e for e in entries if e.endswith(".gmail.json")]
         for msg in messages[:5]:
-            print(f"  {msg}")
+            print(f"  {first_date}/{msg}")
 
         if messages:
             first = messages[0]
-            path = f"/gmail{first}"
+            path = f"/gmail/INBOX/{first_date}/{first}"
             print("\n--- open() + read first message ---")
             with open(path) as f:
                 content = f.read()

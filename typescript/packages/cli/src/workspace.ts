@@ -15,7 +15,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { Command } from 'commander'
-import { interpolateEnv, loadWorkspaceConfig } from '@struktoai/mirage-server'
+import { interpolateEnv, loadWorkspaceConfigFile } from '@struktoai/mirage-server'
 import { parse as yamlParse } from 'yaml'
 import { makeClient } from './client.ts'
 import { emit, fail, formatAge, formatTable, handleResponse } from './output.ts'
@@ -154,7 +154,7 @@ export function registerWorkspaceCommands(program: Command): void {
     .argument('<config>', 'YAML/JSON workspace config')
     .option('--id <id>', 'Explicit workspace id')
     .action(async (configPath: string, opts: { id?: string }) => {
-      const cfg = loadWorkspaceConfig(configPath)
+      const cfg = loadWorkspaceConfigFile(configPath)
       const body: { config: unknown; id?: string } = { config: cfg }
       if (opts.id !== undefined) body.id = opts.id
       const c = buildClient()

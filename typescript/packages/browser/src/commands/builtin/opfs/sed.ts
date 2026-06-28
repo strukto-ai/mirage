@@ -12,21 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ResourceName, command, specOf, sedGeneric } from '@struktoai/mirage-core'
+import { ResourceName, makeSed } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../../accessor/opfs.ts'
 import { stream as opfsStream } from '../../../core/opfs/stream.ts'
 import { writeBytes as opfsWrite } from '../../../core/opfs/write.ts'
 
-export const OPFS_SED = command({
-  name: 'sed',
+export const OPFS_SED = makeSed<OPFSAccessor>({
   resource: ResourceName.OPFS,
-  spec: specOf('sed'),
-  fn: (accessor: OPFSAccessor, paths, texts, opts) =>
-    sedGeneric(
-      paths,
-      texts,
-      opts,
-      (p) => opfsStream(accessor, p),
-      (p, d) => opfsWrite(accessor, p, d),
-    ),
+  stream: (a, p) => opfsStream(a, p),
+  write: (a, p, d) => opfsWrite(a, p, d),
 })

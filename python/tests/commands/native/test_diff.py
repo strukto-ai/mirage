@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import pytest
-
 
 def test_diff_identical(env):
     env.create_file("a.txt", b"same\n")
@@ -89,8 +87,43 @@ def test_diff_e(env):
 
 
 def test_diff_r(env):
-    pytest.skip("diff -r has a known bug with readdir full paths")
     env.create_file("dir1/a.txt", b"hello\n")
     env.create_file("dir2/a.txt", b"world\n")
     result = env.mirage("diff -r /data/dir1 /data/dir2")
     assert "differ" in result or "hello" in result or "world" in result
+
+
+def test_diff_r_recurses_subdirs(env):
+    env.create_file("d1/top.txt", b"same\n")
+    env.create_file("d2/top.txt", b"same\n")
+    env.create_file("d1/sub/x.txt", b"alpha\n")
+    env.create_file("d2/sub/x.txt", b"beta\n")
+    result = env.mirage("diff -r /data/d1 /data/d2")
+    assert "alpha" in result and "beta" in result
+    assert "/data/d1/sub/x.txt" in result
+
+
+def test_diff_r_only_in(env):
+    env.create_file("o1/shared.txt", b"s\n")
+    env.create_file("o2/shared.txt", b"s\n")
+    env.create_file("o1/leftonly.txt", b"l\n")
+    env.create_file("o2/rightonly.txt", b"r\n")
+    result = env.mirage("diff -r /data/o1 /data/o2")
+    assert "Only in /data/o1: leftonly.txt" in result
+    assert "Only in /data/o2: rightonly.txt" in result
+
+
+def test_diff_r_on_files(env):
+    env.create_file("f1.txt", b"hello\n")
+    env.create_file("f2.txt", b"world\n")
+    result = env.mirage("diff -r /data/f1.txt /data/f2.txt")
+    assert "hello" in result and "world" in result
+    assert "Not a directory" not in result
+
+
+def test_diff_r_identical_tree(env):
+    env.create_file("s1/a.txt", b"x\n")
+    env.create_file("s1/sub/b.txt", b"y\n")
+    env.create_file("s2/a.txt", b"x\n")
+    env.create_file("s2/sub/b.txt", b"y\n")
+    assert env.mirage("diff -r /data/s1 /data/s2") == ""

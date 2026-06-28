@@ -158,6 +158,9 @@ REGISTRY: dict[str, ResourceEntry] = {
     "lancedb":
     ResourceEntry("mirage.resource.lancedb:LanceDBResource",
                   "mirage.resource.lancedb:LanceDBConfig"),
+    "qdrant":
+    ResourceEntry("mirage.resource.qdrant:QdrantResource",
+                  "mirage.resource.qdrant:QdrantConfig"),
 }
 
 

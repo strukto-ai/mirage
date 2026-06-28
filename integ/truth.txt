@@ -32,6 +32,7 @@ hello
 world
 === head_c5 ===
 hello
+\ No newline at end of output
 === tail_default ===
 hello
 world
@@ -250,6 +251,7 @@ a.txt
 /data/a.txt
 === find_name ===
 /data/a.txt
+/data/anchors.txt
 /data/b.txt
 /data/c.txt
 /data/disptree/d/y.txt
@@ -260,9 +262,11 @@ a.txt
 /data/guard/g.txt
 /data/guard/sub/s.txt
 /data/mixed.txt
+/data/multi.txt
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
 /data/prefix_dup.txt
@@ -278,6 +282,7 @@ a.txt
 === find_type_f ===
 /data/a.txt
 /data/abc.csv
+/data/anchors.txt
 /data/b.txt
 /data/binary.bin
 /data/c.txt
@@ -292,9 +297,11 @@ a.txt
 /data/guard/g.txt
 /data/guard/sub/s.txt
 /data/mixed.txt
+/data/multi.txt
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
 /data/prefix_dup.txt
@@ -312,6 +319,7 @@ a.txt
 === ls ===
 a.txt
 abc.csv
+anchors.txt
 b.txt
 binary.bin
 c.txt
@@ -324,9 +332,11 @@ empty.txt
 fields.txt
 guard
 mixed.txt
+multi.txt
 no_nl.txt
 numbers.txt
 one_byte.txt
+oooo.txt
 patterns.txt
 patterns2.txt
 prefix_dup.txt
@@ -343,6 +353,7 @@ users.json
 === ls_1 ===
 a.txt
 abc.csv
+anchors.txt
 b.txt
 binary.bin
 c.txt
@@ -355,9 +366,11 @@ empty.txt
 fields.txt
 guard
 mixed.txt
+multi.txt
 no_nl.txt
 numbers.txt
 one_byte.txt
+oooo.txt
 patterns.txt
 patterns2.txt
 prefix_dup.txt
@@ -454,6 +467,7 @@ baz
 === find_mindepth ===
 /data/a.txt
 /data/abc.csv
+/data/anchors.txt
 /data/b.txt
 /data/binary.bin
 /data/c.txt
@@ -468,9 +482,11 @@ baz
 /data/guard/g.txt
 /data/guard/sub/s.txt
 /data/mixed.txt
+/data/multi.txt
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
 /data/prefix_dup.txt
@@ -488,6 +504,7 @@ baz
 === find_maxdepth ===
 /data/a.txt
 /data/abc.csv
+/data/anchors.txt
 /data/b.txt
 /data/binary.bin
 /data/c.txt
@@ -498,9 +515,11 @@ baz
 /data/empty.txt
 /data/fields.txt
 /data/mixed.txt
+/data/multi.txt
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
 /data/prefix_dup.txt
@@ -515,6 +534,7 @@ baz
 /data/users.json
 === find_multi_name ===
 /data/a.txt
+/data/anchors.txt
 /data/b.txt
 /data/c.txt
 /data/disptree/d/y.txt
@@ -525,9 +545,11 @@ baz
 /data/guard/g.txt
 /data/guard/sub/s.txt
 /data/mixed.txt
+/data/multi.txt
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
 /data/prefix_dup.txt
@@ -588,7 +610,7 @@ world
       2 b
       1 c
 === find_pipe_wc ===
-26
+29
 === jq_pipe_wc ===
 3
 === cat_tr_sort ===
@@ -613,7 +635,7 @@ world
 3
 === find_sort_head ===
 /data/a.txt
-/data/b.txt
+/data/anchors.txt
 === cat_empty ===
 
 === wc_empty ===
@@ -626,6 +648,7 @@ d41d8cd98f00b204e9800998ecf8427e  /data/empty.txt
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  /data/empty.txt
 === cat_no_nl ===
 no trailing newline
+\ No newline at end of output
 === wc_no_nl ===
  0  3 19 /data/no_nl.txt
 === md5_one_byte ===
@@ -662,6 +685,7 @@ world
 === rg_c ===
 1
 === find_d ===
+/data
 /data/disptree
 /data/disptree/d
 /data/guard
@@ -670,6 +694,7 @@ world
 /data/sub/deep
 === find_iname ===
 /data/a.txt
+/data/anchors.txt
 /data/b.txt
 /data/c.txt
 /data/disptree/d/y.txt
@@ -680,9 +705,11 @@ world
 /data/guard/g.txt
 /data/guard/sub/s.txt
 /data/mixed.txt
+/data/multi.txt
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
 /data/prefix_dup.txt
@@ -696,8 +723,10 @@ world
 /data/sub/nested.txt
 /data/tabbed.txt
 === find_size_gt ===
+/data
 /data/a.txt
 /data/abc.csv
+/data/anchors.txt
 /data/binary.bin
 /data/c.txt
 /data/chat.jsonl
@@ -713,6 +742,7 @@ world
 /data/mixed.txt
 /data/no_nl.txt
 /data/numbers.txt
+/data/oooo.txt
 /data/patterns.txt
 /data/prefix_dup.txt
 /data/repeats.txt
@@ -729,6 +759,7 @@ world
 /data/users.json
 === find_recurse ===
 /data/a.txt
+/data/anchors.txt
 /data/b.txt
 /data/c.txt
 /data/disptree/d/y.txt
@@ -739,9 +770,11 @@ world
 /data/guard/g.txt
 /data/guard/sub/s.txt
 /data/mixed.txt
+/data/multi.txt
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
 /data/prefix_dup.txt
@@ -862,9 +895,9 @@ foo
 === sed_print_only ===
 world
 === sed_replace_n ===
-hellO
+hello
 world
-foo
+foO
 bar
 baz
 === sed_delete_pattern ===
@@ -875,11 +908,217 @@ baz
 === sed_append ===
 hello
 world
-
 INSERTED
 foo
 bar
 baz
+=== sed_anchor_sub ===
+#TS
+ls
+#TS
+foo bar
+=== sed_anchor_sub_E ===
+#TS
+ls
+#TS
+foo bar
+=== sed_anchor_sub_g ===
+#TS
+ls
+#TS
+foo bar
+=== sed_anchor_addr_del ===
+ls
+foo bar
+=== sed_anchor_sub_file ===
+#TS
+ls
+#TS
+foo bar
+=== sed_firstmatch_file ===
+Oo
+Oo
+Oo
+=== sed_count_nth ===
+oOoo
+oOoo
+=== sed_count_nth_g ===
+oOOO
+oOOO
+=== sed_sub_p ===
+Oooo
+Oooo
+=== sed_y ===
+hippo
+=== sed_c_addr ===
+hello
+CHANGED
+foo
+bar
+baz
+=== sed_c_range ===
+hello
+MID
+baz
+=== sed_bre_group ===
+[foo]
+=== sed_bre_plus ===
+Xb
+=== sed_bre_alt ===
+PET
+=== sed_ere_group ===
+[foo]
+=== sed_ere_plus ===
+Xb
+=== sed_r_alias ===
+Xb
+=== sed_multi_e ===
+c
+=== sed_e_file ===
+hello
+EARTH
+foo
+bar
+baz
+=== sed_f_file ===
+hello
+EARTH
+foo
+bar
+baz
+=== sed_f_multi ===
+hello
+EARTH
+FOO
+bar
+baz
+=== sed_ef_combined ===
+hello
+EARTH
+FOO
+bar
+baz
+=== sed_f_stdin ===
+hello
+EARTH
+foo
+bar
+baz
+=== sed_amp ===
+hello
+[world]
+foo
+bar
+baz
+=== sed_amp_literal ===
+hello
+[&]
+foo
+bar
+baz
+=== sed_sub_i ===
+HI World
+HI world
+HI WORLD
+=== sed_delim_pipe ===
+hellO
+wOrld
+fOO
+bar
+baz
+=== sed_d_range ===
+hello
+bar
+baz
+=== sed_n_2p ===
+world
+=== sed_n_lastp ===
+baz
+=== sed_insert ===
+hello
+INSERTED
+world
+foo
+bar
+baz
+=== sed_change_all ===
+X
+X
+X
+X
+X
+=== sed_change_regex ===
+hello
+CHANGED
+foo
+bar
+baz
+=== sed_quit ===
+hello
+world
+=== sed_double_space ===
+hello
+
+world
+
+foo
+
+bar
+
+baz
+
+=== sed_n_join ===
+hello world
+foo bar
+baz
+=== sed_block ===
+hello
+X
+foo
+bar
+baz
+=== sed_semicolon ===
+hell0
+w0rld
+f0o
+bAr
+bAz
+=== sed_backref_E ===
+1section
+body1
+2section
+body2
+3section
+body3
+=== sed_neg_line ===
+world
+=== sed_neg_regex ===
+world
+=== sed_neg_lastp ===
+hello
+world
+foo
+bar
+=== sed_neg_range ===
+hello
+world
+foo
+Xar
+Xaz
+=== sed_join_all ===
+hello,world,foo,bar,baz
+=== sed_hold_accum ===
+
+hello
+world
+foo
+bar
+baz
+=== sed_escaped_delim ===
+c
+=== sed_no_final_nl ===
+NO trailing newline
+\ No newline at end of output
 === tr_squeeze ===
 abc
 === tr_complement ===
@@ -1044,6 +1283,7 @@ baz,
 === find_empty ===
 /data/empty.txt
 === find_not_name ===
+/data
 /data/abc.csv
 /data/binary.bin
 /data/chat.jsonl
@@ -1057,7 +1297,20 @@ baz,
 /data/sub/deep
 /data/user.json
 /data/users.json
+=== find_name_start ===
+/data
+=== find_maxdepth_zero ===
+/data
+=== find_mindepth_zero ===
+/data
+/data/disptree
+/data/disptree/d
+/data/guard
+/data/guard/sub
+/data/sub
+/data/sub/deep
 === find_size_lt ===
+/data
 /data/disptree
 /data/disptree/d
 /data/disptree/d/y.txt
@@ -1072,6 +1325,7 @@ baz,
 === find_depth ===
 /data/a.txt
 /data/abc.csv
+/data/anchors.txt
 /data/b.txt
 /data/binary.bin
 /data/c.txt
@@ -1086,9 +1340,11 @@ baz,
 /data/guard/g.txt
 /data/guard/sub/s.txt
 /data/mixed.txt
+/data/multi.txt
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
 /data/prefix_dup.txt
@@ -1104,8 +1360,10 @@ baz,
 /data/user.json
 /data/users.json
 === find_mtime ===
+/data
 /data/a.txt
 /data/abc.csv
+/data/anchors.txt
 /data/b.txt
 /data/binary.bin
 /data/c.txt
@@ -1124,9 +1382,11 @@ baz,
 /data/guard/sub
 /data/guard/sub/s.txt
 /data/mixed.txt
+/data/multi.txt
 /data/no_nl.txt
 /data/numbers.txt
 /data/one_byte.txt
+/data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
 /data/prefix_dup.txt
@@ -1173,6 +1433,19 @@ baz,
 -cherry
 +date
 +elder
+=== diff_recursive ===
+diff -r /data/dr/x/a.txt /data/dr/y/a.txt
+1c1
+< aaa
+---
+> AAA
+Only in /data/dr/x: leftonly.txt
+Only in /data/dr/y: rightonly.txt
+diff -r /data/dr/x/sub/d.txt /data/dr/y/sub/d.txt
+1c1
+< deep1
+---
+> deep2
 === cmp_same ===
 
 === cmp_differ ===
@@ -1180,7 +1453,7 @@ baz,
 === du_file ===
 24	/data/a.txt
 === du_dir ===
-648	/data
+722	/data
 === du_h ===
 24B	/data/a.txt
 === tree ===
@@ -1352,6 +1625,7 @@ c
 olleh
 === base64_stdin_d ===
 hello
+\ No newline at end of output
 === cp_multi_into_dir ===
 
 === cp_multi_verify_a ===
@@ -1545,8 +1819,8 @@ disptree/d
 disptree/d/y.txt
 disptree/x.txt
 === history_last_two ===
-419  (cd /data && ls -R disptree)
-420  (cd /data && find disptree)
+477  (cd /data && ls -R disptree)
+478  (cd /data && find disptree)
 === bash_history_tail ===
 (cd /data && ls -R disptree)
 (cd /data && find disptree)
@@ -1566,6 +1840,8 @@ grep -v '^#' /.bash_history | tail -n 1
 h.txt.gz
 two
 h.txt
+=== sed_count_zero ===
+exit=1
 === jq_no_filter_no_input ===
 exit=0
 === jq_dot_no_input ===
@@ -1824,6 +2100,12 @@ find: invalid argument '' to '-size'
 === find_bad_mtime ===
 exit=1
 find: invalid argument 'abc' to '-mtime'
+=== find_unknown_predicate ===
+exit=1
+find: unknown predicate '-regex'
+=== find_bogus_predicate ===
+exit=1
+find: unknown predicate '-boguspredicate'
 === sleep_zero ===
 sleep_zero ok
 === sleep_fraction ===

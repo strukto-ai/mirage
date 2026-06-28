@@ -21,10 +21,23 @@ import { stat, type NotionStatAccessor } from './stat.ts'
 
 class FakeTransport implements NotionTransport {
   public readonly invocations: { name: string; args: Record<string, unknown> }[] = []
+  private readonly responses = new Map<string, Record<string, unknown>[]>()
+
+  enqueue(toolName: string, response: Record<string, unknown>): void {
+    const list = this.responses.get(toolName)
+    if (list === undefined) {
+      this.responses.set(toolName, [response])
+    } else {
+      list.push(response)
+    }
+  }
 
   callTool(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
     this.invocations.push({ name, args })
-    return Promise.reject(new Error(`unexpected tool call: ${name}`))
+    const list = this.responses.get(name) ?? []
+    const response = list.shift()
+    if (response === undefined) return Promise.reject(new Error(`unexpected tool call: ${name}`))
+    return Promise.resolve(response)
   }
 }
 
@@ -37,6 +50,16 @@ function spec(original: string, prefix = ''): PathSpec {
 }
 
 const PAGE_ID = 'aaaa1111-2222-3333-4444-555566667777'
+const DB_ID = 'bbbb1111-2222-3333-4444-555566667777'
+
+function databaseBody(id: string, title: string, lastEdited: string): Record<string, unknown> {
+  return {
+    id,
+    object: 'database',
+    title: [{ plain_text: title }],
+    last_edited_time: lastEdited,
+  }
+}
 
 describe('notion stat', () => {
   it('returns a directory stat for the root', async () => {
@@ -44,6 +67,65 @@ describe('notion stat', () => {
     const result = await stat(makeAccessor(transport), spec('/'), undefined)
     expect(result.name).toBe('/')
     expect(result.type).toBe(FileType.DIRECTORY)
+    expect(transport.invocations).toHaveLength(0)
+  })
+
+  it('returns a directory stat for virtual roots', async () => {
+    const transport = new FakeTransport()
+    for (const root of ['/', '/pages', '/databases']) {
+      const result = await stat(makeAccessor(transport), spec(root), undefined)
+      expect(result.type).toBe(FileType.DIRECTORY)
+    }
+    expect(transport.invocations).toHaveLength(0)
+  })
+
+  it('returns directory stat for a database dir using cached remoteTime', async () => {
+    const transport = new FakeTransport()
+    const idx = new RAMIndexCacheStore()
+    const segment = `Tasks__${DB_ID}`
+    await idx.put(
+      `/databases/${segment}`,
+      new IndexEntry({
+        id: DB_ID,
+        name: segment,
+        resourceType: 'notion/database',
+        remoteTime: '2024-02-03T00:00:00Z',
+        vfsName: segment,
+      }),
+    )
+    const result = await stat(makeAccessor(transport), spec(`/databases/${segment}/`), idx)
+    expect(result.name).toBe(segment)
+    expect(result.type).toBe(FileType.DIRECTORY)
+    expect(result.extra.database_id).toBe(DB_ID)
+    expect(transport.invocations).toHaveLength(0)
+  })
+
+  it('falls back to getDatabase when index has no database entry', async () => {
+    const transport = new FakeTransport()
+    transport.enqueue(
+      'API-retrieve-a-database',
+      databaseBody(DB_ID, 'Tasks', '2024-04-05T00:00:00Z'),
+    )
+    const segment = `Tasks__${DB_ID}`
+    const result = await stat(makeAccessor(transport), spec(`/databases/${segment}/`), undefined)
+    expect(result.type).toBe(FileType.DIRECTORY)
+    expect(result.modified).toBe('2024-04-05T00:00:00Z')
+    expect(result.extra.database_id).toBe(DB_ID)
+    expect(transport.invocations[0]?.name).toBe('API-retrieve-a-database')
+    expect(transport.invocations[0]?.args).toEqual({ database_id: DB_ID })
+  })
+
+  it('returns a json stat for database.json without any API call', async () => {
+    const transport = new FakeTransport()
+    const segment = `Tasks__${DB_ID}`
+    const result = await stat(
+      makeAccessor(transport),
+      spec(`/databases/${segment}/database.json`),
+      undefined,
+    )
+    expect(result.name).toBe('database.json')
+    expect(result.type).toBe(FileType.JSON)
+    expect(result.extra.database_id).toBe(DB_ID)
     expect(transport.invocations).toHaveLength(0)
   })
 
@@ -82,6 +164,7 @@ describe('notion stat', () => {
     const result = await stat(makeAccessor(transport), spec(`/pages/${segment}/`), idx)
     expect(result.name).toBe(segment)
     expect(result.type).toBe(FileType.DIRECTORY)
+    expect(result.modified).toBe('2024-01-02T00:00:00Z')
     expect(result.extra.page_id).toBe(PAGE_ID)
     expect(transport.invocations).toHaveLength(0)
   })

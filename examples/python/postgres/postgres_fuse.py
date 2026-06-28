@@ -14,11 +14,10 @@
 
 import json
 import os
-import time
 
 from dotenv import load_dotenv
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.postgres import PostgresConfig, PostgresResource
 
 load_dotenv(".env.development")
@@ -30,22 +29,18 @@ config = PostgresConfig(
 )
 resource = PostgresResource(config=config)
 
-with Workspace(
-    {"/pg/": resource},
-        mode=MountMode.READ,
-        fuse=True,
-) as ws:
-    time.sleep(1)
+with Workspace({"/pg/": Mount(resource, mode=MountMode.READ,
+                              fuse=True)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
 
     print("--- os.listdir() root ---")
-    for e in os.listdir(f"{mp}/pg"):
+    for e in os.listdir(mp):
         print(f"  {e}")
 
     print("\n--- read database.json ---")
-    with open(f"{mp}/pg/database.json") as f:
+    with open(f"{mp}/database.json") as f:
         db_json = json.loads(f.read())
     print(f"  database: {db_json['database']}")
     print(f"  schemas: {db_json['schemas']}")
@@ -54,14 +49,14 @@ with Workspace(
           f"relationships: {len(db_json['relationships'])}")
 
     if "public" in db_json["schemas"]:
-        tables = os.listdir(f"{mp}/pg/public/tables")
+        tables = os.listdir(f"{mp}/public/tables")
         print(f"\n--- public.tables: {len(tables)} entries ---")
         for t in tables[:5]:
             print(f"  {t}")
 
         if tables:
             target = tables[0]
-            entity_dir = f"{mp}/pg/public/tables/{target}"
+            entity_dir = f"{mp}/public/tables/{target}"
 
             print(f"\n--- ls {entity_dir} ---")
             for e in os.listdir(entity_dir):
@@ -97,9 +92,9 @@ with Workspace(
 
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> Open another terminal and try:")
-    print(f">>>   ls {mp}/pg/")
-    print(f">>>   cat {mp}/pg/database.json | jq .schemas")
-    print(f">>>   head -n 3 {mp}/pg/public/tables/<table>/rows.jsonl")
+    print(f">>>   ls {mp}/")
+    print(f">>>   cat {mp}/database.json | jq .schemas")
+    print(f">>>   head -n 3 {mp}/public/tables/<table>/rows.jsonl")
     print(">>> Press Enter to unmount and exit...")
     input()
 

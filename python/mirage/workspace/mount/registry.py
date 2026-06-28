@@ -19,9 +19,18 @@ from mirage.ops.config import OpsMount
 from mirage.resource.base import BaseResource
 from mirage.resource.dev import DevResource
 from mirage.types import ConsistencyPolicy, MountMode, PathSpec
-from mirage.workspace.mount.mount import Mount
+from mirage.workspace.mount.mount import MountEntry
 
 DEV_PREFIX = "/dev/"
+
+
+class MountCommandUnsupported(Exception):
+    """Raised when a path-bound command is unsupported by its backend."""
+
+    def __init__(self, cmd_name: str, backend: str) -> None:
+        self.cmd_name = cmd_name
+        self.backend = backend
+        super().__init__(f"{cmd_name}: not supported on the {backend} backend")
 
 
 class MountRegistry:
@@ -33,8 +42,8 @@ class MountRegistry:
     """
 
     def __init__(self) -> None:
-        self._mounts: list[Mount] = []
-        self._default_mount: Mount | None = None
+        self._mounts: list[MountEntry] = []
+        self._root: MountEntry | None = None
         self._consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
         self._file_cache: FileCacheMixin | None = None
         self.mount(DEV_PREFIX, DevResource(), MountMode.WRITE)
@@ -47,8 +56,7 @@ class MountRegistry:
         CacheManagers.
 
         Called once by Workspace after the cache store exists. Mounts
-        added later get their manager in ``mount()`` /
-        ``set_default_mount()``.
+        added later get their manager in ``mount()``.
 
         Args:
             cache (FileCacheMixin | None): Workspace file cache store.
@@ -56,29 +64,10 @@ class MountRegistry:
         self._file_cache = cache
         for m in self._mounts:
             self._attach_manager(m)
-        if self._default_mount is not None:
-            self._attach_manager(self._default_mount)
 
-    def _attach_manager(self, m: Mount) -> None:
+    def _attach_manager(self, m: MountEntry) -> None:
         m.cache_manager = CacheManager(self._file_cache, m.resource.index,
                                        m.prefix, m.resource.caches_reads)
-
-    def set_default_mount(self, resource: BaseResource) -> None:
-        """Set a default fallback mount (cache resource).
-
-        Used when a command has no path args and cwd
-        doesn't match any mount.
-        """
-        m = Mount("/_default/", resource, MountMode.WRITE)
-        for cmd in resource.commands():
-            m.register(cmd)
-        for cmd in GENERAL_COMMANDS:
-            m.register_general(cmd)
-        for ro in resource.ops_list():
-            m.register_op(ro)
-        if self._file_cache is not None:
-            self._attach_manager(m)
-        self._default_mount = m
 
     def mount(
         self,
@@ -86,7 +75,7 @@ class MountRegistry:
         resource: BaseResource,
         mode: MountMode = MountMode.READ,
         consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY,
-    ) -> Mount:
+    ) -> MountEntry:
         """Mount a resource and return the Mount object."""
         stripped = prefix.strip("/")
         norm_prefix = ("/" + stripped + "/" if stripped else "/")
@@ -94,7 +83,7 @@ class MountRegistry:
             if existing.prefix == norm_prefix:
                 raise ValueError(f"duplicate mount prefix: "
                                  f"{norm_prefix!r}")
-        m = Mount(norm_prefix, resource, mode, consistency)
+        m = MountEntry(norm_prefix, resource, mode, consistency)
         for cmd in resource.commands():
             m.register(cmd)
         for cmd in GENERAL_COMMANDS:
@@ -105,9 +94,11 @@ class MountRegistry:
             self._attach_manager(m)
         self._mounts.append(m)
         self._mounts.sort(key=lambda x: len(x.prefix), reverse=True)
+        if norm_prefix == "/":
+            self._root = m
         return m
 
-    def unmount(self, prefix: str) -> Mount:
+    def unmount(self, prefix: str) -> MountEntry:
         """Remove a mount by exact prefix and return it.
 
         Per-mount commands and ops live on the Mount instance and die with
@@ -124,6 +115,8 @@ class MountRegistry:
         for i, m in enumerate(self._mounts):
             if m.prefix == norm_prefix:
                 del self._mounts[i]
+                if m is self._root:
+                    self._root = None
                 return m
         raise ValueError(f"no mount at prefix: {norm_prefix!r}")
 
@@ -142,7 +135,7 @@ class MountRegistry:
                 return m.resource, resource_path, m.mode
         raise ValueError(f"no mount matches path: {path!r}")
 
-    def mount_for_prefix(self, prefix: str) -> Mount:
+    def mount_for_prefix(self, prefix: str) -> MountEntry:
         for m in self._mounts:
             if m.prefix == prefix:
                 return m
@@ -153,7 +146,7 @@ class MountRegistry:
         norm = "/" + stripped + "/" if stripped else "/"
         return any(m.prefix == norm for m in self._mounts)
 
-    def descendant_mounts(self, path: str) -> list[Mount]:
+    def descendant_mounts(self, path: str) -> list[MountEntry]:
         """Mounts whose prefix is strictly under `path`.
 
         Used by traversal commands (find, tree, du, grep -r) to fan out
@@ -165,7 +158,7 @@ class MountRegistry:
         """
         stripped = path.strip("/")
         norm = "/" + stripped + "/" if stripped else "/"
-        out: list[Mount] = []
+        out: list[MountEntry] = []
         for m in self._mounts:
             if m.prefix == norm:
                 continue
@@ -209,7 +202,7 @@ class MountRegistry:
         out.sort()
         return out
 
-    def mount_for(self, path: str) -> Mount:
+    def mount_for(self, path: str) -> MountEntry:
         """Find the mount that handles this path."""
         norm = "/" + path.strip("/")
         for m in self._mounts:
@@ -219,25 +212,20 @@ class MountRegistry:
 
     def is_exec_allowed(self) -> bool:
         for m in self._mounts:
-            prefix_no_trail = m.prefix.rstrip("/") or "/"
-            if prefix_no_trail == "/":
-                return m.mode == MountMode.EXEC
-        for m in self._mounts:
             if m.prefix == DEV_PREFIX:
                 continue
             if m.mode == MountMode.EXEC:
                 return True
         return False
 
-    def mount_for_command(self, cmd_name: str) -> Mount | None:
+    def mount_for_command(self, cmd_name: str) -> MountEntry | None:
         """Find a mount that has this command registered.
 
-        Prefers the default mount (cache resource), then
-        searches other mounts.
+        Prefers the virtual root mount, then searches other mounts.
         """
-        if (self._default_mount is not None
-                and self._default_mount.resolve_command(cmd_name) is not None):
-            return self._default_mount
+        if (self._root is not None
+                and self._root.resolve_command(cmd_name) is not None):
+            return self._root
         for m in self._mounts:
             if m.resolve_command(cmd_name) is not None:
                 return m
@@ -248,15 +236,16 @@ class MountRegistry:
         cmd_name: str,
         path_scopes: list[PathSpec],
         cwd: str,
-    ) -> Mount | None:
+    ) -> MountEntry | None:
         """Resolve which mount should handle a command.
 
         Resolution order:
         1. First PathSpec path (or cwd) → mount_for(path)
         2. If mount lacks the command → mount_for_command(cmd_name)
-        3. If a read-only command's paths are all cached → use cache
-           mount instead. Write commands always stay on the real mount
-           so mutations reach the backend rather than just the cache.
+        3. For a read-only command on a caching backend under ALWAYS
+           consistency, evict stale entries from the hidden file cache so
+           the in-place read-through serves fresh bytes. The command always
+           stays on its real mount; the cache is never a mount.
 
         Args:
             cmd_name (str): command name.
@@ -273,29 +262,32 @@ class MountRegistry:
         except ValueError:
             mount = None
 
-        if mount is None or mount.resolve_command(cmd_name) is None:
+        if mount is not None and mount.resolve_command(cmd_name) is None:
+            if path_scopes:
+                raise MountCommandUnsupported(cmd_name, mount.resource.name)
+            mount = self.mount_for_command(cmd_name)
+        elif mount is None:
             mount = self.mount_for_command(cmd_name)
 
         if mount is None:
             return None
 
-        default = self._default_mount
         resolved = mount.resolve_command(cmd_name)
-        if (default is not None and path_scopes and resolved is not None
-                and not resolved.write
-                and isinstance(default.resource, FileCacheMixin)
-                and mount.resource.caches_reads):
-            keys = [p.original for p in path_scopes]
-            if self._consistency == ConsistencyPolicy.ALWAYS:
-                await self._evict_stale(mount, default.resource, path_scopes)
-            if await default.resource.all_cached(keys):
-                mount = default
+        # Warm reads are served in place by with_read_cache, so a read-only
+        # command stays on its real mount. The cache is a hidden store (not a
+        # mount); under ALWAYS we evict stale entries from it here so the
+        # read-through serves fresh bytes.
+        if (self._file_cache is not None and path_scopes
+                and resolved is not None and not resolved.write
+                and mount.resource.caches_reads
+                and self._consistency == ConsistencyPolicy.ALWAYS):
+            await self._evict_stale(mount, self._file_cache, path_scopes)
 
         return mount
 
     async def _evict_stale(
         self,
-        real_mount: Mount,
+        real_mount: MountEntry,
         cache: FileCacheMixin,
         path_scopes: list[PathSpec],
     ) -> None:
@@ -322,10 +314,14 @@ class MountRegistry:
                 await cache.remove(key)
 
     @property
-    def default_mount(self) -> Mount | None:
-        return self._default_mount
+    def root_mount(self) -> MountEntry | None:
+        return self._root
 
-    def mounts(self) -> list[Mount]:
+    @property
+    def file_cache(self) -> FileCacheMixin | None:
+        return self._file_cache
+
+    def mounts(self) -> list[MountEntry]:
         return list(self._mounts)
 
     def ops_mounts(self) -> list[OpsMount]:
@@ -369,12 +365,12 @@ class MountRegistry:
     def group_by_mount(
         self,
         paths: list[str],
-    ) -> list[tuple[Mount, list[str]]]:
+    ) -> list[tuple[MountEntry, list[str]]]:
         """Group virtual paths by their mount.
 
         Returns list of (mount, resource_paths).
         """
-        groups: dict[int, tuple[Mount, list[str]]] = {}
+        groups: dict[int, tuple[MountEntry, list[str]]] = {}
         for path in paths:
             mount = self.mount_for(path)
             _, resource_path, _ = self.resolve(path)

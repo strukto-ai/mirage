@@ -44,5 +44,21 @@ def normalize_page(page: dict, blocks: list[dict]) -> dict:
     }
 
 
+def normalize_database(database: dict) -> dict:
+    title_items = database.get("title", [])
+    title = "".join(item.get("plain_text", "") for item in title_items)
+    return {
+        "database_id": database.get("id", ""),
+        "title": title,
+        "url": database.get("url", ""),
+        "created_time": database.get("created_time", ""),
+        "last_edited_time": database.get("last_edited_time", ""),
+        "parent": database.get("parent", {}),
+        "archived": database.get("archived", database.get("in_trash", False)),
+        "is_inline": database.get("is_inline", False),
+        "properties": database.get("properties", {}),
+    }
+
+
 def to_json_bytes(obj: dict | list) -> bytes:
     return json.dumps(obj, indent=2, ensure_ascii=False).encode("utf-8")

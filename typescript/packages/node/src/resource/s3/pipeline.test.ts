@@ -179,8 +179,9 @@ describe('pipeline', () => {
     expect(decode(io.stdout)).toContain('true')
   })
 
-  it.skip('nested subshell (TS tree-sitter parser rejects ((export DEEP=yes)) as arithmetic)', () => {
-    // unsupported
+  it('nested subshell export does not leak', async () => {
+    await ws.execute('((export DEEP=yes))')
+    expect(Object.hasOwn(ws.getSession(DEFAULT_SESSION_ID).env, 'DEEP')).toBe(false)
   })
 
   // ── Background jobs ──────────────────────────────────────────────
@@ -260,14 +261,30 @@ describe('pipeline', () => {
 
   // ── Multi-session isolation ──────────────────────────────────────
 
-  it.skip('two sessions isolated cwd (TS execute() lacks per-call sessionId routing)', () => {
-    // unsupported
+  it('two sessions isolated cwd', async () => {
+    const sa = ws.createSession('s-a')
+    sa.cwd = '/'
+    const sb = ws.createSession('s-b')
+    sb.cwd = '/'
+    await ws.execute('cd /data', { sessionId: 's-a' })
+    await ws.execute('cd /data/subdir', { sessionId: 's-b' })
+    expect(ws.getSession('s-a').cwd).toBe('/data')
+    expect(ws.getSession('s-b').cwd).toBe('/data/subdir')
   })
-  it.skip('two sessions isolated env (TS execute() lacks per-call sessionId routing)', () => {
-    // unsupported
+  it('two sessions isolated env', async () => {
+    ws.createSession('s-a')
+    ws.createSession('s-b')
+    await ws.execute('export X=from_a', { sessionId: 's-a' })
+    await ws.execute('export X=from_b', { sessionId: 's-b' })
+    expect(ws.getSession('s-a').env.X).toBe('from_a')
+    expect(ws.getSession('s-b').env.X).toBe('from_b')
   })
-  it.skip('session env not visible cross-session (TS execute() lacks per-call sessionId routing)', () => {
-    // unsupported
+  it('session env not visible cross-session', async () => {
+    ws.createSession('s-a')
+    ws.createSession('s-b')
+    await ws.execute('export PRIVATE=yes', { sessionId: 's-a' })
+    const io = await ws.execute('printenv PRIVATE', { sessionId: 's-b' })
+    expect(io.exitCode).toBe(1)
   })
 
   // ── For loops ────────────────────────────────────────────────────
@@ -332,8 +349,13 @@ describe('pipeline', () => {
     expect([...lines].sort()).toEqual(['1', '2', '3'])
   })
 
-  it.skip('history tracks session id (ws.history not exposed in TS)', () => {
-    // unsupported
+  it('history tracks session id', async () => {
+    ws.createSession('s-hist')
+    ws.getSession('s-hist').cwd = '/'
+    await ws.execute('echo tracked', { sessionId: 's-hist' })
+    const records = (await ws.history()).filter((e) => e.session === 's-hist')
+    expect(records.length).toBe(1)
+    expect(records[0]?.command).toBe('echo tracked')
   })
 
   // ── grep exit codes ──────────────────────────────────────────────

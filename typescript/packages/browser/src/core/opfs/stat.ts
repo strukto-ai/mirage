@@ -15,7 +15,13 @@
 import { FileStat, FileType, guessType, type PathSpec } from '@struktoai/mirage-core'
 import { enoent } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
-import { isNotFound, resolveDirHandle, resolveParentDirHandle, splitSegments } from './utils.ts'
+import {
+  isNotFound,
+  iterEntries,
+  resolveDirHandle,
+  resolveParentDirHandle,
+  splitSegments,
+} from './utils.ts'
 
 export async function stat(accessor: OPFSAccessor, p: PathSpec): Promise<FileStat> {
   const root = accessor.rootHandle
@@ -55,16 +61,25 @@ export async function stat(accessor: OPFSAccessor, p: PathSpec): Promise<FileSta
       throw err
     }
   }
+  let dirHandle: FileSystemDirectoryHandle
   try {
-    await resolveDirHandle(root, virtual, { create: false })
-    return new FileStat({
-      name,
-      size: null,
-      modified: null,
-      type: FileType.DIRECTORY,
-    })
+    dirHandle = await resolveDirHandle(root, virtual, { create: false })
   } catch (err) {
     if (isNotFound(err)) throw enoent(p)
     throw err
   }
+  // OPFS exposes no directory timestamp, so derive one from the newest file
+  // child's lastModified (null when the directory holds no files).
+  let latest = 0
+  for await (const [, handle] of iterEntries(dirHandle)) {
+    if (handle.kind !== 'file') continue
+    const file = await (handle as FileSystemFileHandle).getFile()
+    if (file.lastModified > latest) latest = file.lastModified
+  }
+  return new FileStat({
+    name,
+    size: null,
+    modified: latest > 0 ? new Date(latest).toISOString() : null,
+    type: FileType.DIRECTORY,
+  })
 }

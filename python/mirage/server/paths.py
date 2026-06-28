@@ -36,8 +36,7 @@ def resolve_within_root(root: str | Path, user_path: str) -> Path:
     """
     resolved_root = os.path.realpath(str(root))
     resolved = os.path.realpath(os.path.join(resolved_root, user_path))
-    if resolved != resolved_root and not resolved.startswith(resolved_root +
-                                                             os.sep):
+    if os.path.commonpath([resolved_root, resolved]) != resolved_root:
         raise PathOutsideRootError(
             f"path escapes the configured root: {user_path}")
     return Path(resolved)

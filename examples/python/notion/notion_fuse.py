@@ -14,11 +14,10 @@
 
 import json
 import os
-import time
 
 from dotenv import load_dotenv
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.notion import NotionConfig, NotionResource
 
 load_dotenv(".env.development")
@@ -26,20 +25,20 @@ load_dotenv(".env.development")
 config = NotionConfig(api_key=os.environ["NOTION_API_KEY"])
 resource = NotionResource(config=config)
 
-with Workspace({"/notion/": resource}, mode=MountMode.READ, fuse=True) as ws:
-    time.sleep(1)
+with Workspace({"/notion/": Mount(resource, mode=MountMode.READ,
+                                  fuse=True)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
 
     print("--- os.listdir() pages ---")
-    pages = os.listdir(f"{mp}/notion/pages")
+    pages = os.listdir(f"{mp}/pages")
     for p in pages[:5]:
         print(f"  {p}")
 
     if pages:
         page = pages[0]
-        page_path = f"{mp}/notion/pages/{page}"
+        page_path = f"{mp}/pages/{page}"
 
         print(f"\n--- os.listdir() {page} ---")
         contents = os.listdir(page_path)
@@ -54,8 +53,8 @@ with Workspace({"/notion/": resource}, mode=MountMode.READ, fuse=True) as ws:
 
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> Open another terminal and run:")
-    print(f">>>   ls {mp}/notion/pages/")
-    print(f">>>   cat {mp}/notion/pages/<page>/page.json | jq .title")
+    print(f">>>   ls {mp}/pages/")
+    print(f">>>   cat {mp}/pages/<page>/page.json | jq .title")
     print(">>> Press Enter to unmount and exit...")
     input()
 

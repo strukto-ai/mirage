@@ -58,7 +58,7 @@ await ws.execute('cat /s3/events/2026-05-06.parquet | jq .user')
 ## 소개
 
 - **N개의 SDK와 M개의 MCP 대신 하나의 인터페이스.** 모든 서비스가 동일한 파일 시스템 의미론을 사용하며, 파이프라인은 로컬 디스크에서처럼 자연스럽게 서비스 간에 조합됩니다.
-- **약 50개의 내장 백엔드:** RAM, Disk, Redis, S3 / R2 / OCI / Supabase / GCS, Gmail / GDrive / GDocs / GSheets / GSlides, GitHub / Linear / Notion / Trello, Slack / Discord / Telegram / Email, MongoDB / Postgres / LanceDB, SSH 등을 하나의 루트 아래 나란히 마운트합니다.
+- **약 50개의 내장 백엔드:** RAM, Disk, Redis, S3 / R2 / OCI / Supabase / GCS, Gmail / GDrive / GDocs / GSheets / GSlides, GitHub / Linear / Notion / Trello, Slack / Discord / Email, MongoDB / Postgres / LanceDB, SSH 등을 하나의 루트 아래 나란히 마운트합니다.
 - **이식 가능한 워크스페이스:** 워크스페이스를 클론, 스냅샷, 버전 관리할 수 있습니다. 에이전트 실행을 재시작이나 재설정 없이 머신 간에 옮길 수 있습니다.
 - **임베딩 가능:** Python과 TypeScript SDK가 FastAPI, Express, 브라우저 앱 또는 모든 비동기 런타임의 프로세스 안에서 직접 실행됩니다. 별도 프로세스가 필요 없습니다.
 - **에이전트 통합:** OpenAI Agents SDK, Vercel AI SDK, LangChain, Pydantic AI, CAMEL, OpenHands는 SDK로, Claude Code와 Codex 같은 코딩 에이전트는 경량 CLI + 데몬으로 지원합니다.

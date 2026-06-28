@@ -26,7 +26,7 @@ async def test_find_root_returns_sorted_entries(make_acc):
         "data/c.json": b"c",
     })
     out = await find(acc, PathSpec.from_str_path("/"))
-    assert out == ["/a.json", "/b.json", "/data", "/data/c.json"]
+    assert out == ["/", "/a.json", "/b.json", "/data", "/data/c.json"]
 
 
 @pytest.mark.asyncio
@@ -67,7 +67,7 @@ async def test_find_type_filter(make_acc):
     files = await find(acc, PathSpec.from_str_path("/"), type="f")
     dirs = await find(acc, PathSpec.from_str_path("/"), type="d")
     assert files == ["/a.json", "/data/c.json"]
-    assert dirs == ["/data"]
+    assert dirs == ["/", "/data"]
 
 
 @pytest.mark.asyncio
@@ -78,4 +78,4 @@ async def test_find_maxdepth(make_acc):
         "data/sub/d.json": b"d",
     })
     out = await find(acc, PathSpec.from_str_path("/"), maxdepth=1)
-    assert out == ["/a.json", "/data"]
+    assert out == ["/", "/a.json", "/data"]

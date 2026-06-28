@@ -50,6 +50,7 @@ EXPECTED_RESOURCES = {
     "mongodb",
     "postgres",
     "lancedb",
+    "qdrant",
     "notion",
     "langfuse",
     "ssh",

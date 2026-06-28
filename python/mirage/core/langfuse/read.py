@@ -30,7 +30,10 @@ def _json_bytes(data: dict) -> bytes:
 def _jsonl_bytes(items: list[dict]) -> bytes:
     if not items:
         return b""
-    lines = [json.dumps(item, ensure_ascii=False) for item in items]
+    lines = [
+        json.dumps(item, ensure_ascii=False, separators=(",", ":"))
+        for item in items
+    ]
     return ("\n".join(lines) + "\n").encode()
 
 

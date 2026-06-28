@@ -17,6 +17,7 @@ export {
   configToWorkspaceArgs,
   interpolateEnv,
   loadWorkspaceConfig,
+  loadWorkspaceConfigFile,
   type MountBlock,
   type WorkspaceArgs,
   type WorkspaceConfigRaw,

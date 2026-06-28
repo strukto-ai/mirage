@@ -14,11 +14,13 @@
 
 import {
   buildTree,
+  emitStartPath,
   type FindOptions,
   keep,
   type PathSpec,
   type PredNode,
   rstripSlash,
+  startBasename,
   stripSlash,
 } from '@struktoai/mirage-core'
 import type { HfAccessor } from '../../accessor/hf.ts'
@@ -86,10 +88,12 @@ export async function find(
   const scanPath = pfx !== '' ? `${pfx}/` : '/'
   const base = pfx !== '' ? `/${pfx}` : '/'
   const baseDepth = base === '/' ? 0 : (base.match(/\//g) ?? []).length
+  const startName = startBasename(path.original)
   const op = await accessor.operator()
   const results: string[] = []
   const seenDirs = new Set<string>()
   let sawDescendant = false
+  let dirExists = false
   const tree =
     options.tree ??
     buildTree({
@@ -113,7 +117,11 @@ export async function find(
     const meta = entry.metadata()
     const isDir = rel.endsWith('/') || meta.isDirectory()
     const entryPath = `/${stripSlash(rel)}`
-    if (entryPath !== base) sawDescendant = true
+    if (entryPath === base) {
+      dirExists = true
+      continue
+    }
+    sawDescendant = true
     const kind: 'f' | 'd' = isDir ? 'd' : 'f'
     const length = meta.contentLength
     const lm = meta.lastModified
@@ -138,10 +146,15 @@ export async function find(
       }
     }
   }
-  if (base !== '/' && sawDescendant && (options.maxDepth == null || options.maxDepth >= 0)) {
-    if (matchesFilters(base, 'd', { size: 0, mtime: null }, baseDepth, options, tree)) {
-      results.push(base)
-    }
+  if (sawDescendant || dirExists) {
+    emitStartPath(results, base, startName, {
+      kind: 'd',
+      isEmpty: null,
+      exists: true,
+      tree,
+      maxDepth: options.maxDepth,
+      minDepth: options.minDepth,
+    })
   }
   return [...new Set(results)].sort()
 }

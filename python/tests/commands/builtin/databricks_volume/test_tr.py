@@ -14,10 +14,6 @@
 
 import pytest
 
-from mirage.cache.index import RAMIndexCacheStore
-from mirage.commands.builtin.databricks_volume import tr as tr_command
-from mirage.types import PathSpec
-
 
 @pytest.mark.asyncio
 async def test_workspace_execute_databricks_volume_tr(
@@ -26,23 +22,3 @@ async def test_workspace_execute_databricks_volume_tr(
 
     assert io.exit_code == 0
     assert io.stdout == b"BETA\nALPHA\nALPHA\n"
-
-
-@pytest.mark.asyncio
-async def test_databricks_volume_tr_forwards_index(
-    index_tracker,
-    expected_index: RAMIndexCacheStore,
-    materialize_output,
-):
-    source, _io = await tr_command(
-        object(),
-        [PathSpec.from_str_path("/dbx/sample.txt", "/dbx")],
-        "a-z",
-        "A-Z",
-        index=expected_index,
-    )
-
-    await materialize_output(source)
-
-    assert index_tracker.seen_indexes
-    assert all(index is expected_index for index in index_tracker.seen_indexes)

@@ -16,31 +16,12 @@ import type { S3Accessor } from '../../../accessor/s3.ts'
 import { resolveGlob } from '../../../core/s3/glob.ts'
 import { stream as s3Stream } from '../../../core/s3/stream.ts'
 import { write as s3Write } from '../../../core/s3/write.ts'
-import { ResourceName, type PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { sedGeneric } from '../generic/sed.ts'
+import { ResourceName } from '../../../types.ts'
+import { makeSed } from '../generic/sed_command.ts'
 
-async function sedCommand(
-  accessor: S3Accessor,
-  paths: PathSpec[],
-  texts: string[],
-  opts: CommandOpts,
-): Promise<CommandFnResult> {
-  const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  return sedGeneric(
-    resolved,
-    texts,
-    opts,
-    (p) => s3Stream(accessor, p),
-    (p, data) => s3Write(accessor, p, data),
-  )
-}
-
-export const S3_SED = command({
-  name: 'sed',
+export const S3_SED = makeSed<S3Accessor>({
   resource: ResourceName.S3,
-  spec: specOf('sed'),
-  fn: sedCommand,
+  stream: (a, p) => s3Stream(a, p),
+  write: (a, p, d) => s3Write(a, p, d),
+  glob: (a, paths, opts) => resolveGlob(a, paths, opts.index ?? undefined),
 })

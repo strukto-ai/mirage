@@ -20,10 +20,7 @@ from mirage.core.onedrive._client import graph_post, item_url, split_path
 from mirage.types import PathSpec
 
 
-async def mkdir(accessor: OneDriveAccessor, path: PathSpec) -> None:
-    _, stripped = split_path(path)
-    if not stripped:
-        return
+async def _create_dir(accessor: OneDriveAccessor, stripped: str) -> None:
     parent = posixpath.dirname("/" + stripped).strip("/")
     name = posixpath.basename(stripped)
     url = item_url(accessor.config,
@@ -35,4 +32,18 @@ async def mkdir(accessor: OneDriveAccessor, path: PathSpec) -> None:
         "@microsoft.graph.conflictBehavior": "replace",
     }
     await graph_post(accessor.config, url, body)
+
+
+async def mkdir(accessor: OneDriveAccessor,
+                path: PathSpec,
+                parents: bool = False) -> None:
+    _, stripped = split_path(path)
+    if not stripped:
+        return
+    if parents:
+        parts = stripped.split("/")
+        for i in range(len(parts)):
+            await _create_dir(accessor, "/".join(parts[:i + 1]))
+    else:
+        await _create_dir(accessor, stripped)
     await invalidate_after_write(path)

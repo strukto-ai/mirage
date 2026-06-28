@@ -14,12 +14,26 @@
 
 from dataclasses import dataclass
 from fnmatch import fnmatch
-from typing import TYPE_CHECKING
 
-from mirage.types import FindType
+from mirage.types import FindType, PathSpec
 
-if TYPE_CHECKING:
-    from mirage.commands.builtin.generic.find import FindArgs
+
+def start_basename(path: PathSpec | str) -> str:
+    """Basename of a find start path, as GNU would print and match it.
+
+    Single source of truth for the start path's own name across every
+    backend find op. Reads ``path.original`` (the path as written, with
+    its mount prefix) so the name is correct whether the start is the
+    mount root or a nested directory.
+
+    Args:
+        path (PathSpec | str): The find start path.
+
+    Returns:
+        str: The start path's basename, or "" for the bare root "/".
+    """
+    original = path.original if isinstance(path, PathSpec) else str(path)
+    return original.rstrip("/").rsplit("/", 1)[-1]
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,10 +121,81 @@ def tree_has_type(node: PredNode) -> bool:
     return False
 
 
+def tree_has_empty(node: PredNode) -> bool:
+    if isinstance(node, Empty):
+        return True
+    if isinstance(node, Not):
+        return tree_has_empty(node.kid)
+    if isinstance(node, (And, Or)):
+        return any(tree_has_empty(kid) for kid in node.kids)
+    return False
+
+
 def keep(entry: FindEntry, tree: PredNode, min_depth: int | None) -> bool:
     if min_depth is not None and entry.depth < min_depth:
         return False
     return eval_predicate(tree, entry)
+
+
+def emit_start_path(
+    results: list[str],
+    start_key: str,
+    start_name: str,
+    *,
+    kind: str,
+    is_empty: bool | None,
+    exists: bool,
+    tree: PredNode,
+    maxdepth: int | None,
+    mindepth: int | None,
+    size: int | None = None,
+    min_size: int | None = None,
+    max_size: int | None = None,
+) -> None:
+    """Append the search start path to results when it matches.
+
+    Shared by every backend find op so the start path is emitted
+    uniformly. GNU lists the start path itself at depth 0, so bare
+    ``find <dir>``, ``-type d`` on the root, ``-maxdepth 0`` (just the
+    start), ``-mindepth 0`` (start included), and ``-name``/``-iname``
+    against the start's own basename all behave the same everywhere.
+
+    Size filtering applies only to a file start path; directory roots
+    pass ``size=None`` and skip it. Backends whose start path can be a
+    file (ram/redis/chroma/dify/notion) pass the start's size so
+    ``find <file> -size`` filters the start like GNU does.
+
+    Args:
+        results (list[str]): Mount-relative result keys to append to.
+        start_key (str): Mount-relative key of the start path.
+        start_name (str): Basename of the start path as written.
+        kind (str): "d" for a directory or "f" for a file.
+        is_empty (bool | None): Emptiness for ``-empty``; None if unknown.
+        exists (bool): Whether the start path exists.
+        tree (PredNode): Predicate tree.
+        maxdepth (int | None): ``-maxdepth`` value.
+        mindepth (int | None): ``-mindepth`` value.
+        size (int | None): Start path size in bytes when it is a file.
+        min_size (int | None): ``-size +`` lower bound in bytes.
+        max_size (int | None): ``-size -`` upper bound in bytes.
+    """
+    if not exists:
+        return
+    if maxdepth is not None and maxdepth < 0:
+        return
+    entry = FindEntry(key=start_key,
+                      name=start_name,
+                      kind=kind,
+                      depth=0,
+                      is_empty=is_empty)
+    if not keep(entry, tree, mindepth):
+        return
+    if kind == "f" and size is not None:
+        if min_size is not None and size < min_size:
+            return
+        if max_size is not None and size > max_size:
+            return
+    results.append(start_key)
 
 
 def _type_kind(type_arg: FindType | str | None) -> str | None:
@@ -165,7 +250,25 @@ def compute_nonempty_dirs(keys: list[str]) -> set[str]:
     return nonempty
 
 
-def args_to_tree(args: "FindArgs") -> PredNode:
+@dataclass
+class FindArgs:
+    name: str | None = None
+    iname: str | None = None
+    path_pattern: str | None = None
+    type: FindType | str | None = None
+    min_size: int | None = None
+    max_size: int | None = None
+    mtime_min: float | None = None
+    mtime_max: float | None = None
+    maxdepth: int | None = None
+    mindepth: int | None = None
+    name_exclude: str | None = None
+    or_names: list[str] | None = None
+    empty: bool = False
+    tree: PredNode | None = None
+
+
+def args_to_tree(args: FindArgs) -> PredNode:
     if args.tree is not None:
         return args.tree
     return build_tree(name=args.name,

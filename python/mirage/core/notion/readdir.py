@@ -14,12 +14,14 @@
 
 from mirage.accessor.notion import NotionAccessor
 from mirage.cache.index import IndexCacheStore, IndexEntry
-from mirage.core.notion.pages import list_block_children, search_pages
-from mirage.core.notion.pathing import page_dirname, split_suffix_id
+from mirage.core.notion.pages import (list_block_children, query_database,
+                                      search_databases, search_pages)
+from mirage.core.notion.pathing import (database_dirname, page_dirname,
+                                        split_suffix_id)
 from mirage.types import PathSpec
 from mirage.utils.sanitize import sanitize_name
 
-VIRTUAL_ROOTS = ("pages", )
+VIRTUAL_ROOTS = ("pages", "databases")
 
 
 async def readdir(
@@ -40,7 +42,7 @@ async def readdir(
     idx_key = "/" + key if key else "/"
 
     if not key:
-        return [f"{prefix}/pages"]
+        return [f"{prefix}/{root}" for root in VIRTUAL_ROOTS]
 
     if key == "pages":
         if index is not None:
@@ -66,8 +68,30 @@ async def readdir(
             await index.set_dir(idx_key, entries)
         return [f"{prefix}/pages/{name}" for name, _ in entries]
 
+    if key == "databases":
+        if index is not None:
+            listing = await index.list_dir(idx_key)
+            if listing.entries is not None:
+                return [f"{prefix}{entry}" for entry in listing.entries]
+        databases = await search_databases(accessor.config)
+        entries = []
+        for database in databases:
+            dirname = database_dirname(database)
+            entry = IndexEntry(
+                id=database["id"],
+                name=dirname,
+                resource_type="notion/database",
+                remote_time=database.get("last_edited_time", ""),
+                vfs_name=dirname,
+            )
+            entries.append((dirname, entry))
+        if index is not None:
+            await index.set_dir(idx_key, entries)
+        return [f"{prefix}/databases/{name}" for name, _ in entries]
+
     parts = key.split("/")
-    if len(parts) >= 2 and parts[0] == "pages":
+    if (parts[0] == "pages" and len(parts) >= 2) or (parts[0] == "databases"
+                                                     and len(parts) >= 3):
         _, page_id = split_suffix_id(parts[-1])
         page_idx_key = "/" + "/".join(parts)
 
@@ -97,12 +121,50 @@ async def readdir(
                 id=child_id,
                 name=dirname,
                 resource_type="notion/page",
+                remote_time=child_block.get("last_edited_time", ""),
                 vfs_name=dirname,
             )
             entries.append((dirname, child_entry))
 
         if index is not None:
             await index.set_dir(page_idx_key, entries)
+
+        base = f"{prefix}/{key}"
+        return [f"{base}/{name}" for name, _ in entries]
+
+    if len(parts) == 2 and parts[0] == "databases":
+        _, database_id = split_suffix_id(parts[1])
+        database_idx_key = "/" + "/".join(parts)
+
+        if index is not None:
+            listing = await index.list_dir(database_idx_key)
+            if listing.entries is not None:
+                return [f"{prefix}{entry}" for entry in listing.entries]
+
+        rows = await query_database(accessor.config, database_id)
+        entries: list[tuple[str, IndexEntry]] = []
+        database_json_entry = IndexEntry(
+            id=f"{database_id}:database",
+            name="database.json",
+            resource_type="file",
+            vfs_name="database.json",
+        )
+        entries.append(("database.json", database_json_entry))
+        for row in rows:
+            if row.get("object") != "page":
+                continue
+            dirname = page_dirname(row)
+            row_entry = IndexEntry(
+                id=row["id"],
+                name=dirname,
+                resource_type="notion/page",
+                remote_time=row.get("last_edited_time", ""),
+                vfs_name=dirname,
+            )
+            entries.append((dirname, row_entry))
+
+        if index is not None:
+            await index.set_dir(database_idx_key, entries)
 
         base = f"{prefix}/{key}"
         return [f"{base}/{name}" for name, _ in entries]

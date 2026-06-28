@@ -13,11 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
-import time
 
 from dotenv import load_dotenv
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.hf_datasets import HfDatasetsConfig, HfDatasetsResource
 
 load_dotenv(".env.development")
@@ -29,21 +28,17 @@ config = HfDatasetsConfig(
 )
 resource = HfDatasetsResource(config)
 
-with Workspace(
-    {"/ds/": resource},
-        mode=MountMode.READ,
-        fuse=True,
-) as ws:
-    time.sleep(1)
+with Workspace({"/ds/": Mount(resource, mode=MountMode.READ,
+                              fuse=True)}) as ws:
     mp = ws.fuse_mountpoint
     print(f"=== FUSE: mounted at {mp} ===\n")
 
-    print(f"--- os.listdir({mp}/ds) ---")
-    root_entries = os.listdir(f"{mp}/ds")
+    print(f"--- os.listdir({mp}) ---")
+    root_entries = os.listdir(mp)
     for e in root_entries:
         print(f"  {e}")
 
-    target = f"{mp}/ds/README.md"
+    target = f"{mp}/README.md"
     if os.path.exists(target):
         print(f"\n--- read first 5 lines of {target} ---")
         with open(target) as f:
@@ -54,8 +49,8 @@ with Workspace(
 
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> In another terminal:")
-    print(f">>>   ls {mp}/ds/")
-    print(f">>>   find {mp}/ds/ -name '*.parquet' | head")
+    print(f">>>   ls {mp}/")
+    print(f">>>   find {mp}/ -name '*.parquet' | head")
     print(">>> Press Enter to unmount...")
     try:
         input()

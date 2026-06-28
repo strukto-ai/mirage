@@ -8,10 +8,6 @@ def _unused_read_stream(_accessor, _path):
     raise AssertionError("read_stream should not be called for stdin input")
 
 
-async def _bytes_read_stream(_accessor, _path):
-    return b"dup\ndup\nsolo\n"
-
-
 async def _generator_read_stream(_accessor, _path):
     yield b"dup\ndup\nsolo\n"
 
@@ -100,15 +96,6 @@ async def test_ignore_case_folds_duplicates():
     data = b"Hello\nhello\n"
     out = await _collect(data, ignore_case=True)
     assert out == b"Hello\n"
-
-
-@pytest.mark.asyncio
-async def test_read_stream_returning_bytes():
-    # whole-read backends (github, gdrive gdoc) resolve to bytes
-    p = PathSpec(original="/x", directory="/x")
-    source, _io = await uniq([p], read_stream=_bytes_read_stream)
-    out = b"".join([chunk async for chunk in source])
-    assert out == b"dup\nsolo\n"
 
 
 @pytest.mark.asyncio

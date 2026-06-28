@@ -12,31 +12,89 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import type { Workspace } from '@struktoai/mirage-core'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FuseManager } from './fuse.ts'
 
+const mocks = vi.hoisted(() => ({
+  forceUnmount: vi.fn(),
+  mount: vi.fn(),
+  rmSync: vi.fn(),
+  rmdirSync: vi.fn(),
+}))
+
+vi.mock('../fuse/mount.ts', () => ({
+  forceUnmount: mocks.forceUnmount,
+  mount: mocks.mount,
+}))
+
+vi.mock('node:fs', () => ({
+  rmSync: mocks.rmSync,
+  rmdirSync: mocks.rmdirSync,
+}))
+
+// FuseManager is a passive primitive: it only forwards ws to the (mocked)
+// mount() and tears the handle down. It never touches the workspace registry,
+// so a trivial stub suffices.
+function workspaceStub(): Workspace {
+  return {} as unknown as Workspace
+}
+
 describe('FuseManager (without a real mount)', () => {
+  beforeEach(() => {
+    mocks.mount.mockReset()
+    mocks.rmSync.mockReset()
+    mocks.rmdirSync.mockReset()
+  })
+
   it('starts with mountpoint=null', () => {
     const fm = new FuseManager()
     expect(fm.mountpoint).toBeNull()
-  })
-
-  it('allows assigning an external mountpoint via setter', () => {
-    const fm = new FuseManager()
-    fm.mountpoint = '/tmp/test-fuse'
-    expect(fm.mountpoint).toBe('/tmp/test-fuse')
-  })
-
-  it('close() is a no-op when the mount is externally set (not auto)', async () => {
-    const fm = new FuseManager()
-    fm.mountpoint = '/tmp/test-fuse'
-    await fm.close()
-    expect(fm.mountpoint).toBe('/tmp/test-fuse')
   })
 
   it('close() is a no-op when no mountpoint is set', async () => {
     const fm = new FuseManager()
     await fm.close()
     expect(fm.mountpoint).toBeNull()
+  })
+
+  it('keeps caller-owned mountpoints after close', async () => {
+    // Regression: explicit mountpoints are deployment/caller-owned paths. The
+    // manager must unmount FUSE without deleting the directory it mounted on.
+    const unmount = vi.fn(() => Promise.resolve())
+    mocks.mount.mockResolvedValueOnce({
+      mountpoint: '/tmp/caller-owned',
+      ownsMountpoint: false,
+      unmount,
+    })
+    const ws = workspaceStub()
+    const fm = new FuseManager()
+
+    await fm.setup(ws, { mountpoint: '/tmp/caller-owned' })
+    await fm.close()
+
+    expect(unmount).toHaveBeenCalledOnce()
+    expect(mocks.rmdirSync).not.toHaveBeenCalled()
+    expect(mocks.rmSync).not.toHaveBeenCalled()
+  })
+
+  it('removes generated mountpoints with an empty-directory rmdir', async () => {
+    // Generated temp mountpoints are Mirage-owned, but cleanup is intentionally
+    // rmdir-only so a still-mounted FUSE tree is never recursively deleted.
+    const unmount = vi.fn(() => Promise.resolve())
+    mocks.mount.mockResolvedValueOnce({
+      mountpoint: '/tmp/generated',
+      ownsMountpoint: true,
+      unmount,
+    })
+    const ws = workspaceStub()
+    const fm = new FuseManager()
+
+    await fm.setup(ws)
+    await fm.close()
+
+    expect(unmount).toHaveBeenCalledOnce()
+    expect(mocks.rmdirSync).toHaveBeenCalledWith('/tmp/generated')
+    expect(mocks.rmSync).not.toHaveBeenCalled()
   })
 })

@@ -17,6 +17,8 @@ from typing import NamedTuple
 
 from mirage.commands.builtin.find_parse import (FindParseError, find_expr_tail,
                                                 parse_find_expression)
+from mirage.commands.builtin.generic.crossmount import (handle_cross_mount,
+                                                        is_cross_mount)
 from mirage.commands.builtin.utils.safeguard import maybe_with_timeout
 from mirage.commands.safeguard import resolve_across_mounts, resolve_safeguard
 from mirage.commands.spec import (SPECS, OperandKind, flag_kwarg_name,
@@ -29,21 +31,34 @@ from mirage.shell.job_table import JobTable
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
 from mirage.types import PathSpec
 from mirage.workspace.executor.control import ReturnSignal
-from mirage.workspace.executor.cross_mount import (handle_cross_mount,
-                                                   is_cross_mount)
 from mirage.workspace.executor.fanout import (_fan_out_traversal,
                                               _should_fan_out)
 from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
 from mirage.workspace.executor.fs_error import format_fs_error
 from mirage.workspace.executor.jobs import (handle_jobs, handle_kill,
                                             handle_ps, handle_wait)
-from mirage.workspace.mount import MountRegistry
+from mirage.workspace.mount import MountCommandUnsupported, MountRegistry
 from mirage.workspace.session import Session, assert_mount_allowed
 from mirage.workspace.types import ExecutionNode
 
 _JOB_BUILTINS = frozenset({"wait", "fg", "kill", "jobs", "ps"})
 
 _FIND_ACTION_FLAGS = frozenset({"delete", "print0", "ls"})
+
+
+async def _exec_node(cmd_str: str, io: IOResult) -> ExecutionNode:
+    """Build the recorded execution node, materializing any streamed stderr.
+
+    Args:
+        cmd_str (str): Original command text for the record.
+        io (IOResult): Command result whose stderr/exit_code the node carries.
+    """
+    # The node is a recorded artifact (compared by value, serialized via a
+    # sync to_dict, sometimes read twice), so the live lazy io.stderr is
+    # materialized to concrete bytes here. On the cross-mount path it is bytes.
+    return ExecutionNode(command=cmd_str,
+                         stderr=await materialize(io.stderr),
+                         exit_code=io.exit_code)
 
 
 def _check_mount_root_guard_raw(
@@ -156,10 +171,20 @@ def _parse_flags(
 
         # Recover PathSpec for PATH flag values; repeatable PATH flags
         # arrive as a list of resolved paths and become list[PathSpec].
+        # A relative PATH flag value cwd-resolved by parse_command (e.g.
+        # csplit -f part -> /data/part) is absent from scope_map, so build a
+        # PathSpec for it just like positional paths do, otherwise it never
+        # gets the mount prefix stripped.
         repeat_path_keys = {
             flag_kwarg_name(name)
             for opt in spec.options
             if opt.value_kind == OperandKind.PATH and opt.repeatable
+            for name in (opt.short, opt.long) if name
+        }
+        single_path_keys = {
+            flag_kwarg_name(name)
+            for opt in spec.options
+            if opt.value_kind == OperandKind.PATH and not opt.repeatable
             for name in (opt.short, opt.long) if name
         }
         for key, value in flag_kwargs.items():
@@ -171,6 +196,12 @@ def _parse_flags(
                                  directory=part[:part.rfind("/") + 1] or "/",
                                  resolved=True)) for part in value
                 ]
+            elif key in single_path_keys and isinstance(value, str):
+                flag_kwargs[key] = scope_map.get(
+                    value,
+                    PathSpec(original=value,
+                             directory=value[:value.rfind("/") + 1] or "/",
+                             resolved=True))
             elif isinstance(value, str) and value in scope_map:
                 flag_kwargs[key] = scope_map[value]
 
@@ -276,10 +307,6 @@ async def handle_command(
     # Cross-mount: paths span different mounts (e.g. cp /ram/a /disk/b).
     # Use dispatch to read/write across mounts directly.
     path_scopes = [p for p in parts[1:] if isinstance(p, PathSpec)]
-    text_only = [
-        p.original if isinstance(p, PathSpec) else p for p in parts[1:]
-    ]
-
     raw_argv = [
         p.original if isinstance(p, PathSpec) else p for p in parts[1:]
     ]
@@ -307,15 +334,14 @@ async def handle_command(
                                       stderr=msg.encode())
 
     if is_cross_mount(cmd_name, path_scopes, registry):
-        flag_kwargs = {}
         # Cross-mount execution bypasses a resource command handler. Parse
-        # against the shared spec so flags do not depend on the source mount.
-        command_spec = SPECS.get(cmd_name)
-        if command_spec is not None:
-            parsed = parse_command(command_spec, raw_argv, cwd=session.cwd)
-            flag_kwargs = parse_to_kwargs(parsed)
-        stdout, io, exec_node = await handle_cross_mount(
-            cmd_name, path_scopes, text_only, flag_kwargs, dispatch, cmd_str)
+        # against the shared spec so flags and text operands do not depend on
+        # the source mount.
+        parsed = parse_command(SPECS[cmd_name], raw_argv, cwd=session.cwd)
+        stdout, io = await handle_cross_mount(cmd_name, path_scopes,
+                                              parsed.texts(),
+                                              parse_to_kwargs(parsed),
+                                              dispatch)
         if io.safeguard is None:
             mounts = []
             for s in path_scopes:
@@ -326,7 +352,7 @@ async def handle_command(
             io.safeguard = (resolve_across_mounts(cmd_name, mounts)
                             if mounts else resolve_safeguard(cmd_name))
         stdout = maybe_with_timeout(stdout, io.safeguard, cmd_name)
-        return stdout, io, exec_node
+        return stdout, io, await _exec_node(cmd_str, io)
 
     # Reject unsupported cross-mount commands
     if len(path_scopes) >= 2:
@@ -345,7 +371,15 @@ async def handle_command(
                 stderr=err.encode(),
             ), ExecutionNode(command=cmd_str, exit_code=1)
 
-    mount = await registry.resolve_mount(cmd_name, path_scopes, session.cwd)
+    try:
+        mount = await registry.resolve_mount(cmd_name, path_scopes,
+                                             session.cwd)
+    except MountCommandUnsupported as exc:
+        err = f"{exc}\n".encode()
+        return None, IOResult(exit_code=1,
+                              stderr=err), ExecutionNode(command=cmd_str,
+                                                         exit_code=1,
+                                                         stderr=err)
     if mount is None:
         return None, IOResult(
             exit_code=127,
@@ -428,7 +462,7 @@ async def handle_command(
                 io.exit_code = 1
 
     prefix = mount.prefix.rstrip("/")
-    if prefix and mount is not registry.default_mount:
+    if prefix:
         io.reads = {prefix + k: v for k, v in io.reads.items()}
         io.writes = {prefix + k: v for k, v in io.writes.items()}
         io.cache = [prefix + p for p in io.cache]
@@ -441,11 +475,7 @@ async def handle_command(
     stdout = maybe_with_timeout(stdout, io.safeguard, cmd_name)
     io.stderr = maybe_with_timeout(io.stderr, io.safeguard, cmd_name)
 
-    stderr_bytes = await materialize(io.stderr)
-    exec_node = ExecutionNode(command=cmd_str,
-                              stderr=stderr_bytes,
-                              exit_code=io.exit_code)
-    return stdout, io, exec_node
+    return stdout, io, await _exec_node(cmd_str, io)
 
 
 async def _inject_child_mounts(

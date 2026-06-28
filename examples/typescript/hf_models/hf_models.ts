@@ -54,6 +54,15 @@ async function main(): Promise<void> {
     process.stdout.write((await ws.execute('jq .architectures /m/config.json')).stdoutText)
     console.log()
 
+    // sed read-transform over the HF mount
+    console.log("=== sed -n '1,3p' /m/config.json ===")
+    process.stdout.write((await ws.execute("sed -n '1,3p' /m/config.json")).stdoutText)
+    console.log("=== cat /m/config.json | sed 's/\"//g' | head -n 3 ===")
+    process.stdout.write(
+      (await ws.execute('cat /m/config.json | sed \'s/"//g\' | head -n 3')).stdoutText,
+    )
+    console.log()
+
     console.log('=== head -n 10 /m/README.md ===')
     process.stdout.write((await ws.execute('head -n 10 /m/README.md')).stdoutText)
     console.log()

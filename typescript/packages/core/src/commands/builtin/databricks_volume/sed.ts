@@ -16,31 +16,12 @@ import type { DatabricksVolumeAccessor } from '../../../accessor/databricks_volu
 import { resolveGlob } from '../../../core/databricks_volume/glob.ts'
 import { readStream as dbxStream } from '../../../core/databricks_volume/stream.ts'
 import { writeBytes as dbxWrite } from '../../../core/databricks_volume/write.ts'
-import { ResourceName, type PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { sedGeneric } from '../generic/sed.ts'
+import { ResourceName } from '../../../types.ts'
+import { makeSed } from '../generic/sed_command.ts'
 
-async function sedCommand(
-  accessor: DatabricksVolumeAccessor,
-  paths: PathSpec[],
-  texts: string[],
-  opts: CommandOpts,
-): Promise<CommandFnResult> {
-  const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  return sedGeneric(
-    resolved,
-    texts,
-    opts,
-    (p) => dbxStream(accessor, p),
-    (p, data) => dbxWrite(accessor, p, data),
-  )
-}
-
-export const DATABRICKS_VOLUME_SED = command({
-  name: 'sed',
+export const DATABRICKS_VOLUME_SED = makeSed<DatabricksVolumeAccessor>({
   resource: ResourceName.DATABRICKS_VOLUME,
-  spec: specOf('sed'),
-  fn: sedCommand,
+  stream: (a, p) => dbxStream(a, p),
+  write: (a, p, d) => dbxWrite(a, p, d),
+  glob: (a, paths, opts) => resolveGlob(a, paths, opts.index ?? undefined),
 })

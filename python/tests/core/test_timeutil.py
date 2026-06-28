@@ -14,7 +14,7 @@
 
 from datetime import datetime, timedelta, timezone
 
-from mirage.core.timeutil import now_iso, to_iso_z
+from mirage.core.timeutil import epoch_to_iso, now_iso, to_iso_z
 
 
 def test_to_iso_z_converts_utc_offset_to_z():
@@ -32,3 +32,11 @@ def test_now_iso_uses_z_suffix():
     s = now_iso()
     assert s.endswith("Z")
     assert "+00:00" not in s
+
+
+def test_epoch_to_iso_whole_second():
+    assert epoch_to_iso(1609459200) == "2021-01-01T00:00:00Z"
+
+
+def test_epoch_to_iso_truncates_sub_second():
+    assert epoch_to_iso(1609459200.987) == "2021-01-01T00:00:00Z"

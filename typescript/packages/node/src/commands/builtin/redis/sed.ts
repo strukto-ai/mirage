@@ -12,21 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ResourceName, command, specOf, sedGeneric } from '@struktoai/mirage-core'
+import { ResourceName, makeSed } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../../accessor/redis.ts'
 import { stream as redisStream } from '../../../core/redis/stream.ts'
 import { writeBytes as redisWrite } from '../../../core/redis/write.ts'
 
-export const REDIS_SED = command({
-  name: 'sed',
+export const REDIS_SED = makeSed<RedisAccessor>({
   resource: ResourceName.REDIS,
-  spec: specOf('sed'),
-  fn: (accessor: RedisAccessor, paths, texts, opts) =>
-    sedGeneric(
-      paths,
-      texts,
-      opts,
-      (p) => redisStream(accessor, p),
-      (p, d) => redisWrite(accessor, p, d),
-    ),
+  stream: (a, p) => redisStream(a, p),
+  write: (a, p, d) => redisWrite(a, p, d),
 })

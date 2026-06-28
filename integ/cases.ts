@@ -47,6 +47,9 @@ export const SEED_FILES: Record<string, string> = {
   "/data/patterns2.txt": "baz\n",
   "/data/guard/g.txt": "guard\n",
   "/data/guard/sub/s.txt": "inner\n",
+  "/data/anchors.txt": "#123\nls\n#456\nfoo bar\n",
+  "/data/multi.txt": "oo\noo\noo\n",
+  "/data/oooo.txt": "oooo\noooo\n",
   // dedicated clean subtree for traversal-display cases (no other case
   // writes under it, so listings/walks are deterministic)
   "/data/disptree/x.txt": "nested\ncontent\n",
@@ -264,6 +267,85 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ["sed_replace_n", "sed 's/o/O/2' /data/a.txt"],
   ["sed_delete_pattern", "sed '/foo/d' /data/a.txt"],
   ["sed_append", "sed '2a\\\nINSERTED' /data/a.txt"],
+  // Anchored ^/$ must apply per line (strukto-ai/mirage#326).
+  ["sed_anchor_sub", "cat /data/anchors.txt | sed 's/^#[0-9]*$/#TS/'"],
+  ["sed_anchor_sub_E", "cat /data/anchors.txt | sed -E 's/^#[0-9]+$/#TS/'"],
+  ["sed_anchor_sub_g", "cat /data/anchors.txt | sed 's/^#[0-9]*$/#TS/g'"],
+  ["sed_anchor_addr_del", "cat /data/anchors.txt | sed '/^#[0-9]*$/d'"],
+  // Same per-line semantics must hold when sed reads a file argument
+  // directly (single-`s` fast-path), not just stdin (strukto-ai/mirage#326).
+  ["sed_anchor_sub_file", "sed 's/^#[0-9]*$/#TS/' /data/anchors.txt"],
+  // Non-global `s///` replaces the first match on *each* line, not just the
+  // first match in the whole file.
+  ["sed_firstmatch_file", "sed 's/o/O/' /data/multi.txt"],
+  // s/// numeric count (Nth occurrence) and Nth-onward (Ng), per line.
+  ["sed_count_nth", "sed 's/o/O/2' /data/oooo.txt"],
+  ["sed_count_nth_g", "sed 's/o/O/2g' /data/oooo.txt"],
+  // s///p prints the pattern space on substitution (here with -n).
+  ["sed_sub_p", "cat /data/oooo.txt | sed -n 's/o/O/p'"],
+  // y/// transliterate, and the change command (single address + range).
+  ["sed_y", "echo hello | sed 'y/el/ip/'"],
+  ["sed_c_addr", "sed '2cCHANGED' /data/a.txt"],
+  ["sed_c_range", "sed '2,4cMID' /data/a.txt"],
+  // BRE (default): \\( \\) groups, \\+ one-or-more, \\| alternation (GNU exts);
+  // bare + is literal. ERE via -E / -r: bare () + | are special.
+  ['sed_bre_group', "echo foo | sed 's/\\(foo\\)/[\\1]/'"],
+  ['sed_bre_plus', 'echo aaab | sed \'s/a\\+/X/\''],
+  ['sed_bre_alt', "echo cat | sed 's/cat\\|dog/PET/'"],
+  ['sed_ere_group', "echo foo | sed -E 's/(foo)/[\\1]/'"],
+  ['sed_ere_plus', "echo aaab | sed -E 's/a+/X/'"],
+  ['sed_r_alias', "echo aaab | sed -r 's/a+/X/'"],
+  // Multiple -e expressions apply in sequence; -e with a file argument.
+  ['sed_multi_e', "echo a | sed -e 's/a/b/' -e 's/b/c/'"],
+  ['sed_e_file', 'sed -e s/world/EARTH/ /data/a.txt'],
+  // -f reads the script from a file (script lives on the data mount). The
+  // script file is created and removed inside the case so directory listings
+  // stay unpolluted.
+  [
+    'sed_f_file',
+    "echo 's/world/EARTH/' | tee /data/prog.sed > /dev/null && sed -f /data/prog.sed /data/a.txt && rm /data/prog.sed",
+  ],
+  [
+    'sed_f_multi',
+    "echo 's/world/EARTH/;s/foo/FOO/' | tee /data/prog.sed > /dev/null && sed -f /data/prog.sed /data/a.txt && rm /data/prog.sed",
+  ],
+  [
+    'sed_ef_combined',
+    "echo 's/foo/FOO/' | tee /data/prog.sed > /dev/null && sed -e s/world/EARTH/ -f /data/prog.sed /data/a.txt && rm /data/prog.sed",
+  ],
+  [
+    'sed_f_stdin',
+    "echo 's/world/EARTH/' | tee /data/prog.sed > /dev/null && cat /data/a.txt | sed -f /data/prog.sed && rm /data/prog.sed",
+  ],
+  // Broader GNU sed surface: & whole-match, s flags, addresses, hold/branch,
+  // multi-command, alt delimiters, a/i/c forms.
+  ['sed_amp', "sed 's/world/[&]/' /data/a.txt"],
+  ['sed_amp_literal', "sed 's/world/[\\&]/' /data/a.txt"],
+  ['sed_sub_i', "sed 's/hello/HI/i' /data/mixed.txt"],
+  ['sed_delim_pipe', "sed 's|o|O|g' /data/a.txt"],
+  ['sed_d_range', "sed '2,3d' /data/a.txt"],
+  ['sed_n_2p', "sed -n '2p' /data/a.txt"],
+  ['sed_n_lastp', "sed -n '$p' /data/a.txt"],
+  ['sed_insert', "sed '2iINSERTED' /data/a.txt"],
+  ['sed_change_all', "sed 'cX' /data/a.txt"],
+  ['sed_change_regex', "sed '/world/cCHANGED' /data/a.txt"],
+  ['sed_quit', "sed '2q' /data/a.txt"],
+  ['sed_double_space', "sed 'G' /data/a.txt"],
+  ['sed_n_join', "sed 'N;s/\\n/ /' /data/a.txt"],
+  ['sed_block', "sed '/world/{s/world/W/;s/W/X/}' /data/a.txt"],
+  ['sed_semicolon', "sed 's/o/0/;s/a/A/' /data/a.txt"],
+  ['sed_backref_E', "sed -E 's/(section)([0-9])/\\2\\1/' /data/sections.txt"],
+  // address negation: addr!cmd applies to lines the address does NOT select.
+  ['sed_neg_line', "sed '2!d' /data/a.txt"],
+  ['sed_neg_regex', "sed '/world/!d' /data/a.txt"],
+  ['sed_neg_lastp', "sed -n '$!p' /data/a.txt"],
+  ['sed_neg_range', "sed '1,3!s/./X/' /data/a.txt"],
+  // multi-line pattern space: join-all idiom, hold accumulation, escaped
+  // delimiter, and preservation of a missing final newline.
+  ['sed_join_all', "sed ':a;N;$!ba;s/\\n/,/g' /data/a.txt"],
+  ['sed_hold_accum', "sed -n 'H;${x;p}' /data/a.txt"],
+  ['sed_escaped_delim', "echo 'a/b' | sed 's/a\\/b/c/'"],
+  ['sed_no_final_nl', "sed 's/no/NO/' /data/no_nl.txt"],
 
   ["tr_squeeze", "echo aaabbbccc | tr -s a-z"],
   ["tr_complement", "cat /data/a.txt | tr -c 'a-z\\n' '*'"],
@@ -324,6 +406,9 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
 
   ["find_empty", "find /data -empty"],
   ["find_not_name", 'find /data -not -name "*.txt"'],
+  ["find_name_start", "find /data -name data"],
+  ["find_maxdepth_zero", "find /data -maxdepth 0"],
+  ["find_mindepth_zero", "find /data -mindepth 0 -type d"],
   ["find_size_lt", "find /data -size -5c"],
   ["find_depth", "find /data -depth -type f"],
   ["find_mtime", "find /data -mtime +0 -o -mtime -1"],
@@ -335,6 +420,19 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ["diff_same", "diff /data/a.txt /data/a.txt"],
   ["diff_differ", "diff /data/a.txt /data/b.txt"],
   ["diff_u", "diff -u /data/sorted_a.txt /data/sorted_b.txt"],
+  [
+    "diff_recursive",
+    "mkdir -p /data/dr/x/sub /data/dr/y/sub" +
+      " && echo aaa | tee /data/dr/x/a.txt > /dev/null" +
+      " && echo AAA | tee /data/dr/y/a.txt > /dev/null" +
+      " && echo keep | tee /data/dr/x/c.txt > /dev/null" +
+      " && echo keep | tee /data/dr/y/c.txt > /dev/null" +
+      " && echo deep1 | tee /data/dr/x/sub/d.txt > /dev/null" +
+      " && echo deep2 | tee /data/dr/y/sub/d.txt > /dev/null" +
+      " && echo L | tee /data/dr/x/leftonly.txt > /dev/null" +
+      " && echo R | tee /data/dr/y/rightonly.txt > /dev/null" +
+      " && diff -r /data/dr/x /data/dr/y",
+  ],
   ["cmp_same", "cmp /data/a.txt /data/a.txt"],
   ["cmp_differ", "cmp /data/a.txt /data/b.txt"],
 
@@ -518,10 +616,9 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ['bash_history_after_find', "grep -v '^#' /.bash_history | tail -n 1"],
   // GNU bash histfile layout: a `#<epoch>` comment line per command.
   // The timestamp is volatile, so normalize it to `#TS` to assert the
-  // structure deterministically. Uses the unanchored pattern because TS
-  // sed mishandles `^...$` anchors (strukto-ai/mirage#326); revert to
-  // `s/^#[0-9]*$/#TS/` once that is fixed.
-  ['bash_history_format', "cat /.bash_history | sed 's/#[0-9][0-9]*/#TS/' | tail -n 4"],
+  // structure deterministically. The anchored pattern only matches lines
+  // that consist solely of `#<digits>` (the timestamp comments).
+  ['bash_history_format', "cat /.bash_history | sed 's/^#[0-9]*$/#TS/' | tail -n 4"],
   // gzip removes h.txt, the ls caches the listing, gunzip recreates h.txt:
   // cat and the final ls must see the recreated file, not stale cache.
   [
@@ -534,6 +631,8 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
 ];
 
 export const EXIT_CODE_CASES: ReadonlyArray<readonly [string, string]> = [
+  // sed rejects a zero occurrence count (GNU: "may not be zero").
+  ["sed_count_zero", "sed 's/o/O/0'"],
   ["jq_no_filter_no_input", "jq"],
   ["jq_dot_no_input", 'jq "."'],
   ["tac_no_input", "tac"],
@@ -626,6 +725,8 @@ export const FIND_ARG_ERROR_CASES: ReadonlyArray<readonly [string, string]> = [
   ['find_bad_size', 'find /data -size abc'],
   ['find_empty_size', "find /data -size ''"],
   ['find_bad_mtime', 'find /data -mtime abc'],
+  ['find_unknown_predicate', "find /data -regex '.*deep.*'"],
+  ['find_bogus_predicate', 'find /data -boguspredicate'],
 ];
 
 export const SLEEP_CASES: ReadonlyArray<readonly [string, string, number]> = [
@@ -676,6 +777,19 @@ export async function runNotFound(ws: Workspace, mount: string): Promise<void> {
   }
 }
 
+// Emit a case's stdout. A non-empty body that does not end in a newline is
+// flagged with a git-style sentinel so truth.txt records the missing final
+// newline (otherwise the section separators would mask it).
+function emitBody(out: string): void {
+  if (out === "") {
+    process.stdout.write("\n");
+  } else if (out.endsWith("\n")) {
+    process.stdout.write(out);
+  } else {
+    process.stdout.write(out + "\n\\ No newline at end of output\n");
+  }
+}
+
 export async function runCases(ws: Workspace): Promise<void> {
   for (const [path, content] of Object.entries(SEED_FILES)) {
     const dir = path.slice(0, path.lastIndexOf("/"));
@@ -693,7 +807,7 @@ export async function runCases(ws: Workspace): Promise<void> {
       );
     }
     process.stdout.write(`=== ${name} ===\n`);
-    process.stdout.write(out.endsWith("\n") ? out : out + "\n");
+    emitBody(out);
   }
 
   for (const [name, cmd] of EXIT_CODE_CASES) {
@@ -701,7 +815,7 @@ export async function runCases(ws: Workspace): Promise<void> {
     const out = new TextDecoder().decode(result.stdout);
     process.stdout.write(`=== ${name} ===\n`);
     process.stdout.write(`exit=${result.exitCode}\n`);
-    if (out) process.stdout.write(out.endsWith("\n") ? out : out + "\n");
+    if (out) emitBody(out);
   }
 
   for (const [name, cmd] of NOT_FOUND_CASES) {

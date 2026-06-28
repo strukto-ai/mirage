@@ -14,6 +14,8 @@
 
 import type { DropboxAccessor } from '../../../accessor/dropbox.ts'
 import { resolveGlob } from '../../../core/dropbox/glob.ts'
+import { readdir as dropboxReaddir } from '../../../core/dropbox/readdir.ts'
+import { stat as dropboxStat } from '../../../core/dropbox/stat.ts'
 import { stream as dropboxStream } from '../../../core/dropbox/read.ts'
 import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
@@ -30,7 +32,13 @@ async function diffCommand(
     paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
   const stream = (p: PathSpec): AsyncIterable<Uint8Array> =>
     dropboxStream(accessor, p, opts.index ?? undefined)
-  return diffGeneric(resolved, opts, stream)
+  return diffGeneric(
+    resolved,
+    opts,
+    stream,
+    (p) => dropboxReaddir(accessor, p, opts.index ?? undefined),
+    (p) => dropboxStat(accessor, p, opts.index ?? undefined),
+  )
 }
 
 export const DROPBOX_DIFF = command({

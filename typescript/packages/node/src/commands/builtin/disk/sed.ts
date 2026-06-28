@@ -12,21 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ResourceName, command, specOf, sedGeneric } from '@struktoai/mirage-core'
+import { ResourceName, makeSed } from '@struktoai/mirage-core'
 import type { DiskAccessor } from '../../../accessor/disk.ts'
 import { stream as diskStream } from '../../../core/disk/stream.ts'
 import { writeBytes as diskWrite } from '../../../core/disk/write.ts'
 
-export const DISK_SED = command({
-  name: 'sed',
+export const DISK_SED = makeSed<DiskAccessor>({
   resource: ResourceName.DISK,
-  spec: specOf('sed'),
-  fn: (accessor: DiskAccessor, paths, texts, opts) =>
-    sedGeneric(
-      paths,
-      texts,
-      opts,
-      (p) => diskStream(accessor, p),
-      (p, d) => diskWrite(accessor, p, d),
-    ),
+  stream: (a, p) => diskStream(a, p),
+  write: (a, p, d) => diskWrite(a, p, d),
 })

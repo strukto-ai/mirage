@@ -12,49 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
-from mirage.accessor.nextcloud import NextcloudAccessor
-from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.sed import sed as generic_sed
-from mirage.commands.registry import command
-from mirage.commands.spec import SPECS
+from mirage.commands.builtin.generic.sed_command import make_sed
 from mirage.core.nextcloud.glob import resolve_glob
 from mirage.core.nextcloud.read import read_bytes
 from mirage.core.nextcloud.write import write_bytes
-from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
 
-
-@command("sed", resource="nextcloud", spec=SPECS["sed"])
-async def sed(
-    accessor: NextcloudAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
-    i: bool = False,
-    e: bool = False,
-    n: bool = False,
-    E: bool = False,
-    index: IndexCacheStore = None,
-    **_extra: object,
-) -> tuple[ByteSource | None, IOResult]:
-    if not texts:
-        raise ValueError("sed: usage: sed EXPRESSION [path]")
-
-    if paths:
-        paths = await resolve_glob(accessor, paths, index)
-    else:
-        paths = []
-
-    return await generic_sed(
-        paths,
-        texts[0],
-        read_bytes=read_bytes,
-        write_bytes=write_bytes,
-        accessor=accessor,
-        stdin=stdin,
-        in_place=i,
-        suppress=n,
-        index=index,
-    )
+sed = make_sed(
+    resource="nextcloud",
+    glob_fn=resolve_glob,
+    make_read=lambda accessor, index, paths: read_bytes,
+    write_bytes=write_bytes,
+)

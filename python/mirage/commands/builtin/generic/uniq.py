@@ -1,7 +1,6 @@
 from collections.abc import AsyncIterator, Callable
 
-from mirage.commands.builtin.utils.stream import (_open_read_stream,
-                                                  _resolve_source)
+from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -99,7 +98,7 @@ async def uniq(
 ) -> tuple[ByteSource | None, IOResult]:
     cache: list[str] = []
     if paths:
-        source = await _open_read_stream(read_stream, accessor, paths[0])
+        source: AsyncIterator[bytes] = read_stream(accessor, paths[0])
         cache = [paths[0].strip_prefix]
     else:
         source = _resolve_source(stdin, "uniq: missing operand")

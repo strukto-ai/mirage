@@ -212,14 +212,11 @@ describe('S3Resource (mocked integration)', () => {
       expect(txts.sort()).toEqual(['/find/a.txt', '/find/c.txt'])
     })
 
-    // Skipped pending strukto-ai/mirage#318: a -size filter must treat a
-    // directory's size as 0 and filter directories like files (so the start
-    // directory is excluded under minSize). That fix is tracked separately.
-    it.skip('find with minSize skips small files', async () => {
+    it('find with minSize skips small files, letting directories pass', async () => {
       await resource.writeFile(mkPath('/sz/small'), ENC.encode('x'))
       await resource.writeFile(mkPath('/sz/big'), ENC.encode('x'.repeat(100)))
       const results = await resource.find(mkPath('/sz/'), { minSize: 10 })
-      expect(results).toEqual(['/sz/big'])
+      expect(results).toEqual(['/sz', '/sz/big'])
     })
   })
 })

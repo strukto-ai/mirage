@@ -254,6 +254,7 @@ export { gzipGeneric } from './commands/builtin/generic/gzip.ts'
 export { gunzipGeneric } from './commands/builtin/generic/gunzip.ts'
 export { iconvGeneric } from './commands/builtin/generic/iconv.ts'
 export { sedGeneric } from './commands/builtin/generic/sed.ts'
+export { makeSed, type SedBackend } from './commands/builtin/generic/sed_command.ts'
 export { teeGeneric } from './commands/builtin/generic/tee.ts'
 export { splitGeneric } from './commands/builtin/generic/split.ts'
 export { csplitGeneric } from './commands/builtin/generic/csplit.ts'
@@ -334,7 +335,15 @@ export {
 } from './commands/builtin/utils/output.ts'
 export { grepFilesOnly, grepRecursive } from './commands/builtin/grep_helper.ts'
 export { interpretEscapes } from './commands/builtin/utils/escapes.ts'
-export { deflateRaw, gunzip, gzip, inflateRaw } from './utils/compress.ts'
+export {
+  deflateRaw,
+  gunzip,
+  gzip,
+  inflateRaw,
+  registerCompressionCodec,
+  getCompressionCodec,
+  type CompressionCodec,
+} from './utils/compress.ts'
 export { decodeBase64, encodeBase64 } from './utils/base64.ts'
 export { md5, md5Hex, sha256, sha256Hex } from './utils/hash.ts'
 export {
@@ -511,7 +520,7 @@ export {
   getWhileParts,
 } from './shell/helpers.ts'
 export { MountRegistry } from './workspace/mount/registry.ts'
-export { Mount, type MountInit } from './workspace/mount/mount.ts'
+export { MountEntry, type MountInit } from './workspace/mount/mount.ts'
 export { normMountPrefix } from './workspace/snapshot/utils.ts'
 export {
   command,
@@ -1079,6 +1088,22 @@ export { readdir as chromaReaddir } from './core/chroma/readdir.ts'
 export { stat as chromaStat } from './core/chroma/stat.ts'
 export { resolveGlob as resolveChromaGlob } from './core/chroma/glob.ts'
 export { searchSegments as chromaSearch } from './core/chroma/search.ts'
+export type { QdrantPoint, QdrantRow } from './core/qdrant/_client.ts'
+export { QdrantAccessor } from './accessor/qdrant.ts'
+export {
+  resolveQdrantConfig,
+  type QdrantConfig,
+  type QdrantConfigResolved,
+} from './resource/qdrant/config.ts'
+export { QDRANT_PROMPT } from './resource/qdrant/prompt.ts'
+export { QDRANT_OPS } from './ops/qdrant/index.ts'
+export { QDRANT_COMMANDS } from './commands/builtin/qdrant/index.ts'
+export { QdrantResource, type QdrantResourceOptions } from './resource/qdrant/qdrant.ts'
+export { read as qdrantRead } from './core/qdrant/read.ts'
+export { readdir as qdrantReaddir } from './core/qdrant/readdir.ts'
+export { stat as qdrantStat } from './core/qdrant/stat.ts'
+export { resolveGlob as resolveQdrantGlob } from './core/qdrant/glob.ts'
+export { searchRowsOutput as qdrantSearch } from './core/qdrant/search.ts'
 export { scoreFromDistance } from './utils/score.ts'
 export {
   countDocuments as mongoCountDocuments,
@@ -1105,10 +1130,13 @@ export { fnmatch } from './utils/fnmatch.ts'
 export {
   buildTree,
   computeNonemptyDirs,
+  emitStartPath,
+  type EmitStartPathOptions,
   evalPredicate,
   type FindEntry,
   keep,
   type PredNode,
+  startBasename,
 } from './commands/builtin/findEval.ts'
 export { enoent, enotdir, errorVirtualPath, type FsError, gnuStrerror } from './utils/errors.ts'
 

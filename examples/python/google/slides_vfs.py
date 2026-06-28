@@ -51,7 +51,7 @@ async def main():
 
         if presentations:
             first = presentations[0]
-            path = f"/gslides{first}"
+            path = f"/gslides/owned/{first}"
             print("\n--- open() + read first presentation ---")
             with open(path) as f:
                 content = f.read()

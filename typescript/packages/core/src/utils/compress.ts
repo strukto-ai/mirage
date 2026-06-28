@@ -37,3 +37,22 @@ export async function deflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
 export async function inflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
   return runThrough(bytes, new DecompressionStream('deflate-raw'))
 }
+
+export interface CompressionCodec {
+  compress(bytes: Uint8Array): Promise<Uint8Array>
+  decompress(bytes: Uint8Array): Promise<Uint8Array>
+}
+
+const codecs = new Map<string, CompressionCodec>()
+
+// gzip ships in every runtime via CompressionStream; heavier codecs (bzip2,
+// xz) are registered by the runtime package that bundles a dependency for
+// them. Browser core leaves them unregistered, so tar -j/-J report
+// "not supported" there.
+export function registerCompressionCodec(name: string, codec: CompressionCodec): void {
+  codecs.set(name, codec)
+}
+
+export function getCompressionCodec(name: string): CompressionCodec | undefined {
+  return codecs.get(name)
+}

@@ -58,7 +58,7 @@ def _spec(original: str, prefix: str = "") -> PathSpec:
 @pytest.mark.asyncio
 async def test_root_lists_pages_with_prefix():
     out = await readdir_mod.readdir(_ACCESSOR, _spec("/notion", "/notion"))
-    assert out == ["/notion/pages"]
+    assert out == ["/notion/pages", "/notion/databases"]
 
 
 @pytest.mark.asyncio
@@ -75,3 +75,13 @@ async def test_pages_listing_keeps_prefix_on_warm_cache_hit():
     warm = await readdir_mod.readdir(_ACCESSOR, spec, index)
     assert warm == cold
     assert warm == [f"/notion/pages/Top1__{TOP_ID}"]
+
+
+@pytest.mark.asyncio
+async def test_pages_listing_stores_remote_time():
+    index = RAMIndexCacheStore()
+    spec = _spec("/notion/pages", "/notion")
+    await readdir_mod.readdir(_ACCESSOR, spec, index)
+    lookup = await index.get(f"/pages/Top1__{TOP_ID}")
+    assert lookup.entry is not None
+    assert lookup.entry.remote_time == "2026-01-02T00:00:00.000Z"

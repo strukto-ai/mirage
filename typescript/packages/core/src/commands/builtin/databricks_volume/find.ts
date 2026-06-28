@@ -25,6 +25,8 @@ export const DATABRICKS_VOLUME_FIND = command({
   resource: ResourceName.DATABRICKS_VOLUME,
   spec: specOf('find'),
   fn: (accessor: DatabricksVolumeAccessor, paths, texts, opts) =>
-    findGeneric(paths, texts, opts, (root, options) => dbxFind(accessor, root, options)),
+    findGeneric(paths, texts, opts, (root, options) =>
+      dbxFind(accessor, root, options, opts.index ?? undefined),
+    ),
   provision: metadataProvision,
 })

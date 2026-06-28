@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.s3 import S3Accessor
-from mirage.core.s3._client import _client_kwargs, _prefix, async_session
+from mirage.core.s3._client import _client_kwargs, _key, async_session
 from mirage.types import PathSpec
 
 
@@ -29,14 +29,19 @@ async def du(accessor: S3Accessor, path: PathSpec) -> int:
     if isinstance(path, PathSpec):
         path = path.strip_prefix
     config = accessor.config
-    pfx = _prefix(path, config)
+    key = _key(path, config)
+    stem = key.rstrip("/")
+    base = (stem + "/") if stem else ""
     total = 0
     session = async_session(config)
     async with session.client(**_client_kwargs(config)) as client:
         paginator = client.get_paginator("list_objects_v2")
-        async for page in paginator.paginate(Bucket=config.bucket, Prefix=pfx):
+        async for page in paginator.paginate(Bucket=config.bucket,
+                                             Prefix=stem):
             for obj in page.get("Contents") or []:
-                total += obj.get("Size", 0)
+                okey = obj["Key"]
+                if okey == stem or okey.startswith(base):
+                    total += obj.get("Size", 0)
     return total
 
 
@@ -53,17 +58,22 @@ async def du_all(accessor: S3Accessor,
     if isinstance(path, PathSpec):
         path = path.strip_prefix
     config = accessor.config
-    pfx = _prefix(path, config)
+    key = _key(path, config)
+    stem = key.rstrip("/")
+    base = (stem + "/") if stem else ""
     results: list[tuple[str, int]] = []
     total = 0
     session = async_session(config)
     async with session.client(**_client_kwargs(config)) as client:
         paginator = client.get_paginator("list_objects_v2")
-        async for page in paginator.paginate(Bucket=config.bucket, Prefix=pfx):
+        async for page in paginator.paginate(Bucket=config.bucket,
+                                             Prefix=stem):
             for obj in page.get("Contents") or []:
+                okey = obj["Key"]
+                if not (okey == stem or okey.startswith(base)):
+                    continue
                 sz = obj.get("Size", 0)
-                key = obj["Key"]
-                entry = "/" + key.lstrip("/")
+                entry = "/" + okey.lstrip("/")
                 results.append((entry, sz))
                 total += sz
     results.append((path, total))

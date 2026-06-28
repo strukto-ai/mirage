@@ -1,0 +1,130 @@
+---
+title: Qdrant
+description: Mount a Qdrant collection as a Mirage filesystem, with payload folders, multimodal blobs, and a semantic search command for Python agents.
+icon: database
+---
+
+The Qdrant resource exposes a [Qdrant](https://qdrant.tech/) collection as a virtual filesystem mounted
+at some prefix such as `/q/`. Group-by payload fields become nested folders,
+each point becomes a `.json` payload file (plus a `.txt` text file and an optional blob), and semantic search is the
+`search` command, which returns ranked points as canonical file paths.
+
+For connection setup (self-hosted, Qdrant Cloud, search), see
+[Qdrant Setup](/python/setup/qdrant).
+
+## Config
+
+```python
+from mirage import MountMode, Workspace
+from mirage.resource.qdrant import QdrantConfig, QdrantResource
+
+config = QdrantConfig(
+    url="https://xyz.cloud.qdrant.io",
+    api_key="...",
+    collection="fashion",
+    group_by=["gender", "articleType", "baseColour"],
+    id_field="id",
+    text_field="productDisplayName",
+    blob_field="image_b64",
+    blob_ext="jpg",
+    search_limit=5,
+)
+resource = QdrantResource(config)
+ws = Workspace({"/fashion/": resource}, mode=MountMode.READ)
+```
+
+The mapping is config-driven; nothing about the dataset is hardcoded. Point
+`group_by` at different payload fields and the folder tree changes.
+
+## Filesystem layout
+
+Every path is translated into a Qdrant query. Descending a folder adds one
+payload filter; the leaf level lists points.
+
+```text
+/                                  # list collections (omitted when `collection` is pinned)
+/<collection>/                     # distinct group_by[0] values
+  <v1>/                            # distinct group_by[1] where group_by[0]=v1
+    .../<vN>/                      # all group-by fields bound -> point files
+      <id>.json                    # full payload (the metadata)
+      <id>.txt                     # embedded source text (when text_field set)
+      <id>.<ext>                   # raw blob / image bytes (when blob_field set)
+```
+
+`<id>` is the Qdrant point id. When `collection` is set the collection level is
+elided, so the mount root is that collection:
+
+```text
+/fashion/
+  Men/
+    Shoes/
+      White/
+        3.json
+        3.txt
+        3.jpg
+```
+
+### Point files
+
+A point is shown as its underlying data in its original format, never as the
+embedding vector:
+
+- `<id>.txt` is the embedded source text (the `text_field` value), exactly what
+  the vector was built from.
+- `<id>.json` is the full payload as compact JSON (the metadata), with the vector
+  and the raw blob omitted.
+- `<id>.<ext>` is the raw blob bytes when `blob_field` is configured.
+
+```text
+$ cat /fashion/Men/Shoes/White/3.txt
+Nike Men White Running Sneakers
+
+$ cat /fashion/Men/Shoes/White/3.json
+{"gender":"Men","articleType":"Shoes","baseColour":"White","productDisplayName":"Nike Men White Running Sneakers","id":3}
+```
+
+## Semantic search
+
+Search is a command, not a path. It returns each ranked point as its **canonical
+content path** (the `<id>.txt`, or `<id>.json` when no `text_field` is set)
+annotated with the similarity score, followed by the content:
+
+```text
+$ search "white running sneakers" /fashion
+/fashion/Men/Shoes/White/3.txt:0.7421
+Nike Men White Running Sneakers
+```
+
+Flags: `--top-k <n>` (default `search_limit`), `--threshold <min-score>`,
+`--method semantic` (the only supported method; `grep`/`rg` stay lexical).
+
+## Supported commands
+
+All commands delegate to Mirage's shared implementations.
+
+| Command       | Behaviour on a Qdrant mount                                   |
+| ------------- | ------------------------------------------------------------- |
+| `ls`          | list collections, payload folders, or point files            |
+| `cd`          | navigate (each level narrows the filter)                      |
+| `tree`        | render the folder hierarchy                                   |
+| `cat`         | print a point's text/JSON, or dump raw blob/image bytes       |
+| `stat`        | directory vs file, blob size, image mime type                 |
+| `find`        | walk the tree (e.g. `find /fashion -name '*.txt'`)            |
+| `grep` / `rg` | lexical search over the text/JSON files                       |
+| `search`      | semantic (vector) search -> ranked content paths + score      |
+| `head` / `tail` | first/last lines of a file                                  |
+| `wc`          | count lines/bytes of a file                                   |
+
+## Access pattern
+
+The mount is **read-only** (`MountMode.READ`); writes are not supported. The two
+read modes are:
+
+- **Browse** by payload folders: scroll filters on `group_by` fields, no embedding.
+- **Search** by meaning: `search "<query>" <path>` runs vector search and returns
+  canonical point paths.
+
+Folder listings are capped by `max_rows`. A filtered listing scrolls first and
+only creates keyword payload indexes for the `group_by` fields if Qdrant reports
+one is required, so already-indexed collections work under read-only keys. Keep
+`group_by` to low-cardinality fields for large collections.

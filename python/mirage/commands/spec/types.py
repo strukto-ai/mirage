@@ -61,7 +61,12 @@ class Operand:
             mount dispatch; TEXT operands pass through verbatim.
         provided_by (tuple[str, ...]): flags that supply this operand's
             value. When any is present the slot is skipped and remaining
-            args classify as rest (e.g. grep's pattern with -e/-f).
+            args classify as rest (e.g. grep's pattern with -e/-f). This is
+            the declarative form of the conditional real tools write by hand
+            (grep's ``if (!pattern_given)`` getopt loop); the same scenario
+            clap names ``required_unless_present`` and docopt expresses as
+            alternate usage patterns. It lives in the spec, not in command
+            code, because Mirage classifies args before a backend is chosen.
     """
     kind: OperandKind = OperandKind.PATH
     provided_by: tuple[str, ...] = ()

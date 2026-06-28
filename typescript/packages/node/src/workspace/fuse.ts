@@ -12,12 +12,29 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { rmSync } from 'node:fs'
+import { rmdirSync } from 'node:fs'
 import type { Workspace } from '@struktoai/mirage-core'
 import { forceUnmount, mount, type FuseHandle, type MountOptions } from '../fuse/mount.ts'
 
 const SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const
 type Signal = (typeof SIGNALS)[number]
+interface CleanupEntry {
+  mountpoint: string
+  handle: FuseHandle
+  // Cleanup owns only generated temp directories, never explicit mountpoints.
+  ownsMountpoint: boolean
+}
+
+function removeMountpointIfOwned(entry: { mountpoint: string; ownsMountpoint: boolean }): void {
+  if (!entry.ownsMountpoint) return
+  try {
+    // Empty-directory cleanup only. Recursive removal is unsafe because a
+    // still-mounted FUSE path can make deletes hit the mounted backend.
+    rmdirSync(entry.mountpoint)
+  } catch {
+    // mountpoint may still be busy, non-empty, or already gone; caller can retry
+  }
+}
 
 /**
  * Tracks auto-mounted FUSE handles and installs a single process-wide cleanup
@@ -26,16 +43,16 @@ type Signal = (typeof SIGNALS)[number]
  * KeyboardInterrupt → `diskutil unmount force` / `fusermount -u` in mount.py.
  */
 class FuseCleanupRegistry {
-  private readonly mounts = new Set<{ mountpoint: string; handle: FuseHandle }>()
+  private readonly mounts = new Set<CleanupEntry>()
   private installed = false
   private exiting = false
 
-  register(entry: { mountpoint: string; handle: FuseHandle }): void {
+  register(entry: CleanupEntry): void {
     this.mounts.add(entry)
     this.install()
   }
 
-  unregister(entry: { mountpoint: string; handle: FuseHandle }): void {
+  unregister(entry: CleanupEntry): void {
     this.mounts.delete(entry)
   }
 
@@ -67,11 +84,7 @@ class FuseCleanupRegistry {
   private drainSync(): void {
     for (const entry of this.mounts) {
       forceUnmount(entry.mountpoint)
-      try {
-        rmSync(entry.mountpoint, { recursive: true, force: true })
-      } catch {
-        // best-effort
-      }
+      removeMountpointIfOwned(entry)
     }
     this.mounts.clear()
   }
@@ -79,58 +92,54 @@ class FuseCleanupRegistry {
 
 const CLEANUP = new FuseCleanupRegistry()
 
+// Passive mounting primitive: it mounts a workspace subtree and tears it down.
+// Registry/lifecycle ownership lives on the node Workspace (addFuseMount /
+// removeFuseMount), mirroring Python's FuseManager.
 export class FuseManager {
   private handle: FuseHandle | null = null
-  private externalMountpoint: string | null = null
-  private auto = false
-  private cleanupEntry: { mountpoint: string; handle: FuseHandle } | null = null
+  private cleanupEntry: CleanupEntry | null = null
 
   get mountpoint(): string | null {
-    if (this.handle !== null) return this.handle.mountpoint
-    return this.externalMountpoint
-  }
-
-  set mountpoint(path: string | null) {
-    this.externalMountpoint = path
+    return this.handle?.mountpoint ?? null
   }
 
   async setup(ws: Workspace, options: MountOptions = {}): Promise<string> {
     if (this.handle !== null) return this.handle.mountpoint
-    this.handle = await mount(ws, options)
-    this.auto = true
-    this.externalMountpoint = null
-    this.cleanupEntry = { mountpoint: this.handle.mountpoint, handle: this.handle }
+    const handle = await mount(ws, options)
+    this.handle = handle
+    this.cleanupEntry = {
+      mountpoint: handle.mountpoint,
+      handle,
+      // Preserve the ownership decision made by mount(); unmount cleanup must
+      // not infer ownership from path shape or whether the directory exists.
+      ownsMountpoint: handle.ownsMountpoint,
+    }
     CLEANUP.register(this.cleanupEntry)
-    ws.setFuseMountpoint(this.handle.mountpoint, { owned: true })
-    return this.handle.mountpoint
+    return handle.mountpoint
   }
 
-  async unmount(ws?: Workspace): Promise<void> {
+  async unmount(): Promise<void> {
     if (this.handle === null) {
-      if (ws !== undefined) ws.setFuseMountpoint(null)
-      this.externalMountpoint = null
       return
     }
     const mp = this.handle.mountpoint
     try {
       await this.handle.unmount()
     } finally {
-      if (this.cleanupEntry !== null) {
-        CLEANUP.unregister(this.cleanupEntry)
+      const cleanupEntry = this.cleanupEntry
+      if (cleanupEntry !== null) {
+        CLEANUP.unregister(cleanupEntry)
         this.cleanupEntry = null
       }
       this.handle = null
-      this.auto = false
-      ws?.setFuseMountpoint(null)
-      try {
-        rmSync(mp, { recursive: true, force: true })
-      } catch {
-        // mountpoint may still be busy; caller can retry
-      }
+      removeMountpointIfOwned({
+        mountpoint: mp,
+        ownsMountpoint: cleanupEntry?.ownsMountpoint ?? false,
+      })
     }
   }
 
-  async close(ws?: Workspace): Promise<void> {
-    if (this.auto) await this.unmount(ws)
+  async close(): Promise<void> {
+    await this.unmount()
   }
 }

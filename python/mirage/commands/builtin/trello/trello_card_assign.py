@@ -46,4 +46,5 @@ async def trello_card_assign(
     card = await card_assign(config, card_id=card_id, member_id=member_id)
     return yield_bytes(
         json.dumps(normalize_card(card),
-                   ensure_ascii=False).encode()), IOResult()
+                   ensure_ascii=False,
+                   separators=(",", ":")).encode()), IOResult()

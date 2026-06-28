@@ -52,9 +52,18 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      mongodb:
+        image: mongo:8
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1}).ok'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -78,6 +87,7 @@ jobs:
         working-directory: python
         env:
           REDIS_URL: redis://localhost:6379/0
+          MONGODB_URI: mongodb://localhost:27017
         run: uv run pytest --ignore=tests/agents/camel
 
       - name: Examples (output checked against integ/ truth files)
@@ -120,7 +130,7 @@ jobs:
             module: mirage.agents.openai_agents
             blocked: deepagents
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -160,6 +170,28 @@ jobs:
               f"${{ matrix.blocked }} got imported transitively"
           print(f"OK: imported ${{ matrix.module }} cleanly without ${{ matrix.blocked }}")
           PY
+
+  audit:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Audit dependencies for known vulnerabilities (informational)
+        working-directory: python
+        run: uv audit --preview-features audit --no-extra camel
 
   gate:
     name: test-python-gate

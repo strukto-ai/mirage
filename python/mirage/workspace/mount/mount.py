@@ -77,7 +77,7 @@ def _wrap_cmd_streams(
     return stream, io
 
 
-class Mount:
+class MountEntry:
     """A mounted resource with command and op dispatch.
 
     Each mount has its own lookup tables for commands and ops.

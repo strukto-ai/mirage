@@ -20,7 +20,10 @@ import {
   createPage,
   getChildBlocks,
   getChildPages,
+  getDatabase,
   getPage,
+  queryDatabase,
+  searchDatabases,
   searchPages,
   searchTopLevelPages,
 } from './pages.ts'
@@ -87,6 +90,66 @@ describe('searchTopLevelPages', () => {
   })
 })
 
+describe('searchDatabases', () => {
+  it('invokes API-post-search with a database filter', async () => {
+    const transport = new FakeTransport()
+    transport.responses.push({
+      results: [{ id: 'db1', object: 'database' }],
+      has_more: false,
+      next_cursor: null,
+    })
+    const databases = await searchDatabases(transport)
+    expect(transport.invocations).toEqual([
+      {
+        name: 'API-post-search',
+        args: { filter: { value: 'database', property: 'object' }, page_size: 100 },
+      },
+    ])
+    expect(databases).toEqual([{ id: 'db1', object: 'database' }])
+  })
+})
+
+describe('getDatabase', () => {
+  it('invokes API-retrieve-a-database with the database id', async () => {
+    const transport = new FakeTransport()
+    const database = { id: 'db1', object: 'database' }
+    transport.responses.push(database)
+    const result = await getDatabase(transport, 'db1')
+    expect(transport.invocations).toEqual([
+      { name: 'API-retrieve-a-database', args: { database_id: 'db1' } },
+    ])
+    expect(result).toEqual(database)
+  })
+})
+
+describe('queryDatabase', () => {
+  it('paginates API-post-database-query and returns database rows', async () => {
+    const transport = new FakeTransport()
+    transport.responses.push({
+      results: [{ id: 'row1', object: 'page' }],
+      has_more: true,
+      next_cursor: 'cursor-db',
+    })
+    transport.responses.push({
+      results: [{ id: 'row2', object: 'page' }],
+      has_more: false,
+      next_cursor: null,
+    })
+    const rows = await queryDatabase(transport, 'db1')
+    expect(transport.invocations).toEqual([
+      { name: 'API-post-database-query', args: { database_id: 'db1', page_size: 100 } },
+      {
+        name: 'API-post-database-query',
+        args: { database_id: 'db1', page_size: 100, start_cursor: 'cursor-db' },
+      },
+    ])
+    expect(rows).toEqual([
+      { id: 'row1', object: 'page' },
+      { id: 'row2', object: 'page' },
+    ])
+  })
+})
+
 describe('getPage', () => {
   it('invokes API-retrieve-a-page with the page id and returns the result', async () => {
     const transport = new FakeTransport()
@@ -135,6 +198,7 @@ describe('getChildPages', () => {
         {
           id: 'aaaa1111-2222-3333-4444-555566667777',
           type: 'child_page',
+          last_edited_time: '2024-01-03T00:00:00Z',
           child_page: { title: 'First' },
         },
         { id: 'block-paragraph', type: 'paragraph' },
@@ -149,8 +213,12 @@ describe('getChildPages', () => {
     })
     const pages = await getChildPages(transport, 'parent-block')
     expect(pages).toEqual([
-      { id: 'aaaa1111-2222-3333-4444-555566667777', title: 'First' },
-      { id: 'bbbb1111-2222-3333-4444-555566667777', title: 'Second' },
+      {
+        id: 'aaaa1111-2222-3333-4444-555566667777',
+        title: 'First',
+        lastEditedTime: '2024-01-03T00:00:00Z',
+      },
+      { id: 'bbbb1111-2222-3333-4444-555566667777', title: 'Second', lastEditedTime: '' },
     ])
   })
 })

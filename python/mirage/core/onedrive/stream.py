@@ -39,18 +39,18 @@ async def read_stream(
     rec = record_stream("read", stripped, "onedrive")
     url = item_url(config, "/" + stripped, action="/content")
     auth = True
-    if pinned is not None:
-        action = f"/versions/{quote(pinned, safe='')}/content"
-        url = item_url(config, "/" + stripped, action=action)
-        if rec is not None:
-            rec.revision = pinned
-    elif rec is not None:
-        rec.fingerprint, rec.revision, download_url = await capture_metadata(
-            accessor, path)
-        if download_url:
-            url = download_url
-            auth = False
     try:
+        if pinned is not None:
+            action = f"/versions/{quote(pinned, safe='')}/content"
+            url = item_url(config, "/" + stripped, action=action)
+            if rec is not None:
+                rec.revision = pinned
+        elif rec is not None:
+            (rec.fingerprint, rec.revision,
+             download_url) = await capture_metadata(accessor, path)
+            if download_url:
+                url = download_url
+                auth = False
         async for chunk in graph_stream(config, url, chunk_size, auth=auth):
             if rec is not None:
                 rec.bytes += len(chunk)

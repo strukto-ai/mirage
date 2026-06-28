@@ -12,52 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
 from functools import partial
 
-from mirage.accessor.github import GitHubAccessor
-from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.sed import sed as generic_sed
-from mirage.commands.registry import command
-from mirage.commands.spec import SPECS
+from mirage.commands.builtin.generic.sed_command import make_sed
 from mirage.core.github.glob import resolve_glob
 from mirage.core.github.read import read as github_read
-from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
 
-
-async def _write_readonly(accessor: GitHubAccessor, path: PathSpec,
-                          data: bytes) -> None:
-    raise PermissionError("sed -i not supported on read-only GitHub mount")
-
-
-@command("sed", resource="github", spec=SPECS["sed"])
-async def sed(
-    accessor: GitHubAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    stdin: AsyncIterator[bytes] | bytes | None = None,
-    i: bool = False,
-    e: bool = False,
-    n: bool = False,
-    E: bool = False,
-    index: IndexCacheStore = None,
-    **_extra: object,
-) -> tuple[ByteSource | None, IOResult]:
-    if i:
-        raise PermissionError("sed -i not supported on read-only GitHub mount")
-    if not texts:
-        raise ValueError("sed: usage: sed EXPRESSION [path]")
-    if paths and index is not None:
-        paths = await resolve_glob(accessor, paths, index)
-    return await generic_sed(
-        paths,
-        texts[0],
-        read_bytes=partial(github_read, index=index),
-        write_bytes=_write_readonly,
-        accessor=accessor,
-        stdin=stdin,
-        in_place=i,
-        suppress=n,
-        index=index,
-    )
+sed = make_sed(
+    resource="github",
+    glob_fn=resolve_glob,
+    glob_when=lambda accessor, index: index is not None,
+    make_read=lambda accessor, index, paths: partial(github_read, index=index),
+    inplace_error=(
+        PermissionError,
+        "sed -i not supported on read-only GitHub mount",
+    ),
+)

@@ -18,10 +18,13 @@ import sys
 import threading
 import time
 
-import mfusepy as fuse
+try:
+    import mfusepy as fuse
+except ImportError:
+    fuse = None
 
 from mirage.fuse.fs import MirageFS
-from mirage.workspace import Workspace
+from mirage.ops import Ops
 
 
 def _run_fuse(fs: MirageFS, mountpoint: str, foreground: bool) -> None:
@@ -32,20 +35,37 @@ def _run_fuse(fs: MirageFS, mountpoint: str, foreground: bool) -> None:
               direct_io=True)
 
 
-def mount_background(ws: Workspace,
+def _await_ready(thread: threading.Thread,
+                 mountpoint: str,
+                 timeout: float = 10.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if os.path.ismount(mountpoint):
+            return
+        if not thread.is_alive():
+            raise RuntimeError(
+                f"FUSE mount thread for {mountpoint!r} exited before the "
+                "mountpoint became live")
+        time.sleep(0.02)
+    raise TimeoutError(
+        f"FUSE mount at {mountpoint!r} did not become ready within "
+        f"{timeout:g}s")
+
+
+def mount_background(ops: Ops,
                      mountpoint: str,
                      agent_id: str | None = None,
                      root_prefix: str = "") -> threading.Thread:
-    fs = MirageFS(ws, agent_id=agent_id, root_prefix=root_prefix)
+    fs = MirageFS(ops, agent_id=agent_id, root_prefix=root_prefix)
     t = threading.Thread(target=_run_fuse,
                          args=(fs, mountpoint, True),
                          daemon=True)
     t.start()
-    time.sleep(0.3)
+    _await_ready(t, mountpoint)
     return t
 
 
-def mount(ws: Workspace | None = None,
+def mount(ops: Ops | None = None,
           mountpoint: str = "",
           foreground: bool = True,
           agent_id: str | None = None,
@@ -53,7 +73,7 @@ def mount(ws: Workspace | None = None,
           daemon: bool = False,
           post_fork=None) -> None:
     if fs is None:
-        fs = MirageFS(ws, agent_id=agent_id)
+        fs = MirageFS(ops, agent_id=agent_id)
     if daemon:
         pid = os.fork()
         if pid > 0:

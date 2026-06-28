@@ -15,9 +15,8 @@
 import os
 import shutil
 import tempfile
-import time
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.ram import RAMResource
 
 
@@ -32,20 +31,15 @@ def main() -> None:
     pinned = os.path.join(tempfile.gettempdir(),
                           f"mirage-fuse-data-{os.getpid()}")
     shutil.rmtree(pinned, ignore_errors=True)
-    with Workspace(
-        {
-            "/data": (data, MountMode.WRITE),
-            "/logs": (logs, MountMode.WRITE),
-        },
-            mode=MountMode.WRITE,
-            fuse_mounts={
-                "/data": pinned,
-                "/logs": True,
-            }) as ws:
-        time.sleep(1)
-        points = ws.fuse_mountpoints
-        data_mp = points["/data"]
-        logs_mp = points["/logs"]
+    # Mount via the public per-mount Mount spec (what examples/users write):
+    # /data pins its mountpoint and overrides the workspace default to WRITE;
+    # /logs gets a generated mountpoint and inherits the default READ.
+    with Workspace({
+            "/data": Mount(data, mode=MountMode.WRITE, fuse=pinned),
+            "/logs": Mount(logs, fuse=True),
+    }) as ws:
+        data_mp = ws.fuse_mountpoints["/data"]
+        logs_mp = ws.fuse_mountpoints["/logs"]
 
         with open(f"{data_mp}/a.txt", "rb") as fh:
             print(f"data_cat_a={fh.read().decode().strip()}")
@@ -54,6 +48,25 @@ def main() -> None:
         print(f"logs_size_b={os.path.getsize(f'{logs_mp}/b.txt')}")
         print(f"data_pinned={'yes' if data_mp == pinned else 'no'}")
         print(f"distinct_mounts={'yes' if data_mp != logs_mp else 'no'}")
+
+        write_ok = ws.mount("/data").mode == MountMode.WRITE
+        read_ok = ws.mount("/logs").mode == MountMode.READ
+        print(f"data_mode_is_write={'yes' if write_ok else 'no'}")
+        print(f"logs_mode_is_read={'yes' if read_ok else 'no'}")
+
+        try:
+            _ = ws.fuse_mountpoint
+            singular = "no"
+        except RuntimeError:
+            singular = "yes"
+        print(f"singular_raises_multi={singular}")
+
+        try:
+            ws.add_fuse_mount("/collide", pinned)
+            collision = "no"
+        except ValueError:
+            collision = "yes"
+        print(f"collision_rejected={collision}")
 
 
 if __name__ == "__main__":

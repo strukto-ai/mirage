@@ -2,7 +2,7 @@ import pytest
 from aioresponses import CallbackResult, aioresponses
 
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
-from mirage.commands.builtin.onedrive.cp import cp
+from mirage.commands.builtin.onedrive import COMMANDS
 from mirage.core.onedrive._client import GraphError
 from mirage.core.onedrive.copy import copy
 from mirage.core.onedrive.truncate import truncate
@@ -14,6 +14,9 @@ def _accessor(**kw) -> OneDriveAccessor:
 
 
 _BASE = "https://graph.microsoft.com/v1.0/me/drive"
+
+_cp = next(c for c in COMMANDS if any(
+    rc.name == "cp" for rc in getattr(c, "_registered_commands", [])))
 
 
 @pytest.mark.asyncio
@@ -96,10 +99,23 @@ async def test_cp_recursive_uses_server_side_folder_copy():
                       "file": {}
                   }]
               })
+        m.get(_BASE + "/root:/dst",
+              status=404,
+              payload={"error": {
+                  "code": "itemNotFound"
+              }})
+        m.get(_BASE + "/root:/src",
+              payload={
+                  "id": "0",
+                  "name": "src",
+                  "folder": {
+                      "childCount": 2
+                  }
+              })
         m.post(_BASE + "/root:/src:/copy", status=202, payload={})
-        _out, io = await cp.__wrapped__(_accessor(), [src, dst],
-                                        r=True,
-                                        index=None)
+        _out, io = await _cp.__wrapped__(_accessor(), [src, dst],
+                                         r=True,
+                                         index=None)
     assert set(io.writes) == {"/dst/a.txt", "/dst/sub/b.txt"}
 
 

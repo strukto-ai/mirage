@@ -137,7 +137,8 @@
                 "group": "Microsoft",
                 "icon": "microsoft",
                 "pages": [
-                  "home/setup/onedrive"
+                  "home/setup/onedrive",
+                  "home/setup/sharepoint"
                 ]
               },
               {
@@ -176,7 +177,8 @@
                   "home/setup/mongodb",
                   "home/setup/postgres",
                   "home/setup/chroma",
-                  "home/setup/lancedb"
+                  "home/setup/lancedb",
+                  "home/setup/qdrant"
                 ]
               },
               {
@@ -292,7 +294,8 @@
                 "group": "Microsoft",
                 "icon": "microsoft",
                 "pages": [
-                  "python/resource/onedrive"
+                  "python/resource/onedrive",
+                  "python/resource/sharepoint"
                 ]
               },
               {
@@ -329,7 +332,8 @@
                   "python/resource/mongodb",
                   "python/resource/postgres",
                   "python/resource/chroma",
-                  "python/resource/lancedb"
+                  "python/resource/lancedb",
+                  "python/resource/qdrant"
                 ]
               },
               {
@@ -480,7 +484,8 @@
                   "typescript/setup/mongodb",
                   "typescript/setup/postgres",
                   "typescript/setup/chroma",
-                  "typescript/setup/lancedb"
+                  "typescript/setup/lancedb",
+                  "typescript/setup/qdrant"
                 ]
               },
               {

@@ -53,6 +53,7 @@ const TOP1_ID = 'aaaa1111-2222-3333-4444-555566667777'
 const TOP2_ID = 'bbbb2222-3333-4444-5555-666677778888'
 const CHILD1_ID = 'cccc1111-2222-3333-4444-555566667777'
 const CHILD2_ID = 'dddd2222-3333-4444-5555-666677778888'
+const DB_ID = 'ffff1111-2222-3333-4444-555566667777'
 
 function topPage(id: string, title: string): Record<string, unknown> {
   return {
@@ -67,10 +68,10 @@ function topPage(id: string, title: string): Record<string, unknown> {
 }
 
 describe('notion readdir root', () => {
-  it('lists only the pages virtual root without any API call', async () => {
+  it('lists the pages and databases virtual roots without any API call', async () => {
     const transport = new FakeTransport()
     const out = await readdir(makeAccessor(transport), spec('/'), undefined)
-    expect(out).toEqual(['/pages'])
+    expect(out).toEqual(['/pages', '/databases'])
     expect(transport.invocations).toHaveLength(0)
   })
 
@@ -81,7 +82,7 @@ describe('notion readdir root', () => {
       new PathSpec({ original: '/notion', directory: '/notion', prefix: '/notion' }),
       undefined,
     )
-    expect(out).toEqual(['/notion/pages'])
+    expect(out).toEqual(['/notion/pages', '/notion/databases'])
   })
 
   it('returns an empty list for an unknown top-level dir', async () => {
@@ -157,6 +158,43 @@ describe('notion readdir pages', () => {
     expect(warm).toEqual(cold)
     expect(warm).toEqual([`/notion/pages/Top1__${TOP1_ID}`])
     expect(transport.invocations).toHaveLength(1)
+  })
+})
+
+describe('notion readdir databases', () => {
+  it('lists databases under the /databases virtual root', async () => {
+    const transport = new FakeTransport()
+    transport.enqueue('API-post-search', {
+      results: [
+        {
+          id: DB_ID,
+          object: 'database',
+          title: [{ plain_text: 'Tasks' }],
+          last_edited_time: '2024-02-03T00:00:00Z',
+        },
+      ],
+      has_more: false,
+      next_cursor: null,
+    })
+    const out = await readdir(makeAccessor(transport), spec('/databases'), undefined)
+    expect(out).toEqual([`/databases/Tasks__${DB_ID}`])
+    expect(transport.invocations[0]?.args).toEqual({
+      filter: { value: 'database', property: 'object' },
+      page_size: 100,
+    })
+  })
+
+  it('lists database row pages under a database directory', async () => {
+    const transport = new FakeTransport()
+    transport.enqueue('API-post-database-query', {
+      results: [topPage(TOP1_ID, 'Row A'), { id: 'x', object: 'database' }],
+      has_more: false,
+      next_cursor: null,
+    })
+    const dirPath = `/databases/Tasks__${DB_ID}`
+    const out = await readdir(makeAccessor(transport), spec(dirPath), undefined)
+    expect(out).toEqual([`${dirPath}/database.json`, `${dirPath}/Row_A__${TOP1_ID}`])
+    expect(transport.invocations[0]?.args).toEqual({ database_id: DB_ID, page_size: 100 })
   })
 })
 

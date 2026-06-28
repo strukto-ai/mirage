@@ -42,7 +42,7 @@ async function main(): Promise<void> {
   // Handle shutdown so the parent can stop us cleanly via SIGTERM.
   const shutdown = async (): Promise<void> => {
     try {
-      await fm.unmount(ws)
+      await fm.unmount()
     } finally {
       await ws.close()
       process.exit(0)

@@ -62,7 +62,6 @@ describe('ResourceName', () => {
     expect(ResourceName.DISCORD).toBe('discord')
     expect(ResourceName.GMAIL).toBe('gmail')
     expect(ResourceName.TRELLO).toBe('trello')
-    expect(ResourceName.TELEGRAM).toBe('telegram')
     expect(ResourceName.MONGODB).toBe('mongodb')
     expect(ResourceName.NOTION).toBe('notion')
     expect(ResourceName.LANGFUSE).toBe('langfuse')

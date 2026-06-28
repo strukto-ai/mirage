@@ -46,4 +46,5 @@ async def trello_card_label_remove(
     card = await card_remove_label(config, card_id=card_id, label_id=label_id)
     return yield_bytes(
         json.dumps(normalize_card(card),
-                   ensure_ascii=False).encode()), IOResult()
+                   ensure_ascii=False,
+                   separators=(",", ":")).encode()), IOResult()

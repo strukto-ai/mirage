@@ -43,6 +43,7 @@ def index():
                 id="C001",
                 name="general",
                 resource_type="discord/channel",
+                remote_time="794354201395200000",
                 vfs_name="general",
             ),
         ))
@@ -88,6 +89,7 @@ async def test_stat_channel(accessor, index):
                  directory="/My Server/channels/general"), index)
     assert result.type == FileType.DIRECTORY
     assert result.extra["channel_id"] == "C001"
+    assert result.modified == "2021-01-01T00:00:00Z"
 
 
 @pytest.mark.asyncio

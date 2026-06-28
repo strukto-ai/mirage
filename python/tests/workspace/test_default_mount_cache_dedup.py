@@ -34,6 +34,6 @@ async def test_cache_hit_does_not_double_store():
 
         assert size_after_second == size_after_first
         assert keys_second == keys_first
-        assert all(not k.startswith("/_default/") for k in keys_second)
+        assert all(k.startswith("/r/") for k in keys_second)
     finally:
         await ws.close()

@@ -1,0 +1,112 @@
+---
+title: Qdrant
+icon: database
+description: Set up the Qdrant resource in Python, including self-hosted Qdrant and Qdrant Cloud, with local or server-side semantic search.
+---
+
+The Qdrant resource mounts a [Qdrant](https://qdrant.tech/) collection as a filesystem: group-by payload
+fields become folders, points become files, and semantic search is the `search`
+command. See [Qdrant Resource](/python/resource/qdrant) for the full layout and
+command list.
+
+## Dependencies
+
+```bash
+uv add 'mirage-ai[qdrant]'
+```
+
+The `qdrant` extra installs `qdrant-client[fastembed]`. `fastembed` powers
+local, in-process query embedding for the `search` command; filesystem browsing
+(`ls`/`cat`/`find`/`grep`) needs only the base client.
+
+## Connection
+
+The same `QdrantConfig` works for self-hosted and cloud.
+
+### Self-hosted
+
+```python
+from mirage import MountMode, Workspace
+from mirage.resource.qdrant import QdrantConfig, QdrantResource
+
+config = QdrantConfig(
+    host="localhost",
+    port=6333,
+    collection="fashion",
+    group_by=["gender", "articleType", "baseColour"],
+    id_field="id",
+    text_field="productDisplayName",
+    blob_field="image_b64",
+    blob_ext="jpg",
+)
+ws = Workspace({"/fashion/": QdrantResource(config)}, mode=MountMode.READ)
+```
+
+### Qdrant Cloud
+
+Use `url` plus an `api_key`:
+
+```python
+import os
+
+config = QdrantConfig(
+    url="https://xyz.cloud.qdrant.io",
+    api_key=os.environ["QDRANT_API_KEY"],
+    collection="fashion",
+    group_by=["gender", "articleType", "baseColour"],
+    id_field="id",
+)
+ws = Workspace({"/fashion/": QdrantResource(config)}, mode=MountMode.READ)
+```
+
+## Search setup
+
+The `search` command embeds the query and runs Qdrant vector search. The
+collection must already store vectors produced by the same model
+(`embedding_model`, default `sentence-transformers/all-MiniLM-L6-v2`). Query
+embedding happens one of two ways:
+
+- **Local (default):** `fastembed` embeds the query in process.
+- **Server-side:** set `cloud_inference=True` to have an inference-enabled
+  Qdrant Cloud cluster embed the query. The query text is sent to the server
+  instead of being embedded locally.
+
+```python
+config = QdrantConfig(
+    url="https://xyz.cloud.qdrant.io",
+    api_key=os.environ["QDRANT_API_KEY"],
+    collection="fashion",
+    group_by=["gender"],
+    cloud_inference=True,
+    embedding_model="sentence-transformers/all-MiniLM-L6-v2",
+)
+```
+
+```bash
+search "red running shoes" /fashion          # ranked <path>.txt:score + content
+cat /fashion/Men/Shoes/White/3.txt            # follow a result to the real file
+```
+
+## Config reference
+
+| Field              | Required | Default                                     | Description                                                  |
+| ------------------ | -------- | ------------------------------------------- | ------------------------------------------------------------ |
+| `url`              | No       |                                             | Qdrant URL (Cloud or self-hosted); overrides `host`/`port`   |
+| `host`             | No       | `localhost`                                 | Host when `url` is unset                                     |
+| `port`             | No       | `6333`                                      | Port when `url` is unset                                     |
+| `https`            | No       | `false`                                     | Use TLS for `host`/`port` connections                        |
+| `api_key`          | No       |                                             | Qdrant Cloud API key                                         |
+| `collection`       | No       |                                             | Pin one collection; the mount root becomes that collection   |
+| `group_by`         | No       | `[]`                                        | Payload fields that become nested folder levels              |
+| `id_field`         | No       | `id`                                        | Field name shown for the point id; names point files         |
+| `text_field`       | No       |                                             | Payload field served as the `<id>.txt` embedded source text  |
+| `blob_field`       | No       |                                             | Payload field served as the raw blob/image file              |
+| `blob_ext`         | No       | `bin`                                       | Extension for the blob file (`jpg`, `png`, ...)              |
+| `vector_field`     | No       |                                             | Payload field holding a vector, omitted from `<id>.json`     |
+| `search_limit`     | No       | `10`                                        | Default top-k returned by `search`                           |
+| `max_rows`         | No       | `1000`                                      | Cap on points scanned per folder listing                     |
+| `embedding_model`  | No       | `sentence-transformers/all-MiniLM-L6-v2`    | Model used to embed the query                                |
+| `cloud_inference` | No       | `false`                                     | Embed the query server-side instead of with local fastembed  |
+
+The mount is read-only. See [Qdrant Resource](/python/resource/qdrant) for the
+filesystem layout and supported commands.

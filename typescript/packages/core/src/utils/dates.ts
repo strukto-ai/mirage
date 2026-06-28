@@ -16,3 +16,9 @@ export function utcDateFolder(ts?: number): string {
   const d = ts === undefined ? new Date() : new Date(ts)
   return d.toISOString().slice(0, 10)
 }
+
+// Truncated to whole seconds so this matches the Python epoch_to_iso byte
+// for byte (second precision).
+export function epochToIso(seconds: number): string {
+  return new Date(Math.floor(seconds) * 1000).toISOString().replace('.000Z', 'Z')
+}

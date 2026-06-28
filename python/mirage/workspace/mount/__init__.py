@@ -12,7 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.workspace.mount.mount import Mount
-from mirage.workspace.mount.registry import MountRegistry
+from mirage.workspace.mount.mount import MountEntry
+from mirage.workspace.mount.registry import (MountCommandUnsupported,
+                                             MountRegistry)
+from mirage.workspace.mount.spec import Mount
 
-__all__ = ["Mount", "MountRegistry"]
+__all__ = ["Mount", "MountCommandUnsupported", "MountEntry", "MountRegistry"]

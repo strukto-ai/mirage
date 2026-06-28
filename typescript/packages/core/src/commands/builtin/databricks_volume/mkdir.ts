@@ -37,7 +37,7 @@ async function mkdirCommand(
   const writes: Record<string, Uint8Array> = {}
   for (const path of resolved) {
     await dbxMkdir(accessor, path)
-    writes[path.original] = new Uint8Array()
+    writes[path.stripPrefix] = new Uint8Array()
     if (verbose) lines.push(`mkdir: created directory '${path.original}'`)
   }
   const output: ByteSource | null = lines.length > 0 ? ENC.encode(lines.join('\n') + '\n') : null

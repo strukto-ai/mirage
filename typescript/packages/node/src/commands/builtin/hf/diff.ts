@@ -14,6 +14,8 @@
 
 import { command, diffGeneric, specOf } from '@struktoai/mirage-core'
 import { stream as hfStream } from '../../../core/hf/stream.ts'
+import { readdir as hfReaddir } from '../../../core/hf/readdir.ts'
+import { stat as hfStat } from '../../../core/hf/stat.ts'
 import type { HfAccessor } from '../../../accessor/hf.ts'
 import { HF_RESOURCES } from '../../../accessor/hf.ts'
 
@@ -22,5 +24,11 @@ export const HF_DIFF = command({
   resource: [...HF_RESOURCES],
   spec: specOf('diff'),
   fn: (accessor: HfAccessor, paths, _texts, opts) =>
-    diffGeneric(paths, opts, (p) => hfStream(accessor, p)),
+    diffGeneric(
+      paths,
+      opts,
+      (p) => hfStream(accessor, p),
+      (p) => hfReaddir(accessor, p, opts.index ?? undefined),
+      (p) => hfStat(accessor, p, opts.index ?? undefined),
+    ),
 })

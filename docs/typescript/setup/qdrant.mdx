@@ -1,0 +1,74 @@
+---
+title: Qdrant
+icon: database
+description: Mount a Qdrant collection as a Mirage filesystem in TypeScript, with payload folders and a semantic search command.
+---
+
+`QdrantResource` exposes a [Qdrant](https://qdrant.tech/) collection as a read-only filesystem: group-by
+payload fields become nested folders, each point is a `.json` payload file (plus
+a `.txt` text file and an optional blob), and semantic search is the `search`
+command. The TypeScript backend mirrors the [Python one](/python/resource/qdrant)
+and returns identical results.
+
+## Install
+
+The client is browser-safe, so the resource ships in `core` and is available
+from both the Node and browser packages:
+
+```bash
+pnpm add @struktoai/mirage-node @qdrant/js-client-rest
+```
+
+```ts
+import { QdrantResource, MountMode, Workspace } from '@struktoai/mirage-node'
+
+const fashion = new QdrantResource({
+  config: {
+    url: 'https://xyz.cloud.qdrant.io',
+    apiKey: process.env.QDRANT_API_KEY,
+    collection: 'fashion',
+    groupBy: ['gender', 'articleType', 'baseColour'],
+    idField: 'id',
+    textField: 'productDisplayName',
+    blobField: 'image_b64',
+    blobExt: 'jpg',
+    searchLimit: 5,
+  },
+})
+
+const ws = new Workspace({ '/fashion/': fashion }, { mode: MountMode.READ })
+
+await ws.execute('ls /fashion/Men/Shoes/White')
+await ws.execute('search "red running shoes" /fashion') // ranked paths + score + content
+```
+
+## Filesystem layout
+
+```text
+/fashion/<gender>/<articleType>/<baseColour>/<id>.json  # full payload (metadata)
+/fashion/<gender>/<articleType>/<baseColour>/<id>.txt   # embedded source text
+/fashion/<gender>/<articleType>/<baseColour>/<id>.jpg   # raw blob bytes
+```
+
+`<id>` is the Qdrant point id. Semantic search is the `search` command, not a
+path: it returns ranked points as the canonical `<id>.txt` (or `<id>.json`) paths
+above, annotated with the similarity score.
+
+## Search embedding
+
+The query is embedded **server-side**: the TypeScript client sends the query
+text to Qdrant, so the cluster must have inference enabled (Qdrant Cloud) and
+store vectors from the same `embeddingModel`
+(default `sentence-transformers/all-MiniLM-L6-v2`). Browsing
+(`ls`/`cat`/`find`/`grep`) needs no embedding.
+
+## Supported commands
+
+`ls`, `cd`, `tree`, `cat`, `stat`, `find`, `wc`, `head`, `tail`, and `search`. `grep`/`rg` stay
+lexical; `search "<query>" <path>` is the semantic command, returning ranked
+points as canonical `<id>.txt` (or `<id>.json`) paths plus a score, so results
+compose with `cat`, `wc`, and pipes. Flags: `--top-k`, `--threshold`, `--method semantic`.
+
+Folder listings filter on payload fields. A filtered listing scrolls first and
+only creates keyword payload indexes for the `groupBy` fields if Qdrant reports
+one is required. `maxRows` caps how many points are scanned per folder.

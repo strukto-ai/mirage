@@ -55,6 +55,16 @@ async def test_find_by_name(store):
 
 
 @pytest.mark.asyncio
+async def test_find_name_matches_mount_root_start_path(store):
+    results = await find(store,
+                         PathSpec(original="/data",
+                                  directory="/data",
+                                  prefix="/data"),
+                         name="data")
+    assert results == ["/"]
+
+
+@pytest.mark.asyncio
 async def test_find_by_type_file(store):
     results = await find(store,
                          PathSpec(original="/src", directory="/src"),

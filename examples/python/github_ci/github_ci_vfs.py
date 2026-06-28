@@ -49,7 +49,7 @@ async def main():
             print(f"  {wf}")
 
         if workflows:
-            wf_path = workflows[0]
+            wf_path = f"/ci/workflows/{workflows[0]}"
             print(f"\n--- open() + read {wf_path} ---")
             with open(wf_path) as f:
                 data = json.loads(f.read())
@@ -65,26 +65,25 @@ async def main():
             print(f"  ... ({len(runs)} total)")
 
         if runs:
-            run = runs[0]
-            print(f"\n--- os.listdir() {run} ---")
-            contents = vos.listdir(run)
+            run_path = f"/ci/runs/{runs[0]}"
+            print(f"\n--- os.listdir() {run_path} ---")
+            contents = vos.listdir(run_path)
             for c in contents:
                 print(f"  {c}")
 
-            run_json_path = [c for c in contents if c.endswith("run.json")]
-            if run_json_path:
+            if "run.json" in contents:
                 print("\n--- open() + read run.json ---")
-                with open(run_json_path[0]) as f:
+                with open(f"{run_path}/run.json") as f:
                     data = json.loads(f.read())
                 print(f"  status: {data.get('status')}")
                 print(f"  conclusion: {data.get('conclusion')}")
                 print(f"  event: {data.get('event')}")
                 print(f"  branch: {data.get('head_branch')}")
 
-            jobs_dir = [c for c in contents if c.endswith("/jobs")]
-            if jobs_dir:
+            if "jobs" in contents:
+                jobs_path = f"{run_path}/jobs"
                 print("\n--- os.listdir() jobs ---")
-                jobs = vos.listdir(jobs_dir[0])
+                jobs = vos.listdir(jobs_path)
                 for j in jobs[:10]:
                     print(f"  {j}")
 
@@ -93,7 +92,7 @@ async def main():
 
                 if json_jobs:
                     print("\n--- open() + read job .json ---")
-                    with open(json_jobs[0]) as f:
+                    with open(f"{jobs_path}/{json_jobs[0]}") as f:
                         data = json.loads(f.read())
                     print(f"  name: {data.get('name')}")
                     print(f"  status: {data.get('status')}")
@@ -106,7 +105,7 @@ async def main():
 
                 if log_jobs:
                     print("\n--- open() + read job .log (first 10 lines) ---")
-                    with open(log_jobs[0]) as f:
+                    with open(f"{jobs_path}/{log_jobs[0]}") as f:
                         for i, line in enumerate(f):
                             if i >= 10:
                                 print("  ...")

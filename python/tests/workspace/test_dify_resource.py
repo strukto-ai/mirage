@@ -50,7 +50,7 @@ def test_workspace_mount_registers_dify_commands_and_ops():
     assert "stat" in mount.commands()
     assert "tree" in mount.commands()
     assert "uniq" in mount.commands()
-    assert "du" not in mount.commands()
+    assert "du" in mount.commands()
     assert "read" in mount.registered_ops()
     assert "stat" in mount.registered_ops()
 

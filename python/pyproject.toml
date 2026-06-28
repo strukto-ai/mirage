@@ -109,6 +109,9 @@ langfuse = ["langfuse>=4.2.0"]
 # thin HTTP-only client; the accessor uses AsyncHttpClient exclusively
 chroma   = ["chromadb-client>=1.0.0"]
 
+# --- qdrant ---
+qdrant   = ["qdrant-client[fastembed]>=1.18.0"]
+
 # --- anthropic ---
 anthropic   = ["anthropic>=0.88"]
 
@@ -163,6 +166,7 @@ all = [
     "mirage-ai[pdf]",
     "mirage-ai[langfuse]",
     "mirage-ai[chroma]",
+    "mirage-ai[qdrant]",
     "mirage-ai[anthropic]",
     "mirage-ai[openai]",
     "mirage-ai[pydantic-ai]",

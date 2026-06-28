@@ -69,7 +69,7 @@ async def test_stat_board_entry(accessor, index):
             id="b1",
             name="Product Roadmap",
             resource_type="trello/board",
-            remote_time="",
+            remote_time="2026-04-05T00:00:00.000Z",
             vfs_name="Product_Roadmap__b1",
         ),
     )
@@ -80,6 +80,7 @@ async def test_stat_board_entry(accessor, index):
     )
     assert result.type == FileType.DIRECTORY
     assert result.extra["board_id"] == "b1"
+    assert result.modified == "2026-04-05T00:00:00.000Z"
 
 
 @pytest.mark.asyncio

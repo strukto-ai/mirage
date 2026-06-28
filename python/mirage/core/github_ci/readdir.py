@@ -67,6 +67,7 @@ async def readdir(
                 name=wf.get("name", ""),
                 resource_type="ci/workflow",
                 vfs_name=filename,
+                remote_time=wf.get("updated_at", ""),
             )
             entries.append((filename, entry))
             names.append(f"{prefix}/{key}/{filename}")
@@ -204,6 +205,7 @@ async def readdir(
                 resource_type="ci/artifact",
                 vfs_name=filename,
                 size=a.get("size_in_bytes"),
+                remote_time=a.get("updated_at", ""),
             )
             entries.append((filename, entry))
             names.append(f"{prefix}/{key}/{filename}")

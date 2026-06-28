@@ -12,12 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import pytest
-
 
 def test_patch_N(env):
-    if env.resource_type in ("s3", "disk"):
-        pytest.skip("s3/disk patch has a known await bug")
     env.create_file("f.txt", b"hello\nworld\n")
     patch_content = (b"--- a/f.txt\n"
                      b"+++ b/f.txt\n"
@@ -32,8 +28,6 @@ def test_patch_N(env):
 
 
 def test_patch_R(env):
-    if env.resource_type in ("s3", "disk"):
-        pytest.skip("s3/disk patch has a known await bug")
     env.create_file("f.txt", b"goodbye\nworld\n")
     patch_content = (b"--- a/f.txt\n"
                      b"+++ b/f.txt\n"

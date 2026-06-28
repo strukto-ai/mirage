@@ -25,6 +25,10 @@ quickstart.md
 /knowledge/guides/quickstart.md
 /knowledge/policies/privacy.md
 /knowledge/policies/refunds.md
+=== find_root_maxdepth0 ===
+/knowledge
+=== find_root_name ===
+/knowledge
 === grep_cold_single ===
 Authentication uses bearer tokens via the Authorization header.
 === grep_warm_single ===

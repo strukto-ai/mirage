@@ -46,7 +46,7 @@ async function main(): Promise<void> {
     if (cleaned) return
     cleaned = true
     void (async (): Promise<void> => {
-      try { await fm.close(ws) } catch {}
+      try { await fm.close() } catch {}
       try { await ws.close() } catch {}
       console.error(`\n>>> unmounted ${mp}`)
       process.exit(sig === 'SIGINT' ? 130 : 143)

@@ -1677,8 +1677,8 @@ def test_cross_mount_diff_different():
     io = _exec(ws, "diff /disk/a.txt /ram/b.txt")
     assert io.exit_code == 1
     out = _stdout(io)
-    assert b"---" in out
-    assert b"+++" in out
+    assert b"< aaa" in out
+    assert b"> bbb" in out
 
 
 def test_cross_mount_cmp_same():
@@ -2379,11 +2379,11 @@ def test_unmount_closes_resource_when_owned():
 
 
 def test_unmount_rejects_reserved_prefixes():
-    """unmount of cache root / history view / dev / unknown prefix raises."""
+    """unmount of virtual root / history view / dev / unknown prefix raises."""
     ws = _ws()
     import pytest
 
-    with pytest.raises(ValueError, match="cache root"):
+    with pytest.raises(ValueError, match="virtual root"):
         asyncio.run(ws.unmount("/"))
     with pytest.raises(ValueError, match="history view"):
         asyncio.run(ws.unmount("/.bash_history"))

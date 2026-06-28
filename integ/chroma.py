@@ -171,6 +171,8 @@ CASES: list[tuple[str, str]] = [
     ("tree", "tree {root}"),
     ("find_md", "find {root} -name '*.md'"),
     ("find_type_f", "find {root} -type f | sort"),
+    ("find_root_maxdepth0", "find {root} -maxdepth 0"),
+    ("find_root_name", "find {root} -name knowledge"),
     # cold (bespoke) then warm (cache-mount generic) must be identical
     ("grep_cold_single", "grep bearer {root}guides/auth.md"),
     ("grep_warm_single", "grep bearer {root}guides/auth.md"),

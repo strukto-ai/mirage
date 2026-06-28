@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.cache.read_through import cached_prefix_bytes
 from mirage.commands.builtin.generic.head import head as generic_head
 from mirage.commands.builtin.generic.head import head_multi
 from mirage.commands.builtin.utils.stream import _resolve_source
@@ -43,10 +44,13 @@ async def head(
     c_int = int(c) if c is not None else None
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        # Single file with -c: fetch only the first c_int bytes via a range
-        # request instead of streaming the whole file.
+        # Single file with -c: serve the first c_int bytes from the cache
+        # when warm, otherwise fetch only those bytes via a range request
+        # instead of streaming the whole file.
         if len(paths) == 1 and c_int is not None:
-            data = await range_read(accessor, paths[0], 0, c_int)
+            data = await cached_prefix_bytes(paths[0], c_int)
+            if data is None:
+                data = await range_read(accessor, paths[0], 0, c_int)
             return yield_bytes(data), IOResult()
         return head_multi(paths,
                           read=read_stream,

@@ -14,11 +14,10 @@
 
 import json
 import os
-import time
 
 from dotenv import load_dotenv
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.resource.trello import TrelloConfig, TrelloResource
 
 load_dotenv(".env.development")
@@ -29,20 +28,20 @@ config = TrelloConfig(
 )
 resource = TrelloResource(config=config)
 
-with Workspace({"/trello/": resource}, mode=MountMode.READ, fuse=True) as ws:
-    time.sleep(1)
+with Workspace({"/trello/": Mount(resource, mode=MountMode.READ,
+                                  fuse=True)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
 
     print("--- os.listdir() workspaces ---")
-    workspaces = os.listdir(f"{mp}/trello/workspaces")
+    workspaces = os.listdir(f"{mp}/workspaces")
     for w in workspaces[:5]:
         print(f"  {w}")
 
     if workspaces:
         workspace = workspaces[0]
-        ws_path = f"{mp}/trello/workspaces/{workspace}"
+        ws_path = f"{mp}/workspaces/{workspace}"
 
         print(f"\n--- os.listdir() {workspace} ---")
         contents = os.listdir(ws_path)
@@ -58,7 +57,7 @@ with Workspace({"/trello/": resource}, mode=MountMode.READ, fuse=True) as ws:
 
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> Open another terminal and run:")
-    print(f">>>   ls {mp}/trello/workspaces/")
+    print(f">>>   ls {mp}/workspaces/")
     print(">>> Press Enter to unmount and exit...")
     input()
 

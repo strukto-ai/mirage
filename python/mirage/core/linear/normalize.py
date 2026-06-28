@@ -149,5 +149,7 @@ def to_jsonl_bytes(rows: list[dict]) -> bytes:
     ordered = sorted(rows, key=lambda row: row.get("created_at") or "")
     if not ordered:
         return b""
-    text = "\n".join(json.dumps(row, ensure_ascii=False) for row in ordered)
+    text = "\n".join(
+        json.dumps(row, ensure_ascii=False, separators=(",", ":"))
+        for row in ordered)
     return text.encode() + b"\n"

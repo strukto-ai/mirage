@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from cases import run_cases  # noqa: E402
+from cases import assert_real_mtime, run_cases  # noqa: E402
 
 from mirage import MountMode, Workspace  # noqa: E402
 from mirage.observe.disk_store import DiskObserverStore  # noqa: E402
@@ -35,6 +35,7 @@ async def main() -> None:
                        mode=MountMode.WRITE,
                        observe=DiskObserverStore(obs_root))
         await run_cases(ws)
+        await assert_real_mtime(ws)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
         shutil.rmtree(obs_root, ignore_errors=True)

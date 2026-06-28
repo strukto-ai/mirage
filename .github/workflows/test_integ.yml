@@ -70,6 +70,13 @@ jobs:
               - 'python/mirage/core/chroma/**'
               - 'python/mirage/commands/builtin/chroma/**'
               - 'python/mirage/resource/chroma/**'
+              - 'integ/qdrant.py'
+              - 'integ/qdrant.ts'
+              - 'integ/truth_qdrant.txt'
+              - 'python/mirage/accessor/qdrant.py'
+              - 'python/mirage/core/qdrant/**'
+              - 'python/mirage/commands/builtin/qdrant/**'
+              - 'python/mirage/resource/qdrant/**'
               - 'typescript/**'
               - '.github/workflows/test_integ.yml'
             data:
@@ -122,7 +129,7 @@ jobs:
     env:
       REDIS_URL: redis://localhost:6379/0
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -173,6 +180,16 @@ jobs:
           ./python/.venv/bin/python integ/s3_cases.py > /tmp/s3_cases.out
           diff integ/truth.txt /tmp/s3_cases.out
 
+      - name: Run onedrive integ (fake Graph) and diff against truth
+        run: |
+          ./python/.venv/bin/python integ/onedrive.py > /tmp/onedrive.out
+          diff integ/truth_onedrive.txt /tmp/onedrive.out
+
+      - name: Run shared command suite on onedrive (fake Graph) and diff against shared truth
+        run: |
+          ./python/.venv/bin/python integ/onedrive_cases.py > /tmp/onedrive_cases.out
+          diff integ/truth.txt /tmp/onedrive_cases.out
+
       - name: Run lancedb integ (embedded) and diff against truth
         run: |
           ./python/.venv/bin/python integ/lancedb.py > /tmp/lancedb.out
@@ -182,6 +199,12 @@ jobs:
         run: |
           ./python/.venv/bin/python integ/find_arg_errors.py > /tmp/fae.out
           diff integ/truth_find_arg_errors.txt /tmp/fae.out
+
+      - name: Run cross-mount commands (ram -> ram/redis/s3 via moto)
+        run: ./python/.venv/bin/python integ/cross_commands.py
+
+      - name: Run virtual-root mount switching (ram/disk/yaml)
+        run: ./python/.venv/bin/python integ/root.py
 
   integ-ts:
     needs: changes
@@ -205,7 +228,7 @@ jobs:
       AWS_ACCESS_KEY_ID: minio
       AWS_SECRET_ACCESS_KEY: minio123
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Node
         uses: actions/setup-node@v6
@@ -249,8 +272,14 @@ jobs:
 
       - name: Create MinIO bucket
         run: |
-          curl -sSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /tmp/mc
-          chmod +x /tmp/mc
+          for i in 1 2 3; do
+            if curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /tmp/mc \
+               && chmod +x /tmp/mc && /tmp/mc --version >/dev/null 2>&1; then
+              break
+            fi
+            echo "mc download attempt $i failed; retrying"; sleep 3
+          done
+          /tmp/mc --version
           /tmp/mc alias set local http://localhost:9000 minio minio123
           /tmp/mc mb local/mirage-integ || true
           /tmp/mc mb local/mirage-integ-s3 || true
@@ -339,11 +368,15 @@ jobs:
         image: chromadb/chroma:latest
         ports:
           - 8000:8000
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports:
+          - 6333:6333
     env:
       MONGODB_URI: mongodb://localhost:27017/?replicaSet=rs0
       POSTGRES_DSN: postgres://mirage:mirage@localhost:5432/mirage_integ
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -366,6 +399,15 @@ jobs:
             sleep 1
           done
           echo "ChromaDB did not become healthy" >&2
+          exit 1
+
+      - name: Wait for Qdrant
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:6333/readyz && exit 0
+            sleep 1
+          done
+          echo "Qdrant did not become healthy" >&2
           exit 1
 
       - name: Start MongoDB replica set
@@ -402,6 +444,11 @@ jobs:
           ./python/.venv/bin/python integ/chroma.py > /tmp/chroma.out
           diff integ/truth_chroma.txt /tmp/chroma.out
 
+      - name: Run qdrant integ and diff against truth
+        run: |
+          ./python/.venv/bin/python integ/qdrant.py > /tmp/qdrant.out
+          diff integ/truth_qdrant.txt /tmp/qdrant.out
+
   integ-database-ts:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.database == 'true') }}
@@ -424,11 +471,15 @@ jobs:
         image: chromadb/chroma:latest
         ports:
           - 8000:8000
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports:
+          - 6333:6333
     env:
       MONGODB_URI: mongodb://localhost:27017/?replicaSet=rs0
       POSTGRES_DSN: postgres://mirage:mirage@localhost:5432/mirage_integ
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Node
         uses: actions/setup-node@v6
@@ -476,6 +527,15 @@ jobs:
             sleep 1
           done
 
+      - name: Wait for Qdrant
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:6333/readyz && exit 0
+            sleep 1
+          done
+          echo "Qdrant did not become healthy" >&2
+          exit 1
+
       - name: Run MongoDB backend (TS) and check against truth
         shell: bash
         working-directory: integ
@@ -498,6 +558,12 @@ jobs:
           pnpm exec tsx chroma.ts > /tmp/ts-chroma.out
           diff truth_chroma.txt /tmp/ts-chroma.out
 
+      - name: Run TS qdrant integ and diff against truth
+        working-directory: integ
+        run: |
+          pnpm exec tsx qdrant.ts > /tmp/ts-qdrant.out
+          diff truth_qdrant.txt /tmp/ts-qdrant.out
+
   integ-data:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.data == 'true') }}
@@ -517,7 +583,7 @@ jobs:
       NEXTCLOUD_USERNAME: admin
       NEXTCLOUD_PASSWORD: admin123
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -574,7 +640,7 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.ssh == 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -600,7 +666,7 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.ssh == 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Node
         uses: actions/setup-node@v6
@@ -635,7 +701,7 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.fuse == 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install libfuse (fusermount3 + libfuse2 for mfusepy, libfuse3 headers for fuse-native)
         run: |

@@ -51,7 +51,7 @@ async def main() -> None:
 
         if sheets:
             first = sheets[0]
-            path = f"/gsheets{first}"
+            path = f"/gsheets/owned/{first}"
             print("\n--- open() + read first spreadsheet ---")
             with open(path) as f:
                 content = f.read()

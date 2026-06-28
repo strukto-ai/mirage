@@ -52,6 +52,11 @@ async def main() -> None:
     print("=== cat it back ===")
     print(await (await ws.execute(f"cat {TEST_FILE}")).stdout_str())
 
+    print("=== sed read-transform: cat | sed 's/hello/HELLO/' ===")
+    print(await
+          (await
+           ws.execute(f"cat {TEST_FILE} | sed 's/hello/HELLO/'")).stdout_str())
+
     print("=== stat (fingerprint = cTag) ===")
     print(await (await ws.execute(f"stat {TEST_FILE}")).stdout_str())
 

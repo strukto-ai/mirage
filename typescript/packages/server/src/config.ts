@@ -207,20 +207,10 @@ function readProcessEnv(): Record<string, string> {
 }
 
 export function loadWorkspaceConfig(
-  source: string | Record<string, unknown>,
+  source: Record<string, unknown>,
   env?: Record<string, string>,
 ): WorkspaceConfigRaw {
-  let raw: Record<string, unknown>
-  if (typeof source === 'string') {
-    const text = readFileSync(source, 'utf-8')
-    const parsed: unknown = parseYaml(text)
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error(`config source must be a mapping`)
-    }
-    raw = parsed as Record<string, unknown>
-  } else {
-    raw = { ...source }
-  }
+  const raw = { ...source }
   const useEnv = env ?? readProcessEnv()
   const interpolated = interpolateEnv(raw, useEnv)
   const normalized = normalizeConfigKeys(interpolated)
@@ -236,6 +226,18 @@ export function loadWorkspaceConfig(
   return normalized as unknown as WorkspaceConfigRaw
 }
 
+export function loadWorkspaceConfigFile(
+  path: string,
+  env?: Record<string, string>,
+): WorkspaceConfigRaw {
+  const text = readFileSync(path, 'utf-8')
+  const parsed: unknown = parseYaml(text)
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`config source must be a mapping`)
+  }
+  return loadWorkspaceConfig(parsed as Record<string, unknown>, env)
+}
+
 export interface WorkspaceArgs {
   resources: Record<string, [Resource, MountMode, Record<string, CommandSafeguard>]>
   options: {
@@ -243,10 +245,10 @@ export interface WorkspaceArgs {
     consistency: ConsistencyPolicy
     sessionId: string
     agentId: string
-    fuseMounts?: Record<string, boolean | string>
     cache?: FileCache & Resource
     index?: IndexConfig
   }
+  fuseMounts: Record<string, boolean | string>
 }
 
 function buildCache(
@@ -303,9 +305,9 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
       consistency,
       sessionId: cfg.defaultSessionId ?? 'default',
       agentId: cfg.defaultAgentId ?? 'default',
-      ...(Object.keys(fuseMounts).length > 0 ? { fuseMounts } : {}),
       ...(cache !== undefined ? { cache } : {}),
       ...(index !== undefined ? { index } : {}),
     },
+    fuseMounts,
   }
 }

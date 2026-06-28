@@ -34,7 +34,7 @@
     "mailparser": "^3.9.8",
     "mongodb": "^7.2.0",
     "mongodb-memory-server": "^11.1.0",
-    "nodemailer": "^8.0.7",
+    "nodemailer": "^9.0.1",
     "pyodide": "^0.29.3",
     "redis": "^5.0.0",
     "tsx": "^4.20.0",

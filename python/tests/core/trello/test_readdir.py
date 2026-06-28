@@ -60,6 +60,22 @@ async def test_readdir_workspaces(accessor, index):
 
 
 @pytest.mark.asyncio
+async def test_readdir_workspaces_keeps_prefix_on_warm_cache_hit(
+        accessor, index):
+    workspaces = [{"id": "ws1", "displayName": "Engineering", "name": "eng"}]
+    spec = PathSpec(original="trello/workspaces",
+                    directory="trello/workspaces",
+                    prefix="trello")
+    with patch("mirage.core.trello.readdir.list_workspaces",
+               new_callable=AsyncMock,
+               return_value=workspaces):
+        cold = await readdir(accessor, spec, index)
+        warm = await readdir(accessor, spec, index)
+    assert cold == ["trello/workspaces/Engineering__ws1"]
+    assert warm == cold
+
+
+@pytest.mark.asyncio
 async def test_readdir_workspace_entry(accessor, index):
     await index.put(
         "/workspaces/Engineering__ws1",

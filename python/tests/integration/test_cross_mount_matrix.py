@@ -161,11 +161,18 @@ def _populate_file(state: _MountState, name: str, content: bytes,
         state.gdrive.add_file(name, content)
 
 
-async def _ls_for_index(ws: Workspace, mount_path: str, name: str) -> None:
+async def _ls_for_index(ws: Workspace, state: "_MountState",
+                        name: str) -> None:
+    mount_path = state.mount_path
     parts = name.strip("/").split("/")
     for i in range(len(parts)):
         sub = "/".join(parts[:i])
         path = f"{mount_path}/{sub}".rstrip("/") or mount_path
+        # Files are seeded straight into the backend, bypassing the mirage
+        # write path that would normally invalidate the parent listing, so a
+        # previously warmed (now stale) index entry must be dropped before the
+        # ls re-lists it.
+        await state.resource.index.invalidate_dir(path)
         await ws.execute(f"ls {path}")
 
 
@@ -190,7 +197,7 @@ class CrossMountEnv:
         state = self.m1 if mount_idx == 1 else self.m2
         _populate_file(state, name, content, self.buckets)
         if state.ptype == "gdrive":
-            asyncio.run(_ls_for_index(self.ws, state.mount_path, name))
+            asyncio.run(_ls_for_index(self.ws, state, name))
 
     def run(self, cmd: str) -> str:
 
@@ -344,8 +351,6 @@ def test_mv_cross(cross):
 
 
 def test_cp_recursive_cross(cross):
-    if cross.src_type == "gdrive":
-        pytest.skip("gdrive recursive-source listing tracked as a follow-up")
     cross.create_file(1, "tree/a.txt", b"aaa\n")
     cross.create_file(1, "tree/sub/b.txt", b"bbb\n")
     code = cross.exit("cp -r /m1/tree /m2/copied")
@@ -360,8 +365,6 @@ def test_cp_recursive_cross(cross):
 
 
 def test_mv_recursive_cross(cross):
-    if cross.src_type == "gdrive":
-        pytest.skip("gdrive recursive-source listing tracked as a follow-up")
     cross.create_file(1, "tree/a.txt", b"aaa\n")
     cross.create_file(1, "tree/sub/b.txt", b"bbb\n")
     code = cross.exit("mv /m1/tree /m2/moved")

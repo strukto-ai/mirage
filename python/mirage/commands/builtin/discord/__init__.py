@@ -12,9 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.discord.basename import basename
-from mirage.commands.builtin.discord.cat import cat
-from mirage.commands.builtin.discord.dirname import dirname
 from mirage.commands.builtin.discord.discord_add_reaction import \
     discord_add_reaction
 from mirage.commands.builtin.discord.discord_get_server_info import \
@@ -26,35 +23,43 @@ from mirage.commands.builtin.discord.discord_send_message import \
 from mirage.commands.builtin.discord.find import find
 from mirage.commands.builtin.discord.grep import grep
 from mirage.commands.builtin.discord.head import head
-from mirage.commands.builtin.discord.jq import jq
-from mirage.commands.builtin.discord.ls import ls
-from mirage.commands.builtin.discord.realpath import realpath
 from mirage.commands.builtin.discord.rg import rg
-from mirage.commands.builtin.discord.stat import stat
-from mirage.commands.builtin.discord.tail import tail
-from mirage.commands.builtin.discord.tree import tree
-from mirage.commands.builtin.discord.wc import wc
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
+from mirage.commands.builtin.generic_bind import (CommandIO,
+                                                  make_generic_commands)
+from mirage.commands.builtin.generic_bind.provision import metadata_provision
 from mirage.core.discord.glob import resolve_glob as _ft_resolve_glob
-from mirage.core.discord.read import read as _ft_read
+from mirage.core.discord.read import read as _read
+from mirage.core.discord.readdir import readdir as _readdir
+from mirage.core.discord.stat import stat as _stat
+from mirage.core.discord.stream import read_stream as _read_stream
+
+# Channel history is read through the generic factory; grep/rg/find/head are
+# bespoke (channel search push-down, history pagination, channel-aware walk)
+# and writes go through the discord_* commands, so the generic byte-mutation
+# commands are absent.
+_DISCORD_CMD_OPS = CommandIO(
+    readdir=_readdir,
+    read_bytes=_read,
+    read_stream=_read_stream,
+    stat=_stat,
+    is_mounted=lambda a: True,
+    local=False,
+)
 
 COMMANDS = [
     *make_filetype_commands(
-        "discord", _ft_resolve_glob, _ft_read, read_takes_index=True),
-    basename,
-    cat,
-    dirname,
+        "discord", _ft_resolve_glob, _read, read_takes_index=True),
+    *make_generic_commands(
+        "discord",
+        _DISCORD_CMD_OPS,
+        overrides={"grep", "rg", "find", "head"},
+        provision_overrides={"ls": metadata_provision},
+    ),
     find,
     grep,
-    head,
-    jq,
-    ls,
-    realpath,
     rg,
-    stat,
-    tail,
-    tree,
-    wc,
+    head,
     discord_send_message,
     discord_add_reaction,
     discord_list_members,

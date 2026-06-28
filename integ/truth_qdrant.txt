@@ -1,0 +1,100 @@
+=== ls_root ===
+cat
+dog
+=== ls_group ===
+big
+small
+=== ls_leaf ===
+1.json
+1.txt
+=== tree ===
+├── cat
+│   ├── big
+│   │   ├── 1.json
+│   │   └── 1.txt
+│   └── small
+│       ├── 2.json
+│       └── 2.txt
+└── dog
+    ├── big
+    │   ├── 3.json
+    │   └── 3.txt
+    └── small
+        ├── 4.json
+        └── 4.txt
+=== find_txt ===
+/db/cat/big/1.txt
+/db/cat/small/2.txt
+/db/dog/big/3.txt
+/db/dog/small/4.txt
+=== find_json ===
+/db/cat/big/1.json
+/db/cat/small/2.json
+/db/dog/big/3.json
+/db/dog/small/4.json
+=== cat_txt ===
+a big orange cat
+=== cat_json ===
+{"label":"cat","kind":"big","name":"a big orange cat","id":1}
+=== wc_c_txt ===
+17 /db/cat/big/1.txt
+=== grep_text ===
+a big orange cat
+=== grep_json_field ===
+{"label":"cat","kind":"big","name":"a big orange cat","id":1}
+=== grep_i ===
+a big orange cat
+=== grep_n ===
+1:{"label":"cat","kind":"big","name":"a big orange cat","id":1}
+=== grep_c ===
+1
+=== grep_o ===
+cat
+cat
+=== grep_w ===
+{"label":"cat","kind":"big","name":"a big orange cat","id":1}
+=== grep_F_literal ===
+a big orange cat
+=== grep_E_alt ===
+a big orange cat
+=== grep_v ===
+a big orange cat
+=== grep_multi ===
+/db/cat/small/2.json:{"label":"cat","kind":"small","name":"a small grey cat","id":2}
+/db/dog/small/4.json:{"label":"dog","kind":"small","name":"a small white dog","id":4}
+=== grep_r_group ===
+/db/cat/big/1.json:{"label":"cat","kind":"big","name":"a big orange cat","id":1}
+/db/cat/big/1.txt:a big orange cat
+=== grep_rl ===
+/db/cat/big/1.json
+/db/cat/big/1.txt
+/db/cat/small/2.json
+/db/cat/small/2.txt
+=== pipe_grep_stdin ===
+{"label":"cat","kind":"big","name":"a big orange cat","id":1}
+=== rg_basic ===
+a big orange cat
+=== grep_q_match ===
+exit=0
+=== grep_q_no_match ===
+exit=1
+=== grep_no_match ===
+exit=1
+=== nf_cat ===
+exit=1
+cat: /db/cat/big/__nf_missing__.json: No such file or directory
+=== nf_head ===
+exit=1
+head: /db/cat/big/__nf_missing__.json: No such file or directory
+=== nf_tail ===
+exit=1
+tail: /db/cat/big/__nf_missing__.json: No such file or directory
+=== nf_wc ===
+exit=1
+wc: /db/cat/big/__nf_missing__.json: No such file or directory
+=== nf_stat ===
+exit=1
+stat: /db/cat/big/__nf_missing__.json: No such file or directory
+=== nf_grep ===
+exit=1
+grep: /db/cat/big/__nf_missing__.json: No such file or directory

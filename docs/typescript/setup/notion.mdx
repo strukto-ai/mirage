@@ -63,4 +63,46 @@ notion-block-append --params '{"block_id":"..."}' --json '{"children":[...]}'
 notion-comment-add --json '{"parent":{"page_id":"..."},"rich_text":[{"text":{"content":"Comment"}}]}'
 ```
 
-For the page/database layout and supported edits see the [Python Notion docs](/python/resource/notion).
+## Layout
+
+```text
+/notion/
+  pages/
+    <page-title>__<page-id>/
+      page.json
+      <child-page-title>__<child-id>/
+        page.json
+        ...
+  databases/
+    <database-title>__<database-id>/
+      database.json
+      <row-page-title>__<page-id>/
+        page.json
+        ...
+```
+
+`database.json` is the database's identity plus its typed column schema,
+with no rows inline; `ls` the database directory to enumerate row pages.
+The shape is identical to the Python connector:
+
+```json
+{
+  "database_id": "2c4d6a7f-5bf3-8036-bed2-d1c95826f76b",
+  "title": "Item",
+  "url": "https://www.notion.so/2c4d6a7f5bf38036bed2d1c95826f76b",
+  "created_time": "2025-12-09T23:36:00.000Z",
+  "last_edited_time": "2026-04-15T12:30:00.000Z",
+  "parent": { "type": "workspace", "workspace": true },
+  "archived": false,
+  "is_inline": false,
+  "properties": {
+    "Name": { "id": "title", "type": "title", "title": {} },
+    "Number": { "id": "e%5BNQ", "type": "number", "number": { "format": "number" } },
+    "Date": { "id": "%3BgQq", "type": "date", "date": {} }
+  }
+}
+```
+
+A database row is itself a page: its `page.json` reports `parent_type` of
+`database_id`. For full `page.json` field details and supported edits see
+the [Python Notion docs](/python/resource/notion).

@@ -1,12 +1,19 @@
 from opendal.exceptions import NotFound
 
 from mirage.accessor.nextcloud import NextcloudAccessor
-from mirage.types import PathSpec
+from mirage.core.nextcloud.stat import stat
+from mirage.types import FileType, PathSpec
 
 
 async def du(accessor: NextcloudAccessor, path: PathSpec) -> int:
     if isinstance(path, str):
         path = PathSpec.from_str_path(path)
+    try:
+        info = await stat(accessor, path)
+    except FileNotFoundError:
+        info = None
+    if info is not None and info.type != FileType.DIRECTORY:
+        return info.size or 0
     target = path.strip_prefix
     pfx = target.strip("/")
     scan_path = pfx + "/" if pfx else "/"
@@ -28,6 +35,12 @@ async def du_all(accessor: NextcloudAccessor,
                  path: PathSpec) -> list[tuple[str, int]]:
     if isinstance(path, str):
         path = PathSpec.from_str_path(path)
+    try:
+        info = await stat(accessor, path)
+    except FileNotFoundError:
+        info = None
+    if info is not None and info.type != FileType.DIRECTORY:
+        return []
     target = path.strip_prefix
     pfx = target.strip("/")
     scan_path = pfx + "/" if pfx else "/"
