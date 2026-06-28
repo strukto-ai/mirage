@@ -105,7 +105,6 @@ class Workspace:
             max_drain = cache.max_drain_bytes if cache is not None else None
             self._cache = RAMFileCacheStore(cache_limit=limit,
                                             max_drain_bytes=max_drain)
-        self._registry.set_root_mount(RAMResource())
         self._locked_paths: set[str] = set()
         self._closed = False
         self._drift_policy: DriftPolicy = DriftPolicy.OFF
@@ -148,6 +147,9 @@ class Workspace:
                 mount_obj.command_safeguards.update(mount_safeguards)
             if mount_fuse:
                 fuse_targets.append((prefix, mount_fuse))
+
+        if self._registry.root_mount is None:
+            self._registry.mount("/", RAMResource(), mode)
 
         self._fuse_mountpoints: dict[str, str] = {}
         self._fuse_managers: dict[str, FuseManager] = {}
@@ -226,10 +228,13 @@ class Workspace:
                              f"{HISTORY_PREFIX!r}")
         removed = self._registry.unmount(prefix)
         self._ops.unmount(prefix)
-        still_mounted = any(m.resource is removed.resource
-                            for m in self._registry.mounts())
-        if not still_mounted:
+        remaining = self._registry.mounts()
+        still_instance = any(m.resource is removed.resource for m in remaining)
+        still_kind = any(m.resource.name == removed.resource.name
+                         for m in remaining)
+        if not still_kind:
             self._ops._registry.unregister_resource(removed.resource.name)
+        if not still_instance:
             close = getattr(removed.resource, "close", None)
             if callable(close):
                 result = close()

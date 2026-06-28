@@ -97,13 +97,16 @@ async def test_curl_o_readonly_mount_fails(multi_mount_ws, mock_http):
 
 
 @pytest.mark.asyncio
-async def test_curl_o_no_mount_fails(multi_mount_ws, mock_http):
+async def test_curl_o_missing_parent_dir_fails(multi_mount_ws, mock_http):
+    # The virtual root catches any absolute path, so an unmounted target no
+    # longer fails with "no mount"; it routes to the root and fails because
+    # the parent directory does not exist there (no silent success).
     io = await multi_mount_ws.execute(
         "curl -s https://x.test/file -o /nope/foo.bin")
     assert io.exit_code == 1
     err = (io.stderr or b"").decode()
-    assert "no mount" in err
-    assert "/nope/foo.bin" in err
+    assert "parent directory does not exist" in err
+    assert "/nope" in err
 
 
 @pytest.mark.asyncio

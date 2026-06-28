@@ -90,7 +90,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-E"),
             Option(short="-r"),
         ),
-        positional=(Operand(kind=OperandKind.TEXT), ),
+        positional=(Operand(kind=OperandKind.TEXT, provided_by=("-e", )), ),
         rest=Operand(kind=OperandKind.PATH),
     ),
     'jq':

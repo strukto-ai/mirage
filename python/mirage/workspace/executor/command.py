@@ -171,10 +171,20 @@ def _parse_flags(
 
         # Recover PathSpec for PATH flag values; repeatable PATH flags
         # arrive as a list of resolved paths and become list[PathSpec].
+        # A relative PATH flag value cwd-resolved by parse_command (e.g.
+        # csplit -f part -> /data/part) is absent from scope_map, so build a
+        # PathSpec for it just like positional paths do, otherwise it never
+        # gets the mount prefix stripped.
         repeat_path_keys = {
             flag_kwarg_name(name)
             for opt in spec.options
             if opt.value_kind == OperandKind.PATH and opt.repeatable
+            for name in (opt.short, opt.long) if name
+        }
+        single_path_keys = {
+            flag_kwarg_name(name)
+            for opt in spec.options
+            if opt.value_kind == OperandKind.PATH and not opt.repeatable
             for name in (opt.short, opt.long) if name
         }
         for key, value in flag_kwargs.items():
@@ -186,6 +196,12 @@ def _parse_flags(
                                  directory=part[:part.rfind("/") + 1] or "/",
                                  resolved=True)) for part in value
                 ]
+            elif key in single_path_keys and isinstance(value, str):
+                flag_kwargs[key] = scope_map.get(
+                    value,
+                    PathSpec(original=value,
+                             directory=value[:value.rfind("/") + 1] or "/",
+                             resolved=True))
             elif isinstance(value, str) and value in scope_map:
                 flag_kwargs[key] = scope_map[value]
 

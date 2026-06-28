@@ -43,14 +43,15 @@ async def stat_zzz_disk(
 @pytest.mark.asyncio
 async def test_cache_decoupled_from_root_mount():
     """The file cache is a hidden store reached via ``registry.file_cache``,
-    not the virtual root mount's resource. The root mount is a plain empty
-    anchor at ``/`` (used only as the neutral base for root listing and
-    arg-less command resolution) and never holds the cache."""
+    not the virtual root mount's resource. When no ``/`` is mounted the root
+    is an ordinary empty RAM mount at ``/`` (a normal entry in ``_mounts``)
+    and never holds the cache."""
     ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
     assert ws._registry.file_cache is ws.cache
     assert ws._registry.root_mount.resource is not ws.cache
     assert ws._registry.root_mount.resource.caches_reads is False
     assert ws._registry.root_mount.prefix == "/"
+    assert ws._registry.root_mount in ws._registry.mounts()
 
 
 @pytest.mark.asyncio

@@ -43,7 +43,7 @@ class MountRegistry:
 
     def __init__(self) -> None:
         self._mounts: list[MountEntry] = []
-        self._root_mount: MountEntry | None = None
+        self._root: MountEntry | None = None
         self._consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
         self._file_cache: FileCacheMixin | None = None
         self.mount(DEV_PREFIX, DevResource(), MountMode.WRITE)
@@ -56,8 +56,7 @@ class MountRegistry:
         CacheManagers.
 
         Called once by Workspace after the cache store exists. Mounts
-        added later get their manager in ``mount()`` /
-        ``set_root_mount()``.
+        added later get their manager in ``mount()``.
 
         Args:
             cache (FileCacheMixin | None): Workspace file cache store.
@@ -65,33 +64,10 @@ class MountRegistry:
         self._file_cache = cache
         for m in self._mounts:
             self._attach_manager(m)
-        if self._root_mount is not None:
-            self._attach_manager(self._root_mount)
 
     def _attach_manager(self, m: MountEntry) -> None:
         m.cache_manager = CacheManager(self._file_cache, m.resource.index,
                                        m.prefix, m.resource.caches_reads)
-
-    def set_root_mount(self, resource: BaseResource) -> None:
-        """Set the virtual root mount at ``/``.
-
-        Anchors root listing (``ls /``) and resolves commands with no
-        path args whose cwd matches no mount. Kept out of ``_mounts`` so
-        it never shadows a real mount in longest-prefix routing; it is the
-        neutral fallback only. The resource is an empty placeholder; the
-        file cache is a hidden store attached separately via
-        ``attach_file_cache``.
-        """
-        m = MountEntry("/", resource, MountMode.WRITE)
-        for cmd in resource.commands():
-            m.register(cmd)
-        for cmd in GENERAL_COMMANDS:
-            m.register_general(cmd)
-        for ro in resource.ops_list():
-            m.register_op(ro)
-        if self._file_cache is not None:
-            self._attach_manager(m)
-        self._root_mount = m
 
     def mount(
         self,
@@ -118,6 +94,8 @@ class MountRegistry:
             self._attach_manager(m)
         self._mounts.append(m)
         self._mounts.sort(key=lambda x: len(x.prefix), reverse=True)
+        if norm_prefix == "/":
+            self._root = m
         return m
 
     def unmount(self, prefix: str) -> MountEntry:
@@ -137,6 +115,8 @@ class MountRegistry:
         for i, m in enumerate(self._mounts):
             if m.prefix == norm_prefix:
                 del self._mounts[i]
+                if m is self._root:
+                    self._root = None
                 return m
         raise ValueError(f"no mount at prefix: {norm_prefix!r}")
 
@@ -232,10 +212,6 @@ class MountRegistry:
 
     def is_exec_allowed(self) -> bool:
         for m in self._mounts:
-            prefix_no_trail = m.prefix.rstrip("/") or "/"
-            if prefix_no_trail == "/":
-                return m.mode == MountMode.EXEC
-        for m in self._mounts:
             if m.prefix == DEV_PREFIX:
                 continue
             if m.mode == MountMode.EXEC:
@@ -247,9 +223,9 @@ class MountRegistry:
 
         Prefers the virtual root mount, then searches other mounts.
         """
-        if (self._root_mount is not None
-                and self._root_mount.resolve_command(cmd_name) is not None):
-            return self._root_mount
+        if (self._root is not None
+                and self._root.resolve_command(cmd_name) is not None):
+            return self._root
         for m in self._mounts:
             if m.resolve_command(cmd_name) is not None:
                 return m
@@ -339,7 +315,7 @@ class MountRegistry:
 
     @property
     def root_mount(self) -> MountEntry | None:
-        return self._root_mount
+        return self._root
 
     @property
     def file_cache(self) -> FileCacheMixin | None:

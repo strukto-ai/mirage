@@ -96,5 +96,5 @@ ops_have_source=True
 s2_after_clear=['history', 'synthetic entry one', 'history -s synthetic entry one', 'history 3', 'history -d 1', 'history 3']
 default_first=echo marker-one
 === observer_not_mounted ===
-mounts=['/.bash_history/', '/data/', '/dev/']
+mounts=['/', '/.bash_history/', '/data/', '/dev/']
 recorder_mounted=False

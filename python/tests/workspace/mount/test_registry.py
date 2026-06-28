@@ -315,7 +315,7 @@ def _remote_registry_with_cache():
     reg.mount("/ssh/", SSHResource(SSHConfig(host="example", root="/srv")),
               MountMode.WRITE)
     cache = RAMFileCacheStore()
-    reg.set_root_mount(cache)
+    reg.attach_file_cache(cache)
     return reg, cache
 
 
@@ -358,7 +358,7 @@ def _path_bound_registry_with_default():
     reg.mount("/limited/", _LimitedResource(), MountMode.WRITE)
     fallback = _FallbackResource()
     fallback.register(_fallback_only)
-    reg.set_root_mount(fallback)
+    reg.mount("/", fallback, MountMode.WRITE)
     return reg
 
 
