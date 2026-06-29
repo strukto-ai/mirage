@@ -13,10 +13,47 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../../accessor/base.ts'
+import { activeCacheManager } from '../../../cache/context.ts'
+import { cacheAwareReadBytes, cacheAwareReadStream } from '../../../cache/read_through.ts'
+import type { IndexCacheStore } from '../../../cache/index/store.ts'
+import { FileStat, type PathSpec } from '../../../types.ts'
 import { type CommandFn, type ProvisionFn, type RegisteredCommand, command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import type { CommandIO } from './adapter.ts'
+import type { CommandIO, StatOp } from './adapter.ts'
 import { BUILDERS } from './builders/index.ts'
+
+function cachedStat<A extends Accessor>(stat: StatOp<A>): StatOp<A> {
+  return async (accessor: A, path: PathSpec, index?: IndexCacheStore) => {
+    const result = await stat(accessor, path, index)
+    if (result.size !== null) return result
+    const manager = activeCacheManager()
+    if (manager === null) return result
+    const cached = await manager.cachedBytes(path)
+    if (cached === null) return result
+    return new FileStat({
+      name: result.name,
+      size: cached.length,
+      modified: result.modified,
+      fingerprint: result.fingerprint,
+      revision: result.revision,
+      type: result.type,
+      extra: result.extra,
+    })
+  }
+}
+
+function withStatCache<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
+  return { ...ops, stat: cachedStat(ops.stat) }
+}
+
+function withReadCache<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
+  return {
+    ...ops,
+    stat: cachedStat(ops.stat),
+    readStream: cacheAwareReadStream(ops.readStream),
+    readBytes: cacheAwareReadBytes(ops.readBytes),
+  }
+}
 
 export interface MakeGenericCommandsOptions<A extends Accessor = Accessor> {
   overrides?: ReadonlySet<string>
@@ -38,8 +75,10 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
     // (cp/mv/tee/gunzip/...), so don't register a command that would crash
     // when invoked.
     if (b.write === true && ops.write === undefined) continue
+    const cmdOps =
+      b.read === true ? withReadCache(opsBase) : b.write === true ? opsBase : withStatCache(opsBase)
     const fn: CommandFn = (accessor, paths, texts, opts) =>
-      b.fn(opsBase, accessor, paths, texts, opts)
+      b.fn(cmdOps, accessor, paths, texts, opts)
     const provision =
       (provOver[b.name] as ProvisionFn | undefined) ??
       (b.provision !== undefined ? b.provision(opsBase.stat) : null)

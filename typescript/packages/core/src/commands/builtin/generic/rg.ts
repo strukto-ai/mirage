@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { cacheAwareStream } from '../../../cache/read_through.ts'
 import { exitOnEmpty } from '../../../io/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
@@ -88,6 +89,7 @@ export async function rgGeneric(
   stream: Stream,
   scopeCheck?: ScopeCheck,
 ): Promise<CommandFnResult> {
+  stream = cacheAwareStream(stream)
   const resolution = await resolvePatternFromFlags(
     'rg',
     texts,

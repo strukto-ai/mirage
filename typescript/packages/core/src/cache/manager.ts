@@ -55,6 +55,23 @@ export class CacheManager {
     return p
   }
 
+  /**
+   * Return cached bytes for `path` if present, else null.
+   *
+   * Lookup only, never fetches from the backend. The single read-cache
+   * check the shared read-through wrappers (`cache/read_through.ts`) read
+   * through, so warm reads are served from the file cache without the
+   * command knowing about it. No-op for local or non-caching mounts.
+   */
+  async cachedBytes(path: PathSpec): Promise<Uint8Array | null> {
+    if (!this.cachesReads || this.fileCache === null) return null
+    const virtual = this.virtual(path)
+    if (await this.fileCache.exists(virtual)) {
+      return this.fileCache.get(virtual)
+    }
+    return null
+  }
+
   /** Invalidate caches after a write to `path` (resource-relative). */
   async invalidateAfterWrite(path: string | PathSpec): Promise<void> {
     const virtual = this.virtual(path)

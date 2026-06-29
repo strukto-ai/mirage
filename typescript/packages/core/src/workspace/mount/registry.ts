@@ -330,22 +330,20 @@ export class MountRegistry {
     }
     if (mount === null) return null
     const defaultMount = this.defaultMountRef
+    // Warm reads are served in place by withReadCache, so a read-only command
+    // stays on its real mount. The cache is a hidden store (not a mount);
+    // under ALWAYS we evict stale entries from it here so the read-through
+    // serves fresh bytes.
+    const baseCmd = mount.resolveCommand(cmdName)
     if (
       defaultMount !== null &&
       pathScopes.length > 0 &&
       isFileCache(defaultMount.resource) &&
-      cachesReads(mount.resource)
+      cachesReads(mount.resource) &&
+      baseCmd?.write !== true &&
+      this.consistency === ConsistencyPolicy.ALWAYS
     ) {
-      const baseCmd = mount.resolveCommand(cmdName)
-      if (!baseCmd?.write) {
-        if (this.consistency === ConsistencyPolicy.ALWAYS) {
-          await this.evictStale(mount, defaultMount.resource, pathScopes)
-        }
-        const keys = pathScopes.map((p) => p.original)
-        if (await defaultMount.resource.allCached(keys)) {
-          mount = defaultMount
-        }
-      }
+      await this.evictStale(mount, defaultMount.resource, pathScopes)
     }
     return mount
   }
