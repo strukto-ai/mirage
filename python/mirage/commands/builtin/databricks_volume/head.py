@@ -44,10 +44,12 @@ async def head(
     c_int = int(c) if c is not None else None
     if paths:
         paths = await resolve_glob(accessor, paths, index)
-        # Single file with -c: serve the first c_int bytes from the cache
-        # when warm, otherwise fetch only those bytes via a range request
-        # instead of streaming the whole file.
-        if len(paths) == 1 and c_int is not None:
+        # Single file with -c >= 0: serve the first c_int bytes from the
+        # cache when warm, otherwise fetch only those bytes via a range
+        # request instead of streaming the whole file. A negative -c (all but
+        # the last N bytes) cannot be a prefix fetch, so fall through to the
+        # generic head, which reads the whole object.
+        if len(paths) == 1 and c_int is not None and c_int >= 0:
             data = await cached_prefix_bytes(paths[0], c_int)
             if data is None:
                 data = await range_read(accessor, paths[0], 0, c_int)

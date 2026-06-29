@@ -269,6 +269,7 @@ a.txt
 /data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
+/data/poem.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -304,6 +305,8 @@ a.txt
 /data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
+/data/poem.diff
+/data/poem.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -339,6 +342,8 @@ one_byte.txt
 oooo.txt
 patterns.txt
 patterns2.txt
+poem.diff
+poem.txt
 prefix_dup.txt
 repeats.txt
 sections.txt
@@ -373,6 +378,8 @@ one_byte.txt
 oooo.txt
 patterns.txt
 patterns2.txt
+poem.diff
+poem.txt
 prefix_dup.txt
 repeats.txt
 sections.txt
@@ -402,6 +409,7 @@ one_byte.txt
 oooo.txt
 patterns.txt
 patterns2.txt
+poem.txt
 prefix_dup.txt
 repeats.txt
 sections.txt
@@ -515,6 +523,8 @@ baz
 /data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
+/data/poem.diff
+/data/poem.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -548,6 +558,8 @@ baz
 /data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
+/data/poem.diff
+/data/poem.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -578,6 +590,7 @@ baz
 /data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
+/data/poem.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -636,7 +649,7 @@ world
       2 b
       1 c
 === find_pipe_wc ===
-29
+30
 === jq_pipe_wc ===
 3
 === cat_tr_sort ===
@@ -738,6 +751,7 @@ world
 /data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
+/data/poem.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -770,6 +784,8 @@ world
 /data/numbers.txt
 /data/oooo.txt
 /data/patterns.txt
+/data/poem.diff
+/data/poem.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -803,6 +819,7 @@ world
 /data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
+/data/poem.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -1319,6 +1336,7 @@ baz,
 /data/disptree/d
 /data/guard
 /data/guard/sub
+/data/poem.diff
 /data/sub
 /data/sub/deep
 /data/user.json
@@ -1373,6 +1391,8 @@ baz,
 /data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
+/data/poem.diff
+/data/poem.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -1415,6 +1435,8 @@ baz,
 /data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
+/data/poem.diff
+/data/poem.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -1479,7 +1501,7 @@ diff -r /data/dr/x/sub/d.txt /data/dr/y/sub/d.txt
 === du_file ===
 24	/data/a.txt
 === du_dir ===
-722	/data
+881	/data
 === du_h ===
 24B	/data/a.txt
 === tree ===
@@ -1845,8 +1867,8 @@ disptree/d
 disptree/d/y.txt
 disptree/x.txt
 === history_last_two ===
-479  (cd /data && ls -R disptree)
-480  (cd /data && find disptree)
+483  (cd /data && ls -R disptree)
+484  (cd /data && find disptree)
 === bash_history_tail ===
 (cd /data && ls -R disptree)
 (cd /data && find disptree)
@@ -1866,6 +1888,18 @@ grep -v '^#' /.bash_history | tail -n 1
 h.txt.gz
 two
 h.txt
+=== patch_apply ===
+roses are red
+violets are dark
+sugar is sweet
+=== patch_n_noop ===
+roses are red
+violets are dark
+sugar is sweet
+=== patch_reverse ===
+roses are red
+violets are blue
+sugar is sweet
 === sed_count_zero ===
 exit=1
 === jq_no_filter_no_input ===

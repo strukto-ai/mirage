@@ -21,7 +21,6 @@ from mirage.commands.builtin.s3._provision import \
     file_read_provision as _ft_provision
 from mirage.commands.builtin.s3.du import du
 from mirage.commands.builtin.s3.mkdir import mkdir
-from mirage.commands.builtin.s3.patch import patch
 from mirage.commands.builtin.s3.rm import rm
 from mirage.commands.builtin.s3.sed import sed
 from mirage.commands.builtin.s3.stat import stat
@@ -68,8 +67,9 @@ _S3_CMD_OPS = CommandIO(
 
 # s3-specific behaviours kept as overrides: no real directories (mkdir -p,
 # rm not-empty), write-tracking (touch/tee), du_multi aggregation, and the
-# index-threaded, missing-operand stat.
-_S3_OVERRIDES = {"stat", "du", "rm", "mkdir", "tee", "touch", "patch"}
+# index-threaded, missing-operand stat. patch is generic (the factory builder
+# delegates to the shared generic patch).
+_S3_OVERRIDES = {"stat", "du", "rm", "mkdir", "tee", "touch"}
 
 COMMANDS = [
     *make_filetype_commands(
@@ -87,7 +87,6 @@ COMMANDS = [
     ),
     du,
     mkdir,
-    patch,
     rm,
     sed,
     stat,

@@ -54,6 +54,14 @@ export const SEED_FILES: Record<string, string> = {
   // writes under it, so listings/walks are deterministic)
   "/data/disptree/x.txt": "nested\ncontent\n",
   "/data/disptree/d/y.txt": "deep\n",
+  // patch round-trip: a unified diff whose hunk has a leading context line,
+  // so an applier that anchors on the hunk start instead of walking context
+  // corrupts the first line. The diff and target are seeded; the cases below
+  // apply, re-apply with -N, and reverse it.
+  "/data/poem.txt": "roses are red\nviolets are blue\nsugar is sweet\n",
+  "/data/poem.diff":
+    "--- a/poem.txt\n+++ b/poem.txt\n@@ -1,3 +1,3 @@\n" +
+    " roses are red\n-violets are blue\n+violets are dark\n sugar is sweet\n",
 };
 
 export const CASES: ReadonlyArray<readonly [string, string]> = [
@@ -630,6 +638,11 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
       ' && gunzip /data/arch2/h.txt.gz && cat /data/arch2/h.txt' +
       ' && ls /data/arch2',
   ],
+
+  // ----- patch (apply / forward-only / reverse) -----
+  ['patch_apply', 'patch -p1 /data/poem.diff > /dev/null && cat /data/poem.txt'],
+  ['patch_n_noop', 'patch -N -p1 /data/poem.diff > /dev/null && cat /data/poem.txt'],
+  ['patch_reverse', 'patch -R -p1 /data/poem.diff > /dev/null && cat /data/poem.txt'],
 ];
 
 export const EXIT_CODE_CASES: ReadonlyArray<readonly [string, string]> = [
