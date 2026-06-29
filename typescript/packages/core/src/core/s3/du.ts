@@ -14,28 +14,37 @@
 
 import type { PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
-import { loadS3Module, rawPathOf, s3Prefix, stripKeyPrefix, withClient } from './_client.ts'
+import { rstripSlash } from '../../utils/slash.ts'
+import { loadS3Module, rawPathOf, s3Key, stripKeyPrefix, withClient } from './_client.ts'
 
+// List with the stem prefix (no trailing slash) and count an object only when
+// it is the operand itself or lives under it. A bare prefix would miss a file
+// operand entirely (key "a.txt" never matches prefix "a.txt/") and would also
+// catch siblings like "dataother" for a "data" operand; the stem+filter pair
+// handles both file and directory operands, mirroring Python's s3 du.
 export async function du(accessor: S3Accessor, path: PathSpec): Promise<number> {
   const { ListObjectsV2Command } = await loadS3Module(accessor.config)
   const raw = rawPathOf(path)
-  const pfx = s3Prefix(raw, accessor.config)
+  const stem = rstripSlash(s3Key(raw, accessor.config))
+  const base = stem !== '' ? `${stem}/` : ''
   let total = 0
   await withClient(accessor.config, async (client) => {
     let continuationToken: string | undefined
     do {
       const input: Record<string, unknown> = {
         Bucket: accessor.config.bucket,
-        Prefix: pfx,
+        Prefix: stem,
       }
       if (continuationToken !== undefined) input.ContinuationToken = continuationToken
       const resp = (await client.send(new ListObjectsV2Command(input))) as {
-        Contents?: { Size?: number }[]
+        Contents?: { Key?: string; Size?: number }[]
         IsTruncated?: boolean
         NextContinuationToken?: string
       }
       for (const obj of resp.Contents ?? []) {
-        total += obj.Size ?? 0
+        const okey = obj.Key
+        if (okey === undefined) continue
+        if (okey === stem || okey.startsWith(base)) total += obj.Size ?? 0
       }
       continuationToken = resp.IsTruncated === true ? resp.NextContinuationToken : undefined
     } while (continuationToken !== undefined)
@@ -53,7 +62,8 @@ export async function duAll(
 ): Promise<[[string, number][], number]> {
   const { ListObjectsV2Command } = await loadS3Module(accessor.config)
   const raw = rawPathOf(path)
-  const pfx = s3Prefix(raw, accessor.config)
+  const stem = rstripSlash(s3Key(raw, accessor.config))
+  const base = stem !== '' ? `${stem}/` : ''
   const entries: [string, number][] = []
   let total = 0
   await withClient(accessor.config, async (client) => {
@@ -61,7 +71,7 @@ export async function duAll(
     do {
       const input: Record<string, unknown> = {
         Bucket: accessor.config.bucket,
-        Prefix: pfx,
+        Prefix: stem,
       }
       if (continuationToken !== undefined) input.ContinuationToken = continuationToken
       const resp = (await client.send(new ListObjectsV2Command(input))) as {
@@ -72,6 +82,7 @@ export async function duAll(
       for (const obj of resp.Contents ?? []) {
         const key = obj.Key
         if (key === undefined) continue
+        if (!(key === stem || key.startsWith(base))) continue
         const size = obj.Size ?? 0
         const entry = '/' + stripKeyPrefix(key, accessor.config)
         entries.push([entry, size])
