@@ -196,6 +196,40 @@ async function checkCompare(
   check(`${label}: cmp differing`, code === 1 && out.includes("differ"));
 }
 
+// cd must traverse mount boundaries within one session: hop straight from one
+// mount to another, walk `..` up to the shared virtual root above all mounts,
+// take a relative `..` chain across the boundary, swap with `cd -`, collapse a
+// leading `//`, honor GNU options on a cross-mount target, and search a $CDPATH
+// that spans two mounts.
+async function checkCdCrossMount(
+  ws: Workspace,
+  dst: string,
+  label: string,
+): Promise<void> {
+  const rel = "../.." + dst + "/copied";
+  const bare = dst.slice(1);
+  let [out] = await run(ws, `(cd /ram/dir && cd ${dst}/copied && pwd)`);
+  check(`${label}: cd hops mounts`, out.trim() === `${dst}/copied`);
+  [out] = await run(ws, "(cd /ram/dir && cd / && pwd)");
+  check(`${label}: cd / above mounts`, out.trim() === "/");
+  [out] = await run(ws, `(cd /ram/dir && cd ${rel} && pwd)`);
+  check(`${label}: relative .. crosses mounts`, out.trim() === `${dst}/copied`);
+  [out] = await run(ws, `(cd /ram && cd ${dst} && cd - > /dev/null && pwd)`);
+  check(`${label}: cd - swaps mounts`, out.trim() === "/ram");
+  [out] = await run(ws, `(cd //${bare}/copied && pwd)`);
+  check(`${label}: // collapses on mount`, out.trim() === `${dst}/copied`);
+  [out] = await run(ws, `(cd /ram && cd -P ${dst}/copied && pwd)`);
+  check(`${label}: cd -P cross-mount`, out.trim() === `${dst}/copied`);
+  [out] = await run(ws, `(cd /ram && cd -- ${dst}/copied && pwd)`);
+  check(`${label}: cd -- cross-mount`, out.trim() === `${dst}/copied`);
+  [out] = await run(ws, `(export CDPATH=/ram:${dst} && cd copied && pwd)`);
+  const lines = out.trim().split("\n");
+  check(
+    `${label}: CDPATH spans mounts`,
+    lines[lines.length - 1] === `${dst}/copied`,
+  );
+}
+
 // mv a directory across mounts: destination gets the tree, source is gone.
 async function checkMove(
   ws: Workspace,
@@ -296,6 +330,7 @@ async function exercise(
 ): Promise<void> {
   process.stdout.write(`===== ram -> ${label} =====\n`);
   await checkRecursive(ws, dst, label, expectDirs);
+  await checkCdCrossMount(ws, dst, label);
   await checkReadFamily(ws, dst, label);
   await checkCompare(ws, dst, label);
   await checkNoClobber(ws, dst, label);

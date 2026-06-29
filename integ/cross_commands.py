@@ -134,6 +134,36 @@ async def check_compare(ws: Workspace, dst: str, label: str) -> None:
     check(f"{label}: cmp differing", code == 1 and "differ" in out)
 
 
+async def check_cd_cross_mount(ws: Workspace, dst: str, label: str) -> None:
+    # cd must traverse mount boundaries within one session: hop straight from
+    # one mount to another, walk `..` up to the shared virtual root above all
+    # mounts, take a relative `..` chain across the boundary, swap with `cd -`,
+    # collapse a leading `//`, honor GNU options on a cross-mount target, and
+    # search a $CDPATH that spans two mounts.
+    rel = "../.." + dst + "/copied"
+    bare = dst.lstrip("/")
+    out, _, _ = await run(ws, f"(cd /ram/dir && cd {dst}/copied && pwd)")
+    check(f"{label}: cd hops mounts", out.strip() == f"{dst}/copied")
+    out, _, _ = await run(ws, "(cd /ram/dir && cd / && pwd)")
+    check(f"{label}: cd / above mounts", out.strip() == "/")
+    out, _, _ = await run(ws, f"(cd /ram/dir && cd {rel} && pwd)")
+    check(f"{label}: relative .. crosses mounts",
+          out.strip() == f"{dst}/copied")
+    out, _, _ = await run(ws,
+                          f"(cd /ram && cd {dst} && cd - > /dev/null && pwd)")
+    check(f"{label}: cd - swaps mounts", out.strip() == "/ram")
+    out, _, _ = await run(ws, f"(cd //{bare}/copied && pwd)")
+    check(f"{label}: // collapses on mount", out.strip() == f"{dst}/copied")
+    out, _, _ = await run(ws, f"(cd /ram && cd -P {dst}/copied && pwd)")
+    check(f"{label}: cd -P cross-mount", out.strip() == f"{dst}/copied")
+    out, _, _ = await run(ws, f"(cd /ram && cd -- {dst}/copied && pwd)")
+    check(f"{label}: cd -- cross-mount", out.strip() == f"{dst}/copied")
+    out, _, _ = await run(ws,
+                          f"(export CDPATH=/ram:{dst} && cd copied && pwd)")
+    last = out.strip().splitlines()[-1] if out.strip() else ""
+    check(f"{label}: CDPATH spans mounts", last == f"{dst}/copied")
+
+
 async def check_move(ws: Workspace, dst: str, label: str) -> None:
     # mv a directory across mounts: destination gets the tree, source is gone.
     await run(ws, "mkdir -p /ram/movedir/sub")
@@ -216,6 +246,7 @@ async def exercise(ws: Workspace, dst: str, label: str,
                    expect_dirs: bool) -> None:
     print(f"===== ram -> {label} =====")
     await check_recursive(ws, dst, label, expect_dirs)
+    await check_cd_cross_mount(ws, dst, label)
     await check_read_family(ws, dst, label)
     await check_compare(ws, dst, label)
     await check_no_clobber(ws, dst, label)
