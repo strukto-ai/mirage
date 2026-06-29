@@ -1816,6 +1816,7 @@ content
 /data
 === cwd_cd_cdpath ===
 /data/sub
+/data/sub
 === subshell_var_isolated ===
 1
 === subshell_var_inherit ===
@@ -1916,6 +1917,7 @@ cd: too many arguments
 === cwd_cd_bad_opt ===
 exit=2
 cd: -x: invalid option
+cd: usage: cd [-L|[-P [-e]] [-@]] [dir]
 === cwd_cd_home_unset ===
 exit=1
 cd: HOME not set
