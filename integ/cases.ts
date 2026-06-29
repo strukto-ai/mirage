@@ -141,6 +141,8 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ["find_type_f", "find /data -type f"],
   ["ls", "ls /data/"],
   ["ls_1", "ls -1 /data/"],
+  ["ls_file", "ls /data/a.txt"],
+  ["ls_glob", "ls /data/*.txt"],
 
   ["expand", "cat /data/tabbed.txt | expand"],
   ["fold", "cat /data/a.txt | fold -w 3"],

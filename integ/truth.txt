@@ -384,6 +384,32 @@ sub
 tabbed.txt
 user.json
 users.json
+=== ls_file ===
+a.txt
+=== ls_glob ===
+a.txt
+anchors.txt
+b.txt
+c.txt
+dup.txt
+empty.txt
+fields.txt
+mixed.txt
+multi.txt
+no_nl.txt
+numbers.txt
+one_byte.txt
+oooo.txt
+patterns.txt
+patterns2.txt
+prefix_dup.txt
+repeats.txt
+sections.txt
+sorted_a.txt
+sorted_b.txt
+sorted_c.txt
+spaced.txt
+tabbed.txt
 === expand ===
 a       1
 b       2
@@ -1819,8 +1845,8 @@ disptree/d
 disptree/d/y.txt
 disptree/x.txt
 === history_last_two ===
-477  (cd /data && ls -R disptree)
-478  (cd /data && find disptree)
+479  (cd /data && ls -R disptree)
+480  (cd /data && find disptree)
 === bash_history_tail ===
 (cd /data && ls -R disptree)
 (cd /data && find disptree)
