@@ -1,0 +1,353 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import {
+  CreateBucketCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
+import {
+  MountMode,
+  RAMResource,
+  RedisResource,
+  S3Resource,
+  Workspace,
+} from "@struktoai/mirage-node";
+
+const S3_BUCKET = "mirage-integ-cross";
+const ENDPOINT = process.env.S3_ENDPOINT ?? "http://localhost:9000";
+const REGION = process.env.S3_REGION ?? "us-east-1";
+const ACCESS = process.env.AWS_ACCESS_KEY_ID ?? "minio";
+const SECRET = process.env.AWS_SECRET_ACCESS_KEY ?? "minio123";
+
+const DEC = new TextDecoder();
+const ENC = new TextEncoder();
+
+let fail = 0;
+
+function check(label: string, cond: boolean): void {
+  if (cond) {
+    process.stdout.write(`OK   ${label}\n`);
+  } else {
+    process.stdout.write(`FAIL ${label}\n`);
+    fail += 1;
+  }
+}
+
+async function run(
+  ws: Workspace,
+  cmd: string,
+): Promise<[string, string, number]> {
+  const io = await ws.execute(cmd);
+  return [DEC.decode(io.stdout), DEC.decode(io.stderr), io.exitCode];
+}
+
+function sdkClient(): S3Client {
+  return new S3Client({
+    region: REGION,
+    endpoint: ENDPOINT,
+    forcePathStyle: true,
+    credentials: { accessKeyId: ACCESS, secretAccessKey: SECRET },
+  });
+}
+
+async function putObject(
+  client: S3Client,
+  key: string,
+  body: string,
+): Promise<void> {
+  await client.send(
+    new PutObjectCommand({
+      Bucket: S3_BUCKET,
+      Key: key,
+      Body: ENC.encode(body),
+    }),
+  );
+}
+
+async function seedTree(ws: Workspace, base: string): Promise<void> {
+  await run(ws, `mkdir -p ${base}/dir/sub`);
+  await run(ws, `mkdir -p ${base}/dir/empty`);
+  await run(ws, `printf 'aaa\\n' > ${base}/dir/a.txt`);
+  await run(ws, `printf 'bbb\\n' > ${base}/dir/sub/b.txt`);
+}
+
+// cp -r the whole tree across mounts and verify the files (and, for backends
+// with real directories, the empty subdirectory) landed.
+async function checkRecursive(
+  ws: Workspace,
+  dst: string,
+  label: string,
+  expectDirs: boolean,
+): Promise<void> {
+  await run(ws, `cp -r /ram/dir ${dst}/copied`);
+  let [out] = await run(ws, `cat ${dst}/copied/a.txt`);
+  check(`${label}: cp -r a.txt`, out === "aaa\n");
+  [out] = await run(ws, `cat ${dst}/copied/sub/b.txt`);
+  check(`${label}: cp -r sub/b.txt`, out === "bbb\n");
+  if (expectDirs) {
+    [out] = await run(ws, `ls ${dst}/copied`);
+    check(`${label}: cp -r preserves empty dir`, out.includes("empty"));
+  }
+}
+
+// cp -rn into an existing mapped tree: an existing file is kept, a new file is
+// still copied (GNU per-file no-clobber).
+async function checkNoClobber(
+  ws: Workspace,
+  dst: string,
+  label: string,
+): Promise<void> {
+  await run(ws, `mkdir -p ${dst}/nc/dir`);
+  await run(ws, `printf 'keep\\n' > ${dst}/nc/dir/a.txt`);
+  await run(ws, `cp -rn /ram/dir ${dst}/nc`);
+  let [out] = await run(ws, `cat ${dst}/nc/dir/a.txt`);
+  check(`${label}: cp -rn keeps existing file`, out === "keep\n");
+  [out] = await run(ws, `cat ${dst}/nc/dir/sub/b.txt`);
+  check(`${label}: cp -rn copies new file`, out === "bbb\n");
+}
+
+// cp without -r on a directory is an error (GNU), not a silent copy.
+async function checkOmitDirectory(
+  ws: Workspace,
+  dst: string,
+  label: string,
+): Promise<void> {
+  const [, err, code] = await run(ws, `cp /ram/dir ${dst}/nope`);
+  check(
+    `${label}: cp dir without -r fails`,
+    code === 1 && err.includes("omitting directory"),
+  );
+}
+
+// Multi-file reads whose operands span two mounts must aggregate exactly like
+// the single-mount commands (GNU): cat concatenates, head/tail emit
+// ==> path <== banners, wc prints a total, grep prefixes each match.
+async function checkReadFamily(
+  ws: Workspace,
+  dst: string,
+  label: string,
+): Promise<void> {
+  const src = "/ram/dir/a.txt";
+  const other = `${dst}/copied/sub/b.txt`;
+  const copied = `${dst}/copied/a.txt`;
+  let [out] = await run(ws, `cat ${src} ${other}`);
+  check(`${label}: cat aggregates`, out === "aaa\nbbb\n");
+  [out] = await run(ws, `head -n 1 ${src} ${copied}`);
+  check(
+    `${label}: head banners`,
+    out.includes(`==> ${src} <==`) && out.includes(`==> ${copied} <==`),
+  );
+  [out] = await run(ws, `tail -n 1 ${src} ${other}`);
+  check(
+    `${label}: tail banners`,
+    out.includes(`==> ${src} <==`) && out.includes("bbb"),
+  );
+  [out] = await run(ws, `wc -l ${src} ${copied}`);
+  check(`${label}: wc total`, out.includes("total"));
+  [out] = await run(ws, `grep aaa ${src} ${copied}`);
+  check(
+    `${label}: grep prefixes`,
+    out.includes(`${src}:aaa`) && out.includes(`${copied}:aaa`),
+  );
+  [out] = await run(ws, `rg aaa ${src} ${copied}`);
+  check(
+    `${label}: rg prefixes`,
+    out.includes(`${src}:aaa`) && out.includes(`${copied}:aaa`),
+  );
+}
+
+// diff/cmp two files that live on different mounts: identical operands exit 0
+// with no output, differing operands exit 1 and report the change.
+async function checkCompare(
+  ws: Workspace,
+  dst: string,
+  label: string,
+): Promise<void> {
+  const same = `${dst}/copied/a.txt`;
+  const other = `${dst}/copied/sub/b.txt`;
+  const src = "/ram/dir/a.txt";
+  let [out, , code] = await run(ws, `diff ${src} ${same}`);
+  check(`${label}: diff identical`, code === 0 && out === "");
+  [out, , code] = await run(ws, `diff ${src} ${other}`);
+  check(
+    `${label}: diff differing`,
+    code === 1 && out.includes("aaa") && out.includes("bbb"),
+  );
+  [, , code] = await run(ws, `cmp ${src} ${same}`);
+  check(`${label}: cmp identical`, code === 0);
+  [out, , code] = await run(ws, `cmp ${src} ${other}`);
+  check(`${label}: cmp differing`, code === 1 && out.includes("differ"));
+}
+
+// mv a directory across mounts: destination gets the tree, source is gone.
+async function checkMove(
+  ws: Workspace,
+  dst: string,
+  label: string,
+): Promise<void> {
+  await run(ws, "mkdir -p /ram/movedir/sub");
+  await run(ws, "printf 'm\\n' > /ram/movedir/sub/c.txt");
+  await run(ws, `mv /ram/movedir ${dst}/moved`);
+  let [out, , code] = await run(ws, `cat ${dst}/moved/sub/c.txt`);
+  check(`${label}: mv tree to dest`, out === "m\n");
+  [out, , code] = await run(ws, "cat /ram/movedir/sub/c.txt");
+  check(`${label}: mv removes source`, code !== 0);
+}
+
+// A cross-mount read relays through the dispatcher; that relayed path must
+// serve warm bytes from the file cache, not re-fetch the backend. Warm the S3
+// object with a single-mount cat, mutate it out-of-band via the SDK, then
+// exercise the whole read family with the cached operand on /s3 and a live
+// operand on /ram. Under LAZY the cached v1 (keepme/mid/last) must win for
+// every command; a relayed path that skipped the cache would fetch v2 (nomatch)
+// and these checks would fail. wc discriminates on line count (cached 3 vs v2's
+// 1) and grep on a v1-only token.
+async function checkCrossMountCache(
+  ws: Workspace,
+  client: S3Client,
+  label: string,
+): Promise<void> {
+  await putObject(client, "cache/x.txt", "keepme\nmid\nlast\n");
+  let [out] = await run(ws, "cat /s3/cache/x.txt");
+  check(`${label}: warm read caches v1`, out === "keepme\nmid\nlast\n");
+  await putObject(client, "cache/x.txt", "nomatch\n");
+  const src = "/ram/dir/a.txt";
+  const x = "/s3/cache/x.txt";
+  [out] = await run(ws, `cat ${src} ${x}`);
+  check(
+    `${label}: cross cat serves cached`,
+    out === "aaa\nkeepme\nmid\nlast\n",
+  );
+  [out] = await run(ws, `head -n 1 ${src} ${x}`);
+  check(
+    `${label}: cross head serves cached`,
+    out.includes("keepme") && !out.includes("nomatch"),
+  );
+  [out] = await run(ws, `tail -n 1 ${src} ${x}`);
+  check(
+    `${label}: cross tail serves cached`,
+    out.includes("last") && !out.includes("nomatch"),
+  );
+  [out] = await run(ws, `wc -l ${src} ${x}`);
+  check(`${label}: cross wc serves cached`, out.includes("4 total"));
+  [out] = await run(ws, `grep keepme ${src} ${x}`);
+  check(`${label}: cross grep serves cached`, out.includes(`${x}:keepme`));
+}
+
+// Glob multi-file warm serving on a single remote mount: warm every file under
+// glob/, mutate one out-of-band, then run the read family over glob/*.txt. The
+// glob expands to both files; each must serve its cached bytes (a.txt's stale
+// v1, not v2). a.txt's v2 grows to two lines so wc and the line-shape commands
+// discriminate cache from backend; grep keys on a v1-only token.
+async function checkGlobCache(
+  ws: Workspace,
+  client: S3Client,
+  label: string,
+): Promise<void> {
+  await putObject(client, "glob/a.txt", "alpha-v1\n");
+  await putObject(client, "glob/b.txt", "bravo-v1\n");
+  await run(ws, "cat /s3/glob/a.txt /s3/glob/b.txt");
+  await putObject(client, "glob/a.txt", "alpha-v2\nEXTRA\n");
+  const g = "/s3/glob/*.txt";
+  let [out] = await run(ws, `head -n 1 ${g}`);
+  check(
+    `${label}: glob head serves cached`,
+    out.includes("alpha-v1") && !out.includes("alpha-v2"),
+  );
+  [out] = await run(ws, `tail -n 1 ${g}`);
+  check(
+    `${label}: glob tail serves cached`,
+    out.includes("alpha-v1") && !out.includes("EXTRA"),
+  );
+  [out] = await run(ws, `wc -l ${g}`);
+  check(
+    `${label}: glob wc serves cached`,
+    out.includes("2 total") && !out.includes("3 total"),
+  );
+  [out] = await run(ws, `grep alpha-v1 ${g}`);
+  check(
+    `${label}: glob grep serves cached`,
+    out.includes("/s3/glob/a.txt:alpha-v1"),
+  );
+}
+
+async function exercise(
+  ws: Workspace,
+  dst: string,
+  label: string,
+  expectDirs: boolean,
+): Promise<void> {
+  process.stdout.write(`===== ram -> ${label} =====\n`);
+  await checkRecursive(ws, dst, label, expectDirs);
+  await checkReadFamily(ws, dst, label);
+  await checkCompare(ws, dst, label);
+  await checkNoClobber(ws, dst, label);
+  await checkOmitDirectory(ws, dst, label);
+  await checkMove(ws, dst, label);
+}
+
+async function main(): Promise<void> {
+  const client = sdkClient();
+  try {
+    await client.send(new CreateBucketCommand({ Bucket: S3_BUCKET }));
+  } catch (err) {
+    const code = (err as { name?: string }).name;
+    if (code !== "BucketAlreadyOwnedByYou" && code !== "BucketAlreadyExists")
+      throw err;
+  }
+
+  const mounts: Record<string, RAMResource | S3Resource | RedisResource> = {
+    "/ram": new RAMResource(),
+    "/ram2": new RAMResource(),
+    "/s3": new S3Resource({
+      bucket: S3_BUCKET,
+      region: REGION,
+      endpoint: ENDPOINT,
+      accessKeyId: ACCESS,
+      secretAccessKey: SECRET,
+      forcePathStyle: true,
+    }),
+  };
+  const redisUrl = process.env.REDIS_URL;
+  if (redisUrl) {
+    const prefix = `mirage-integ-cross-${String(process.pid)}-${String(Date.now())}/`;
+    mounts["/redis"] = new RedisResource({ url: redisUrl, keyPrefix: prefix });
+  }
+
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE });
+  try {
+    await seedTree(ws, "/ram");
+    await exercise(ws, "/ram2", "ram", true);
+    if (redisUrl) await exercise(ws, "/redis", "redis", true);
+    else process.stdout.write("SKIP redis (REDIS_URL unset)\n");
+    await exercise(ws, "/s3", "s3", false);
+    await checkCrossMountCache(ws, client, "s3");
+    await checkGlobCache(ws, client, "s3");
+  } finally {
+    await ws.close();
+    client.destroy();
+  }
+
+  if (fail) {
+    process.stdout.write(`\ncross commands FAILED (${fail} checks)\n`);
+    process.exit(1);
+  }
+  process.stdout.write("\ncross commands OK\n");
+}
+
+main().catch((err: unknown) => {
+  process.stderr.write(String(err) + "\n");
+  process.exit(1);
+});

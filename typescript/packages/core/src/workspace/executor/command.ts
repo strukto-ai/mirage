@@ -150,10 +150,14 @@ export async function handleCommand(
   }
 
   if (isCrossMount(cmdName, pathScopes, registry)) {
+    const srcMount = registry.mountFor(pathScopes[0]?.original ?? session.cwd)
+    const csFlags =
+      srcMount !== null ? parseFlags(parts.slice(1), srcMount, cmdName, session.cwd)[2] : {}
     const [csStdout, csIo, csExec] = await handleCrossMount(
       cmdName,
       pathScopes,
       textOnly,
+      csFlags,
       dispatch,
       cmdStr,
     )

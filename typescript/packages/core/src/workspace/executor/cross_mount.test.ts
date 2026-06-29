@@ -15,7 +15,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { IOResult } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
-import { MountMode, PathSpec } from '../../types.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { handleCrossMount, isCrossMount } from './cross_mount.ts'
 
@@ -57,6 +57,14 @@ describe('isCrossMount', () => {
   })
 })
 
+function fileStat(name: string): FileStat {
+  return new FileStat({ name, size: 0, type: FileType.TEXT })
+}
+
+function dirStat(name: string): FileStat {
+  return new FileStat({ name, size: 0, type: FileType.DIRECTORY })
+}
+
 describe('handleCrossMount — cp / mv', () => {
   it('cp reads src then writes dst', async () => {
     const dispatch = vi.fn<
@@ -66,7 +74,12 @@ describe('handleCrossMount — cp / mv', () => {
         args?: readonly unknown[],
         kw?: Record<string, unknown>,
       ) => Promise<[unknown, IOResult]>
-    >((op) => {
+    >((op, p) => {
+      if (op === 'stat') {
+        // dst does not exist yet; src is an existing file.
+        if (p.original === '/disk/b') return Promise.reject(new Error('ENOENT'))
+        return Promise.resolve<[unknown, IOResult]>([fileStat('a'), new IOResult()])
+      }
       if (op === 'read')
         return Promise.resolve<[unknown, IOResult]>([
           new TextEncoder().encode('payload'),
@@ -75,12 +88,71 @@ describe('handleCrossMount — cp / mv', () => {
       return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
     })
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    const [, io, tree] = await handleCrossMount('cp', paths, [], dispatch, 'cp /ram/a /disk/b')
+    const [, io, tree] = await handleCrossMount('cp', paths, [], {}, dispatch, 'cp /ram/a /disk/b')
     expect(io.exitCode).toBe(0)
     expect(tree.exitCode).toBe(0)
-    expect(dispatch).toHaveBeenCalledTimes(2)
-    expect(dispatch.mock.calls[0]?.[0]).toBe('read')
-    expect(dispatch.mock.calls[1]?.[0]).toBe('write')
+    const ops = dispatch.mock.calls.map((c) => c[0])
+    expect(ops).toContain('read')
+    expect(ops).toContain('write')
+    expect(ops.indexOf('read')).toBeLessThan(ops.indexOf('write'))
+  })
+
+  it('cp of a directory without -r is an omitting-directory error', async () => {
+    const dispatch = vi.fn<
+      (
+        op: string,
+        p: PathSpec,
+        args?: readonly unknown[],
+        kw?: Record<string, unknown>,
+      ) => Promise<[unknown, IOResult]>
+    >((op, p) => {
+      if (op === 'stat') {
+        if (p.original === '/disk/b') return Promise.reject(new Error('ENOENT'))
+        return Promise.resolve<[unknown, IOResult]>([dirStat('a'), new IOResult()])
+      }
+      return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
+    })
+    const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
+    const [, io] = await handleCrossMount('cp', paths, [], {}, dispatch, 'cp /ram/a /disk/b')
+    expect(io.exitCode).toBe(1)
+    expect(dispatch.mock.calls.some((c) => c[0] === 'write')).toBe(false)
+  })
+
+  it('cp -r recurses a directory: mkdir dst, then copy each file', async () => {
+    const dispatch = vi.fn<
+      (
+        op: string,
+        p: PathSpec,
+        args?: readonly unknown[],
+        kw?: Record<string, unknown>,
+      ) => Promise<[unknown, IOResult]>
+    >((op, p) => {
+      if (op === 'stat') {
+        if (p.original === '/disk/b' || p.original.startsWith('/disk/'))
+          return Promise.reject(new Error('ENOENT'))
+        if (p.original === '/ram/dir')
+          return Promise.resolve<[unknown, IOResult]>([dirStat('dir'), new IOResult()])
+        return Promise.resolve<[unknown, IOResult]>([fileStat('f'), new IOResult()])
+      }
+      if (op === 'readdir')
+        return Promise.resolve<[unknown, IOResult]>([['/ram/dir/a.txt'], new IOResult()])
+      if (op === 'read')
+        return Promise.resolve<[unknown, IOResult]>([new TextEncoder().encode('x'), new IOResult()])
+      return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
+    })
+    const paths = [PathSpec.fromStrPath('/ram/dir'), PathSpec.fromStrPath('/disk/b')]
+    const [, io] = await handleCrossMount(
+      'cp',
+      paths,
+      [],
+      { r: true },
+      dispatch,
+      'cp -r /ram/dir /disk/b',
+    )
+    expect(io.exitCode).toBe(0)
+    const ops = dispatch.mock.calls.map((c) => c[0])
+    expect(ops).toContain('mkdir')
+    expect(ops).toContain('write')
   })
 
   it('mv reads src, writes dst, then unlinks src', async () => {
@@ -91,7 +163,11 @@ describe('handleCrossMount — cp / mv', () => {
         args?: readonly unknown[],
         kw?: Record<string, unknown>,
       ) => Promise<[unknown, IOResult]>
-    >((op) => {
+    >((op, p) => {
+      if (op === 'stat') {
+        if (p.original === '/disk/b') return Promise.reject(new Error('ENOENT'))
+        return Promise.resolve<[unknown, IOResult]>([fileStat('a'), new IOResult()])
+      }
       if (op === 'read')
         return Promise.resolve<[unknown, IOResult]>([
           new TextEncoder().encode('data'),
@@ -100,8 +176,9 @@ describe('handleCrossMount — cp / mv', () => {
       return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
     })
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    await handleCrossMount('mv', paths, [], dispatch, 'mv')
-    expect(dispatch.mock.calls.map((c) => c[0])).toEqual(['read', 'write', 'unlink'])
+    await handleCrossMount('mv', paths, [], {}, dispatch, 'mv')
+    const ops = dispatch.mock.calls.map((c) => c[0]).filter((o) => o !== 'stat')
+    expect(ops).toEqual(['read', 'write', 'unlink'])
   })
 })
 
@@ -124,14 +201,14 @@ describe('handleCrossMount — cmp', () => {
   it('identical contents → exit 0 empty stdout', async () => {
     const d = dispatchWithContents(new TextEncoder().encode('abc'), new TextEncoder().encode('abc'))
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    const [, io] = await handleCrossMount('cmp', paths, [], d, 'cmp')
+    const [, io] = await handleCrossMount('cmp', paths, [], {}, d, 'cmp')
     expect(io.exitCode).toBe(0)
   })
 
   it('differ at a byte → reports byte index', async () => {
     const d = dispatchWithContents(new TextEncoder().encode('abc'), new TextEncoder().encode('aXc'))
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    const [out, io] = await handleCrossMount('cmp', paths, [], d, 'cmp')
+    const [out, io] = await handleCrossMount('cmp', paths, [], {}, d, 'cmp')
     expect(io.exitCode).toBe(1)
     expect(decode(out as Uint8Array)).toMatch(/byte 2/)
   })
@@ -139,7 +216,7 @@ describe('handleCrossMount — cmp', () => {
   it('EOF on shorter file → exit 1', async () => {
     const d = dispatchWithContents(new TextEncoder().encode('ab'), new TextEncoder().encode('abc'))
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    const [out, io] = await handleCrossMount('cmp', paths, [], d, 'cmp')
+    const [out, io] = await handleCrossMount('cmp', paths, [], {}, d, 'cmp')
     expect(io.exitCode).toBe(1)
     expect(decode(out as Uint8Array)).toMatch(/EOF on/)
   })
@@ -166,14 +243,14 @@ describe('handleCrossMount — multi-read cat/head/tail/grep/wc', () => {
   it('cat concatenates contents', async () => {
     const d = dispatchTwo('hello\n', 'world\n')
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    const [out] = await handleCrossMount('cat', paths, [], d, 'cat')
+    const [out] = await handleCrossMount('cat', paths, [], {}, d, 'cat')
     expect(decode(out as Uint8Array)).toBe('hello\nworld\n')
   })
 
   it('head -n 2 keeps first N lines per file with headers on multi-file', async () => {
     const d = dispatchTwo('1\n2\n3\n', 'x\ny\nz\n')
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    const [out] = await handleCrossMount('head', paths, ['-n', '2'], d, 'head')
+    const [out] = await handleCrossMount('head', paths, ['-n', '2'], {}, d, 'head')
     const text = decode(out as Uint8Array)
     expect(text).toMatch(/==> \/ram\/a <==/)
     expect(text).toMatch(/1\n2/)
@@ -184,7 +261,7 @@ describe('handleCrossMount — multi-read cat/head/tail/grep/wc', () => {
   it('grep emits "name:line" for matches', async () => {
     const d = dispatchTwo('apple\nbanana\n', 'apricot\n')
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    const [out, io] = await handleCrossMount('grep', paths, ['ap'], d, 'grep')
+    const [out, io] = await handleCrossMount('grep', paths, ['ap'], {}, d, 'grep')
     expect(io.exitCode).toBe(0)
     const text = decode(out as Uint8Array)
     expect(text).toMatch(/\/ram\/a:apple/)
@@ -194,14 +271,14 @@ describe('handleCrossMount — multi-read cat/head/tail/grep/wc', () => {
   it('grep returns exit 1 and no output when nothing matches', async () => {
     const d = dispatchTwo('x\n', 'y\n')
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    const [, io] = await handleCrossMount('grep', paths, ['zzz'], d, 'grep')
+    const [, io] = await handleCrossMount('grep', paths, ['zzz'], {}, d, 'grep')
     expect(io.exitCode).toBe(1)
   })
 
   it('wc defaults to lines/words/chars per file', async () => {
     const d = dispatchTwo('a b\nc\n', 'x\n')
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    const [out] = await handleCrossMount('wc', paths, [], d, 'wc')
+    const [out] = await handleCrossMount('wc', paths, [], {}, d, 'wc')
     const text = decode(out as Uint8Array)
     expect(text).toMatch(/2 3 \d+ \/ram\/a/)
     expect(text).toMatch(/1 1 \d+ \/disk\/b/)

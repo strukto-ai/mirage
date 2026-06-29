@@ -846,3 +846,29 @@ export async function runCases(ws: Workspace): Promise<void> {
     }
   }
 }
+
+// Pure assertion (no stdout, not in truth.txt): a backend that reports real
+// timestamps must surface them through `ls -l`, not the epoch sentinel. Writes
+// a probe, drops the write-through cache so the listing resolves mtime from the
+// backend stat, then checks both the file and the parent-dir listing.
+export async function assertRealMtime(ws: Workspace): Promise<void> {
+  const DEC = new TextDecoder();
+  await ws.execute("mkdir -p /data/mtimecheck");
+  await ws.execute("tee /data/mtimecheck/probe.txt > /dev/null", {
+    stdin: ENC.encode("x"),
+  });
+  await ws.cache.clear();
+  const fileOut = DEC.decode((await ws.execute("ls -l /data/mtimecheck/probe.txt")).stdout);
+  const dirOut = DEC.decode((await ws.execute("ls -l /data | grep mtimecheck")).stdout);
+  for (const [label, out] of [
+    ["file", fileOut],
+    ["dir", dirOut],
+  ] as const) {
+    if (out.trim() === "") throw new Error(`mtime check produced no ${label} listing`);
+    if (out.includes("Jan  1 00:00"))
+      throw new Error(
+        `${label} ls -l shows epoch mtime (modified not set): ${JSON.stringify(out.trim())}`,
+      );
+  }
+  await ws.execute("rm -rf /data/mtimecheck");
+}

@@ -16,7 +16,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DiskObserverStore, DiskResource, MountMode, Workspace } from '@struktoai/mirage-node'
-import { runCases } from './cases.ts'
+import { assertRealMtime, runCases } from './cases.ts'
 
 async function main(): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), 'mirage-integ-disk-'))
@@ -27,6 +27,7 @@ async function main(): Promise<void> {
   )
   try {
     await runCases(ws)
+    await assertRealMtime(ws)
   } finally {
     await ws.close()
     rmSync(root, { recursive: true, force: true })

@@ -328,6 +328,10 @@ jobs:
           pnpm exec tsx s3.ts > /tmp/ts-s3-native.out
           diff truth_s3_ts.txt /tmp/ts-s3-native.out
 
+      - name: Run cross-mount commands (ram -> ram/s3 via MinIO)
+        working-directory: integ
+        run: pnpm exec tsx cross_commands.ts
+
       - name: Run notion integ (TS, mock server) and diff against truth
         working-directory: integ
         run: |

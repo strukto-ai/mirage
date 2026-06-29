@@ -102,6 +102,19 @@ const STREAMING_CASES: ReadonlyArray<readonly [string, string]> = [
   ["cat_wc_full", `cat {m}/data/example.jsonl | wc -l`],
 ];
 
+// Warm-read serving: a cat warms the file cache for the object, then each
+// read-only command reads the same object and is served entirely from cache,
+// pulling zero backend bytes. cat goes through the generic read-through and
+// grep/head/tail/wc through the shared consumers; a regression that stopped
+// serving warm reads would re-fetch the object and bytes would jump above 0.
+const WARM_SERVE_CASES: ReadonlyArray<readonly [string, string]> = [
+  ["warm_cat", `cat {m}/data/example.jsonl`],
+  ["warm_grep", `grep mirage {m}/data/example.jsonl`],
+  ["warm_head", `head -n 1 {m}/data/example.jsonl`],
+  ["warm_tail", `tail -n 1 {m}/data/example.jsonl`],
+  ["warm_wc", `wc -l {m}/data/example.jsonl`],
+];
+
 const EXIT_CODE_CASES: ReadonlyArray<readonly [string, string]> = [
   ["grep_match", `grep -q mirage {m}/data/example.jsonl`],
   ["grep_no_match", `grep -q zzzznomatch {m}/data/example.jsonl`],
@@ -249,6 +262,20 @@ async function measureBytes(
   );
 }
 
+async function warmServe(name: string, mount: string, cmd: string): Promise<void> {
+  const ws = buildWorkspace();
+  try {
+    await ws.execute(`cat ${mount}/data/example.jsonl`);
+    const before = ws.records.reduce((sum, r) => sum + r.bytes, 0);
+    await ws.execute(cmd);
+    const net = ws.records.reduce((sum, r) => sum + r.bytes, 0) - before;
+    process.stdout.write(`=== ${name} ===\n`);
+    process.stdout.write(`bytes=${net} served_from_cache=${net === 0}\n`);
+  } finally {
+    await ws.close();
+  }
+}
+
 async function measureCalls(name: string, cmd: string): Promise<void> {
   const ws = buildWorkspace();
   resetCalls();
@@ -373,6 +400,15 @@ async function main(): Promise<void> {
         await measureBytes(
           ws,
           `${tag}:stream:${name}`,
+          tmpl.replaceAll("{m}", mount),
+        );
+    }
+    for (const mount of MOUNTS) {
+      const tag = mount.slice(1);
+      for (const [name, tmpl] of WARM_SERVE_CASES)
+        await warmServe(
+          `${tag}:warm:${name}`,
+          mount,
           tmpl.replaceAll("{m}", mount),
         );
     }
