@@ -164,6 +164,23 @@ async def check_cd_cross_mount(ws: Workspace, dst: str, label: str) -> None:
     check(f"{label}: CDPATH spans mounts", last == f"{dst}/copied")
 
 
+async def check_symlinks_cross_mount(ws: Workspace, dst: str,
+                                     label: str) -> None:
+    # A symlink lives on the workspace registry and may point across mounts.
+    # readlink returns the verbatim target; cd through a cross-mount link to a
+    # real directory on the other mount resolves and lands there.
+    link = f"/ram/xlink_{label}"
+    await run(ws, f"ln -s {dst}/copied/a.txt {link}")
+    out, _, code = await run(ws, f"readlink {link}")
+    check(f"{label}: readlink cross-mount target", code == 0
+          and out.strip() == f"{dst}/copied/a.txt")
+    dlink = f"/ram/xdir_{label}"
+    await run(ws, f"ln -s {dst}/copied {dlink}")
+    out, _, _ = await run(ws, f"(cd {dlink} && pwd)")
+    check(f"{label}: cd through cross-mount link",
+          out.strip() == f"{dst}/copied")
+
+
 async def check_move(ws: Workspace, dst: str, label: str) -> None:
     # mv a directory across mounts: destination gets the tree, source is gone.
     await run(ws, "mkdir -p /ram/movedir/sub")
@@ -247,6 +264,7 @@ async def exercise(ws: Workspace, dst: str, label: str,
     print(f"===== ram -> {label} =====")
     await check_recursive(ws, dst, label, expect_dirs)
     await check_cd_cross_mount(ws, dst, label)
+    await check_symlinks_cross_mount(ws, dst, label)
     await check_read_family(ws, dst, label)
     await check_compare(ws, dst, label)
     await check_no_clobber(ws, dst, label)

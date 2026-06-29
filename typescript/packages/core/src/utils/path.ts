@@ -44,6 +44,33 @@ export function parent(path: string): string {
   return path.slice(0, i)
 }
 
+export const MAX_SYMLINK_HOPS = 40
+
+export class CycleError extends Error {}
+
+function isLinkPrefix(key: string, path: string): boolean {
+  return path === key || path.startsWith(key + '/')
+}
+
+export function resolveSymlinks(path: string, links: Record<string, string>): string {
+  if (Object.keys(links).length === 0) return path
+  for (let hop = 0; hop < MAX_SYMLINK_HOPS; hop++) {
+    let best: string | null = null
+    let bestTarget = ''
+    for (const [key, val] of Object.entries(links)) {
+      if (isLinkPrefix(key, path) && (best === null || key.length > best.length)) {
+        best = key
+        bestTarget = val
+      }
+    }
+    if (best === null) return path
+    let target = bestTarget
+    if (!target.startsWith('/')) target = norm(parent(best) + '/' + target)
+    path = target + path.slice(best.length)
+  }
+  throw new CycleError(path)
+}
+
 export function gnuBasename(path: string, suffix?: string): string {
   let i = path.length
   while (i > 0 && path[i - 1] === '/') i--

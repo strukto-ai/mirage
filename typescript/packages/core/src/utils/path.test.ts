@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { expandTilde } from './path.ts'
+import { CycleError, expandTilde, resolveSymlinks } from './path.ts'
 
 describe('expandTilde', () => {
   it('~ alone → home', () => {
@@ -38,5 +38,55 @@ describe('expandTilde', () => {
 
   it('plain word left unchanged', () => {
     expect(expandTilde('file.txt', '/home/u')).toBe('file.txt')
+  })
+})
+
+describe('resolveSymlinks', () => {
+  it('no links → unchanged', () => {
+    expect(resolveSymlinks('/foo/bar/baz', {})).toBe('/foo/bar/baz')
+  })
+
+  it('single hop', () => {
+    expect(resolveSymlinks('/foo/bar/baz', { '/foo/bar': '/abc' })).toBe('/abc/baz')
+  })
+
+  it('exact match', () => {
+    expect(resolveSymlinks('/foo/bar', { '/foo/bar': '/abc' })).toBe('/abc')
+  })
+
+  it('multi-hop until stable', () => {
+    expect(resolveSymlinks('/foo/bar/baz', { '/foo/bar': '/abc', '/abc': '/xyz' })).toBe('/xyz/baz')
+  })
+
+  it('longest prefix wins', () => {
+    expect(resolveSymlinks('/foo/bar/baz', { '/foo': '/q', '/foo/bar': '/abc' })).toBe('/abc/baz')
+  })
+
+  it('boundary not substring', () => {
+    expect(resolveSymlinks('/foo/barbaz', { '/foo/bar': '/abc' })).toBe('/foo/barbaz')
+  })
+
+  it('cross-mount target', () => {
+    expect(resolveSymlinks('/ram/link/x', { '/ram/link': '/s3/data' })).toBe('/s3/data/x')
+  })
+
+  it('relative target against link dir', () => {
+    expect(resolveSymlinks('/ram/sub/dlink', { '/ram/sub/dlink': 'deep.txt' })).toBe(
+      '/ram/sub/deep.txt',
+    )
+  })
+
+  it('relative target with suffix', () => {
+    expect(resolveSymlinks('/ram/sub/dlink/x', { '/ram/sub/dlink': 'peer' })).toBe(
+      '/ram/sub/peer/x',
+    )
+  })
+
+  it('cycle raises', () => {
+    expect(() => resolveSymlinks('/a', { '/a': '/b', '/b': '/a' })).toThrow(CycleError)
+  })
+
+  it('self-cycle raises', () => {
+    expect(() => resolveSymlinks('/a/x', { '/a': '/a/y' })).toThrow(CycleError)
   })
 })

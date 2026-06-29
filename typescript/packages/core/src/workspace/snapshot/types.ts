@@ -119,4 +119,6 @@ export interface WorkspaceStateDict {
    * (e.g. Gmail, Slack). Replay logs a warning naming these.
    */
   live_only_mounts?: string[]
+  /** Workspace-level symlink table (link abs path -> verbatim target). */
+  symlinks?: Record<string, string>
 }

@@ -25,7 +25,6 @@ from mirage.types import PathSpec
 from mirage.workspace.executor.command import handle_command
 from mirage.workspace.executor.control import BreakSignal, ContinueSignal
 from mirage.workspace.expand import classify_parts, expand_node, expand_parts
-from mirage.workspace.expand.classify import classify_bare_path
 from mirage.workspace.node.classify_argv import classify_argv_by_spec
 from mirage.workspace.node.resolve_globs import resolve_globs
 from mirage.workspace.session.shell_dirs import home_dir
@@ -36,9 +35,10 @@ from mirage.shell.helpers import (  # isort: skip
     get_process_sub_direction, get_text)
 from mirage.workspace.executor.builtins import (  # isort: skip
     handle_bash, handle_cd, handle_echo, handle_eval, handle_export,
-    handle_history, handle_local, handle_man, handle_printenv, handle_printf,
-    handle_read, handle_return, handle_set, handle_shift, handle_sleep,
-    handle_source, handle_test, handle_trap, handle_unset, handle_whoami)
+    handle_history, handle_ln, handle_local, handle_man, handle_printenv,
+    handle_printf, handle_read, handle_readlink, handle_return, handle_set,
+    handle_shift, handle_sleep, handle_source, handle_test, handle_trap,
+    handle_unset, handle_whoami, link_flags)
 
 _UNSUPPORTED_BUILTINS = frozenset({
     "bg",
@@ -52,22 +52,23 @@ _UNSUPPORTED_BUILTINS = frozenset({
 _CdArgs = list[str | PathSpec]
 
 
-def _split_cd_options(args: _CdArgs) -> tuple[_CdArgs, str | None]:
+def _split_cd_options(args: _CdArgs) -> tuple[_CdArgs, str | None, bool]:
     """Split leading ``cd`` option flags from the directory operand.
 
     Accepts the GNU ``cd`` options ``-L -P -e -@`` (and clusters such as
     ``-LP``) plus a ``--`` end-of-options marker; a bare ``-`` is the
-    OLDPWD operand, not an option.
+    OLDPWD operand, not an option. The last of ``-L``/``-P`` wins.
 
     Args:
         args: The classified arguments after the ``cd`` command name.
 
     Returns:
-        ``(operands, bad)`` where ``operands`` are the non-option args and
-        ``bad`` is the first unknown option character, or ``None`` when all
-        options were valid.
+        ``(operands, bad, physical)`` where ``operands`` are the non-option
+        args, ``bad`` is the first unknown option character (or ``None``),
+        and ``physical`` is True when ``-P`` is the effective mode.
     """
     operands: _CdArgs = []
+    physical = False
     parsing = True
     for arg in args:
         s = arg.original if isinstance(arg, PathSpec) else str(arg)
@@ -78,11 +79,16 @@ def _split_cd_options(args: _CdArgs) -> tuple[_CdArgs, str | None]:
             if s != "-" and len(s) >= 2 and s.startswith("-"):
                 bad = next((c for c in s[1:] if c not in "LPe@"), None)
                 if bad is None:
+                    for c in s[1:]:
+                        if c == "P":
+                            physical = True
+                        elif c == "L":
+                            physical = False
                     continue
-                return operands, bad
+                return operands, bad, physical
             parsing = False
         operands.append(arg)
-    return operands, None
+    return operands, None, physical
 
 
 async def execute_command(
@@ -251,7 +257,7 @@ async def _dispatch_command_body(
         return out, IOResult(), ExecutionNode(command="pwd", exit_code=0)
 
     if name == SB.CD:
-        operands, bad_opt = _split_cd_options(classified[1:])
+        operands, bad_opt, physical = _split_cd_options(classified[1:])
         if bad_opt is not None:
             err = (f"cd: -{bad_opt}: invalid option\n"
                    f"cd: usage: cd [-L|[-P [-e]] [-@]] [dir]\n").encode()
@@ -273,8 +279,12 @@ async def _dispatch_command_body(
                                       stderr=err), ExecutionNode(command="cd",
                                                                  exit_code=1,
                                                                  stderr=err)
-            return await handle_cd(dispatch, registry.is_mount_root, home,
-                                   session)
+            return await handle_cd(dispatch,
+                                   registry.is_mount_root,
+                                   home,
+                                   session,
+                                   links=registry.symlinks,
+                                   physical=physical)
         raw = operands[0]
         raw_str = raw.original if isinstance(raw, PathSpec) else str(raw)
         if raw_str == "-":
@@ -287,21 +297,21 @@ async def _dispatch_command_body(
                                    registry.is_mount_root,
                                    old,
                                    session,
-                                   print_path=True)
+                                   print_path=True,
+                                   links=registry.symlinks,
+                                   physical=physical)
         if isinstance(raw, PathSpec):
-            path = raw
-            cdpath_target = raw.as_typed or raw.original
-        elif raw_str.startswith("/"):
-            path = raw_str
-            cdpath_target = raw_str
+            path = raw.as_typed or raw.original
         else:
-            path = classify_bare_path(raw_str, registry, session.cwd)
-            cdpath_target = raw_str
+            path = raw_str
+        cdpath_target = path
         return await handle_cd(dispatch,
                                registry.is_mount_root,
                                path,
                                session,
-                               cdpath_target=cdpath_target)
+                               cdpath_target=cdpath_target,
+                               links=registry.symlinks,
+                               physical=physical)
 
     if name == SB.HISTORY:
         return await handle_history(registry, expanded[1:], session)
@@ -411,6 +421,16 @@ async def _dispatch_command_body(
 
     if name == SB.CONTINUE:
         raise ContinueSignal()
+
+    # ── symlinks (workspace-level, registry-backed) ──
+    # `ln -s` creates a link; plain `readlink` reads the target. `ln` without
+    # -s (hard link) and `readlink -f/-e/-m` (canonicalize) fall through to
+    # the mount command, preserving existing behavior.
+    if name == "ln" and "s" in link_flags(classified[1:], "sfnv"):
+        return handle_ln(registry, session, classified[1:])
+    if name == "readlink" and not (link_flags(classified[1:], "fenm")
+                                   & {"f", "e", "m"}):
+        return handle_readlink(registry, session, classified[1:])
 
     # ── mount command (default) ─────────────────
     return await handle_command(recurse,

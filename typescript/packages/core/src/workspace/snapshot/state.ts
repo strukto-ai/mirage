@@ -114,6 +114,7 @@ export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
     jobs,
     fingerprints,
     live_only_mounts: liveOnly,
+    symlinks: { ...ws.registry.symlinks },
   }
 }
 
@@ -165,6 +166,7 @@ export async function applyStateDict(ws: Workspace, state: WorkspaceStateDict): 
     await Promise.resolve(resource.loadState(m.resource_state as RAMResourceState))
   }
   restoreSessions(ws, state)
+  ws.registry.symlinks = { ...(state.symlinks ?? {}) }
   // current_agent_id is not restored separately: TS models a single
   // readonly agentId, set to default_agent_id at construction (== current).
   restoreCache(ws, state)

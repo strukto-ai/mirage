@@ -47,6 +47,7 @@ export class MountRegistry {
   private consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
   private readonly defaultMode: MountMode
   private cacheStore: FileCache | null = null
+  symlinks: Record<string, string> = {}
 
   /**
    * Attach the workspace file cache and build per-mount CacheManagers.

@@ -1923,7 +1923,7 @@ exit=1
 cd: HOME not set
 === cwd_cd_quoted_tilde ===
 exit=1
-cd: /data/~: No such file or directory
+cd: ~: No such file or directory
 === sed_count_zero ===
 exit=1
 === jq_no_filter_no_input ===
@@ -2073,12 +2073,24 @@ exit=0
 exit=0
 arch.zip
 deep
-link.txt
 nested.txt
-=== ln_read_back ===
+=== ln_readlink ===
 exit=0
-nested
-content
+/data/sub/nested.txt
+=== sym_readlink_abs ===
+exit=0
+/data/a.txt
+=== sym_readlink_rel ===
+exit=0
+a.txt
+=== sym_readlink_nonlink ===
+exit=1
+=== sym_cd_through ===
+exit=0
+/data/sub
+=== sym_cd_eloop ===
+exit=1
+cd: /data/c1: Too many levels of symbolic links
 === nl_pin_du ===
 exit=0
 14
@@ -2090,10 +2102,10 @@ exit=0
 18
 === nl_pin_tree ===
 exit=0
-145
+126
 === nl_pin_ls ===
 exit=0
-34
+25
 === nl_pin_wc ===
 exit=0
 14

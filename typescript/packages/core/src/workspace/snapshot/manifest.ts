@@ -57,6 +57,7 @@ export function splitManifestAndBlobs(state: AnyDict): [AnyDict, Record<string, 
     [StateKey.JOBS]: [],
     [StateKey.FINGERPRINTS]: state[StateKey.FINGERPRINTS] ?? [],
     [StateKey.LIVE_ONLY_MOUNTS]: state[StateKey.LIVE_ONLY_MOUNTS] ?? [],
+    [StateKey.SYMLINKS]: state[StateKey.SYMLINKS] ?? {},
   }
 
   for (const m of mounts) {

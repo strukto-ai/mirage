@@ -712,7 +712,15 @@ export const EXIT_CODE_CASES: ReadonlyArray<readonly [string, string]> = [
   ["ln_create", "ln -s /data/sub/nested.txt /data/sub/link.txt"],
   ["zip_create", "zip /data/sub/arch.zip /data/sub/nested.txt"],
   ["lnzip_ls_after", "ls -1 /data/sub"],
-  ["ln_read_back", "cat /data/sub/link.txt"],
+  ["ln_readlink", "readlink /data/sub/link.txt"],
+
+  // ----- symlinks: workspace-level registry overlay (issue #414 for
+  // follow-on-read; here we pin ln -s / readlink / cd-through / ELOOP) -----
+  ["sym_readlink_abs", "ln -s /data/a.txt /data/syma && readlink /data/syma"],
+  ["sym_readlink_rel", "ln -s a.txt /data/sub/rellink && readlink /data/sub/rellink"],
+  ["sym_readlink_nonlink", "readlink /data/a.txt"],
+  ["sym_cd_through", "ln -s /data/sub /data/sublink && (cd /data/sublink && pwd)"],
+  ["sym_cd_eloop", "ln -s /data/c2 /data/c1 && ln -s /data/c1 /data/c2 && (cd /data/c1) 2>&1"],
 
   // ----- trailing-newline pins (wc -c counts the final \n) -----
   ["nl_pin_du", "du /data/b.txt | wc -c"],

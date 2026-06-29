@@ -46,6 +46,7 @@ class MountRegistry:
         self._root: MountEntry | None = None
         self._consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
         self._file_cache: FileCacheMixin | None = None
+        self.symlinks: dict[str, str] = {}
         self.mount(DEV_PREFIX, DevResource(), MountMode.WRITE)
 
     def set_consistency(self, consistency: ConsistencyPolicy) -> None:

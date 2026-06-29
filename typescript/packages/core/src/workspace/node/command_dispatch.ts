@@ -27,7 +27,7 @@ import type { PyodideRuntime } from '../executor/python/runtime.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { NodeType as NT, ShellBuiltin as SB } from '../../shell/types.ts'
 import { PathSpec } from '../../types.ts'
-import { classifyBarePath, classifyParts } from '../expand/classify.ts'
+import { classifyParts } from '../expand/classify.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import { expandParts } from '../expand/parts.ts'
 import type { TSNodeLike } from '../expand/variable.ts'
@@ -43,6 +43,7 @@ import {
   handleEval,
   handleExport,
   handleHistory,
+  handleLn,
   handleLocal,
   handleMan,
   handlePrintenv,
@@ -54,9 +55,11 @@ import {
   handleSleep,
   handleSource,
   handleTest,
+  handleReadlink,
   handleTrap,
   handleUnset,
   handleWhoami,
+  linkFlags,
 } from '../executor/builtins/index.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Session } from '../session/session.ts'
@@ -81,8 +84,10 @@ const UNSUPPORTED_BUILTINS: ReadonlySet<string> = new Set([
 function splitCdOptions(args: (string | PathSpec)[]): {
   operands: (string | PathSpec)[]
   bad: string | null
+  physical: boolean
 } {
   const operands: (string | PathSpec)[] = []
+  let physical = false
   let parsing = true
   for (const arg of args) {
     const s = arg instanceof PathSpec ? arg.original : arg
@@ -99,14 +104,20 @@ function splitCdOptions(args: (string | PathSpec)[]): {
             break
           }
         }
-        if (bad === null) continue
-        return { operands, bad }
+        if (bad === null) {
+          for (const c of s.slice(1)) {
+            if (c === 'P') physical = true
+            else if (c === 'L') physical = false
+          }
+          continue
+        }
+        return { operands, bad, physical }
       }
       parsing = false
     }
     operands.push(arg)
   }
-  return { operands, bad: null }
+  return { operands, bad: null, physical }
 }
 
 export async function executeCommand(
@@ -323,7 +334,7 @@ async function runCommandBody(
   }
 
   if (name === SB.CD) {
-    const { operands, bad } = splitCdOptions(classified.slice(1))
+    const { operands, bad, physical } = splitCdOptions(classified.slice(1))
     if (bad !== null) {
       const err = new TextEncoder().encode(
         `cd: -${bad}: invalid option\ncd: usage: cd [-L|[-P [-e]] [-@]] [dir]\n`,
@@ -352,7 +363,16 @@ async function runCommandBody(
           new ExecutionNode({ command: 'cd', exitCode: 1, stderr: err }),
         ]
       }
-      return handleCd(dispatch, (p) => registry.isMountRoot(p), home, session)
+      return handleCd(
+        dispatch,
+        (p) => registry.isMountRoot(p),
+        home,
+        session,
+        false,
+        null,
+        registry.symlinks,
+        physical,
+      )
     }
     const raw = operands[0]
     const rawStr = raw instanceof PathSpec ? raw.original : String(raw)
@@ -366,21 +386,34 @@ async function runCommandBody(
           new ExecutionNode({ command: 'cd -', exitCode: 1, stderr: err }),
         ]
       }
-      return handleCd(dispatch, (p) => registry.isMountRoot(p), old, session, true)
+      return handleCd(
+        dispatch,
+        (p) => registry.isMountRoot(p),
+        old,
+        session,
+        true,
+        null,
+        registry.symlinks,
+        physical,
+      )
     }
-    let path: string | PathSpec
-    let cdpathTarget: string
+    let path: string
     if (raw instanceof PathSpec) {
-      path = raw
-      cdpathTarget = raw.asTyped ?? raw.original
-    } else if (rawStr.startsWith('/')) {
-      path = rawStr
-      cdpathTarget = rawStr
+      path = raw.asTyped ?? raw.original
     } else {
-      path = classifyBarePath(rawStr, registry, session.cwd)
-      cdpathTarget = rawStr
+      path = rawStr
     }
-    return handleCd(dispatch, (p) => registry.isMountRoot(p), path, session, false, cdpathTarget)
+    const cdpathTarget = path
+    return handleCd(
+      dispatch,
+      (p) => registry.isMountRoot(p),
+      path,
+      session,
+      false,
+      cdpathTarget,
+      registry.symlinks,
+      physical,
+    )
   }
 
   if (name === SB.TRUE) {
@@ -462,6 +495,19 @@ async function runCommandBody(
       return [io.stdout, io, new ExecutionNode({ command: 'timeout', exitCode: io.exitCode })]
     }
     return [null, new IOResult(), new ExecutionNode({ command: 'timeout', exitCode: 0 })]
+  }
+
+  // Symlinks (workspace-level, registry-backed). `ln -s` creates a link;
+  // plain `readlink` reads the target. `ln` without -s (hard link) and
+  // `readlink -f/-e/-m` (canonicalize) fall through to the mount command.
+  if (name === 'ln' && linkFlags(classified.slice(1), 'sfnv').has('s')) {
+    return handleLn(registry, session, classified.slice(1))
+  }
+  if (name === 'readlink') {
+    const fl = linkFlags(classified.slice(1), 'fenm')
+    if (!(fl.has('f') || fl.has('e') || fl.has('m'))) {
+      return handleReadlink(registry, session, classified.slice(1))
+    }
   }
 
   // Default: mount-dispatched command

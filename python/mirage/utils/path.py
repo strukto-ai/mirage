@@ -85,6 +85,57 @@ def expand_tilde(word: str, home: str | None) -> str:
     return word
 
 
+MAX_SYMLINK_HOPS = 40
+
+
+class CycleError(Exception):
+    """Raised when symlink resolution exceeds the maximum hop count.
+
+    Mirrors POSIX ELOOP (a loop such as ``a -> b -> a`` or an unbounded
+    expansion such as ``a -> a/x``). Command boundaries render this as the
+    GNU ``strerror`` text "Too many levels of symbolic links".
+    """
+
+
+def _is_link_prefix(key: str, path: str) -> bool:
+    return path == key or path.startswith(key + "/")
+
+
+def resolve_symlinks(path: str, links: dict[str, str]) -> str:
+    """Resolve symlink prefixes in ``path`` until stable.
+
+    Repeatedly replaces the longest dict key that is a path-boundary prefix
+    of ``path`` with its target, mirroring filesystem symlink following
+    (``/a/b`` is a prefix of ``/a/b/c`` but not ``/a/bc``).
+
+    Args:
+        path: An absolute virtual path.
+        links: Map of link virtual-path to target virtual-path.
+
+    Returns:
+        The path with all symlink prefixes resolved.
+
+    Raises:
+        CycleError: If resolution exceeds ``MAX_SYMLINK_HOPS`` (a loop or
+            unbounded expansion), matching POSIX ELOOP.
+    """
+    if not links:
+        return path
+    for _ in range(MAX_SYMLINK_HOPS):
+        best: str | None = None
+        for key in links:
+            if _is_link_prefix(key, path) and (best is None
+                                               or len(key) > len(best)):
+                best = key
+        if best is None:
+            return path
+        target = links[best]
+        if not target.startswith("/"):
+            target = norm(parent(best) + "/" + target)
+        path = target + path[len(best):]
+    raise CycleError(path)
+
+
 def rebase_display(paths: list[str], original: str,
                    display: str | None) -> list[str]:
     """Rewrite the base of walked output paths to the as-typed form.

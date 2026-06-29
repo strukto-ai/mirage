@@ -275,6 +275,7 @@ class StateKey(StrEnum):
     JOBS = "jobs"
     FINGERPRINTS = "fingerprints"
     LIVE_ONLY_MOUNTS = "live_only_mounts"
+    SYMLINKS = "symlinks"
 
 
 class DriftPolicy(StrEnum):

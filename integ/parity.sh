@@ -71,6 +71,13 @@ probe() {
   echo "cwd.rel_cat=$($cli execute -w pw -c '(cd /data && cat f.txt)' </dev/null | sout)"
   echo "cwd.wc_disp=$($cli execute -w pw -c '(cd /data && wc -l f.txt)' </dev/null | sout)"
 
+  # ── symlinks: ln -s / readlink (verbatim target) / cd-through / ELOOP ──
+  echo "sym.readlink=$($cli execute -w pw -c 'ln -s /data/f.txt /data/lnk && readlink /data/lnk' </dev/null | sout)"
+  echo "sym.readlink_rel=$($cli execute -w pw -c 'ln -s f.txt /data/rlnk && readlink /data/rlnk' </dev/null | sout)"
+  echo "sym.nonlink_exit=$($cli execute -w pw -c 'readlink /data/f.txt' </dev/null | sexit)"
+  echo "sym.cd_through=$($cli execute -w pw -c 'ln -s /data /data/dlnk && (cd /data/dlnk && pwd)' </dev/null | sout)"
+  echo "sym.eloop=$($cli execute -w pw -c 'ln -s /data/c2 /data/c1 && ln -s /data/c1 /data/c2 && (cd /data/c1) 2>&1' </dev/null | sout)"
+
   # ── sessions: default session persists cwd; -s session is isolated ──
   $cli session create pw --id s2 </dev/null >/dev/null
   $cli execute -w pw -c 'cd /data' </dev/null >/dev/null

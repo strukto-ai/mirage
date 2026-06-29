@@ -230,6 +230,27 @@ async function checkCdCrossMount(
   );
 }
 
+// A symlink lives on the workspace registry and may point across mounts.
+// readlink returns the verbatim target; cd through a cross-mount link to a
+// real directory on the other mount resolves and lands there.
+async function checkSymlinksCrossMount(
+  ws: Workspace,
+  dst: string,
+  label: string,
+): Promise<void> {
+  const link = `/ram/xlink_${label}`;
+  await run(ws, `ln -s ${dst}/copied/a.txt ${link}`);
+  const [out, , code] = await run(ws, `readlink ${link}`);
+  check(
+    `${label}: readlink cross-mount target`,
+    code === 0 && out.trim() === `${dst}/copied/a.txt`,
+  );
+  const dlink = `/ram/xdir_${label}`;
+  await run(ws, `ln -s ${dst}/copied ${dlink}`);
+  const [out2] = await run(ws, `(cd ${dlink} && pwd)`);
+  check(`${label}: cd through cross-mount link`, out2.trim() === `${dst}/copied`);
+}
+
 // mv a directory across mounts: destination gets the tree, source is gone.
 async function checkMove(
   ws: Workspace,
@@ -331,6 +352,7 @@ async function exercise(
   process.stdout.write(`===== ram -> ${label} =====\n`);
   await checkRecursive(ws, dst, label, expectDirs);
   await checkCdCrossMount(ws, dst, label);
+  await checkSymlinksCrossMount(ws, dst, label);
   await checkReadFamily(ws, dst, label);
   await checkCompare(ws, dst, label);
   await checkNoClobber(ws, dst, label);

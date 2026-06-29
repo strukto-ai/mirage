@@ -16,12 +16,29 @@ import { resolvePath } from '../../../commands/spec/parser.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { FileType } from '../../../types.ts'
+import { CycleError, MAX_SYMLINK_HOPS, resolveSymlinks } from '../../../utils/path.ts'
+import { rstripSlash } from '../../../utils/slash.ts'
+import { posixNormpath } from '../../expand/classify.ts'
 import type { Session } from '../../session/session.ts'
 import { changeDir } from '../../session/shell_dirs.ts'
 import { ExecutionNode } from '../../types.ts'
 import type { DispatchFn } from '../cross_mount.ts'
 import { toScope, scopePath } from './scope.ts'
 import type { Result } from './scope.ts'
+
+// Resolve a combined `cd` path, following symlinks per mode. Logical (-L,
+// default) simplifies `..` textually first, then follows links; physical
+// (-P) follows links first so `..` acts on the link target. Both loop
+// resolve<->normalize until stable, so a link target containing `..` works.
+function resolveTarget(combined: string, links: Record<string, string>, physical: boolean): string {
+  let p = physical ? combined : posixNormpath(combined)
+  for (let hop = 0; hop < MAX_SYMLINK_HOPS; hop++) {
+    const n = posixNormpath(resolveSymlinks(p, links))
+    if (n === p) return n
+    p = n
+  }
+  throw new CycleError(p)
+}
 
 function cdpathSearchable(target: string): boolean {
   if (target.startsWith('/') || target.startsWith('./') || target.startsWith('../')) {
@@ -36,7 +53,7 @@ function cdCandidates(
   session: Session,
 ): [string, boolean][] {
   const cwd = session.cwd
-  const fallback = resolvePath(cwd, raw)
+  const fallback = raw.startsWith('/') ? raw : `${rstripSlash(cwd)}/${raw}`
   const cdpath = session.env.CDPATH
   if (!cdpath || !cdpathTarget || !cdpathSearchable(cdpathTarget)) {
     return [[fallback, false]]
@@ -44,7 +61,7 @@ function cdCandidates(
   const out: [string, boolean][] = []
   for (const entry of cdpath.split(':')) {
     const base = entry ? resolvePath(cwd, entry) : cwd
-    out.push([resolvePath(base, cdpathTarget), entry !== ''])
+    out.push([`${rstripSlash(base)}/${cdpathTarget}`, entry !== ''])
   }
   out.push([fallback, false])
   return out
@@ -57,11 +74,23 @@ export async function handleCd(
   session: Session,
   printPath = false,
   cdpathTarget: string | null = null,
+  links: Record<string, string> = {},
+  physical = false,
 ): Promise<Result> {
   const raw = scopePath(path)
   const candidates = cdCandidates(raw, cdpathTarget, session)
   let error: string | null = null
-  for (const [resolved, announce] of candidates) {
+  for (const [combined, announce] of candidates) {
+    let resolved: string
+    try {
+      resolved = resolveTarget(combined, links, physical)
+    } catch (exc) {
+      if (exc instanceof CycleError) {
+        error = `cd: ${raw}: Too many levels of symbolic links\n`
+        continue
+      }
+      throw exc
+    }
     if (resolved === '/') return cdSuccess(session, '/', raw, printPath || announce)
     const scope = toScope(resolved)
     let stat: { type?: string } | null = null

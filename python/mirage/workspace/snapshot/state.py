@@ -94,6 +94,7 @@ async def to_state_dict(ws) -> dict:
         StateKey.JOBS: finished_jobs,
         StateKey.FINGERPRINTS: fingerprints,
         StateKey.LIVE_ONLY_MOUNTS: live_only_mounts,
+        StateKey.SYMLINKS: dict(ws._registry.symlinks),
     }
 
 
@@ -163,6 +164,7 @@ async def apply_state_dict(ws, state: dict) -> None:
         mount.resource.load_state(m[MountKey.RESOURCE_STATE])
 
     _restore_sessions(ws, state)
+    ws._registry.symlinks = dict(state.get(StateKey.SYMLINKS) or {})
     ws._current_agent_id = state.get(StateKey.CURRENT_AGENT_ID,
                                      ws._default_agent_id)
 
