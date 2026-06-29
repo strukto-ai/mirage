@@ -110,6 +110,11 @@ async def check_read_family(ws: Workspace, dst: str, label: str) -> None:
     out, _, _ = await run(ws, f"rg aaa {src} {copied}")
     check(f"{label}: rg prefixes", f"{src}:aaa" in out
           and f"{copied}:aaa" in out)
+    # A non-numeric -n is rejected by the shared head/tail generic, exit 1.
+    _, err, code = await run(ws, f"head -n abc {src} {copied}")
+    check(f"{label}: head invalid -n", code == 1 and "abc" in err)
+    _, err, code = await run(ws, f"tail -n abc {src} {copied}")
+    check(f"{label}: tail invalid -n", code == 1 and "abc" in err)
 
 
 async def check_compare(ws: Workspace, dst: str, label: str) -> None:

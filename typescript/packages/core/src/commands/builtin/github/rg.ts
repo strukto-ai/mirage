@@ -13,24 +13,18 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GitHubAccessor } from '../../../accessor/github.ts'
-import { SCOPE_ERROR, SCOPE_WARN } from '../../../core/github/constants.ts'
-import { resolveGlob } from '../../../core/github/glob.ts'
+import { SCOPE_ERROR } from '../../../core/github/constants.ts'
 import { readdir as githubReaddir } from '../../../core/github/readdir.ts'
-import {
-  countScopeFiles,
-  isRepoRoot,
-  scopeRelativeKey,
-  shouldUseSearch,
-} from '../../../core/github/scope.ts'
-import { narrowPaths } from '../../../core/github/search.ts'
 import { stat as githubStat } from '../../../core/github/stat.ts'
 import { stream as githubStream } from '../../../core/github/read.ts'
 import { IOResult } from '../../../io/types.ts'
 import { type FileStat, ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { isRegexPattern, patternArg } from '../grep_helper.ts'
+import { patternArg } from '../grep_helper.ts'
+import { rgMatchesFilter } from '../rg_helper.ts'
 import { rgGeneric } from '../generic/rg.ts'
+import { filesOnlyShortcircuit, narrowScope } from './narrow.ts'
 
 const ENC = new TextEncoder()
 
@@ -44,33 +38,33 @@ async function rgCommand(
   if (paths.length > 0) {
     const first = paths[0]
     if (first === undefined) return [null, new IOResult()]
-    const pattern = patternArg(texts, opts.flags) ?? ''
+    const pattern = patternArg(texts, opts.flags)
     const fixedString = opts.flags.F === true
-    const key = scopeRelativeKey(first)
-    let fileCount = countScopeFiles(accessor.tree, key)
-    const useSearch =
-      shouldUseSearch(isRegexPattern(pattern, fixedString), true, accessor.isDefaultBranch) &&
-      isRepoRoot(key) &&
-      fileCount > SCOPE_WARN
-    if (useSearch) {
-      const narrowed = await narrowPaths(accessor, pattern, paths)
-      if (narrowed.length > 0) {
-        resolved = narrowed
-        fileCount = narrowed.length
-      } else {
-        resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-      }
-    } else {
-      resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
-    }
-    if (fileCount > SCOPE_ERROR) {
+    const narrowed = await narrowScope(
+      accessor,
+      paths,
+      pattern,
+      fixedString,
+      true,
+      opts.index ?? undefined,
+    )
+    resolved = narrowed.resolved
+    if (narrowed.fileCount > SCOPE_ERROR) {
       return [
         null,
         new IOResult({
           exitCode: 1,
-          stderr: ENC.encode(`rg: ${String(fileCount)} files in scope, narrow the path\n`),
+          stderr: ENC.encode(`rg: ${String(narrowed.fileCount)} files in scope, narrow the path\n`),
         }),
       ]
+    }
+    if (narrowed.usedSearch) {
+      const fileType = typeof opts.flags.type === 'string' ? opts.flags.type : null
+      const globPattern = typeof opts.flags.glob === 'string' ? opts.flags.glob : null
+      const hidden = opts.flags.hidden === true
+      const predicate = (p: string): boolean => rgMatchesFilter(p, fileType, globPattern, hidden)
+      const short = filesOnlyShortcircuit(opts.flags, pattern, resolved, first, predicate)
+      if (short !== null) return short
     }
   }
   const stat = (p: PathSpec): Promise<FileStat> => githubStat(accessor, p, opts.index ?? undefined)

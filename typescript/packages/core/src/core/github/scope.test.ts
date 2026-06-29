@@ -71,10 +71,9 @@ describe('countScopeFiles', () => {
 })
 
 describe('shouldUseSearch', () => {
-  it('requires literal pattern, recursive, and default branch', () => {
-    expect(shouldUseSearch(false, true, true)).toBe(true)
-    expect(shouldUseSearch(true, true, true)).toBe(false)
-    expect(shouldUseSearch(false, false, true)).toBe(false)
-    expect(shouldUseSearch(false, true, false)).toBe(false)
+  it('requires recursive and default branch (literal check moved to caller)', () => {
+    expect(shouldUseSearch(true, true)).toBe(true)
+    expect(shouldUseSearch(false, true)).toBe(false)
+    expect(shouldUseSearch(true, false)).toBe(false)
   })
 })

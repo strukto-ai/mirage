@@ -166,6 +166,11 @@ async function checkReadFamily(
     `${label}: rg prefixes`,
     out.includes(`${src}:aaa`) && out.includes(`${copied}:aaa`),
   );
+  // A non-numeric -n is rejected by the shared head/tail generic (GNU), exit 1.
+  const hbad = await run(ws, `head -n abc ${src} ${copied}`);
+  check(`${label}: head invalid -n`, hbad[2] === 1 && hbad[1].includes("abc"));
+  const tbad = await run(ws, `tail -n abc ${src} ${copied}`);
+  check(`${label}: tail invalid -n`, tbad[2] === 1 && tbad[1].includes("abc"));
 }
 
 // diff/cmp two files that live on different mounts: identical operands exit 0

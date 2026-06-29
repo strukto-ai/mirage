@@ -214,8 +214,11 @@ describe('workspace: cross-mount commands (cp/mv/diff/cmp)', () => {
     const io = await ws.execute('diff /disk/a.txt /ram/b.txt')
     expect(io.exitCode).toBe(1)
     const out = stdoutStr(io)
+    // GNU normal-diff format (cross-mount diff now routes through the shared
+    // generic, matching single-mount: "1c1 / < aaa / --- / > bbb").
     expect(out).toContain('---')
-    expect(out).toContain('+++')
+    expect(out).toContain('< aaa')
+    expect(out).toContain('> bbb')
     await ws.close()
   })
 

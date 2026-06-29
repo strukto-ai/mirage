@@ -47,7 +47,10 @@ export async function narrowPaths(
     const pathFilter = stripSlash(stripPrefix(p))
     try {
       const results = await search(accessor, pattern, pathFilter === '' ? undefined : pathFilter)
-      for (const r of results) narrowed.push(r.path)
+      const scopePrefix = pathFilter === '' ? '' : `${pathFilter}/`
+      for (const r of results) {
+        if (r.path === pathFilter || r.path.startsWith(scopePrefix)) narrowed.push(r.path)
+      }
     } catch {
       // ignore — search is best-effort
     }

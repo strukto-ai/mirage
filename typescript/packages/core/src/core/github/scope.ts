@@ -47,12 +47,11 @@ export function countScopeFiles(tree: Record<string, TreeEntry>, key: string): n
   return count
 }
 
-export function shouldUseSearch(
-  isRegex: boolean,
-  recursive: boolean,
-  onDefaultBranch: boolean,
-): boolean {
-  return !isRegex && recursive && onDefaultBranch
+export function shouldUseSearch(recursive: boolean, onDefaultBranch: boolean): boolean {
+  // Search only helps recursive scans on the default branch (code search only
+  // indexes the default branch). Whether a usable literal exists, and whether
+  // the scope is large enough to bother, is decided by the caller.
+  return recursive && onDefaultBranch
 }
 
 export function estimateScope(

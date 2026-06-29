@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { IOResult } from '../../io/types.ts'
+import { IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { MountRegistry } from '../mount/registry.ts'
@@ -210,7 +210,8 @@ describe('handleCrossMount — cmp', () => {
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
     const [out, io] = await handleCrossMount('cmp', paths, [], {}, d, 'cmp')
     expect(io.exitCode).toBe(1)
-    expect(decode(out as Uint8Array)).toMatch(/byte 2/)
+    // The shared generic cmp reports "char N, line M" (matching single-mount).
+    expect(decode(out as Uint8Array)).toMatch(/char 2/)
   })
 
   it('EOF on shorter file → exit 1', async () => {
@@ -244,14 +245,15 @@ describe('handleCrossMount — multi-read cat/head/tail/grep/wc', () => {
     const d = dispatchTwo('hello\n', 'world\n')
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
     const [out] = await handleCrossMount('cat', paths, [], {}, d, 'cat')
-    expect(decode(out as Uint8Array)).toBe('hello\nworld\n')
+    expect(decode(await materialize(out))).toBe('hello\nworld\n')
   })
 
   it('head -n 2 keeps first N lines per file with headers on multi-file', async () => {
     const d = dispatchTwo('1\n2\n3\n', 'x\ny\nz\n')
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    const [out] = await handleCrossMount('head', paths, ['-n', '2'], {}, d, 'head')
-    const text = decode(out as Uint8Array)
+    // The executor parses flags before routing, so -n arrives as a flag kwarg.
+    const [out] = await handleCrossMount('head', paths, [], { n: '2' }, d, 'head')
+    const text = decode(await materialize(out))
     expect(text).toMatch(/==> \/ram\/a <==/)
     expect(text).toMatch(/1\n2/)
     expect(text).toMatch(/==> \/disk\/b <==/)

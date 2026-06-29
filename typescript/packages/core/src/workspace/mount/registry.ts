@@ -23,6 +23,18 @@ import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 
 export const DEV_PREFIX = '/dev/'
 
+export class MountCommandUnsupported extends Error {
+  readonly cmdName: string
+  readonly backend: string
+
+  constructor(cmdName: string, backend: string) {
+    super(`${cmdName}: not supported on the ${backend} backend`)
+    this.name = 'MountCommandUnsupported'
+    this.cmdName = cmdName
+    this.backend = backend
+  }
+}
+
 export interface OpsMountInfo {
   prefix: string
   resourceType: string
@@ -311,6 +323,9 @@ export class MountRegistry {
   ): Promise<MountEntry | null> {
     const mountPath = pathScopes.length > 0 ? (pathScopes[0]?.original ?? cwd) : cwd
     let mount = this.mountFor(mountPath)
+    if (mount !== null && mount.resolveCommand(cmdName) == null && pathScopes.length > 0) {
+      throw new MountCommandUnsupported(cmdName, mount.resource.kind)
+    }
     if (mount?.resolveCommand(cmdName) == null) {
       mount = this.mountForCommand(cmdName)
     }

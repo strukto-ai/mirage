@@ -16,7 +16,7 @@ import { cacheAwareStreamEager } from '../../../cache/read_through.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { countNewlines, parseN, tailBytes } from '../tail_helper.ts'
+import { countNewlines, numberFlagError, parseN, tailBytes } from '../tail_helper.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 
 const ENC = new TextEncoder()
@@ -44,6 +44,8 @@ export async function tailGeneric(
   stream = cacheAwareStreamEager(stream)
   const nRaw = typeof opts.flags.n === 'string' ? opts.flags.n : null
   const cRaw = typeof opts.flags.c === 'string' ? opts.flags.c : null
+  const numErr = numberFlagError('tail', nRaw, cRaw)
+  if (numErr !== null) return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(numErr) })]
   const qFlag = opts.flags.q === true
   const vFlag = opts.flags.v === true
   const [lines, plusMode] = parseN(nRaw)

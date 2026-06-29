@@ -18,6 +18,22 @@ export function parseN(n: string | null): [number, boolean] {
   return [Number.parseInt(n, 10), false]
 }
 
+// GNU-style validation for head/tail -n/-c. Mirrors Python's int() raising on
+// a non-numeric value; returns the error line (with the bad value) or null.
+export function numberFlagError(
+  cmd: string,
+  nRaw: string | null,
+  cRaw: string | null,
+): string | null {
+  if (nRaw !== null && !/^[+-]?\d+$/.test(nRaw)) {
+    return `${cmd}: invalid number of lines: '${nRaw}'\n`
+  }
+  if (cRaw !== null && !/^[+-]?\d+$/.test(cRaw)) {
+    return `${cmd}: invalid number of bytes: '${cRaw}'\n`
+  }
+  return null
+}
+
 export function tailBytes(
   data: Uint8Array,
   lines: number,
