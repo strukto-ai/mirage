@@ -14,11 +14,11 @@
 
 import type { Session } from './session.ts'
 
-export const DEFAULT_HOME = '/'
-
-export function homeDir(session: Session): string {
+// Returns $HOME from the session env, or null when unset/empty, matching
+// GNU bash (no implicit home; `cd` errors, `~` and $HOME do not expand).
+export function homeDir(session: Session): string | null {
   const home = session.env.HOME
-  return home !== undefined && home !== '' ? home : DEFAULT_HOME
+  return home !== undefined && home !== '' ? home : null
 }
 
 export function changeDir(session: Session, newCwd: string): void {

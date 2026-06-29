@@ -17,16 +17,16 @@ import { Session } from './session.ts'
 import { changeDir, homeDir } from './shell_dirs.ts'
 
 describe('shell_dirs', () => {
-  it('homeDir defaults to /', () => {
-    expect(homeDir(new Session({ sessionId: 's' }))).toBe('/')
+  it('homeDir is null when $HOME unset', () => {
+    expect(homeDir(new Session({ sessionId: 's' }))).toBeNull()
   })
 
   it('homeDir reads $HOME', () => {
     expect(homeDir(new Session({ sessionId: 's', env: { HOME: '/data' } }))).toBe('/data')
   })
 
-  it('homeDir falls back to / for empty $HOME', () => {
-    expect(homeDir(new Session({ sessionId: 's', env: { HOME: '' } }))).toBe('/')
+  it('homeDir is null for empty $HOME', () => {
+    expect(homeDir(new Session({ sessionId: 's', env: { HOME: '' } }))).toBeNull()
   })
 
   it('changeDir sets cwd and $OLDPWD', () => {

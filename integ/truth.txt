@@ -1785,8 +1785,8 @@ bar
 baz
 === cwd_echo_pwd ===
 /data/sub
-=== cwd_echo_home_default ===
-/
+=== cwd_echo_home_unset ===
+[]
 === cwd_cd_oldpwd ===
 /data
 === cwd_cd_dash ===
@@ -1806,6 +1806,16 @@ baz
 === cwd_tilde_subdir_cat ===
 nested
 content
+=== cwd_cd_double_slash ===
+/data
+=== cwd_cd_phys_flag ===
+/data/sub
+=== cwd_cd_log_flag ===
+/data
+=== cwd_cd_dashdash ===
+/data
+=== cwd_cd_cdpath ===
+/data/sub
 === subshell_var_isolated ===
 1
 === subshell_var_inherit ===
@@ -1867,8 +1877,8 @@ disptree/d
 disptree/d/y.txt
 disptree/x.txt
 === history_last_two ===
-483  (cd /data && ls -R disptree)
-484  (cd /data && find disptree)
+488  (cd /data && ls -R disptree)
+489  (cd /data && find disptree)
 === bash_history_tail ===
 (cd /data && ls -R disptree)
 (cd /data && find disptree)
@@ -1900,6 +1910,18 @@ sugar is sweet
 roses are red
 violets are blue
 sugar is sweet
+=== cwd_cd_too_many ===
+exit=1
+cd: too many arguments
+=== cwd_cd_bad_opt ===
+exit=2
+cd: -x: invalid option
+=== cwd_cd_home_unset ===
+exit=1
+cd: HOME not set
+=== cwd_cd_quoted_tilde ===
+exit=1
+cd: /data/~: No such file or directory
 === sed_count_zero ===
 exit=1
 === jq_no_filter_no_input ===

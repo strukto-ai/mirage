@@ -85,7 +85,7 @@ export function lookupVar(name: string, session: Session, callStack: CallStack |
     if (localVal !== null) return localVal
   }
   if (name === 'PWD') return session.cwd
-  if (name === 'HOME') return homeDir(session)
+  if (name === 'HOME') return homeDir(session) ?? ''
   return env[name] ?? ''
 }
 

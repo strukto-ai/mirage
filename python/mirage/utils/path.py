@@ -54,23 +54,30 @@ def resolve_path(path: str, cwd: str) -> str:
     """
     if not path.startswith("/"):
         path = cwd.rstrip("/") + "/" + path
-    return posixpath.normpath(path)
+    resolved = posixpath.normpath(path)
+    if resolved.startswith("//"):
+        resolved = "/" + resolved.lstrip("/")
+    return resolved
 
 
-def expand_tilde(word: str, home: str) -> str:
+def expand_tilde(word: str, home: str | None) -> str:
     """Expand a leading ``~`` against the home directory.
 
     ``~`` alone or ``~/rest`` expands to ``home`` (or ``home/rest``).
     ``~user`` and any non-leading ``~`` are left unchanged, matching
-    bash behavior when no matching user exists.
+    bash behavior when no matching user exists. When ``home`` is ``None``
+    (``$HOME`` unset/empty), a leading ``~`` is left literal, mirroring
+    GNU bash with no home directory.
 
     Args:
         word: The unexpanded word.
-        home: The home directory to substitute for ``~``.
+        home: The home directory to substitute for ``~``, or ``None``.
 
     Returns:
         The word with a leading ``~`` resolved, or the word unchanged.
     """
+    if home is None:
+        return word
     if word == "~":
         return home
     if word.startswith("~/"):

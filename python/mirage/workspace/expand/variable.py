@@ -60,7 +60,7 @@ def _lookup_var(var: str, session: Session,
     if var == "PWD":
         return session.cwd
     if var == "HOME":
-        return home_dir(session)
+        return home_dir(session) or ""
     return env.get(var, "")
 
 

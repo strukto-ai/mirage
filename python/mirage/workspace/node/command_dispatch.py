@@ -49,6 +49,41 @@ _UNSUPPORTED_BUILTINS = frozenset({
     "ulimit",
 })
 
+_CdArgs = list[str | PathSpec]
+
+
+def _split_cd_options(args: _CdArgs) -> tuple[_CdArgs, str | None]:
+    """Split leading ``cd`` option flags from the directory operand.
+
+    Accepts the GNU ``cd`` options ``-L -P -e -@`` (and clusters such as
+    ``-LP``) plus a ``--`` end-of-options marker; a bare ``-`` is the
+    OLDPWD operand, not an option.
+
+    Args:
+        args: The classified arguments after the ``cd`` command name.
+
+    Returns:
+        ``(operands, bad)`` where ``operands`` are the non-option args and
+        ``bad`` is the first unknown option character, or ``None`` when all
+        options were valid.
+    """
+    operands: _CdArgs = []
+    parsing = True
+    for arg in args:
+        s = arg.original if isinstance(arg, PathSpec) else str(arg)
+        if parsing:
+            if s == "--":
+                parsing = False
+                continue
+            if s != "-" and len(s) >= 2 and s.startswith("-"):
+                bad = next((c for c in s[1:] if c not in "LPe@"), None)
+                if bad is None:
+                    continue
+                return operands, bad
+            parsing = False
+        operands.append(arg)
+    return operands, None
+
 
 async def execute_command(
     recurse,
@@ -216,10 +251,31 @@ async def _dispatch_command_body(
         return out, IOResult(), ExecutionNode(command="pwd", exit_code=0)
 
     if name == SB.CD:
-        if len(classified) <= 1:
-            return await handle_cd(dispatch, registry.is_mount_root,
-                                   home_dir(session), session)
-        raw = classified[1]
+        operands, bad_opt = _split_cd_options(classified[1:])
+        if bad_opt is not None:
+            err = (f"cd: -{bad_opt}: invalid option\n"
+                   f"cd: usage: cd [-L|[-P [-e]] [-@]] [dir]\n").encode()
+            return None, IOResult(exit_code=2,
+                                  stderr=err), ExecutionNode(command="cd",
+                                                             exit_code=2,
+                                                             stderr=err)
+        if len(operands) > 1:
+            err = b"cd: too many arguments\n"
+            return None, IOResult(exit_code=1,
+                                  stderr=err), ExecutionNode(command="cd",
+                                                             exit_code=1,
+                                                             stderr=err)
+        if not operands:
+            home = home_dir(session)
+            if home is None:
+                err = b"cd: HOME not set\n"
+                return None, IOResult(exit_code=1,
+                                      stderr=err), ExecutionNode(command="cd",
+                                                                 exit_code=1,
+                                                                 stderr=err)
+            return await handle_cd(dispatch, registry.is_mount_root, home,
+                                   session)
+        raw = operands[0]
         raw_str = raw.original if isinstance(raw, PathSpec) else str(raw)
         if raw_str == "-":
             old = session.env.get("OLDPWD")
@@ -232,15 +288,20 @@ async def _dispatch_command_body(
                                    old,
                                    session,
                                    print_path=True)
-        if raw_str == "~":
-            path = home_dir(session)
-        elif isinstance(raw, PathSpec):
+        if isinstance(raw, PathSpec):
             path = raw
+            cdpath_target = raw.as_typed or raw.original
         elif raw_str.startswith("/"):
             path = raw_str
+            cdpath_target = raw_str
         else:
             path = classify_bare_path(raw_str, registry, session.cwd)
-        return await handle_cd(dispatch, registry.is_mount_root, path, session)
+            cdpath_target = raw_str
+        return await handle_cd(dispatch,
+                               registry.is_mount_root,
+                               path,
+                               session,
+                               cdpath_target=cdpath_target)
 
     if name == SB.HISTORY:
         return await handle_history(registry, expanded[1:], session)

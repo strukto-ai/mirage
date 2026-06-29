@@ -24,16 +24,66 @@ from mirage.workspace.session.shell_dirs import change_dir
 from mirage.workspace.types import ExecutionNode
 
 
+def _cdpath_searchable(target: str) -> bool:
+    """Return whether ``target`` triggers a ``$CDPATH`` search.
+
+    Args:
+        target: The as-typed ``cd`` operand.
+
+    Returns:
+        True when ``target`` is relative and does not begin with ``./``
+        or ``../`` (mirroring GNU bash's ``cd`` search rule).
+    """
+    if target.startswith(("/", "./", "../")):
+        return False
+    return target not in (".", "..")
+
+
+def _cd_candidates(
+    raw: str,
+    cdpath_target: str | None,
+    session: Session,
+) -> list[tuple[str, bool]]:
+    """Build the ordered list of directories ``cd`` should try.
+
+    Args:
+        raw: The resolved operand path string.
+        cdpath_target: The as-typed operand when a ``$CDPATH`` search
+            applies, else ``None``.
+        session: The shell session (provides cwd and env).
+
+    Returns:
+        ``(resolved_path, announce)`` pairs in trial order; ``announce``
+        marks a non-empty ``$CDPATH`` hit whose absolute path GNU prints.
+    """
+    cwd = session.cwd
+    fallback = resolve_path(raw, cwd)
+    cdpath = session.env.get("CDPATH")
+    if (not cdpath or not cdpath_target
+            or not _cdpath_searchable(cdpath_target)):
+        return [(fallback, False)]
+    out: list[tuple[str, bool]] = []
+    for entry in cdpath.split(":"):
+        base = resolve_path(entry, cwd) if entry else cwd
+        out.append((resolve_path(cdpath_target, base), entry != ""))
+    out.append((fallback, False))
+    return out
+
+
 async def handle_cd(
     dispatch: Callable,
     is_mount_root: Callable[[str], bool],
     path: str | PathSpec,
     session: Session,
     print_path: bool = False,
+    cdpath_target: str | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     raw = _scope_path(path)
-    resolved = resolve_path(raw, session.cwd)
-    if resolved != "/":
+    candidates = _cd_candidates(raw, cdpath_target, session)
+    error: str | None = None
+    for resolved, announce in candidates:
+        if resolved == "/":
+            return _cd_success(session, "/", raw, print_path or announce)
         scope = _to_scope(resolved)
         s = None
         not_found = False
@@ -42,19 +92,31 @@ async def handle_cd(
         except FileNotFoundError:
             not_found = True
         except ValueError as exc:
-            err = f"cd: {raw}: {exc}\n".encode()
-            return None, IOResult(exit_code=1, stderr=err), ExecutionNode(
-                command=f"cd {raw}", exit_code=1, stderr=err)
+            error = f"cd: {raw}: {exc}\n"
+            continue
         if s is None or not_found:
-            if not is_mount_root(resolved):
-                err = (f"cd: {raw}: No such file or "
-                       f"directory\n").encode()
-                return None, IOResult(exit_code=1, stderr=err), ExecutionNode(
-                    command=f"cd {raw}", exit_code=1, stderr=err)
-        elif s.type != FileType.DIRECTORY:
-            err = f"cd: {raw}: Not a directory\n".encode()
-            return None, IOResult(exit_code=1, stderr=err), ExecutionNode(
-                command=f"cd {raw}", exit_code=1, stderr=err)
+            if is_mount_root(resolved):
+                return _cd_success(session, resolved, raw, print_path
+                                   or announce)
+            error = f"cd: {raw}: No such file or directory\n"
+            continue
+        if s.type != FileType.DIRECTORY:
+            error = f"cd: {raw}: Not a directory\n"
+            continue
+        return _cd_success(session, resolved, raw, print_path or announce)
+    err = (error or f"cd: {raw}: No such file or directory\n").encode()
+    return None, IOResult(exit_code=1,
+                          stderr=err), ExecutionNode(command=f"cd {raw}",
+                                                     exit_code=1,
+                                                     stderr=err)
+
+
+def _cd_success(
+    session: Session,
+    resolved: str,
+    raw: str,
+    print_path: bool,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     change_dir(session, resolved)
     out = (resolved + "\n").encode() if print_path else None
     return out, IOResult(), ExecutionNode(command=f"cd {raw}", exit_code=0)
