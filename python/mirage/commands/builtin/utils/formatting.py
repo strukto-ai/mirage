@@ -23,11 +23,14 @@ EPOCH_LS_TIME = "Jan  1 00:00"
 
 
 def _human_size(n: int) -> str:
-    for unit in ("B", "K", "M", "G", "T"):
-        if n < 1024:
-            return f"{n:.1f}{unit}" if unit != "B" else f"{n}{unit}"
-        n //= 1024
-    return f"{n}P"
+    units = ("B", "K", "M", "G", "T")
+    value = float(n)
+    i = 0
+    while value >= 1024 and i < len(units) - 1:
+        value /= 1024
+        i += 1
+    text = str(round(value)) if i == 0 else f"{value:.1f}"
+    return f"{text}{units[i]}"
 
 
 def _ls_mode_string(s: FileStat) -> str:

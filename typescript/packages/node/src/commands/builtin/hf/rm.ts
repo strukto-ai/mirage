@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  FileType,
   IOResult,
   command,
   specOf,
@@ -23,6 +24,7 @@ import {
 } from '@struktoai/mirage-core'
 import { HF_RESOURCES, type HfAccessor } from '../../../accessor/hf.ts'
 import { resolveGlob } from '../../../core/hf/glob.ts'
+import { stat as hfStat } from '../../../core/hf/stat.ts'
 import { unlink as hfUnlink } from '../../../core/hf/unlink.ts'
 
 const ENC = new TextEncoder()
@@ -41,31 +43,34 @@ async function rmCommand(
   if (paths.length === 0) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('rm: missing operand\n') })]
   }
-  if (opts.flags.r === true || opts.flags.R === true || opts.flags.d === true) {
-    return [
-      null,
-      new IOResult({
-        exitCode: 1,
-        stderr: ENC.encode('rm: recursive and directory removal are not supported\n'),
-      }),
-    ]
-  }
+  const recursive = opts.flags.r === true || opts.flags.R === true
+  const dirFlag = opts.flags.d === true
   const force = opts.flags.f === true
   const verbose = opts.flags.v === true
-  const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
+  const idx = opts.index ?? undefined
+  const resolved = await resolveGlob(accessor, paths, idx)
   const verboseParts: string[] = []
   const removed: Record<string, Uint8Array> = {}
   for (const path of resolved) {
+    let s
     try {
-      await hfUnlink(accessor, path, opts.index ?? undefined)
+      s = await hfStat(accessor, path, idx)
     } catch (err) {
       const code = (err as { code?: string } | null)?.code
-      if (code === 'EISDIR') {
-        throw new Error(`rm: cannot remove '${path.original}': Is a directory`)
-      }
       if (code === 'ENOENT' && force) continue
+      if (code === 'ENOENT') {
+        throw new Error(`rm: cannot remove '${path.original}': No such file or directory`)
+      }
       throw err
     }
+    // HF repos have no server-side directory removal; a plain file still
+    // unlinks even with -r, matching GNU and the Python generic rm.
+    if (s.type === FileType.DIRECTORY) {
+      if (recursive) throw new Error('rm: recursive remove not supported on this backend')
+      if (dirFlag) throw new Error('rm: directory remove not supported on this backend')
+      throw new Error(`rm: cannot remove '${path.original}': Is a directory`)
+    }
+    await hfUnlink(accessor, path, idx)
     removed[path.stripPrefix] = new Uint8Array()
     if (verbose) verboseParts.push(`removed '${path.original}'`)
   }

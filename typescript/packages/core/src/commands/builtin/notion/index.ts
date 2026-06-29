@@ -24,7 +24,7 @@ import { NOTION_PAGE_CREATE } from './notion_page_create.ts'
 import { NOTION_SEARCH } from './notion_search.ts'
 import { NOTION_CMD_OPS } from './ops.ts'
 
-const NOTION_OVERRIDES = new Set(['find', 'du'])
+const NOTION_OVERRIDES = new Set(['find'])
 
 export const NOTION_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<NotionAccessor>(ResourceName.NOTION, NOTION_CMD_OPS, {

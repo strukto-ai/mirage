@@ -31,7 +31,7 @@ import { EMAIL_RG } from './rg.ts'
 import { EMAIL_SEND } from './email_send.ts'
 import { EMAIL_TRIAGE } from './email_triage.ts'
 
-const EMAIL_OVERRIDES = new Set(['find', 'grep', 'rg', 'du'])
+const EMAIL_OVERRIDES = new Set(['find', 'grep', 'rg'])
 
 export const EMAIL_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<EmailAccessor>(ResourceName.EMAIL, EMAIL_CMD_OPS, {

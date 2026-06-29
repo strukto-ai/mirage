@@ -12,7 +12,20 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
+
 from mirage.commands.builtin.utils.types import _ReadBytes
+
+_NUMBER_RE = re.compile(r"^[+-]?\d+$")
+
+
+def number_flag_error(cmd: str, n_raw: str | None,
+                      c_raw: str | None) -> str | None:
+    if n_raw is not None and not _NUMBER_RE.match(n_raw):
+        return f"{cmd}: invalid number of lines: '{n_raw}'\n"
+    if c_raw is not None and not _NUMBER_RE.match(c_raw):
+        return f"{cmd}: invalid number of bytes: '{c_raw}'\n"
+    return None
 
 
 def _parse_n(n: str | None) -> tuple[int, bool]:

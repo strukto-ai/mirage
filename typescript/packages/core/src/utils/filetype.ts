@@ -49,3 +49,24 @@ export function guessType(path: string): FileType {
   const ext = path.slice(dot + 1).toLowerCase()
   return EXTENSION_MAP[ext] ?? FileType.BINARY
 }
+
+const MIMETYPE_MAP: Readonly<Record<string, FileType>> = Object.freeze({
+  'application/pdf': FileType.PDF,
+  'application/zip': FileType.ZIP,
+  'application/gzip': FileType.GZIP,
+  'application/json': FileType.JSON,
+  'image/png': FileType.IMAGE_PNG,
+  'image/jpeg': FileType.IMAGE_JPEG,
+  'image/gif': FileType.IMAGE_GIF,
+  'text/csv': FileType.CSV,
+})
+
+// Map a standard mimetype to a FileType, TEXT for any text/*, BINARY default.
+// Mirrors Python's filetype_from_mimetype.
+export function filetypeFromMimetype(mime: string): FileType {
+  if (mime === '') return FileType.BINARY
+  const mapped = MIMETYPE_MAP[mime]
+  if (mapped !== undefined) return mapped
+  if (mime.startsWith('text/')) return FileType.TEXT
+  return FileType.BINARY
+}

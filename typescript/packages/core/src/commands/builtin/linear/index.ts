@@ -30,7 +30,7 @@ import { LINEAR_ISSUE_UPDATE } from './linear_issue_update.ts'
 import { LINEAR_SEARCH } from './linear_search.ts'
 import { LINEAR_CMD_OPS } from './ops.ts'
 
-const LINEAR_OVERRIDES = new Set(['find', 'du'])
+const LINEAR_OVERRIDES = new Set(['find'])
 
 export const LINEAR_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<LinearAccessor>(ResourceName.LINEAR, LINEAR_CMD_OPS, {

@@ -22,6 +22,7 @@ from mirage.commands.builtin.generic.head import head_multi
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.builtin.generic_bind.provision import \
     make_head_tail_provision
+from mirage.commands.builtin.tail_helper import number_flag_error
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -38,6 +39,9 @@ async def head(
     index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
+    num_err = number_flag_error("head", n, c)
+    if num_err is not None:
+        return None, IOResult(exit_code=1, stderr=num_err.encode())
     n_int = int(n) if n is not None else None
     c_int = int(c) if c is not None else None
     if paths and ops.is_mounted(accessor):

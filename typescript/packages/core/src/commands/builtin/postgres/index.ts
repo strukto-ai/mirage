@@ -25,7 +25,7 @@ import { POSTGRES_RG } from './rg.ts'
 import { POSTGRES_TAIL } from './tail.ts'
 import { POSTGRES_WC } from './wc.ts'
 
-const POSTGRES_OVERRIDES = new Set(['find', 'grep', 'head', 'rg', 'tail', 'wc', 'du'])
+const POSTGRES_OVERRIDES = new Set(['find', 'grep', 'head', 'rg', 'tail', 'wc'])
 
 export const POSTGRES_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<PostgresAccessor>(ResourceName.POSTGRES, POSTGRES_CMD_OPS, {

@@ -12,7 +12,24 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.tail_helper import number_flag_error
 from mirage.commands.builtin.tail_helper import tail as _tail_impl
+
+
+class TestNumberFlagError:
+
+    def test_valid_numbers_pass(self):
+        assert number_flag_error("head", "5", None) is None
+        assert number_flag_error("tail", "+3", None) is None
+        assert number_flag_error("head", None, "-2") is None
+
+    def test_invalid_lines(self):
+        assert number_flag_error(
+            "head", "abc", None) == "head: invalid number of lines: 'abc'\n"
+
+    def test_invalid_bytes(self):
+        assert number_flag_error(
+            "tail", None, "xyz") == "tail: invalid number of bytes: 'xyz'\n"
 
 
 def _norm(path):

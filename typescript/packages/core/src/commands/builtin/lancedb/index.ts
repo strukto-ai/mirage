@@ -20,7 +20,7 @@ import { LANCEDB_FIND } from './find.ts'
 import { LANCEDB_CMD_OPS } from './ops.ts'
 import { LANCEDB_SEARCH } from './search.ts'
 
-const LANCEDB_OVERRIDES = new Set(['find', 'search', 'du'])
+const LANCEDB_OVERRIDES = new Set(['find', 'search'])
 
 export const LANCEDB_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<LanceDBAccessor>(ResourceName.LANCEDB, LANCEDB_CMD_OPS, {

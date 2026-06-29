@@ -118,6 +118,14 @@ Requests are rate limited to 100 calls per minute per token.
 If you exceed the limit you receive HTTP 429 and must back off.
 === pipe_concat_head ===
 Welcome to Acme. This quickstart gets you running fast.
+=== du_guides ===
+370	/knowledge/guides
+=== du_root ===
+730	/knowledge
+=== du_c_multi ===
+370	/knowledge/guides
+270	/knowledge/policies
+640	total
 === nf_cat ===
 exit=1
 cat: /knowledge/__nf_missing__.txt: No such file or directory

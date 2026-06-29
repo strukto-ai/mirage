@@ -21,7 +21,7 @@ import { CHROMA_CMD_OPS } from './ops.ts'
 import { CHROMA_SEARCH } from './search.ts'
 import { CHROMA_SED } from './sed.ts'
 
-const CHROMA_OVERRIDES = new Set(['find', 'search', 'sed', 'du'])
+const CHROMA_OVERRIDES = new Set(['find', 'search', 'sed'])
 
 export const CHROMA_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<ChromaAccessor>(ResourceName.CHROMA, CHROMA_CMD_OPS, {

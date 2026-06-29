@@ -25,6 +25,11 @@ def test_human_size_kilobytes():
     assert _human_size(1024) == "1.0K"
 
 
+def test_human_size_fractional_rounds_not_floored():
+    assert _human_size(1536) == "1.5K"
+    assert _human_size(1024 * 1024 + 512 * 1024) == "1.5M"
+
+
 def test_format_ls_long_regular_file():
     stat = FileStat(name="file.txt",
                     size=5,

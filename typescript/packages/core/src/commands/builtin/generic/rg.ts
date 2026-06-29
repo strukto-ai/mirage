@@ -18,12 +18,18 @@ import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import { rebaseDisplay } from '../../../utils/path.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { compilePattern, grepStream, resolvePatternFromFlags } from '../grep_helper.ts'
+import {
+  compilePattern,
+  grepStream,
+  nonzeroCountStream,
+  resolvePatternFromFlags,
+} from '../grep_helper.ts'
 import { rgFolderFiletype, rgFull } from '../rg_helper.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { grepGeneric } from './grep.ts'
 
 const ENC = new TextEncoder()
+const DEC = new TextDecoder()
 
 type Stat = (p: PathSpec) => Promise<FileStat>
 type Readdir = (p: PathSpec) => Promise<string[]>
@@ -248,6 +254,32 @@ export async function rgGeneric(
     const out: ByteSource = ENC.encode(results.join('\n') + '\n')
     const io = new IOResult(stderr !== undefined ? { stderr } : {})
     return [out, io]
+  }
+
+  if (flags.countOnly) {
+    const pat = compilePattern(exprText, flags.ignoreCase, flags.fixedString, flags.wholeWord)
+    const streamOpts = {
+      invert: flags.invert,
+      lineNumbers: false,
+      onlyMatching: flags.onlyMatching,
+      maxCount: flags.maxCount,
+      countOnly: true,
+      afterContext: 0,
+      beforeContext: 0,
+    }
+    if (paths.length > 1) {
+      const results: string[] = []
+      for (const p of paths) {
+        const counted = await materialize(grepStream(stream(p), pat, streamOpts))
+        const n = Number.parseInt(DEC.decode(counted).trim() || '0', 10)
+        if (n > 0) results.push(`${p.display}:${String(n)}`)
+      }
+      if (results.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
+      return [ENC.encode(results.join('\n') + '\n'), new IOResult()]
+    }
+    const io = new IOResult()
+    const counted = nonzeroCountStream(grepStream(stream(first), pat, streamOpts))
+    return [exitOnEmpty(counted, io), io]
   }
 
   return grepGeneric('rg', paths, texts, opts, stat, readdir, stream)

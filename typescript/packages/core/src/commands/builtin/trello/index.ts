@@ -28,7 +28,7 @@ import { TRELLO_CARD_LABEL_REMOVE } from './trello_card_label_remove.ts'
 import { TRELLO_CARD_MOVE } from './trello_card_move.ts'
 import { TRELLO_CARD_UPDATE } from './trello_card_update.ts'
 
-const TRELLO_OVERRIDES = new Set(['find', 'du'])
+const TRELLO_OVERRIDES = new Set(['find'])
 
 export const TRELLO_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<TrelloAccessor>(ResourceName.TRELLO, TRELLO_CMD_OPS, {

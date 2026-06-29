@@ -25,7 +25,7 @@ import { MONGODB_RG } from './rg.ts'
 import { MONGODB_TAIL } from './tail.ts'
 import { MONGODB_WC } from './wc.ts'
 
-const MONGODB_OVERRIDES = new Set(['cat', 'find', 'grep', 'rg', 'tail', 'wc', 'du'])
+const MONGODB_OVERRIDES = new Set(['cat', 'find', 'grep', 'rg', 'tail', 'wc'])
 
 export const MONGODB_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<MongoDBAccessor>(ResourceName.MONGODB, MONGODB_CMD_OPS, {

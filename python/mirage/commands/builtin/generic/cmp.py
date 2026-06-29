@@ -1,6 +1,7 @@
 from collections.abc import Awaitable, Callable
 
 from mirage.commands.builtin.utils.output import format_records
+from mirage.commands.errors import UsageError
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -17,7 +18,7 @@ async def cmp_cmd(
     skip: int | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) < 2:
-        raise ValueError("cmp: requires two paths")
+        raise UsageError("cmp: requires two paths")
     p0, p1 = paths[0], paths[1]
     data1 = await read_bytes(accessor, p0)
     data2 = await read_bytes(accessor, p1)

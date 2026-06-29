@@ -41,6 +41,12 @@ async def stat(accessor: S3Accessor,
     if original_prefix and path.startswith(original_prefix):
         path = path[len(original_prefix):] or "/"
 
+    # A trailing slash ("/s3/csv/") signals the caller treats it as a
+    # directory. S3 allows both an object at key "csv" AND a prefix "csv/"
+    # to coexist; without this hint head_object would return the file and
+    # `ls /s3/csv/` would list the file itself instead of the prefix.
+    hints_directory = path.endswith("/")
+
     stripped = path.strip("/")
 
     if not stripped:
@@ -82,28 +88,32 @@ async def stat(accessor: S3Accessor,
     key = _key(path, config)
     session = async_session(config)
     async with session.client(**_client_kwargs(config)) as client:
-        # Try head_object first — works for files.
-        try:
-            resp = await client.head_object(Bucket=config.bucket, Key=key)
-            modified = to_iso_z(resp["LastModified"])
-            etag_raw = resp.get("ETag", "").strip('"')
-            vid_raw = resp.get("VersionId")
-            if vid_raw == "null":
-                vid_raw = None
-            return FileStat(
-                name=path.rstrip("/").rsplit("/", 1)[-1],
-                size=resp["ContentLength"],
-                modified=modified,
-                type=guess_type(path),
-                fingerprint=etag_raw or None,
-                revision=vid_raw or None,
-                extra={"etag": etag_raw},
-            )
-        except Exception as exc:
-            if not _is_not_found(exc):
-                raise
+        # Try head_object first — works for files. Skipped when the path
+        # hints a directory (trailing slash), so a coexisting object of the
+        # same name does not shadow the prefix.
+        if not hints_directory:
+            try:
+                resp = await client.head_object(Bucket=config.bucket, Key=key)
+                modified = to_iso_z(resp["LastModified"])
+                etag_raw = resp.get("ETag", "").strip('"')
+                vid_raw = resp.get("VersionId")
+                if vid_raw == "null":
+                    vid_raw = None
+                return FileStat(
+                    name=path.rstrip("/").rsplit("/", 1)[-1],
+                    size=resp["ContentLength"],
+                    modified=modified,
+                    type=guess_type(path),
+                    fingerprint=etag_raw or None,
+                    revision=vid_raw or None,
+                    extra={"etag": etag_raw},
+                )
+            except Exception as exc:
+                if not _is_not_found(exc):
+                    raise
 
-        # head_object returned 404 — check if the path is a valid
+        # head_object returned 404 (or was skipped) — check if the path is a
+        # valid
         # prefix (directory). S3/GCS don't have real directory objects,
         # so we probe with list_objects_v2 using MaxKeys=1.
         pfx = key.rstrip("/") + "/" if key else ""

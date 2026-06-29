@@ -64,6 +64,12 @@ CASES: list[tuple[str, str]] = [
     ("grep_rl", "grep -rl cat {root}"),
     ("pipe_grep_stdin", "cat {root}cat/big/1.json | grep orange"),
     ("rg_basic", "rg orange {root}cat/big/1.txt"),
+    # du has no native op -> exercises the stat/readdir walk fallback,
+    # which must match the Python du builder byte for byte.
+    ("du_leaf", "du {root}cat/big"),
+    ("du_group", "du {root}cat"),
+    ("du_root", "du {root}"),
+    ("du_c_multi", "du -c {root}cat {root}dog"),
 ]
 
 EXIT_CODE_CASES: list[tuple[str, str]] = [

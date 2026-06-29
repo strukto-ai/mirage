@@ -162,6 +162,11 @@ const CASES: ReadonlyArray<readonly [string, string]> = [
     "pipe_concat_head",
     "cat {root}guides/quickstart.md {root}guides/auth.md | head -n 1",
   ],
+  // du has no native op -> exercises the stat/readdir walk fallback,
+  // which must match the Python du builder byte for byte.
+  ["du_guides", "du {root}guides"],
+  ["du_root", "du {root}"],
+  ["du_c_multi", "du -c {root}guides {root}policies"],
 ];
 
 function encodedPathTree(): string {
