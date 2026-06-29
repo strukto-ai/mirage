@@ -87,6 +87,12 @@ async function main(): Promise<void> {
     console.log(`\n=== find ${teamBase} -name "issue.json" | head -n 5 ===`)
     await run(ws, `find "${teamBase}" -name "issue.json" | head -n 5`)
 
+    console.log(`\n=== find ${teamBase} -type d | head -n 5 ===`)
+    await run(ws, `find "${teamBase}" -type d | head -n 5`)
+
+    console.log(`\n=== du -s ${teamBase} (walk fallback) ===`)
+    await run(ws, `du -s "${teamBase}"`)
+
     console.log(`\n=== grep -r -l bug ${teamBase}/issues/ | head -n 3 ===`)
     await run(ws, `grep -r -l bug "${teamBase}/issues/" | head -n 3`)
 

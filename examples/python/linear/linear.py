@@ -139,6 +139,15 @@ async def main() -> None:
         " | head -n 5")
     print(await result.stdout_str())
 
+    print("=== find teams -type d (directory filter) ===")
+    result = await ws.execute(f"find /linear/teams/{first_team}/ -type d"
+                              " | head -n 5")
+    print(await result.stdout_str())
+
+    print(f"=== du -s teams/{first_team} (walk fallback) ===")
+    result = await ws.execute(f"du -s /linear/teams/{first_team}/")
+    print(await result.stdout_str())
+
     print("=== grep Mirage issue.json ===")
     result = await ws.execute(f'grep Mirage {issue_path}/issue.json')
     print(await result.stdout_str())

@@ -92,6 +92,12 @@ async function main(): Promise<void> {
     console.log(`\n=== find ${boardBase} -name "card.json" ===`)
     await run(ws, `find "${boardBase}" -name "card.json"`)
 
+    console.log(`\n=== find ${boardBase} -type d | head -n 5 ===`)
+    await run(ws, `find "${boardBase}" -type d | head -n 5`)
+
+    console.log(`\n=== du -s ${boardBase} (walk fallback) ===`)
+    await run(ws, `du -s "${boardBase}"`)
+
     console.log(`\n=== grep -l hello ${boardBase} ===`)
     await run(ws, `grep -r -l hello "${boardBase}"`)
 
