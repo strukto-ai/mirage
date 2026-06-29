@@ -136,6 +136,50 @@ async def main() -> None:
         for line in lines[:3]:
             print(f"  {line[:150]}")
 
+    # ── subdir + regex narrowing + -l short-circuit (issue #404) ──
+    # A large subdir (>100 files) is what makes the per-file fallback slow;
+    # these cases narrow via GitHub code search instead of fetching each file.
+    big_dir = "/github/python/mirage/"
+    print(f"\n=== grep -rln BaseResource {big_dir} "
+          "(subdir narrowing, -l short-circuit) ===")
+    ms, out = await _timed(ws, f"grep -rln BaseResource {big_dir}")
+    files = out.strip().splitlines() if out.strip() else []
+    print(f"  {ms:.0f}ms  files-with-matches: {len(files)}")
+    for line in files[:3]:
+        print(f"  {line}")
+
+    print(f"\n=== grep -rn 'async def .*self' {big_dir} "
+          "(regex narrows via required literal 'async def ') ===")
+    ms, out = await _timed(ws, f"grep -rn 'async def .*self' {big_dir}")
+    lines = out.strip().splitlines() if out.strip() else []
+    print(f"  {ms:.0f}ms  matches: {len(lines)}")
+    for line in lines[:3]:
+        print(f"  {line[:150]}")
+
+    print(f"\n=== rg -l GitHubAccessor {big_dir} "
+          "(rg subdir narrowing, -l short-circuit) ===")
+    ms, out = await _timed(ws, f"rg -l GitHubAccessor {big_dir}")
+    files = out.strip().splitlines() if out.strip() else []
+    print(f"  {ms:.0f}ms  files-with-matches: {len(files)}")
+    for line in files[:3]:
+        print(f"  {line}")
+
+    print(f"\n=== rg -l --glob '*.py' GitHubAccessor {big_dir} "
+          "(file filter applied to narrowed set) ===")
+    ms, out = await _timed(ws, f"rg -l --glob '*.py' GitHubAccessor {big_dir}")
+    files = out.strip().splitlines() if out.strip() else []
+    print(f"  {ms:.0f}ms  files-with-matches: {len(files)}")
+    for line in files[:3]:
+        print(f"  {line}")
+
+    print(f"\n=== rg -l --type py GitHubAccessor {big_dir} "
+          "(--type filter applied to narrowed set) ===")
+    ms, out = await _timed(ws, f"rg -l --type py GitHubAccessor {big_dir}")
+    files = out.strip().splitlines() if out.strip() else []
+    print(f"  {ms:.0f}ms  files-with-matches: {len(files)}")
+    for line in files[:3]:
+        print(f"  {line}")
+
     print("=== find -type d ===")
     r = await ws.execute("find /github/python/mirage/core -type d")
     print(await r.stdout_str())

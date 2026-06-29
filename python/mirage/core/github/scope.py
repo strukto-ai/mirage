@@ -68,16 +68,16 @@ def count_scope_files(entries: dict[str, IndexEntry], key: str) -> int:
 
 
 def should_use_search(
-    is_regex: bool,
     recursive: bool,
     on_default_branch: bool,
 ) -> bool:
     """Whether grep/rg should narrow paths via GitHub code search.
 
-    Search is appropriate for non-regex patterns running recursively on the
-    default branch (code search only indexes the default branch).
+    Search only helps recursive scans on the default branch (code search only
+    indexes the default branch). Whether a usable literal exists, and whether
+    the scope is large enough to bother, is decided by the caller.
     """
-    return not is_regex and recursive and on_default_branch
+    return recursive and on_default_branch
 
 
 async def estimate_scope(tree: dict[str, TreeEntry], directory: str,
