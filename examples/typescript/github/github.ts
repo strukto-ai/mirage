@@ -292,6 +292,27 @@ async function main(): Promise<void> {
   await header(ws, "tree -L", "tree -L 2 /github/python/mirage/");
   await header(ws, "rg", "rg 'BaseResource' /github/python/mirage/resource/");
 
+  console.log(
+    "=== caching: a warm read is served from cache (no backend fetch) ===",
+  );
+  const cacheFile = "/github/python/mirage/workspace/workspace.py";
+  const [coldMs, body] = await timed(ws, `cat ${cacheFile}`);
+  const [warmMs] = await timed(ws, `cat ${cacheFile}`);
+  const [grepMs] = await timed(ws, `grep 'def ' ${cacheFile}`);
+  const [headMs] = await timed(ws, `head -n 5 ${cacheFile}`);
+  const [tailMs] = await timed(ws, `tail -n 5 ${cacheFile}`);
+  const [wcMs] = await timed(ws, `wc -l ${cacheFile}`);
+  console.log(`  file=${cacheFile} size=${String(body.length)}B`);
+  console.log(
+    `  cold cat=${coldMs.toFixed(0)}ms  warm cat=${warmMs.toFixed(0)}ms  ` +
+      `grep=${grepMs.toFixed(0)}ms head=${headMs.toFixed(0)}ms tail=${tailMs.toFixed(0)}ms ` +
+      `wc=${wcMs.toFixed(0)}ms`,
+  );
+  console.log(
+    `  served_from_cache=${String(warmMs < coldMs / 5)} ` +
+      `(warm speedup ${(coldMs / Math.max(warmMs, 0.001)).toFixed(0)}x)`,
+  );
+
   await ws.close();
 }
 
