@@ -12,15 +12,24 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { command, specOf, foldGeneric } from '@struktoai/mirage-core'
+import type { CommandIO } from '@struktoai/mirage-core'
 import type { HfAccessor } from '../../../accessor/hf.ts'
-import { HF_RESOURCES } from '../../../accessor/hf.ts'
+import { mkdir as hfMkdir } from '../../../core/hf/mkdir.ts'
+import { read as hfRead } from '../../../core/hf/read.ts'
+import { readdir as hfReaddir } from '../../../core/hf/readdir.ts'
+import { stat as hfStat } from '../../../core/hf/stat.ts'
 import { stream as hfStream } from '../../../core/hf/stream.ts'
+import { exists as hfExists } from '../../../core/hf/exists.ts'
+import { write as hfWrite } from '../../../core/hf/write.ts'
 
-export const HF_FOLD = command({
-  name: 'fold',
-  resource: [...HF_RESOURCES],
-  spec: specOf('fold'),
-  fn: (accessor: HfAccessor, paths, _texts, opts) =>
-    foldGeneric(paths, opts, (p) => hfStream(accessor, p)),
-})
+export const HF_CMD_OPS: CommandIO<HfAccessor> = {
+  readdir: hfReaddir,
+  readBytes: hfRead,
+  readStream: hfStream,
+  stat: hfStat,
+  isMounted: () => true,
+  local: false,
+  write: hfWrite,
+  exists: hfExists,
+  mkdir: (accessor, path) => hfMkdir(accessor, path),
+}
