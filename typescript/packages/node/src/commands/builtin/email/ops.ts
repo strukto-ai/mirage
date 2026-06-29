@@ -12,35 +12,25 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  ResourceName,
-  command,
-  specOf,
-  statGeneric,
-  type CommandFnResult,
-  type CommandOpts,
-  type PathSpec,
-} from '@struktoai/mirage-core'
+import type { CommandIO, IndexCacheStore, PathSpec } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
-import { resolveGlob } from '../../../core/email/glob.ts'
+import { read as emailRead } from '../../../core/email/read.ts'
+import { readdir as emailReaddir } from '../../../core/email/readdir.ts'
 import { stat as emailStat } from '../../../core/email/stat.ts'
-import { metadataProvision } from './provision.ts'
 
-async function statCommand(
+async function* emailReadStream(
   accessor: EmailAccessor,
-  paths: PathSpec[],
-  _texts: string[],
-  opts: CommandOpts,
-): Promise<CommandFnResult> {
-  const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  return statGeneric(resolved, opts, (p) => emailStat(accessor, p, opts.index ?? undefined))
+  path: PathSpec,
+  index?: IndexCacheStore,
+): AsyncIterable<Uint8Array> {
+  yield await emailRead(accessor, path, index)
 }
 
-export const EMAIL_STAT = command({
-  name: 'stat',
-  resource: ResourceName.EMAIL,
-  spec: specOf('stat'),
-  fn: statCommand,
-  provision: metadataProvision,
-})
+export const EMAIL_CMD_OPS: CommandIO<EmailAccessor> = {
+  readdir: emailReaddir,
+  readBytes: emailRead,
+  readStream: emailReadStream,
+  stat: emailStat,
+  isMounted: () => true,
+  local: false,
+}

@@ -12,14 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ResourceName } from '../../../types.ts'
-import { command } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { dirnameFn } from '../generic/dirname.ts'
+import type { DropboxAccessor } from '../../../accessor/dropbox.ts'
+import { du as dropboxDu, duAll as dropboxDuAll } from '../../../core/dropbox/du.ts'
+import { read as dropboxRead, stream as dropboxStream } from '../../../core/dropbox/read.ts'
+import { readdir as dropboxReaddir } from '../../../core/dropbox/readdir.ts'
+import { stat as dropboxStat } from '../../../core/dropbox/stat.ts'
+import type { CommandIO } from '../generic_bind/index.ts'
 
-export const NOTION_DIRNAME = command({
-  name: 'dirname',
-  resource: ResourceName.NOTION,
-  spec: specOf('dirname'),
-  fn: dirnameFn,
-})
+export const DROPBOX_CMD_OPS: CommandIO<DropboxAccessor> = {
+  readdir: dropboxReaddir,
+  readBytes: dropboxRead,
+  readStream: dropboxStream,
+  stat: dropboxStat,
+  isMounted: () => true,
+  local: false,
+  duTotal: dropboxDu,
+  duAll: dropboxDuAll,
+}

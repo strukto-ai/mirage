@@ -12,43 +12,32 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RegisteredCommand } from '../../config.ts'
-import { NOTION_BASENAME } from './basename.ts'
-import { NOTION_CAT } from './cat.ts'
-import { NOTION_DIRNAME } from './dirname.ts'
-import { NOTION_FIND } from './find.ts'
-import { NOTION_GREP } from './grep.ts'
-import { NOTION_HEAD } from './head.ts'
-import { NOTION_JQ } from './jq.ts'
-import { NOTION_LS } from './ls.ts'
+import type { NotionAccessor } from '../../../accessor/notion.ts'
+import { ResourceName } from '../../../types.ts'
+import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
+import { fileReadProvision, metadataProvision } from './_provision.ts'
+import { makeGenericCommands } from '../generic_bind/index.ts'
 import { NOTION_BLOCK_APPEND } from './notion_block_append.ts'
 import { NOTION_COMMENT_ADD } from './notion_comment_add.ts'
+import { NOTION_FIND } from './find.ts'
 import { NOTION_PAGE_CREATE } from './notion_page_create.ts'
 import { NOTION_SEARCH } from './notion_search.ts'
-import { NOTION_REALPATH } from './realpath.ts'
-import { NOTION_RG } from './rg.ts'
-import { NOTION_STAT } from './stat.ts'
-import { NOTION_TAIL } from './tail.ts'
-import { NOTION_TREE } from './tree.ts'
-import { NOTION_WC } from './wc.ts'
+import { NOTION_CMD_OPS } from './ops.ts'
+
+const NOTION_OVERRIDES = new Set(['find', 'du'])
 
 export const NOTION_COMMANDS: readonly RegisteredCommand[] = [
-  ...NOTION_LS,
-  ...NOTION_TREE,
-  ...NOTION_CAT,
-  ...NOTION_HEAD,
-  ...NOTION_TAIL,
-  ...NOTION_WC,
+  ...makeGenericCommands<NotionAccessor>(ResourceName.NOTION, NOTION_CMD_OPS, {
+    overrides: NOTION_OVERRIDES,
+    provisionOverrides: {
+      grep: fileReadProvision as ProvisionFn,
+      rg: fileReadProvision as ProvisionFn,
+      ls: metadataProvision as ProvisionFn,
+    },
+  }),
   ...NOTION_FIND,
-  ...NOTION_GREP,
-  ...NOTION_RG,
-  ...NOTION_STAT,
-  ...NOTION_JQ,
-  ...NOTION_BASENAME,
-  ...NOTION_DIRNAME,
-  ...NOTION_REALPATH,
-  ...NOTION_SEARCH,
-  ...NOTION_PAGE_CREATE,
   ...NOTION_BLOCK_APPEND,
   ...NOTION_COMMENT_ADD,
+  ...NOTION_PAGE_CREATE,
+  ...NOTION_SEARCH,
 ]

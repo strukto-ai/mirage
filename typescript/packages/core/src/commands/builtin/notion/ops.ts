@@ -13,32 +13,26 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { NotionAccessor } from '../../../accessor/notion.ts'
-import { resolveNotionGlob } from '../../../core/notion/glob.ts'
+import type { IndexCacheStore } from '../../../cache/index/index.ts'
+import { read as notionRead } from '../../../core/notion/read.ts'
 import { readdir as notionReaddir } from '../../../core/notion/readdir.ts'
 import { stat as notionStat } from '../../../core/notion/stat.ts'
-import { ResourceName, type PathSpec } from '../../../types.ts'
-import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { treeGeneric } from '../generic/tree.ts'
+import type { PathSpec } from '../../../types.ts'
+import type { CommandIO } from '../generic_bind/index.ts'
 
-async function treeCommand(
+async function* notionReadStream(
   accessor: NotionAccessor,
-  paths: PathSpec[],
-  _texts: string[],
-  opts: CommandOpts,
-): Promise<CommandFnResult> {
-  const resolved = await resolveNotionGlob(accessor, paths, opts.index ?? undefined)
-  return treeGeneric(
-    resolved,
-    opts,
-    (p) => notionReaddir(accessor, p, opts.index ?? undefined),
-    (p) => notionStat(accessor, p, opts.index ?? undefined),
-  )
+  path: PathSpec,
+  index?: IndexCacheStore,
+): AsyncIterable<Uint8Array> {
+  yield await notionRead(accessor, path, index)
 }
 
-export const NOTION_TREE = command({
-  name: 'tree',
-  resource: ResourceName.NOTION,
-  spec: specOf('tree'),
-  fn: treeCommand,
-})
+export const NOTION_CMD_OPS: CommandIO<NotionAccessor> = {
+  readdir: notionReaddir,
+  readBytes: notionRead,
+  readStream: notionReadStream,
+  stat: notionStat,
+  isMounted: () => true,
+  local: false,
+}
