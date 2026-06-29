@@ -166,14 +166,16 @@ describe('Workspace.execute AbortSignal', () => {
 })
 
 describe('Workspace.unmount', () => {
-  it('removes a mount from mounts() and rejects subsequent dispatch', async () => {
+  it('removes a mount from mounts(); the path falls through to the root anchor', async () => {
     const a = new RAMResource()
     const b = new RAMResource()
     const ws = new Workspace({ '/a': a, '/b': b }, { mode: MountMode.WRITE })
     expect(ws.mounts().some((m) => m.prefix === '/a/')).toBe(true)
     await ws.unmount('/a')
     expect(ws.mounts().some((m) => m.prefix === '/a/')).toBe(false)
-    await expect(ws.resolve('/a/x')).rejects.toThrow(/no mount/i)
+    // With /a gone the path no longer routes to a's resource; it falls through
+    // to the empty root anchor (prefix '/'), not back to /a.
+    expect(ws.registry.mountFor('/a/x')?.prefix).toBe('/')
     await ws.close()
   })
 
@@ -196,9 +198,9 @@ describe('Workspace.unmount', () => {
     await ws.close()
   })
 
-  it('throws on cache root, history view, /dev/, and unknown prefix', async () => {
+  it('throws on root, history view, /dev/, and unknown prefix', async () => {
     const ws = new Workspace({ '/data': new RAMResource() })
-    await expect(ws.unmount('/')).rejects.toThrow(/cache root/i)
+    await expect(ws.unmount('/')).rejects.toThrow(/root/i)
     await expect(ws.unmount('/.bash_history')).rejects.toThrow(/history view/i)
     await expect(ws.unmount('/dev')).rejects.toThrow(/reserved/i)
     await expect(ws.unmount('/missing')).rejects.toThrow(/no mount/i)
@@ -217,19 +219,21 @@ describe('Workspace.unmount', () => {
 })
 
 describe('Workspace mount fallback', () => {
-  it('falls back to the default cache mount, not the observer', async () => {
+  it('falls back to the root mount, not the observer', async () => {
     const ws = new Workspace({ '/': new RAMResource() }, { mode: MountMode.WRITE })
     const m = ws.registry.mountForCommand('mkdir')
     expect(m).not.toBeNull()
-    expect(m?.prefix).toBe('/_default/')
+    expect(m?.prefix).toBe('/')
     await ws.close()
   })
 
-  it('skips the history view mount even when no default cache provides the command', async () => {
+  it('skips the history view mount even when no user root provides the command', async () => {
     const ws = new Workspace({ '/r': new RAMResource() }, { mode: MountMode.READ })
-    // The default cache is RAM-backed and writable, so it will satisfy `mkdir`.
-    // The point: even with the read-only history view in the registry, fallback is /_default/, never /.bash_history/.
+    // No `/` was mounted, so the workspace adds a plain empty RAM root anchor
+    // at `/`, which satisfies `mkdir`. The point: even with the read-only
+    // history view in the registry, fallback is the root, never /.bash_history/.
     const m = ws.registry.mountForCommand('mkdir')
+    expect(m?.prefix).toBe('/')
     expect(m?.prefix).not.toBe('/.bash_history/')
     await ws.close()
   })

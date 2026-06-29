@@ -125,10 +125,7 @@ export async function handleCommandProvision(
     result.command = cmdStr
   }
 
-  const defaultMount = registry.defaultMount
-  const cache =
-    defaultMount !== null ? (defaultMount.resource as unknown as FileCache | null) : null
-  const hits = await checkCacheHits(cache, scopedParts)
+  const hits = await checkCacheHits(registry.fileCache, scopedParts)
   if (hits > 0) {
     result.cacheHits = hits
     result.cacheReadLow = result.networkReadLow

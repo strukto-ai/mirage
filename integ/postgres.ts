@@ -111,9 +111,6 @@ async function run(ws: Workspace, name: string, cmd: string): Promise<void> {
 function setCatSafeguard(ws: Workspace, maxLines: number): void {
   const sg = new CommandSafeguard({ maxLines });
   for (const m of ws.registry.allMounts()) m.commandSafeguards.set("cat", sg);
-  if (ws.registry.defaultMount !== null) {
-    ws.registry.defaultMount.commandSafeguards.set("cat", sg);
-  }
 }
 
 async function main(): Promise<void> {

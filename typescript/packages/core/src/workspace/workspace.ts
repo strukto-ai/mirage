@@ -16,6 +16,7 @@ import { NOOPAccessor } from '../accessor/base.ts'
 import type { FileCache } from '../cache/file/mixin.ts'
 import type { IndexConfig } from '../cache/index/config.ts'
 import { RAMFileCacheStore } from '../cache/file/ram.ts'
+import { RAMResource } from '../resource/ram/ram.ts'
 import type { ByteSource } from '../io/types.ts'
 import { IOResult, materialize } from '../io/types.ts'
 import { runWithRecording, runWithRevisions } from '../observe/context.ts'
@@ -190,6 +191,9 @@ export class Workspace {
   private readonly workspaceId: string = `ws-${String(Date.now())}-${Math.random().toString(36).slice(2, 10)}`
   private readonly closers: (() => Promise<void>)[] = []
   private readonly pythonRuntime: PyodideRuntime
+  // True when the workspace auto-added an empty `/` anchor (no user `/` mount).
+  // The anchor is internal and is not forwarded into the Pyodide filesystem.
+  private syntheticRootAnchor = false
   // Drift check state populated by Workspace.load. Empty during normal
   // runs. Drained on first dispatch/execute after load (see
   // {@link runPendingDriftCheck}).
@@ -233,7 +237,15 @@ export class Workspace {
       (p) => this.resolve(p),
       consistency,
     )
-    const defaultMount = this.registry.setDefaultMount(this.cache)
+    // The file cache is a hidden store (attached above), never a mount. Arg-less
+    // commands and root listing resolve against a neutral root anchor: reuse the
+    // user's `/` mount if they gave one, else add a plain empty RAM mount at `/`.
+    // A synthetic anchor is mirage-internal and must NOT be forwarded to Pyodide,
+    // whose own `/` filesystem (holding the Python stdlib) would be hijacked.
+    if (this.registry.rootMount === null) {
+      this.registry.mount('/', new RAMResource(), options.mode ?? MountMode.READ)
+      this.syntheticRootAnchor = true
+    }
     for (const resource of [...this.registry.allMounts().map((m) => m.resource), this.cache]) {
       const resourceOps = resource.ops?.()
       if (resourceOps === undefined) continue
@@ -241,7 +253,7 @@ export class Workspace {
         this.opsRegistry.register(op)
       }
     }
-    for (const mount of [...this.registry.allMounts(), defaultMount]) {
+    for (const mount of this.registry.allMounts()) {
       const cmds = mount.resource.commands?.()
       if (cmds !== undefined) {
         for (const cmd of cmds) {
@@ -266,6 +278,7 @@ export class Workspace {
     this.fs = new WorkspaceFS((path) => this.resolve(path), this.opsRegistry)
     for (const m of this.registry.allMounts()) {
       if (m.prefix === HISTORY_PREFIX || m.prefix === HISTORY_PREFIX + '/') continue
+      if (this.syntheticRootAnchor && m.prefix === '/') continue
       void this.forwardAddMountToPython(m.prefix)
     }
   }
@@ -356,15 +369,15 @@ export class Workspace {
   /**
    * Mount prefixes a session is always allowed to touch.
    *
-   * The cache mount (where text-processing commands like `wc` without a
+   * The root mount (where text-processing commands like `wc` without a
    * path argument resolve), the device mount, and the history view are
    * infrastructure: they hold no user credentials, and rejecting them
    * would break common shell idioms or the history builtin.
    */
   private infrastructureMountPrefixes(): Set<string> {
     const prefixes = new Set<string>(['/dev', HISTORY_PREFIX])
-    const def = this.registry.defaultMount
-    if (def !== null) prefixes.add('/' + stripSlash(def.prefix))
+    const root = this.registry.rootMount
+    if (root !== null) prefixes.add('/' + stripSlash(root.prefix))
     return prefixes
   }
 
@@ -429,8 +442,8 @@ export class Workspace {
     if (this.closed) throw new Error('Workspace is closed')
     const stripped = stripSlash(prefix)
     const norm = stripped ? `/${stripped}/` : '/'
-    if (norm === '/' || norm === '/_default/') {
-      throw new Error(`cannot unmount cache root: ${prefix}`)
+    if (norm === '/') {
+      throw new Error(`cannot unmount root: ${prefix}`)
     }
     if (norm === '/dev/') {
       throw new Error(`cannot unmount reserved prefix: /dev/`)
@@ -458,10 +471,14 @@ export class Workspace {
     }
   }
 
-  get cacheMount(): MountEntry {
-    const m = this.registry.defaultMount
-    if (m === null) throw new Error('cache mount is initialized in constructor')
-    return m
+  /**
+   * True when the `/` mount is an empty anchor the workspace added itself
+   * (no user `/` mount). Consumers that distinguish "genuinely mounted" from
+   * "merely caught by the root anchor" (e.g. the node fs monkey-patch) check
+   * this before treating a root-matched path as backed by a real mount.
+   */
+  get syntheticRoot(): boolean {
+    return this.syntheticRootAnchor
   }
 
   get maxDrainBytes(): number | null {

@@ -23,13 +23,6 @@ import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 
 export const DEV_PREFIX = '/dev/'
 
-function isFileCache(resource: Resource): resource is Resource & FileCache {
-  const r = resource as Partial<FileCache>
-  return (
-    typeof r.allCached === 'function' && typeof r.get === 'function' && typeof r.set === 'function'
-  )
-}
-
 export interface OpsMountInfo {
   prefix: string
   resourceType: string
@@ -38,25 +31,25 @@ export interface OpsMountInfo {
 
 export class MountRegistry {
   private readonly mountList: MountEntry[]
-  private defaultMountRef: MountEntry | null = null
+  private rootRef: MountEntry | null = null
   private consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
   private readonly defaultMode: MountMode
-  private fileCache: FileCache | null = null
+  private cacheStore: FileCache | null = null
 
   /**
    * Attach the workspace file cache and build per-mount CacheManagers.
    * Called once by Workspace after the cache store exists; mounts
-   * added later get their manager in `mount()` / `setDefaultMount()`.
+   * added later get their manager in `mount()`. The cache is a hidden
+   * store, never a mount.
    */
   attachFileCache(cache: FileCache | null): void {
-    this.fileCache = cache
+    this.cacheStore = cache
     for (const m of this.mountList) this.attachManager(m)
-    if (this.defaultMountRef !== null) this.attachManager(this.defaultMountRef)
   }
 
   private attachManager(m: MountEntry): void {
     m.cacheManager = new CacheManager(
-      this.fileCache,
+      this.cacheStore,
       m.resource.index ?? null,
       m.prefix,
       cachesReads(m.resource),
@@ -90,6 +83,7 @@ export class MountRegistry {
     }
     mounts.sort((a, b) => b.prefix.length - a.prefix.length)
     this.mountList = mounts
+    this.rootRef = mounts.find((m) => m.prefix === '/') ?? null
   }
 
   setConsistency(consistency: ConsistencyPolicy): void {
@@ -136,9 +130,10 @@ export class MountRegistry {
         else m.registerOp(op)
       }
     }
-    if (this.fileCache !== null) this.attachManager(m)
+    if (this.cacheStore !== null) this.attachManager(m)
     this.mountList.push(m)
     this.mountList.sort((a, b) => b.prefix.length - a.prefix.length)
+    if (norm === '/') this.rootRef = m
     return m
   }
 
@@ -160,6 +155,7 @@ export class MountRegistry {
     if (removed === undefined) {
       throw new Error(`no mount at prefix: ${norm}`)
     }
+    if (removed === this.rootRef) this.rootRef = null
     return removed
   }
 
@@ -247,22 +243,12 @@ export class MountRegistry {
     return [...groups.entries()]
   }
 
-  setDefaultMount(resource: Resource): MountEntry {
-    const mount = new MountEntry({ prefix: '/_default/', resource, mode: MountMode.WRITE })
-    const ops = resource.ops?.()
-    if (ops !== undefined) {
-      for (const op of ops) {
-        if (op.resource === null) mount.registerGeneralOp(op)
-        else mount.registerOp(op)
-      }
-    }
-    if (this.fileCache !== null) this.attachManager(mount)
-    this.defaultMountRef = mount
-    return mount
+  get rootMount(): MountEntry | null {
+    return this.rootRef
   }
 
-  get defaultMount(): MountEntry | null {
-    return this.defaultMountRef
+  get fileCache(): FileCache | null {
+    return this.cacheStore
   }
 
   resolve(path: string): [Resource, PathSpec, MountMode] {
@@ -305,9 +291,9 @@ export class MountRegistry {
   }
 
   mountForCommand(cmdName: string): MountEntry | null {
-    if (this.defaultMountRef !== null) {
-      const cmd = this.defaultMountRef.resolveCommand(cmdName)
-      if (cmd !== null) return this.defaultMountRef
+    if (this.rootRef !== null) {
+      const cmd = this.rootRef.resolveCommand(cmdName)
+      if (cmd !== null) return this.rootRef
     }
     for (const m of this.mountList) {
       if (m.prefix === DEV_PREFIX) continue
@@ -329,21 +315,19 @@ export class MountRegistry {
       mount = this.mountForCommand(cmdName)
     }
     if (mount === null) return null
-    const defaultMount = this.defaultMountRef
     // Warm reads are served in place by withReadCache, so a read-only command
     // stays on its real mount. The cache is a hidden store (not a mount);
     // under ALWAYS we evict stale entries from it here so the read-through
     // serves fresh bytes.
     const baseCmd = mount.resolveCommand(cmdName)
     if (
-      defaultMount !== null &&
+      this.cacheStore !== null &&
       pathScopes.length > 0 &&
-      isFileCache(defaultMount.resource) &&
       cachesReads(mount.resource) &&
       baseCmd?.write !== true &&
       this.consistency === ConsistencyPolicy.ALWAYS
     ) {
-      await this.evictStale(mount, defaultMount.resource, pathScopes)
+      await this.evictStale(mount, this.cacheStore, pathScopes)
     }
     return mount
   }

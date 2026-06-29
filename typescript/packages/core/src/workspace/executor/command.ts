@@ -304,7 +304,7 @@ export async function handleCommand(
       }
     }
     const prefix = rstripSlash(mount.prefix)
-    if (prefix !== '' && mount !== registry.defaultMount) {
+    if (prefix !== '') {
       io.reads = prefixKeys(io.reads, prefix)
       io.writes = prefixKeys(io.writes, prefix)
       io.cache = io.cache.map((p) => prefix + p)

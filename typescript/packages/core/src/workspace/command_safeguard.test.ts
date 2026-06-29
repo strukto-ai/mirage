@@ -44,9 +44,6 @@ function buildWs(nLines: number): Workspace {
 
 function overrideSafeguard(ws: Workspace, name: string, sg: CommandSafeguard): void {
   for (const m of ws.registry.allMounts()) m.commandSafeguards.set(name, sg)
-  if (ws.registry.defaultMount !== null) {
-    ws.registry.defaultMount.commandSafeguards.set(name, sg)
-  }
 }
 
 async function runCmd(

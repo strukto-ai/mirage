@@ -12,147 +12,78 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
-import { command } from '../commands/config.ts'
-import { specOf } from '../commands/spec/builtins.ts'
-import { IOResult } from '../io/types.ts'
-import type { RegisteredOp } from '../ops/registry.ts'
+import { cachesReads } from '../resource/base.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
-import { MountMode, ResourceName, type PathSpec } from '../types.ts'
-import { MountEntry } from './mount/mount.ts'
+import { createShellParser } from '../shell/parse.ts'
+import { ConsistencyPolicy, MountMode, PathSpec } from '../types.ts'
 import { Workspace } from './workspace.ts'
 
 const ENC = new TextEncoder()
+const DEC = new TextDecoder()
+const require = createRequire(import.meta.url)
+const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
+const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
 
-const echopath = command({
-  name: 'echopath',
-  resource: ResourceName.RAM,
-  spec: specOf('cat'),
-  fn: (_accessor, paths: readonly PathSpec[]) => {
-    const first = paths[0]
-    if (first === undefined) {
-      return [
-        null,
-        new IOResult({ exitCode: 1, stderr: ENC.encode('echopath: missing operand\n') }),
-      ]
+describe('cache is a hidden store, not a mount', () => {
+  it('is decoupled from the root mount', async () => {
+    // The file cache is reached via `registry.fileCache`, not the root mount's
+    // resource. When no `/` is mounted the root is an ordinary empty RAM mount
+    // at `/` (a normal entry in allMounts) and never holds the cache.
+    const ws = new Workspace({ '/data/': new RAMResource() }, { mode: MountMode.WRITE })
+    try {
+      expect(ws.registry.fileCache).toBe(ws.cache)
+      const root = ws.registry.rootMount
+      expect(root).not.toBeNull()
+      expect(root?.resource).not.toBe(ws.cache)
+      expect(cachesReads(root?.resource ?? new RAMResource())).toBe(false)
+      expect(root?.prefix).toBe('/')
+      expect(ws.registry.allMounts()).toContain(root)
+    } finally {
+      await ws.close()
     }
-    return [ENC.encode(`echopath:${first.original}`), new IOResult()]
-  },
-})
-
-const helloOp: RegisteredOp = {
-  name: 'hello_op',
-  resource: ResourceName.RAM,
-  filetype: null,
-  fn: (_accessor, path) => `hello:${path.original}`,
-  write: false,
-}
-
-function mkWs(): Workspace {
-  return new Workspace({ '/data/': new RAMResource() }, { mode: MountMode.WRITE })
-}
-
-describe('Workspace.cacheMount accessor', () => {
-  it('returns a Mount that is the registry default mount', () => {
-    const ws = mkWs()
-    expect(ws.cacheMount).toBeInstanceOf(MountEntry)
-    expect(ws.cacheMount).toBe(ws.registry.defaultMount)
-    expect(ws.cacheMount.prefix).toBe('/_default/')
   })
 
-  it('cacheMount.resource is the workspace cache', () => {
-    const ws = mkWs()
-    expect(ws.cacheMount.resource).toBe(ws.cache)
+  it('reuses a user-provided / mount as the root anchor (no synthetic root)', async () => {
+    const userRoot = new RAMResource()
+    const ws = new Workspace({ '/': userRoot }, { mode: MountMode.WRITE })
+    try {
+      expect(ws.registry.rootMount?.resource).toBe(userRoot)
+      expect(ws.registry.fileCache).toBe(ws.cache)
+    } finally {
+      await ws.close()
+    }
   })
 })
 
-describe('Workspace.cacheMount.registerFns', () => {
-  it('accepts a RAM-typed command', () => {
-    const ws = mkWs()
-    ws.cacheMount.registerFns(echopath)
-    const cmd = ws.cacheMount.resolveCommand('echopath')
-    expect(cmd).not.toBeNull()
-    expect(cmd?.name).toBe('echopath')
-  })
-
-  it('accepts a RAM-typed op', () => {
-    const ws = mkWs()
-    ws.cacheMount.registerFns([helloOp])
-    const registered = ws.cacheMount.registeredOps()
-    expect(registered.hello_op).toBeDefined()
-  })
-
-  it('rejects a command whose resource kind mismatches the cache', () => {
-    const ws = mkWs()
-    const diskOnly = command({
-      name: 'disk_only',
-      resource: ResourceName.DISK,
-      spec: specOf('cat'),
-      fn: () => [null, new IOResult()],
-    })
-    expect(() => {
-      ws.cacheMount.registerFns(diskOnly)
-    }).toThrow(/'disk'/)
-  })
-
-  it('multi-resource command filters to matching resource', () => {
-    const ws = mkWs()
-    const multi = command({
-      name: 'multi',
-      resource: [ResourceName.RAM, ResourceName.S3],
-      spec: specOf('cat'),
-      fn: () => [null, new IOResult()],
-    })
-    ws.cacheMount.registerFns(multi)
-    const cmd = ws.cacheMount.resolveCommand('multi')
-    expect(cmd).not.toBeNull()
-    expect(cmd?.resource).toBe(ResourceName.RAM)
-  })
-
-  it('multi-resource command with no matching resource throws', () => {
-    const ws = mkWs()
-    const noneMatch = command({
-      name: 'noneMatch',
-      resource: [ResourceName.S3, ResourceName.DISK],
-      spec: specOf('cat'),
-      fn: () => [null, new IOResult()],
-    })
-    expect(() => {
-      ws.cacheMount.registerFns(noneMatch)
-    }).toThrow(/'disk'.*'s3'/)
-  })
-
-  it('multi-resource op filters to matching resource', () => {
-    const ws = mkWs()
-    const fn = (_acc: unknown, p: PathSpec): string => `multi:${p.original}`
-    const multiOps: RegisteredOp[] = [
-      { name: 'multi_op', resource: ResourceName.RAM, filetype: null, fn, write: false },
-      { name: 'multi_op', resource: ResourceName.S3, filetype: null, fn, write: false },
-    ]
-    ws.cacheMount.registerFns(multiOps)
-    expect(ws.cacheMount.registeredOps().multi_op).toBeDefined()
-  })
-
-  it('multi-resource op with no matching resource throws', () => {
-    const ws = mkWs()
-    const fn = (_acc: unknown, p: PathSpec): string => p.original
-    const noneMatchOps: RegisteredOp[] = [
-      { name: 'none_op', resource: ResourceName.S3, filetype: null, fn, write: false },
-      { name: 'none_op', resource: ResourceName.DISK, filetype: null, fn, write: false },
-    ]
-    expect(() => {
-      ws.cacheMount.registerFns(noneMatchOps)
-    }).toThrow(/'disk'.*'s3'/)
-  })
-})
-
-describe('setDefaultMount ops symmetry', () => {
-  it('auto-registers resource.ops() on the cache mount, mirroring mount()', () => {
-    const ws = mkWs()
-    const cacheOps = ws.cacheMount.registeredOps()
-    const resourceOpNames = new Set((ws.cacheMount.resource.ops?.() ?? []).map((o) => o.name))
-    for (const name of resourceOpNames) {
-      expect(cacheOps[name]).toBeDefined()
+describe('warm read serves from the hidden store, command stays on its mount', () => {
+  it('serves a cached operand under LAZY after out-of-band mutation', async () => {
+    const ram = new RAMResource()
+    // Force the cache on a local backend so the read is cached and, under LAZY,
+    // never revalidated. A subsequent out-of-band mutation must NOT be seen:
+    // the warm read serves the cached bytes from the hidden store while the
+    // command stays on its real mount.
+    ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
+    const ws = new Workspace(
+      { '/r': ram },
+      {
+        mode: MountMode.WRITE,
+        consistency: ConsistencyPolicy.LAZY,
+        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
+      },
+    )
+    try {
+      await ram.writeFile(PathSpec.fromStrPath('/a.txt'), ENC.encode('v1\n'))
+      const first = DEC.decode((await ws.execute('cat /r/a.txt')).stdout)
+      expect(first).toContain('v1')
+      await ram.writeFile(PathSpec.fromStrPath('/a.txt'), ENC.encode('v2\n'))
+      const second = DEC.decode((await ws.execute('cat /r/a.txt')).stdout)
+      expect(second).toContain('v1')
+      expect(second).not.toContain('v2')
+    } finally {
+      await ws.close()
     }
   })
 })

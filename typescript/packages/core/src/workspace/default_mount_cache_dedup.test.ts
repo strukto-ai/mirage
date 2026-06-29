@@ -54,7 +54,7 @@ describe('default mount cache dedup', () => {
 
       expect(sizeSecond).toBe(sizeFirst)
       expect(keysSecond).toEqual(keysFirst)
-      expect(keysSecond.every((k) => !k.startsWith('/_default/'))).toBe(true)
+      expect(keysSecond.every((k) => k.startsWith('/r/'))).toBe(true)
     } finally {
       await ws.close()
     }
