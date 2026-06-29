@@ -14,7 +14,7 @@
 
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import type { PathSpec } from '../../../types.ts'
+import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult } from '../../config.ts'
 import {
   backendKeyDefault,
@@ -24,19 +24,30 @@ import {
   type BackendKeyFn,
   type StatFn,
 } from '../utils/copy.ts'
+import { rstripSlash } from '../../../utils/slash.ts'
+import { cpWalk, type CpPrimitives } from './cp.ts'
 
 const ENC = new TextEncoder()
 
 type RenameFn = (src: PathSpec, target: PathSpec) => Promise<void>
 
+// Low-level primitives for the no-native-rename path (cross-mount): the source
+// tree is copied (parents first) then removed (children first), mirroring the
+// Python mv generic. Backends that inject a native rename never use these.
+export interface MvPrimitives extends CpPrimitives {
+  unlink: (p: PathSpec) => Promise<void>
+  rmdir: (p: PathSpec) => Promise<void>
+}
+
 export async function mvGeneric(
   paths: PathSpec[],
-  rename: RenameFn,
+  rename: RenameFn | undefined,
   stat: StatFn,
   noClobber: boolean,
   verbose: boolean,
   index?: IndexCacheStore,
   backendKey?: BackendKeyFn,
+  prim?: MvPrimitives,
 ): Promise<CommandFnResult> {
   const keyOf = backendKey ?? backendKeyDefault
   const sources = paths.slice(0, -1)
@@ -62,7 +73,32 @@ export async function mvGeneric(
       continue
     }
     if (noClobber && (await pathExists(stat, target))) continue
-    await rename(src, target)
+    if (rename === undefined && prim !== undefined) {
+      const srcBase = rstripSlash(src.stripPrefix)
+      const dstBase = rstripSlash(target.stripPrefix)
+      const entries = await cpWalk(prim.readdir, stat, src, index)
+      for (const { path: entry, isDir } of entries) {
+        const entryDst = dstBase + entry.slice(srcBase.length)
+        const entryDstSpec = PathSpec.fromStrPath(entryDst, target.prefix)
+        if (isDir) {
+          if (!(await isDirectory(stat, entryDstSpec, index))) await prim.mkdir(entryDstSpec)
+        } else {
+          await prim.write(
+            entryDstSpec,
+            await prim.readBytes(PathSpec.fromStrPath(entry, src.prefix)),
+          )
+        }
+      }
+      for (let i = entries.length - 1; i >= 0; i -= 1) {
+        const node = entries[i]
+        if (node === undefined) continue
+        const spec = PathSpec.fromStrPath(node.path, src.prefix)
+        if (node.isDir) await prim.rmdir(spec)
+        else await prim.unlink(spec)
+      }
+    } else if (rename !== undefined) {
+      await rename(src, target)
+    }
     writes[src.stripPrefix] = new Uint8Array()
     writes[target.stripPrefix] = new Uint8Array()
     if (verbose) lines.push(`'${src.original}' -> '${target.original}'`)

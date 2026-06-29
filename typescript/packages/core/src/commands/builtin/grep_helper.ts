@@ -135,6 +135,78 @@ export function isRegexPattern(pattern: string, fixedString: boolean): boolean {
   return !/^[\w\s\-.]+$/.test(pattern)
 }
 
+export enum PatternType {
+  EXACT = 'exact',
+  SIMPLE = 'simple',
+  REGEX = 'regex',
+}
+
+// Classify a grep pattern for API push-down decisions.
+export function classifyPattern(pattern: string, fixedString: boolean): PatternType {
+  if (pattern.includes('\n')) return PatternType.REGEX
+  if (fixedString) return PatternType.EXACT
+  if (/^[\w\s\-_.]+$/.test(pattern)) return PatternType.SIMPLE
+  return PatternType.REGEX
+}
+
+const REGEX_BREAKERS: ReadonlySet<string> = new Set('.^$*+?()|{}')
+const MIN_SEARCH_LITERAL = 3
+
+// Longest substring every match of a regex must contain. Returns a literal
+// any matching line is guaranteed to contain, suitable for narrowing via a
+// literal search API before the real regex is scanned locally. Conservative:
+// returns null whenever a required literal cannot be proven (top-level
+// alternation, character classes, escapes, runs shorter than
+// MIN_SEARCH_LITERAL), so the caller falls back to a full scan.
+export function extractRequiredLiteral(pattern: string): string | null {
+  if (pattern.includes('|')) return null
+  const runs: string[] = []
+  let current: string[] = []
+  let i = 0
+  const n = pattern.length
+  while (i < n) {
+    const ch = pattern.charAt(i)
+    if (ch === '\\') {
+      runs.push(current.join(''))
+      current = []
+      i += 2
+      continue
+    }
+    if (ch === '[') {
+      runs.push(current.join(''))
+      current = []
+      i += 1
+      while (i < n && pattern[i] !== ']') i += pattern[i] === '\\' ? 2 : 1
+      i += 1
+      continue
+    }
+    if (REGEX_BREAKERS.has(ch)) {
+      if ((ch === '*' || ch === '?' || ch === '{') && current.length > 0) current.pop()
+      runs.push(current.join(''))
+      current = []
+      if (ch === '{') {
+        while (i < n && pattern[i] !== '}') i += 1
+      }
+      i += 1
+      continue
+    }
+    current.push(ch)
+    i += 1
+  }
+  runs.push(current.join(''))
+  let best = ''
+  for (const r of runs) if (r.length > best.length) best = r
+  return best.length >= MIN_SEARCH_LITERAL ? best : null
+}
+
+// Literal to push down to a code-search API for a grep/rg pattern: the
+// pattern itself when literal, a required literal extracted from a regex, or
+// null when no literal can be searched.
+export function searchQuery(pattern: string, fixedString: boolean): string | null {
+  if (classifyPattern(pattern, fixedString) !== PatternType.REGEX) return pattern
+  return extractRequiredLiteral(pattern)
+}
+
 export interface GrepLinesOptions {
   invert: boolean
   lineNumbers: boolean

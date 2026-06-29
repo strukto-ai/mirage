@@ -466,7 +466,7 @@ export {
   getUnsetNames,
   getWhileParts,
 } from './shell/helpers.ts'
-export { MountRegistry } from './workspace/mount/registry.ts'
+export { MountCommandUnsupported, MountRegistry } from './workspace/mount/registry.ts'
 export { MountEntry, type MountInit } from './workspace/mount/mount.ts'
 export { normMountPrefix } from './workspace/snapshot/utils.ts'
 export {

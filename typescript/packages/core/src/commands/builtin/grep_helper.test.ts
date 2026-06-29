@@ -13,7 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { NEVER_MATCH, compilePattern, isRegexPattern, mergePatternList } from './grep_helper.ts'
+import {
+  classifyPattern,
+  compilePattern,
+  extractRequiredLiteral,
+  isRegexPattern,
+  mergePatternList,
+  NEVER_MATCH,
+  PatternType,
+  searchQuery,
+} from './grep_helper.ts'
 
 const ENC = new TextEncoder()
 
@@ -104,5 +113,64 @@ describe('isRegexPattern', () => {
 
   it('keeps plain literals non-regex', () => {
     expect(isRegexPattern('foo bar', false)).toBe(false)
+  })
+})
+
+describe('classifyPattern', () => {
+  it('newlines and regex are REGEX, plain text is SIMPLE, fixed is EXACT', () => {
+    expect(classifyPattern('foo\nbar', false)).toBe(PatternType.REGEX)
+    expect(classifyPattern('foo\nbar', true)).toBe(PatternType.REGEX)
+    expect(classifyPattern('foo bar', false)).toBe(PatternType.SIMPLE)
+    expect(classifyPattern('foo', true)).toBe(PatternType.EXACT)
+    expect(classifyPattern('fo+', false)).toBe(PatternType.REGEX)
+  })
+})
+
+describe('extractRequiredLiteral', () => {
+  it.each([
+    ['import.*os', 'import'],
+    ['imp.*rt', 'imp'],
+    ['^import', 'import'],
+    ['colou?r', 'colo'],
+    ['[Ee]rror', 'rror'],
+    ['\\d+error', 'error'],
+    ['config$', 'config'],
+    ['a*b', null],
+    ['ab', null],
+    ['foo|bar', null],
+    ['(ab)?cdef', 'cdef'],
+  ])('extracts the longest required literal from %s', (pattern, expected) => {
+    expect(extractRequiredLiteral(pattern)).toBe(expected)
+  })
+
+  it('the extracted literal is present in every matching sample', () => {
+    for (const pattern of ['import.*os', 'colou?r', '[Ee]rror', '\\d+error']) {
+      const literal = extractRequiredLiteral(pattern)
+      expect(literal).not.toBeNull()
+      const re = new RegExp(pattern)
+      for (const sample of [
+        'import sys, os',
+        'color',
+        'colour',
+        'Error here',
+        'an error',
+        'x42error',
+      ]) {
+        if (re.test(sample)) expect(sample).toContain(String(literal))
+      }
+    }
+  })
+})
+
+describe('searchQuery', () => {
+  it('returns the pattern itself when literal', () => {
+    expect(searchQuery('import', false)).toBe('import')
+    expect(searchQuery('foo', true)).toBe('foo')
+  })
+  it('extracts a required literal from a regex', () => {
+    expect(searchQuery('import.*os', false)).toBe('import')
+  })
+  it('returns null when no literal can be proven', () => {
+    expect(searchQuery('foo|bar', false)).toBeNull()
   })
 })
