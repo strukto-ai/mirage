@@ -12,10 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
+
+import pytest
+
 from mirage.commands.builtin.constants import PatternType
 from mirage.commands.builtin.grep_helper import (NEVER_MATCH, classify_pattern,
                                                  compile_pattern,
-                                                 merge_pattern_list)
+                                                 extract_required_literal,
+                                                 merge_pattern_list,
+                                                 search_query)
 
 
 def test_single_pattern_keeps_regex_semantics():
@@ -95,3 +101,43 @@ def test_never_match_pattern_matches_nothing():
     pat = compile_pattern(NEVER_MATCH)
     assert not pat.search("")
     assert not pat.search("anything")
+
+
+@pytest.mark.parametrize("pattern,expected", [
+    ("import.*os", "import"),
+    ("imp.*rt", "imp"),
+    ("^import", "import"),
+    ("colou?r", "colo"),
+    ("[Ee]rror", "rror"),
+    (r"\d+error", "error"),
+    ("config$", "config"),
+    ("a*b", None),
+    ("ab", None),
+    ("foo|bar", None),
+    ("(ab)?cdef", "cdef"),
+])
+def test_extract_required_literal(pattern, expected):
+    assert extract_required_literal(pattern) == expected
+
+
+def test_extract_literal_is_required_substring():
+    for pattern in ("import.*os", "colou?r", "[Ee]rror", r"\d+error"):
+        literal = extract_required_literal(pattern)
+        assert literal is not None
+        for sample in ("import sys, os", "color", "colour", "Error here",
+                       "an error", "x42error"):
+            if re.search(pattern, sample):
+                assert literal in sample
+
+
+def test_search_query_literal_returns_pattern():
+    assert search_query("import", False) == "import"
+    assert search_query("foo", True) == "foo"
+
+
+def test_search_query_regex_extracts_literal():
+    assert search_query("import.*os", False) == "import"
+
+
+def test_search_query_regex_no_literal_is_none():
+    assert search_query("foo|bar", False) is None
