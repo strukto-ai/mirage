@@ -30,7 +30,6 @@ type OpBytes<A extends Accessor> = (
 ) => Promise<Uint8Array>
 
 type PathStream = (path: PathSpec) => AsyncIterable<Uint8Array>
-type PathBytes = (path: PathSpec) => Promise<Uint8Array>
 
 async function* serveStream(
   manager: CacheInvalidator | null,
@@ -85,11 +84,6 @@ export function cacheAwareReadBytes<A extends Accessor>(raw: OpBytes<A>): OpByte
  */
 export function cacheAwareStream(raw: PathStream): PathStream {
   return (path) => serveStream(activeCacheManager(), path, () => raw(path))
-}
-
-/** Wrap a path-keyed bytes reader for warm read-through (capture at call). */
-export function cacheAwareBytes(raw: PathBytes): PathBytes {
-  return (path) => serveBytes(activeCacheManager(), path, () => raw(path))
 }
 
 /**

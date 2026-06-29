@@ -12,10 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import fnmatch
-
 from mirage.cache.index import IndexEntry
-from mirage.core.github.tree_entry import TreeEntry
 from mirage.types import PathSpec
 
 
@@ -78,19 +75,3 @@ def should_use_search(
     the scope is large enough to bother, is decided by the caller.
     """
     return recursive and on_default_branch
-
-
-async def estimate_scope(tree: dict[str, TreeEntry], directory: str,
-                         pattern: str) -> tuple[int, int]:
-    key = directory
-    prefix = key + "/" if key else ""
-    file_count = 0
-    total_bytes = 0
-    for p, entry in tree.items():
-        if not p.startswith(prefix):
-            continue
-        remainder = p[len(prefix):]
-        if entry.type == "blob" and fnmatch.fnmatch(remainder, pattern):
-            file_count += 1
-            total_bytes += entry.size or 0
-    return file_count, total_bytes
