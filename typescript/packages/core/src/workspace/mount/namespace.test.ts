@@ -13,11 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { IOResult } from '../../io/types.ts'
 import { RAMResource } from '../../resource/ram/ram.ts'
 import { Workspace } from '../workspace.ts'
 
-describe('Namespace facade', () => {
+describe('Namespace facade (addressing)', () => {
   it('resolve delegates to the workspace resolver', async () => {
     const ws = new Workspace({ '/data': new RAMResource() })
     const viaNs = await ws.namespace.resolve('/data/a.txt')
@@ -34,10 +33,10 @@ describe('Namespace facade', () => {
     await ws.close()
   })
 
-  it('exposes dispatch and applyIo through the facade', async () => {
+  it('mountFor returns the owning mount', async () => {
     const ws = new Workspace({ '/data': new RAMResource() })
-    expect(typeof ws.namespace.dispatch).toBe('function')
-    await ws.namespace.applyIo(new IOResult())
+    const mount = ws.namespace.mountFor('/data/a.txt')
+    expect(mount?.prefix).toBe('/data/')
     await ws.close()
   })
 })

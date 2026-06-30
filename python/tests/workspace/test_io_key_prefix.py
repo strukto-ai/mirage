@@ -62,13 +62,13 @@ def _zip_bytes() -> bytes:
 
 def _capture_io(ws: Workspace) -> list:
     captured: list = []
-    orig = ws._namespace.apply_io
+    orig = ws._dispatcher.apply_io
 
     async def recording(result):
         captured.append(result)
         return await orig(result)
 
-    ws._namespace.apply_io = recording
+    ws._dispatcher.apply_io = recording
     return captured
 
 

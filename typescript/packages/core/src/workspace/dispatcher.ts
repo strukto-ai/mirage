@@ -22,7 +22,7 @@ import { type OpKwargs } from '../ops/registry.ts'
 import { cachesReads, type Resource } from '../resource/base.ts'
 import { ConsistencyPolicy, MountMode, type PathSpec } from '../types.ts'
 import type { DispatchFn } from './executor/cross_mount.ts'
-import type { MountRegistry } from './mount/registry.ts'
+import type { Namespace } from './mount/namespace.ts'
 
 const NOOP_ACCESSOR_INSTANCE = new NOOPAccessor()
 const DISPATCH_READ_OPS = new Set(['read', 'read_bytes'])
@@ -38,28 +38,25 @@ const DISPATCH_WRITE_OPS = new Set([
 export type ResolveFn = (path: string) => Promise<[Resource, PathSpec, MountMode]>
 
 export class Dispatcher {
-  private readonly registry: MountRegistry
+  private readonly namespace: Namespace
   private readonly cache: FileCache & Resource
   private readonly opsRegistry: OpsRegistry
-  private readonly resolveFn: ResolveFn
   private readonly consistency: ConsistencyPolicy
 
   constructor(
-    registry: MountRegistry,
+    namespace: Namespace,
     cache: FileCache & Resource,
     opsRegistry: OpsRegistry,
-    resolveFn: ResolveFn,
     consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY,
   ) {
-    this.registry = registry
+    this.namespace = namespace
     this.cache = cache
     this.opsRegistry = opsRegistry
-    this.resolveFn = resolveFn
     this.consistency = consistency
   }
 
   dispatch: DispatchFn = async (opName, path, args, kwargs) => {
-    const [resource, scope, mode] = await this.resolveFn(path.original)
+    const [resource, scope, mode] = await this.namespace.resolve(path.original)
     const caches = cachesReads(resource)
     if (caches && DISPATCH_READ_OPS.has(opName)) {
       let cached = await this.cache.get(path.original)
@@ -90,7 +87,7 @@ export class Dispatcher {
       kwargs?.index === undefined && resource.index !== undefined
         ? { ...(kwargs ?? {}), index: resource.index }
         : (kwargs ?? {})
-    const mount = this.registry.mountFor(path.original)
+    const mount = this.namespace.mountFor(path.original)
     const result = await runWithRevisions(
       mount !== null && mount.revisions.size > 0 ? mount.revisions : null,
       async () =>
@@ -110,7 +107,7 @@ export class Dispatcher {
   }
 
   async invalidateAfterWriteByPath(path: string): Promise<void> {
-    const mount = this.registry.mountFor(path)
+    const mount = this.namespace.mountFor(path)
     if (mount === null) return
     if (cachesReads(mount.resource)) {
       await this.cache.remove(path)

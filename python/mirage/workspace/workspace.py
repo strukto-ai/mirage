@@ -49,6 +49,7 @@ from mirage.types import (DEFAULT_AGENT_ID, DEFAULT_SESSION_ID,
                           ConsistencyPolicy, DriftPolicy, FileStat, MountMode,
                           PathSpec, StateKey)
 from mirage.workspace.abort import MirageAbortError
+from mirage.workspace.dispatcher import Dispatcher
 from mirage.workspace.executor.fs_error import format_fs_error
 from mirage.workspace.file_prompt import build_file_prompt
 from mirage.workspace.fuse import FuseManager
@@ -120,7 +121,9 @@ class Workspace:
         self._consistency = consistency
         self._registry.set_consistency(consistency)
         self._registry.attach_file_cache(self._cache)
-        self._namespace = Namespace(self._registry, self._cache, consistency)
+        self._namespace = Namespace(self._registry)
+        self._dispatcher = Dispatcher(self._namespace, self._cache,
+                                      consistency)
 
         fuse_targets: list[tuple[str, bool | str]] = []
         for prefix, value in resources.items():
@@ -549,7 +552,7 @@ class Workspace:
                        **kwargs: Any) -> tuple[Any, IOResult]:
         if self._drift_check_pending:
             await self._run_pending_drift_check()
-        return await self._namespace.dispatch(op, path, **kwargs)
+        return await self._dispatcher.dispatch(op, path, **kwargs)
 
     async def _run_pending_drift_check(self) -> None:
         """Drain the post-load drift check.
@@ -594,10 +597,10 @@ class Workspace:
     # ── execution ────────────────────────────────────────────────────────────
 
     async def apply_io(self, io: IOResult) -> None:
-        await self._namespace.apply_io(io)
+        await self._dispatcher.apply_io(io)
 
     async def _invalidate_after_write_by_path(self, path: str) -> None:
-        await self._namespace.invalidate_after_write_by_path(path)
+        await self._dispatcher.invalidate_after_write_by_path(path)
 
     def _session_cwd(self, session_id: str) -> str | None:
         try:

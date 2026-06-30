@@ -18,7 +18,8 @@ from mirage.cache.file import io as cache_io
 from mirage.cache.manager import CacheManager
 from mirage.io import IOResult
 from mirage.types import ConsistencyPolicy, FileStat, PathSpec
-from mirage.workspace.mount import MountEntry, MountRegistry
+from mirage.workspace.mount import MountEntry
+from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import assert_mount_allowed
 
 _DISPATCH_READ_OPS = frozenset({"read", "read_bytes"})
@@ -32,22 +33,22 @@ class Dispatcher:
 
     Owns the cache/IO coordination that used to live on Workspace: cache
     lookups for read-caching backends, post-write file-cache eviction,
-    and parent index invalidation. Constructed with the registry, cache
-    store, and
-    consistency policy; holds no other workspace state. Drift checking
-    stays on Workspace (it reads/writes snapshot-owned state), which guards
-    its own dispatch wrapper before delegating here.
+    and parent index invalidation. Constructed with the namespace (for
+    addressing), cache store, and consistency policy; holds no other
+    workspace state. Drift checking stays on Workspace (it reads/writes
+    snapshot-owned state), which guards its own dispatch wrapper before
+    delegating here.
     """
 
-    def __init__(self, registry: MountRegistry, cache,
+    def __init__(self, namespace: Namespace, cache,
                  consistency: ConsistencyPolicy) -> None:
-        self._registry = registry
+        self._namespace = namespace
         self._cache = cache
         self._consistency = consistency
 
     async def dispatch(self, op: str, path: PathSpec,
                        **kwargs: Any) -> tuple[Any, IOResult]:
-        mount = self._registry.mount_for(path.original)
+        mount = self._namespace.mount_for(path.original)
         assert_mount_allowed(mount.prefix)
         caches_reads = mount.resource.caches_reads
 
@@ -91,7 +92,7 @@ class Dispatcher:
 
     def is_cacheable_path(self, path: str) -> bool:
         try:
-            mount = self._registry.mount_for(path)
+            mount = self._namespace.mount_for(path)
         except ValueError:
             return False
         return mount.resource.caches_reads
@@ -110,7 +111,7 @@ class Dispatcher:
             path (str): absolute mount path that was written.
         """
         try:
-            mount = self._registry.mount_for(path)
+            mount = self._namespace.mount_for(path)
         except ValueError:
             return
         await self.invalidate_after_write(mount, path)

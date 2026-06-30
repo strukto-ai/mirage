@@ -12,32 +12,27 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
-
-from mirage.io import IOResult
 from mirage.resource.base import BaseResource
-from mirage.types import ConsistencyPolicy, FileStat, MountMode, PathSpec
-from mirage.workspace.dispatcher import Dispatcher
+from mirage.types import MountMode
+from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.registry import MountRegistry
 
 
 class Namespace:
-    """Single front for path resolution and VFS op dispatch.
+    """Addressing authority: maps virtual paths to their mounts.
 
-    Owns the mount registry and the op dispatcher (cache read-through plus
-    post-write invalidation). The rest of the workspace talks to storage
-    through this one object instead of reaching the registry, the dispatcher,
-    and the ops layer separately: ``resolve`` maps a virtual path to its mount,
-    and ``dispatch``/``stat``/``readdir`` route a VFS op to the owning mount.
+    Owns the mount registry (and, in later phases, the symlink and attribute
+    tables). Pure addressing: it resolves a virtual path to its mount and
+    backend-relative path, following symlinks and crossing mounts. It holds no
+    cache and performs no backend I/O. Op execution and caching live in the
+    Dispatcher, which calls this layer to locate the mount.
 
     The ``follow`` argument on ``resolve`` is the seam for symlink-following;
-    it is a no-op until the symlink table lands in a later phase.
+    it is a no-op until the symlink table lands.
     """
 
-    def __init__(self, registry: MountRegistry, cache,
-                 consistency: ConsistencyPolicy) -> None:
+    def __init__(self, registry: MountRegistry) -> None:
         self._registry = registry
-        self._dispatcher = Dispatcher(registry, cache, consistency)
 
     @property
     def registry(self) -> MountRegistry:
@@ -56,18 +51,5 @@ class Namespace:
         """
         return self._registry.resolve(path)
 
-    async def dispatch(self, op: str, path: PathSpec,
-                       **kwargs: Any) -> tuple[Any, IOResult]:
-        return await self._dispatcher.dispatch(op, path, **kwargs)
-
-    async def stat(self, path: str) -> FileStat:
-        return await self._dispatcher.stat(path)
-
-    async def readdir(self, path: str) -> list[str]:
-        return await self._dispatcher.readdir(path)
-
-    async def apply_io(self, io: IOResult) -> None:
-        await self._dispatcher.apply_io(io)
-
-    async def invalidate_after_write_by_path(self, path: str) -> None:
-        await self._dispatcher.invalidate_after_write_by_path(path)
+    def mount_for(self, path: str) -> MountEntry:
+        return self._registry.mount_for(path)

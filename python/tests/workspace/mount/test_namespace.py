@@ -14,17 +14,12 @@
 
 import pytest
 
-from mirage.cache.file.ram import RAMFileCacheStore
-from mirage.types import ConsistencyPolicy, PathSpec
 from mirage.workspace.mount.namespace import Namespace
 
 
 @pytest.fixture
 def namespace(registry):
-    cache = RAMFileCacheStore()
-    registry.attach_file_cache(cache)
-    registry.set_consistency(ConsistencyPolicy.LAZY)
-    return Namespace(registry, cache, ConsistencyPolicy.LAZY)
+    return Namespace(registry)
 
 
 def test_resolve_delegates_to_registry(namespace, registry):
@@ -43,22 +38,6 @@ def test_resolve_unknown_path_raises(namespace):
         namespace.resolve("/unknown/x.txt")
 
 
-@pytest.mark.asyncio
-async def test_stat_roundtrip(namespace):
-    stat = await namespace.stat("/data/hello.txt")
-    assert stat.name
-
-
-@pytest.mark.asyncio
-async def test_readdir_roundtrip(namespace):
-    entries = await namespace.readdir("/data/")
-    assert "/data/hello.txt" in entries
-
-
-@pytest.mark.asyncio
-async def test_dispatch_matches_direct_op(namespace):
-    scope = PathSpec(original="/data/hello.txt",
-                     directory="/data/hello.txt",
-                     resolved=True)
-    result, _ = await namespace.dispatch("stat", scope)
-    assert result is not None
+def test_mount_for_delegates_to_registry(namespace, registry):
+    assert namespace.mount_for("/data/hello.txt") is registry.mount_for(
+        "/data/hello.txt")

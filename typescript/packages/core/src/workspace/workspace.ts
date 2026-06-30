@@ -65,6 +65,7 @@ import type { BridgeDispatchFn, MirageEntry } from './executor/python/mirage_bri
 import { PyodideRuntime } from './executor/python/runtime.ts'
 import type { PythonReplRunResult } from './executor/python/types.ts'
 import { makeAbortError } from './abort.ts'
+import { Dispatcher } from './dispatcher.ts'
 import { Namespace } from './mount/namespace.ts'
 import { provisionNode } from './node/provision_node.ts'
 import { runCommandTree } from './node/run_tree.ts'
@@ -184,6 +185,7 @@ export class Workspace {
   readonly agentId: string
   readonly cache: FileCache & Resource
   readonly namespace: Namespace
+  private readonly dispatcher: Dispatcher
   readonly observer: Observer
   readonly records: OpRecord[] = []
   readonly fs: WorkspaceFS
@@ -230,13 +232,8 @@ export class Workspace {
     this.registry.mount(HISTORY_PREFIX, new HistoryViewResource(this.observer), MountMode.READ)
     this.cache = options.cache ?? new RAMFileCacheStore({ limit: options.cacheLimit ?? '512MB' })
     this.registry.attachFileCache(this.cache)
-    this.namespace = new Namespace(
-      this.registry,
-      this.cache,
-      this.opsRegistry,
-      (p) => this.resolve(p),
-      consistency,
-    )
+    this.namespace = new Namespace(this.registry, (p) => this.resolve(p))
+    this.dispatcher = new Dispatcher(this.namespace, this.cache, this.opsRegistry, consistency)
     // The file cache is a hidden store (attached above), never a mount. Arg-less
     // commands and root listing resolve against a neutral root anchor: reuse the
     // user's `/` mount if they gave one, else add a plain empty RAM mount at `/`.
@@ -655,7 +652,7 @@ export class Workspace {
    * to no known mount.
    */
   async invalidateAfterWriteByPath(path: string): Promise<void> {
-    await this.namespace.invalidateAfterWriteByPath(path)
+    await this.dispatcher.invalidateAfterWriteByPath(path)
   }
 
   async provision(command: string): Promise<ProvisionResult> {
@@ -716,7 +713,7 @@ export class Workspace {
     }
     const rootNode = root as unknown as TSNodeLike
 
-    const dispatch: DispatchFn = this.namespace.dispatch
+    const dispatch: DispatchFn = this.dispatcher.dispatch
 
     const executeFn: ExecuteFn = async (cmd) => {
       // The executor's internal evals ($(), eval, source, xargs) are
@@ -798,7 +795,7 @@ export class Workspace {
     targetSession.lastExitCode = io.exitCode
     let stdoutBytes: Uint8Array
     try {
-      await this.namespace.applyIo(io)
+      await this.dispatcher.applyIo(io)
       stdoutBytes = materialized === null ? new Uint8Array() : await materialize(materialized)
     } catch (err) {
       // Lazy reads can fail while draining (e.g. head/tail that open the

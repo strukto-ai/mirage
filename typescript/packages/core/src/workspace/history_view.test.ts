@@ -357,8 +357,8 @@ describe('history recording boundaries (GNU line-reader semantics)', () => {
   it('a failed line still records its ops and a failed command entry', async () => {
     const ws = makeWs()
     await ws.execute('echo hi > /data/f.txt')
-    const namespace = (ws as unknown as { namespace: { applyIo: unknown } }).namespace
-    namespace.applyIo = () => {
+    const dispatcher = (ws as unknown as { dispatcher: { applyIo: unknown } }).dispatcher
+    dispatcher.applyIo = () => {
       throw new Error('induced')
     }
     const res = await ws.execute('cat /data/f.txt')
