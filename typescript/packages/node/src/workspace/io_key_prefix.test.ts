@@ -18,10 +18,10 @@ import { Workspace } from '../workspace.ts'
 
 function captureIo(ws: Workspace): IOResult[] {
   const captured: IOResult[] = []
-  const dispatcher = (ws as unknown as { dispatcher: { applyIo: (io: IOResult) => Promise<void> } })
-    .dispatcher
-  const orig = dispatcher.applyIo.bind(dispatcher)
-  dispatcher.applyIo = async (io: IOResult) => {
+  const namespace = (ws as unknown as { namespace: { applyIo: (io: IOResult) => Promise<void> } })
+    .namespace
+  const orig = namespace.applyIo.bind(namespace)
+  namespace.applyIo = async (io: IOResult) => {
     captured.push(io)
     return orig(io)
   }
