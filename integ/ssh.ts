@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
 import ssh2, { type Server, type SFTPWrapper } from "ssh2";
 import { MountMode, SSHResource, Workspace } from "@struktoai/mirage-node";
-import { runCases } from "./cases.ts";
+import { assertRealMtime, runCases } from "./cases.ts";
 
 const { STATUS_CODE, flagsToString } = ssh2.utils.sftp;
 
@@ -301,6 +301,7 @@ async function main(): Promise<void> {
   const ws = new Workspace({ "/data": resource }, { mode: MountMode.WRITE });
   try {
     await runCases(ws);
+    await assertRealMtime(ws);
   } finally {
     await ws.close();
     server.close();

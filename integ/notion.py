@@ -317,6 +317,8 @@ CASES: list[tuple[str, str]] = [
     ("cat_database_json", f"cat {DB_DIR}/database.json"),
     ("jq_db_props", f'jq ".properties | keys" {DB_DIR}/database.json'),
     ("cat_row", f"cat {ROW_1_DIR}/page.json"),
+    ("du_pages", f"du {MOUNT}/pages/"),
+    ("du_page_a", f"du {DIR_A}/"),
 ]
 
 EXIT_CODE_CASES: list[tuple[str, str]] = [

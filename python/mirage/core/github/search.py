@@ -85,7 +85,10 @@ async def narrow_paths(
                 "github code search failed (%s); "
                 "falling back to per-file scan", exc)
             continue
-        narrowed.extend(r.path for r in results)
+        scope_prefix = path_filter + "/" if path_filter else ""
+        narrowed.extend(
+            r.path for r in results
+            if r.path == path_filter or r.path.startswith(scope_prefix))
     return [
         PathSpec(original=mount_prefix + "/" + n.lstrip("/"),
                  directory="",

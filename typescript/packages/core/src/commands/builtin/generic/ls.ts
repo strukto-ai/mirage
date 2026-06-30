@@ -76,6 +76,19 @@ function sortStats(
   return sorted
 }
 
+// A file operand whose readdir came back empty: backends without real
+// directories (e.g. S3) list the "<file>/" prefix and find nothing rather than
+// raising ENOTDIR. Return the stat only when it is a non-directory, so an empty
+// directory still lists as empty. Mirrors Python ls `_file_entry`.
+async function fileEntry(stat: Stat, path: PathSpec): Promise<FileStat | null> {
+  try {
+    const s = await stat(path)
+    return s.type !== FileType.DIRECTORY ? s : null
+  } catch {
+    return null
+  }
+}
+
 async function listDir(
   readdir: Readdir,
   stat: Stat,
@@ -209,6 +222,10 @@ export async function lsGeneric(
         warnings.push(`ls: cannot access '${p.display}': ${msg}`)
         continue
       }
+    }
+    if (stats.length === 0) {
+      const fe = await fileEntry(stat, p)
+      if (fe !== null) stats = [fe]
     }
     appendListing(sortStats(stats, sortBy, reverse), long, human, classify, lines)
   }

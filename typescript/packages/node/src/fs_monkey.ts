@@ -30,7 +30,13 @@ type FsLike = Record<string, unknown>
 
 function mountedPath(ws: Workspace, p: string): boolean {
   try {
-    return ws.registry.mountFor(p) !== null
+    const m = ws.registry.mountFor(p)
+    if (m === null) return false
+    // The synthetic root anchor is an empty internal mount that matches every
+    // path; it does not back real files, so paths caught only by it fall
+    // through to the native fs. A user-provided `/` mount is honored.
+    if (ws.syntheticRoot && m === ws.registry.rootMount) return false
+    return true
   } catch {
     return false
   }

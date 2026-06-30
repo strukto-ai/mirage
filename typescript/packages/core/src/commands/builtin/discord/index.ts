@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RegisteredCommand } from '../../config.ts'
-import { DISCORD_BASENAME } from './basename.ts'
-import { DISCORD_CAT } from './cat.ts'
-import { DISCORD_DIRNAME } from './dirname.ts'
+import type { DiscordAccessor } from '../../../accessor/discord.ts'
+import { ResourceName } from '../../../types.ts'
+import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
+import { makeGenericCommands } from '../generic_bind/index.ts'
+import { metadataProvision } from './_provision.ts'
 import { DISCORD_ADD_REACTION } from './discord_add_reaction.ts'
 import { DISCORD_GET_SERVER_INFO } from './discord_get_server_info.ts'
 import { DISCORD_LIST_MEMBERS } from './discord_list_members.ts'
@@ -23,30 +24,22 @@ import { DISCORD_SEND_MESSAGE } from './discord_send_message.ts'
 import { DISCORD_FIND } from './find.ts'
 import { DISCORD_GREP } from './grep.ts'
 import { DISCORD_HEAD } from './head.ts'
-import { DISCORD_JQ } from './jq.ts'
-import { DISCORD_LS } from './ls.ts'
-import { DISCORD_REALPATH } from './realpath.ts'
+import { DISCORD_CMD_OPS } from './ops.ts'
 import { DISCORD_RG } from './rg.ts'
-import { DISCORD_STAT } from './stat.ts'
-import { DISCORD_TAIL } from './tail.ts'
-import { DISCORD_TREE } from './tree.ts'
-import { DISCORD_WC } from './wc.ts'
+
+const DISCORD_OVERRIDES = new Set(['grep', 'rg', 'find', 'head'])
 
 export const DISCORD_COMMANDS: readonly RegisteredCommand[] = [
-  ...DISCORD_LS,
-  ...DISCORD_TREE,
-  ...DISCORD_CAT,
-  ...DISCORD_HEAD,
-  ...DISCORD_TAIL,
-  ...DISCORD_WC,
+  ...makeGenericCommands<DiscordAccessor>(ResourceName.DISCORD, DISCORD_CMD_OPS, {
+    overrides: DISCORD_OVERRIDES,
+    provisionOverrides: {
+      ls: metadataProvision as ProvisionFn,
+    },
+  }),
   ...DISCORD_FIND,
   ...DISCORD_GREP,
   ...DISCORD_RG,
-  ...DISCORD_STAT,
-  ...DISCORD_JQ,
-  ...DISCORD_BASENAME,
-  ...DISCORD_DIRNAME,
-  ...DISCORD_REALPATH,
+  ...DISCORD_HEAD,
   ...DISCORD_SEND_MESSAGE,
   ...DISCORD_ADD_REACTION,
   ...DISCORD_GET_SERVER_INFO,

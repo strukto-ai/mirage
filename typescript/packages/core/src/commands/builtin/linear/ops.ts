@@ -1,0 +1,38 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import type { LinearAccessor } from '../../../accessor/linear.ts'
+import type { IndexCacheStore } from '../../../cache/index/index.ts'
+import { read as linearRead } from '../../../core/linear/read.ts'
+import { readdir as linearReaddir } from '../../../core/linear/readdir.ts'
+import { stat as linearStat } from '../../../core/linear/stat.ts'
+import type { PathSpec } from '../../../types.ts'
+import type { CommandIO } from '../generic_bind/index.ts'
+
+async function* linearReadStream(
+  accessor: LinearAccessor,
+  path: PathSpec,
+  index?: IndexCacheStore,
+): AsyncIterable<Uint8Array> {
+  yield await linearRead(accessor, path, index)
+}
+
+export const LINEAR_CMD_OPS: CommandIO<LinearAccessor> = {
+  readdir: linearReaddir,
+  readBytes: linearRead,
+  readStream: linearReadStream,
+  stat: linearStat,
+  isMounted: () => true,
+  local: false,
+}

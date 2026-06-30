@@ -90,11 +90,14 @@ describe('curl -o persists to mount', () => {
     await ws.close()
   })
 
-  it('fails when target has no mount', async () => {
+  it('fails when the target path has no parent directory', async () => {
+    // No `/nope` mount and no `/nope` dir under the root anchor, so the write
+    // routes to the empty root mount and fails because the parent is missing
+    // (the catch-all root never silently swallows an unmounted path).
     const ws = await makeWs()
     const io = await ws.execute('curl -s https://x.test/file -o /nope/foo.bin')
     expect(io.exitCode).toBe(1)
-    expect(io.stderrText).toMatch(/no mount/)
+    expect(io.stderrText).toMatch(/parent directory does not exist/)
     expect(io.stderrText).toContain('/nope/foo.bin')
     await ws.close()
   })

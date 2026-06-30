@@ -2792,7 +2792,7 @@ def test_pwd_returns_root():
 
 
 def test_cd_tilde():
-    session = _session(cwd="/data/sub")
+    session = _session(cwd="/data/sub", env={"HOME": "/"})
     dispatch = _mock_dispatch()
     dispatch.side_effect = FileNotFoundError("not found")
     _, io, _, session, _, _ = _exec("cd ~", session=session, dispatch=dispatch)

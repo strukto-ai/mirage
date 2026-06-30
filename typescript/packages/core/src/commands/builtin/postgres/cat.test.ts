@@ -15,6 +15,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../../core/postgres/read.ts', () => ({
+  read: vi.fn(),
   readStream: vi.fn(),
 }))
 vi.mock('../../../core/postgres/stat.ts', () => ({
@@ -28,7 +29,9 @@ import * as statModule from '../../../core/postgres/stat.ts'
 import { resolvePostgresConfig } from '../../../resource/postgres/config.ts'
 import { materialize } from '../../../io/types.ts'
 import { FileStat, PathSpec } from '../../../types.ts'
-import { POSTGRES_CAT } from './cat.ts'
+import { POSTGRES_COMMANDS } from './index.ts'
+
+const POSTGRES_CAT = POSTGRES_COMMANDS.filter((c) => c.name === 'cat' && c.filetype == null)
 
 class StubDriver implements PgDriver {
   query<R = Record<string, unknown>>(): Promise<PgQueryResult<R>> {

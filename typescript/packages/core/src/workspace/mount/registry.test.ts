@@ -18,7 +18,7 @@ import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
 import { MountMode, PathSpec } from '../../types.ts'
-import { MountRegistry } from './registry.ts'
+import { MountCommandUnsupported, MountRegistry } from './registry.ts'
 
 class StubResource implements Resource {
   readonly kind = 'stub'
@@ -295,5 +295,51 @@ describe('MountRegistry.resolveMount: cross-mount fallback', () => {
     expect(new TextDecoder().decode(io.stderr as Uint8Array)).toContain(
       'mutate: read-only mount at /b/',
     )
+  })
+})
+
+class LimitedResource implements Resource {
+  readonly kind = 'limited'
+  open(): Promise<void> {
+    return Promise.resolve()
+  }
+  close(): Promise<void> {
+    return Promise.resolve()
+  }
+}
+
+describe('MountRegistry.resolveMount: path-bound dispatch', () => {
+  function pathBoundRegistryWithFallback(): MountRegistry {
+    const reg = new MountRegistry({ '/limited/': new LimitedResource() }, MountMode.WRITE)
+    reg.mount('/', new RAMStubResource(), MountMode.WRITE)
+    const root = reg.mountForPrefix('/')
+    if (root === null) throw new Error('missing / mount')
+    const [fallbackOnly] = command({
+      name: 'fallback-only',
+      resource: 'ram',
+      spec: EMPTY_SPEC,
+      fn: NOOP_CMD,
+    })
+    if (fallbackOnly === undefined) throw new Error('missing fallback-only cmd')
+    root.register(fallbackOnly)
+    return reg
+  }
+
+  it('rejects a path-bound command unsupported by its backend', async () => {
+    const reg = pathBoundRegistryWithFallback()
+    const path = new PathSpec({ original: '/limited/file.txt', directory: '/limited' })
+    await expect(reg.resolveMount('fallback-only', [path], '/limited')).rejects.toThrow(
+      MountCommandUnsupported,
+    )
+    await expect(reg.resolveMount('fallback-only', [path], '/limited')).rejects.toThrow(
+      'fallback-only: not supported on the limited backend',
+    )
+  })
+
+  it('allows the fallback mount when the command is not path-bound', async () => {
+    const reg = pathBoundRegistryWithFallback()
+    const mount = await reg.resolveMount('fallback-only', [], '/limited')
+    expect(mount).not.toBeNull()
+    expect(mount?.prefix).toBe('/')
   })
 })

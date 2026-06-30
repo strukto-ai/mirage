@@ -171,6 +171,14 @@ async def main() -> None:
         f'find {list_path}/cards/ -name "*.json" | head -n 5')
     print(await result.stdout_str())
 
+    print("=== find board -type d (directory filter) ===")
+    result = await ws.execute(f"find {board_path}/ -type d | head -n 5")
+    print(await result.stdout_str())
+
+    print("=== du -s board (walk fallback) ===")
+    result = await ws.execute(f"du -s {board_path}/")
+    print(await result.stdout_str())
+
     ws_path = f"/trello/workspaces/{first_ws}"
     print("=== grep -r wawa across workspace ===")
     result = await ws.execute(f"grep -r wawa {ws_path}/")

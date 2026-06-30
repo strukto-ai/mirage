@@ -38,6 +38,11 @@ describe('humanSize', () => {
     expect(humanSize(1024 * 1024)).toBe('1.0M')
     expect(humanSize(1024 * 1024 * 1024)).toBe('1.0G')
   })
+
+  it('fractional sizes round to one decimal (GNU, not floored)', () => {
+    expect(humanSize(1536)).toBe('1.5K')
+    expect(humanSize(1024 * 1024 + 512 * 1024)).toBe('1.5M')
+  })
 })
 
 describe('formatLsLong', () => {

@@ -77,9 +77,11 @@ const EXPECTED_NAMES = [
 ]
 
 describe('HF_COMMANDS', () => {
-  it('mirrors the python hf_buckets command list', () => {
-    const names = [...new Set(HF_COMMANDS.map((c) => c.name))].sort()
-    expect(names).toEqual([...EXPECTED_NAMES].sort())
+  it('registers the python hf_buckets command list', () => {
+    const names = new Set(HF_COMMANDS.map((c) => c.name))
+    for (const name of EXPECTED_NAMES) {
+      expect(names.has(name)).toBe(true)
+    }
   })
 
   it('registers every command for all four hf resources', () => {

@@ -17,18 +17,7 @@ import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { formatRecords } from '../utils/output.ts'
-
-function humanSize(n: number): string {
-  const units = ['B', 'K', 'M', 'G', 'T']
-  let v = n
-  let i = 0
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024
-    i += 1
-  }
-  const s = i === 0 ? Math.round(v).toString() : v.toFixed(1)
-  return `${s}${units[i] ?? ''}`
-}
+import { humanSize } from '../utils/formatting.ts'
 
 function depthOf(entryPath: string, basePath: string): number {
   const base = rstripSlash(basePath)
@@ -84,4 +73,35 @@ export async function duGeneric(
   }
   const out: ByteSource = formatRecords(lines)
   return [out, new IOResult()]
+}
+
+// Fallback for backends with no native du op: one recursive-total line per
+// operand, computed by walking stat/readdir. Mirrors the Python du_multi path
+// (compute_all=None), so -a/-s/--max-depth collapse to a single summary line.
+export async function duMulti(
+  paths: PathSpec[],
+  opts: CommandOpts,
+  computeTotal: (p: PathSpec) => Promise<number>,
+): Promise<CommandFnResult> {
+  const human = opts.flags.h === true
+  const cumulative = opts.flags.c === true
+  const targets =
+    paths.length > 0 ? paths : [new PathSpec({ original: '/', directory: '/', resolved: false })]
+  const fmt = (size: number): string => (human ? humanSize(size) : String(size))
+  const lines: string[] = []
+  let grand = 0
+  for (const root of targets) {
+    let total = 0
+    try {
+      total = await computeTotal(root)
+    } catch {
+      total = 0
+    }
+    lines.push(`${fmt(total)}\t${root.display}`)
+    grand += total
+  }
+  if (cumulative) {
+    lines.push(`${fmt(grand)}\ttotal`)
+  }
+  return [formatRecords(lines), new IOResult()]
 }

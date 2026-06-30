@@ -12,29 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { QdrantAccessor } from '../../../accessor/qdrant.ts'
+import { ResourceName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
-import { QDRANT_CAT } from './cat.ts'
+import { makeGenericCommands } from '../generic_bind/index.ts'
 import { QDRANT_FIND } from './find.ts'
-import { QDRANT_GREP } from './grep.ts'
-import { QDRANT_HEAD } from './head.ts'
-import { QDRANT_LS } from './ls.ts'
-import { QDRANT_RG } from './rg.ts'
+import { QDRANT_CMD_OPS } from './ops.ts'
 import { QDRANT_SEARCH } from './search.ts'
-import { QDRANT_STAT } from './stat.ts'
-import { QDRANT_TAIL } from './tail.ts'
-import { QDRANT_TREE } from './tree.ts'
-import { QDRANT_WC } from './wc.ts'
+
+const QDRANT_OVERRIDES = new Set(['find', 'search'])
 
 export const QDRANT_COMMANDS: readonly RegisteredCommand[] = [
-  ...QDRANT_LS,
-  ...QDRANT_STAT,
-  ...QDRANT_CAT,
-  ...QDRANT_TREE,
-  ...QDRANT_WC,
+  ...makeGenericCommands<QdrantAccessor>(ResourceName.QDRANT, QDRANT_CMD_OPS, {
+    overrides: QDRANT_OVERRIDES,
+  }),
   ...QDRANT_FIND,
   ...QDRANT_SEARCH,
-  ...QDRANT_GREP,
-  ...QDRANT_RG,
-  ...QDRANT_HEAD,
-  ...QDRANT_TAIL,
 ]

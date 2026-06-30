@@ -39,3 +39,7 @@ For DSN format and permissions, see [Postgres Setup](/home/setup/postgres).
 ## Snapshot behavior
 
 The DSN is redacted on snapshot. Loading a snapshot back requires a config file that supplies a fresh DSN.
+
+## File size and `du`
+
+`rows.jsonl` is rendered on demand, so `stat` / `ls -l` / `du` report the table's **physical storage size** (`pg_total_relation_size`: heap + indexes + TOAST + page padding), not the size of the rendered JSONL. That number can differ a lot from the content and shifts with Postgres version and vacuum state. For the actual rendered byte count, use `wc -c rows.jsonl` (which streams and counts the bytes).

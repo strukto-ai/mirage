@@ -16,19 +16,16 @@ from collections.abc import AsyncIterator
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.constants import PatternType
 from mirage.commands.builtin.generic.grep import grep as generic_grep
-from mirage.commands.builtin.grep_helper import classify_pattern, pattern_arg
+from mirage.commands.builtin.github.narrow import (files_only_shortcircuit,
+                                                   narrow_scope)
+from mirage.commands.builtin.grep_helper import pattern_arg
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
-from mirage.core.github.constants import SCOPE_ERROR, SCOPE_WARN
-from mirage.core.github.glob import resolve_glob
+from mirage.core.github.constants import SCOPE_ERROR
 from mirage.core.github.read import read as github_read
 from mirage.core.github.readdir import readdir as github_readdir
-from mirage.core.github.scope import (count_scope_files, is_repo_root,
-                                      scope_relative_key, should_use_search)
-from mirage.core.github.search import narrow_paths
 from mirage.core.github.stat import stat as github_stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision import ProvisionResult
@@ -105,30 +102,21 @@ async def grep(
 
     resolved: list[PathSpec] = []
     if paths and index is not None:
-        key = scope_relative_key(paths[0])
-        file_count = count_scope_files(index._entries, key)
-        # -f-only invocations have no literal yet (files are read inside the
-        # generic); treat as regex so the search narrowing is skipped.
-        is_regex = (pattern is None or classify_pattern(pattern, fl.bool("F"))
-                    == PatternType.REGEX)
-        use_search = (should_use_search(
-            is_regex=is_regex,
+        resolved, file_count, used_search = await narrow_scope(
+            accessor,
+            index,
+            paths,
+            pattern,
+            fixed_string=fl.bool("F"),
             recursive=recursive,
-            on_default_branch=(accessor.ref == accessor.default_branch),
-        ) and is_repo_root(key) and file_count > SCOPE_WARN)
-        if use_search:
-            narrowed = await narrow_paths(accessor.config, accessor.owner,
-                                          accessor.repo, pattern, paths)
-            if narrowed:
-                resolved = narrowed
-                file_count = len(narrowed)
-            else:
-                resolved = await resolve_glob(accessor, paths, index)
-        else:
-            resolved = await resolve_glob(accessor, paths, index)
+        )
         if file_count > SCOPE_ERROR:
             msg = f"grep: {file_count} files in scope, narrow the path\n"
             return b"", IOResult(exit_code=1, stderr=msg.encode())
+        if used_search:
+            short = files_only_shortcircuit(fl, pattern, resolved, paths[0])
+            if short is not None:
+                return short
 
     return await generic_grep(
         resolved,

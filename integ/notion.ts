@@ -390,6 +390,8 @@ const CASES: ReadonlyArray<readonly [string, string]> = [
   ["cat_database_json", `cat ${DB_DIR}/database.json`],
   ["jq_db_props", `jq ".properties | keys" ${DB_DIR}/database.json`],
   ["cat_row", `cat ${ROW_1_DIR}/page.json`],
+  ["du_pages", `du ${MOUNT}/pages/`],
+  ["du_page_a", `du ${DIR_A}/`],
 ];
 
 const EXIT_CODE_CASES: ReadonlyArray<readonly [string, string]> = [

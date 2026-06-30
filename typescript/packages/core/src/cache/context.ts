@@ -24,6 +24,7 @@ import { createAsyncContext } from '../utils/async_context.ts'
 export interface CacheInvalidator {
   invalidateAfterWrite(path: string | PathSpec): Promise<void>
   invalidateAfterUnlink(path: string | PathSpec): Promise<void>
+  cachedBytes(path: PathSpec): Promise<Uint8Array | null>
 }
 
 interface CacheContextState {

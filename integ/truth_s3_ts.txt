@@ -444,6 +444,46 @@ bytes=8192 lines=1 out0='{"type":"queue-operation","operation":"enqueue",'
 bytes=8192 lines=1 out0='{"parentUuid":null,"isSidechain":false,"userType'
 === seaweedfs:stream:cat_wc_full ===
 bytes=10414430 lines=1 out0='5766'
+=== s3:warm:warm_cat ===
+bytes=0 served_from_cache=true
+=== s3:warm:warm_grep ===
+bytes=0 served_from_cache=true
+=== s3:warm:warm_head ===
+bytes=0 served_from_cache=true
+=== s3:warm:warm_tail ===
+bytes=0 served_from_cache=true
+=== s3:warm:warm_wc ===
+bytes=0 served_from_cache=true
+=== gcs:warm:warm_cat ===
+bytes=0 served_from_cache=true
+=== gcs:warm:warm_grep ===
+bytes=0 served_from_cache=true
+=== gcs:warm:warm_head ===
+bytes=0 served_from_cache=true
+=== gcs:warm:warm_tail ===
+bytes=0 served_from_cache=true
+=== gcs:warm:warm_wc ===
+bytes=0 served_from_cache=true
+=== minio:warm:warm_cat ===
+bytes=0 served_from_cache=true
+=== minio:warm:warm_grep ===
+bytes=0 served_from_cache=true
+=== minio:warm:warm_head ===
+bytes=0 served_from_cache=true
+=== minio:warm:warm_tail ===
+bytes=0 served_from_cache=true
+=== minio:warm:warm_wc ===
+bytes=0 served_from_cache=true
+=== seaweedfs:warm:warm_cat ===
+bytes=0 served_from_cache=true
+=== seaweedfs:warm:warm_grep ===
+bytes=0 served_from_cache=true
+=== seaweedfs:warm:warm_head ===
+bytes=0 served_from_cache=true
+=== seaweedfs:warm:warm_tail ===
+bytes=0 served_from_cache=true
+=== seaweedfs:warm:warm_wc ===
+bytes=0 served_from_cache=true
 === s3:calls:ls_l ===
 ListObjectsV2=1 HeadObject=0
 === s3:calls:tree ===

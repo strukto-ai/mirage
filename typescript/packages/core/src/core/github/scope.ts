@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { fnmatch } from '../../utils/fnmatch.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { PathSpec } from '../../types.ts'
 import type { TreeEntry } from './tree_entry.ts'
@@ -47,30 +46,9 @@ export function countScopeFiles(tree: Record<string, TreeEntry>, key: string): n
   return count
 }
 
-export function shouldUseSearch(
-  isRegex: boolean,
-  recursive: boolean,
-  onDefaultBranch: boolean,
-): boolean {
-  return !isRegex && recursive && onDefaultBranch
-}
-
-export function estimateScope(
-  tree: Record<string, TreeEntry>,
-  directory: string,
-  pattern: string,
-): { fileCount: number; totalBytes: number } {
-  const key = directory
-  const prefix = key !== '' ? `${key}/` : ''
-  let fileCount = 0
-  let totalBytes = 0
-  for (const [p, entry] of Object.entries(tree)) {
-    if (!p.startsWith(prefix)) continue
-    const remainder = p.slice(prefix.length)
-    if (entry.type === 'blob' && fnmatch(remainder, pattern)) {
-      fileCount += 1
-      totalBytes += entry.size ?? 0
-    }
-  }
-  return { fileCount, totalBytes }
+export function shouldUseSearch(recursive: boolean, onDefaultBranch: boolean): boolean {
+  // Search only helps recursive scans on the default branch (code search only
+  // indexes the default branch). Whether a usable literal exists, and whether
+  // the scope is large enough to bother, is decided by the caller.
+  return recursive && onDefaultBranch
 }

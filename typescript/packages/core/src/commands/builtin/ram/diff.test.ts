@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { RAMResource } from '../../../resource/ram/ram.ts'
 import { PathSpec } from '../../../types.ts'
-import { RAM_DIFF } from './diff.ts'
+const RAM_DIFF = RAM_COMMANDS.filter((c) => c.name === 'diff' && c.filetype == null)
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -155,5 +156,18 @@ describe('diff', () => {
     resource.store.files.set('/tmp/a.txt', ENC.encode('hello\n'))
     const r = await runDiff(resource, [PathSpec.fromStrPath('/tmp/a.txt')])
     expect(r.exitCode).toBe(2)
+  })
+
+  it('-u uses GNU single-line hunk header (@@ -1 +1 @@)', async () => {
+    const resource = new RAMResource()
+    resource.store.files.set('/tmp/a.txt', ENC.encode('hello\n'))
+    resource.store.files.set('/tmp/b.txt', ENC.encode('world\n'))
+    const r = await runDiff(
+      resource,
+      [PathSpec.fromStrPath('/tmp/a.txt'), PathSpec.fromStrPath('/tmp/b.txt')],
+      { u: true },
+    )
+    expect(r.exitCode).toBe(1)
+    expect(r.out).toContain('@@ -1 +1 @@')
   })
 })

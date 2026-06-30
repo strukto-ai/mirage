@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.spec import CommandSpec, OperandKind, parse_command
 from mirage.io.types import ByteSource
 
 COMPOUND_EXTENSIONS = frozenset({
@@ -36,38 +35,9 @@ def get_extension(path: str | None) -> str | None:
     return path[dot:]
 
 
-def resolve_first_path(argv: list[str], cwd: str,
-                       spec: CommandSpec) -> str | None:
-    parsed = parse_command(spec, argv, cwd)
-    paths = parsed.routing_paths()
-    return paths[0] if paths else cwd
-
-
 async def materialize_stdout(stdout: ByteSource | None) -> bytes:
     if stdout is None:
         return b""
     if isinstance(stdout, bytes):
         return stdout
     return b"".join([chunk async for chunk in stdout])
-
-
-def strip_prefix_from_path_kwargs(
-    kwargs: dict[str, str | bool],
-    spec: CommandSpec,
-    prefix: str,
-) -> dict[str, str | bool]:
-    if not prefix:
-        return kwargs
-    result = dict(kwargs)
-    for opt in spec.options:
-        if opt.value_kind != OperandKind.PATH:
-            continue
-        for flag_name in (opt.short, opt.long):
-            if flag_name is None:
-                continue
-            clean = flag_name.lstrip("-")
-            if clean in result and isinstance(result[clean], str):
-                vp = result[clean]
-                if vp.startswith(prefix + "/") or vp == prefix:
-                    result[clean] = ("/" + vp[len(prefix):].lstrip("/"))
-    return result

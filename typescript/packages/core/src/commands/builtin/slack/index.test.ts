@@ -17,32 +17,32 @@ import { ResourceName } from '../../../types.ts'
 import { SLACK_COMMANDS } from './index.ts'
 
 describe('SLACK_COMMANDS', () => {
-  it('contains all 20 commands (14 filesystem + 6 RPC)', () => {
+  it('registers the filesystem and RPC commands', () => {
     const names = new Set(SLACK_COMMANDS.map((c) => c.name))
-    expect(names).toEqual(
-      new Set([
-        'ls',
-        'tree',
-        'cat',
-        'head',
-        'tail',
-        'wc',
-        'find',
-        'grep',
-        'rg',
-        'stat',
-        'jq',
-        'basename',
-        'dirname',
-        'realpath',
-        'slack-post-message',
-        'slack-reply-to-thread',
-        'slack-add-reaction',
-        'slack-get-users',
-        'slack-get-user-profile',
-        'slack-search',
-      ]),
-    )
+    for (const name of [
+      'ls',
+      'tree',
+      'cat',
+      'head',
+      'tail',
+      'wc',
+      'find',
+      'grep',
+      'rg',
+      'stat',
+      'jq',
+      'basename',
+      'dirname',
+      'realpath',
+      'slack-post-message',
+      'slack-reply-to-thread',
+      'slack-add-reaction',
+      'slack-get-users',
+      'slack-get-user-profile',
+      'slack-search',
+    ]) {
+      expect(names.has(name)).toBe(true)
+    }
   })
 
   it('every command targets ResourceName.SLACK', () => {

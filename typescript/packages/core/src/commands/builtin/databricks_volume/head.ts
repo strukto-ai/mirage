@@ -12,11 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { cachedPrefixBytes } from '../../../cache/read_through.ts'
 import type { DatabricksVolumeAccessor } from '../../../accessor/databricks_volume.ts'
 import { resolveGlob } from '../../../core/databricks_volume/glob.ts'
 import { stat as dbxStat } from '../../../core/databricks_volume/stat.ts'
-import { readStream as dbxStream } from '../../../core/databricks_volume/stream.ts'
+import { rangeRead, readStream as dbxStream } from '../../../core/databricks_volume/stream.ts'
 import { type FileStat, ResourceName, type PathSpec } from '../../../types.ts'
+import { IOResult } from '../../../io/types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { headGeneric } from '../generic/head.ts'
@@ -28,9 +30,20 @@ async function headCommand(
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const resolved =
-    paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
-  const stat = (p: PathSpec): Promise<FileStat> => dbxStat(accessor, p, opts.index ?? undefined)
+  const index = opts.index ?? undefined
+  const resolved = paths.length > 0 ? await resolveGlob(accessor, paths, index) : []
+  const cRaw = typeof opts.flags.c === 'string' ? opts.flags.c : null
+  const cInt = cRaw !== null ? Number.parseInt(cRaw, 10) : null
+  const single = resolved[0]
+  // Single file with -c >= 0: serve the first cInt bytes from the cache
+  // when warm, else fetch only those bytes via a range request instead of
+  // streaming the whole file.
+  if (resolved.length === 1 && single !== undefined && cInt !== null && cInt >= 0) {
+    const data =
+      (await cachedPrefixBytes(single, cInt)) ?? (await rangeRead(accessor, single, 0, cInt))
+    return [data, new IOResult()]
+  }
+  const stat = (p: PathSpec): Promise<FileStat> => dbxStat(accessor, p, index)
   return headGeneric(resolved, texts, opts, stat, (p) => dbxStream(accessor, p))
 }
 

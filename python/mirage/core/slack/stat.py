@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
+
 from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.core.slack.readdir import readdir as _readdir
@@ -21,6 +23,7 @@ from mirage.utils.errors import enoent
 from mirage.utils.filetype import filetype_from_mimetype
 
 VIRTUAL_DIRS = {"", "channels", "dms", "users"}
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def _slack_modified(remote_time: str) -> str | None:
@@ -107,19 +110,20 @@ async def stat(
             extra={"user_id": lookup.entry.id},
         )
 
-    if len(parts) == 3 and parts[0] in ("channels", "dms"):
+    if (len(parts) == 3 and parts[0] in ("channels", "dms")
+            and _DATE_RE.match(parts[2])):
         return FileStat(name=parts[2], type=FileType.DIRECTORY)
 
     if (len(parts) == 4 and parts[0] in ("channels", "dms")
-            and parts[3] == "chat.jsonl"):
+            and _DATE_RE.match(parts[2]) and parts[3] == "chat.jsonl"):
         return FileStat(name="chat.jsonl", type=FileType.TEXT)
 
     if (len(parts) == 4 and parts[0] in ("channels", "dms")
-            and parts[3] == "files"):
+            and _DATE_RE.match(parts[2]) and parts[3] == "files"):
         return FileStat(name="files", type=FileType.DIRECTORY)
 
     if (len(parts) == 5 and parts[0] in ("channels", "dms")
-            and parts[3] == "files"):
+            and _DATE_RE.match(parts[2]) and parts[3] == "files"):
         if index is None:
             raise enoent(virtual)
         lookup = await index.get(virtual_key)

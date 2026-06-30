@@ -269,6 +269,7 @@ a.txt
 /data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
+/data/poem.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -304,6 +305,8 @@ a.txt
 /data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
+/data/poem.diff
+/data/poem.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -339,6 +342,8 @@ one_byte.txt
 oooo.txt
 patterns.txt
 patterns2.txt
+poem.diff
+poem.txt
 prefix_dup.txt
 repeats.txt
 sections.txt
@@ -373,6 +378,8 @@ one_byte.txt
 oooo.txt
 patterns.txt
 patterns2.txt
+poem.diff
+poem.txt
 prefix_dup.txt
 repeats.txt
 sections.txt
@@ -384,6 +391,33 @@ sub
 tabbed.txt
 user.json
 users.json
+=== ls_file ===
+a.txt
+=== ls_glob ===
+a.txt
+anchors.txt
+b.txt
+c.txt
+dup.txt
+empty.txt
+fields.txt
+mixed.txt
+multi.txt
+no_nl.txt
+numbers.txt
+one_byte.txt
+oooo.txt
+patterns.txt
+patterns2.txt
+poem.txt
+prefix_dup.txt
+repeats.txt
+sections.txt
+sorted_a.txt
+sorted_b.txt
+sorted_c.txt
+spaced.txt
+tabbed.txt
 === expand ===
 a       1
 b       2
@@ -489,6 +523,8 @@ baz
 /data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
+/data/poem.diff
+/data/poem.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -522,6 +558,8 @@ baz
 /data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
+/data/poem.diff
+/data/poem.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -552,6 +590,7 @@ baz
 /data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
+/data/poem.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -610,7 +649,7 @@ world
       2 b
       1 c
 === find_pipe_wc ===
-29
+30
 === jq_pipe_wc ===
 3
 === cat_tr_sort ===
@@ -712,6 +751,7 @@ world
 /data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
+/data/poem.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -744,6 +784,8 @@ world
 /data/numbers.txt
 /data/oooo.txt
 /data/patterns.txt
+/data/poem.diff
+/data/poem.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -777,6 +819,7 @@ world
 /data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
+/data/poem.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -1293,6 +1336,7 @@ baz,
 /data/disptree/d
 /data/guard
 /data/guard/sub
+/data/poem.diff
 /data/sub
 /data/sub/deep
 /data/user.json
@@ -1347,6 +1391,8 @@ baz,
 /data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
+/data/poem.diff
+/data/poem.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -1389,6 +1435,8 @@ baz,
 /data/oooo.txt
 /data/patterns.txt
 /data/patterns2.txt
+/data/poem.diff
+/data/poem.txt
 /data/prefix_dup.txt
 /data/repeats.txt
 /data/sections.txt
@@ -1453,7 +1501,7 @@ diff -r /data/dr/x/sub/d.txt /data/dr/y/sub/d.txt
 === du_file ===
 24	/data/a.txt
 === du_dir ===
-722	/data
+881	/data
 === du_h ===
 24B	/data/a.txt
 === tree ===
@@ -1737,8 +1785,8 @@ bar
 baz
 === cwd_echo_pwd ===
 /data/sub
-=== cwd_echo_home_default ===
-/
+=== cwd_echo_home_unset ===
+[]
 === cwd_cd_oldpwd ===
 /data
 === cwd_cd_dash ===
@@ -1758,6 +1806,17 @@ baz
 === cwd_tilde_subdir_cat ===
 nested
 content
+=== cwd_cd_double_slash ===
+/data
+=== cwd_cd_phys_flag ===
+/data/sub
+=== cwd_cd_log_flag ===
+/data
+=== cwd_cd_dashdash ===
+/data
+=== cwd_cd_cdpath ===
+/data/sub
+/data/sub
 === subshell_var_isolated ===
 1
 === subshell_var_inherit ===
@@ -1819,8 +1878,8 @@ disptree/d
 disptree/d/y.txt
 disptree/x.txt
 === history_last_two ===
-477  (cd /data && ls -R disptree)
-478  (cd /data && find disptree)
+488  (cd /data && ls -R disptree)
+489  (cd /data && find disptree)
 === bash_history_tail ===
 (cd /data && ls -R disptree)
 (cd /data && find disptree)
@@ -1840,6 +1899,31 @@ grep -v '^#' /.bash_history | tail -n 1
 h.txt.gz
 two
 h.txt
+=== patch_apply ===
+roses are red
+violets are dark
+sugar is sweet
+=== patch_n_noop ===
+roses are red
+violets are dark
+sugar is sweet
+=== patch_reverse ===
+roses are red
+violets are blue
+sugar is sweet
+=== cwd_cd_too_many ===
+exit=1
+cd: too many arguments
+=== cwd_cd_bad_opt ===
+exit=2
+cd: -x: invalid option
+cd: usage: cd [-L|[-P [-e]] [-@]] [dir]
+=== cwd_cd_home_unset ===
+exit=1
+cd: HOME not set
+=== cwd_cd_quoted_tilde ===
+exit=1
+cd: /data/~: No such file or directory
 === sed_count_zero ===
 exit=1
 === jq_no_filter_no_input ===

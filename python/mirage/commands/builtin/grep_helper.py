@@ -63,6 +63,80 @@ def classify_pattern(
     return PatternType.REGEX
 
 
+_REGEX_BREAKERS = frozenset(".^$*+?()|{}")
+_MIN_SEARCH_LITERAL = 3
+
+
+def extract_required_literal(pattern: str) -> str | None:
+    """Longest substring every match of a regex must contain.
+
+    Returns a literal that any line matching ``pattern`` is guaranteed to
+    contain, suitable for narrowing via a literal search API before the real
+    regex is scanned locally. Conservative: returns None whenever a required
+    literal cannot be proven (top-level alternation, character classes,
+    escapes, runs shorter than ``_MIN_SEARCH_LITERAL``), so the caller falls
+    back to a full scan rather than risk a false negative.
+
+    Args:
+        pattern (str): a regular expression.
+
+    Returns:
+        str | None: the longest required literal, or None.
+    """
+    if "|" in pattern:
+        return None
+    runs: list[str] = []
+    current: list[str] = []
+    i = 0
+    n = len(pattern)
+    while i < n:
+        ch = pattern[i]
+        if ch == "\\":
+            runs.append("".join(current))
+            current = []
+            i += 2
+            continue
+        if ch == "[":
+            runs.append("".join(current))
+            current = []
+            i += 1
+            while i < n and pattern[i] != "]":
+                i += 2 if pattern[i] == "\\" else 1
+            i += 1
+            continue
+        if ch in _REGEX_BREAKERS:
+            if ch in "*?{" and current:
+                current.pop()
+            runs.append("".join(current))
+            current = []
+            if ch == "{":
+                while i < n and pattern[i] != "}":
+                    i += 1
+            i += 1
+            continue
+        current.append(ch)
+        i += 1
+    runs.append("".join(current))
+    best = max(runs, key=len, default="")
+    return best if len(best) >= _MIN_SEARCH_LITERAL else None
+
+
+def search_query(pattern: str, fixed_string: bool) -> str | None:
+    """Literal to push down to a code-search API for a grep/rg pattern.
+
+    Args:
+        pattern (str): the search pattern.
+        fixed_string (bool): True if -F is set.
+
+    Returns:
+        str | None: the pattern itself when it is literal, a required literal
+            extracted from a regex, or None when no literal can be searched.
+    """
+    if classify_pattern(pattern, fixed_string) != PatternType.REGEX:
+        return pattern
+    return extract_required_literal(pattern)
+
+
 def pattern_arg(texts: Sequence[str], flags: FlagView) -> str | None:
     """Resolve the pattern-list argument from -e values or the positional.
 

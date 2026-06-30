@@ -132,6 +132,15 @@ async def test_stat_date_dir(accessor, index):
 
 
 @pytest.mark.asyncio
+async def test_stat_non_date_dir_not_found(accessor, index):
+    with pytest.raises(FileNotFoundError):
+        await stat(accessor,
+                   PathSpec(original="/channels/general__C001/notadate",
+                            directory="/channels/general__C001/notadate"),
+                   index=index)
+
+
+@pytest.mark.asyncio
 async def test_stat_chat_jsonl(accessor, index):
     s = await stat(
         accessor,

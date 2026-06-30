@@ -43,6 +43,12 @@ async function run(ws: Workspace, cmd: string): Promise<string> {
   return out
 }
 
+async function timed(ws: Workspace, cmd: string): Promise<[number, string]> {
+  const start = performance.now()
+  const out = (await ws.execute(cmd)).stdoutText
+  return [performance.now() - start, out]
+}
+
 async function main(): Promise<void> {
   const ws = new Workspace(
     { '/langfuse': new LangfuseResource(buildConfig()) },
@@ -85,6 +91,31 @@ async function main(): Promise<void> {
 
     console.log('\n=== tree -L 2 /langfuse/ ===')
     await run(ws, 'tree -L 2 /langfuse/ | head -n 20')
+
+    console.log('\n' + '='.repeat(60))
+    console.log('CACHING: warm reads served from cache (no backend fetch)')
+    console.log('='.repeat(60))
+    const found = await run(ws, 'find "/langfuse/prompts/" -name "*.json"')
+    const promptFiles = found === '' ? [] : found.split('\n')
+    if (promptFiles.length > 0) {
+      const cacheFile = (promptFiles[0] ?? '').trim()
+      const [coldMs, body] = await timed(ws, `cat "${cacheFile}"`)
+      const [warmMs] = await timed(ws, `cat "${cacheFile}"`)
+      const [grepMs] = await timed(ws, `grep . "${cacheFile}"`)
+      const [headMs] = await timed(ws, `head -n 1 "${cacheFile}"`)
+      const [tailMs] = await timed(ws, `tail -n 1 "${cacheFile}"`)
+      const [wcMs] = await timed(ws, `wc -l "${cacheFile}"`)
+      console.log(`  file=${cacheFile} size=${String(body.length)}B`)
+      console.log(
+        `  cold cat=${coldMs.toFixed(0)}ms  warm cat=${warmMs.toFixed(0)}ms  ` +
+          `grep=${grepMs.toFixed(0)}ms head=${headMs.toFixed(0)}ms tail=${tailMs.toFixed(0)}ms ` +
+          `wc=${wcMs.toFixed(0)}ms`,
+      )
+      console.log(
+        `  served_from_cache=${String(warmMs < coldMs / 5)} ` +
+          `(warm speedup ${(coldMs / Math.max(warmMs, 0.001)).toFixed(0)}x)`,
+      )
+    }
   } finally {
     await ws.close()
   }

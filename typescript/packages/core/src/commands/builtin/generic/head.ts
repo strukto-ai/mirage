@@ -12,10 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { cacheAwareStreamEager } from '../../../cache/read_through.ts'
 import { IOResult } from '../../../io/types.ts'
 import { Precision, ProvisionResult } from '../../../provision/types.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import { numberFlagError } from '../tail_helper.ts'
 import { resolveSource } from '../utils/stream.ts'
 
 const ENC = new TextEncoder()
@@ -162,8 +164,11 @@ export async function headGeneric(
   stat: Stat,
   stream: Stream,
 ): Promise<CommandFnResult> {
+  stream = cacheAwareStreamEager(stream)
   const nRaw = typeof opts.flags.n === 'string' ? opts.flags.n : null
   const cRaw = typeof opts.flags.c === 'string' ? opts.flags.c : null
+  const numErr = numberFlagError('head', nRaw, cRaw)
+  if (numErr !== null) return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(numErr) })]
   const lineCount = nRaw !== null ? Number.parseInt(nRaw, 10) : 10
   const byteCount = cRaw !== null ? Number.parseInt(cRaw, 10) : null
   if (paths.length > 0) {

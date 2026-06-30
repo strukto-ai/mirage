@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { RAMResource } from '../../../resource/ram/ram.ts'
 import type { PathSpec } from '../../../types.ts'
-import { RAM_ICONV } from './iconv.ts'
+const RAM_ICONV = RAM_COMMANDS.filter((c) => c.name === 'iconv' && c.filetype == null)
 
 const ENC = new TextEncoder()
 

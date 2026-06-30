@@ -16,6 +16,7 @@ import type { DiscordAccessor } from '../../accessor/discord.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { readdir as coreReaddir, snowflakeToIso } from './readdir.ts'
+import { filetypeFromMimetype } from '../../utils/filetype.ts'
 import { stripSlash } from '../../utils/slash.ts'
 
 const VIRTUAL_DIRS: ReadonlySet<string> = new Set(['channels', 'members'])
@@ -150,7 +151,7 @@ export async function stat(
     return new FileStat({
       name: lookup.entry.vfsName !== '' ? lookup.entry.vfsName : lookup.entry.name,
       ...(lookup.entry.size !== null ? { size: lookup.entry.size } : {}),
-      type: mime !== '' ? (mime as FileType) : FileType.BINARY,
+      type: filetypeFromMimetype(mime),
       extra: { content_type: mime, attachment_id: lookup.entry.id },
     })
   }

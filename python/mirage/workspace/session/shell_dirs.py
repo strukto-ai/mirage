@@ -14,19 +14,19 @@
 
 from mirage.workspace.session.session import Session
 
-DEFAULT_HOME = "/"
 
-
-def home_dir(session: Session) -> str:
+def home_dir(session: Session) -> str | None:
     """Return the session home directory used for ``~`` expansion.
 
     Args:
         session: The shell session.
 
     Returns:
-        ``$HOME`` from the session env, or ``"/"`` when unset/empty.
+        ``$HOME`` from the session env, or ``None`` when unset/empty,
+        matching GNU bash (no implicit home; ``cd`` errors, ``~`` and
+        ``$HOME`` do not expand).
     """
-    return session.env.get("HOME") or DEFAULT_HOME
+    return session.env.get("HOME") or None
 
 
 def change_dir(session: Session, new_cwd: str) -> None:

@@ -17,7 +17,9 @@ import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { FakeDiscordTransport, makeFakeResource, seedChannel, seedGuild } from './_test_util.ts'
-import { DISCORD_LS } from './ls.ts'
+import { DISCORD_COMMANDS } from './index.ts'
+
+const DISCORD_LS = DISCORD_COMMANDS.filter((c) => c.name === 'ls' && c.filetype == null)
 
 const DEC = new TextDecoder()
 

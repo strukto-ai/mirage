@@ -12,10 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import fnmatch
-
 from mirage.cache.index import IndexEntry
-from mirage.core.github.tree_entry import TreeEntry
 from mirage.types import PathSpec
 
 
@@ -68,29 +65,13 @@ def count_scope_files(entries: dict[str, IndexEntry], key: str) -> int:
 
 
 def should_use_search(
-    is_regex: bool,
     recursive: bool,
     on_default_branch: bool,
 ) -> bool:
     """Whether grep/rg should narrow paths via GitHub code search.
 
-    Search is appropriate for non-regex patterns running recursively on the
-    default branch (code search only indexes the default branch).
+    Search only helps recursive scans on the default branch (code search only
+    indexes the default branch). Whether a usable literal exists, and whether
+    the scope is large enough to bother, is decided by the caller.
     """
-    return not is_regex and recursive and on_default_branch
-
-
-async def estimate_scope(tree: dict[str, TreeEntry], directory: str,
-                         pattern: str) -> tuple[int, int]:
-    key = directory
-    prefix = key + "/" if key else ""
-    file_count = 0
-    total_bytes = 0
-    for p, entry in tree.items():
-        if not p.startswith(prefix):
-            continue
-        remainder = p[len(prefix):]
-        if entry.type == "blob" and fnmatch.fnmatch(remainder, pattern):
-            file_count += 1
-            total_bytes += entry.size or 0
-    return file_count, total_bytes
+    return recursive and on_default_branch

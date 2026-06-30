@@ -56,6 +56,7 @@ export async function stat(
       return new FileStat({
         name: entry.name,
         size: entry.size ?? null,
+        modified: entry.remoteTime !== '' ? entry.remoteTime : null,
         type: guessType(entry.name),
       })
     }

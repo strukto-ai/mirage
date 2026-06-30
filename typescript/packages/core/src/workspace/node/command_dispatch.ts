@@ -75,6 +75,40 @@ const UNSUPPORTED_BUILTINS: ReadonlySet<string> = new Set([
   'ulimit',
 ])
 
+// Split leading `cd` option flags (-L -P -e -@, clusters like -LP, and a
+// `--` terminator) from the directory operand. A bare `-` is the OLDPWD
+// operand, not an option. `bad` is the first unknown option character.
+function splitCdOptions(args: (string | PathSpec)[]): {
+  operands: (string | PathSpec)[]
+  bad: string | null
+} {
+  const operands: (string | PathSpec)[] = []
+  let parsing = true
+  for (const arg of args) {
+    const s = arg instanceof PathSpec ? arg.original : arg
+    if (parsing) {
+      if (s === '--') {
+        parsing = false
+        continue
+      }
+      if (s !== '-' && s.length >= 2 && s.startsWith('-')) {
+        let bad: string | null = null
+        for (const c of s.slice(1)) {
+          if (!'LPe@'.includes(c)) {
+            bad = c
+            break
+          }
+        }
+        if (bad === null) continue
+        return { operands, bad }
+      }
+      parsing = false
+    }
+    operands.push(arg)
+  }
+  return { operands, bad: null }
+}
+
 export async function executeCommand(
   recurse: (
     n: TSNodeLike,
@@ -289,10 +323,38 @@ async function runCommandBody(
   }
 
   if (name === SB.CD) {
-    if (classified.length <= 1) {
-      return handleCd(dispatch, (p) => registry.isMountRoot(p), homeDir(session), session)
+    const { operands, bad } = splitCdOptions(classified.slice(1))
+    if (bad !== null) {
+      const err = new TextEncoder().encode(
+        `cd: -${bad}: invalid option\ncd: usage: cd [-L|[-P [-e]] [-@]] [dir]\n`,
+      )
+      return [
+        null,
+        new IOResult({ exitCode: 2, stderr: err }),
+        new ExecutionNode({ command: 'cd', exitCode: 2, stderr: err }),
+      ]
     }
-    const raw = classified[1]
+    if (operands.length > 1) {
+      const err = new TextEncoder().encode('cd: too many arguments\n')
+      return [
+        null,
+        new IOResult({ exitCode: 1, stderr: err }),
+        new ExecutionNode({ command: 'cd', exitCode: 1, stderr: err }),
+      ]
+    }
+    if (operands.length === 0) {
+      const home = homeDir(session)
+      if (home === null) {
+        const err = new TextEncoder().encode('cd: HOME not set\n')
+        return [
+          null,
+          new IOResult({ exitCode: 1, stderr: err }),
+          new ExecutionNode({ command: 'cd', exitCode: 1, stderr: err }),
+        ]
+      }
+      return handleCd(dispatch, (p) => registry.isMountRoot(p), home, session)
+    }
+    const raw = operands[0]
     const rawStr = raw instanceof PathSpec ? raw.original : String(raw)
     if (rawStr === '-') {
       const old = session.env.OLDPWD
@@ -307,11 +369,18 @@ async function runCommandBody(
       return handleCd(dispatch, (p) => registry.isMountRoot(p), old, session, true)
     }
     let path: string | PathSpec
-    if (rawStr === '~') path = homeDir(session)
-    else if (raw instanceof PathSpec) path = raw
-    else if (rawStr.startsWith('/')) path = rawStr
-    else path = classifyBarePath(rawStr, registry, session.cwd)
-    return handleCd(dispatch, (p) => registry.isMountRoot(p), path, session)
+    let cdpathTarget: string
+    if (raw instanceof PathSpec) {
+      path = raw
+      cdpathTarget = raw.asTyped ?? raw.original
+    } else if (rawStr.startsWith('/')) {
+      path = rawStr
+      cdpathTarget = rawStr
+    } else {
+      path = classifyBarePath(rawStr, registry, session.cwd)
+      cdpathTarget = rawStr
+    }
+    return handleCd(dispatch, (p) => registry.isMountRoot(p), path, session, false, cdpathTarget)
   }
 
   if (name === SB.TRUE) {

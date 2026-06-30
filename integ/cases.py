@@ -90,6 +90,15 @@ SEED_FILES = {
     "nested\ncontent\n",
     "/data/disptree/d/y.txt":
     "deep\n",
+    # patch round-trip: a unified diff whose hunk has a leading context line,
+    # so an applier that anchors on the hunk start instead of walking context
+    # corrupts the first line. The diff and target are seeded; the cases below
+    # apply, re-apply with -N, and reverse it.
+    "/data/poem.txt":
+    "roses are red\nviolets are blue\nsugar is sweet\n",
+    "/data/poem.diff": ("--- a/poem.txt\n+++ b/poem.txt\n@@ -1,3 +1,3 @@\n"
+                        " roses are red\n-violets are blue\n"
+                        "+violets are dark\n sugar is sweet\n"),
 }
 
 CASES: list[tuple[str, str]] = [
@@ -188,6 +197,8 @@ CASES: list[tuple[str, str]] = [
     ("find_type_f", "find /data -type f"),
     ("ls", "ls /data/"),
     ("ls_1", "ls -1 /data/"),
+    ("ls_file", "ls /data/a.txt"),
+    ("ls_glob", "ls /data/*.txt"),
 
     # ----- formatting -----
     ("expand", "cat /data/tabbed.txt | expand"),
@@ -638,7 +649,7 @@ CASES: list[tuple[str, str]] = [
     ("cwd_rel_subdir_cat", "(cd /data && cat sub/nested.txt)"),
     ("cwd_rel_dotdot_cat", "(cd /data/sub && cat ../a.txt)"),
     ("cwd_echo_pwd", "(cd /data/sub && echo $PWD)"),
-    ("cwd_echo_home_default", "(echo $HOME)"),
+    ("cwd_echo_home_unset", '(echo "[$HOME]")'),
     ("cwd_cd_oldpwd", "(cd /data && cd /data/sub && echo $OLDPWD)"),
     ("cwd_cd_dash", "(cd /data && cd /data/sub && cd -)"),
     ("cwd_cd_dash_pwd",
@@ -647,6 +658,12 @@ CASES: list[tuple[str, str]] = [
     ("cwd_home_echo", "(export HOME=/data && echo $HOME)"),
     ("cwd_tilde_cat", "(export HOME=/data && cat ~/a.txt)"),
     ("cwd_tilde_subdir_cat", "(export HOME=/data && cat ~/sub/nested.txt)"),
+    # GNU cd: leading // collapses, -L/-P/-- options, $CDPATH search.
+    ("cwd_cd_double_slash", "(cd //data && pwd)"),
+    ("cwd_cd_phys_flag", "(cd -P /data/sub && pwd)"),
+    ("cwd_cd_log_flag", "(cd -L /data && pwd)"),
+    ("cwd_cd_dashdash", "(cd -- /data && pwd)"),
+    ("cwd_cd_cdpath", "(export CDPATH=/data && cd sub && pwd)"),
 
     # ----- subshell isolation vs inheritance (GNU bash ( ... )) -----
     # A subshell inherits all parent state but its mutations (vars, export,
@@ -699,9 +716,22 @@ CASES: list[tuple[str, str]] = [
      " && gzip /data/arch2/h.txt && ls /data/arch2"
      " && gunzip /data/arch2/h.txt.gz && cat /data/arch2/h.txt"
      " && ls /data/arch2"),
+
+    # ----- patch (apply / forward-only / reverse) -----
+    ("patch_apply",
+     "patch -p1 /data/poem.diff > /dev/null && cat /data/poem.txt"),
+    ("patch_n_noop",
+     "patch -N -p1 /data/poem.diff > /dev/null && cat /data/poem.txt"),
+    ("patch_reverse",
+     "patch -R -p1 /data/poem.diff > /dev/null && cat /data/poem.txt"),
 ]
 
 EXIT_CODE_CASES: list[tuple[str, str]] = [
+    # GNU cd error paths (stderr merged via 2>&1).
+    ("cwd_cd_too_many", "cd /data /data/sub 2>&1"),
+    ("cwd_cd_bad_opt", "cd -x /data 2>&1"),
+    ("cwd_cd_home_unset", "(unset HOME; cd) 2>&1"),
+    ("cwd_cd_quoted_tilde", "(cd /data && cd '~') 2>&1"),
     # sed rejects a zero occurrence count (GNU: "may not be zero").
     ("sed_count_zero", "sed 's/o/O/0'"),
     ("jq_no_filter_no_input", "jq"),

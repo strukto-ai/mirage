@@ -18,7 +18,8 @@ export function norm(path: string): string {
   return `/${stripSlash(path)}`
 }
 
-export function expandTilde(word: string, home: string): string {
+export function expandTilde(word: string, home: string | null): string {
+  if (home === null) return word
   if (word === '~') return home
   if (word.startsWith('~/')) return rstripSlash(home) + word.slice(1)
   return word

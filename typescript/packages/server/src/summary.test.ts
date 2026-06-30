@@ -25,7 +25,9 @@ describe('summary', () => {
     const brief = makeBrief(entry)
     expect(brief.id).toBe('ws-x')
     expect(brief.mode).toBe('write')
-    expect(brief.mountCount).toBe(1)
+    // /data/ plus the empty root anchor the workspace adds at / (no user /
+    // mount). /dev and the history view are auto-prefixes and filtered out.
+    expect(brief.mountCount).toBe(2)
   })
 
   it('makeDetail emits mounts + sessions', async () => {
@@ -33,8 +35,9 @@ describe('summary', () => {
     const ws = new Workspace({ '/data/': new RAMResource() }, { mode: MountMode.WRITE })
     const entry = r.add(ws, 'ws-y')
     const detail = await makeDetail(entry)
-    expect(detail.mounts).toHaveLength(1)
-    expect(detail.mounts[0]?.prefix).toBe('/data/')
-    expect(detail.mounts[0]?.resource).toBe('ram')
+    // /data/ plus the empty root anchor at / (no user / mount was given).
+    expect(detail.mounts.map((m) => m.prefix).sort()).toEqual(['/', '/data/'])
+    const dataMount = detail.mounts.find((m) => m.prefix === '/data/')
+    expect(dataMount?.resource).toBe('ram')
   })
 })

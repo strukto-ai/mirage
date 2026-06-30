@@ -29,7 +29,9 @@ import { materialize } from '../../../io/types.ts'
 import type { Resource } from '../../../resource/base.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { GDRIVE_CUT } from './cut.ts'
+import { GDRIVE_COMMANDS } from './index.ts'
+
+const GDRIVE_CUT = GDRIVE_COMMANDS.filter((c) => c.name === 'cut' && c.filetype == null)
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()

@@ -68,7 +68,7 @@ async def stat(
             extra={"file_id": result.entry.id},
         )
     return FileStat(
-        name=result.entry.vfs_name,
+        name=result.entry.vfs_name or result.entry.name,
         size=result.entry.size,
         type=guess_type(result.entry.vfs_name),
         modified=result.entry.remote_time,

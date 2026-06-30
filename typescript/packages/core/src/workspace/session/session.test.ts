@@ -67,7 +67,7 @@ describe('Session.fork', () => {
       sessionId: 'orig',
       cwd: '/disk',
       env: { FOO: 'bar' },
-      allowedMounts: new Set(['/s3', '/dev', '/_default']),
+      allowedMounts: new Set(['/s3', '/dev', '/']),
       shellOptions: { errexit: true },
       readonlyVars: new Set(['HOME']),
       arrays: { ARGV: ['a', 'b'] },

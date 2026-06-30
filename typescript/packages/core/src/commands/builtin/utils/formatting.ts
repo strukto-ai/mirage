@@ -15,14 +15,15 @@
 import { FileType, type FileStat } from '../../../types.ts'
 
 export function humanSize(n: number): string {
+  const units = ['B', 'K', 'M', 'G', 'T']
   let value = n
-  for (const unit of ['B', 'K', 'M', 'G', 'T']) {
-    if (value < 1024) {
-      return unit === 'B' ? `${String(value)}${unit}` : `${value.toFixed(1)}${unit}`
-    }
-    value = Math.floor(value / 1024)
+  let i = 0
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024
+    i += 1
   }
-  return `${String(value)}P`
+  const s = i === 0 ? Math.round(value).toString() : value.toFixed(1)
+  return `${s}${units[i] ?? ''}`
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']

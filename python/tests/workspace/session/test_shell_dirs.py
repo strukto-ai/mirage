@@ -16,9 +16,9 @@ from mirage.workspace.session.session import Session
 from mirage.workspace.session.shell_dirs import change_dir, home_dir
 
 
-def test_home_dir_default_root():
+def test_home_dir_unset_is_none():
     session = Session(session_id="s")
-    assert home_dir(session) == "/"
+    assert home_dir(session) is None
 
 
 def test_home_dir_from_env():
@@ -26,9 +26,9 @@ def test_home_dir_from_env():
     assert home_dir(session) == "/data"
 
 
-def test_home_dir_empty_env_falls_back_root():
+def test_home_dir_empty_env_is_none():
     session = Session(session_id="s", env={"HOME": ""})
-    assert home_dir(session) == "/"
+    assert home_dir(session) is None
 
 
 def test_change_dir_sets_cwd_and_oldpwd():

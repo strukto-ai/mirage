@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { MountMode, RedisObserverStore, RedisResource, Workspace } from '@struktoai/mirage-node'
-import { runCases } from './cases.ts'
+import { assertRealMtime, runCases } from './cases.ts'
 
 async function main(): Promise<void> {
   const url = process.env.REDIS_URL ?? 'redis://localhost:6379/0'
@@ -23,6 +23,7 @@ async function main(): Promise<void> {
   const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE, observe })
   try {
     await runCases(ws)
+    await assertRealMtime(ws)
     await observe.clear()
   } finally {
     await ws.close()

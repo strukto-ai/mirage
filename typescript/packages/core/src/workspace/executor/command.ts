@@ -24,7 +24,7 @@ import type { JobTable } from '../../shell/job_table.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/types.ts'
 import { PathSpec } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
-import type { MountRegistry } from '../mount/registry.ts'
+import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import type { PyodideRuntime } from './python/runtime.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
@@ -150,10 +150,14 @@ export async function handleCommand(
   }
 
   if (isCrossMount(cmdName, pathScopes, registry)) {
+    const srcMount = registry.mountFor(pathScopes[0]?.original ?? session.cwd)
+    const csFlags =
+      srcMount !== null ? parseFlags(parts.slice(1), srcMount, cmdName, session.cwd)[2] : {}
     const [csStdout, csIo, csExec] = await handleCrossMount(
       cmdName,
       pathScopes,
       textOnly,
+      csFlags,
       dispatch,
       cmdStr,
     )
@@ -188,7 +192,20 @@ export async function handleCommand(
     }
   }
 
-  const mount = await registry.resolveMount(cmdName, pathScopes, session.cwd)
+  let mount: MountEntry | null
+  try {
+    mount = await registry.resolveMount(cmdName, pathScopes, session.cwd)
+  } catch (err) {
+    if (err instanceof MountCommandUnsupported) {
+      const errBytes = new TextEncoder().encode(`${err.message}\n`)
+      return [
+        null,
+        new IOResult({ exitCode: 1, stderr: errBytes }),
+        new ExecutionNode({ command: cmdStr, stderr: errBytes, exitCode: 1 }),
+      ]
+    }
+    throw err
+  }
   if (mount === null) {
     const err = new TextEncoder().encode(`${cmdName}: command not found`)
     return [
@@ -300,7 +317,7 @@ export async function handleCommand(
       }
     }
     const prefix = rstripSlash(mount.prefix)
-    if (prefix !== '' && mount !== registry.defaultMount) {
+    if (prefix !== '') {
       io.reads = prefixKeys(io.reads, prefix)
       io.writes = prefixKeys(io.writes, prefix)
       io.cache = io.cache.map((p) => prefix + p)

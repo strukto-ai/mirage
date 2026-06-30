@@ -74,6 +74,16 @@ a big orange cat
 {"label":"cat","kind":"big","name":"a big orange cat","id":1}
 === rg_basic ===
 a big orange cat
+=== du_leaf ===
+79	/db/cat/big
+=== du_group ===
+160	/db/cat
+=== du_root ===
+320	/db
+=== du_c_multi ===
+160	/db/cat
+160	/db/dog
+320	total
 === grep_q_match ===
 exit=0
 === grep_q_no_match ===

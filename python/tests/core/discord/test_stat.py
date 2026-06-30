@@ -130,6 +130,20 @@ async def test_stat_files_dir(accessor, index):
 
 
 @pytest.mark.asyncio
+async def test_stat_non_date_chat_jsonl_not_found(accessor, index):
+    path = "/My Server/channels/general/notadate/chat.jsonl"
+    with pytest.raises(FileNotFoundError):
+        await stat(accessor, PathSpec(original=path, directory=path), index)
+
+
+@pytest.mark.asyncio
+async def test_stat_non_date_files_dir_not_found(accessor, index):
+    path = "/My Server/channels/general/notadate/files"
+    with pytest.raises(FileNotFoundError):
+        await stat(accessor, PathSpec(original=path, directory=path), index)
+
+
+@pytest.mark.asyncio
 async def test_stat_not_found(accessor, index):
     with pytest.raises(FileNotFoundError):
         await stat(

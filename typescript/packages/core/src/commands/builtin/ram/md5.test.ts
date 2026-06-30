@@ -12,12 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { RAMResource } from '../../../resource/ram/ram.ts'
 import { PathSpec } from '../../../types.ts'
 import { md5Hex } from '../../../utils/hash.ts'
-import { RAM_MD5 } from './md5.ts'
+const RAM_MD5 = RAM_COMMANDS.filter((c) => c.name === 'md5' && c.filetype == null)
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()

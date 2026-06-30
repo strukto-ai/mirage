@@ -12,43 +12,26 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RegisteredCommand } from '../../config.ts'
-import { GSLIDES_BASENAME } from './basename.ts'
-import { GSLIDES_CAT } from './cat.ts'
-import { GSLIDES_DIRNAME } from './dirname.ts'
-import { GSLIDES_FIND } from './find.ts'
-import { GSLIDES_GREP } from './grep.ts'
+import type { GSlidesAccessor } from '../../../accessor/gslides.ts'
+import { ResourceName } from '../../../types.ts'
+import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
+import { makeGenericCommands } from '../generic_bind/index.ts'
 import { GSLIDES_GWS_BATCH_UPDATE } from './gws_slides_presentations_batchUpdate.ts'
 import { GSLIDES_GWS_CREATE } from './gws_slides_presentations_create.ts'
-import { GSLIDES_HEAD } from './head.ts'
-import { GSLIDES_JQ } from './jq.ts'
-import { GSLIDES_LS } from './ls.ts'
-import { GSLIDES_NL } from './nl.ts'
-import { GSLIDES_REALPATH } from './realpath.ts'
-import { GSLIDES_RG } from './rg.ts'
+import { GSLIDES_CMD_OPS } from './ops.ts'
+import { fileReadProvision, metadataProvision } from './provision.ts'
 import { GSLIDES_RM } from './rm.ts'
-import { GSLIDES_STAT } from './stat.ts'
-import { GSLIDES_TAIL } from './tail.ts'
-import { GSLIDES_TREE } from './tree.ts'
-import { GSLIDES_WC } from './wc.ts'
 
 export const GSLIDES_COMMANDS: readonly RegisteredCommand[] = [
-  ...GSLIDES_BASENAME,
-  ...GSLIDES_CAT,
-  ...GSLIDES_DIRNAME,
-  ...GSLIDES_FIND,
-  ...GSLIDES_GREP,
-  ...GSLIDES_GWS_BATCH_UPDATE,
-  ...GSLIDES_GWS_CREATE,
-  ...GSLIDES_HEAD,
-  ...GSLIDES_JQ,
-  ...GSLIDES_LS,
-  ...GSLIDES_NL,
-  ...GSLIDES_REALPATH,
-  ...GSLIDES_RG,
+  ...makeGenericCommands<GSlidesAccessor>(ResourceName.GSLIDES, GSLIDES_CMD_OPS, {
+    provisionOverrides: {
+      grep: fileReadProvision as ProvisionFn,
+      rg: fileReadProvision as ProvisionFn,
+      ls: metadataProvision as ProvisionFn,
+      find: metadataProvision as ProvisionFn,
+    },
+  }),
   ...GSLIDES_RM,
-  ...GSLIDES_STAT,
-  ...GSLIDES_TAIL,
-  ...GSLIDES_TREE,
-  ...GSLIDES_WC,
+  ...GSLIDES_GWS_CREATE,
+  ...GSLIDES_GWS_BATCH_UPDATE,
 ]

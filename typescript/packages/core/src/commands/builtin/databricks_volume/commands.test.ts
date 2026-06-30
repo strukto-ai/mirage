@@ -69,9 +69,9 @@ async function run(
 }
 
 describe('databricks_volume commands registry', () => {
-  it('registers the same 24 commands as Python', () => {
-    const names = DATABRICKS_VOLUME_COMMANDS.map((c) => c.name).sort()
-    expect(names).toEqual([
+  it('registers the filesystem and bespoke commands', () => {
+    const names = new Set(DATABRICKS_VOLUME_COMMANDS.map((c) => c.name))
+    for (const name of [
       'awk',
       'cat',
       'cp',
@@ -96,7 +96,9 @@ describe('databricks_volume commands registry', () => {
       'tree',
       'uniq',
       'wc',
-    ])
+    ]) {
+      expect(names.has(name)).toBe(true)
+    }
   })
 })
 

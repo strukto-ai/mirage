@@ -94,15 +94,25 @@ describe('cwd integration (port of tests/workspace/test_cwd_integration.py)', ()
     await ws.close()
   })
 
-  it('cd /ram/subdir && cd ~ && pwd → /', async () => {
+  it('cd ~ with $HOME unset → error', async () => {
     const ws = await makeWs()
-    expect((await runOut(ws, 'cd /ram/subdir && cd ~ && pwd')).trim()).toBe('/')
+    const io = await ws.execute('cd /ram/subdir && cd ~')
+    expect(io.exitCode).not.toBe(0)
     await ws.close()
   })
 
-  it('cd /ram/subdir && cd && pwd → / (bare cd)', async () => {
+  it('bare cd with $HOME unset → error (HOME not set)', async () => {
     const ws = await makeWs()
-    expect((await runOut(ws, 'cd /ram/subdir && cd && pwd')).trim()).toBe('/')
+    const io = await ws.execute('cd /ram/subdir && cd')
+    expect(io.exitCode).toBe(1)
+    expect(stderrStr(io)).toContain('HOME not set')
+    await ws.close()
+  })
+
+  it('bare cd with $HOME set → goes home', async () => {
+    const ws = await makeWs()
+    const out = await runOut(ws, 'export HOME=/ram/subdir && cd /ram && cd && pwd')
+    expect(out.trim()).toBe('/ram/subdir')
     await ws.close()
   })
 
@@ -182,9 +192,9 @@ describe('cwd integration (port of tests/workspace/test_cwd_integration.py)', ()
     await ws.close()
   })
 
-  it('echo $HOME default → /', async () => {
+  it('echo $HOME with $HOME unset → empty', async () => {
     const ws = await makeWs()
-    expect((await runOut(ws, 'echo $HOME')).trim()).toBe('/')
+    expect((await runOut(ws, 'echo "[$HOME]"')).trim()).toBe('[]')
     await ws.close()
   })
 
@@ -250,6 +260,74 @@ describe('cwd integration (port of tests/workspace/test_cwd_integration.py)', ()
   it('subshell does not leak cwd', async () => {
     const ws = await makeWs()
     expect((await runOut(ws, 'cd /ram && (cd /ram/subdir) && pwd')).trim()).toBe('/ram')
+    await ws.close()
+  })
+
+  it('cd //ram collapses double slash → /ram', async () => {
+    const ws = await makeWs()
+    expect((await runOut(ws, 'cd //ram && pwd')).trim()).toBe('/ram')
+    await ws.close()
+  })
+
+  it('cd ///ram/subdir collapses triple slash', async () => {
+    const ws = await makeWs()
+    expect((await runOut(ws, 'cd ///ram/subdir && pwd')).trim()).toBe('/ram/subdir')
+    await ws.close()
+  })
+
+  it('cd -P dir → physical flag accepted', async () => {
+    const ws = await makeWs()
+    expect((await runOut(ws, 'cd -P /ram/subdir && pwd')).trim()).toBe('/ram/subdir')
+    await ws.close()
+  })
+
+  it('cd -L dir → logical flag accepted', async () => {
+    const ws = await makeWs()
+    expect((await runOut(ws, 'cd -L /ram && pwd')).trim()).toBe('/ram')
+    await ws.close()
+  })
+
+  it('cd -LP dir → clustered flags accepted', async () => {
+    const ws = await makeWs()
+    expect((await runOut(ws, 'cd -LP /ram && pwd')).trim()).toBe('/ram')
+    await ws.close()
+  })
+
+  it('cd -- dir → terminates options', async () => {
+    const ws = await makeWs()
+    expect((await runOut(ws, 'cd -- /ram && pwd')).trim()).toBe('/ram')
+    await ws.close()
+  })
+
+  it('cd -x → invalid option, exit 2', async () => {
+    const ws = await makeWs()
+    const io = await ws.execute('cd -x /ram')
+    expect(io.exitCode).toBe(2)
+    expect(stderrStr(io)).toContain('invalid option')
+    await ws.close()
+  })
+
+  it('cd a b → too many arguments, exit 1', async () => {
+    const ws = await makeWs()
+    const io = await ws.execute('cd /ram /ram/subdir')
+    expect(io.exitCode).toBe(1)
+    expect(stderrStr(io)).toContain('too many arguments')
+    await ws.close()
+  })
+
+  it("cd '~' (quoted) is literal, not $HOME", async () => {
+    const ws = await makeWs()
+    const io = await ws.execute("cd /ram && cd '~'")
+    expect(io.exitCode).not.toBe(0)
+    await ws.close()
+  })
+
+  it('cd searches $CDPATH and prints the resolved dir', async () => {
+    const ws = await makeWs()
+    const out = await runOut(ws, 'export CDPATH=/ram && cd subdir && pwd')
+    const lines = out.split('\n').filter((l) => l !== '')
+    expect(lines[lines.length - 1]).toBe('/ram/subdir')
+    expect(lines.slice(0, -1)).toContain('/ram/subdir')
     await ws.close()
   })
 })

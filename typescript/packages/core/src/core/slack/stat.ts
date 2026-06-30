@@ -17,29 +17,11 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { readdir as coreReaddir } from './readdir.ts'
 import { epochToIso } from '../../utils/dates.ts'
+import { filetypeFromMimetype } from '../../utils/filetype.ts'
 import { stripSlash } from '../../utils/slash.ts'
 
 const VIRTUAL_DIRS: ReadonlySet<string> = new Set(['', 'channels', 'dms', 'users'])
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
-
-const MIMETYPE_MAP: Record<string, FileType> = {
-  'application/pdf': FileType.PDF,
-  'application/zip': FileType.ZIP,
-  'application/gzip': FileType.GZIP,
-  'application/json': FileType.JSON,
-  'image/png': FileType.IMAGE_PNG,
-  'image/jpeg': FileType.IMAGE_JPEG,
-  'image/gif': FileType.IMAGE_GIF,
-  'text/csv': FileType.CSV,
-}
-
-function filetypeFromMimetype(mime: string): FileType {
-  if (mime === '') return FileType.BINARY
-  const mapped = MIMETYPE_MAP[mime]
-  if (mapped !== undefined) return mapped
-  if (mime.startsWith('text/')) return FileType.TEXT
-  return FileType.BINARY
-}
 
 function slackModified(remoteTime: string): string | null {
   if (remoteTime === '') return null
