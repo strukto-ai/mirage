@@ -1783,6 +1783,9 @@ world
 foo
 bar
 baz
+=== cwd_rel_csplit ===
+nested
+content
 === cwd_echo_pwd ===
 /data/sub
 === cwd_echo_home_unset ===
@@ -1878,8 +1881,8 @@ disptree/d
 disptree/d/y.txt
 disptree/x.txt
 === history_last_two ===
-488  (cd /data && ls -R disptree)
-489  (cd /data && find disptree)
+489  (cd /data && ls -R disptree)
+490  (cd /data && find disptree)
 === bash_history_tail ===
 (cd /data && ls -R disptree)
 (cd /data && find disptree)

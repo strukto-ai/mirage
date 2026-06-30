@@ -48,8 +48,6 @@ async def csplit(
 ) -> tuple[ByteSource | None, IOResult]:
     if isinstance(prefix, PathSpec):
         prefix = prefix.strip_prefix
-    if isinstance(prefix, PathSpec):
-        prefix = prefix.strip_prefix
     suffix_fmt = suffix_format if suffix_format else f"%0{digits}d"
     if paths:
         raw = await read_bytes(accessor, paths[0])

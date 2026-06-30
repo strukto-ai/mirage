@@ -712,7 +712,7 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
   }),
   csplit: new CommandSpec({
     options: [
-      new Option({ short: '-f', valueKind: OperandKind.TEXT }),
+      new Option({ short: '-f', valueKind: OperandKind.PATH }),
       new Option({ short: '-n', valueKind: OperandKind.TEXT }),
       new Option({ short: '-b', valueKind: OperandKind.TEXT }),
       new Option({ short: '-k' }),
