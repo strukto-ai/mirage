@@ -52,7 +52,7 @@ async function rgCommand(
   }
   const maxCount = typeof opts.flags.m === 'string' ? Number.parseInt(opts.flags.m, 10) : null
 
-  if (paths.length > 0) {
+  if (paths.length > 0 && !pattern.includes('\n')) {
     const first = paths[0]
     if (first !== undefined) {
       const scope = detectScope(first)

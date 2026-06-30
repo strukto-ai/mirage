@@ -73,6 +73,8 @@ output truncated at safeguard limit (2 lines)
 === grep_r_e_multi ===
 /mongodb/mirage_integ/collections/books/documents.jsonl:{"_id": 1, "title": "alpha"
 /mongodb/mirage_integ/collections/books/documents.jsonl:{"_id": 2, "title": "beta"
+=== rg_e_multi ===
+/mongodb/mirage_integ/collections/books/documents.jsonl:{"_id": 3, "title": "gamma"
 === nf_cat ===
 exit=1
 cat: /mongodb/__nf_missing__.txt: No such file or directory

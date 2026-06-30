@@ -208,3 +208,41 @@ async def test_discord_rg_with_many_concrete_paths_uses_native_search():
     assert out.endswith(b"\n")
     assert (b"/discord/myguild/channels/general__ch_456/"
             b"2026-01-15/chat.jsonl:") in out
+
+
+@pytest.mark.asyncio
+async def test_discord_rg_multi_pattern_skips_native_search():
+    """rg -e a -e b must bypass the native search push-down.
+
+    Like grep, the push-down passes a single newline-joined pattern to the
+    native search, which matches nothing. Multiple -e patterns must fall
+    through to the generic rg instead.
+    """
+    accessor = AsyncMock()
+    accessor.config = AsyncMock()
+    paths = [
+        PathSpec(original="/discord/myguild/channels/general/*.jsonl",
+                 directory="/discord/myguild/channels/general/",
+                 pattern="*.jsonl",
+                 prefix="/discord"),
+    ]
+    with patch(
+            "mirage.commands.builtin.discord.rg.search_guild",
+            new=AsyncMock(return_value=[]),
+    ) as fake_search, patch(
+            "mirage.commands.builtin.discord.rg.resolve_glob",
+            new=AsyncMock(return_value=paths),
+    ) as fake_resolve, patch(
+            "mirage.commands.builtin.discord.rg.discord_read",
+            new=AsyncMock(return_value=b""),
+    ), patch(
+            "mirage.commands.builtin.discord.rg._stat",
+            new=AsyncMock(return_value=FileStat(name="2026-04-10.jsonl",
+                                                type=FileType.TEXT)),
+    ):
+        _, io = await rg(accessor,
+                         paths,
+                         e=["ada", "ben"],
+                         index=_fake_index())
+    assert fake_search.await_count == 0
+    assert fake_resolve.await_count == 1

@@ -56,7 +56,7 @@ async def rg(
         raise UsageError("rg: usage: rg [flags] pattern [path]")
     max_count = fl.int("m")
 
-    if paths:
+    if paths and "\n" not in pattern_str:
         scope = detect_scope(paths[0])
         if not scope.use_native:
             scope = coalesce_scopes(paths) or scope
@@ -93,10 +93,9 @@ async def rg(
                 "slack search push-down failed (%s); "
                 "falling back to per-file scan", err)
 
-        paths = await resolve_glob(accessor, paths, index)
-
+    resolved = await resolve_glob(accessor, paths, index) if paths else []
     return await generic_rg(
-        paths,
+        resolved,
         texts,
         flags,
         readdir=_readdir,

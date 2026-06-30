@@ -250,6 +250,7 @@ export {
   grepLines,
   type GrepStreamOptions,
   grepStream,
+  patternArg,
 } from './commands/builtin/grep_helper.ts'
 export { grepContextLines } from './commands/builtin/grep_context.ts'
 export {

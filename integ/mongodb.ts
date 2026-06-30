@@ -64,6 +64,7 @@ const CASES: ReadonlyArray<readonly [string, string]> = [
   ["grep_db_scope", `grep ada ${MOUNT}/${DB}/`],
   ["grep_root_scope", `grep ada ${MOUNT}/`],
   ["rg_db_scope", `rg ben ${MOUNT}/${DB}/`],
+  ["rg_e_multi", `rg -e gamma -e cara ${MOUNT}/${DB}/collections/books`],
   ["find_docs", `find ${MOUNT}/${DB}/ -name documents.jsonl`],
   ["find_schema", `find ${MOUNT}/${DB}/ -name schema.json`],
   ["jq_titles", `jq '.title' ${MOUNT}/${DB}/collections/books/documents.jsonl`],

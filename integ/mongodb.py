@@ -112,6 +112,7 @@ CASES: list[tuple[str, str]] = [
     ("grep_db_scope", f"grep ada {MOUNT}/{DB}/"),
     ("grep_root_scope", f"grep ada {MOUNT}/"),
     ("rg_db_scope", f"rg ben {MOUNT}/{DB}/"),
+    ("rg_e_multi", f"rg -e gamma -e cara {MOUNT}/{DB}/collections/books"),
     ("find_docs", f"find {MOUNT}/{DB}/ -name documents.jsonl"),
     ("find_schema", f"find {MOUNT}/{DB}/ -name schema.json"),
     ("jq_titles",
