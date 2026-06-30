@@ -12,16 +12,53 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import posixpath
 from collections.abc import Callable
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.types import FileType, PathSpec
-from mirage.utils.path import resolve_path
+from mirage.utils.path import (MAX_SYMLINK_HOPS, CycleError, resolve_path,
+                               resolve_symlinks)
 from mirage.workspace.executor.builtins.scope import _scope_path, _to_scope
 from mirage.workspace.session import Session
 from mirage.workspace.session.shell_dirs import change_dir
 from mirage.workspace.types import ExecutionNode
+
+
+def _norm(path: str) -> str:
+    resolved = posixpath.normpath(path)
+    if resolved.startswith("//"):
+        resolved = "/" + resolved.lstrip("/")
+    return resolved
+
+
+def _resolve_target(combined: str, links: dict[str, str],
+                    physical: bool) -> str:
+    """Resolve a combined ``cd`` path, following symlinks per mode.
+
+    Logical (``-L``, default) simplifies ``..`` textually first, then
+    follows links. Physical (``-P``) follows links first so ``..`` acts on
+    the link target. Both loop resolve<->normalize until stable.
+
+    Args:
+        combined (str): The absolute target (cwd joined to arg).
+        links (dict[str, str]): The symlink table (link -> target).
+        physical (bool): True for ``-P``, False for ``-L``.
+
+    Returns:
+        str: The final absolute path with links resolved.
+
+    Raises:
+        CycleError: On a symlink loop or unbounded expansion (ELOOP).
+    """
+    p = combined if physical else _norm(combined)
+    for _ in range(MAX_SYMLINK_HOPS):
+        n = _norm(resolve_symlinks(p, links))
+        if n == p:
+            return n
+        p = n
+    raise CycleError(p)
 
 
 def _cdpath_searchable(target: str) -> bool:
@@ -77,11 +114,20 @@ async def handle_cd(
     session: Session,
     print_path: bool = False,
     cdpath_target: str | None = None,
+    links: dict[str, str] | None = None,
+    physical: bool = False,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     raw = _scope_path(path)
+    table = links or {}
     candidates = _cd_candidates(raw, cdpath_target, session)
     error: str | None = None
     for resolved, announce in candidates:
+        if table:
+            try:
+                resolved = _resolve_target(resolved, table, physical)
+            except CycleError:
+                error = f"cd: {raw}: Too many levels of symbolic links\n"
+                continue
         if resolved == "/":
             return _cd_success(session, "/", raw, print_path or announce)
         scope = _to_scope(resolved)

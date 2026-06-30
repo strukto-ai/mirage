@@ -15,6 +15,9 @@
 from mirage.workspace.executor.builtins.condition import handle_test
 from mirage.workspace.executor.builtins.dirs import handle_cd
 from mirage.workspace.executor.builtins.history import handle_history
+from mirage.workspace.executor.builtins.links import (handle_ln,
+                                                      handle_readlink,
+                                                      link_flags)
 from mirage.workspace.executor.builtins.man import (_collect_man_hits,
                                                     _render_man_entry,
                                                     _render_man_index,
@@ -46,7 +49,10 @@ __all__ = [
     'handle_eval',
     'handle_export',
     'handle_history',
+    'handle_ln',
     'handle_local',
+    'handle_readlink',
+    'link_flags',
     'handle_man',
     'handle_printenv',
     'handle_printf',

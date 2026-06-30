@@ -21,15 +21,15 @@ def test_ln_v(env):
 
 def test_ln_sf(env):
     env.create_file("a.txt", b"hello")
+    env.create_file("b.txt", b"world")
     env.mirage("ln -s /data/a.txt /data/link.txt")
-    env.mirage("ln -s -f /data/a.txt /data/link.txt")
-    result = env.mirage("cat /data/link.txt")
-    assert "hello" in result
+    env.mirage("ln -s -f /data/b.txt /data/link.txt")
+    result = env.mirage("readlink /data/link.txt")
+    assert "/data/b.txt" in result
 
 
 def test_ln_n(env):
     env.create_file("a.txt", b"hello")
-    env.mirage("ln -s /data/a.txt /data/link.txt")
-    env.mirage("ln -s -n /data/a.txt /data/link.txt")
-    result = env.mirage("cat /data/link.txt")
-    assert "hello" in result
+    result = env.mirage(
+        "ln -s -n /data/a.txt /data/link.txt && readlink /data/link.txt")
+    assert "/data/a.txt" in result

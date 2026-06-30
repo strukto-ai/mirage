@@ -706,6 +706,7 @@ class Workspace:
             io, _ = await run_command_tree(
                 self.dispatch,
                 self._registry,
+                self._namespace,
                 self.job_table,
                 exec_recursion,
                 self._current_agent_id,

@@ -41,3 +41,52 @@ def test_resolve_unknown_path_raises(namespace):
 def test_mount_for_delegates_to_registry(namespace, registry):
     assert namespace.mount_for("/data/hello.txt") is registry.mount_for(
         "/data/hello.txt")
+
+
+def test_symlink_readlink_roundtrip_verbatim(namespace):
+    namespace.symlink("/data/link", "/data/hello.txt", 1.0)
+    assert namespace.is_link("/data/link")
+    assert namespace.readlink("/data/link") == "/data/hello.txt"
+
+
+def test_readlink_missing_returns_none(namespace):
+    assert namespace.readlink("/data/nope") is None
+
+
+def test_symlink_stores_relative_target_verbatim(namespace):
+    namespace.symlink("/data/link", "hello.txt", 1.0)
+    assert namespace.readlink("/data/link") == "hello.txt"
+
+
+def test_unlink_removes_link(namespace):
+    namespace.symlink("/data/link", "/data/hello.txt", 1.0)
+    assert namespace.unlink("/data/link") is True
+    assert namespace.is_link("/data/link") is False
+    assert namespace.unlink("/data/link") is False
+
+
+def test_rename_moves_link(namespace):
+    namespace.symlink("/data/a", "/data/hello.txt", 1.0)
+    assert namespace.rename("/data/a", "/data/b") is True
+    assert namespace.is_link("/data/a") is False
+    assert namespace.readlink("/data/b") == "/data/hello.txt"
+
+
+def test_resolve_follows_link_to_target_mount(namespace):
+    namespace.symlink("/data/link", "/data/hello.txt", 1.0)
+    assert namespace.resolve(
+        "/data/link", follow=True) == namespace.resolve("/data/hello.txt")
+
+
+def test_resolve_no_follow_keeps_link_path(namespace, registry):
+    namespace.symlink("/data/link", "/data/hello.txt", 1.0)
+    assert namespace.resolve("/data/link",
+                             follow=False) == registry.resolve("/data/link")
+
+
+def test_resolve_cycle_raises(namespace):
+    from mirage.utils.path import CycleError
+    namespace.symlink("/data/a", "/data/b", 1.0)
+    namespace.symlink("/data/b", "/data/a", 1.0)
+    with pytest.raises(CycleError):
+        namespace.resolve("/data/a", follow=True)

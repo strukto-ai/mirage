@@ -33,6 +33,7 @@ from mirage.workspace.executor.redirect import handle_redirect
 from mirage.workspace.expand import (classify_word, expand_and_classify,
                                      expand_node)
 from mirage.workspace.mount import MountRegistry
+from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.command_dispatch import execute_command
 from mirage.workspace.node.program import execute_program
 from mirage.workspace.node.resolve_globs import resolve_globs
@@ -52,6 +53,7 @@ from mirage.workspace.executor.builtins import (  # isort: skip
 async def execute_node(
     dispatch: Callable,
     registry: MountRegistry,
+    namespace: Namespace,
     job_table: JobTable,
     execute_fn: Callable,
     agent_id: str,
@@ -66,6 +68,7 @@ async def execute_node(
     Args:
         dispatch (Callable): VFS op dispatcher (op, path, **kw).
         registry (MountRegistry): mount registry for path resolution.
+        namespace (Namespace): addressing authority for symlink ops.
         job_table (JobTable): background job management.
         execute_fn (Callable): recursive execute (for source/eval).
         agent_id (str): current agent ID for jobs.
@@ -82,6 +85,7 @@ async def execute_node(
     recurse = partial(execute_node,
                       dispatch,
                       registry,
+                      namespace,
                       job_table,
                       execute_fn,
                       agent_id,
@@ -102,6 +106,7 @@ async def execute_node(
         return await execute_command(recurse,
                                      dispatch,
                                      registry,
+                                     namespace,
                                      execute_fn,
                                      node,
                                      session,

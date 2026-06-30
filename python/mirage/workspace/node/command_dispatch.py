@@ -36,9 +36,10 @@ from mirage.shell.helpers import (  # isort: skip
     get_process_sub_direction, get_text)
 from mirage.workspace.executor.builtins import (  # isort: skip
     handle_bash, handle_cd, handle_echo, handle_eval, handle_export,
-    handle_history, handle_local, handle_man, handle_printenv, handle_printf,
-    handle_read, handle_return, handle_set, handle_shift, handle_sleep,
-    handle_source, handle_test, handle_trap, handle_unset, handle_whoami)
+    handle_history, handle_ln, handle_local, handle_man, handle_printenv,
+    handle_printf, handle_read, handle_readlink, handle_return, handle_set,
+    handle_shift, handle_sleep, handle_source, handle_test, handle_trap,
+    handle_unset, handle_whoami, link_flags)
 
 _UNSUPPORTED_BUILTINS = frozenset({
     "bg",
@@ -52,7 +53,7 @@ _UNSUPPORTED_BUILTINS = frozenset({
 _CdArgs = list[str | PathSpec]
 
 
-def _split_cd_options(args: _CdArgs) -> tuple[_CdArgs, str | None]:
+def _split_cd_options(args: _CdArgs) -> tuple[_CdArgs, str | None, bool]:
     """Split leading ``cd`` option flags from the directory operand.
 
     Accepts the GNU ``cd`` options ``-L -P -e -@`` (and clusters such as
@@ -63,12 +64,14 @@ def _split_cd_options(args: _CdArgs) -> tuple[_CdArgs, str | None]:
         args: The classified arguments after the ``cd`` command name.
 
     Returns:
-        ``(operands, bad)`` where ``operands`` are the non-option args and
-        ``bad`` is the first unknown option character, or ``None`` when all
-        options were valid.
+        ``(operands, bad, physical)`` where ``operands`` are the non-option
+        args, ``bad`` is the first unknown option character (or ``None``),
+        and ``physical`` is True when ``-P`` is the effective (last-wins)
+        mode.
     """
     operands: _CdArgs = []
     parsing = True
+    physical = False
     for arg in args:
         s = arg.original if isinstance(arg, PathSpec) else str(arg)
         if parsing:
@@ -78,17 +81,23 @@ def _split_cd_options(args: _CdArgs) -> tuple[_CdArgs, str | None]:
             if s != "-" and len(s) >= 2 and s.startswith("-"):
                 bad = next((c for c in s[1:] if c not in "LPe@"), None)
                 if bad is None:
+                    for c in s[1:]:
+                        if c == "P":
+                            physical = True
+                        elif c == "L":
+                            physical = False
                     continue
-                return operands, bad
+                return operands, bad, physical
             parsing = False
         operands.append(arg)
-    return operands, None
+    return operands, None, physical
 
 
 async def execute_command(
     recurse,
     dispatch,
     registry,
+    namespace,
     execute_fn,
     node,
     session,
@@ -150,9 +159,9 @@ async def execute_command(
     timeout = (resolved.timeout_seconds if resolved is not None else None)
 
     try:
-        body = _dispatch_command_body(recurse, dispatch, registry, execute_fn,
-                                      node, parts, name, session, stdin,
-                                      call_stack, job_table, cancel)
+        body = _dispatch_command_body(recurse, dispatch, registry, namespace,
+                                      execute_fn, node, parts, name, session,
+                                      stdin, call_stack, job_table, cancel)
         return await run_with_timeout(body, timeout, name or "?")
     finally:
         for k, prev in saved_env_overrides.items():
@@ -166,6 +175,7 @@ async def _dispatch_command_body(
     recurse,
     dispatch,
     registry,
+    namespace,
     execute_fn,
     node,
     parts,
@@ -251,7 +261,7 @@ async def _dispatch_command_body(
         return out, IOResult(), ExecutionNode(command="pwd", exit_code=0)
 
     if name == SB.CD:
-        operands, bad_opt = _split_cd_options(classified[1:])
+        operands, bad_opt, physical = _split_cd_options(classified[1:])
         if bad_opt is not None:
             err = (f"cd: -{bad_opt}: invalid option\n"
                    f"cd: usage: cd [-L|[-P [-e]] [-@]] [dir]\n").encode()
@@ -273,8 +283,12 @@ async def _dispatch_command_body(
                                       stderr=err), ExecutionNode(command="cd",
                                                                  exit_code=1,
                                                                  stderr=err)
-            return await handle_cd(dispatch, registry.is_mount_root, home,
-                                   session)
+            return await handle_cd(dispatch,
+                                   registry.is_mount_root,
+                                   home,
+                                   session,
+                                   links=namespace.symlink_targets(),
+                                   physical=physical)
         raw = operands[0]
         raw_str = raw.original if isinstance(raw, PathSpec) else str(raw)
         if raw_str == "-":
@@ -287,7 +301,9 @@ async def _dispatch_command_body(
                                    registry.is_mount_root,
                                    old,
                                    session,
-                                   print_path=True)
+                                   print_path=True,
+                                   links=namespace.symlink_targets(),
+                                   physical=physical)
         if isinstance(raw, PathSpec):
             path = raw
             cdpath_target = raw.as_typed or raw.original
@@ -301,7 +317,9 @@ async def _dispatch_command_body(
                                registry.is_mount_root,
                                path,
                                session,
-                               cdpath_target=cdpath_target)
+                               cdpath_target=cdpath_target,
+                               links=namespace.symlink_targets(),
+                               physical=physical)
 
     if name == SB.HISTORY:
         return await handle_history(registry, expanded[1:], session)
@@ -411,6 +429,15 @@ async def _dispatch_command_body(
 
     if name == SB.CONTINUE:
         raise ContinueSignal()
+
+    # ── symlinks (namespace-backed; not bash builtins, not mount
+    #    commands: they mutate the addressing layer) ──
+    if name == "ln" and "s" in link_flags(classified[1:], "sfnv"):
+        return handle_ln(namespace, session, classified[1:])
+
+    if name == "readlink" and not (link_flags(classified[1:], "fenm")
+                                   & {"f", "e", "m"}):
+        return handle_readlink(namespace, session, classified[1:])
 
     # ── mount command (default) ─────────────────
     return await handle_command(recurse,

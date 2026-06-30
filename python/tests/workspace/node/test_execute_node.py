@@ -20,8 +20,14 @@ from mirage.shell import parse
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.job_table import JobTable
 from mirage.types import MountMode, PathSpec
-from mirage.workspace.node.execute_node import execute_node
+from mirage.workspace.mount.namespace import Namespace
+from mirage.workspace.node.execute_node import execute_node as _execute_node
 from mirage.workspace.session import Session
+
+
+def execute_node(dispatch, registry, *args, **kwargs):
+    return _execute_node(dispatch, registry, Namespace(registry), *args,
+                         **kwargs)
 
 
 def _session(cwd="/", env=None):

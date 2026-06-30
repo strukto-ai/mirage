@@ -25,6 +25,7 @@ from mirage.shell.job_table import Job, JobStatus
 from mirage.types import (CacheKey, ConsistencyPolicy, JobKey, MountKey,
                           MountMode, ResourceName, ResourceStateKey,
                           SessionKey, StateKey)
+from mirage.workspace.mount.namespace import LinkEntry
 from mirage.workspace.snapshot.config import MountArgs
 from mirage.workspace.snapshot.drift import (capture_fingerprints,
                                              live_only_mount_prefixes)
@@ -94,6 +95,13 @@ async def to_state_dict(ws) -> dict:
         StateKey.JOBS: finished_jobs,
         StateKey.FINGERPRINTS: fingerprints,
         StateKey.LIVE_ONLY_MOUNTS: live_only_mounts,
+        StateKey.SYMLINKS: {
+            link: {
+                "target": entry.target,
+                "mtime": entry.mtime
+            }
+            for link, entry in ws._namespace.symlinks.items()
+        },
     }
 
 
@@ -169,6 +177,15 @@ async def apply_state_dict(ws, state: dict) -> None:
     _restore_cache(ws, state)
     await _restore_history(ws, state)
     _restore_jobs(ws, state)
+    _restore_symlinks(ws, state)
+
+
+def _restore_symlinks(ws, state: dict) -> None:
+    entries = {
+        link: LinkEntry(target=d["target"], mtime=d["mtime"])
+        for link, d in (state.get(StateKey.SYMLINKS) or {}).items()
+    }
+    ws._namespace.replace_symlinks(entries)
 
 
 def _restore_sessions(ws, state: dict) -> None:

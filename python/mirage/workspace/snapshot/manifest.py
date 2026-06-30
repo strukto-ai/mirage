@@ -57,6 +57,7 @@ def split_manifest_and_blobs(state: dict) -> tuple[dict, dict[str, bytes]]:
         StateKey.JOBS: [],
         StateKey.FINGERPRINTS: state.get(StateKey.FINGERPRINTS) or [],
         StateKey.LIVE_ONLY_MOUNTS: state.get(StateKey.LIVE_ONLY_MOUNTS) or [],
+        StateKey.SYMLINKS: state.get(StateKey.SYMLINKS) or {},
     }
 
     for m in state[StateKey.MOUNTS]:

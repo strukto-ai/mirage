@@ -133,3 +133,36 @@ def test_expand_tilde_non_leading_unchanged():
 
 def test_expand_tilde_plain_word_unchanged():
     assert expand_tilde("file.txt", "/home/u") == "file.txt"
+
+
+def test_resolve_symlinks_prefix_substitution():
+    from mirage.utils.path import resolve_symlinks
+    links = {"/a/link": "/a/real"}
+    assert resolve_symlinks("/a/link/f.txt", links) == "/a/real/f.txt"
+    assert resolve_symlinks("/a/link", links) == "/a/real"
+
+
+def test_resolve_symlinks_relative_target_resolved_against_link_dir():
+    from mirage.utils.path import resolve_symlinks
+    links = {"/a/link": "real"}
+    assert resolve_symlinks("/a/link", links) == "/a/real"
+
+
+def test_resolve_symlinks_respects_path_boundary():
+    from mirage.utils.path import resolve_symlinks
+    links = {"/a/b": "/x"}
+    assert resolve_symlinks("/a/bc", links) == "/a/bc"
+
+
+def test_resolve_symlinks_no_links_is_identity():
+    from mirage.utils.path import resolve_symlinks
+    assert resolve_symlinks("/a/b", {}) == "/a/b"
+
+
+def test_resolve_symlinks_cycle_raises():
+    import pytest
+
+    from mirage.utils.path import CycleError, resolve_symlinks
+    links = {"/a": "/b", "/b": "/a"}
+    with pytest.raises(CycleError):
+        resolve_symlinks("/a", links)

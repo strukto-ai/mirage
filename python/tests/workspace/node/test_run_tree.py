@@ -21,9 +21,15 @@ from mirage.shell.job_table import JobTable
 from mirage.shell.parse import parse
 from mirage.types import MountMode
 from mirage.workspace.mount import MountRegistry
-from mirage.workspace.node import run_command_tree
+from mirage.workspace.mount.namespace import Namespace
+from mirage.workspace.node import run_command_tree as _run_command_tree
 from mirage.workspace.session import Session
 from mirage.workspace.workspace import Workspace
+
+
+def run_command_tree(dispatch, registry, *args, **kwargs):
+    return _run_command_tree(dispatch, registry, Namespace(registry), *args,
+                             **kwargs)
 
 
 @pytest.fixture
