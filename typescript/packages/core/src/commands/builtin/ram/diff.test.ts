@@ -157,4 +157,17 @@ describe('diff', () => {
     const r = await runDiff(resource, [PathSpec.fromStrPath('/tmp/a.txt')])
     expect(r.exitCode).toBe(2)
   })
+
+  it('-u uses GNU single-line hunk header (@@ -1 +1 @@)', async () => {
+    const resource = new RAMResource()
+    resource.store.files.set('/tmp/a.txt', ENC.encode('hello\n'))
+    resource.store.files.set('/tmp/b.txt', ENC.encode('world\n'))
+    const r = await runDiff(
+      resource,
+      [PathSpec.fromStrPath('/tmp/a.txt'), PathSpec.fromStrPath('/tmp/b.txt')],
+      { u: true },
+    )
+    expect(r.exitCode).toBe(1)
+    expect(r.out).toContain('@@ -1 +1 @@')
+  })
 })

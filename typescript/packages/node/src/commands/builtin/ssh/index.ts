@@ -12,12 +12,33 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type RegisteredCommand, ResourceName, makeGenericCommands } from '@struktoai/mirage-core'
+import {
+  type ProvisionFn,
+  type RegisteredCommand,
+  ResourceName,
+  makeFiletypeCommands,
+  makeGenericCommands,
+} from '@struktoai/mirage-core'
 import type { SSHAccessor } from '../../../accessor/ssh.ts'
+import { read as sshRead } from '../../../core/ssh/read.ts'
+import { stat as sshStat } from '../../../core/ssh/stat.ts'
+import { fileReadProvision, metadataProvision } from './_provision.ts'
 import { SSH_CMD_OPS } from './ops.ts'
 import { SSH_SED } from './sed.ts'
 
 export const SSH_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<SSHAccessor>(ResourceName.SSH, SSH_CMD_OPS),
+  ...makeFiletypeCommands<SSHAccessor>({
+    resource: ResourceName.SSH,
+    readBytes: sshRead,
+    statEntry: sshStat,
+  }),
+  ...makeGenericCommands<SSHAccessor>(ResourceName.SSH, SSH_CMD_OPS, {
+    provisionOverrides: {
+      grep: fileReadProvision as ProvisionFn,
+      rg: fileReadProvision as ProvisionFn,
+      ls: metadataProvision as ProvisionFn,
+      find: metadataProvision as ProvisionFn,
+    },
+  }),
   ...SSH_SED,
 ]

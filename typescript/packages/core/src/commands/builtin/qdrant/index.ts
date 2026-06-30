@@ -20,7 +20,7 @@ import { QDRANT_FIND } from './find.ts'
 import { QDRANT_CMD_OPS } from './ops.ts'
 import { QDRANT_SEARCH } from './search.ts'
 
-const QDRANT_OVERRIDES = new Set(['find', 'search', 'du'])
+const QDRANT_OVERRIDES = new Set(['find', 'search'])
 
 export const QDRANT_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<QdrantAccessor>(ResourceName.QDRANT, QDRANT_CMD_OPS, {

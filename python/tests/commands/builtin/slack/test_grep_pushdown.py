@@ -75,13 +75,18 @@ async def test_grep_falls_back_when_native_search_raises():
                  pattern="*.jsonl",
                  prefix="/slack"),
     ]
+    resolved = [
+        PathSpec(original="/slack/channels/general__C1/2026-04-10/chat.jsonl",
+                 directory="/slack/channels/general__C1/2026-04-10/",
+                 prefix="/slack"),
+    ]
     with patch(
             "mirage.commands.builtin.slack.grep.search_messages",
             new=AsyncMock(
                 side_effect=RuntimeError("missing search:read scope")),
     ), patch(
             "mirage.commands.builtin.slack.grep.resolve_glob",
-            new=AsyncMock(return_value=paths),
+            new=AsyncMock(return_value=resolved),
     ), patch(
             "mirage.commands.builtin.slack.grep.slack_read",
             new=AsyncMock(return_value=b""),

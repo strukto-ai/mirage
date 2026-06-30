@@ -29,7 +29,7 @@ import { GMAIL_CMD_OPS } from './ops.ts'
 import { metadataProvision } from './provision.ts'
 import { GMAIL_RG } from './rg.ts'
 
-const GMAIL_OVERRIDES = new Set(['grep', 'rg', 'find', 'du'])
+const GMAIL_OVERRIDES = new Set(['grep', 'rg', 'find'])
 
 export const GMAIL_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<GmailAccessor>(ResourceName.GMAIL, GMAIL_CMD_OPS, {

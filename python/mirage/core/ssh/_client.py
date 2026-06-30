@@ -60,9 +60,3 @@ def _connect_kwargs(config) -> dict:
 
 async def connect(config) -> asyncssh.SSHClientConnection:
     return await asyncssh.connect(**_connect_kwargs(config))
-
-
-async def sftp_session(config):
-    conn = await connect(config)
-    sftp = await conn.start_sftp_client()
-    return conn, sftp

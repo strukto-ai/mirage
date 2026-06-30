@@ -22,7 +22,7 @@ import { GITHUB_CI_CMD_OPS } from './ops.ts'
 import { metadataProvision } from './provision.ts'
 import { GITHUB_CI_RG } from './rg.ts'
 
-const GITHUB_CI_OVERRIDES = new Set(['find', 'grep', 'rg', 'du'])
+const GITHUB_CI_OVERRIDES = new Set(['find', 'grep', 'rg'])
 
 export const GITHUB_CI_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<GitHubCIAccessor>(ResourceName.GITHUB_CI, GITHUB_CI_CMD_OPS, {

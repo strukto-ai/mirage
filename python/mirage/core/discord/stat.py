@@ -125,16 +125,18 @@ async def stat(
         return FileStat(name=parts[3], type=FileType.DIRECTORY)
 
     # <guild>/channels/<ch>/<date>/chat.jsonl
-    if (len(parts) == 5 and parts[1] == "channels"
+    if (len(parts) == 5 and parts[1] == "channels" and _DATE_RE.match(parts[3])
             and parts[4] == "chat.jsonl"):
         return FileStat(name="chat.jsonl", type=FileType.TEXT)
 
     # <guild>/channels/<ch>/<date>/files
-    if (len(parts) == 5 and parts[1] == "channels" and parts[4] == "files"):
+    if (len(parts) == 5 and parts[1] == "channels" and _DATE_RE.match(parts[3])
+            and parts[4] == "files"):
         return FileStat(name="files", type=FileType.DIRECTORY)
 
     # <guild>/channels/<ch>/<date>/files/<blob>
-    if (len(parts) == 6 and parts[1] == "channels" and parts[4] == "files"):
+    if (len(parts) == 6 and parts[1] == "channels" and _DATE_RE.match(parts[3])
+            and parts[4] == "files"):
         if index is None:
             raise enoent(virtual)
         lookup = await index.get(virtual_key)

@@ -99,6 +99,16 @@ name: a big orange cat
 === rg_basic ===
 # a big orange cat
 name: a big orange cat
+=== du_file ===
+70	/db/animals/cat/big/1.md
+=== du_group ===
+142	/db/animals/cat
+=== du_table ===
+284	/db/animals
+=== du_c_multi ===
+142	/db/animals/cat
+142	/db/animals/dog
+284	total
 === grep_q_match ===
 exit=0
 === grep_q_no_match ===

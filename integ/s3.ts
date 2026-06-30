@@ -202,11 +202,18 @@ function buildWorkspace(): Workspace {
   );
 }
 
+const LS_TIME_RE = /[A-Z][a-z]{2} [ \d]\d \d{2}:\d{2}/g;
+
 async function run(ws: Workspace, name: string, cmd: string): Promise<void> {
   process.stdout.write(`=== ${name} ===\n`);
   try {
     const result = await ws.execute(cmd);
-    const out = DEC.decode(result.stdout);
+    let out = DEC.decode(result.stdout);
+    // MinIO stamps each seeded object with the real upload time, so the
+    // `ls -l` mtime column resolved from the index is non-deterministic.
+    // Mask it back to the epoch placeholder (Python freezes moto's clock
+    // instead; both keep the truth file stable).
+    if (name.includes("ls_l")) out = out.replace(LS_TIME_RE, "Jan  1 00:00");
     process.stdout.write(out.endsWith("\n") ? out : out + "\n");
     if (name.includes("safeguard_")) {
       const err = DEC.decode(result.stderr);

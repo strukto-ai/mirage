@@ -132,6 +132,16 @@ export function getOpcodes(a: readonly string[], b: readonly string[]): Opcode[]
   return opcodes
 }
 
+// Mirror Python difflib's _format_range_unified: a single-line range collapses
+// to just its start, and an empty range begins at the line before it (",0").
+function formatRangeUnified(start: number, stop: number): string {
+  const beginning = start + 1
+  const length = stop - start
+  if (length === 1) return String(beginning)
+  if (length === 0) return `${String(beginning - 1)},0`
+  return `${String(beginning)},${String(length)}`
+}
+
 export function unifiedDiff(
   a: readonly string[],
   b: readonly string[],
@@ -154,7 +164,7 @@ export function unifiedDiff(
     const i2 = last[2]
     const j1 = first[3]
     const j2 = last[4]
-    out.push(`@@ -${String(i1 + 1)},${String(i2 - i1)} +${String(j1 + 1)},${String(j2 - j1)} @@\n`)
+    out.push(`@@ -${formatRangeUnified(i1, i2)} +${formatRangeUnified(j1, j2)} @@\n`)
     for (const [tag, ai1, ai2, bj1, bj2] of group) {
       if (tag === DiffOpTag.EQUAL) {
         for (let k = ai1; k < ai2; k++) out.push(' ' + (a[k] ?? ''))

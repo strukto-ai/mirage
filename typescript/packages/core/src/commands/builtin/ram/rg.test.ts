@@ -101,6 +101,28 @@ describe('rg', () => {
     expect(r.lines).toEqual(['2'])
   })
 
+  it('-c on a zero-match file omits the count and exits 1 (unlike grep -c)', async () => {
+    const resource = new RAMResource()
+    resource.store.files.set('/tmp/a.txt', ENC.encode('foo\nbar\n'))
+    const r = await runRg(resource, ['zzz'], [PathSpec.fromStrPath('/tmp/a.txt')], { c: true })
+    expect(r.lines).toEqual([])
+    expect(r.exitCode).toBe(1)
+  })
+
+  it('-c across files lists only files with matches', async () => {
+    const resource = new RAMResource()
+    resource.store.files.set('/tmp/a.txt', ENC.encode('foo\nfoo\n'))
+    resource.store.files.set('/tmp/b.txt', ENC.encode('bar\n'))
+    const r = await runRg(
+      resource,
+      ['foo'],
+      [PathSpec.fromStrPath('/tmp/a.txt'), PathSpec.fromStrPath('/tmp/b.txt')],
+      { c: true },
+    )
+    expect(r.lines).toEqual(['/tmp/a.txt:2'])
+    expect(r.exitCode).toBe(0)
+  })
+
   it('-n prepends line numbers in stdin mode', async () => {
     const resource = new RAMResource()
     const r = await runRg(resource, ['foo'], [], { n: true }, ENC.encode('foo\nbar\nfoo baz\n'))

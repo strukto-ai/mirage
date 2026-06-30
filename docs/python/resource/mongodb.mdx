@@ -88,6 +88,11 @@ BSON-specific types round-trip through their canonical `$` wrappers:
 `cat` / `head` / `tail` / `grep` / `jq` all stream from this file; nothing
 materializes the full collection in memory.
 
+Because the file is rendered on demand, `stat` / `ls -l` report no size and
+`du` returns `0` for it (computing the real size would require rendering the
+whole collection). Use `wc -c documents.jsonl` for the actual rendered byte
+count; `stat` still exposes `document_count` for the number of documents.
+
 ### schema.json
 
 Generated from a 100-document `$sample`. Includes:

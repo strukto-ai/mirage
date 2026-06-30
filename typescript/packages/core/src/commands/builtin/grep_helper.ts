@@ -260,6 +260,17 @@ export function countRecordsHaveMatches(results: readonly string[]): boolean {
   return results.some((r) => Number.parseInt(r.slice(r.lastIndexOf(':') + 1), 10) > 0)
 }
 
+// Drop zero-count chunks for the `rg -c` fallback stream. Unlike grep -c
+// (which prints "0" and exits 1), ripgrep omits files with no matches.
+// Mirrors Python's nonzero_count_stream.
+export async function* nonzeroCountStream(
+  source: AsyncIterable<Uint8Array>,
+): AsyncIterable<Uint8Array> {
+  for await (const chunk of source) {
+    if (Number.parseInt(DEC.decode(chunk).trim() || '0', 10) > 0) yield chunk
+  }
+}
+
 // Yield count-only grep output, setting exit 1 when all counts are zero.
 // GNU grep -c prints the count but still exits 1 when no lines were
 // selected, so emptiness-based exit detection cannot apply.

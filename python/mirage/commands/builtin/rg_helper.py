@@ -14,16 +14,12 @@
 
 import fnmatch
 import posixpath
-import re
 
 from mirage.commands.builtin.grep_helper import (BINARY_EXTENSIONS,
                                                  compile_pattern,
-                                                 get_extension,
-                                                 grep_count_has_matches,
-                                                 grep_lines)
+                                                 get_extension)
 from mirage.commands.builtin.utils.types import (_AsyncReadBytes,
-                                                 _AsyncReaddir, _AsyncStat,
-                                                 _ReadBytes)
+                                                 _AsyncReaddir, _AsyncStat)
 from mirage.types import FileType
 
 TYPE_EXTENSIONS: dict[str, list[str]] = {
@@ -67,86 +63,6 @@ def rg_matches_filter(
             basename, glob_pattern):
         return False
     return True
-
-
-def rg_search_file(
-    read_bytes: _ReadBytes,
-    entry: str,
-    compiled: re.Pattern[str],
-    invert: bool,
-    line_numbers: bool,
-    count_only: bool,
-    files_only: bool,
-    only_matching: bool,
-    max_count: int | None,
-    context_before: int,
-    context_after: int,
-    prefix_path: bool,
-    warnings: list[str] | None = None,
-) -> list[str]:
-    try:
-        data = read_bytes(entry).decode(errors="replace").splitlines()
-    except Exception as exc:
-        if warnings is not None:
-            warnings.append(f"rg: {entry}: {exc}")
-        return []
-
-    if context_before == 0 and context_after == 0:
-        lines = grep_lines(
-            entry,
-            data,
-            compiled,
-            invert,
-            line_numbers,
-            count_only,
-            files_only,
-            only_matching,
-            max_count,
-        )
-        if count_only and not grep_count_has_matches(lines):
-            return []
-        if prefix_path and not count_only and not files_only:
-            return [f"{entry}:{ln}" for ln in lines]
-        return lines
-
-    results: list[str] = []
-    match_indices: set[int] = set()
-    count = 0
-    for idx, line in enumerate(data):
-        m = compiled.search(line)
-        matched = bool(m) != invert
-        if matched:
-            count += 1
-            match_indices.add(idx)
-            if max_count is not None and count >= max_count:
-                break
-
-    if count_only:
-        return [str(count)] if count > 0 else []
-    if files_only:
-        return [entry] if count > 0 else []
-
-    output_indices: set[int] = set()
-    for idx in sorted(match_indices):
-        for j in range(max(0, idx - context_before),
-                       min(len(data), idx + context_after + 1)):
-            output_indices.add(j)
-
-    prev_idx = -2
-    pfx = f"{entry}:" if prefix_path else ""
-    for idx in sorted(output_indices):
-        if prev_idx >= 0 and idx > prev_idx + 1:
-            results.append("--")
-        line = data[idx]
-        lineno = idx + 1
-        is_match = idx in match_indices
-        sep = ":" if is_match else "-"
-        if line_numbers:
-            results.append(f"{pfx}{lineno}{sep}{line}")
-        else:
-            results.append(f"{pfx}{line}")
-        prev_idx = idx
-    return results
 
 
 async def rg_folder(

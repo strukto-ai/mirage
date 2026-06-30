@@ -22,7 +22,7 @@ from mirage.commands.builtin.generic.tail import tail_multi
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.commands.builtin.generic_bind.provision import \
     make_head_tail_provision
-from mirage.commands.builtin.tail_helper import _parse_n
+from mirage.commands.builtin.tail_helper import _parse_n, number_flag_error
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -41,6 +41,9 @@ async def tail(
     index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
+    num_err = number_flag_error("tail", n, c)
+    if num_err is not None:
+        return None, IOResult(exit_code=1, stderr=num_err.encode())
     n_int: int | None = None
     from_line: int | None = None
     if n is not None:
