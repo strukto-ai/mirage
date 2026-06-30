@@ -69,7 +69,7 @@ async def grep(
     pattern = pattern_arg(texts, fl)
     max_count = fl.int("m")
 
-    if paths and pattern is not None:
+    if paths and pattern is not None and "\n" not in pattern:
         scope = detect_scope(paths[0])
         if not scope.use_native:
             scope = coalesce_scopes(paths) or scope

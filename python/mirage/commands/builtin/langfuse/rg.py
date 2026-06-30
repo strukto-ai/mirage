@@ -59,7 +59,7 @@ async def rg(
     config = accessor.config
     limit = config.default_search_limit
 
-    if paths:
+    if paths and "\n" not in pattern_str:
         scope = detect_scope(paths[0])
 
         if scope.level == "traces" or scope.level == "root":
@@ -84,10 +84,10 @@ async def rg(
             datasets = await fetch_datasets(accessor.api)
             return _format_dataset_results(datasets, pat)
 
-        paths = await resolve_glob(accessor, paths, index=index)
-
+    resolved = await resolve_glob(accessor, paths,
+                                  index=index) if paths else []
     return await generic_rg(
-        paths,
+        resolved,
         texts,
         flags,
         readdir=_readdir,

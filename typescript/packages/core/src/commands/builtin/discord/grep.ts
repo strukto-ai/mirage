@@ -52,7 +52,7 @@ async function grepCommand(
 
   const pushdownWarnings: string[] = []
   const firstPath = paths[0]
-  if (firstPath !== undefined && pattern !== null) {
+  if (firstPath !== undefined && pattern !== null && !pattern.includes('\n')) {
     const scope = detectScope(firstPath)
     if (scope.useNative && scope.guildId !== undefined) {
       try {

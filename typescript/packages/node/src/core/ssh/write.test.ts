@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { PathSpec } from '@struktoai/mirage-core'
+import { PathSpec, ResourceName, runWithRecording } from '@struktoai/mirage-core'
 import { makeFakeAccessor } from './_test_utils.ts'
 import { read } from './read.ts'
 import { writeBytes } from './write.ts'
@@ -63,5 +63,22 @@ describe('core/ssh/write', () => {
     await writeBytes(accessor, spec('/data/a.txt'), new TextEncoder().encode('rooted'))
     const out = await read(accessor, spec('/data/a.txt'))
     expect(new TextDecoder().decode(out)).toBe('rooted')
+  })
+
+  it('records the write for command history', async () => {
+    const accessor = makeFakeAccessor({
+      files: new Map(),
+      dirs: new Map([
+        ['/', {}],
+        ['/data', {}],
+      ]),
+    })
+    const [, records] = await runWithRecording(async () => {
+      await writeBytes(accessor, spec('/data/a.txt'), new TextEncoder().encode('hello'))
+    })
+    expect(records).toHaveLength(1)
+    expect(records[0]?.op).toBe('write')
+    expect(records[0]?.source).toBe(ResourceName.SSH)
+    expect(records[0]?.bytes).toBe(5)
   })
 })

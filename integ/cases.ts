@@ -577,6 +577,10 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ['cwd_rel_dot_cat', '(cd /data && cat ./a.txt)'],
   ['cwd_rel_subdir_cat', '(cd /data && cat sub/nested.txt)'],
   ['cwd_rel_dotdot_cat', '(cd /data/sub && cat ../a.txt)'],
+  [
+    'cwd_rel_csplit',
+    '(cd /data/sub && csplit -s -f cs_ nested.txt 2 && cat cs_00 cs_01 && rm cs_00 cs_01)',
+  ],
   ['cwd_echo_pwd', '(cd /data/sub && echo $PWD)'],
   ['cwd_echo_home_unset', '(echo "[$HOME]")'],
   ['cwd_cd_oldpwd', '(cd /data && cd /data/sub && echo $OLDPWD)'],

@@ -28,15 +28,14 @@ export async function mkdir(
     await invalidateAfterWrite(path)
     return
   }
-  await invalidateAfterWrite(path)
   try {
     await fsMkdir(full)
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code
-    if (code === 'EEXIST') return
     if (code === 'ENOENT') {
       throw new Error(`parent directory does not exist: ${path.stripPrefix}`)
     }
-    throw err
+    if (code !== 'EEXIST') throw err
   }
+  await invalidateAfterWrite(path)
 }

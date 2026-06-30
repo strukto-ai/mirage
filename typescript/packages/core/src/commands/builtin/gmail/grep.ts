@@ -48,7 +48,7 @@ async function grepCommand(
   const maxCount = typeof opts.flags.m === 'string' ? Number.parseInt(opts.flags.m, 10) : null
 
   const first = paths[0]
-  if (first !== undefined && pattern !== null) {
+  if (first !== undefined && pattern !== null && !pattern.includes('\n')) {
     const scope = detectScope(first)
     if (scope.useNative) {
       const filePrefix = first.prefix !== '' ? first.prefix : ''

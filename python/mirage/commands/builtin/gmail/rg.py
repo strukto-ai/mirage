@@ -49,7 +49,7 @@ async def rg(
         raise UsageError("rg: usage: rg [flags] pattern [path]")
     max_count = fl.int("m")
 
-    if paths:
+    if paths and "\n" not in pattern_str:
         scope = detect_scope(paths[0])
         if scope.use_native:
             file_prefix = paths[0].prefix or ""
@@ -65,10 +65,9 @@ async def rg(
                 return b"", IOResult(exit_code=1)
             return format_records(lines), IOResult()
 
-        paths = await resolve_glob(accessor, paths, index)
-
+    resolved = await resolve_glob(accessor, paths, index) if paths else []
     return await generic_rg(
-        paths,
+        resolved,
         texts,
         flags,
         readdir=_readdir,

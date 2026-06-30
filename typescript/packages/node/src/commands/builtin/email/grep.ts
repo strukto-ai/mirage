@@ -118,7 +118,7 @@ async function grepCommand(
     const first = paths[0]
     if (first !== undefined) {
       const scope = detectScope(first)
-      if (scope.useNative) {
+      if (scope.useNative && !pattern.includes('\n')) {
         const filePrefix = first.prefix !== '' ? first.prefix : ''
         const pairs = await searchAndFormat(accessor, scope, pattern, filePrefix, f.maxCount ?? 50)
         const lines: string[] = []

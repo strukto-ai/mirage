@@ -69,7 +69,7 @@ async def grep(
     max_count = fl.int("m")
 
     pushdown_warnings: list[str] = []
-    if paths and pattern is not None:
+    if paths and pattern is not None and "\n" not in pattern:
         scope = await detect_scope(paths[0], index)
         if scope.level in ("messages", "file_blob", "date"):
             coalesced = await coalesce_scopes(paths, index)

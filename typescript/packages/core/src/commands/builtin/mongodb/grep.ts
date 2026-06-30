@@ -53,7 +53,7 @@ async function grepCommand(
   const limit = accessor.config.defaultSearchLimit
 
   const first = paths[0]
-  if (first !== undefined && pattern !== null) {
+  if (first !== undefined && pattern !== null && !pattern.includes('\n')) {
     const scope = detectScope(first)
 
     if (scope.level !== ScopeLevel.ROOT) {

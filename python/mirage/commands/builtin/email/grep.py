@@ -66,7 +66,8 @@ async def grep(
     fl = FlagView(flags, spec=SPECS["grep"])
     pattern = pattern_arg(texts, fl)
 
-    if paths and pattern is not None and (fl.bool("r") or fl.bool("R")):
+    if paths and pattern is not None and "\n" not in pattern and (
+            fl.bool("r") or fl.bool("R")):
         scope = detect_scope(paths[0])
         if scope.use_native and scope.folder:
             return await _grep_server_side(accessor,

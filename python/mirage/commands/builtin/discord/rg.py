@@ -56,7 +56,7 @@ async def rg(
     max_count = fl.int("m")
 
     pushdown_warnings: list[str] = []
-    if paths:
+    if paths and "\n" not in pattern_str:
         scope = await detect_scope(paths[0], index)
         if scope.level in ("messages", "file_blob", "date"):
             coalesced = await coalesce_scopes(paths, index)
@@ -103,10 +103,10 @@ async def rg(
                     "discord search push-down failed (%s); "
                     "falling back to per-file scan", exc)
 
-        paths = await resolve_glob(accessor, paths, index=index)
-
+    resolved = await resolve_glob(accessor, paths,
+                                  index=index) if paths else []
     stdout, io = await generic_rg(
-        paths,
+        resolved,
         texts,
         flags,
         readdir=_readdir,
