@@ -1,6 +1,6 @@
 {
   "name": "@struktoai/mirage-agents",
-  "version": "0.0.3-alpha.0",
+  "version": "0.0.3",
   "description": "A Unified Virtual Filesystem For AI Agents",
   "keywords": [
     "bash",
