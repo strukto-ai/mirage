@@ -25,6 +25,7 @@ export const StateKey = Object.freeze({
   JOBS: 'jobs',
   FINGERPRINTS: 'fingerprints',
   LIVE_ONLY_MOUNTS: 'live_only_mounts',
+  SYMLINKS: 'symlinks',
 } as const)
 
 export const MountKey = Object.freeze({

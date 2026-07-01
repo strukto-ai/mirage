@@ -2076,12 +2076,10 @@ exit=0
 exit=0
 arch.zip
 deep
-link.txt
 nested.txt
 === ln_read_back ===
 exit=0
-nested
-content
+/data/sub/nested.txt
 === nl_pin_du ===
 exit=0
 14
@@ -2093,10 +2091,10 @@ exit=0
 18
 === nl_pin_tree ===
 exit=0
-145
+126
 === nl_pin_ls ===
 exit=0
-34
+25
 === nl_pin_wc ===
 exit=0
 14

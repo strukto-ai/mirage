@@ -44,6 +44,48 @@ export function parent(path: string): string {
   return path.slice(0, i)
 }
 
+export const MAX_SYMLINK_HOPS = 40
+
+// Raised when symlink resolution exceeds the maximum hop count. Mirrors POSIX
+// ELOOP (a loop such as `a -> b -> a` or an unbounded expansion such as
+// `a -> a/x`). Command boundaries render this as the GNU strerror text
+// "Too many levels of symbolic links".
+export class CycleError extends Error {
+  constructor(path: string) {
+    super(`too many levels of symbolic links: ${path}`)
+    this.name = 'CycleError'
+  }
+}
+
+function isLinkPrefix(key: string, path: string): boolean {
+  return path === key || path.startsWith(key + '/')
+}
+
+// Follow the symlink table over a whole-path lookup: repeatedly substitute the
+// longest link prefix that matches `path` until no link applies, resolving
+// relative targets lazily against the link's own parent. Throws CycleError
+// once the hop count is exceeded (POSIX ELOOP).
+export function resolveSymlinks(path: string, links: Map<string, string>): string {
+  if (links.size === 0) return path
+  for (let hop = 0; hop < MAX_SYMLINK_HOPS; hop++) {
+    let best: string | null = null
+    let bestTarget = ''
+    for (const [key, value] of links) {
+      if (isLinkPrefix(key, path) && (best === null || key.length > best.length)) {
+        best = key
+        bestTarget = value
+      }
+    }
+    if (best === null) return path
+    let target = bestTarget
+    if (!target.startsWith('/')) {
+      target = norm(parent(best) + '/' + target)
+    }
+    path = target + path.slice(best.length)
+  }
+  throw new CycleError(path)
+}
+
 export function gnuBasename(path: string, suffix?: string): string {
   let i = path.length
   while (i > 0 && path[i - 1] === '/') i--

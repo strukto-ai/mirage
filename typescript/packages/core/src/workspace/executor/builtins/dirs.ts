@@ -16,12 +16,28 @@ import { resolvePath } from '../../../commands/spec/parser.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { FileType } from '../../../types.ts'
+import { CycleError, MAX_SYMLINK_HOPS, resolveSymlinks } from '../../../utils/path.ts'
+import { posixNormpath } from '../../expand/classify.ts'
 import type { Session } from '../../session/session.ts'
 import { changeDir } from '../../session/shell_dirs.ts'
 import { ExecutionNode } from '../../types.ts'
 import type { DispatchFn } from '../cross_mount.ts'
 import { toScope, scopePath } from './scope.ts'
 import type { Result } from './scope.ts'
+
+// Resolve a combined `cd` target following symlinks per mode. Logical (-L,
+// default) simplifies `..` textually first, then follows links; physical (-P)
+// follows links first so `..` acts on the target. Both loop until stable.
+// Throws CycleError on a symlink loop (ELOOP).
+function resolveTarget(combined: string, links: Map<string, string>, physical: boolean): string {
+  let p = physical ? combined : posixNormpath(combined)
+  for (let hop = 0; hop < MAX_SYMLINK_HOPS; hop++) {
+    const n = posixNormpath(resolveSymlinks(p, links))
+    if (n === p) return n
+    p = n
+  }
+  throw new CycleError(p)
+}
 
 function cdpathSearchable(target: string): boolean {
   if (target.startsWith('/') || target.startsWith('./') || target.startsWith('../')) {
@@ -57,11 +73,26 @@ export async function handleCd(
   session: Session,
   printPath = false,
   cdpathTarget: string | null = null,
+  links: Map<string, string> | null = null,
+  physical = false,
 ): Promise<Result> {
   const raw = scopePath(path)
+  const table = links ?? new Map<string, string>()
   const candidates = cdCandidates(raw, cdpathTarget, session)
   let error: string | null = null
-  for (const [resolved, announce] of candidates) {
+  for (const [candidate, announce] of candidates) {
+    let resolved = candidate
+    if (table.size > 0) {
+      try {
+        resolved = resolveTarget(resolved, table, physical)
+      } catch (exc) {
+        if (exc instanceof CycleError) {
+          error = `cd: ${raw}: Too many levels of symbolic links\n`
+          continue
+        }
+        throw exc
+      }
+    }
     if (resolved === '/') return cdSuccess(session, '/', raw, printPath || announce)
     const scope = toScope(resolved)
     let stat: { type?: string } | null = null

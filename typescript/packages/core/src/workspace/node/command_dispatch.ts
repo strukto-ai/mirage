@@ -43,11 +43,13 @@ import {
   handleEval,
   handleExport,
   handleHistory,
+  handleLn,
   handleLocal,
   handleMan,
   handlePrintenv,
   handlePrintf,
   handleRead,
+  handleReadlink,
   handleReturn,
   handleSet,
   handleShift,
@@ -57,7 +59,9 @@ import {
   handleTrap,
   handleUnset,
   handleWhoami,
+  linkFlags,
 } from '../executor/builtins/index.ts'
+import type { Namespace } from '../mount/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Session } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
@@ -81,9 +85,11 @@ const UNSUPPORTED_BUILTINS: ReadonlySet<string> = new Set([
 function splitCdOptions(args: (string | PathSpec)[]): {
   operands: (string | PathSpec)[]
   bad: string | null
+  physical: boolean
 } {
   const operands: (string | PathSpec)[] = []
   let parsing = true
+  let physical = false
   for (const arg of args) {
     const s = arg instanceof PathSpec ? arg.original : arg
     if (parsing) {
@@ -99,14 +105,18 @@ function splitCdOptions(args: (string | PathSpec)[]): {
             break
           }
         }
-        if (bad === null) continue
-        return { operands, bad }
+        if (bad !== null) return { operands, bad, physical }
+        for (const c of s.slice(1)) {
+          if (c === 'P') physical = true
+          else if (c === 'L') physical = false
+        }
+        continue
       }
       parsing = false
     }
     operands.push(arg)
   }
-  return { operands, bad: null }
+  return { operands, bad: null, physical }
 }
 
 export async function executeCommand(
@@ -118,6 +128,7 @@ export async function executeCommand(
   ) => Promise<Result>,
   dispatch: DispatchFn,
   registry: MountRegistry,
+  namespace: Namespace,
   executeFn: ExecuteFn,
   node: TSNodeLike,
   session: Session,
@@ -188,6 +199,7 @@ export async function executeCommand(
         recurse,
         dispatch,
         registry,
+        namespace,
         executeFn,
         node,
         nonPrefixParts,
@@ -225,6 +237,7 @@ async function runCommandBody(
   ) => Promise<Result>,
   dispatch: DispatchFn,
   registry: MountRegistry,
+  namespace: Namespace,
   executeFn: ExecuteFn,
   node: TSNodeLike,
   parts: TSNodeLike[],
@@ -323,7 +336,8 @@ async function runCommandBody(
   }
 
   if (name === SB.CD) {
-    const { operands, bad } = splitCdOptions(classified.slice(1))
+    const { operands, bad, physical } = splitCdOptions(classified.slice(1))
+    const links = namespace.symlinkTargets()
     if (bad !== null) {
       const err = new TextEncoder().encode(
         `cd: -${bad}: invalid option\ncd: usage: cd [-L|[-P [-e]] [-@]] [dir]\n`,
@@ -352,7 +366,16 @@ async function runCommandBody(
           new ExecutionNode({ command: 'cd', exitCode: 1, stderr: err }),
         ]
       }
-      return handleCd(dispatch, (p) => registry.isMountRoot(p), home, session)
+      return handleCd(
+        dispatch,
+        (p) => registry.isMountRoot(p),
+        home,
+        session,
+        false,
+        null,
+        links,
+        physical,
+      )
     }
     const raw = operands[0]
     const rawStr = raw instanceof PathSpec ? raw.original : String(raw)
@@ -366,7 +389,16 @@ async function runCommandBody(
           new ExecutionNode({ command: 'cd -', exitCode: 1, stderr: err }),
         ]
       }
-      return handleCd(dispatch, (p) => registry.isMountRoot(p), old, session, true)
+      return handleCd(
+        dispatch,
+        (p) => registry.isMountRoot(p),
+        old,
+        session,
+        true,
+        null,
+        links,
+        physical,
+      )
     }
     let path: string | PathSpec
     let cdpathTarget: string
@@ -380,7 +412,16 @@ async function runCommandBody(
       path = classifyBarePath(rawStr, registry, session.cwd)
       cdpathTarget = rawStr
     }
-    return handleCd(dispatch, (p) => registry.isMountRoot(p), path, session, false, cdpathTarget)
+    return handleCd(
+      dispatch,
+      (p) => registry.isMountRoot(p),
+      path,
+      session,
+      false,
+      cdpathTarget,
+      links,
+      physical,
+    )
   }
 
   if (name === SB.TRUE) {
@@ -462,6 +503,19 @@ async function runCommandBody(
       return [io.stdout, io, new ExecutionNode({ command: 'timeout', exitCode: io.exitCode })]
     }
     return [null, new IOResult(), new ExecutionNode({ command: 'timeout', exitCode: 0 })]
+  }
+
+  // Symlinks are namespace-backed: not bash builtins, not mount commands.
+  // They mutate the addressing layer. `readlink -f/-e/-m` is canonicalization,
+  // which falls through to the mount command.
+  if (name === 'ln' && linkFlags(classified.slice(1), 'sfnv').has('s')) {
+    return handleLn(namespace, session, classified.slice(1))
+  }
+  if (name === 'readlink') {
+    const flags = linkFlags(classified.slice(1), 'fenm')
+    if (!(flags.has('f') || flags.has('e') || flags.has('m'))) {
+      return handleReadlink(namespace, session, classified.slice(1))
+    }
   }
 
   // Default: mount-dispatched command

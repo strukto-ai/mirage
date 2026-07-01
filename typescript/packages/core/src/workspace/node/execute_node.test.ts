@@ -21,6 +21,7 @@ import { NodeType as NT } from '../../shell/types.ts'
 import { MountMode } from '../../types.ts'
 import type { TSNodeLike } from '../expand/variable.ts'
 import type { DispatchFn } from '../executor/cross_mount.ts'
+import { Namespace } from '../mount/namespace.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { Session } from '../session/session.ts'
 import { CommandSpec, Operand, OperandKind, Option } from '../../commands/spec/types.ts'
@@ -38,6 +39,7 @@ function buildDeps(registry: MountRegistry): ExecuteNodeDeps {
   return {
     dispatch,
     registry,
+    namespace: new Namespace(registry, (p) => Promise.resolve(registry.resolve(p))),
     jobTable,
     executeFn,
     agentId: 'test-agent',

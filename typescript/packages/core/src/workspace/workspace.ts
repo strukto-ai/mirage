@@ -741,6 +741,7 @@ export class Workspace {
     const deps = {
       dispatch,
       registry: this.registry,
+      namespace: this.namespace,
       jobTable: this.jobTable,
       executeFn,
       agentId: callAgentId,

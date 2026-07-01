@@ -97,6 +97,10 @@ export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
   )
   const fingerprints: FingerprintEntrySnapshot[] = captureFingerprints(ws.records, ws.registry)
   const liveOnly = liveOnlyMountPrefixes(ws.registry)
+  const symlinks: Record<string, { target: string; mtime: number }> = {}
+  for (const [link, entry] of ws.namespace.symlinks) {
+    symlinks[link] = { target: entry.target, mtime: entry.mtime }
+  }
   return {
     version: FORMAT_VERSION,
     mirage_version: VERSION,
@@ -114,6 +118,7 @@ export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
     jobs,
     fingerprints,
     live_only_mounts: liveOnly,
+    symlinks,
   }
 }
 
@@ -170,6 +175,15 @@ export async function applyStateDict(ws: Workspace, state: WorkspaceStateDict): 
   restoreCache(ws, state)
   await restoreHistory(ws, state)
   restoreJobs(ws, state)
+  restoreSymlinks(ws, state)
+}
+
+function restoreSymlinks(ws: Workspace, state: WorkspaceStateDict): void {
+  const entries = new Map<string, { target: string; mtime: number }>()
+  for (const [link, e] of Object.entries(state.symlinks ?? {})) {
+    entries.set(link, { target: e.target, mtime: e.mtime })
+  }
+  ws.namespace.replaceSymlinks(entries)
 }
 
 function restoreSessions(ws: Workspace, state: WorkspaceStateDict): void {

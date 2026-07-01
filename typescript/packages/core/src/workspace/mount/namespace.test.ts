@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { RAMResource } from '../../resource/ram/ram.ts'
+import { CycleError } from '../../utils/path.ts'
 import { Workspace } from '../workspace.ts'
 
 describe('Namespace facade (addressing)', () => {
@@ -37,6 +38,73 @@ describe('Namespace facade (addressing)', () => {
     const ws = new Workspace({ '/data': new RAMResource() })
     const mount = ws.namespace.mountFor('/data/a.txt')
     expect(mount?.prefix).toBe('/data/')
+    await ws.close()
+  })
+})
+
+describe('Namespace symlink table', () => {
+  it('symlink/readlink round-trip verbatim', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    ws.namespace.symlink('/data/link', '/data/hello.txt', 1)
+    expect(ws.namespace.isLink('/data/link')).toBe(true)
+    expect(ws.namespace.readlink('/data/link')).toBe('/data/hello.txt')
+    await ws.close()
+  })
+
+  it('readlink of a missing link returns null', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    expect(ws.namespace.readlink('/data/nope')).toBeNull()
+    await ws.close()
+  })
+
+  it('stores a relative target verbatim', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    ws.namespace.symlink('/data/link', 'hello.txt', 1)
+    expect(ws.namespace.readlink('/data/link')).toBe('hello.txt')
+    await ws.close()
+  })
+
+  it('unlink removes the link', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    ws.namespace.symlink('/data/link', '/data/hello.txt', 1)
+    expect(ws.namespace.unlink('/data/link')).toBe(true)
+    expect(ws.namespace.isLink('/data/link')).toBe(false)
+    expect(ws.namespace.unlink('/data/link')).toBe(false)
+    await ws.close()
+  })
+
+  it('rename moves the link entry', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    ws.namespace.symlink('/data/a', '/data/hello.txt', 1)
+    expect(ws.namespace.rename('/data/a', '/data/b')).toBe(true)
+    expect(ws.namespace.isLink('/data/a')).toBe(false)
+    expect(ws.namespace.readlink('/data/b')).toBe('/data/hello.txt')
+    await ws.close()
+  })
+
+  it('resolve follows a link to its target mount', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    ws.namespace.symlink('/data/link', '/data/hello.txt', 1)
+    const viaLink = await ws.namespace.resolve('/data/link', true)
+    const viaTarget = await ws.namespace.resolve('/data/hello.txt')
+    expect(viaLink).toEqual(viaTarget)
+    await ws.close()
+  })
+
+  it('resolve without follow keeps the link path', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    ws.namespace.symlink('/data/link', '/data/hello.txt', 1)
+    const noFollow = await ws.namespace.resolve('/data/link', false)
+    const [, spec] = noFollow
+    expect(spec.original).toBe('/data/link')
+    await ws.close()
+  })
+
+  it('resolve throws CycleError on a symlink loop', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    ws.namespace.symlink('/data/a', '/data/b', 1)
+    ws.namespace.symlink('/data/b', '/data/a', 1)
+    await expect(ws.namespace.resolve('/data/a', true)).rejects.toThrow(CycleError)
     await ws.close()
   })
 })

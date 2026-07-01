@@ -64,6 +64,7 @@ import {
 } from '../executor/builtins/index.ts'
 import { handleConnection, handlePipe, handleSubshell } from '../executor/pipes.ts'
 import { handleRedirect } from '../executor/redirect.ts'
+import type { Namespace } from '../mount/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
@@ -77,6 +78,7 @@ type Result = [ByteSource | null, IOResult, ExecutionNode]
 export interface ExecuteNodeDeps {
   dispatch: DispatchFn
   registry: MountRegistry
+  namespace: Namespace
   jobTable: JobTable | null
   executeFn: ExecuteFn
   agentId: string
@@ -122,6 +124,7 @@ export async function executeNode(
       recurse,
       dispatch,
       registry,
+      deps.namespace,
       executeFn,
       node,
       session,

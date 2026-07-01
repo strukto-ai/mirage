@@ -119,4 +119,9 @@ export interface WorkspaceStateDict {
    * (e.g. Gmail, Slack). Replay logs a warning naming these.
    */
   live_only_mounts?: string[]
+  /**
+   * Namespace symlink table: link path -> {target, mtime}. Optional for
+   * backwards compatibility with snapshots that predate symlinks.
+   */
+  symlinks?: Record<string, { target: string; mtime: number }>
 }

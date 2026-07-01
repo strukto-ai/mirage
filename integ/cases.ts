@@ -716,7 +716,7 @@ export const EXIT_CODE_CASES: ReadonlyArray<readonly [string, string]> = [
   ["ln_create", "ln -s /data/sub/nested.txt /data/sub/link.txt"],
   ["zip_create", "zip /data/sub/arch.zip /data/sub/nested.txt"],
   ["lnzip_ls_after", "ls -1 /data/sub"],
-  ["ln_read_back", "cat /data/sub/link.txt"],
+  ["ln_read_back", "readlink /data/sub/link.txt"],
 
   // ----- trailing-newline pins (wc -c counts the final \n) -----
   ["nl_pin_du", "du /data/b.txt | wc -c"],

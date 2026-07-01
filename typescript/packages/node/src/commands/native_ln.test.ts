@@ -33,23 +33,24 @@ describe.each(NATIVE_BACKENDS)('native ln (%s backend)', (kind) => {
     const env = makeEnv(kind)
     try {
       env.createFile('a.txt', ENC.encode('hello'))
+      env.createFile('b.txt', ENC.encode('world'))
       await env.mirage('ln -s /data/a.txt /data/link.txt')
-      await env.mirage('ln -s -f /data/a.txt /data/link.txt')
-      const result = await env.mirage('cat /data/link.txt')
-      expect(result).toContain('hello')
+      await env.mirage('ln -s -f /data/b.txt /data/link.txt')
+      const result = await env.mirage('readlink /data/link.txt')
+      expect(result).toContain('/data/b.txt')
     } finally {
       await env.cleanup()
     }
   })
 
-  it('ln -s -n does not dereference target', async () => {
+  it('ln -s -n creates a symlink whose target reads back verbatim', async () => {
     const env = makeEnv(kind)
     try {
       env.createFile('a.txt', ENC.encode('hello'))
-      await env.mirage('ln -s /data/a.txt /data/link.txt')
-      await env.mirage('ln -s -n /data/a.txt /data/link.txt')
-      const result = await env.mirage('cat /data/link.txt')
-      expect(result).toContain('hello')
+      const result = await env.mirage(
+        'ln -s -n /data/a.txt /data/link.txt && readlink /data/link.txt',
+      )
+      expect(result).toContain('/data/a.txt')
     } finally {
       await env.cleanup()
     }

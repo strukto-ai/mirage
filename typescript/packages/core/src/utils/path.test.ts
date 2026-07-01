@@ -13,7 +13,37 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { expandTilde } from './path.ts'
+import { CycleError, expandTilde, resolveSymlinks } from './path.ts'
+
+describe('resolveSymlinks', () => {
+  it('substitutes the longest matching link prefix', () => {
+    const links = new Map([['/a/link', '/a/real']])
+    expect(resolveSymlinks('/a/link/f.txt', links)).toBe('/a/real/f.txt')
+    expect(resolveSymlinks('/a/link', links)).toBe('/a/real')
+  })
+
+  it('resolves a relative target against the link directory', () => {
+    const links = new Map([['/a/link', 'real']])
+    expect(resolveSymlinks('/a/link', links)).toBe('/a/real')
+  })
+
+  it('respects path-segment boundaries', () => {
+    const links = new Map([['/a/b', '/x']])
+    expect(resolveSymlinks('/a/bc', links)).toBe('/a/bc')
+  })
+
+  it('is identity with no links', () => {
+    expect(resolveSymlinks('/a/b', new Map())).toBe('/a/b')
+  })
+
+  it('throws CycleError on a loop', () => {
+    const links = new Map([
+      ['/a', '/b'],
+      ['/b', '/a'],
+    ])
+    expect(() => resolveSymlinks('/a', links)).toThrow(CycleError)
+  })
+})
 
 describe('expandTilde', () => {
   it('~ alone → home', () => {
