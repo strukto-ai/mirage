@@ -34,13 +34,8 @@ async def readdir(
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
     virtual = path.original
-    if isinstance(path, PathSpec):
-        prefix = path.prefix
-        path = path.directory if path.pattern else path.original
-    if prefix and path.startswith(prefix):
-        rest = path[len(prefix):]
-        if prefix.endswith("/") or rest == "" or rest.startswith("/"):
-            path = rest or "/"
+    prefix = path.prefix
+    path = (path.dir if path.pattern else path).strip_prefix
     key = path.strip("/")
     idx_key = "/" + key if key else "/"
 

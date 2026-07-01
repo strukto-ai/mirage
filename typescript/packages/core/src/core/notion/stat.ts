@@ -17,7 +17,6 @@ import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import type { NotionTransport } from './_client.ts'
 import { getDatabase } from './pages.ts'
 import { parseSegment } from './pathing.ts'
-import { stripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
 
 export interface NotionStatAccessor {
@@ -34,12 +33,7 @@ export async function stat(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<FileStat> {
-  const prefix = path.prefix
-  let p = path.original
-  if (prefix !== '' && p.startsWith(prefix)) {
-    p = p.slice(prefix.length) || '/'
-  }
-  const key = stripSlash(p)
+  const key = path.key
 
   if (key === '' || key === 'pages' || key === 'databases') {
     return new FileStat({ name: key !== '' ? key : '/', type: FileType.DIRECTORY })

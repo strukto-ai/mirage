@@ -20,7 +20,6 @@ import { listLabels } from './labels.ts'
 import type { GmailMessageRaw } from './messages.ts'
 import { extractAttachments, extractHeader, getMessageRaw, listMessages } from './messages.ts'
 import { GoogleFileSuffix } from '../google/drive.ts'
-import { stripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
 
 export function isDirName(child: string): boolean {
@@ -65,10 +64,7 @@ export async function readdir(
   index?: IndexCacheStore,
 ): Promise<string[]> {
   const prefix = path.prefix
-  const raw = path.pattern !== null ? path.directory : path.original
-  let p = raw
-  if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
-  const key = stripSlash(p)
+  const key = (path.pattern !== null ? path.dir : path).key
   const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
   const parts = key === '' ? [] : key.split('/')
   const depth = parts.length

@@ -21,7 +21,7 @@ import { readSpreadsheet } from '../gsheets/read.ts'
 import { readPresentation } from '../gslides/read.ts'
 import type { TokenManager } from '../google/_client.ts'
 import { DIRECTORY_RESOURCE_TYPES, readdir } from './readdir.ts'
-import { rstripSlash, stripSlash } from '../../utils/slash.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
 
 function eisdir(p: string): Error {
@@ -40,9 +40,7 @@ export async function read(
   index?: IndexCacheStore,
 ): Promise<Uint8Array> {
   const prefix = path.prefix
-  let p = path.original
-  if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
-  const key = stripSlash(p)
+  const key = path.key
   if (index === undefined) throw enoent(path.original)
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
   let result = await index.get(virtualKey)

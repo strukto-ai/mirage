@@ -17,7 +17,6 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { readdir as coreReaddir } from './readdir.ts'
 import { listLabels } from './labels.ts'
-import { stripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
 
 function guessType(name: string): FileType {
@@ -42,9 +41,7 @@ export async function stat(
   index?: IndexCacheStore,
 ): Promise<FileStat> {
   const prefix = path.prefix
-  let p = path.original
-  if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
-  const key = stripSlash(p)
+  const key = path.key
   if (key === '') return new FileStat({ name: '/', type: FileType.DIRECTORY })
 
   if (index === undefined) throw enoent(path.original)

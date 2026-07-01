@@ -43,15 +43,8 @@ async def read(accessor: RAMAccessor,
                index: IndexCacheStore = None) -> bytes:
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
-    virtual = path.original if isinstance(path, PathSpec) else path
-    if isinstance(path, PathSpec):
-        prefix = path.prefix
-        path = path.original
-    if prefix and path.startswith(prefix):
-        rest = path[len(prefix):]
-        if prefix.endswith("/") or rest == "" or rest.startswith("/"):
-            path = rest or "/"
+    virtual = path.original
     try:
-        return await read_bytes(accessor, path)
+        return await read_bytes(accessor, path.strip_prefix)
     except FileNotFoundError as exc:
         raise enoent(virtual) from exc

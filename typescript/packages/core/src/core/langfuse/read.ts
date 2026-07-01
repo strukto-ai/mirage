@@ -16,7 +16,6 @@ import type { LangfuseAccessor } from '../../accessor/langfuse.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { fetchDatasetItems, fetchDatasetRuns, fetchPrompt, fetchTrace } from './_client.ts'
-import { stripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
 
 const ENC = new TextEncoder()
@@ -36,12 +35,7 @@ export async function read(
   path: PathSpec,
   _index?: IndexCacheStore,
 ): Promise<Uint8Array> {
-  const prefix = path.prefix
-  let p = path.original
-  if (prefix !== '' && p.startsWith(prefix)) {
-    p = p.slice(prefix.length) || '/'
-  }
-  const key = stripSlash(p)
+  const key = path.key
   if (key === '') throw enoent(path)
   const parts = key.split('/')
   for (const part of parts) {

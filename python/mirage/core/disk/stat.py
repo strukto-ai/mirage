@@ -36,14 +36,9 @@ async def stat(accessor: DiskAccessor,
                index: IndexCacheStore = None) -> FileStat:
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
+    virtual = path.original
     if isinstance(path, PathSpec):
-        prefix = path.prefix
-        path = path.original
-    virtual = path
-    if prefix and path.startswith(prefix):
-        rest = path[len(prefix):]
-        if prefix.endswith("/") or rest == "" or rest.startswith("/"):
-            path = rest or "/"
+        path = path.strip_prefix
     root = accessor.root
     p = _resolve(root, path)
     if not await aio_path.exists(p):

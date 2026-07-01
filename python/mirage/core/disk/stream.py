@@ -36,14 +36,9 @@ async def read_stream(accessor: DiskAccessor,
                       chunk_size: int = 8192) -> AsyncIterator[bytes]:
     if isinstance(path, str):
         path = PathSpec(original=path, directory=path)
+    virtual = path.original
     if isinstance(path, PathSpec):
-        prefix = path.prefix
-        path = path.original
-    virtual = path
-    if prefix and path.startswith(prefix):
-        rest = path[len(prefix):]
-        if prefix.endswith("/") or rest == "" or rest.startswith("/"):
-            path = rest or "/"
+        path = path.strip_prefix
     root = accessor.root
     rec = record_stream("read", path, "disk")
     p = _resolve(root, path)

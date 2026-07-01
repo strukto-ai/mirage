@@ -18,7 +18,6 @@ import type { NotionTransport } from './_client.ts'
 import { normalizeDatabase, normalizePage, toJsonBytes } from './normalize.ts'
 import { getBlockTree, getDatabase, getPage } from './pages.ts'
 import { parseSegment } from './pathing.ts'
-import { stripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
 
 export interface NotionReadAccessor {
@@ -31,12 +30,7 @@ export async function read(
   _index?: IndexCacheStore,
 ): Promise<Uint8Array> {
   void _index
-  const prefix = path.prefix
-  let p = path.original
-  if (prefix !== '' && p.startsWith(prefix)) {
-    p = p.slice(prefix.length) || '/'
-  }
-  const key = stripSlash(p)
+  const key = path.key
   if (key === '') throw enoent(path.original)
   const parts = key.split('/')
   const last = parts[parts.length - 1] ?? ''

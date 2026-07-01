@@ -280,3 +280,31 @@ describe('PathSpec immutability', () => {
     expect(Object.isFrozen(p)).toBe(true)
   })
 })
+
+describe('PathSpec.stripPrefix / key', () => {
+  it('strips the mount prefix at a path boundary', () => {
+    const p = new PathSpec({ original: '/data/sub/x.txt', directory: '/data/sub', prefix: '/data' })
+    expect(p.stripPrefix).toBe('/sub/x.txt')
+    expect(p.key).toBe('sub/x.txt')
+  })
+
+  it('does not strip a sibling that only shares the prefix as a string', () => {
+    // `/data` must not be stripped from `/database`, which shares it as a
+    // string prefix but not a path prefix.
+    const p = new PathSpec({ original: '/database/x.txt', directory: '/database', prefix: '/data' })
+    expect(p.stripPrefix).toBe('/database/x.txt')
+    expect(p.key).toBe('database/x.txt')
+  })
+
+  it('reduces to "/" and empty key at the mount root', () => {
+    const p = new PathSpec({ original: '/data', directory: '/data', prefix: '/data' })
+    expect(p.stripPrefix).toBe('/')
+    expect(p.key).toBe('')
+  })
+
+  it('is identity without a prefix', () => {
+    const p = new PathSpec({ original: '/x.txt', directory: '/' })
+    expect(p.stripPrefix).toBe('/x.txt')
+    expect(p.key).toBe('x.txt')
+  })
+})

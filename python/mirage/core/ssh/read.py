@@ -33,12 +33,7 @@ async def read_bytes(accessor: SSHAccessor,
         path = PathSpec(original=path, directory=path)
     virtual = path.original
     if isinstance(path, PathSpec):
-        prefix = path.prefix
-        path = path.original
-    if prefix and path.startswith(prefix):
-        rest = path[len(prefix):]
-        if prefix.endswith("/") or rest == "" or rest.startswith("/"):
-            path = rest or "/"
+        path = path.strip_prefix
     config = accessor.config
     sftp = await accessor.sftp()
     start_ms = int(time.monotonic() * 1000)

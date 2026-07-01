@@ -17,7 +17,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
 import { SLIDES_API_BASE, type TokenManager, googleGet } from '../google/_client.ts'
 import { readdir } from './readdir.ts'
-import { rstripSlash, stripSlash } from '../../utils/slash.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
 
 const ENC = new TextEncoder()
@@ -43,9 +43,7 @@ export async function read(
   index?: IndexCacheStore,
 ): Promise<Uint8Array> {
   const prefix = path.prefix
-  let p = path.original
-  if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
-  const key = stripSlash(p)
+  const key = path.key
   if (index === undefined) throw enoent(path.original)
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
   let result = await index.get(virtualKey)

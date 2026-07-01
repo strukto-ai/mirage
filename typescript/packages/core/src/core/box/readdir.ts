@@ -17,7 +17,7 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
 import { listFolderItems, type BoxItem } from './api.ts'
-import { rstripSlash, stripSlash } from '../../utils/slash.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 
 const ROOT_FOLDER_ID = '0'
 
@@ -62,10 +62,7 @@ export async function readdir(
   index?: IndexCacheStore,
 ): Promise<string[]> {
   const prefix = path.prefix
-  const raw = path.pattern !== null ? path.directory : path.original
-  let p = raw
-  if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
-  const key = stripSlash(p)
+  const key = (path.pattern !== null ? path.dir : path).key
   const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
 
   if (index !== undefined) {

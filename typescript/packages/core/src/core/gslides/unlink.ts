@@ -16,7 +16,6 @@ import { invalidateAfterUnlink } from '../../cache/context.ts'
 import type { GSlidesAccessor } from '../../accessor/gslides.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
-import { stripSlash } from '../../utils/slash.ts'
 import { deleteFile } from '../google/drive.ts'
 import { readdir as coreReaddir } from './readdir.ts'
 import { enoent } from '../../utils/errors.ts'
@@ -35,9 +34,7 @@ export async function unlink(
   index?: IndexCacheStore,
 ): Promise<void> {
   const prefix = path.prefix
-  let p = path.original
-  if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
-  const key = stripSlash(p)
+  const key = path.key
   if (VIRTUAL_DIRS.has(key)) throw eisdir(path.original)
   if (index === undefined) throw enoent(path.original)
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`

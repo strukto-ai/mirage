@@ -17,7 +17,6 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { listFolder, type DropboxEntry } from './api.ts'
-import { stripSlash } from '../../utils/slash.ts'
 
 function resourceTypeFor(entry: DropboxEntry): string {
   if (entry['.tag'] === 'folder') return 'dropbox/folder'
@@ -35,10 +34,7 @@ export async function readdir(
   index?: IndexCacheStore,
 ): Promise<string[]> {
   const prefix = path.prefix
-  const raw = path.pattern !== null ? path.directory : path.original
-  let p = raw
-  if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
-  const key = stripSlash(p)
+  const key = (path.pattern !== null ? path.dir : path).key
   const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
 
   if (index !== undefined) {

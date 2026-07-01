@@ -16,7 +16,6 @@ import type { TrelloAccessor } from '../../accessor/trello.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { readdir as coreReaddir } from './readdir.ts'
-import { stripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
 
 const VIRTUAL_DIRS = new Set(['', 'workspaces'])
@@ -60,11 +59,7 @@ export async function stat(
   index?: IndexCacheStore,
 ): Promise<FileStat> {
   const prefix = path.prefix
-  let p = path.original
-  if (prefix !== '' && p.startsWith(prefix)) {
-    p = p.slice(prefix.length) || '/'
-  }
-  const key = stripSlash(p)
+  const key = path.key
   const virtualKey = makeVirtualKey(prefix, key)
 
   if (VIRTUAL_DIRS.has(key)) {

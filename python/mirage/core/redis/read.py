@@ -47,12 +47,7 @@ async def read(
         path = PathSpec(original=path, directory=path)
     virtual = path.original if isinstance(path, PathSpec) else path
     if isinstance(path, PathSpec):
-        prefix = path.prefix
-        path = path.original
-    if prefix and path.startswith(prefix):
-        rest = path[len(prefix):]
-        if prefix.endswith("/") or rest == "" or rest.startswith("/"):
-            path = rest or "/"
+        path = path.strip_prefix
     try:
         return await read_bytes(accessor, path)
     except FileNotFoundError as exc:

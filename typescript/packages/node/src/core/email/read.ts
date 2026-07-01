@@ -37,9 +37,7 @@ export async function read(
   index?: IndexCacheStore,
 ): Promise<Uint8Array> {
   const prefix = path.prefix
-  let p = path.original
-  if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
-  const key = stripSlash(p)
+  const key = path.key
   if (index === undefined) throw enoent(path.original)
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
   const result = await index.get(virtualKey)

@@ -15,7 +15,7 @@
 import pytest
 from pydantic import ValidationError
 
-from mirage.types import Aggr, CommandSafeguard, FileStat, OnExceed
+from mirage.types import Aggr, CommandSafeguard, FileStat, OnExceed, PathSpec
 
 
 def test_filestat_defaults():
@@ -85,3 +85,33 @@ def test_every_field_declares_an_aggr_rule():
         assert any(
             isinstance(m, Aggr)
             for m in field.metadata), (f"field {name!r} has no Aggr rule")
+
+
+def test_pathspec_strip_prefix_and_key():
+    p = PathSpec(original="/data/sub/x.txt",
+                 directory="/data/sub",
+                 prefix="/data")
+    assert p.strip_prefix == "/sub/x.txt"
+    assert p.key == "sub/x.txt"
+
+
+def test_pathspec_prefix_respects_path_boundary():
+    # `/data` must not be stripped from a sibling like `/database` that only
+    # shares it as a string prefix, not a path prefix.
+    p = PathSpec(original="/database/x.txt",
+                 directory="/database",
+                 prefix="/data")
+    assert p.strip_prefix == "/database/x.txt"
+    assert p.key == "database/x.txt"
+
+
+def test_pathspec_key_at_mount_root():
+    p = PathSpec(original="/data", directory="/data", prefix="/data")
+    assert p.strip_prefix == "/"
+    assert p.key == ""
+
+
+def test_pathspec_key_without_prefix():
+    p = PathSpec(original="/x.txt", directory="/")
+    assert p.strip_prefix == "/x.txt"
+    assert p.key == "x.txt"

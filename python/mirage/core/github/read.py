@@ -43,13 +43,8 @@ async def read(
         path = PathSpec(original=path, directory=path)
     virtual = path.original
     if isinstance(path, PathSpec):
-        prefix = path.prefix
-        path = path.original
+        path = path.strip_prefix
 
-    if prefix and path.startswith(prefix):
-        rest = path[len(prefix):]
-        if prefix.endswith("/") or rest == "" or rest.startswith("/"):
-            path = rest or "/"
     key = "/" + path.strip("/")
     if index is None:
         raise enoent(virtual)
