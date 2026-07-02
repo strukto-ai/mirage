@@ -2077,6 +2077,7 @@ exit=0
 arch.zip
 deep
 nested.txt
+link.txt
 === ln_read_back ===
 exit=0
 /data/sub/nested.txt
@@ -2094,7 +2095,7 @@ exit=0
 126
 === nl_pin_ls ===
 exit=0
-25
+34
 === nl_pin_wc ===
 exit=0
 14
@@ -2137,6 +2138,45 @@ exit=1
 exit=1
 === sleep_infinity ===
 exit=1
+=== sym_setup ===
+exit=0
+=== sym_ln ===
+exit=0
+=== sym_cat_follow ===
+exit=0
+alpha
+=== sym_grep_follow ===
+exit=0
+alpha
+=== sym_write_through ===
+exit=0
+beta
+=== sym_ls_f ===
+exit=0
+t.txt
+l.txt@
+=== sym_ls_long_arrow ===
+exit=0
+l	-	-	l.txt -> /data/symd/t.txt
+=== sym_dirlink_read ===
+exit=0
+beta
+=== sym_mv_rename ===
+exit=0
+/data/symd/t.txt
+=== sym_cp_follow ===
+exit=0
+beta
+=== sym_rm_link ===
+exit=1
+=== sym_dangle_cat ===
+exit=1
+cat: /data/symd/dangle: No such file or directory
+=== sym_eloop_cat ===
+exit=1
+cat: /data/lp1: Too many levels of symbolic links
+=== sym_cleanup ===
+exit=0
 === nf_cat ===
 exit=1
 cat: /data/missing.txt: No such file or directory

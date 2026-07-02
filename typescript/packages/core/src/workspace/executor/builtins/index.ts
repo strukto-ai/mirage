@@ -15,7 +15,15 @@
 export type { ExecuteStringFn, Result } from './scope.ts'
 export { scopePath, toScope } from './scope.ts'
 export { handleCd } from './dirs.ts'
-export { handleLn, handleReadlink, linkFlags } from './links.ts'
+export {
+  NO_FOLLOW_COMMANDS,
+  followPaths,
+  handleLn,
+  handleReadlink,
+  linkFlags,
+  prepareMv,
+  stripLinkOperands,
+} from './links.ts'
 export {
   handleExport,
   handleLocal,

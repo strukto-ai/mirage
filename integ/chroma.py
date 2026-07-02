@@ -212,6 +212,14 @@ CASES: list[tuple[str, str]] = [
     ("du_guides", "du {root}guides"),
     ("du_root", "du {root}"),
     ("du_c_multi", "du -c {root}guides {root}policies"),
+    # symlink into the mount: links are namespace state, so they work on a
+    # read-only backend (no backend write happens)
+    ("sym_ln", "ln -s {root}guides/auth.md {root}meta_link"),
+    ("sym_readlink", "readlink {root}meta_link"),
+    ("sym_cat", "cat {root}meta_link"),
+    ("sym_wc", "wc -l {root}meta_link"),
+    ("sym_ls", "ls -F {root} | grep meta_link"),
+    ("sym_rm", "rm {root}meta_link && ls {root}"),
 ]
 
 

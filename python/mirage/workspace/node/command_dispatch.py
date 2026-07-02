@@ -22,6 +22,7 @@ from mirage.io.stream import materialize
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import ShellBuiltin as SB
 from mirage.types import PathSpec
+from mirage.utils.path import CycleError
 from mirage.workspace.executor.command import handle_command
 from mirage.workspace.executor.control import BreakSignal, ContinueSignal
 from mirage.workspace.expand import classify_parts, expand_node, expand_parts
@@ -35,11 +36,12 @@ from mirage.shell.helpers import (  # isort: skip
     ProcessSubDirection, get_command_name, get_parts,
     get_process_sub_direction, get_text)
 from mirage.workspace.executor.builtins import (  # isort: skip
-    handle_bash, handle_cd, handle_echo, handle_eval, handle_export,
-    handle_history, handle_ln, handle_local, handle_man, handle_printenv,
-    handle_printf, handle_read, handle_readlink, handle_return, handle_set,
-    handle_shift, handle_sleep, handle_source, handle_test, handle_trap,
-    handle_unset, handle_whoami, link_flags)
+    NO_FOLLOW_COMMANDS, follow_paths, handle_bash, handle_cd, handle_echo,
+    handle_eval, handle_export, handle_history, handle_ln, handle_local,
+    handle_man, handle_printenv, handle_printf, handle_read, handle_readlink,
+    handle_return, handle_set, handle_shift, handle_sleep, handle_source,
+    handle_test, handle_trap, handle_unset, handle_whoami, link_flags,
+    prepare_mv, strip_link_operands)
 
 _UNSUPPORTED_BUILTINS = frozenset({
     "bg",
@@ -439,12 +441,50 @@ async def _dispatch_command_body(
                                    & {"f", "e", "m"}):
         return handle_readlink(namespace, session, classified[1:])
 
+    # ── symlink-aware dispatch: reads follow links (open(2)); rm/mv act
+    #    on the link entry itself (lstat semantics) ──
+    post_unlink: str | None = None
+    if namespace.symlinks:
+        try:
+            if name == "rm":
+                rest, removed = strip_link_operands(namespace, classified[1:])
+                classified = classified[:1] + rest
+                if removed and not any(isinstance(a, PathSpec) for a in rest):
+                    return None, IOResult(), ExecutionNode(command=name,
+                                                           exit_code=0)
+            elif name == "mv":
+                rest, post_unlink, early = await prepare_mv(
+                    namespace, dispatch, classified[1:])
+                classified = classified[:1] + rest
+                if early is not None:
+                    return early
+            elif name not in NO_FOLLOW_COMMANDS:
+                classified = classified[:1] + follow_paths(
+                    namespace, classified[1:])
+        except CycleError as exc:
+            err = (f"{name}: {exc}: "
+                   f"Too many levels of symbolic links\n").encode()
+            return None, IOResult(exit_code=1,
+                                  stderr=err), ExecutionNode(command=name,
+                                                             exit_code=1,
+                                                             stderr=err)
+
     # ── mount command (default) ─────────────────
-    return await handle_command(recurse,
-                                dispatch,
-                                registry,
-                                classified,
-                                session,
-                                stdin,
-                                call_stack,
-                                job_table=job_table)
+    stdout, io, exec_node = await handle_command(recurse,
+                                                 dispatch,
+                                                 registry,
+                                                 classified,
+                                                 session,
+                                                 stdin,
+                                                 call_stack,
+                                                 job_table=job_table,
+                                                 namespace=namespace)
+
+    if io.exit_code == 0 and namespace.symlinks:
+        if name == "rm":
+            for item in classified[1:]:
+                if isinstance(item, PathSpec):
+                    namespace.purge_under(item.virtual)
+        if post_unlink is not None:
+            namespace.unlink(post_unlink)
+    return stdout, io, exec_node

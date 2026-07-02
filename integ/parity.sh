@@ -77,6 +77,17 @@ probe() {
   echo "session.default_pwd=$($cli execute -w pw -c 'pwd' </dev/null | sout)"
   echo "session.s2_pwd=$($cli execute -w pw -s s2 -c 'pwd' </dev/null | sout)"
 
+  # ── symlinks: namespace links follow on read; rm/mv act on the entry ──
+  $cli execute -w pw -c 'echo sym1 > /data/s.txt && ln -s /data/s.txt /data/link.txt' </dev/null >/dev/null
+  echo "sym.readlink=$($cli execute -w pw -c 'readlink /data/link.txt' </dev/null | sout)"
+  echo "sym.cat_follow=$($cli execute -w pw -c 'cat /data/link.txt' </dev/null | sout)"
+  echo "sym.write_through=$($cli execute -w pw -c 'echo via >> /data/link.txt && tail -n 1 /data/s.txt' </dev/null | sout)"
+  echo "sym.ls_arrow=$($cli execute -w pw -c 'ls -l /data | grep -- "->"' </dev/null | sout)"
+  echo "sym.mv_entry=$($cli execute -w pw -c 'mv /data/link.txt /data/moved.txt && readlink /data/moved.txt' </dev/null | sout)"
+  echo "sym.rm_entry=$($cli execute -w pw -c 'rm /data/moved.txt; readlink /data/moved.txt' </dev/null | sexit)"
+  echo "sym.dangle=$($cli execute -w pw -c 'ln -s /data/none /data/d.txt; cat /data/d.txt' </dev/null | sexit)"
+  echo "sym.eloop=$($cli execute -w pw -c 'ln -s /data/l2 /data/l1 && ln -s /data/l1 /data/l2; cat /data/l1 2>&1' </dev/null | sout)"
+
   $cli workspace delete pw >/dev/null 2>&1 </dev/null || true
 
   # ── versioning: commit/branch/log/clone/checkout/diff (git-backed) ──
@@ -179,6 +190,14 @@ expect "clone.at_first" "one"
 expect "version.checkout_first" "one"
 expect 'version.diff' '{"added":[],"modified":["a.txt"],"deleted":[]}'
 expect "fuse.operates" "alive"
+expect "sym.readlink" "/data/s.txt"
+expect "sym.cat_follow" "sym1"
+expect "sym.write_through" "via"
+expect "sym.ls_arrow" "$(printf 'l\t-\t-\tlink.txt -> /data/s.txt')"
+expect "sym.mv_entry" "/data/s.txt"
+expect "sym.rm_entry" "1"
+expect "sym.dangle" "1"
+expect "sym.eloop" "cat: /data/l1: Too many levels of symbolic links"
 
 if [ "$fail" != "0" ]; then
   echo

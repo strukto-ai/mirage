@@ -97,3 +97,12 @@ grep: /mongodb/__nf_missing__.txt: No such file or directory
 # ---- tail -f change stream (live insert via PyMongo async watch) ----
 === tail_f_change_stream ===
 "title": "live_insert"
+
+# symlink to the database meta file (namespace links; read-only backend)
+=== sym_ln ===
+=== sym_readlink ===
+/mongodb/mirage_integ/database.json
+=== sym_cat ===
+=== sym_ls ===
+meta_link@
+=== sym_rm ===

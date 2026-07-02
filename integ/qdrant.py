@@ -70,6 +70,13 @@ CASES: list[tuple[str, str]] = [
     ("du_group", "du {root}cat"),
     ("du_root", "du {root}"),
     ("du_c_multi", "du -c {root}cat {root}dog"),
+    # symlink into the mount (namespace state; works on a read-only backend)
+    ("sym_ln", "ln -s {root}cat/big/1.json {root}meta_link"),
+    ("sym_readlink", "readlink {root}meta_link"),
+    ("sym_cat", "cat {root}meta_link"),
+    ("sym_grep", "grep label {root}meta_link"),
+    ("sym_ls", "ls -F {root} | grep meta_link"),
+    ("sym_rm", "rm {root}meta_link && ls {root}"),
 ]
 
 EXIT_CODE_CASES: list[tuple[str, str]] = [

@@ -57,6 +57,16 @@ CASES: list[tuple[str, str, str]] = [
     ("bash_history_has_synthetic", "default",
      "grep -c 'synthetic entry one' /.bash_history"),
     ("find_view_by_name", "default", "find /.bash_history -name '*bash*'"),
+    # ----- symlinks: commands record as typed (the link path, not the
+    #       followed target); the follow happens below the recorder -----
+    ("sym_hist_setup", "default",
+     "echo view > /data/ht.txt && ln -s /data/ht.txt /data/hlink"),
+    ("sym_hist_cat", "default", "cat /data/hlink"),
+    ("sym_hist_shows_typed", "default", "history 2"),
+    ("sym_hist_file_has_link_path", "default",
+     "grep -c 'cat /data/hlink' /.bash_history"),
+    ("sym_hist_no_target_leak", "default",
+     "grep -c 'cat /data/ht.txt' /.bash_history"),
 ]
 
 EXIT_CODE_CASES: list[tuple[str, str, str]] = [

@@ -51,9 +51,12 @@ export const MAX_SYMLINK_HOPS = 40
 // `a -> a/x`). Command boundaries render this as the GNU strerror text
 // "Too many levels of symbolic links".
 export class CycleError extends Error {
+  readonly path: string
+
   constructor(path: string) {
     super(`too many levels of symbolic links: ${path}`)
     this.name = 'CycleError'
+    this.path = path
   }
 }
 

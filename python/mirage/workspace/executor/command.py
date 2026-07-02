@@ -38,6 +38,7 @@ from mirage.workspace.executor.fs_error import format_fs_error
 from mirage.workspace.executor.jobs import (handle_jobs, handle_kill,
                                             handle_ps, handle_wait)
 from mirage.workspace.mount import MountCommandUnsupported, MountRegistry
+from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import Session, assert_mount_allowed
 from mirage.workspace.types import ExecutionNode
 
@@ -240,6 +241,7 @@ async def handle_command(
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     job_table: JobTable | None = None,
+    namespace: Namespace | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute a simple command.
 
@@ -452,6 +454,9 @@ async def handle_command(
     if cmd_name == "ls" and io.exit_code == 0:
         stdout = await _inject_child_mounts(stdout, registry, paths,
                                             flag_kwargs, session.cwd)
+        if namespace is not None and namespace.symlinks:
+            stdout = await _inject_links(stdout, namespace, paths, flag_kwargs,
+                                         session.cwd)
 
     if cmd_name == "find":
         stdout, action_err = await _apply_find_actions(stdout, flag_kwargs,
@@ -477,6 +482,60 @@ async def handle_command(
     io.stderr = maybe_with_timeout(io.stderr, io.safeguard, cmd_name)
 
     return stdout, io, await _exec_node(cmd_str, io)
+
+
+async def _inject_links(
+    stdout: ByteSource | None,
+    namespace: Namespace,
+    paths: list[PathSpec],
+    flag_kwargs: dict,
+    cwd: str,
+) -> ByteSource | None:
+    """Append symlink entries living under the listed directory.
+
+    Links are namespace state, invisible to backend readdir, so ``ls``
+    surfaces them the same way child mounts are surfaced. Long form
+    renders GNU-style ``name -> target``.
+
+    Args:
+        stdout (ByteSource | None): backend ls output.
+        namespace (Namespace): addressing authority holding the link table.
+        paths (list[PathSpec]): positional ls operands.
+        flag_kwargs (dict): parsed ls flags.
+        cwd (str): current working directory fallback operand.
+    """
+    if flag_kwargs.get("d") is True or flag_kwargs.get("R") is True:
+        return stdout
+    if len(paths) > 1:
+        return stdout
+    listed = paths[0].virtual if paths else cwd
+    links = namespace.links_under(listed)
+    if not links:
+        return stdout
+
+    existing_bytes = await materialize(stdout) if stdout is not None else b""
+    existing = existing_bytes.decode("utf-8")
+    long_form = flag_kwargs.get("args_l") is True
+    classify = flag_kwargs.get("F") is True
+    present: set[str] = set()
+    for line in existing.split("\n"):
+        if line == "":
+            continue
+        name = line.split("\t")[-1] if long_form else line.rstrip("/*@|=")
+        if name:
+            present.add(name)
+    extras: list[str] = []
+    for name in sorted(links):
+        if name in present:
+            continue
+        if long_form:
+            extras.append(f"l\t-\t-\t{name} -> {links[name]}")
+        else:
+            extras.append(f"{name}@" if classify else name)
+    if not extras:
+        return stdout
+    sep = "" if existing == "" or existing.endswith("\n") else "\n"
+    return (existing + sep + "\n".join(extras) + "\n").encode("utf-8")
 
 
 async def _inject_child_mounts(

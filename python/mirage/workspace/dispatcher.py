@@ -25,6 +25,10 @@ from mirage.workspace.session import assert_mount_allowed
 _DISPATCH_READ_OPS = frozenset({"read", "read_bytes"})
 _DISPATCH_WRITE_OPS = frozenset(
     {"write", "write_bytes", "append", "unlink", "create", "truncate"})
+# Ops that act on the path entry itself (lstat semantics); every other op
+# follows symlinks before mount lookup, so reads/writes go to the target
+# and the cache keys under the real path.
+_NO_FOLLOW_OPS = frozenset({"unlink", "rename", "rmdir"})
 
 
 class Dispatcher:
@@ -48,6 +52,10 @@ class Dispatcher:
 
     async def dispatch(self, op: str, path: PathSpec,
                        **kwargs: Any) -> tuple[Any, IOResult]:
+        if op not in _NO_FOLLOW_OPS:
+            followed = self._namespace.follow(path.virtual)
+            if followed != path.virtual:
+                path = PathSpec.from_str_path(followed)
         mount = self._namespace.mount_for(path.virtual)
         assert_mount_allowed(mount.prefix)
         caches_reads = mount.resource.caches_reads

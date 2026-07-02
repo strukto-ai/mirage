@@ -822,6 +822,28 @@ EXIT_CODE_CASES: list[tuple[str, str]] = [
     ("sleep_no_operand", "sleep"),
     ("sleep_negative", "sleep -1"),
     ("sleep_infinity", "sleep Infinity"),
+
+    # ----- symlink follow-on-read (namespace links) -----
+    ("sym_setup", "mkdir -p /data/symd && echo alpha > /data/symd/t.txt"),
+    ("sym_ln", "ln -s /data/symd/t.txt /data/symd/l.txt"),
+    ("sym_cat_follow", "cat /data/symd/l.txt"),
+    ("sym_grep_follow", "grep alpha /data/symd/l.txt"),
+    ("sym_write_through",
+     "echo beta > /data/symd/l.txt && cat /data/symd/t.txt"),
+    ("sym_ls_f", "ls -F /data/symd"),
+    ("sym_ls_long_arrow", "ls -l /data/symd | grep -- '->'"),
+    ("sym_dirlink_read", "ln -s /data/symd /data/dl && cat /data/dl/t.txt"),
+    ("sym_mv_rename",
+     "mv /data/symd/l.txt /data/symd/m.txt && readlink /data/symd/m.txt"),
+    ("sym_cp_follow",
+     "cp /data/symd/m.txt /data/symd/copy.txt && cat /data/symd/copy.txt"),
+    ("sym_rm_link", "rm /data/symd/m.txt && readlink /data/symd/m.txt 2>&1"),
+    ("sym_dangle_cat",
+     "ln -s /data/symd/none /data/symd/dangle && cat /data/symd/dangle 2>&1"),
+    ("sym_eloop_cat", "ln -s /data/lp2 /data/lp1 && ln -s /data/lp1 /data/lp2"
+     " && cat /data/lp1 2>&1"),
+    ("sym_cleanup", "rm /data/symd/dangle /data/lp1 /data/lp2 /data/dl"
+     " && rm -r /data/symd"),
 ]
 
 # Not-found errors must always show the full virtual path the user typed

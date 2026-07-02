@@ -69,6 +69,12 @@ const CASES: ReadonlyArray<readonly [string, string]> = [
   ["wc_l_view", `wc -l ${MOUNT}/public/views/recent_books/rows.jsonl`],
   ["safeguard_cat_truncates", `cat ${MOUNT}/public/tables/books/rows.jsonl`],
   ["safeguard_cat_pipe_uncapped", `cat ${MOUNT}/public/tables/books/rows.jsonl | wc -l`],
+  // symlink into the mount (namespace state; works on a read-only backend)
+  ["sym_ln", `ln -s ${MOUNT}/public/tables/books/schema.json ${MOUNT}/meta_link`],
+  ["sym_readlink", `readlink ${MOUNT}/meta_link`],
+  ["sym_cat", `cat ${MOUNT}/meta_link`],
+  ["sym_ls", `ls -F ${MOUNT} | grep meta_link`],
+  ["sym_rm", `rm ${MOUNT}/meta_link && ls ${MOUNT}`],
 ];
 
 async function seed(client: pg.Client): Promise<void> {

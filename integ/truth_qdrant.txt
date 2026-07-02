@@ -84,6 +84,19 @@ a big orange cat
 160	/db/cat
 160	/db/dog
 320	total
+=== sym_ln ===
+
+=== sym_readlink ===
+/db/cat/big/1.json
+=== sym_cat ===
+{"label":"cat","kind":"big","name":"a big orange cat","id":1}
+=== sym_grep ===
+{"label":"cat","kind":"big","name":"a big orange cat","id":1}
+=== sym_ls ===
+meta_link@
+=== sym_rm ===
+cat
+dog
 === grep_q_match ===
 exit=0
 === grep_q_no_match ===

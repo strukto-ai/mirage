@@ -82,6 +82,53 @@ class Namespace:
         self._symlinks[dst] = entry
         return True
 
+    def follow(self, path: str) -> str:
+        """Return ``path`` with all symlink prefixes resolved.
+
+        Identity when the table is empty or nothing matches.
+
+        Args:
+            path (str): absolute virtual path.
+
+        Raises:
+            CycleError: when resolution exceeds the hop limit (ELOOP).
+        """
+        if not self._symlinks:
+            return path
+        return resolve_symlinks(path, self.symlink_targets())
+
+    def links_under(self, directory: str) -> dict[str, str]:
+        """Links living directly under a directory.
+
+        Args:
+            directory (str): absolute virtual directory path.
+
+        Returns:
+            dict[str, str]: link basename to target, for entries whose
+            parent is exactly ``directory``.
+        """
+        base = directory.rstrip("/") + "/"
+        out: dict[str, str] = {}
+        for link, entry in self._symlinks.items():
+            if link.startswith(base) and "/" not in link[len(base):]:
+                out[link[len(base):]] = entry.target
+        return out
+
+    def purge_under(self, directory: str) -> int:
+        """Drop every link entry under a directory (``rm -r`` semantics).
+
+        Args:
+            directory (str): absolute virtual directory path being removed.
+
+        Returns:
+            int: number of entries dropped.
+        """
+        base = directory.rstrip("/") + "/"
+        doomed = [link for link in self._symlinks if link.startswith(base)]
+        for link in doomed:
+            del self._symlinks[link]
+        return len(doomed)
+
     def resolve(self,
                 path: str,
                 *,

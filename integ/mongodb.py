@@ -127,6 +127,12 @@ CASES: list[tuple[str, str]] = [
      f"cat {MOUNT}/{DB}/collections/books/documents.jsonl"),
     ("safeguard_cat_pipe_uncapped",
      f"cat {MOUNT}/{DB}/collections/books/documents.jsonl | wc -l"),
+    # symlink to the database meta file (namespace state; read-only backend)
+    ("sym_ln", f"ln -s {MOUNT}/{DB}/database.json {MOUNT}/meta_link"),
+    ("sym_readlink", f"readlink {MOUNT}/meta_link"),
+    ("sym_cat", f"cat {MOUNT}/meta_link"),
+    ("sym_ls", f"ls -F {MOUNT} | grep meta_link"),
+    ("sym_rm", f"rm {MOUNT}/meta_link && ls {MOUNT}"),
 ]
 
 

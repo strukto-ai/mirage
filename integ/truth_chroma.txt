@@ -126,6 +126,22 @@ Welcome to Acme. This quickstart gets you running fast.
 370	/knowledge/guides
 270	/knowledge/policies
 640	total
+=== sym_ln ===
+
+=== sym_readlink ===
+/knowledge/guides/auth.md
+=== sym_cat ===
+Authentication uses bearer tokens via the Authorization header.
+Requests are rate limited to 100 calls per minute per token.
+If you exceed the limit you receive HTTP 429 and must back off.
+=== sym_wc ===
+2 /knowledge/meta_link
+=== sym_ls ===
+meta_link@
+=== sym_rm ===
+CHANGELOG.md
+guides
+policies
 === nf_cat ===
 exit=1
 cat: /knowledge/__nf_missing__.txt: No such file or directory

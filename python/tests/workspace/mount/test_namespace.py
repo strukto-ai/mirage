@@ -90,3 +90,30 @@ def test_resolve_cycle_raises(namespace):
     namespace.symlink("/data/b", "/data/a", 1.0)
     with pytest.raises(CycleError):
         namespace.resolve("/data/a", follow=True)
+
+
+def test_follow_resolves_prefix_links(namespace):
+    namespace.symlink("/data/link", "/data/real", 1.0)
+    assert namespace.follow("/data/link/f.txt") == "/data/real/f.txt"
+    assert namespace.follow("/data/other") == "/data/other"
+
+
+def test_follow_identity_without_links(namespace):
+    assert namespace.follow("/data/x") == "/data/x"
+
+
+def test_links_under_returns_direct_children_only(namespace):
+    namespace.symlink("/data/a", "/t1", 1.0)
+    namespace.symlink("/data/sub/b", "/t2", 1.0)
+    namespace.symlink("/other/c", "/t3", 1.0)
+    assert namespace.links_under("/data") == {"a": "/t1"}
+    assert namespace.links_under("/data/sub") == {"b": "/t2"}
+
+
+def test_purge_under_drops_nested_entries(namespace):
+    namespace.symlink("/data/sub/a", "/t1", 1.0)
+    namespace.symlink("/data/sub/deep/b", "/t2", 1.0)
+    namespace.symlink("/data/keep", "/t3", 1.0)
+    assert namespace.purge_under("/data/sub") == 2
+    assert namespace.is_link("/data/keep") is True
+    assert namespace.is_link("/data/sub/a") is False

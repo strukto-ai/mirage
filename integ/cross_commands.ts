@@ -245,6 +245,65 @@ async function checkMove(
   check(`${label}: mv removes source`, code !== 0);
 }
 
+// Namespace links are mount-agnostic: a link homed on /ram whose target
+// lives on another mount must read, write, and copy through that mount,
+// and the reverse direction (link homed on the other mount, target in /ram)
+// must behave identically.
+async function checkSymlinks(
+  ws: Workspace,
+  dst: string,
+  label: string,
+): Promise<void> {
+  await run(ws, `ln -s ${dst}/copied/a.txt /ram/xl.txt`);
+  let [out, , code] = await run(ws, "cat /ram/xl.txt");
+  check(`${label}: cat through cross-mount link`, out === "aaa\n");
+  [out] = await run(ws, "grep aaa /ram/xl.txt");
+  check(`${label}: grep through cross-mount link`, out.includes("aaa"));
+  await run(ws, "printf 'xw\n' >> /ram/xl.txt");
+  [out] = await run(ws, `cat ${dst}/copied/a.txt`);
+  check(`${label}: append through link lands on target`, out === "aaa\nxw\n");
+  await run(ws, `printf 'aaa\n' > ${dst}/copied/a.txt`);
+  await run(ws, "cp /ram/xl.txt /ram/xl_copy.txt");
+  [out] = await run(ws, "cat /ram/xl_copy.txt");
+  check(`${label}: cp through link relays bytes`, out === "aaa\n");
+  await run(ws, `ln -s /ram/dir/a.txt ${dst}/rl.txt`);
+  [out] = await run(ws, `cat ${dst}/rl.txt`);
+  check(`${label}: link homed on ${label} reads ram target`, out === "aaa\n");
+  await run(ws, `ln -s ${dst}/copied /ram/xdir`);
+  [out] = await run(ws, "cat /ram/xdir/sub/b.txt");
+  check(`${label}: mid-path dir link across mounts`, out === "bbb\n");
+  [out] = await run(ws, "ls /ram/xdir");
+  check(`${label}: ls through cross-mount dir link`, out.includes("a.txt"));
+  await run(ws, "mv /ram/xl.txt /ram/xl2.txt");
+  [out] = await run(ws, "readlink /ram/xl2.txt");
+  check(`${label}: mv keeps link target`, out.trim() === `${dst}/copied/a.txt`);
+  [, , code] = await run(ws, `rm /ram/xl2.txt ${dst}/rl.txt /ram/xdir`);
+  check(`${label}: rm links exits 0`, code === 0);
+  [out] = await run(ws, `cat ${dst}/copied/a.txt`);
+  check(`${label}: target intact after rm links`, out === "aaa\n");
+  await run(ws, "rm /ram/xl_copy.txt");
+}
+
+// Reads through a link must share the target's cache entry: warming via the
+// link keys the cache under the REAL path, so a direct read of the target
+// serves the same cached bytes after an out-of-band mutation.
+async function checkSymlinkCache(
+  ws: Workspace,
+  client: S3Client,
+  label: string,
+): Promise<void> {
+  await putObject(client, "lcache/y.txt", "link-v1\n");
+  await run(ws, "ln -s /s3/lcache/y.txt /ram/cl.txt");
+  let [out] = await run(ws, "cat /ram/cl.txt");
+  check(`${label}: warm via link reads v1`, out === "link-v1\n");
+  await putObject(client, "lcache/y.txt", "link-v2\n");
+  [out] = await run(ws, "cat /s3/lcache/y.txt");
+  check(`${label}: direct read hits cache warmed via link`, out === "link-v1\n");
+  [out] = await run(ws, "cat /ram/cl.txt");
+  check(`${label}: link read serves cached target bytes`, out === "link-v1\n");
+  await run(ws, "rm /ram/cl.txt");
+}
+
 // A cross-mount read relays through the dispatcher; that relayed path must
 // serve warm bytes from the file cache, not re-fetch the backend. Warm the S3
 // object with a single-mount cat, mutate it out-of-band via the SDK, then
@@ -336,6 +395,7 @@ async function exercise(
   await checkNoClobber(ws, dst, label);
   await checkOmitDirectory(ws, dst, label);
   await checkMove(ws, dst, label);
+  await checkSymlinks(ws, dst, label);
 }
 
 async function main(): Promise<void> {
@@ -375,6 +435,7 @@ async function main(): Promise<void> {
     await exercise(ws, "/s3", "s3", false);
     await checkCrossMountCache(ws, client, "s3");
     await checkGlobCache(ws, client, "s3");
+    await checkSymlinkCache(ws, client, "s3");
   } finally {
     await ws.close();
     client.destroy();

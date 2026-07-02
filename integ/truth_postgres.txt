@@ -91,3 +91,12 @@ stat: /pg/__nf_missing__.txt: No such file or directory
 === nf_grep ===
 exit=1
 grep: /pg/__nf_missing__.txt: No such file or directory
+
+# symlink into the mount (namespace links; read-only backend)
+=== sym_ln ===
+=== sym_readlink ===
+/pg/public/tables/books/schema.json
+=== sym_cat ===
+=== sym_ls ===
+meta_link@
+=== sym_rm ===

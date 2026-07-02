@@ -73,6 +73,12 @@ const CASES: ReadonlyArray<readonly [string, string]> = [
   ["wc_l_view", `wc -l ${MOUNT}/${DB}/views/recent_books/documents.jsonl`],
   ["safeguard_cat_truncates", `cat ${MOUNT}/${DB}/collections/books/documents.jsonl`],
   ["safeguard_cat_pipe_uncapped", `cat ${MOUNT}/${DB}/collections/books/documents.jsonl | wc -l`],
+  // symlink to the database meta file (namespace state; read-only backend)
+  ["sym_ln", `ln -s ${MOUNT}/${DB}/database.json ${MOUNT}/meta_link`],
+  ["sym_readlink", `readlink ${MOUNT}/meta_link`],
+  ["sym_cat", `cat ${MOUNT}/meta_link`],
+  ["sym_ls", `ls -F ${MOUNT} | grep meta_link`],
+  ["sym_rm", `rm ${MOUNT}/meta_link && ls ${MOUNT}`],
 ];
 
 async function seed(client: MongoClient): Promise<void> {

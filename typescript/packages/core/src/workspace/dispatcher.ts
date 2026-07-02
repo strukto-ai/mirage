@@ -20,7 +20,7 @@ import { runWithRevisions } from '../observe/context.ts'
 import type { OpsRegistry } from '../ops/registry.ts'
 import { type OpKwargs } from '../ops/registry.ts'
 import { cachesReads, type Resource } from '../resource/base.ts'
-import { ConsistencyPolicy, MountMode, type PathSpec } from '../types.ts'
+import { ConsistencyPolicy, MountMode, PathSpec } from '../types.ts'
 import type { DispatchFn } from './executor/cross_mount.ts'
 import type { Namespace } from './mount/namespace.ts'
 
@@ -34,6 +34,10 @@ const DISPATCH_WRITE_OPS = new Set([
   'create',
   'truncate',
 ])
+// Ops that act on the path entry itself (lstat semantics); every other op
+// follows symlinks before mount lookup, so reads/writes go to the target
+// and the cache keys under the real path.
+const NO_FOLLOW_OPS = new Set(['unlink', 'rename', 'rmdir'])
 
 export type ResolveFn = (path: string) => Promise<[Resource, PathSpec, MountMode]>
 
@@ -56,10 +60,15 @@ export class Dispatcher {
   }
 
   dispatch: DispatchFn = async (opName, path, args, kwargs) => {
-    const [resource, scope, mode] = await this.namespace.resolve(path.virtual)
+    let p = path
+    if (!NO_FOLLOW_OPS.has(opName)) {
+      const followed = this.namespace.follow(path.virtual)
+      if (followed !== path.virtual) p = PathSpec.fromStrPath(followed)
+    }
+    const [resource, scope, mode] = await this.namespace.resolve(p.virtual, false)
     const caches = cachesReads(resource)
     if (caches && DISPATCH_READ_OPS.has(opName)) {
-      let cached = await this.cache.get(path.virtual)
+      let cached = await this.cache.get(p.virtual)
       if (
         cached !== null &&
         this.consistency === ConsistencyPolicy.ALWAYS &&
@@ -71,23 +80,23 @@ export class Dispatcher {
         } catch {
           remoteFp = null
         }
-        if (remoteFp !== null && !(await this.cache.isFresh(path.virtual, remoteFp))) {
-          await this.cache.remove(path.virtual)
+        if (remoteFp !== null && !(await this.cache.isFresh(p.virtual, remoteFp))) {
+          await this.cache.remove(p.virtual)
           cached = null
         }
       }
       if (cached !== null) {
-        return [cached, new IOResult({ reads: { [path.virtual]: cached } })]
+        return [cached, new IOResult({ reads: { [p.virtual]: cached } })]
       }
     }
     if (mode === MountMode.READ && this.opsRegistry.find(opName, resource.kind)?.write === true) {
-      throw new Error(`mount at '${path.virtual}' is read-only`)
+      throw new Error(`mount at '${p.virtual}' is read-only`)
     }
     const fullKwargs: OpKwargs =
       kwargs?.index === undefined && resource.index !== undefined
         ? { ...(kwargs ?? {}), index: resource.index }
         : (kwargs ?? {})
-    const mount = this.namespace.mountFor(path.virtual)
+    const mount = this.namespace.mountFor(p.virtual)
     const result = await runWithRevisions(
       mount !== null && mount.revisions.size > 0 ? mount.revisions : null,
       async () =>
@@ -101,7 +110,7 @@ export class Dispatcher {
         ),
     )
     if (DISPATCH_WRITE_OPS.has(opName)) {
-      await this.invalidateAfterWriteByPath(path.virtual)
+      await this.invalidateAfterWriteByPath(p.virtual)
     }
     return [result, new IOResult()]
   }

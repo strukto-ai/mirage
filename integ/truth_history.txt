@@ -69,6 +69,17 @@ beta
 2
 === find_view_by_name ===
 /.bash_history
+=== sym_hist_setup ===
+
+=== sym_hist_cat ===
+view
+=== sym_hist_shows_typed ===
+19  echo view > /data/ht.txt && ln -s /data/ht.txt /data/hlink
+20  cat /data/hlink
+=== sym_hist_file_has_link_path ===
+1
+=== sym_hist_no_target_leak ===
+0
 === append_rejected ===
 nonzero_exit=True
 === sessions_path_gone ===

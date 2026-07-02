@@ -107,4 +107,34 @@ describe('Namespace symlink table', () => {
     await expect(ws.namespace.resolve('/data/a', true)).rejects.toThrow(CycleError)
     await ws.close()
   })
+
+  it('follow resolves prefix links and is identity otherwise', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    expect(ws.namespace.follow('/data/x')).toBe('/data/x')
+    ws.namespace.symlink('/data/link', '/data/real', 1)
+    expect(ws.namespace.follow('/data/link/f.txt')).toBe('/data/real/f.txt')
+    expect(ws.namespace.follow('/data/other')).toBe('/data/other')
+    await ws.close()
+  })
+
+  it('linksUnder returns direct children only', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    ws.namespace.symlink('/data/a', '/t1', 1)
+    ws.namespace.symlink('/data/sub/b', '/t2', 1)
+    ws.namespace.symlink('/other/c', '/t3', 1)
+    expect(ws.namespace.linksUnder('/data')).toEqual(new Map([['a', '/t1']]))
+    expect(ws.namespace.linksUnder('/data/sub')).toEqual(new Map([['b', '/t2']]))
+    await ws.close()
+  })
+
+  it('purgeUnder drops nested entries', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    ws.namespace.symlink('/data/sub/a', '/t1', 1)
+    ws.namespace.symlink('/data/sub/deep/b', '/t2', 1)
+    ws.namespace.symlink('/data/keep', '/t3', 1)
+    expect(ws.namespace.purgeUnder('/data/sub')).toBe(2)
+    expect(ws.namespace.isLink('/data/keep')).toBe(true)
+    expect(ws.namespace.isLink('/data/sub/a')).toBe(false)
+    await ws.close()
+  })
 })

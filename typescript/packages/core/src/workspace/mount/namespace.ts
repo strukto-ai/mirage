@@ -15,6 +15,7 @@
 import type { Resource } from '../../resource/base.ts'
 import type { MountMode, PathSpec } from '../../types.ts'
 import { resolveSymlinks } from '../../utils/path.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import type { ResolveFn } from '../dispatcher.ts'
 import type { MountEntry } from './mount.ts'
 import type { MountRegistry } from './registry.ts'
@@ -80,6 +81,36 @@ export class Namespace {
     this.links.delete(src)
     this.links.set(dst, entry)
     return true
+  }
+
+  // Return `path` with all symlink prefixes resolved; identity when the
+  // table is empty or nothing matches. Throws CycleError on ELOOP.
+  follow(path: string): string {
+    if (this.links.size === 0) return path
+    return resolveSymlinks(path, this.symlinkTargets())
+  }
+
+  // Links living directly under a directory: basename -> target.
+  linksUnder(directory: string): Map<string, string> {
+    const base = rstripSlash(directory) + '/'
+    const out = new Map<string, string>()
+    for (const [link, entry] of this.links) {
+      if (link.startsWith(base) && !link.slice(base.length).includes('/')) {
+        out.set(link.slice(base.length), entry.target)
+      }
+    }
+    return out
+  }
+
+  // Drop every link entry under a directory (`rm -r` semantics).
+  purgeUnder(directory: string): number {
+    const base = rstripSlash(directory) + '/'
+    const doomed: string[] = []
+    for (const link of this.links.keys()) {
+      if (link.startsWith(base)) doomed.push(link)
+    }
+    for (const link of doomed) this.links.delete(link)
+    return doomed.length
   }
 
   // Map a virtual path to its mount, following the symlink table first when

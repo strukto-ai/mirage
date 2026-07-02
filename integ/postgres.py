@@ -71,6 +71,13 @@ CASES: list[tuple[str, str]] = [
     ("safeguard_cat_truncates", f"cat {MOUNT}/public/tables/books/rows.jsonl"),
     ("safeguard_cat_pipe_uncapped",
      f"cat {MOUNT}/public/tables/books/rows.jsonl | wc -l"),
+    # symlink into the mount (namespace state; works on a read-only backend)
+    ("sym_ln", f"ln -s {MOUNT}/public/tables/books/schema.json"
+     f" {MOUNT}/meta_link"),
+    ("sym_readlink", f"readlink {MOUNT}/meta_link"),
+    ("sym_cat", f"cat {MOUNT}/meta_link"),
+    ("sym_ls", f"ls -F {MOUNT} | grep meta_link"),
+    ("sym_rm", f"rm {MOUNT}/meta_link && ls {MOUNT}"),
 ]
 
 

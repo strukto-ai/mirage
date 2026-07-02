@@ -24,6 +24,7 @@ import type { JobTable } from '../../shell/job_table.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/types.ts'
 import { PathSpec } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
+import type { Namespace } from '../mount/namespace.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import type { PyodideRuntime } from './python/runtime.ts'
 import type { Session } from '../session/session.ts'
@@ -70,6 +71,7 @@ export async function handleCommand(
   ensureOpen?: (resource: Resource) => Promise<void>,
   unmount?: (prefix: string) => Promise<void>,
   pythonRuntime?: PyodideRuntime,
+  namespace?: Namespace,
 ): Promise<Result> {
   if (parts.length === 0) {
     return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
@@ -298,6 +300,9 @@ export async function handleCommand(
     let stdout = initialStdout
     if (cmdName === 'ls' && io.exitCode === 0) {
       stdout = await injectChildMounts(stdout, registry, paths, flagKwargs, session.cwd)
+      if (namespace !== undefined && namespace.symlinks.size > 0) {
+        stdout = await injectLinks(stdout, namespace, paths, flagKwargs, session.cwd)
+      }
     }
     if (cmdName === 'find') {
       const [newStdout, actionErr] = await applyFindActions(
@@ -504,6 +509,44 @@ function checkMountRootGuard(
   }
 
   return null
+}
+
+// Append symlink entries living under the listed directory. Links are
+// namespace state, invisible to backend readdir, so `ls` surfaces them the
+// same way child mounts are surfaced. Long form renders GNU-style
+// `name -> target`.
+async function injectLinks(
+  stdout: ByteSource | null,
+  namespace: Namespace,
+  paths: readonly PathSpec[],
+  flagKwargs: Record<string, string | boolean | string[]>,
+  cwd: string,
+): Promise<ByteSource | null> {
+  if (flagKwargs.d === true || flagKwargs.R === true) return stdout
+  if (paths.length > 1) return stdout
+  const listed = paths.length === 1 && paths[0] !== undefined ? paths[0].virtual : cwd
+  const links = namespace.linksUnder(listed)
+  if (links.size === 0) return stdout
+
+  const existing = stdout === null ? '' : new TextDecoder().decode(await materialize(stdout))
+  const long = flagKwargs.args_l === true
+  const classify = flagKwargs.F === true
+  const present = new Set<string>()
+  for (const line of existing.split('\n')) {
+    if (line === '') continue
+    const name = long ? (line.split('\t').pop() ?? '') : line.replace(/[/*@|=]$/, '')
+    if (name !== '') present.add(name)
+  }
+  const extras: string[] = []
+  for (const n of [...links.keys()].sort()) {
+    if (present.has(n)) continue
+    if (long) extras.push(`l\t-\t-\t${n} -> ${links.get(n) ?? ''}`)
+    else extras.push(classify ? `${n}@` : n)
+  }
+  if (extras.length === 0) return stdout
+  const sep = existing === '' || existing.endsWith('\n') ? '' : '\n'
+  const combined = existing + sep + extras.join('\n') + '\n'
+  return new TextEncoder().encode(combined)
 }
 
 async function injectChildMounts(

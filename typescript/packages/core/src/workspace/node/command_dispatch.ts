@@ -37,6 +37,8 @@ import { resolveSafeguard } from '../../commands/safeguard.ts'
 import { BreakSignal, ContinueSignal } from '../executor/control.ts'
 import type { DispatchFn } from '../executor/cross_mount.ts'
 import {
+  NO_FOLLOW_COMMANDS,
+  followPaths,
   handleBash,
   handleCd,
   handleEcho,
@@ -60,7 +62,10 @@ import {
   handleUnset,
   handleWhoami,
   linkFlags,
+  prepareMv,
+  stripLinkOperands,
 } from '../executor/builtins/index.ts'
+import { CycleError } from '../../utils/path.ts'
 import type { Namespace } from '../mount/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Session } from '../session/session.ts'
@@ -313,7 +318,7 @@ async function runCommandBody(
     pathArgs = pathSet.size > 0 ? pathSet : null
   }
 
-  const classified = classifyParts(expanded, registry, session.cwd, textArgs, pathArgs)
+  let classified = classifyParts(expanded, registry, session.cwd, textArgs, pathArgs)
   const resolved = await resolveGlobs(classified, registry, textArgs)
   const finalExpanded = resolved.map((p) => (p instanceof PathSpec ? p.virtual : p))
 
@@ -518,8 +523,42 @@ async function runCommandBody(
     }
   }
 
+  // Symlink-aware dispatch: reads follow links (open(2)); rm/mv act on
+  // the link entry itself (lstat semantics).
+  let postUnlink: string | null = null
+  if (namespace.symlinks.size > 0) {
+    try {
+      if (name === 'rm') {
+        const [rest, removed] = stripLinkOperands(namespace, classified.slice(1))
+        classified = [...classified.slice(0, 1), ...rest]
+        if (removed > 0 && !rest.some((a) => a instanceof PathSpec)) {
+          return [null, new IOResult(), new ExecutionNode({ command: name, exitCode: 0 })]
+        }
+      } else if (name === 'mv') {
+        const prepared = await prepareMv(namespace, dispatch, classified.slice(1))
+        classified = [...classified.slice(0, 1), ...prepared.items]
+        postUnlink = prepared.postUnlink
+        if (prepared.early !== null) return prepared.early
+      } else if (!NO_FOLLOW_COMMANDS.has(name)) {
+        classified = [...classified.slice(0, 1), ...followPaths(namespace, classified.slice(1))]
+      }
+    } catch (err) {
+      if (err instanceof CycleError) {
+        const errBytes = new TextEncoder().encode(
+          `${name}: ${err.path}: Too many levels of symbolic links\n`,
+        )
+        return [
+          null,
+          new IOResult({ exitCode: 1, stderr: errBytes }),
+          new ExecutionNode({ command: name, exitCode: 1, stderr: errBytes }),
+        ]
+      }
+      throw err
+    }
+  }
+
   // Default: mount-dispatched command
-  return handleCommand(
+  const [stdout, io, execNode] = await handleCommand(
     recurse,
     dispatch,
     registry,
@@ -531,5 +570,16 @@ async function runCommandBody(
     ensureOpen,
     unmount,
     pythonRuntime,
+    namespace,
   )
+
+  if (io.exitCode === 0 && namespace.symlinks.size > 0) {
+    if (name === 'rm') {
+      for (const item of classified.slice(1)) {
+        if (item instanceof PathSpec) namespace.purgeUnder(item.virtual)
+      }
+    }
+    if (postUnlink !== null) namespace.unlink(postUnlink)
+  }
+  return [stdout, io, execNode]
 }

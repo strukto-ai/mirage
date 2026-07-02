@@ -242,6 +242,64 @@ async def check_glob_cache(ws: Workspace, s3_client, label: str) -> None:
           in out)
 
 
+async def check_symlinks(ws: Workspace, dst: str, label: str) -> None:
+    # Namespace links are mount-agnostic: a link homed on /ram whose target
+    # lives on another mount must read, write, and copy through that mount,
+    # and the reverse direction (link homed on the other mount, target in
+    # /ram) must behave identically.
+    await run(ws, f"ln -s {dst}/copied/a.txt /ram/xl.txt")
+    out, _, _ = await run(ws, "cat /ram/xl.txt")
+    check(f"{label}: cat through cross-mount link", out == "aaa\n")
+    out, _, _ = await run(ws, "grep aaa /ram/xl.txt")
+    check(f"{label}: grep through cross-mount link", "aaa" in out)
+    out, _, _ = await run(ws, "printf 'xw\n' >> /ram/xl.txt")
+    out, _, _ = await run(ws, f"cat {dst}/copied/a.txt")
+    check(f"{label}: append through link lands on target", out == "aaa\nxw\n")
+    await run(ws, f"printf 'aaa\n' > {dst}/copied/a.txt")
+    await run(ws, "cp /ram/xl.txt /ram/xl_copy.txt")
+    out, _, _ = await run(ws, "cat /ram/xl_copy.txt")
+    check(f"{label}: cp through link relays bytes", out == "aaa\n")
+    await run(ws, f"ln -s /ram/dir/a.txt {dst}/rl.txt")
+    out, _, _ = await run(ws, f"cat {dst}/rl.txt")
+    check(f"{label}: link homed on {label} reads ram target", out == "aaa\n")
+    await run(ws, f"ln -s {dst}/copied /ram/xdir")
+    out, _, _ = await run(ws, "cat /ram/xdir/sub/b.txt")
+    check(f"{label}: mid-path dir link across mounts", out == "bbb\n")
+    out, _, _ = await run(ws, "ls /ram/xdir")
+    check(f"{label}: ls through cross-mount dir link", "a.txt" in out)
+    await run(ws, "mv /ram/xl.txt /ram/xl2.txt")
+    out, _, _ = await run(ws, "readlink /ram/xl2.txt")
+    check(f"{label}: mv keeps link target",
+          out.strip() == f"{dst}/copied/a.txt")
+    _, _, code = await run(ws, f"rm /ram/xl2.txt {dst}/rl.txt /ram/xdir")
+    check(f"{label}: rm links exits 0", code == 0)
+    out, _, _ = await run(ws, f"cat {dst}/copied/a.txt")
+    check(f"{label}: target intact after rm links", out == "aaa\n")
+    await run(ws, "rm /ram/xl_copy.txt")
+
+
+async def check_symlink_cache(ws: Workspace, s3_client, label: str) -> None:
+    # Reads through a link must share the target's cache entry: warming via
+    # the link keys the cache under the REAL path, so a direct read of the
+    # target serves the same cached bytes after an out-of-band mutation (and
+    # vice versa a fresh link to a warmed target hits warm).
+    s3_client.put_object(Bucket=S3_BUCKET,
+                         Key="lcache/y.txt",
+                         Body=b"link-v1\n")
+    await run(ws, "ln -s /s3/lcache/y.txt /ram/cl.txt")
+    out, _, _ = await run(ws, "cat /ram/cl.txt")
+    check(f"{label}: warm via link reads v1", out == "link-v1\n")
+    s3_client.put_object(Bucket=S3_BUCKET,
+                         Key="lcache/y.txt",
+                         Body=b"link-v2\n")
+    out, _, _ = await run(ws, "cat /s3/lcache/y.txt")
+    check(f"{label}: direct read hits cache warmed via link",
+          out == "link-v1\n")
+    out, _, _ = await run(ws, "cat /ram/cl.txt")
+    check(f"{label}: link read serves cached target bytes", out == "link-v1\n")
+    await run(ws, "rm /ram/cl.txt")
+
+
 async def exercise(ws: Workspace, dst: str, label: str,
                    expect_dirs: bool) -> None:
     print(f"===== ram -> {label} =====")
@@ -252,6 +310,7 @@ async def exercise(ws: Workspace, dst: str, label: str,
     await check_no_clobber(ws, dst, label)
     await check_omit_directory(ws, dst, label)
     await check_move(ws, dst, label)
+    await check_symlinks(ws, dst, label)
 
 
 async def main() -> None:
@@ -287,6 +346,7 @@ async def main() -> None:
         await exercise(ws, "/s3", "s3", expect_dirs=False)
         await check_cross_mount_cache(ws, s3_client, "s3")
         await check_glob_cache(ws, s3_client, "s3")
+        await check_symlink_cache(ws, s3_client, "s3")
     finally:
         server.stop()
 
