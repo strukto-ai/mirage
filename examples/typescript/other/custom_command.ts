@@ -35,7 +35,7 @@ const greet = command({
   spec: specOf('cat'),
   fn: (accessor, paths: readonly PathSpec[]) => {
     const backend = accessor.constructor.name
-    const targets = paths.length > 0 ? paths.map((p) => p.original).join(', ') : '(no paths)'
+    const targets = paths.length > 0 ? paths.map((p) => p.virtual).join(', ') : '(no paths)'
     const body = ENC.encode(`hello from ${backend}: ${targets}\n`)
     return [body, new IOResult()]
   },

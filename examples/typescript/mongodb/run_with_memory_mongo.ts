@@ -94,7 +94,7 @@ async function main(): Promise<void> {
       const ws = new Workspace({ '/m/': resource }, { mode: MountMode.READ })
       const DEC = new TextDecoder()
       try {
-        const ps = (p: string) => new PathSpec({ original: p, directory: p })
+        const ps = (p: string) => PathSpec.fromStrPath(p)
         const usersBytes = await resource.readFile(ps('/app/users.jsonl'))
         const usersText = DEC.decode(usersBytes).trim().split('\n')
         console.log('app/users.jsonl:')

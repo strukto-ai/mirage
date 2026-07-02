@@ -133,8 +133,8 @@ async function main(): Promise<void> {
 
   // 2. Redis-specific helpers — use these when you want exact cost for Redis.
   const paths = [
-    PathSpec.fromStrPath('/data/hello.txt', '/data'),
-    PathSpec.fromStrPath('/data/user.json', '/data'),
+    PathSpec.fromStrPath('/data/hello.txt', 'hello.txt'),
+    PathSpec.fromStrPath('/data/user.json', 'user.json'),
   ]
 
   const readCost = await fileReadProvision(resource.accessor, paths, { command: 'cat' })

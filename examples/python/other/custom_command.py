@@ -32,7 +32,7 @@ async def greet(
     **_extra: object,
 ):
     backend = type(accessor).__name__
-    targets = ", ".join(p.original for p in paths) if paths else "(no paths)"
+    targets = ", ".join(p.virtual for p in paths) if paths else "(no paths)"
     body = f"hello from {backend}: {targets}\n".encode()
     return body, IOResult()
 

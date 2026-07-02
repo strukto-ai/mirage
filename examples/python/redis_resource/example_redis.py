@@ -178,10 +178,12 @@ async def main() -> None:
 
     # 2. Redis-specific helpers — exact Redis cost, callable standalone
     paths = [
-        PathSpec(original="/data/hello.txt", directory="/data",
-                 prefix="/data"),
-        PathSpec(original="/data/user.json", directory="/data",
-                 prefix="/data"),
+        PathSpec(virtual="/data/hello.txt",
+                 directory="/data",
+                 resource_path="hello.txt"),
+        PathSpec(virtual="/data/user.json",
+                 directory="/data",
+                 resource_path="user.json"),
     ]
     accessor = resource.accessor
 
