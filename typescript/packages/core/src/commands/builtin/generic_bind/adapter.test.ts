@@ -42,7 +42,7 @@ describe('makeResolveGlob', () => {
     const readdir = () => Promise.reject(new Error('should not readdir'))
     const resolveGlob = makeResolveGlob(readdir)
     const p = new PathSpec({
-      resourcePath: stripSlash('/d/a.txt'),
+      resourcePath: 'd/a.txt',
       virtual: '/d/a.txt',
       directory: '/d/',
       resolved: true,
@@ -62,7 +62,7 @@ describe('makeResolveGlob', () => {
     const readdir = () => Promise.reject(new Error('should not readdir'))
     const resolveGlob = makeResolveGlob(readdir)
     const p = new PathSpec({
-      resourcePath: stripSlash('/d/a.txt'),
+      resourcePath: 'd/a.txt',
       virtual: '/d/a.txt',
       directory: '/d/',
       resolved: false,

@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stripSlash } from '../../utils/slash.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
@@ -48,7 +47,7 @@ describe('scopeRelativeKey', () => {
   })
 
   it('passes through unprefixed paths', () => {
-    const p = new PathSpec({ resourcePath: stripSlash('/src'), virtual: '/src', directory: '/' })
+    const p = new PathSpec({ resourcePath: 'src', virtual: '/src', directory: '/' })
     expect(scopeRelativeKey(p)).toBe('/src')
   })
 })

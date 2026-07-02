@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stripSlash } from './utils/slash.ts'
 import { mountKey, mountPrefixOf } from './utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import {
@@ -257,7 +256,7 @@ describe('PathSpec.dir', () => {
 
   it('carries the pattern through', () => {
     const p = new PathSpec({
-      resourcePath: stripSlash('/a/b/*.txt'),
+      resourcePath: 'a/b/*.txt',
       virtual: '/a/b/*.txt',
       directory: '/a/b/',
       pattern: '*.txt',
@@ -325,7 +324,7 @@ describe('PathSpec.mountPath / key', () => {
 
   it('is identity without a prefix', () => {
     const p = new PathSpec({
-      resourcePath: stripSlash('/x.txt'),
+      resourcePath: 'x.txt',
       virtual: '/x.txt',
       directory: '/',
     })

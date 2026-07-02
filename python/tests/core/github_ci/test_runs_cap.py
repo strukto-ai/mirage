@@ -24,7 +24,6 @@ from mirage.core.github_ci.runs import list_runs
 from mirage.io.stream import materialize
 from mirage.resource.github_ci.config import GitHubCIConfig
 from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_key
 
 
 class _MockResponse:
@@ -161,7 +160,7 @@ async def test_ls_runs_listing_capped(monkeypatch):
     cfg = GitHubCIConfig(token="t", owner="o", repo="r", max_runs=5)
     accessor = GitHubCIAccessor(config=cfg)
     index = RAMIndexCacheStore()
-    runs_path = PathSpec(resource_path=mount_key("/runs", ""),
+    runs_path = PathSpec(resource_path="runs",
                          virtual="/runs",
                          directory="/runs")
     ls_cmd = next(c for c in COMMANDS

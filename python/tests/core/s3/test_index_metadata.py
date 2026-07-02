@@ -43,9 +43,7 @@ def test_readdir_stores_remote_time_for_files():
     try:
         accessor = _accessor()
         cache = RAMIndexCacheStore(ttl=60)
-        scope = PathSpec(resource_path=("/dir").strip("/"),
-                         virtual="/dir",
-                         directory="/dir")
+        scope = PathSpec(resource_path="dir", virtual="/dir", directory="/dir")
         asyncio.run(readdir(accessor, scope, cache))
         file_lookup = asyncio.run(cache.get("/dir/a.txt"))
         assert file_lookup.entry is not None
@@ -67,11 +65,9 @@ def test_stat_returns_modified_from_index():
     try:
         accessor = _accessor()
         cache = RAMIndexCacheStore(ttl=60)
-        scope = PathSpec(resource_path=("/dir").strip("/"),
-                         virtual="/dir",
-                         directory="/dir")
+        scope = PathSpec(resource_path="dir", virtual="/dir", directory="/dir")
         asyncio.run(readdir(accessor, scope, cache))
-        target = PathSpec(resource_path=("/dir/a.txt").strip("/"),
+        target = PathSpec(resource_path="dir/a.txt",
                           virtual="/dir/a.txt",
                           directory="/dir")
         result = asyncio.run(stat(accessor, target, index=cache))

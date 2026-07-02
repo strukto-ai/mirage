@@ -42,9 +42,8 @@ async def test_stat_root():
     s = RAMStore()
 
     a = RAMAccessor(s)
-    result = await stat(
-        a, PathSpec(resource_path=("/").strip("/"), virtual="/",
-                    directory="/"))
+    result = await stat(a,
+                        PathSpec(resource_path="", virtual="/", directory="/"))
     assert result.type == FileType.DIRECTORY
     assert result.name == "/"
 
@@ -53,7 +52,7 @@ async def test_stat_root():
 async def test_stat_file(accessor):
     result = await stat(
         accessor,
-        PathSpec(resource_path=("/hello.txt").strip("/"),
+        PathSpec(resource_path="hello.txt",
                  virtual="/hello.txt",
                  directory="/hello.txt"))
     assert result.name == "hello.txt"
@@ -65,9 +64,7 @@ async def test_stat_file(accessor):
 async def test_stat_directory(accessor):
     result = await stat(
         accessor,
-        PathSpec(resource_path=("/sub").strip("/"),
-                 virtual="/sub",
-                 directory="/sub"))
+        PathSpec(resource_path="sub", virtual="/sub", directory="/sub"))
     assert result.type == FileType.DIRECTORY
     assert result.name == "sub"
     assert result.size is None
@@ -78,16 +75,14 @@ async def test_stat_not_found(accessor):
     with pytest.raises(FileNotFoundError):
         await stat(
             accessor,
-            PathSpec(resource_path=("/nope").strip("/"),
-                     virtual="/nope",
-                     directory="/nope"))
+            PathSpec(resource_path="nope", virtual="/nope", directory="/nope"))
 
 
 @pytest.mark.asyncio
 async def test_stat_json_file(accessor):
     result = await stat(
         accessor,
-        PathSpec(resource_path=("/data.json").strip("/"),
+        PathSpec(resource_path="data.json",
                  virtual="/data.json",
                  directory="/data.json"))
     assert result.type == FileType.JSON
@@ -98,7 +93,7 @@ async def test_stat_json_file(accessor):
 async def test_stat_image_file(accessor):
     result = await stat(
         accessor,
-        PathSpec(resource_path=("/img.png").strip("/"),
+        PathSpec(resource_path="img.png",
                  virtual="/img.png",
                  directory="/img.png"))
     assert result.type == FileType.IMAGE_PNG

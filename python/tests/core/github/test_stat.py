@@ -73,7 +73,7 @@ async def test_stat_file(tree):
     index = _index_from_tree(tree)
     result = await stat(
         None,
-        PathSpec(resource_path=("/src/main.py").strip("/"),
+        PathSpec(resource_path="src/main.py",
                  virtual="/src/main.py",
                  directory="/src/main.py"), index)
     assert result.name == "main.py"
@@ -86,10 +86,8 @@ async def test_stat_file(tree):
 async def test_stat_directory(tree):
     index = _index_from_tree(tree)
     result = await stat(
-        None,
-        PathSpec(resource_path=("/src").strip("/"),
-                 virtual="/src",
-                 directory="/src"), index)
+        None, PathSpec(resource_path="src", virtual="/src", directory="/src"),
+        index)
     assert result.name == "src"
     assert result.type == FileType.DIRECTORY
 
@@ -97,10 +95,9 @@ async def test_stat_directory(tree):
 @pytest.mark.asyncio
 async def test_stat_root(tree):
     index = _index_from_tree(tree)
-    result = await stat(
-        None,
-        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"),
-        index)
+    result = await stat(None,
+                        PathSpec(resource_path="", virtual="/", directory="/"),
+                        index)
     assert result.name == "/"
     assert result.type == FileType.DIRECTORY
 
@@ -111,7 +108,7 @@ async def test_stat_not_found(tree):
     with pytest.raises(FileNotFoundError):
         await stat(
             None,
-            PathSpec(resource_path=("/nonexistent.py").strip("/"),
+            PathSpec(resource_path="nonexistent.py",
                      virtual="/nonexistent.py",
                      directory="/nonexistent.py"), index)
 
@@ -121,7 +118,7 @@ async def test_stat_strip_slashes(tree):
     index = _index_from_tree(tree)
     result = await stat(
         None,
-        PathSpec(resource_path=("/README.md").strip("/"),
+        PathSpec(resource_path="README.md",
                  virtual="/README.md",
                  directory="/README.md"), index)
     assert result.name == "README.md"

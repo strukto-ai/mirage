@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stripSlash } from '../../utils/slash.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as StatModule from './stat.ts'
 import type * as WalkModule from './walk.ts'
@@ -36,7 +35,7 @@ import * as walkMod from './walk.ts'
 
 const ACCESSOR = {} as ChromaAccessor
 const INDEX = {} as IndexCacheStore
-const ROOT = new PathSpec({ resourcePath: stripSlash('/'), virtual: '/', directory: '/' })
+const ROOT = new PathSpec({ resourcePath: '', virtual: '/', directory: '/' })
 
 function mockStats(stats: Record<string, { size?: number; modified?: string }>): void {
   vi.mocked(statMod.stat).mockImplementation((_accessor, spec) => {

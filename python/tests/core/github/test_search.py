@@ -74,11 +74,7 @@ async def test_search_code_with_path_filter(mock_get, config):
 async def test_narrow_paths_strips_leading_slash_in_filter(
         mock_search, config):
     mock_search.return_value = [SearchResult(path="src/main.py", sha="aaa")]
-    paths = [
-        PathSpec(resource_path=mount_key("/src", ""),
-                 virtual="/src",
-                 directory="/src")
-    ]
+    paths = [PathSpec(resource_path="src", virtual="/src", directory="/src")]
     await narrow_paths(config, "acme", "proj", "import", paths)
     _, kwargs = mock_search.await_args
     assert kwargs["path_filter"] == "src"
@@ -88,9 +84,7 @@ async def test_narrow_paths_strips_leading_slash_in_filter(
 @patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
 async def test_narrow_paths_root_uses_no_filter(mock_search, config):
     mock_search.return_value = [SearchResult(path="src/main.py", sha="aaa")]
-    paths = [
-        PathSpec(resource_path=mount_key("/", ""), virtual="/", directory="/")
-    ]
+    paths = [PathSpec(resource_path="", virtual="/", directory="/")]
     await narrow_paths(config, "acme", "proj", "import", paths)
     _, kwargs = mock_search.await_args
     assert kwargs["path_filter"] is None
@@ -118,10 +112,6 @@ async def test_narrow_paths_normalizes_results_with_leading_slash(
 @patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
 async def test_narrow_paths_logs_and_continues_on_error(mock_search, config):
     mock_search.side_effect = RuntimeError("boom")
-    paths = [
-        PathSpec(resource_path=mount_key("/src", ""),
-                 virtual="/src",
-                 directory="/src")
-    ]
+    paths = [PathSpec(resource_path="src", virtual="/src", directory="/src")]
     out = await narrow_paths(config, "acme", "proj", "import", paths)
     assert out == []

@@ -76,7 +76,7 @@ def test_read_only_blocks_write_cmd():
     reg = MountRegistry()
     reg.mount("/ro/", RAMResource(), MountMode.READ)
     mount = reg.mount_for("/ro/file.txt")
-    scope = PathSpec(resource_path=("/ro/newdir").strip("/"),
+    scope = PathSpec(resource_path="ro/newdir",
                      virtual="/ro/newdir",
                      directory="/ro/",
                      resolved=True)
@@ -89,7 +89,7 @@ def test_write_mode_allows_write_cmd():
     reg = MountRegistry()
     reg.mount("/rw/", RAMResource(), MountMode.WRITE)
     mount = reg.mount_for("/rw/file.txt")
-    scope = PathSpec(resource_path=("/rw/newdir").strip("/"),
+    scope = PathSpec(resource_path="rw/newdir",
                      virtual="/rw/newdir",
                      directory="/rw/",
                      resolved=True)
@@ -101,7 +101,7 @@ def test_read_only_allows_read_cmd():
     reg = MountRegistry()
     reg.mount("/ro/", RAMResource(), MountMode.READ)
     mount = reg.mount_for("/ro/")
-    scope = PathSpec(resource_path=("/ro/").strip("/"),
+    scope = PathSpec(resource_path="ro",
                      virtual="/ro/",
                      directory="/ro/",
                      resolved=False)
@@ -114,7 +114,7 @@ def test_read_only_allows_read_cmd():
 
 def test_execute_cmd_cat(registry):
     mount = registry.mount_for("/data/hello.txt")
-    scope = PathSpec(resource_path=("/data/hello.txt").strip("/"),
+    scope = PathSpec(resource_path="data/hello.txt",
                      virtual="/data/hello.txt",
                      directory="/data/",
                      resolved=True)
@@ -132,7 +132,7 @@ def test_execute_cmd_not_found(registry):
 
 def test_execute_cmd_ls(registry):
     mount = registry.mount_for("/data/hello.txt")
-    scope = PathSpec(resource_path=("/data/").strip("/"),
+    scope = PathSpec(resource_path="data",
                      virtual="/data/",
                      directory="/data/",
                      resolved=False)
@@ -142,7 +142,7 @@ def test_execute_cmd_ls(registry):
 
 def test_execute_cmd_with_flag_kwargs(registry):
     mount = registry.mount_for("/data/hello.txt")
-    scope = PathSpec(resource_path=("/data/hello.txt").strip("/"),
+    scope = PathSpec(resource_path="data/hello.txt",
                      virtual="/data/hello.txt",
                      directory="/data/",
                      resolved=True)
@@ -152,7 +152,7 @@ def test_execute_cmd_with_flag_kwargs(registry):
 
 def test_execute_cmd_with_texts(registry):
     mount = registry.mount_for("/data/hello.txt")
-    scope = PathSpec(resource_path=("/data/hello.txt").strip("/"),
+    scope = PathSpec(resource_path="data/hello.txt",
                      virtual="/data/hello.txt",
                      directory="/data/",
                      resolved=True)

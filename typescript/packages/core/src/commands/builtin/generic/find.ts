@@ -18,7 +18,7 @@ import type { FindOptions } from '../../../resource/base.ts'
 import { parseFindExpression } from '../findParse.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
+import { rstripSlash } from '../../../utils/slash.ts'
 import { rebaseDisplay } from '../../../utils/path.ts'
 
 const ENC = new TextEncoder()
@@ -121,7 +121,7 @@ export async function findGeneric(
       ? paths
       : [
           new PathSpec({
-            resourcePath: stripSlash('/'),
+            resourcePath: '',
             virtual: '/',
             directory: '/',
             resolved: false,

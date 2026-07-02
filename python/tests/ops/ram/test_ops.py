@@ -132,9 +132,7 @@ async def test_op_unlink_not_found(accessor):
 async def test_op_rmdir(accessor, store):
     await mkdir(
         accessor,
-        PathSpec(resource_path=("/empty").strip("/"),
-                 virtual="/empty",
-                 directory="/empty"))
+        PathSpec(resource_path="empty", virtual="/empty", directory="/empty"))
     await rmdir(accessor, _scope("/empty"))
     assert "/empty" not in store.dirs
 

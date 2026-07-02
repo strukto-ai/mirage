@@ -127,8 +127,8 @@ async def test_read_file_blob(accessor, index):
                return_value=b"%PDF-1.4 fake bytes"):
         data = await read(
             accessor,
-            PathSpec(resource_path=("/channels/general__C001/2026-04-10"
-                                    "/files/report__F1.pdf").strip("/"),
+            PathSpec(resource_path=("channels/general__C001/2026-04-10"
+                                    "/files/report__F1.pdf"),
                      virtual=("/channels/general__C001/2026-04-10"
                               "/files/report__F1.pdf"),
                      directory=("/channels/general__C001/2026-04-10"
@@ -152,10 +152,9 @@ async def test_read_user_json(accessor, index):
             return_value=user_data,
     ):
         result = await read(accessor,
-                            PathSpec(
-                                resource_path=("/users/alice.json").strip("/"),
-                                virtual="/users/alice.json",
-                                directory="/users/alice.json"),
+                            PathSpec(resource_path="users/alice.json",
+                                     virtual="/users/alice.json",
+                                     directory="/users/alice.json"),
                             index=index)
 
     parsed = json.loads(result)
@@ -167,7 +166,7 @@ async def test_read_user_json(accessor, index):
 async def test_read_not_found(accessor, index):
     with pytest.raises(FileNotFoundError):
         await read(accessor,
-                   PathSpec(resource_path=("/nonexistent/path").strip("/"),
+                   PathSpec(resource_path="nonexistent/path",
                             virtual="/nonexistent/path",
                             directory="/nonexistent/path"),
                    index=index)

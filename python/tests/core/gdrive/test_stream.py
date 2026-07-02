@@ -83,7 +83,7 @@ async def test_stream_file(accessor, index):
         data = await _collect(
             stream(
                 accessor,
-                PathSpec(resource_path=("/Team Drive/report.pdf").strip("/"),
+                PathSpec(resource_path="Team Drive/report.pdf",
                          virtual="/Team Drive/report.pdf",
                          directory="/Team Drive/report.pdf"), index))
         assert data == b"chunk1chunk2"
@@ -100,7 +100,7 @@ async def test_stream_not_found(accessor, index):
             await _collect(
                 stream(
                     accessor,
-                    PathSpec(resource_path=("/missing/file.txt").strip("/"),
+                    PathSpec(resource_path="missing/file.txt",
                              virtual="/missing/file.txt",
                              directory="/missing/file.txt"), index))
 
@@ -133,7 +133,7 @@ async def test_stream_auto_bootstraps_from_empty_index(accessor, index):
         data = await _collect(
             stream(
                 accessor,
-                PathSpec(resource_path=("/report.pdf").strip("/"),
+                PathSpec(resource_path="report.pdf",
                          virtual="/report.pdf",
                          directory="/report.pdf"),
                 index,
@@ -156,7 +156,7 @@ async def test_stream_folder_raises(accessor, index):
         await _collect(
             stream(
                 accessor,
-                PathSpec(resource_path=("/data").strip("/"),
+                PathSpec(resource_path="data",
                          virtual="/data",
                          directory="/data"), index))
 
@@ -180,7 +180,7 @@ async def test_stream_shared_drive_raises(accessor, index):
             await _collect(
                 stream(
                     accessor,
-                    PathSpec(resource_path=("/Team Drive").strip("/"),
+                    PathSpec(resource_path="Team Drive",
                              virtual="/Team Drive",
                              directory="/Team Drive"),
                     index,

@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stripSlash } from '../../utils/slash.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ReaddirModule from './readdir.ts'
@@ -80,7 +79,7 @@ const SIZES: Record<string, { size?: number }> = {
   '/notes.txt': { size: 10 },
 }
 
-const ROOT = new PathSpec({ resourcePath: stripSlash('/'), virtual: '/', directory: '/' })
+const ROOT = new PathSpec({ resourcePath: '', virtual: '/', directory: '/' })
 
 describe('box core du', () => {
   beforeEach(() => {
@@ -98,7 +97,7 @@ describe('box core du', () => {
     mockTree(TREE)
     mockStats(SIZES)
     const file = new PathSpec({
-      resourcePath: stripSlash('/notes.txt'),
+      resourcePath: 'notes.txt',
       virtual: '/notes.txt',
       directory: '/notes.txt',
     })

@@ -12,7 +12,6 @@ from mirage.commands.builtin.generic.find import (FindArgs, apply_mount_prefix,
 from mirage.commands.errors import FindParseError
 from mirage.resource.ram import RAMResource
 from mirage.types import FileStat, FileType, FindType, MountMode, PathSpec
-from mirage.utils.key_prefix import mount_key
 from mirage.workspace import Workspace
 
 
@@ -205,7 +204,7 @@ async def _unreached_stat(_spec: PathSpec) -> FileStat:
 
 
 def _root_spec() -> PathSpec:
-    return PathSpec(resource_path=mount_key("/", ""),
+    return PathSpec(resource_path="",
                     virtual="/",
                     directory="/",
                     resolved=False)

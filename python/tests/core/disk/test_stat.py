@@ -46,9 +46,7 @@ async def test_stat_directory(tmp_path):
     index = RAMIndexCacheStore(ttl=0)
     result = await stat(
         accessor,
-        PathSpec(resource_path=("/sub").strip("/"),
-                 virtual="/sub",
-                 directory="/sub"), index)
+        PathSpec(resource_path="sub", virtual="/sub", directory="/sub"), index)
     assert result.type == FileType.DIRECTORY
     assert result.size is None
 
@@ -60,7 +58,7 @@ async def test_stat_file_not_found(tmp_path):
     with pytest.raises(FileNotFoundError):
         await stat(
             accessor,
-            PathSpec(resource_path=("/missing.txt").strip("/"),
+            PathSpec(resource_path="missing.txt",
                      virtual="/missing.txt",
                      directory="/missing.txt"), index)
 

@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stripSlash } from '../../utils/slash.ts'
 import { describe, expect, it } from 'vitest'
 import type { Resource } from '../../resource/base.ts'
 import { MountMode, PathSpec } from '../../types.ts'
@@ -60,7 +59,7 @@ describe('resolveGlobs', () => {
   it('passes through glob PathSpecs when the resource lacks glob', async () => {
     const reg = new MountRegistry({ '/ram': new PlainResource() }, MountMode.WRITE)
     const p = new PathSpec({
-      resourcePath: stripSlash('/ram/*.txt'),
+      resourcePath: 'ram/*.txt',
       virtual: '/ram/*.txt',
       directory: '/ram/',
       pattern: '*.txt',
@@ -78,7 +77,7 @@ describe('resolveGlobs', () => {
     ])
     const reg = new MountRegistry({ '/ram': res }, MountMode.WRITE)
     const p = new PathSpec({
-      resourcePath: stripSlash('/ram/*.txt'),
+      resourcePath: 'ram/*.txt',
       virtual: '/ram/*.txt',
       directory: '/ram/',
       pattern: '*.txt',
@@ -94,7 +93,7 @@ describe('resolveGlobs', () => {
   it('skips glob expansion for args in textArgs', async () => {
     const reg = new MountRegistry({ '/ram': new PlainResource() }, MountMode.WRITE)
     const p = new PathSpec({
-      resourcePath: stripSlash('*.txt'),
+      resourcePath: '*.txt',
       virtual: '*.txt',
       directory: '',
       pattern: '*.txt',

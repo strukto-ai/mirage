@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stripSlash } from '../../utils/slash.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
@@ -51,7 +50,7 @@ function makeDeps(
   }
 }
 
-const ROOT = new PathSpec({ resourcePath: stripSlash('/'), virtual: '/', directory: '/' })
+const ROOT = new PathSpec({ resourcePath: '', virtual: '/', directory: '/' })
 
 describe('walkFind', () => {
   it('walks recursively and sorts by codepoint', async () => {

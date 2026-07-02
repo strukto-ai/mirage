@@ -30,9 +30,7 @@ def _default_paths(paths: list[PathSpec],
         return paths
     if cwd is not None:
         return [cwd]
-    return [
-        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/")
-    ]
+    return [PathSpec(resource_path="", virtual="/", directory="/")]
 
 
 async def search_provision(

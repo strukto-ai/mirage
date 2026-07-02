@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stripSlash } from '../../utils/slash.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as DriveModule from '../google/drive.ts'
 
@@ -59,7 +58,7 @@ describe('gdrive read auto-bootstrap', () => {
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
     const path = new PathSpec({
-      resourcePath: stripSlash('/report.pdf'),
+      resourcePath: 'report.pdf',
       virtual: '/report.pdf',
       directory: '/report.pdf',
     })
@@ -86,7 +85,7 @@ describe('gdrive read auto-bootstrap', () => {
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
     const path = new PathSpec({
-      resourcePath: stripSlash('/missing.txt'),
+      resourcePath: 'missing.txt',
       virtual: '/missing.txt',
       directory: '/missing.txt',
     })
@@ -108,7 +107,7 @@ describe('gdrive read auto-bootstrap', () => {
       }),
     )
     const path = new PathSpec({
-      resourcePath: stripSlash('/Team Drive'),
+      resourcePath: 'Team Drive',
       virtual: '/Team Drive',
       directory: '/Team Drive',
     })

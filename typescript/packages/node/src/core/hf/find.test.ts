@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stripSlash } from '@struktoai/mirage-core'
 import { PathSpec } from '@struktoai/mirage-core'
 import { describe, expect, it } from 'vitest'
 import { HfModelsAccessor } from '../../accessor/hf.ts'
@@ -120,7 +119,7 @@ describe('hf resolveGlob', () => {
   it('expands patterns against readdir entries', async () => {
     const accessor = accessorWith(FILES)
     const spec = new PathSpec({
-      resourcePath: stripSlash('/*.json'),
+      resourcePath: '*.json',
       virtual: '/*.json',
       directory: '/',
       pattern: '*.json',

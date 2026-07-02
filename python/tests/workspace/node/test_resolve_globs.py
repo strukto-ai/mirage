@@ -52,7 +52,7 @@ def test_text_passes_through():
 
 def test_pathspec_without_pattern_preserved():
     reg = _mock_registry()
-    ps = PathSpec(resource_path=("/data/file.txt").strip("/"),
+    ps = PathSpec(resource_path="data/file.txt",
                   virtual="/data/file.txt",
                   directory="/data/",
                   resolved=True)
@@ -73,7 +73,7 @@ def test_glob_pathspec_resolved_to_pathspec():
     )
     reg = _mock_registry(resolve_result=[resolved_ps])
     glob_ps = PathSpec(
-        resource_path=("/data/*.txt").strip("/"),
+        resource_path="data/*.txt",
         virtual="/data/*.txt",
         directory="/data/",
         pattern="*.txt",
@@ -89,18 +89,18 @@ def test_glob_pathspec_resolved_to_pathspec():
 
 def test_glob_multiple_matches_expand():
     matches = [
-        PathSpec(resource_path=("/data/a.txt").strip("/"),
+        PathSpec(resource_path="data/a.txt",
                  virtual="/data/a.txt",
                  directory="/data/",
                  resolved=True),
-        PathSpec(resource_path=("/data/b.txt").strip("/"),
+        PathSpec(resource_path="data/b.txt",
                  virtual="/data/b.txt",
                  directory="/data/",
                  resolved=True),
     ]
     reg = _mock_registry(resolve_result=matches)
     glob_ps = PathSpec(
-        resource_path=("/data/*.txt").strip("/"),
+        resource_path="data/*.txt",
         virtual="/data/*.txt",
         directory="/data/",
         pattern="*.txt",
@@ -118,7 +118,7 @@ def test_glob_multiple_matches_expand():
 def test_glob_string_result_wrapped_in_pathspec():
     reg = _mock_registry(resolve_result=["/a.txt"])
     glob_ps = PathSpec(
-        resource_path=("/data/*.txt").strip("/"),
+        resource_path="data/*.txt",
         virtual="/data/*.txt",
         directory="/data/",
         pattern="*.txt",
@@ -134,7 +134,7 @@ def test_glob_string_result_wrapped_in_pathspec():
 def test_glob_no_match_returns_original_pathspec():
     reg = _mock_registry(resolve_result=[])
     glob_ps = PathSpec(
-        resource_path=("/data/*.xyz").strip("/"),
+        resource_path="data/*.xyz",
         virtual="/data/*.xyz",
         directory="/data/",
         pattern="*.xyz",
@@ -149,7 +149,7 @@ def test_glob_no_match_returns_original_pathspec():
 def test_text_args_skip_glob_resolution():
     reg = _mock_registry()
     glob_ps = PathSpec(
-        resource_path=("/data/*.txt").strip("/"),
+        resource_path="data/*.txt",
         virtual="/data/*.txt",
         directory="/data/",
         pattern="*.txt",
@@ -165,7 +165,7 @@ def test_text_args_skip_glob_resolution():
 
 def test_mixed_text_and_pathspec():
     reg = _mock_registry()
-    ps = PathSpec(resource_path=("/data/file.txt").strip("/"),
+    ps = PathSpec(resource_path="data/file.txt",
                   virtual="/data/file.txt",
                   directory="/data/",
                   resolved=True)
@@ -182,7 +182,7 @@ def test_resolve_error_returns_original_pathspec():
     reg = _mock_registry()
     reg.mount_for = MagicMock(side_effect=ValueError("no mount"))
     glob_ps = PathSpec(
-        resource_path=("/unknown/*.txt").strip("/"),
+        resource_path="unknown/*.txt",
         virtual="/unknown/*.txt",
         directory="/unknown/",
         pattern="*.txt",
@@ -210,7 +210,7 @@ def test_pathspec_dir_carries_pattern():
 
 def test_pathspec_dir_no_pattern():
     ps = PathSpec(
-        resource_path=("/data/file.txt").strip("/"),
+        resource_path="data/file.txt",
         virtual="/data/file.txt",
         directory="/data/",
         resolved=True,
@@ -229,7 +229,7 @@ def test_scope_error_truncates_instead_of_crash():
     resource._store.dirs.add("/")
     index = RAMIndexCacheStore()
     glob_ps = PathSpec(
-        resource_path=("/*.txt").strip("/"),
+        resource_path="*.txt",
         virtual="/*.txt",
         directory="/",
         pattern="*.txt",

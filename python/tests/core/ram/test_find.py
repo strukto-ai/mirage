@@ -39,8 +39,7 @@ def store():
 @pytest.mark.asyncio
 async def test_find_all(store):
     results = await find(
-        store,
-        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"))
+        store, PathSpec(resource_path="", virtual="/", directory="/"))
     assert "/readme.md" in results
     assert "/src/main.py" in results
     assert "/src/lib/helper.py" in results
@@ -51,8 +50,7 @@ async def test_find_all(store):
 @pytest.mark.asyncio
 async def test_find_by_name(store):
     results = await find(store,
-                         PathSpec(resource_path=("/").strip("/"),
-                                  virtual="/",
+                         PathSpec(resource_path="", virtual="/",
                                   directory="/"),
                          name="*.py")
     assert results == ["/src/lib/helper.py", "/src/main.py", "/src/util.py"]
@@ -71,7 +69,7 @@ async def test_find_name_matches_mount_root_start_path(store):
 @pytest.mark.asyncio
 async def test_find_by_type_file(store):
     results = await find(store,
-                         PathSpec(resource_path=("/src").strip("/"),
+                         PathSpec(resource_path="src",
                                   virtual="/src",
                                   directory="/src"),
                          type="f")
@@ -82,8 +80,7 @@ async def test_find_by_type_file(store):
 @pytest.mark.asyncio
 async def test_find_by_type_dir(store):
     results = await find(store,
-                         PathSpec(resource_path=("/").strip("/"),
-                                  virtual="/",
+                         PathSpec(resource_path="", virtual="/",
                                   directory="/"),
                          type="d")
     assert "/src" in results
@@ -94,8 +91,7 @@ async def test_find_by_type_dir(store):
 @pytest.mark.asyncio
 async def test_find_maxdepth(store):
     results = await find(store,
-                         PathSpec(resource_path=("/").strip("/"),
-                                  virtual="/",
+                         PathSpec(resource_path="", virtual="/",
                                   directory="/"),
                          maxdepth=1,
                          type="f")
@@ -108,8 +104,7 @@ async def test_find_maxdepth(store):
 @pytest.mark.asyncio
 async def test_find_mindepth(store):
     results = await find(store,
-                         PathSpec(resource_path=("/").strip("/"),
-                                  virtual="/",
+                         PathSpec(resource_path="", virtual="/",
                                   directory="/"),
                          mindepth=2,
                          type="f")
@@ -121,8 +116,7 @@ async def test_find_mindepth(store):
 @pytest.mark.asyncio
 async def test_find_min_size(store):
     results = await find(store,
-                         PathSpec(resource_path=("/").strip("/"),
-                                  virtual="/",
+                         PathSpec(resource_path="", virtual="/",
                                   directory="/"),
                          min_size=100,
                          type="f")
@@ -132,8 +126,7 @@ async def test_find_min_size(store):
 @pytest.mark.asyncio
 async def test_find_max_size(store):
     results = await find(store,
-                         PathSpec(resource_path=("/").strip("/"),
-                                  virtual="/",
+                         PathSpec(resource_path="", virtual="/",
                                   directory="/"),
                          max_size=10,
                          type="f")
@@ -145,7 +138,7 @@ async def test_find_max_size(store):
 @pytest.mark.asyncio
 async def test_find_name_exclude(store):
     results = await find(store,
-                         PathSpec(resource_path=("/src").strip("/"),
+                         PathSpec(resource_path="src",
                                   virtual="/src",
                                   directory="/src"),
                          name="*.py",
@@ -157,8 +150,7 @@ async def test_find_name_exclude(store):
 @pytest.mark.asyncio
 async def test_find_or_names(store):
     results = await find(store,
-                         PathSpec(resource_path=("/").strip("/"),
-                                  virtual="/",
+                         PathSpec(resource_path="", virtual="/",
                                   directory="/"),
                          or_names=["*.py", "*.json"])
     assert "/src/main.py" in results
@@ -174,8 +166,7 @@ async def test_find_iname(store):
     s.files["/File.TXT"] = b"data"
     s.files["/other.txt"] = b"data"
     results = await find(a,
-                         PathSpec(resource_path=("/").strip("/"),
-                                  virtual="/",
+                         PathSpec(resource_path="", virtual="/",
                                   directory="/"),
                          iname="*.txt")
     assert "/File.TXT" in results
@@ -185,8 +176,7 @@ async def test_find_iname(store):
 @pytest.mark.asyncio
 async def test_find_path_pattern(store):
     results = await find(store,
-                         PathSpec(resource_path=("/").strip("/"),
-                                  virtual="/",
+                         PathSpec(resource_path="", virtual="/",
                                   directory="/"),
                          path_pattern="/src/lib/*")
     assert "/src/lib/helper.py" in results
@@ -197,7 +187,7 @@ async def test_find_path_pattern(store):
 @pytest.mark.asyncio
 async def test_find_subdir(store):
     results = await find(store,
-                         PathSpec(resource_path=("/src/lib").strip("/"),
+                         PathSpec(resource_path="src/lib",
                                   virtual="/src/lib",
                                   directory="/src/lib"),
                          type="f")
@@ -210,8 +200,7 @@ async def test_find_empty_result():
 
     a = RAMAccessor(s)
     results = await find(a,
-                         PathSpec(resource_path=("/").strip("/"),
-                                  virtual="/",
+                         PathSpec(resource_path="", virtual="/",
                                   directory="/"),
                          name="*.xyz")
     assert results == []

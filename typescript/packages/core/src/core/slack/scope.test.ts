@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stripSlash } from '../../utils/slash.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { detectScope } from './scope.ts'
@@ -20,9 +19,7 @@ import { PathSpec } from '../../types.ts'
 
 describe('detectScope', () => {
   it('root → useNative=true, resourcePath /', () => {
-    const s = detectScope(
-      new PathSpec({ resourcePath: stripSlash('/'), virtual: '/', directory: '/' }),
-    )
+    const s = detectScope(new PathSpec({ resourcePath: '', virtual: '/', directory: '/' }))
     expect(s.useNative).toBe(true)
     expect(s.resourcePath).toBe('/')
   })
@@ -30,7 +27,7 @@ describe('detectScope', () => {
   it('/channels → container=channels, useNative=true', () => {
     const s = detectScope(
       new PathSpec({
-        resourcePath: stripSlash('/channels'),
+        resourcePath: 'channels',
         virtual: '/channels',
         directory: '/channels',
       }),
@@ -42,7 +39,7 @@ describe('detectScope', () => {
   it('/channels/general__C123 → channelName=general, channelId=C123', () => {
     const s = detectScope(
       new PathSpec({
-        resourcePath: stripSlash('/channels/general__C123'),
+        resourcePath: 'channels/general__C123',
         virtual: '/channels/general__C123',
         directory: '/channels/general__C123',
       }),
@@ -56,7 +53,7 @@ describe('detectScope', () => {
   it('/channels/general__C123/2026-04-24 → date scope, useNative=true', () => {
     const s = detectScope(
       new PathSpec({
-        resourcePath: stripSlash('/channels/general__C123/2026-04-24'),
+        resourcePath: 'channels/general__C123/2026-04-24',
         virtual: '/channels/general__C123/2026-04-24',
         directory: '/channels/general__C123/2026-04-24',
       }),
@@ -69,7 +66,7 @@ describe('detectScope', () => {
   it('/channels/<chan>/<date>/chat.jsonl → messages target, useNative=false', () => {
     const s = detectScope(
       new PathSpec({
-        resourcePath: stripSlash('/channels/general__C123/2026-04-24/chat.jsonl'),
+        resourcePath: 'channels/general__C123/2026-04-24/chat.jsonl',
         virtual: '/channels/general__C123/2026-04-24/chat.jsonl',
         directory: '/channels/general__C123/2026-04-24/chat.jsonl',
       }),
@@ -82,7 +79,7 @@ describe('detectScope', () => {
   it('/channels/<chan>/<date>/files → files target, useNative=true', () => {
     const s = detectScope(
       new PathSpec({
-        resourcePath: stripSlash('/channels/general__C123/2026-04-24/files'),
+        resourcePath: 'channels/general__C123/2026-04-24/files',
         virtual: '/channels/general__C123/2026-04-24/files',
         directory: '/channels/general__C123/2026-04-24/files',
       }),
@@ -94,7 +91,7 @@ describe('detectScope', () => {
   it('/channels/<chan>/<date>/files/<blob> → files target, useNative=false', () => {
     const s = detectScope(
       new PathSpec({
-        resourcePath: stripSlash('/channels/general__C123/2026-04-24/files/foo__F1.pdf'),
+        resourcePath: 'channels/general__C123/2026-04-24/files/foo__F1.pdf',
         virtual: '/channels/general__C123/2026-04-24/files/foo__F1.pdf',
         directory: '/channels/general__C123/2026-04-24/files/foo__F1.pdf',
       }),
@@ -105,7 +102,7 @@ describe('detectScope', () => {
 
   it('/users → useNative=false, resourcePath=users', () => {
     const s = detectScope(
-      new PathSpec({ resourcePath: stripSlash('/users'), virtual: '/users', directory: '/users' }),
+      new PathSpec({ resourcePath: 'users', virtual: '/users', directory: '/users' }),
     )
     expect(s.useNative).toBe(false)
     expect(s.resourcePath).toBe('users')
@@ -114,7 +111,7 @@ describe('detectScope', () => {
   it('handles dirname without __id (just name)', () => {
     const s = detectScope(
       new PathSpec({
-        resourcePath: stripSlash('/channels/general'),
+        resourcePath: 'channels/general',
         virtual: '/channels/general',
         directory: '/channels/general',
       }),

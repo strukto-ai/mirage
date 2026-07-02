@@ -42,7 +42,7 @@ async def test_resolve_glob_str_path(accessor, index):
 
 @pytest.mark.asyncio
 async def test_resolve_glob_resolved_pathspec(accessor, index):
-    p = PathSpec(resource_path=("/public/tables/users").strip("/"),
+    p = PathSpec(resource_path="public/tables/users",
                  virtual="/public/tables/users",
                  directory="/public/tables",
                  resolved=True)
@@ -58,7 +58,7 @@ async def test_resolve_glob_pattern_match(accessor, index):
                    "/public/tables/users", "/public/tables/orders",
                    "/public/tables/teams"
                ]):
-        p = PathSpec(resource_path=("/public/tables/u*").strip("/"),
+        p = PathSpec(resource_path="public/tables/u*",
                      virtual="/public/tables/u*",
                      directory="/public/tables",
                      pattern="u*",
@@ -70,7 +70,7 @@ async def test_resolve_glob_pattern_match(accessor, index):
 
 @pytest.mark.asyncio
 async def test_resolve_glob_unresolved_no_pattern(accessor, index):
-    p = PathSpec(resource_path=("/public/tables").strip("/"),
+    p = PathSpec(resource_path="public/tables",
                  virtual="/public/tables",
                  directory="/public",
                  resolved=False,

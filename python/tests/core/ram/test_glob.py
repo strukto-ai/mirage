@@ -47,7 +47,7 @@ def index():
 @pytest.mark.asyncio
 async def test_resolve_glob_file_scope(accessor, index):
     scopes = [
-        PathSpec(resource_path=("/readme.md").strip("/"),
+        PathSpec(resource_path="readme.md",
                  virtual="/readme.md",
                  directory="/",
                  resolved=True)
@@ -60,7 +60,7 @@ async def test_resolve_glob_file_scope(accessor, index):
 async def test_resolve_glob_pattern(accessor, index):
     scopes = [
         PathSpec(
-            resource_path=("/src/*.py").strip("/"),
+            resource_path="src/*.py",
             virtual="/src/*.py",
             directory="/src",
             pattern="*.py",
@@ -77,7 +77,7 @@ async def test_resolve_glob_pattern(accessor, index):
 @pytest.mark.asyncio
 async def test_resolve_glob_directory_scope(accessor, index):
     scopes = [
-        PathSpec(resource_path=("/src").strip("/"),
+        PathSpec(resource_path="src",
                  virtual="/src",
                  directory="/src",
                  pattern=None,
@@ -90,12 +90,12 @@ async def test_resolve_glob_directory_scope(accessor, index):
 @pytest.mark.asyncio
 async def test_resolve_glob_multiple_scopes(accessor, index):
     scopes = [
-        PathSpec(resource_path=("/readme.md").strip("/"),
+        PathSpec(resource_path="readme.md",
                  virtual="/readme.md",
                  directory="/",
                  resolved=True),
         PathSpec(
-            resource_path=("/src/*.py").strip("/"),
+            resource_path="src/*.py",
             virtual="/src/*.py",
             directory="/src",
             pattern="*.py",

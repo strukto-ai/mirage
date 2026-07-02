@@ -80,7 +80,7 @@ async function findCommand(
       virtual: '/',
       directory: '/',
       resolved: false,
-      resourcePath: mountKey('/', opts.mountPrefix ?? ''),
+      resourcePath: '',
     })
   const nameFlag = typeof opts.flags.name === 'string' ? opts.flags.name : null
   const inameFlag = typeof opts.flags.iname === 'string' ? opts.flags.iname : null

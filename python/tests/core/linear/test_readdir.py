@@ -38,8 +38,7 @@ def index():
 @pytest.mark.asyncio
 async def test_readdir_root(accessor, index):
     result = await readdir(
-        accessor,
-        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"),
+        accessor, PathSpec(resource_path="", virtual="/", directory="/"),
         index)
     assert result == ["/teams"]
 
@@ -60,7 +59,7 @@ async def test_readdir_teams(accessor, index):
                return_value=teams):
         result = await readdir(
             accessor,
-            PathSpec(resource_path=("/teams").strip("/"),
+            PathSpec(resource_path="teams",
                      virtual="/teams",
                      directory="/teams"), index)
     assert result == ["/teams/ENG__Engineering__TEAM1"]
@@ -113,8 +112,7 @@ async def test_readdir_team_members(accessor, index):
                return_value=users):
         result = await readdir(
             accessor,
-            PathSpec(resource_path=(
-                "/teams/ENG__Engineering__TEAM1/members").strip("/"),
+            PathSpec(resource_path="teams/ENG__Engineering__TEAM1/members",
                      virtual="/teams/ENG__Engineering__TEAM1/members",
                      directory="/teams/ENG__Engineering__TEAM1/members"),
             index,

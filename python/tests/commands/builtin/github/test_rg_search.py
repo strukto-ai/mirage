@@ -20,7 +20,6 @@ from mirage.commands.builtin.github.narrow import narrow_scope
 from mirage.commands.builtin.github.rg import rg
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_key
 from tests.fixtures.github_mock import MOCK_BLOBS
 
 _GLOBALS = rg.__wrapped__.__globals__
@@ -37,14 +36,14 @@ def _patch_read(monkeypatch):
 
 
 def _root() -> PathSpec:
-    return PathSpec(resource_path=mount_key("/", ""),
+    return PathSpec(resource_path="",
                     virtual="/",
                     directory="/",
                     resolved=False)
 
 
 def _subdir() -> PathSpec:
-    return PathSpec(resource_path=mount_key("/src", ""),
+    return PathSpec(resource_path="src",
                     virtual="/src",
                     directory="/src",
                     resolved=False)
@@ -55,11 +54,11 @@ async def test_rg_root_large_tree_uses_search(mock_github_api, github_env,
                                               monkeypatch):
     accessor, index = github_env
     narrowed = [
-        PathSpec(resource_path=mount_key("/src/main.py", ""),
+        PathSpec(resource_path="src/main.py",
                  virtual="/src/main.py",
                  directory="",
                  resolved=True),
-        PathSpec(resource_path=mount_key("/src/utils.py", ""),
+        PathSpec(resource_path="src/utils.py",
                  virtual="/src/utils.py",
                  directory="",
                  resolved=True),

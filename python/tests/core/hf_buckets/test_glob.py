@@ -37,7 +37,7 @@ async def test_resolve_glob_expands_basename_pattern(make_acc):
     })
     index = RAMIndexCacheStore(ttl=60)
     pattern = PathSpec(
-        resource_path=("/data/*.txt").strip("/"),
+        resource_path="data/*.txt",
         virtual="/data/*.txt",
         directory="/data/",
         pattern="*.txt",

@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { GitHubCIAccessor } from '../../accessor/github_ci.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
@@ -157,7 +156,7 @@ describe('readdir(/runs) cap', () => {
       virtual: '/runs',
       directory: '/runs',
       resolved: false,
-      resourcePath: mountKey('/runs', ''),
+      resourcePath: 'runs',
     })
     const out = await ciReaddir(accessor, path, index)
     expect(out.length).toBe(7)
@@ -193,7 +192,7 @@ describe('find on /runs', () => {
           virtual: '/runs',
           directory: '/runs',
           resolved: false,
-          resourcePath: mountKey('/runs', ''),
+          resourcePath: 'runs',
         }),
       ],
       [],

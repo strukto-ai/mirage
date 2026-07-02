@@ -86,7 +86,7 @@ async def test_read_file(accessor, index):
     ):
         result = await read(
             accessor,
-            PathSpec(resource_path=("/Team Drive/report.pdf").strip("/"),
+            PathSpec(resource_path="Team Drive/report.pdf",
                      virtual="/Team Drive/report.pdf",
                      directory="/Team Drive/report.pdf"), index)
         assert result == content
@@ -110,7 +110,7 @@ async def test_read_shared_drive_raises_is_a_directory(accessor, index):
         with pytest.raises(IsADirectoryError):
             await read(
                 accessor,
-                PathSpec(resource_path=("/Team Drive").strip("/"),
+                PathSpec(resource_path="Team Drive",
                          virtual="/Team Drive",
                          directory="/Team Drive"),
                 index,
@@ -123,7 +123,7 @@ async def test_read_not_found(accessor, index):
     with pytest.raises(FileNotFoundError):
         await read(
             accessor,
-            PathSpec(resource_path=("/missing/file.txt").strip("/"),
+            PathSpec(resource_path="missing/file.txt",
                      virtual="/missing/file.txt",
                      directory="/missing/file.txt"), index)
 
@@ -156,7 +156,7 @@ async def test_read_auto_bootstraps_from_empty_index(accessor, index):
     ):
         result = await read(
             accessor,
-            PathSpec(resource_path=("/report.pdf").strip("/"),
+            PathSpec(resource_path="report.pdf",
                      virtual="/report.pdf",
                      directory="/report.pdf"),
             index,
@@ -193,7 +193,7 @@ async def test_read_missing_file_raises_after_recursion(accessor, index):
         with pytest.raises(FileNotFoundError):
             await read(
                 accessor,
-                PathSpec(resource_path=("/missing.txt").strip("/"),
+                PathSpec(resource_path="missing.txt",
                          virtual="/missing.txt",
                          directory="/missing.txt"),
                 index,

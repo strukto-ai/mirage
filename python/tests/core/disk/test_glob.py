@@ -25,7 +25,7 @@ async def test_resolve_file_path(tmp_path):
     (tmp_path / "a.txt").write_text("a")
     accessor = DiskAccessor(tmp_path)
     index = RAMIndexCacheStore(ttl=0)
-    scope = PathSpec(resource_path=("/a.txt").strip("/"),
+    scope = PathSpec(resource_path="a.txt",
                      virtual="/a.txt",
                      directory="/",
                      resolved=True)
@@ -42,7 +42,7 @@ async def test_resolve_glob_pattern(tmp_path):
     (tmp_path / "c.py").write_text("c")
     accessor = DiskAccessor(tmp_path)
     index = RAMIndexCacheStore(ttl=0)
-    scope = PathSpec(resource_path=("/*.txt").strip("/"),
+    scope = PathSpec(resource_path="*.txt",
                      virtual="/*.txt",
                      directory="/",
                      pattern="*.txt",
@@ -56,7 +56,7 @@ async def test_resolve_glob_pattern(tmp_path):
 async def test_resolve_directory_path(tmp_path):
     accessor = DiskAccessor(tmp_path)
     index = RAMIndexCacheStore(ttl=0)
-    scope = PathSpec(resource_path=("/").strip("/"),
+    scope = PathSpec(resource_path="",
                      virtual="/",
                      directory="/",
                      resolved=False)

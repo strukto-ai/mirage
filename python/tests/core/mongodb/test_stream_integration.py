@@ -56,7 +56,7 @@ async def _collect_lines(gen) -> list[str]:
 
 @pytest.mark.asyncio
 async def test_extended_json_for_bson_types(accessor):
-    path = PathSpec(resource_path=("/mirage_test/bson_types.jsonl").strip("/"),
+    path = PathSpec(resource_path="mirage_test/bson_types.jsonl",
                     virtual="/mirage_test/bson_types.jsonl",
                     directory="/mirage_test/bson_types.jsonl")
     lines = await _collect_lines(read_stream(accessor, path))
@@ -79,10 +79,9 @@ async def test_extended_json_for_bson_types(accessor):
 
 @pytest.mark.asyncio
 async def test_streams_full_5000_docs_without_cap(accessor):
-    path = PathSpec(
-        resource_path=("/mirage_test/streaming_large.jsonl").strip("/"),
-        virtual="/mirage_test/streaming_large.jsonl",
-        directory="/mirage_test/streaming_large.jsonl")
+    path = PathSpec(resource_path="mirage_test/streaming_large.jsonl",
+                    virtual="/mirage_test/streaming_large.jsonl",
+                    directory="/mirage_test/streaming_large.jsonl")
     count = 0
     async for chunk in read_stream(accessor, path, batch_size=500):
         count += chunk.count(b"\n")
@@ -91,10 +90,9 @@ async def test_streams_full_5000_docs_without_cap(accessor):
 
 @pytest.mark.asyncio
 async def test_short_circuit_when_only_first_doc_consumed(accessor):
-    path = PathSpec(
-        resource_path=("/mirage_test/streaming_large.jsonl").strip("/"),
-        virtual="/mirage_test/streaming_large.jsonl",
-        directory="/mirage_test/streaming_large.jsonl")
+    path = PathSpec(resource_path="mirage_test/streaming_large.jsonl",
+                    virtual="/mirage_test/streaming_large.jsonl",
+                    directory="/mirage_test/streaming_large.jsonl")
     start = time.monotonic()
     gen = read_stream(accessor, path, batch_size=100)
     first = await gen.__anext__()

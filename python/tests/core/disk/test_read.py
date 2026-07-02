@@ -41,7 +41,7 @@ async def test_read_file_not_found(tmp_path):
     with pytest.raises(FileNotFoundError):
         await read_bytes(
             accessor,
-            PathSpec(resource_path=("/missing.txt").strip("/"),
+            PathSpec(resource_path="missing.txt",
                      virtual="/missing.txt",
                      directory="/missing.txt"), index)
 

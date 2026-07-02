@@ -73,6 +73,6 @@ async def test_read_not_found(accessor, index):
     with pytest.raises(FileNotFoundError):
         await read(
             accessor,
-            PathSpec(resource_path=("/no/such/path").strip("/"),
+            PathSpec(resource_path="no/such/path",
                      virtual="/no/such/path",
                      directory="/no/such/path"), index)

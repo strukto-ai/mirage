@@ -50,7 +50,7 @@ async def test_get_bytes(s3_accessor):
         mock_session.return_value.client.return_value = mock_ctx
         data = await read_bytes(
             s3_accessor,
-            PathSpec(resource_path=("/data/file.txt").strip("/"),
+            PathSpec(resource_path="data/file.txt",
                      virtual="/data/file.txt",
                      directory="/data/file.txt"))
         assert data == b"hello world\nfoo bar\nbaz"
@@ -68,13 +68,12 @@ async def test_range_get(s3_accessor):
         mock_ctx = AsyncMock()
         mock_ctx.__aenter__.return_value = mock_client
         mock_session.return_value.client.return_value = mock_ctx
-        data = await read_bytes(
-            s3_accessor,
-            PathSpec(resource_path=("/data/file.txt").strip("/"),
-                     virtual="/data/file.txt",
-                     directory="/data/file.txt"),
-            offset=0,
-            size=5)
+        data = await read_bytes(s3_accessor,
+                                PathSpec(resource_path="data/file.txt",
+                                         virtual="/data/file.txt",
+                                         directory="/data/file.txt"),
+                                offset=0,
+                                size=5)
         assert data == b"hello"
         mock_client.get_object.assert_called_once()
         call_kwargs = mock_client.get_object.call_args[1]
@@ -93,7 +92,7 @@ async def test_put_bytes(s3_accessor):
         mock_session.return_value.client.return_value = mock_ctx
         await write_bytes(
             s3_accessor,
-            PathSpec(resource_path=("/data/out.txt").strip("/"),
+            PathSpec(resource_path="data/out.txt",
                      virtual="/data/out.txt",
                      directory="/data/out.txt"), b"hello")
         mock_client.put_object.assert_called_once()

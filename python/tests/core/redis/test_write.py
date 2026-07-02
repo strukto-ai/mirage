@@ -42,7 +42,7 @@ async def accessor():
 async def test_write_bytes(accessor):
     await write_bytes(
         accessor,
-        PathSpec(resource_path=("/hello.txt").strip("/"),
+        PathSpec(resource_path="hello.txt",
                  virtual="/hello.txt",
                  directory="/hello.txt"), b"hello")
     assert await accessor.store.get_file("/hello.txt") == b"hello"
@@ -53,12 +53,12 @@ async def test_write_bytes(accessor):
 async def test_write_bytes_overwrite(accessor):
     await write_bytes(
         accessor,
-        PathSpec(resource_path=("/file.txt").strip("/"),
+        PathSpec(resource_path="file.txt",
                  virtual="/file.txt",
                  directory="/file.txt"), b"first")
     await write_bytes(
         accessor,
-        PathSpec(resource_path=("/file.txt").strip("/"),
+        PathSpec(resource_path="file.txt",
                  virtual="/file.txt",
                  directory="/file.txt"), b"second")
     assert await accessor.store.get_file("/file.txt") == b"second"
@@ -76,7 +76,7 @@ async def test_write_bytes_parent_not_found():
     ):
         await write_bytes(
             a,
-            PathSpec(resource_path=("/no/parent/file.txt").strip("/"),
+            PathSpec(resource_path="no/parent/file.txt",
                      virtual="/no/parent/file.txt",
                      directory="/no/parent/file.txt"), b"data")
     await s.clear()
@@ -87,7 +87,7 @@ async def test_write_bytes_parent_not_found():
 async def test_write_bytes_to_subdir(accessor):
     await write_bytes(
         accessor,
-        PathSpec(resource_path=("/sub/file.txt").strip("/"),
+        PathSpec(resource_path="sub/file.txt",
                  virtual="/sub/file.txt",
                  directory="/sub/file.txt"), b"nested data")
     assert await accessor.store.get_file("/sub/file.txt") == b"nested data"
@@ -101,7 +101,7 @@ async def test_write_bytes_root_parent():
     a = RedisAccessor(s)
     await write_bytes(
         a,
-        PathSpec(resource_path=("/root_file.txt").strip("/"),
+        PathSpec(resource_path="root_file.txt",
                  virtual="/root_file.txt",
                  directory="/root_file.txt"), b"root")
     assert await s.get_file("/root_file.txt") == b"root"
@@ -113,7 +113,7 @@ async def test_write_bytes_root_parent():
 async def test_write_bytes_sets_modified(accessor):
     await write_bytes(
         accessor,
-        PathSpec(resource_path=("/file.txt").strip("/"),
+        PathSpec(resource_path="file.txt",
                  virtual="/file.txt",
                  directory="/file.txt"), b"data")
     assert await accessor.store.get_modified("/file.txt") is not None
@@ -123,7 +123,7 @@ async def test_write_bytes_sets_modified(accessor):
 async def test_write_bytes_modified_uses_z_suffix(accessor):
     await write_bytes(
         accessor,
-        PathSpec(resource_path=("/file.txt").strip("/"),
+        PathSpec(resource_path="file.txt",
                  virtual="/file.txt",
                  directory="/file.txt"), b"data")
     modified = await accessor.store.get_modified("/file.txt")

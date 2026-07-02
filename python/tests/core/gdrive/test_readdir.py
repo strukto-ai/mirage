@@ -75,10 +75,8 @@ async def test_readdir_root(accessor, index):
             return_value=files,
     ):
         result = await readdir(
-            accessor,
-            PathSpec(resource_path=("/").strip("/"),
-                     virtual="/",
-                     directory="/"), index)
+            accessor, PathSpec(resource_path="", virtual="/", directory="/"),
+            index)
         assert "/readme.txt" in result
 
 
@@ -93,8 +91,7 @@ async def test_readdir_cached(accessor, index):
     )
     await index.set_dir("/", [("cached.txt", entry)])
     result = await readdir(
-        accessor,
-        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"),
+        accessor, PathSpec(resource_path="", virtual="/", directory="/"),
         index)
     assert any("cached.txt" in r for r in result)
 
@@ -130,9 +127,8 @@ async def test_readdir_subfolder(accessor, index):
     ) as mock_list:
         result = await readdir(
             accessor,
-            PathSpec(resource_path=("/docs").strip("/"),
-                     virtual="/docs",
-                     directory="/docs"), index)
+            PathSpec(resource_path="docs", virtual="/docs", directory="/docs"),
+            index)
         assert "/docs/notes.txt" in result
         mock_list.assert_called_once_with(accessor.token_manager,
                                           folder_id="folder1",
@@ -171,9 +167,8 @@ async def test_readdir_repopulates_evicted_subfolder(accessor, index):
     ):
         result = await readdir(
             accessor,
-            PathSpec(resource_path=("/docs").strip("/"),
-                     virtual="/docs",
-                     directory="/docs"), index)
+            PathSpec(resource_path="docs", virtual="/docs", directory="/docs"),
+            index)
         assert "/docs/notes.txt" in result
 
 
@@ -201,7 +196,7 @@ async def test_readdir_missing_subfolder_raises_after_recursion(
         with pytest.raises(FileNotFoundError):
             await readdir(
                 accessor,
-                PathSpec(resource_path=("/docs").strip("/"),
+                PathSpec(resource_path="docs",
                          virtual="/docs",
                          directory="/docs"), index)
 
@@ -222,10 +217,8 @@ async def test_readdir_root_includes_shared_drives(accessor, index):
          patch("mirage.core.gdrive.readdir.list_shared_drives",
                new_callable=AsyncMock, return_value=drives):
         result = await readdir(
-            accessor,
-            PathSpec(resource_path=("/").strip("/"),
-                     virtual="/",
-                     directory="/"), index)
+            accessor, PathSpec(resource_path="", virtual="/", directory="/"),
+            index)
         assert "/readme.txt" in result
         # Shared Drives appear as top-level directories.
         assert "/Team Drive/" in result
@@ -257,10 +250,8 @@ async def test_readdir_root_uniquifies_duplicate_shared_drive_names(
          patch("mirage.core.gdrive.readdir.list_shared_drives",
                new_callable=AsyncMock, return_value=drives):
         result = await readdir(
-            accessor,
-            PathSpec(resource_path=("/").strip("/"),
-                     virtual="/",
-                     directory="/"), index)
+            accessor, PathSpec(resource_path="", virtual="/", directory="/"),
+            index)
 
     assert result == [
         "/Team/",
@@ -288,10 +279,8 @@ async def test_readdir_root_shared_drives_best_effort(accessor, index):
          patch("mirage.core.gdrive.readdir.list_shared_drives",
                new_callable=AsyncMock, side_effect=RuntimeError("no scope")):
         result = await readdir(
-            accessor,
-            PathSpec(resource_path=("/").strip("/"),
-                     virtual="/",
-                     directory="/"), index)
+            accessor, PathSpec(resource_path="", virtual="/", directory="/"),
+            index)
         assert "/readme.txt" in result
 
 
@@ -336,10 +325,8 @@ async def test_readdir_workspace_files_get_extensions(accessor, index):
             return_value=files,
     ):
         result = await readdir(
-            accessor,
-            PathSpec(resource_path=("/").strip("/"),
-                     virtual="/",
-                     directory="/"), index)
+            accessor, PathSpec(resource_path="", virtual="/", directory="/"),
+            index)
         assert "/My Document.gdoc.json" in result
         assert "/My Sheet.gsheet.json" in result
         assert "/My Slides.gslide.json" in result

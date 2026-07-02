@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stripSlash } from '../../utils/slash.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { command, type CommandFn } from '../../commands/config.ts'
@@ -269,7 +268,7 @@ describe('MountRegistry.resolveMount: cross-mount fallback', () => {
     if (grepB === undefined) throw new Error('missing grep cmd')
     b.register(grepB)
     const path = new PathSpec({
-      resourcePath: stripSlash('/b/file.txt'),
+      resourcePath: 'b/file.txt',
       virtual: '/b/file.txt',
       directory: '/b',
     })
@@ -334,7 +333,7 @@ describe('MountRegistry.resolveMount: path-bound dispatch', () => {
   it('rejects a path-bound command unsupported by its backend', async () => {
     const reg = pathBoundRegistryWithFallback()
     const path = new PathSpec({
-      resourcePath: stripSlash('/limited/file.txt'),
+      resourcePath: 'limited/file.txt',
       virtual: '/limited/file.txt',
       directory: '/limited',
     })

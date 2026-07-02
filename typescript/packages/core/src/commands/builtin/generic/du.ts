@@ -43,7 +43,7 @@ export async function duGeneric(
       ? paths
       : [
           new PathSpec({
-            resourcePath: stripSlash('/'),
+            resourcePath: '',
             virtual: '/',
             directory: '/',
             resolved: false,
@@ -99,7 +99,7 @@ export async function duMulti(
       ? paths
       : [
           new PathSpec({
-            resourcePath: stripSlash('/'),
+            resourcePath: '',
             virtual: '/',
             directory: '/',
             resolved: false,

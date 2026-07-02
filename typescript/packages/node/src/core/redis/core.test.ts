@@ -252,7 +252,7 @@ describe.skipIf(skip)('core/redis ops', () => {
       directory: '/',
       pattern: '*.txt',
       resolved: false,
-      resourcePath: mountKey('/*.txt', ''),
+      resourcePath: '*.txt',
     })
     const expanded = await resolveGlob(acc, [patternSpec])
     const names = expanded.map((p) => p.virtual).sort()

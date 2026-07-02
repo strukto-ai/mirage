@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stripSlash } from '../../utils/slash.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ReaddirModule from './readdir.ts'
@@ -77,7 +76,7 @@ const TREE: Record<string, string[]> = {
   '/docs/inner': ['/docs/inner/deep.md'],
 }
 
-const ROOT = new PathSpec({ resourcePath: stripSlash('/'), virtual: '/', directory: '/' })
+const ROOT = new PathSpec({ resourcePath: '', virtual: '/', directory: '/' })
 
 const SIZES: Record<string, { size?: number; modified?: string }> = {
   '/docs': { modified: '2026-01-05T00:00:00Z' },

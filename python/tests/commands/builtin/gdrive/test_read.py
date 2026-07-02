@@ -70,7 +70,7 @@ async def test_read_gdoc(accessor, index):
     ):
         result = await read(
             accessor,
-            PathSpec(resource_path=("/My Doc.gdoc.json").strip("/"),
+            PathSpec(resource_path="My Doc.gdoc.json",
                      virtual="/My Doc.gdoc.json",
                      directory="/My Doc.gdoc.json"), index)
         assert b"doc1" in result
@@ -94,7 +94,7 @@ async def test_read_gsheet(accessor, index):
     ):
         result = await read(
             accessor,
-            PathSpec(resource_path=("/My Sheet.gsheet.json").strip("/"),
+            PathSpec(resource_path="My Sheet.gsheet.json",
                      virtual="/My Sheet.gsheet.json",
                      directory="/My Sheet.gsheet.json"), index)
         assert b"sheet1" in result
@@ -118,7 +118,7 @@ async def test_read_gslide(accessor, index):
     ):
         result = await read(
             accessor,
-            PathSpec(resource_path=("/My Slides.gslide.json").strip("/"),
+            PathSpec(resource_path="My Slides.gslide.json",
                      virtual="/My Slides.gslide.json",
                      directory="/My Slides.gslide.json"), index)
         assert b"slide1" in result
@@ -143,7 +143,7 @@ async def test_read_regular(accessor, index):
     ):
         result = await read(
             accessor,
-            PathSpec(resource_path=("/photo.png").strip("/"),
+            PathSpec(resource_path="photo.png",
                      virtual="/photo.png",
                      directory="/photo.png"), index)
         assert result == img_bytes

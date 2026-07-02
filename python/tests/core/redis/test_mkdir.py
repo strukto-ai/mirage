@@ -49,7 +49,7 @@ async def test_mkdir(mk_store):
     a = await mk_store("test:mkdir:1:")
     await mkdir(
         a,
-        PathSpec(resource_path=("/newdir").strip("/"),
+        PathSpec(resource_path="newdir",
                  virtual="/newdir",
                  directory="/newdir"))
     assert await a.store.has_dir("/newdir")
@@ -65,7 +65,7 @@ async def test_mkdir_parent_not_found(mk_store):
     ):
         await mkdir(
             a,
-            PathSpec(resource_path=("/no/parent").strip("/"),
+            PathSpec(resource_path="no/parent",
                      virtual="/no/parent",
                      directory="/no/parent"))
 
@@ -74,15 +74,9 @@ async def test_mkdir_parent_not_found(mk_store):
 async def test_mkdir_already_exists(mk_store):
     a = await mk_store("test:mkdir:3:")
     await mkdir(
-        a,
-        PathSpec(resource_path=("/dir").strip("/"),
-                 virtual="/dir",
-                 directory="/dir"))
+        a, PathSpec(resource_path="dir", virtual="/dir", directory="/dir"))
     await mkdir(
-        a,
-        PathSpec(resource_path=("/dir").strip("/"),
-                 virtual="/dir",
-                 directory="/dir"))
+        a, PathSpec(resource_path="dir", virtual="/dir", directory="/dir"))
     assert await a.store.has_dir("/dir")
 
 
@@ -90,7 +84,7 @@ async def test_mkdir_already_exists(mk_store):
 async def test_mkdir_with_parents(mk_store):
     a = await mk_store("test:mkdir:4:")
     await mkdir(a,
-                PathSpec(resource_path=("/a/b/c").strip("/"),
+                PathSpec(resource_path="a/b/c",
                          virtual="/a/b/c",
                          directory="/a/b/c"),
                 parents=True)

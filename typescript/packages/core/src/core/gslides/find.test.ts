@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stripSlash } from '../../utils/slash.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ReaddirModule from './readdir.ts'
 import type * as StatModule from './stat.ts'
@@ -60,7 +59,7 @@ const TREE: Record<string, string[]> = {
   '/shared': [],
 }
 
-const ROOT = new PathSpec({ resourcePath: stripSlash('/'), virtual: '/', directory: '/' })
+const ROOT = new PathSpec({ resourcePath: '', virtual: '/', directory: '/' })
 
 describe('gslides core find', () => {
   beforeEach(() => {

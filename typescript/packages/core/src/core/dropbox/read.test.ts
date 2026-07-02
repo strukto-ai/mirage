@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stripSlash } from '../../utils/slash.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from './_client.ts'
@@ -80,7 +79,7 @@ describe('dropbox read', () => {
     await expect(
       read(
         accessor,
-        new PathSpec({ resourcePath: stripSlash('/docs'), virtual: '/docs', directory: '/docs' }),
+        new PathSpec({ resourcePath: 'docs', virtual: '/docs', directory: '/docs' }),
         index,
       ),
     ).rejects.toThrow(/EISDIR/)

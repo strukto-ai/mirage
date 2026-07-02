@@ -61,7 +61,7 @@ function root(): PathSpec {
     virtual: '/db',
     directory: '/db',
     resolved: false,
-    resourcePath: mountKey('/db', ''),
+    resourcePath: 'db',
   })
 }
 

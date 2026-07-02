@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { scopeWarning } from './scope.ts'
@@ -22,7 +21,7 @@ function scope(): PathSpec {
     virtual: '/dir',
     directory: '/dir',
     resolved: false,
-    resourcePath: mountKey('/dir', ''),
+    resourcePath: 'dir',
   })
 }
 

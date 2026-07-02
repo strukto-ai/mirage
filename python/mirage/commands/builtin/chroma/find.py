@@ -14,19 +14,13 @@ from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 
 
-def _normalize_path(path: PathSpec) -> PathSpec:
-    return path
-
-
 def _default_paths(paths: list[PathSpec],
                    cwd: PathSpec | None) -> list[PathSpec]:
     if paths:
-        return [_normalize_path(path) for path in paths]
+        return paths
     if cwd is not None:
-        return [_normalize_path(cwd)]
-    return [
-        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/")
-    ]
+        return [cwd]
+    return [PathSpec(resource_path="", virtual="/", directory="/")]
 
 
 def _is_bare_name(texts: tuple[str, ...]) -> bool:

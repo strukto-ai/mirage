@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey, stripSlash } from '@struktoai/mirage-core'
+import { mountKey } from '@struktoai/mirage-core'
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '@struktoai/mirage-core'
 import { makeFakeAccessor } from './_test_utils.ts'
@@ -29,7 +29,7 @@ describe('core/ssh/glob.resolveGlob', () => {
       dirs: new Map([['/', {}]]),
     })
     const pattern = new PathSpec({
-      resourcePath: stripSlash('/*.json'),
+      resourcePath: '*.json',
       virtual: '/*.json',
       directory: '/',
       pattern: '*.json',

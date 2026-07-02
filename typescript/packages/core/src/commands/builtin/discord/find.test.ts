@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stripSlash } from '../../../utils/slash.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
@@ -82,7 +81,7 @@ describe('discord find', () => {
       resource.accessor,
       [
         new PathSpec({
-          resourcePath: stripSlash('/mnt/discord'),
+          resourcePath: 'mnt/discord',
           virtual: '/mnt/discord',
           directory: '/mnt/discord',
           resolved: false,

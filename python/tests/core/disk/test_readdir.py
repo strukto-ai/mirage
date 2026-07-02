@@ -40,8 +40,7 @@ async def test_directory_with_files(tmp_path):
     accessor = DiskAccessor(tmp_path)
     index = RAMIndexCacheStore(ttl=0)
     result = await readdir(
-        accessor,
-        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"),
+        accessor, PathSpec(resource_path="", virtual="/", directory="/"),
         index)
     assert result == ["/a.txt", "/b.txt"]
 
@@ -53,8 +52,7 @@ async def test_directory_with_subdirectories(tmp_path):
     accessor = DiskAccessor(tmp_path)
     index = RAMIndexCacheStore(ttl=0)
     result = await readdir(
-        accessor,
-        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"),
+        accessor, PathSpec(resource_path="", virtual="/", directory="/"),
         index)
     assert result == ["/file.txt", "/sub"]
 
@@ -65,13 +63,11 @@ async def test_cache_hit(tmp_path):
     accessor = DiskAccessor(tmp_path)
     index = RAMIndexCacheStore(ttl=600)
     first = await readdir(
-        accessor,
-        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"),
+        accessor, PathSpec(resource_path="", virtual="/", directory="/"),
         index)
     (tmp_path / "b.txt").write_text("b")
     second = await readdir(
-        accessor,
-        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"),
+        accessor, PathSpec(resource_path="", virtual="/", directory="/"),
         index)
     assert first == second
 
@@ -109,6 +105,6 @@ async def test_not_a_directory(tmp_path):
     with pytest.raises(NotADirectoryError):
         await readdir(
             accessor,
-            PathSpec(resource_path=("/file.txt").strip("/"),
+            PathSpec(resource_path="file.txt",
                      virtual="/file.txt",
                      directory="/file.txt"), index)

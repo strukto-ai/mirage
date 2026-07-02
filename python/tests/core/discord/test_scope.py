@@ -193,7 +193,7 @@ def test_glob_specific_date(index):
 
 def test_glob_non_jsonl():
     gs = PathSpec(
-        resource_path=("/discord/TestGuild/members/*.json").strip("/"),
+        resource_path="discord/TestGuild/members/*.json",
         virtual="/discord/TestGuild/members/*.json",
         directory="/discord/TestGuild/members/",
         pattern="*.json",

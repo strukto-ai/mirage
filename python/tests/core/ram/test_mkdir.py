@@ -28,7 +28,7 @@ async def test_mkdir():
     a = RAMAccessor(s)
     await mkdir(
         a,
-        PathSpec(resource_path=("/newdir").strip("/"),
+        PathSpec(resource_path="newdir",
                  virtual="/newdir",
                  directory="/newdir"))
     assert "/newdir" in s.dirs
@@ -44,7 +44,7 @@ async def test_mkdir_parent_not_found():
                        match="parent directory does not exist"):
         await mkdir(
             a,
-            PathSpec(resource_path=("/no/parent").strip("/"),
+            PathSpec(resource_path="no/parent",
                      virtual="/no/parent",
                      directory="/no/parent"))
 
@@ -55,15 +55,9 @@ async def test_mkdir_already_exists():
 
     a = RAMAccessor(s)
     await mkdir(
-        a,
-        PathSpec(resource_path=("/dir").strip("/"),
-                 virtual="/dir",
-                 directory="/dir"))
+        a, PathSpec(resource_path="dir", virtual="/dir", directory="/dir"))
     await mkdir(
-        a,
-        PathSpec(resource_path=("/dir").strip("/"),
-                 virtual="/dir",
-                 directory="/dir"))
+        a, PathSpec(resource_path="dir", virtual="/dir", directory="/dir"))
     assert "/dir" in s.dirs
 
 
@@ -73,7 +67,7 @@ async def test_mkdir_with_parents():
 
     a = RAMAccessor(s)
     await mkdir(a,
-                PathSpec(resource_path=("/a/b/c").strip("/"),
+                PathSpec(resource_path="a/b/c",
                          virtual="/a/b/c",
                          directory="/a/b/c"),
                 parents=True)

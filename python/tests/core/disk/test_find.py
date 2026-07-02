@@ -25,9 +25,8 @@ async def test_find_all_files(tmp_path):
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "b.txt").write_text("b")
     accessor = DiskAccessor(tmp_path)
-    result = await find(
-        accessor,
-        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"))
+    result = await find(accessor,
+                        PathSpec(resource_path="", virtual="/", directory="/"))
     assert "/a.txt" in result
     assert "/sub/b.txt" in result
     assert "/sub" in result
@@ -39,9 +38,7 @@ async def test_find_with_name_pattern(tmp_path):
     (tmp_path / "b.py").write_text("b")
     accessor = DiskAccessor(tmp_path)
     result = await find(accessor,
-                        PathSpec(resource_path=("/").strip("/"),
-                                 virtual="/",
-                                 directory="/"),
+                        PathSpec(resource_path="", virtual="/", directory="/"),
                         name="*.txt")
     assert result == ["/a.txt"]
 
@@ -52,9 +49,7 @@ async def test_find_with_type_filter_file(tmp_path):
     (tmp_path / "sub").mkdir()
     accessor = DiskAccessor(tmp_path)
     result = await find(accessor,
-                        PathSpec(resource_path=("/").strip("/"),
-                                 virtual="/",
-                                 directory="/"),
+                        PathSpec(resource_path="", virtual="/", directory="/"),
                         type="f")
     assert "/a.txt" in result
     assert "/sub" not in result
@@ -66,9 +61,7 @@ async def test_find_with_type_filter_directory(tmp_path):
     (tmp_path / "sub").mkdir()
     accessor = DiskAccessor(tmp_path)
     result = await find(accessor,
-                        PathSpec(resource_path=("/").strip("/"),
-                                 virtual="/",
-                                 directory="/"),
+                        PathSpec(resource_path="", virtual="/", directory="/"),
                         type="d")
     assert "/sub" in result
     assert "/a.txt" not in result
@@ -83,9 +76,7 @@ async def test_find_with_maxdepth(tmp_path):
     (tmp_path / "sub" / "deep" / "c.txt").write_text("c")
     accessor = DiskAccessor(tmp_path)
     result = await find(accessor,
-                        PathSpec(resource_path=("/").strip("/"),
-                                 virtual="/",
-                                 directory="/"),
+                        PathSpec(resource_path="", virtual="/", directory="/"),
                         maxdepth=1)
     assert "/a.txt" in result
     assert "/sub" in result

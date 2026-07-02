@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stripSlash } from '../../utils/slash.ts'
 import { describe, expect, it } from 'vitest'
 
 import { GDriveAccessor } from '../../accessor/gdrive.ts'
@@ -45,7 +44,7 @@ describe('gdrive stat shared drives', () => {
     const result = await stat(
       accessor,
       new PathSpec({
-        resourcePath: stripSlash('/Team Drive'),
+        resourcePath: 'Team Drive',
         virtual: '/Team Drive',
         directory: '/Team Drive',
       }),

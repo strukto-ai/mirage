@@ -1,4 +1,4 @@
-import { PathSpec, mountKey, normalizeKeyPrefix, stripSlash } from '@struktoai/mirage-core'
+import { PathSpec, normalizeKeyPrefix, stripSlash } from '@struktoai/mirage-core'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { S3Resource } from './s3.ts'
 import { installS3Mock, S3MockStore, type S3Mock } from './mock.ts'
@@ -89,7 +89,7 @@ describe('S3Resource operations with keyPrefix (mocked)', () => {
     const dirPath = new PathSpec({
       virtual: '/dir/',
       directory: '/dir/',
-      resourcePath: mountKey('/dir/', ''),
+      resourcePath: 'dir',
     })
     const entries = await resource.readdir(dirPath)
     for (const entry of entries) {
@@ -106,7 +106,7 @@ describe('S3Resource operations with keyPrefix (mocked)', () => {
       directory: '/gdir/',
       pattern: '*.txt',
       resolved: false,
-      resourcePath: mountKey('/gdir/*.txt', ''),
+      resourcePath: 'gdir/*.txt',
     })
     const results = await resource.glob([globPath])
     expect(results.length).toBe(1)

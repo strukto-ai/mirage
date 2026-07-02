@@ -13,9 +13,7 @@ def default_paths(paths: list[PathSpec],
         return paths
     if cwd is not None:
         return [cwd]
-    return [
-        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/")
-    ]
+    return [PathSpec(resource_path="", virtual="/", directory="/")]
 
 
 def is_mount_root(path: PathSpec) -> bool:

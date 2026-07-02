@@ -37,7 +37,7 @@ async def test_github_stat_returns_fingerprint_from_blob_sha():
 
     result = await stat(
         None,
-        PathSpec(resource_path=("/src/main.py").strip("/"),
+        PathSpec(resource_path="src/main.py",
                  virtual="/src/main.py",
                  directory="/src/main.py"),
         index,
@@ -59,9 +59,7 @@ async def test_github_stat_directory_has_no_fingerprint():
 
     result = await stat(
         None,
-        PathSpec(resource_path=("/src").strip("/"),
-                 virtual="/src",
-                 directory="/src"),
+        PathSpec(resource_path="src", virtual="/src", directory="/src"),
         index,
     )
 

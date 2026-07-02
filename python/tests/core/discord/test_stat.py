@@ -67,10 +67,9 @@ def accessor():
 
 @pytest.mark.asyncio
 async def test_stat_root(accessor, index):
-    result = await stat(
-        accessor,
-        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"),
-        index)
+    result = await stat(accessor,
+                        PathSpec(resource_path="", virtual="/", directory="/"),
+                        index)
     assert result.type == FileType.DIRECTORY
     assert result.name == "/"
 
@@ -79,7 +78,7 @@ async def test_stat_root(accessor, index):
 async def test_stat_guild(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(resource_path=("/My Server").strip("/"),
+        PathSpec(resource_path="My Server",
                  virtual="/My Server",
                  directory="/My Server"), index)
     assert result.type == FileType.DIRECTORY
@@ -90,7 +89,7 @@ async def test_stat_guild(accessor, index):
 async def test_stat_channel(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(resource_path=("/My Server/channels/general").strip("/"),
+        PathSpec(resource_path="My Server/channels/general",
                  virtual="/My Server/channels/general",
                  directory="/My Server/channels/general"), index)
     assert result.type == FileType.DIRECTORY
@@ -102,7 +101,7 @@ async def test_stat_channel(accessor, index):
 async def test_stat_member(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(resource_path=("/My Server/members/alice.json").strip("/"),
+        PathSpec(resource_path="My Server/members/alice.json",
                  virtual="/My Server/members/alice.json",
                  directory="/My Server/members/alice.json"), index)
     assert result.type == FileType.JSON
@@ -169,6 +168,6 @@ async def test_stat_not_found(accessor, index):
     with pytest.raises(FileNotFoundError):
         await stat(
             accessor,
-            PathSpec(resource_path=("/nonexistent/path").strip("/"),
+            PathSpec(resource_path="nonexistent/path",
                      virtual="/nonexistent/path",
                      directory="/nonexistent/path"), index)

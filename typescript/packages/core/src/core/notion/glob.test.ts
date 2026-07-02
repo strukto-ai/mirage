@@ -106,7 +106,7 @@ describe('resolveNotionGlob', () => {
       directory: '/pages',
       pattern: 'Top*',
       resolved: false,
-      resourcePath: mountKey('/pages/Top*', ''),
+      resourcePath: 'pages/Top*',
     })
     const out = await resolveNotionGlob(makeAccessor(transport), [spec])
     const originals = out.map((p) => p.virtual).sort()
@@ -153,7 +153,7 @@ describe('resolveNotionGlob', () => {
       directory: '/pages',
       pattern: 'NoSuchPrefix*',
       resolved: false,
-      resourcePath: mountKey('/NoSuchPrefix*', ''),
+      resourcePath: 'NoSuchPrefix*',
     })
     const out = await resolveNotionGlob(makeAccessor(transport), [spec])
     expect(out).toEqual([])

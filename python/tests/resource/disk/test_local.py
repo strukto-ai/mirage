@@ -80,6 +80,6 @@ async def test_path_traversal_raises(local_backend):
     with pytest.raises(ValueError):
         await core_stat(
             local_backend.accessor,
-            PathSpec(resource_path=("/../etc/passwd").strip("/"),
+            PathSpec(resource_path="../etc/passwd",
                      virtual="/../etc/passwd",
                      directory="/../etc/passwd"))

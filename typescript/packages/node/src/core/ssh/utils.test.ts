@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey, stripSlash } from '@struktoai/mirage-core'
+import { mountKey } from '@struktoai/mirage-core'
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '@struktoai/mirage-core'
 import { isDirectoryAttrs, isFileAttrs, isNoSuchFile, joinRoot, stripPrefix } from './utils.ts'
@@ -44,7 +44,7 @@ describe('stripPrefix', () => {
   })
   it('returns the original when prefix is empty', () => {
     const p = new PathSpec({
-      resourcePath: stripSlash('/foo/bar'),
+      resourcePath: 'foo/bar',
       virtual: '/foo/bar',
       directory: '/foo',
     })

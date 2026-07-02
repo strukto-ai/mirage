@@ -58,10 +58,9 @@ def _exists(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_stat_root(accessor, index):
-    result = await stat(
-        accessor,
-        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"),
-        index)
+    result = await stat(accessor,
+                        PathSpec(resource_path="", virtual="/", directory="/"),
+                        index)
     assert result.type == FileType.DIRECTORY
     assert result.name == "/"
 
@@ -70,7 +69,7 @@ async def test_stat_root(accessor, index):
 async def test_stat_database_json(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(resource_path=("/database.json").strip("/"),
+        PathSpec(resource_path="database.json",
                  virtual="/database.json",
                  directory="/database.json"), index)
     assert result.type == FileType.JSON
@@ -81,7 +80,7 @@ async def test_stat_database_json(accessor, index):
 async def test_stat_schema(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(resource_path=("/public").strip("/"),
+        PathSpec(resource_path="public",
                  virtual="/public",
                  directory="/public"), index)
     assert result.type == FileType.DIRECTORY
@@ -92,7 +91,7 @@ async def test_stat_schema(accessor, index):
 async def test_stat_kind_tables(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(resource_path=("/public/tables").strip("/"),
+        PathSpec(resource_path="public/tables",
                  virtual="/public/tables",
                  directory="/public/tables"), index)
     assert result.type == FileType.DIRECTORY
@@ -103,7 +102,7 @@ async def test_stat_kind_tables(accessor, index):
 async def test_stat_kind_views(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(resource_path=("/analytics/views").strip("/"),
+        PathSpec(resource_path="analytics/views",
                  virtual="/analytics/views",
                  directory="/analytics/views"), index)
     assert result.type == FileType.DIRECTORY
@@ -114,7 +113,7 @@ async def test_stat_kind_views(accessor, index):
 async def test_stat_entity_table(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(resource_path=("/public/tables/users").strip("/"),
+        PathSpec(resource_path="public/tables/users",
                  virtual="/public/tables/users",
                  directory="/public/tables/users"), index)
     assert result.type == FileType.DIRECTORY
@@ -130,7 +129,7 @@ async def test_stat_entity_table(accessor, index):
 async def test_stat_entity_schema_json(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(resource_path=("/public/tables/users/schema.json").strip("/"),
+        PathSpec(resource_path="public/tables/users/schema.json",
                  virtual="/public/tables/users/schema.json",
                  directory="/public/tables/users/schema.json"), index)
     assert result.type == FileType.JSON
@@ -161,10 +160,9 @@ async def test_stat_entity_rows_jsonl(accessor, index):
         mc.table_size_bytes = AsyncMock(return_value=4096)
         result = await stat(
             accessor,
-            PathSpec(
-                resource_path=("/public/tables/users/rows.jsonl").strip("/"),
-                virtual="/public/tables/users/rows.jsonl",
-                directory="/public/tables/users/rows.jsonl"), index)
+            PathSpec(resource_path="public/tables/users/rows.jsonl",
+                     virtual="/public/tables/users/rows.jsonl",
+                     directory="/public/tables/users/rows.jsonl"), index)
     assert result.type == FileType.TEXT
     assert result.name == "rows.jsonl"
     assert result.size == 4096
@@ -191,8 +189,7 @@ async def test_stat_view_entity_rows(accessor, index):
         mc.table_size_bytes = AsyncMock(return_value=128)
         result = await stat(
             accessor,
-            PathSpec(resource_path=(
-                "/analytics/views/daily_revenue/rows.jsonl").strip("/"),
+            PathSpec(resource_path="analytics/views/daily_revenue/rows.jsonl",
                      virtual="/analytics/views/daily_revenue/rows.jsonl",
                      directory="/analytics/views/daily_revenue/rows.jsonl"),
             index)
@@ -214,17 +211,15 @@ async def test_stat_fingerprint_changes_with_row_count(accessor, index):
         mc.estimated_row_count = AsyncMock(return_value=10)
         first = await stat(
             accessor,
-            PathSpec(
-                resource_path=("/public/tables/users/rows.jsonl").strip("/"),
-                virtual="/public/tables/users/rows.jsonl",
-                directory="/public/tables/users/rows.jsonl"), index)
+            PathSpec(resource_path="public/tables/users/rows.jsonl",
+                     virtual="/public/tables/users/rows.jsonl",
+                     directory="/public/tables/users/rows.jsonl"), index)
         mc.estimated_row_count = AsyncMock(return_value=20)
         second = await stat(
             accessor,
-            PathSpec(
-                resource_path=("/public/tables/users/rows.jsonl").strip("/"),
-                virtual="/public/tables/users/rows.jsonl",
-                directory="/public/tables/users/rows.jsonl"), index)
+            PathSpec(resource_path="public/tables/users/rows.jsonl",
+                     virtual="/public/tables/users/rows.jsonl",
+                     directory="/public/tables/users/rows.jsonl"), index)
     assert first.fingerprint != second.fingerprint
 
 
@@ -233,10 +228,9 @@ async def test_stat_invalid_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
         await stat(
             accessor,
-            PathSpec(
-                resource_path=("/public/tables/users/extra/foo").strip("/"),
-                virtual="/public/tables/users/extra/foo",
-                directory="/public/tables/users/extra/foo"), index)
+            PathSpec(resource_path="public/tables/users/extra/foo",
+                     virtual="/public/tables/users/extra/foo",
+                     directory="/public/tables/users/extra/foo"), index)
 
 
 @pytest.mark.asyncio
@@ -259,6 +253,6 @@ async def test_stat_missing_entity_raises(accessor, index):
         with pytest.raises(FileNotFoundError):
             await stat(
                 accessor,
-                PathSpec(resource_path=("/public/tables/nope").strip("/"),
+                PathSpec(resource_path="public/tables/nope",
                          virtual="/public/tables/nope",
                          directory="/public/tables/nope"), index)

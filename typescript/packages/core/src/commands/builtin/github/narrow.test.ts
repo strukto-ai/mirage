@@ -68,7 +68,7 @@ function subdir(): PathSpec {
   return new PathSpec({
     virtual: '/src',
     directory: '/src',
-    resourcePath: mountKey('/src', ''),
+    resourcePath: 'src',
     resolved: false,
   })
 }

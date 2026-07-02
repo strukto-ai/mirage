@@ -326,7 +326,7 @@ async def test_resolve_mount_keeps_cached_read_on_real_mount():
     # custom handlers) instead of being redirected to the cache mount.
     reg, cache = _remote_registry_with_cache()
     await cache.set("/ssh/a.txt", b"hi")
-    scope = PathSpec(resource_path=("/ssh/a.txt").strip("/"),
+    scope = PathSpec(resource_path="ssh/a.txt",
                      virtual="/ssh/a.txt",
                      directory="/ssh",
                      resolved=True)
@@ -338,7 +338,7 @@ async def test_resolve_mount_keeps_cached_read_on_real_mount():
 async def test_resolve_mount_keeps_cached_write_on_remote():
     reg, cache = _remote_registry_with_cache()
     await cache.set("/ssh/a.txt", b"hi")
-    scope = PathSpec(resource_path=("/ssh/a.txt").strip("/"),
+    scope = PathSpec(resource_path="ssh/a.txt",
                      virtual="/ssh/a.txt",
                      directory="/ssh",
                      resolved=True)
@@ -371,7 +371,7 @@ def _path_bound_registry_with_default():
 @pytest.mark.asyncio
 async def test_resolve_mount_rejects_path_bound_unsupported_command():
     reg = _path_bound_registry_with_default()
-    scope = PathSpec(resource_path=("/limited/file.txt").strip("/"),
+    scope = PathSpec(resource_path="limited/file.txt",
                      virtual="/limited/file.txt",
                      directory="/limited",
                      resolved=True)

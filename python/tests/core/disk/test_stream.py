@@ -29,7 +29,7 @@ async def test_stream_file(tmp_path):
     chunks = []
     async for chunk in read_stream(
             accessor,
-            PathSpec(resource_path=("/data.txt").strip("/"),
+            PathSpec(resource_path="data.txt",
                      virtual="/data.txt",
                      directory="/data.txt"), index):
         chunks.append(chunk)

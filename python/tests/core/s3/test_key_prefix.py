@@ -85,7 +85,7 @@ def test_resolve_glob_with_prefix():
         accessor = _accessor(PREFIX)
         index = RAMIndexCacheStore()
         glob_path = PathSpec(
-            resource_path=("/*.txt").strip("/"),
+            resource_path="*.txt",
             virtual="/*.txt",
             directory="/",
             pattern="*.txt",

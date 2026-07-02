@@ -28,9 +28,7 @@ async def test_stat_op(tmp_path):
     (tmp_path / "f.txt").write_text("data")
     accessor = DiskAccessor(tmp_path)
     index = RAMIndexCacheStore(ttl=0)
-    scope = PathSpec(resource_path=("/f.txt").strip("/"),
-                     virtual="/f.txt",
-                     directory="/")
+    scope = PathSpec(resource_path="f.txt", virtual="/f.txt", directory="/")
     result = await stat(accessor, scope, index=index)
     assert result.name == "f.txt"
     assert result.size == 4
@@ -41,7 +39,7 @@ async def test_readdir_op(tmp_path):
     (tmp_path / "a.txt").write_text("a")
     accessor = DiskAccessor(tmp_path)
     index = RAMIndexCacheStore(ttl=0)
-    scope = PathSpec(resource_path=("/").strip("/"),
+    scope = PathSpec(resource_path="",
                      virtual="/",
                      directory="/",
                      resolved=False)
@@ -54,9 +52,7 @@ async def test_read_op(tmp_path):
     (tmp_path / "f.txt").write_bytes(b"content")
     accessor = DiskAccessor(tmp_path)
     index = RAMIndexCacheStore(ttl=0)
-    scope = PathSpec(resource_path=("/f.txt").strip("/"),
-                     virtual="/f.txt",
-                     directory="/")
+    scope = PathSpec(resource_path="f.txt", virtual="/f.txt", directory="/")
     result = await read(accessor, scope, index=index)
     assert result == b"content"
 
@@ -64,7 +60,7 @@ async def test_read_op(tmp_path):
 @pytest.mark.asyncio
 async def test_write_op(tmp_path):
     accessor = DiskAccessor(tmp_path)
-    scope = PathSpec(resource_path=("/out.txt").strip("/"),
+    scope = PathSpec(resource_path="out.txt",
                      virtual="/out.txt",
                      directory="/")
     await write(accessor, scope, data=b"written")

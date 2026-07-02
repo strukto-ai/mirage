@@ -24,7 +24,7 @@ async def test_write_new_file(tmp_path):
     accessor = DiskAccessor(tmp_path)
     await write_bytes(
         accessor,
-        PathSpec(resource_path=("/new.txt").strip("/"),
+        PathSpec(resource_path="new.txt",
                  virtual="/new.txt",
                  directory="/new.txt"), b"content")
     assert (tmp_path / "new.txt").read_bytes() == b"content"
@@ -36,7 +36,7 @@ async def test_overwrite_existing_file(tmp_path):
     accessor = DiskAccessor(tmp_path)
     await write_bytes(
         accessor,
-        PathSpec(resource_path=("/exist.txt").strip("/"),
+        PathSpec(resource_path="exist.txt",
                  virtual="/exist.txt",
                  directory="/exist.txt"), b"new")
     assert (tmp_path / "exist.txt").read_bytes() == b"new"
@@ -47,7 +47,7 @@ async def test_parent_directory_auto_creation(tmp_path):
     accessor = DiskAccessor(tmp_path)
     await write_bytes(
         accessor,
-        PathSpec(resource_path=("/a/b/c/file.txt").strip("/"),
+        PathSpec(resource_path="a/b/c/file.txt",
                  virtual="/a/b/c/file.txt",
                  directory="/a/b/c/file.txt"), b"deep")
     assert (tmp_path / "a" / "b" / "c" / "file.txt").read_bytes() == b"deep"

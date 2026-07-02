@@ -49,8 +49,7 @@ def index():
 @pytest.mark.asyncio
 async def test_readdir_root(accessor, store, index):
     entries = await readdir(
-        accessor,
-        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"),
+        accessor, PathSpec(resource_path="", virtual="/", directory="/"),
         index)
     assert "/a.txt" in entries
     assert "/b.txt" in entries
@@ -62,9 +61,7 @@ async def test_readdir_root(accessor, store, index):
 async def test_readdir_subdir(accessor, index):
     entries = await readdir(
         accessor,
-        PathSpec(resource_path=("/sub").strip("/"),
-                 virtual="/sub",
-                 directory="/sub"), index)
+        PathSpec(resource_path="sub", virtual="/sub", directory="/sub"), index)
     assert "/sub/c.txt" in entries
     assert "/sub/d.txt" in entries
     assert "/sub/deep" in entries
@@ -79,10 +76,9 @@ async def test_readdir_empty_dir(index):
     s.dirs.add("/empty")
     a = RAMAccessor(s)
     entries = await readdir(
-        a,
-        PathSpec(resource_path=("/empty").strip("/"),
-                 virtual="/empty",
-                 directory="/empty"), index)
+        a, PathSpec(resource_path="empty",
+                    virtual="/empty",
+                    directory="/empty"), index)
     assert entries == []
 
 
@@ -94,7 +90,7 @@ async def test_readdir_not_found(index):
     with pytest.raises(FileNotFoundError):
         await readdir(
             a,
-            PathSpec(resource_path=("/nonexistent").strip("/"),
+            PathSpec(resource_path="nonexistent",
                      virtual="/nonexistent",
                      directory="/nonexistent"), index)
 
@@ -103,7 +99,7 @@ async def test_readdir_not_found(index):
 async def test_readdir_deep(accessor, index):
     entries = await readdir(
         accessor,
-        PathSpec(resource_path=("/sub/deep").strip("/"),
+        PathSpec(resource_path="sub/deep",
                  virtual="/sub/deep",
                  directory="/sub/deep"), index)
     assert "/sub/deep/e.txt" in entries
@@ -113,12 +109,10 @@ async def test_readdir_deep(accessor, index):
 @pytest.mark.asyncio
 async def test_readdir_cached(accessor, store, index):
     entries1 = await readdir(
-        accessor,
-        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"),
+        accessor, PathSpec(resource_path="", virtual="/", directory="/"),
         index)
     store.store.files["/new.txt"] = b"new"
     entries2 = await readdir(
-        accessor,
-        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"),
+        accessor, PathSpec(resource_path="", virtual="/", directory="/"),
         index)
     assert entries1 == entries2

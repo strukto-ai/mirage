@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stripSlash } from '../../../utils/slash.ts'
 import { describe, expect, it, vi } from 'vitest'
 import type * as DriveModule from '../../../core/google/drive.ts'
 
@@ -83,7 +82,7 @@ describe('gdrive sed', () => {
       makeAccessor() as never,
       [
         new PathSpec({
-          resourcePath: stripSlash('/test/file.txt'),
+          resourcePath: 'test/file.txt',
           virtual: '/test/file.txt',
           directory: '/test',
         }),
@@ -104,7 +103,7 @@ describe('gdrive sed', () => {
       makeAccessor() as never,
       [
         new PathSpec({
-          resourcePath: stripSlash('/test/file.txt'),
+          resourcePath: 'test/file.txt',
           virtual: '/test/file.txt',
           directory: '/test',
         }),
@@ -136,7 +135,7 @@ describe('gdrive sed', () => {
       makeAccessor() as never,
       [
         new PathSpec({
-          resourcePath: stripSlash('/test/file.txt'),
+          resourcePath: 'test/file.txt',
           virtual: '/test/file.txt',
           directory: '/test',
         }),

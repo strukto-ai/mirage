@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stripSlash } from '../../utils/slash.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -40,7 +39,7 @@ describe('resolveGlob', () => {
 
   it('passes through resolved paths unchanged', async () => {
     const p = new PathSpec({
-      resourcePath: stripSlash('/mongo/app'),
+      resourcePath: 'mongo/app',
       virtual: '/mongo/app',
       directory: '/mongo/',
     })
