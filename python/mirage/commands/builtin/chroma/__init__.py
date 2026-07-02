@@ -17,8 +17,6 @@ from mirage.commands.builtin.chroma.search import search
 from mirage.commands.builtin.chroma.sed import sed
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.generic_bind.provision import (
-    make_search_provision, metadata_provision)
 from mirage.core.chroma.read import read_bytes as _read
 from mirage.core.chroma.read import read_stream as _read_stream
 from mirage.core.chroma.readdir import readdir as _readdir
@@ -44,11 +42,6 @@ COMMANDS = [
         "chroma",
         _CHROMA_CMD_OPS,
         overrides=_CHROMA_OVERRIDES,
-        provision_overrides={
-            "grep": make_search_provision(_stat),
-            "rg": make_search_provision(_stat),
-            "ls": metadata_provision,
-        },
     ),
     find,
     search,

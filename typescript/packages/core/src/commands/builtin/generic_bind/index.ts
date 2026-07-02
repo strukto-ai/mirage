@@ -20,3 +20,12 @@ export {
   resolveGlobOf,
 } from './adapter.ts'
 export { type MakeGenericCommandsOptions, makeGenericCommands } from './factory.ts'
+export {
+  defaultProvision,
+  makeFileReadProvision,
+  makeHeadTailProvision,
+  makeJqProvision,
+  makeSearchProvision,
+  metadataProvision,
+  statProvision,
+} from './provision.ts'

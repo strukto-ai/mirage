@@ -24,7 +24,6 @@ from mirage.commands.builtin.email.rg import rg
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.generic_bind.provision import metadata_provision
 from mirage.core.email.glob import resolve_glob as _ft_resolve_glob
 from mirage.core.email.read import read as _read
 from mirage.core.email.readdir import readdir as _readdir
@@ -54,9 +53,6 @@ COMMANDS = [
         "email",
         _EMAIL_CMD_OPS,
         overrides=_EMAIL_OVERRIDES,
-        provision_overrides={
-            "ls": metadata_provision,
-        },
     ),
     find,
     grep,

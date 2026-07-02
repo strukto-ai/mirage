@@ -22,8 +22,6 @@ from mirage.commands.builtin.gdocs.gws_docs_write import gws_docs_write
 from mirage.commands.builtin.gdocs.rm import rm
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.generic_bind.provision import (
-    make_search_provision, metadata_provision)
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.core.gdocs.read import read as _read
 from mirage.core.gdocs.readdir import readdir as _readdir
@@ -45,12 +43,6 @@ COMMANDS = [
     *make_generic_commands(
         "gdocs",
         _GDOCS_CMD_OPS,
-        provision_overrides={
-            "grep": make_search_provision(_stat),
-            "rg": make_search_provision(_stat),
-            "ls": metadata_provision,
-            "find": metadata_provision,
-        },
     ),
     rm,
     gws_docs_documents_batchUpdate,

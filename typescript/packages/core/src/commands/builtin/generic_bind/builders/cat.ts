@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { concatAggregate } from '../../aggregators.ts'
-import { catGeneric, catProvisionGeneric } from '../../generic/cat.ts'
+import { catGeneric } from '../../generic/cat.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
 
 export const CAT_BUILDER: Builder = {
@@ -31,5 +31,4 @@ export const CAT_BUILDER: Builder = {
       (p) => ops.readStream(accessor, p, idx),
     )
   },
-  provision: (stat) => (accessor, paths) => catProvisionGeneric(paths, (p) => stat(accessor, p)),
 }

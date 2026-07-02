@@ -144,9 +144,7 @@ export function combinedPrecision(children: readonly ProvisionResult[]): Precisi
  * unknowable rather than silently undercounted.
  */
 export function combinedCost(children: readonly ProvisionResult[]): number | null {
-  const costs = children
-    .map((c) => c.estimatedCostUsd)
-    .filter((c): c is number => c !== null)
+  const costs = children.map((c) => c.estimatedCostUsd).filter((c): c is number => c !== null)
   if (children.length > 0 && costs.length === children.length) {
     return costs.reduce((a, b) => a + b, 0)
   }

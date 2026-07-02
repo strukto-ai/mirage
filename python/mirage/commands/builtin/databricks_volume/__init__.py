@@ -16,8 +16,6 @@ from mirage.commands.builtin.databricks_volume.head import head
 from mirage.commands.builtin.databricks_volume.sed import sed
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.generic_bind.provision import (
-    make_search_provision, metadata_provision)
 from mirage.core.databricks_volume.copy import copy as _copy
 from mirage.core.databricks_volume.create import create as _create
 from mirage.core.databricks_volume.exists import exists as _exists
@@ -61,12 +59,6 @@ COMMANDS = [
         "databricks_volume",
         _DATABRICKS_CMD_OPS,
         overrides=_DATABRICKS_OVERRIDES,
-        provision_overrides={
-            "grep": make_search_provision(_stat),
-            "rg": make_search_provision(_stat),
-            "ls": metadata_provision,
-            "find": metadata_provision,
-        },
     ),
     head,
     sed,

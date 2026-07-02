@@ -21,7 +21,6 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           with_index)
 from mirage.commands.builtin.generic_bind.builders.common import \
     resolve_or_empty
-from mirage.commands.builtin.generic_bind.provision import make_jq_provision
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -50,4 +49,4 @@ async def jq(
                             s=s)
 
 
-BUILDER = Builder('jq', jq, make_jq_provision, False, None, read=True)
+BUILDER = Builder('jq', jq, None, False, None, read=True)

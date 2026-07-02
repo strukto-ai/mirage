@@ -14,7 +14,6 @@
 
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.generic_bind.provision import metadata_provision
 from mirage.commands.builtin.langfuse.find import find
 from mirage.commands.builtin.langfuse.grep import grep
 from mirage.commands.builtin.langfuse.rg import rg
@@ -44,9 +43,6 @@ COMMANDS = [
         "langfuse",
         _LANGFUSE_CMD_OPS,
         overrides=_LANGFUSE_OVERRIDES,
-        provision_overrides={
-            "ls": metadata_provision,
-        },
     ),
     find,
     grep,

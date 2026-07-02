@@ -27,7 +27,6 @@ from mirage.commands.builtin.discord.rg import rg
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.generic_bind.provision import metadata_provision
 from mirage.core.discord.glob import resolve_glob as _ft_resolve_glob
 from mirage.core.discord.read import read as _read
 from mirage.core.discord.readdir import readdir as _readdir
@@ -54,7 +53,6 @@ COMMANDS = [
         "discord",
         _DISCORD_CMD_OPS,
         overrides={"grep", "rg", "find", "head"},
-        provision_overrides={"ls": metadata_provision},
     ),
     find,
     grep,

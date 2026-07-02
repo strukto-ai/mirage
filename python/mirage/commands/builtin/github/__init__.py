@@ -16,7 +16,6 @@ from functools import partial
 
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.generic_bind.provision import metadata_provision
 from mirage.commands.builtin.github.du import du
 from mirage.commands.builtin.github.find import find
 from mirage.commands.builtin.github.grep import grep
@@ -49,9 +48,6 @@ COMMANDS = [
         "github",
         _GITHUB_CMD_OPS,
         overrides=_GITHUB_OVERRIDES,
-        provision_overrides={
-            "ls": metadata_provision,
-        },
     ),
     du,
     find,

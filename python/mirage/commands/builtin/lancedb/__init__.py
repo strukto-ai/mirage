@@ -16,8 +16,6 @@ from functools import partial
 
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.generic_bind.provision import (
-    make_search_provision, metadata_provision)
 from mirage.commands.builtin.lancedb.find import find
 from mirage.commands.builtin.lancedb.search import search
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
@@ -46,11 +44,6 @@ COMMANDS = [
         "lancedb",
         _LANCEDB_CMD_OPS,
         overrides=_LANCEDB_OVERRIDES,
-        provision_overrides={
-            "grep": make_search_provision(_stat),
-            "rg": make_search_provision(_stat),
-            "ls": metadata_provision,
-        },
     ),
     find,
     search,

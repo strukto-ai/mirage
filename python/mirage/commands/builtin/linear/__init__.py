@@ -14,8 +14,6 @@
 
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.generic_bind.provision import (
-    make_search_provision, metadata_provision)
 from mirage.commands.builtin.linear.find import find
 from mirage.commands.builtin.linear.linear_issue_add_label import \
     linear_issue_add_label
@@ -62,11 +60,6 @@ COMMANDS = [
         "linear",
         _LINEAR_CMD_OPS,
         overrides=_LINEAR_OVERRIDES,
-        provision_overrides={
-            "grep": make_search_provision(_stat),
-            "rg": make_search_provision(_stat),
-            "ls": metadata_provision,
-        },
     ),
     find,
     linear_issue_add_label,

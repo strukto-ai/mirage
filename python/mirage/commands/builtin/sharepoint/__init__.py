@@ -15,8 +15,6 @@
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.generic_bind.provision import (
-    make_search_provision, metadata_provision)
 from mirage.commands.builtin.sharepoint._provision import \
     file_read_provision as _ft_provision
 from mirage.commands.builtin.sharepoint.du import du
@@ -77,12 +75,6 @@ COMMANDS = [
         "sharepoint",
         _SHAREPOINT_CMD_OPS,
         overrides=_SHAREPOINT_OVERRIDES,
-        provision_overrides={
-            "grep": make_search_provision(_stat),
-            "rg": make_search_provision(_stat),
-            "ls": metadata_provision,
-            "find": metadata_provision,
-        },
     ),
     du,
     sed,

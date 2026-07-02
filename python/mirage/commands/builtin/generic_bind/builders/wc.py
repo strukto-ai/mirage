@@ -22,8 +22,6 @@ from mirage.commands.builtin.generic.wc import wc as generic_wc
 from mirage.commands.builtin.generic.wc import wc_lines as generic_wc_lines
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           with_index)
-from mirage.commands.builtin.generic_bind.provision import \
-    make_file_read_provision
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -64,9 +62,4 @@ async def wc(
             b"\n", IOResult())
 
 
-BUILDER = Builder('wc',
-                  wc,
-                  make_file_read_provision,
-                  False,
-                  wc_aggregate,
-                  read=True)
+BUILDER = Builder('wc', wc, None, False, wc_aggregate, read=True)

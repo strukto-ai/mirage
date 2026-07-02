@@ -25,8 +25,6 @@ from mirage.commands.builtin.gdrive._provision import \
 from mirage.commands.builtin.gdrive.sed import sed
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.generic_bind.provision import (
-    make_search_provision, metadata_provision)
 from mirage.commands.builtin.gsheets.gws_sheets_append import gws_sheets_append
 from mirage.commands.builtin.gsheets.gws_sheets_read import gws_sheets_read
 from mirage.commands.builtin.gsheets.gws_sheets_spreadsheets_batchUpdate import \
@@ -68,12 +66,6 @@ COMMANDS = [
     *make_generic_commands(
         "gdrive",
         _GDRIVE_CMD_OPS,
-        provision_overrides={
-            "grep": make_search_provision(_stat),
-            "rg": make_search_provision(_stat),
-            "ls": metadata_provision,
-            "find": metadata_provision,
-        },
     ),
     sed,
     gws_docs_documents_create,

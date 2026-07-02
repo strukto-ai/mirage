@@ -16,7 +16,6 @@ from functools import partial
 
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.generic_bind.provision import metadata_provision
 from mirage.commands.builtin.postgres.find import find
 from mirage.commands.builtin.postgres.grep import grep
 from mirage.commands.builtin.postgres.head import head
@@ -50,9 +49,6 @@ COMMANDS = [
         "postgres",
         _POSTGRES_CMD_OPS,
         overrides=_POSTGRES_OVERRIDES,
-        provision_overrides={
-            "ls": metadata_provision,
-        },
     ),
     find,
     grep,

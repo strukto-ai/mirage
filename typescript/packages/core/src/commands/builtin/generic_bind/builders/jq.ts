@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { jqGeneric, jqProvisionGeneric } from '../../generic/jq.ts'
+import { jqGeneric } from '../../generic/jq.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
 
 export const JQ_BUILDER: Builder = {
@@ -23,6 +23,4 @@ export const JQ_BUILDER: Builder = {
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
     return jqGeneric(resolved, texts, opts, (p) => ops.readStream(accessor, p, idx))
   },
-  provision: (stat) => (accessor, paths, texts) =>
-    jqProvisionGeneric(paths, texts, (p) => stat(accessor, p)),
 }

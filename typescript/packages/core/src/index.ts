@@ -159,9 +159,16 @@ export {
   type BuilderFn,
   type CommandIO,
   type MakeGenericCommandsOptions,
+  defaultProvision,
+  makeFileReadProvision,
   makeGenericCommands,
+  makeHeadTailProvision,
+  makeJqProvision,
   makeResolveGlob,
+  makeSearchProvision,
+  metadataProvision,
   resolveGlobOf,
+  statProvision,
 } from './commands/builtin/generic_bind/index.ts'
 export {
   FILETYPE_ENTRIES,

@@ -15,8 +15,6 @@
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.generic_bind.provision import (
-    make_search_provision, metadata_provision)
 from mirage.commands.builtin.s3._provision import \
     file_read_provision as _ft_provision
 from mirage.commands.builtin.s3.du import du
@@ -78,12 +76,6 @@ COMMANDS = [
         "s3",
         _S3_CMD_OPS,
         overrides=_S3_OVERRIDES,
-        provision_overrides={
-            "grep": make_search_provision(_stat),
-            "rg": make_search_provision(_stat),
-            "ls": metadata_provision,
-            "find": metadata_provision,
-        },
     ),
     du,
     mkdir,

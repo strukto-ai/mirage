@@ -17,7 +17,6 @@ from functools import partial
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.generic_bind.provision import metadata_provision
 from mirage.commands.builtin.gmail.grep import grep
 from mirage.commands.builtin.gmail.gws_gmail_delete import gws_gmail_delete
 from mirage.commands.builtin.gmail.gws_gmail_forward import gws_gmail_forward
@@ -53,10 +52,6 @@ COMMANDS = [
         "gmail",
         _GMAIL_CMD_OPS,
         overrides={"grep", "rg"},
-        provision_overrides={
-            "ls": metadata_provision,
-            "find": metadata_provision,
-        },
     ),
     grep,
     rg,

@@ -19,8 +19,6 @@ from mirage.commands.builtin.dify.sed import sed
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands,
                                                   with_read_cache)
-from mirage.commands.builtin.generic_bind.provision import (
-    make_search_provision, metadata_provision)
 from mirage.core.dify.read import read_bytes as _read
 from mirage.core.dify.read import read_stream as _read_stream
 from mirage.core.dify.readdir import readdir as _readdir
@@ -51,11 +49,6 @@ COMMANDS = [
         "dify",
         _DIFY_CMD_OPS,
         overrides=_DIFY_OVERRIDES,
-        provision_overrides={
-            "grep": make_search_provision(_stat),
-            "rg": make_search_provision(_stat),
-            "ls": metadata_provision,
-        },
     ),
     make_cat(_DIFY_CACHED_OPS),
     find,

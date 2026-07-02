@@ -14,8 +14,6 @@
 
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.generic_bind.provision import (
-    make_search_provision, metadata_provision)
 from mirage.commands.builtin.notion.notion_block_append import \
     notion_block_append
 from mirage.commands.builtin.notion.notion_comment_add import \
@@ -46,12 +44,6 @@ COMMANDS = [
     *make_generic_commands(
         "notion",
         _NOTION_CMD_OPS,
-        provision_overrides={
-            "grep": make_search_provision(_stat),
-            "rg": make_search_provision(_stat),
-            "ls": metadata_provision,
-            "find": metadata_provision,
-        },
     ),
     notion_block_append,
     notion_comment_add,

@@ -20,8 +20,6 @@ from mirage.commands.builtin.aggregators import header_aggregate
 from mirage.commands.builtin.generic.tail import tail as generic_tail
 from mirage.commands.builtin.generic.tail import tail_multi
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
-from mirage.commands.builtin.generic_bind.provision import \
-    make_head_tail_provision
 from mirage.commands.builtin.tail_helper import _parse_n, number_flag_error
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.types import ByteSource, IOResult
@@ -69,9 +67,4 @@ async def tail(
                         from_line=from_line), IOResult()
 
 
-BUILDER = Builder('tail',
-                  tail,
-                  make_head_tail_provision,
-                  False,
-                  header_aggregate,
-                  read=True)
+BUILDER = Builder('tail', tail, None, False, header_aggregate, read=True)

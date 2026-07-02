@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { headerAggregate } from '../../aggregators.ts'
-import { headGeneric, headProvisionGeneric } from '../../generic/head.ts'
+import { headGeneric } from '../../generic/head.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
 
 export const HEAD_BUILDER: Builder = {
@@ -31,6 +31,4 @@ export const HEAD_BUILDER: Builder = {
       (p) => ops.readStream(accessor, p, idx),
     )
   },
-  provision: (stat) => (accessor, paths, texts, opts) =>
-    headProvisionGeneric(paths, texts, opts, (p) => stat(accessor, p)),
 }

@@ -118,6 +118,28 @@ mirage provision --workspace_id demo \
   --command "cat /s3/data/example.jsonl | wc -l"
 ```
 
+Every factory-built backend estimates read commands out of the box, by
+family: whole-file readers (`cat`, `sort`, `md5`, ...) charge the byte
+total from `stat`, `head`/`tail` charge a bounded range, `grep`/`rg`
+charge a worst-case full read, and metadata commands (`ls`, `find`,
+`tree`, ...) charge op counts only. Write commands report
+`precision=unknown`. Virtual files whose size cannot be resolved (for
+example a rendered `chat.jsonl`) degrade the estimate to
+`precision=unknown` while keeping the known byte total as a floor.
+
+Provision is optional when you register your own commands: leave it out
+and the planner reports `precision=unknown`. To opt in with one line,
+reuse the estimator helpers (`make_file_read_provision`,
+`make_search_provision`, `metadata_provision`, ... in Python;
+`makeFileReadProvision` and friends in TypeScript), or pass
+`provision_overrides={"grep": my_estimator}` to the command factory. An
+explicit `None`/`null` override disables a default.
+
+Pipelines combine field-wise: `|`, `;` and `&&` sum the estimates, `||`
+brackets the branches (cheapest low, priciest high), and `for` loops
+multiply by the iteration count. A stage downstream of an unknown stage
+is also unknown, and totals under `precision=unknown` are floors.
+
 ### 6. Cache: network → hit after a real read
 
 After a real `cat`, `provision` flips that path from a network read

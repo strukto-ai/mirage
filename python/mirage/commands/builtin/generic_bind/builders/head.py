@@ -20,8 +20,6 @@ from mirage.commands.builtin.aggregators import header_aggregate
 from mirage.commands.builtin.generic.head import head as generic_head
 from mirage.commands.builtin.generic.head import head_multi
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
-from mirage.commands.builtin.generic_bind.provision import \
-    make_head_tail_provision
 from mirage.commands.builtin.tail_helper import number_flag_error
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.types import ByteSource, IOResult
@@ -57,9 +55,4 @@ async def head(
     return generic_head(source, n=n_int, c=c_int), IOResult()
 
 
-BUILDER = Builder('head',
-                  head,
-                  make_head_tail_provision,
-                  False,
-                  header_aggregate,
-                  read=True)
+BUILDER = Builder('head', head, None, False, header_aggregate, read=True)

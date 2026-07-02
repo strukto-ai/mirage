@@ -22,6 +22,7 @@ from mirage.cache.read_through import (cache_aware_read_bytes,
                                        cache_aware_read_stream)
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.builders import _BUILDERS
+from mirage.commands.builtin.generic_bind.provision import default_provision
 from mirage.commands.config import command
 from mirage.commands.spec import SPECS
 from mirage.types import PathSpec
@@ -127,7 +128,7 @@ def make_generic_commands(
         elif b.provision is not None:
             provision = b.provision(ops.stat)
         else:
-            provision = None
+            provision = default_provision(b.name, ops.stat)
         agg = b.aggregate if ops.local else None
         commands.append(
             command(b.name,

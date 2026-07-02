@@ -14,8 +14,6 @@
 
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.generic_bind.provision import (
-    make_search_provision, metadata_provision)
 from mirage.commands.builtin.hf_buckets.du import du
 from mirage.commands.builtin.hf_buckets.sed import sed
 from mirage.core.hf_buckets.create import create as _create
@@ -59,12 +57,6 @@ COMMANDS = [
         "hf_buckets",
         _HF_BUCKETS_CMD_OPS,
         overrides=_HF_BUCKETS_OVERRIDES,
-        provision_overrides={
-            "grep": make_search_provision(_stat),
-            "rg": make_search_provision(_stat),
-            "ls": metadata_provision,
-            "find": metadata_provision,
-        },
     ),
     du,
     sed,

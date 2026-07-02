@@ -21,6 +21,7 @@ import { type CommandFn, type ProvisionFn, type RegisteredCommand, command } fro
 import { specOf } from '../../spec/builtins.ts'
 import type { CommandIO, StatOp } from './adapter.ts'
 import { BUILDERS } from './builders/index.ts'
+import { defaultProvision } from './provision.ts'
 
 function cachedStat<A extends Accessor>(stat: StatOp<A>): StatOp<A> {
   return async (accessor: A, path: PathSpec, index?: IndexCacheStore) => {
@@ -80,8 +81,11 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
     const fn: CommandFn = (accessor, paths, texts, opts) =>
       b.fn(cmdOps, accessor, paths, texts, opts)
     const provision =
-      (provOver[b.name] as ProvisionFn | undefined) ??
-      (b.provision !== undefined ? b.provision(opsBase.stat) : null)
+      b.name in provOver
+        ? ((provOver[b.name] ?? null) as ProvisionFn | null)
+        : b.provision !== undefined
+          ? b.provision(opsBase.stat)
+          : defaultProvision(b.name, opsBase.stat)
     const aggregate = ops.local !== false ? (b.aggregate ?? null) : null
     commands.push(
       ...command({

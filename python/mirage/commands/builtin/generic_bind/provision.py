@@ -64,10 +64,17 @@ def make_file_read_provision(stat: Callable) -> Callable:
             return ProvisionResult(command=command,
                                    precision=Precision.UNKNOWN)
         resolved, missing = await _resolve_sizes(stat, accessor, paths, index)
-        if missing > 0 or not resolved:
-            return ProvisionResult(command=command,
-                                   precision=Precision.UNKNOWN)
         total = sum(size for _, size in resolved)
+        if missing > 0 or not resolved:
+            # Sizes we could not resolve (virtual/rendered files) are
+            # carried as UNKNOWN precision; the totals are floors.
+            return ProvisionResult(
+                command=command,
+                network_read_low=total,
+                network_read_high=total,
+                read_ops=len(paths),
+                precision=Precision.UNKNOWN,
+            )
         return ProvisionResult(
             command=command,
             network_read_low=total,
@@ -97,8 +104,14 @@ def make_head_tail_provision(stat: Callable) -> Callable:
                                    precision=Precision.UNKNOWN)
         resolved, missing = await _resolve_sizes(stat, accessor, paths, index)
         if missing > 0 or not resolved:
-            return ProvisionResult(command=command,
-                                   precision=Precision.UNKNOWN)
+            full = sum(size for _, size in resolved)
+            return ProvisionResult(
+                command=command,
+                network_read_low=0,
+                network_read_high=full,
+                read_ops=len(paths),
+                precision=Precision.UNKNOWN,
+            )
         if c is not None:
             c_bytes = int(c)
             total = sum(min(c_bytes, size) for _, size in resolved)
@@ -162,17 +175,21 @@ def make_jq_provision(stat: Callable) -> Callable:
         **kwargs,
     ) -> ProvisionResult:
         if not paths or not texts:
-            return ProvisionResult(command="jq")
+            return ProvisionResult(command="jq", precision=Precision.UNKNOWN)
         p = paths[0]
         key = p.mount_path if isinstance(p, PathSpec) else p
         try:
             file_stat = await stat(accessor, p, index)
         except (FileNotFoundError, ValueError):
-            return ProvisionResult(command="jq")
-        file_size = file_stat.size or 0
+            return ProvisionResult(command="jq", precision=Precision.UNKNOWN)
         expr = texts[0]
         shown = p.virtual if isinstance(p, PathSpec) else p
         rendered = f"jq {expr!r} {shown}"
+        if file_stat.size is None:
+            return ProvisionResult(command=rendered,
+                                   read_ops=1,
+                                   precision=Precision.UNKNOWN)
+        file_size = file_stat.size
         if is_jsonl_path(key) and is_streamable_jsonl_expr(expr):
             return ProvisionResult(
                 command=rendered,
@@ -209,3 +226,48 @@ def make_search_provision(stat: Callable) -> Callable:
         return await base(accessor, paths, command=rendered, index=index)
 
     return search_provision
+
+
+FILE_READ_COMMANDS = frozenset({
+    "awk", "base64", "cat", "cmp", "column", "comm", "cut", "diff", "expand",
+    "fmt", "fold", "join", "look", "md5", "nl", "paste", "rev", "sha256sum",
+    "shuf", "sort", "strings", "tac", "tr", "tsort", "unexpand", "uniq", "wc",
+    "xxd", "zcat"
+})
+HEAD_TAIL_COMMANDS = frozenset({"head", "tail"})
+SEARCH_COMMANDS = frozenset({"grep", "rg", "zgrep"})
+METADATA_COMMANDS = frozenset({
+    "basename", "dirname", "du", "find", "ls", "readlink", "realpath", "tree"
+})
+
+
+def default_provision(name: str, stat: Callable) -> Callable | None:
+    """Default cost estimator for a factory-built command, by family.
+
+    Whole-file readers stat their operands and charge the byte total;
+    searches charge a worst-case full read; metadata commands charge op
+    counts only. Write commands and anything unlisted return None so the
+    planner reports UNKNOWN. A backend disables a default by passing an
+    explicit None in provision_overrides.
+
+    Args:
+        name (str): Builder/command name.
+        stat (Callable): Backend stat used to resolve operand sizes.
+
+    Returns:
+        Callable | None: Provision function, or None when the family has
+        no sensible generic estimate.
+    """
+    if name in FILE_READ_COMMANDS:
+        return make_file_read_provision(stat)
+    if name in HEAD_TAIL_COMMANDS:
+        return make_head_tail_provision(stat)
+    if name in SEARCH_COMMANDS:
+        return make_search_provision(stat)
+    if name in METADATA_COMMANDS:
+        return metadata_provision
+    if name == "jq":
+        return make_jq_provision(stat)
+    if name == "stat":
+        return stat_provision
+    return None

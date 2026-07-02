@@ -15,7 +15,6 @@
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.generic_bind.provision import metadata_provision
 from mirage.commands.builtin.slack.find import find
 from mirage.commands.builtin.slack.grep import grep
 from mirage.commands.builtin.slack.rg import rg
@@ -51,7 +50,6 @@ COMMANDS = [
         "slack",
         _SLACK_CMD_OPS,
         overrides={"grep", "rg", "find"},
-        provision_overrides={"ls": metadata_provision},
     ),
     find,
     grep,

@@ -12,12 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { statGeneric, statProvisionGeneric } from '../../generic/stat.ts'
+import { statGeneric } from '../../generic/stat.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
 
 export const STAT_BUILDER: Builder = {
   name: 'stat',
-  provision: () => statProvisionGeneric,
   fn: async (ops, accessor, paths, _texts, opts) => {
     const idx = opts.index ?? undefined
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []

@@ -14,7 +14,6 @@
 
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.generic_bind.provision import metadata_provision
 from mirage.commands.builtin.mongodb.cat import cat
 from mirage.commands.builtin.mongodb.find import find
 from mirage.commands.builtin.mongodb.grep import grep
@@ -49,9 +48,6 @@ COMMANDS = [
         "mongodb",
         _MONGODB_CMD_OPS,
         overrides=_MONGODB_OVERRIDES,
-        provision_overrides={
-            "ls": metadata_provision,
-        },
     ),
     cat,
     find,
