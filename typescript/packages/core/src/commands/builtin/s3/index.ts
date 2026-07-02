@@ -16,12 +16,11 @@ import type { S3Accessor } from '../../../accessor/s3.ts'
 import { read as s3Read } from '../../../core/s3/read.ts'
 import { stat as s3Stat } from '../../../core/s3/stat.ts'
 import { ResourceName } from '../../../types.ts'
-import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
+import type { RegisteredCommand } from '../../config.ts'
 import { makeFiletypeCommands } from '../filetype_factory/factory.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { S3_DU } from './du.ts'
 import { S3_MKDIR } from './mkdir.ts'
-import { fileReadProvision, metadataProvision } from './provision.ts'
 import { S3_RM } from './rm.ts'
 import { S3_SED } from './sed.ts'
 import { S3_STAT } from './stat.ts'
@@ -39,12 +38,6 @@ export const S3_COMMANDS: readonly RegisteredCommand[] = [
   }),
   ...makeGenericCommands<S3Accessor>(ResourceName.S3, S3_CMD_OPS, {
     overrides: S3_OVERRIDES,
-    provisionOverrides: {
-      grep: fileReadProvision as ProvisionFn,
-      rg: fileReadProvision as ProvisionFn,
-      ls: metadataProvision as ProvisionFn,
-      find: metadataProvision as ProvisionFn,
-    },
   }),
   ...S3_STAT,
   ...S3_DU,

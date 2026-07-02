@@ -19,7 +19,7 @@ import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { findGeneric } from '../generic/find.ts'
-import { metadataProvision } from './_provision.ts'
+import { metadataProvision } from '../generic_bind/provision.ts'
 
 async function findCommand(
   accessor: NotionAccessor,

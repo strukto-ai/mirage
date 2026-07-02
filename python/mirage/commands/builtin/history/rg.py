@@ -17,6 +17,8 @@ from collections.abc import AsyncIterator
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.rg import rg as generic_rg
+from mirage.commands.builtin.generic_bind.provision import \
+    make_search_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.history.read import read as history_read
@@ -26,7 +28,10 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("rg", resource="history", spec=SPECS["rg"])
+@command("rg",
+         resource="history",
+         spec=SPECS["rg"],
+         provision=make_search_provision(_stat))
 async def rg(
     accessor: HistoryAccessor,
     paths: list[PathSpec],

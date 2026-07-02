@@ -657,6 +657,16 @@ stat: /s3/__nf_missing__.txt: No such file or directory
 === nf_grep ===
 exit=1
 grep: /s3/__nf_missing__.txt: No such file or directory
+=== prov_cache_write_through ===
+net=0 write=0 cache=17 ops=1 hits=1 precision=exact
+=== prov_cache_cold ===
+net=17 write=0 cache=0 ops=1 hits=0 precision=exact
+=== prov_cache_read_through ===
+net=0 write=0 cache=17 ops=1 hits=1 precision=exact
+=== prov_cache_partial ===
+net=0 write=0 cache=29 ops=2 hits=1 precision=exact
+=== prov_cache_cleared ===
+net=17 write=0 cache=0 ops=1 hits=0 precision=exact
 === consistency:always:first ===
 v1
 === consistency:always:second ===

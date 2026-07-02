@@ -14,9 +14,8 @@
 
 import type { PostgresAccessor } from '../../../accessor/postgres.ts'
 import { ResourceName } from '../../../types.ts'
-import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
+import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { metadataProvision } from './_provision.ts'
 import { POSTGRES_FIND } from './find.ts'
 import { POSTGRES_GREP } from './grep.ts'
 import { POSTGRES_HEAD } from './head.ts'
@@ -30,9 +29,6 @@ const POSTGRES_OVERRIDES = new Set(['find', 'grep', 'head', 'rg', 'tail', 'wc'])
 export const POSTGRES_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<PostgresAccessor>(ResourceName.POSTGRES, POSTGRES_CMD_OPS, {
     overrides: POSTGRES_OVERRIDES,
-    provisionOverrides: {
-      ls: metadataProvision as ProvisionFn,
-    },
   }),
   ...POSTGRES_FIND,
   ...POSTGRES_GREP,

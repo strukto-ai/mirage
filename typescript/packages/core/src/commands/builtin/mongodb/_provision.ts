@@ -12,50 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
-import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import { Precision, ProvisionResult } from '../../../provision/types.ts'
-import type { PathSpec } from '../../../types.ts'
-import type { CommandOpts } from '../../config.ts'
+import { stat as mongoStat } from '../../../core/mongodb/stat.ts'
+import {
+  makeFileReadProvision,
+  makeHeadTailProvision,
+  makeSearchProvision,
+  metadataProvision,
+} from '../generic_bind/provision.ts'
 
-export async function fileReadProvision(
-  _accessor: MongoDBAccessor,
-  paths: PathSpec[],
-  _texts: string[],
-  opts: CommandOpts,
-): Promise<ProvisionResult> {
-  if (paths.length === 0) {
-    return new ProvisionResult({ precision: Precision.UNKNOWN })
-  }
-  const index: IndexCacheStore | undefined = opts.index ?? undefined
-  let ops = 0
-  if (index !== undefined) {
-    for (const p of paths) {
-      const lookup = await index.get(p.virtual)
-      if (lookup.entry !== undefined && lookup.entry !== null) {
-        ops += 1
-      }
-    }
-  }
-  return new ProvisionResult({
-    networkReadLow: 0,
-    networkReadHigh: 0,
-    readOps: ops,
-    precision: Precision.EXACT,
-  })
-}
-
-// eslint-disable-next-line @typescript-eslint/require-await
-export async function metadataProvision(
-  _accessor: MongoDBAccessor,
-  _paths: PathSpec[],
-  _texts: string[],
-  _opts: CommandOpts,
-): Promise<ProvisionResult> {
-  return new ProvisionResult({
-    networkReadLow: 0,
-    networkReadHigh: 0,
-    readOps: 0,
-    precision: Precision.EXACT,
-  })
-}
+export const fileReadProvision = makeFileReadProvision(mongoStat)
+export const headTailProvision = makeHeadTailProvision(mongoStat)
+export const searchProvision = makeSearchProvision(mongoStat)
+export { metadataProvision }

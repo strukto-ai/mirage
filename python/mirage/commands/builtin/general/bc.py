@@ -16,6 +16,7 @@ import math
 from collections.abc import AsyncIterator
 
 from mirage.accessor.base import Accessor, NOOPAccessor
+from mirage.commands.builtin.generic_bind.provision import pure_provision
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -48,7 +49,7 @@ def _eval_bc(expression: str, use_math: bool) -> str:
     return str(result)
 
 
-@command("bc", resource=None, spec=SPECS["bc"])
+@command("bc", resource=None, spec=SPECS["bc"], provision=pure_provision)
 async def bc(
     accessor: Accessor = NOOPAccessor(),
     paths: list[PathSpec] | None = None,

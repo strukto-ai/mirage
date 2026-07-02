@@ -21,7 +21,7 @@ from pathlib import Path
 import aiobotocore.client
 import boto3
 import moto.s3.models as _s3_models
-from cases import run_not_found
+from cases import run_not_found, run_provision_cache_cases
 from moto.server import ThreadedMotoServer
 
 from mirage import MountMode, Workspace
@@ -388,6 +388,21 @@ async def main() -> None:
             else:
                 _safeguard.DEFAULT_COMMAND_SAFEGUARDS["sleep"] = prev_sleep
         await run_not_found(ws, MOUNTS[0])
+        # The suite workspace is read-only; the cache-flip probe seeds its
+        # own files, so it gets a write-mode mount on the same bucket.
+        ws_write = Workspace(
+            {
+                "/s3":
+                S3Resource(
+                    S3Config(bucket=S3_BUCKET,
+                             region="us-east-1",
+                             endpoint_url=endpoint,
+                             aws_access_key_id="testing",
+                             aws_secret_access_key="testing",
+                             path_style=True))
+            },
+            mode=MountMode.WRITE)
+        await run_provision_cache_cases(ws_write, "/s3")
         await _run_consistency(endpoint)
         await _run_coherence(endpoint)
     finally:

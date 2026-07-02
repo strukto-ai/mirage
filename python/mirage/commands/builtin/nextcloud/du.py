@@ -17,6 +17,7 @@ from functools import partial
 from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.du import du_multi
+from mirage.commands.builtin.generic_bind.provision import metadata_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.nextcloud.du import du as du_impl
@@ -26,7 +27,10 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("du", resource="nextcloud", spec=SPECS["du"])
+@command("du",
+         resource="nextcloud",
+         spec=SPECS["du"],
+         provision=metadata_provision)
 async def du(
     accessor: NextcloudAccessor,
     paths: list[PathSpec],

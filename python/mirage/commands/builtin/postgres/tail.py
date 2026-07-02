@@ -20,7 +20,7 @@ from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.tail import tail as generic_tail
 from mirage.commands.builtin.generic.tail import tail_multi
-from mirage.commands.builtin.postgres._provision import file_read_provision
+from mirage.commands.builtin.postgres._provision import head_tail_provision
 from mirage.commands.builtin.tail_helper import _parse_n
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
@@ -30,26 +30,13 @@ from mirage.core.postgres.glob import resolve_glob
 from mirage.core.postgres.read import read as postgres_read
 from mirage.core.postgres.scope import detect_scope
 from mirage.io.types import ByteSource, IOResult
-from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
-
-
-async def tail_provision(
-    accessor: PostgresAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    **_extra: object,
-) -> ProvisionResult:
-    return await file_read_provision(
-        accessor, paths,
-        "tail " + " ".join(p.virtual if isinstance(p, PathSpec) else p
-                           for p in paths))
 
 
 @command("tail",
          resource="postgres",
          spec=SPECS["tail"],
-         provision=tail_provision)
+         provision=head_tail_provision)
 async def tail(
     accessor: PostgresAccessor,
     paths: list[PathSpec],

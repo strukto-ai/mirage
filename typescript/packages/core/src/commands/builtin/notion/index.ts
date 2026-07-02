@@ -14,8 +14,7 @@
 
 import type { NotionAccessor } from '../../../accessor/notion.ts'
 import { ResourceName } from '../../../types.ts'
-import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
-import { fileReadProvision, metadataProvision } from './_provision.ts'
+import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { NOTION_BLOCK_APPEND } from './notion_block_append.ts'
 import { NOTION_COMMENT_ADD } from './notion_comment_add.ts'
@@ -29,11 +28,6 @@ const NOTION_OVERRIDES = new Set(['find'])
 export const NOTION_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<NotionAccessor>(ResourceName.NOTION, NOTION_CMD_OPS, {
     overrides: NOTION_OVERRIDES,
-    provisionOverrides: {
-      grep: fileReadProvision as ProvisionFn,
-      rg: fileReadProvision as ProvisionFn,
-      ls: metadataProvision as ProvisionFn,
-    },
   }),
   ...NOTION_FIND,
   ...NOTION_BLOCK_APPEND,

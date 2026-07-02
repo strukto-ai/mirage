@@ -17,6 +17,8 @@ from collections.abc import AsyncIterator
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.grep import grep as generic_grep
+from mirage.commands.builtin.generic_bind.provision import \
+    make_search_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.history.read import read as history_read
@@ -26,7 +28,10 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("grep", resource="history", spec=SPECS["grep"])
+@command("grep",
+         resource="history",
+         spec=SPECS["grep"],
+         provision=make_search_provision(_stat))
 async def grep(
     accessor: HistoryAccessor,
     paths: list[PathSpec],

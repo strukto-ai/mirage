@@ -24,6 +24,7 @@ import { FileType, type PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { formatRecords } from '../utils/output.ts'
+import { writeMetadataProvision } from '../generic_bind/provision.ts'
 
 const ENC = new TextEncoder()
 
@@ -100,4 +101,5 @@ export const S3_RM = command({
   spec: specOf('rm'),
   fn: rmCommand,
   write: true,
+  provision: writeMetadataProvision,
 })

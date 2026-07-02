@@ -16,13 +16,14 @@ import email.utils
 from datetime import datetime, timezone
 
 from mirage.accessor.base import Accessor, NOOPAccessor
+from mirage.commands.builtin.generic_bind.provision import pure_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("date", resource=None, spec=SPECS["date"])
+@command("date", resource=None, spec=SPECS["date"], provision=pure_provision)
 async def date(
     accessor: Accessor = NOOPAccessor(),
     paths: list[PathSpec] | None = None,

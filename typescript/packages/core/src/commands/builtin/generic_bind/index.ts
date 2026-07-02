@@ -22,10 +22,14 @@ export {
 export { type MakeGenericCommandsOptions, makeGenericCommands } from './factory.ts'
 export {
   defaultProvision,
+  makeCopyProvision,
   makeFileReadProvision,
   makeHeadTailProvision,
   makeJqProvision,
   makeSearchProvision,
+  makeTransformProvision,
   metadataProvision,
-  statProvision,
+  pureProvision,
+  withDefaultProvisions,
+  writeMetadataProvision,
 } from './provision.ts'

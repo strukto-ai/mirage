@@ -12,9 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { ProvisionResult } from '../../../provision/types.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { formatRecords } from '../utils/output.ts'
@@ -36,18 +34,6 @@ function formatStat(fmt: string, s: FileStat, name: string): string {
     if (spec === 'F') return s.type ? (TYPE_LABELS[s.type] ?? 'regular file') : 'regular file'
     if (spec === 'y') return s.modified ?? ''
     return '?'
-  })
-}
-
-export function statProvisionGeneric(
-  _accessor: Accessor,
-  paths: PathSpec[],
-  _texts: string[],
-  _opts: CommandOpts,
-): ProvisionResult {
-  const [first] = paths
-  return new ProvisionResult({
-    command: first !== undefined ? `stat ${first.virtual}` : 'stat',
   })
 }
 

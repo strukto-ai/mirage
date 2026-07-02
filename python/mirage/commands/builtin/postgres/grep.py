@@ -18,7 +18,7 @@ from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.grep_helper import pattern_arg
-from mirage.commands.builtin.postgres._provision import file_read_provision
+from mirage.commands.builtin.postgres._provision import search_provision
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -32,25 +32,13 @@ from mirage.core.postgres.search import (format_grep_results, search_database,
                                          search_schema)
 from mirage.core.postgres.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
-from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
-
-
-async def grep_provision(
-    accessor: PostgresAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    **_extra: object,
-) -> ProvisionResult:
-    return await file_read_provision(
-        accessor, paths,
-        "grep " + " ".join(texts + tuple(str(p) for p in paths)))
 
 
 @command("grep",
          resource="postgres",
          spec=SPECS["grep"],
-         provision=grep_provision)
+         provision=search_provision)
 async def grep(
     accessor: PostgresAccessor,
     paths: list[PathSpec],

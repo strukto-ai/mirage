@@ -125,6 +125,16 @@ async def run_cases(ws: Workspace) -> None:
         print(f"exit={result.exit_code}")
         if err:
             print(err)
+    prov_target = f"{MOUNT}animals/cat/big/1.md"
+    for pv_name, pv_cmd in (("prov_probe_cat", f"cat {prov_target}"),
+                            ("prov_probe_grep", f"grep x {prov_target}"),
+                            ("prov_probe_ls", f"ls {MOUNT}animals/cat/big")):
+        result = await ws.execute(pv_cmd, provision=True)
+        print(f"=== {pv_name} ===")
+        print(f"net={result.network_read} write={result.network_write} "
+              f"cache={result.cache_read} ops={result.read_ops} "
+              f"hits={result.cache_hits} "
+              f"precision={result.precision.value}")
 
 
 async def main() -> None:

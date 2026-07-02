@@ -38,13 +38,22 @@ async def handle_if_provision(
     else_body: Any | None,
     session: Session,
 ) -> ProvisionResult:
-    """Plan an if: range between branches."""
+    """Plan an if: branches bracket as alternatives.
+
+    Taking branch i evaluates conditions 1..i plus body i, so each
+    alternative sums its condition ladder with its body. The else (or,
+    without one, the fall-through) still pays every condition.
+    """
+    cond_costs: list[ProvisionResult] = []
     children = []
     for condition, body in branches:
-        children.append(await provision_node_fn(condition, session))
-        children.append(await provision_node_fn(body, session))
-    if else_body is not None:
-        children.append(await provision_node_fn(else_body, session))
+        cond_costs.append(await provision_node_fn(condition, session))
+        body_result = await _plan_body(provision_node_fn, body, session)
+        children.append(rollup_list(";", cond_costs + [body_result]))
+    else_result = (await _plan_body(provision_node_fn, else_body, session)
+                   if else_body is not None else ProvisionResult(
+                       precision=Precision.EXACT))
+    children.append(rollup_list(";", cond_costs + [else_result]))
     return rollup_list("||", children)
 
 

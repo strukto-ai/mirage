@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Workspace } from "@struktoai/mirage-node";
+import type { ProvisionResult, Workspace } from "@struktoai/mirage-node";
 
 export const SEED_FILES: Record<string, string> = {
   "/data/a.txt": "hello\nworld\nfoo\nbar\nbaz\n",
@@ -781,6 +781,75 @@ export const SLEEP_CASES: ReadonlyArray<readonly [string, string, number]> = [
   ["sleep_one", "sleep 1", 1],
 ];
 
+// Provision (dry-run cost estimates) must print identical numbers on every
+// backend: sizes come from seeded files, and the file cache is cleared first
+// so read-caching backends (s3, onedrive, nextcloud) report the same cold
+// numbers as non-caching ones (ram, disk, redis, ssh). Cache-hit flipping is
+// backend-dependent and covered by runProvisionCacheCases instead.
+export const PROVISION_CASES: ReadonlyArray<readonly [string, string]> = [
+  // ----- whole-file readers (exact byte totals) -----
+  ["prov_cat", "cat /data/a.txt"],
+  ["prov_cat_multi", "cat /data/a.txt /data/b.txt"],
+  ["prov_wc", "wc -l /data/a.txt"],
+  ["prov_sort", "sort /data/numbers.txt"],
+  ["prov_md5", "md5 /data/b.txt"],
+  // ----- search family (worst-case full read) -----
+  ["prov_grep", "grep world /data/a.txt"],
+  ["prov_grep_multi", "grep hello /data/a.txt /data/mixed.txt"],
+  ["prov_rg", "rg world /data/a.txt"],
+  // ----- partial readers (range unless -c pins the bytes) -----
+  ["prov_head", "head /data/a.txt"],
+  ["prov_head_c", "head -c 5 /data/a.txt"],
+  ["prov_tail", "tail -n 1 /data/a.txt"],
+  // ----- metadata-only (op counts, no content bytes) -----
+  ["prov_ls", "ls /data"],
+  ["prov_find", 'find /data -name "*.txt"'],
+  ["prov_du", "du /data/a.txt"],
+  ["prov_stat", "stat /data/a.txt"],
+  // ----- jq (streamable jsonl reads a range, object reads it all) -----
+  ["prov_jq_object", 'jq ".name" /data/user.json'],
+  ["prov_jq_jsonl", 'jq ".id" /data/data.jsonl'],
+  // ----- honest degradation -----
+  ["prov_missing", "cat /data/missing.txt"],
+  ["prov_unprovisioned", "sed s/a/b/ /data/a.txt"],
+  ["prov_write", "tee /data/prov_out.txt"],
+  // ----- combinators -----
+  ["prov_pipe", "cat /data/a.txt | head -c 4"],
+  ["prov_pipe_floor", "grep world /data/a.txt | wc -l"],
+  ["prov_and", "cat /data/a.txt && cat /data/b.txt"],
+  ["prov_seq", "cat /data/a.txt; cat /data/b.txt"],
+  ["prov_or", "cat /data/b.txt || cat /data/a.txt"],
+  ["prov_for", "for i in 1 2 3; do cat /data/a.txt; done"],
+  ["prov_while", "while true; do cat /data/a.txt; done"],
+  // ----- graceful defaults for the remaining families -----
+  ["prov_file_cmd", "file /data/a.txt"],
+  ["prov_iconv", "iconv -f utf-8 -t utf-8 /data/a.txt"],
+  ["prov_cp", "cp /data/a.txt /data/sub"],
+  ["prov_gzip", "gzip /data/b.txt"],
+  ["prov_rm", "rm /data/dup.txt"],
+  ["prov_rm_r", "rm -r /data/guard"],
+  ["prov_mkdir", "mkdir /data/provdir"],
+  ["prov_mv", "mv /data/a.txt /data/moved.txt"],
+  ["prov_seq", "seq 3"],
+  ["prov_date", "date"],
+  // ----- complex bash aggregation -----
+  ["prov_pipe3", "cat /data/a.txt | grep hello | wc -l"],
+  ["prov_and_or", "cat /data/a.txt && cat /data/b.txt || cat /data/numbers.txt"],
+  ["prov_or_and", "cat /data/a.txt || cat /data/b.txt && cat /data/numbers.txt"],
+  ["prov_if_else", "if true; then cat /data/a.txt; else cat /data/b.txt; fi"],
+  ["prov_if_cond_read", "if grep -q hello /data/a.txt; then cat /data/b.txt; fi"],
+  ["prov_case", "case x in x) cat /data/a.txt;; *) cat /data/b.txt;; esac"],
+  ["prov_subshell", "(cat /data/a.txt; cat /data/b.txt)"],
+  ["prov_brace_group", "{ cat /data/a.txt; cat /data/b.txt; }"],
+  ["prov_negate", "! grep zzz /data/a.txt"],
+  ["prov_redirect_out", "cat /data/a.txt > /data/prov_redir.txt"],
+  ["prov_or_unknown_branch", "tee /data/prov_x.txt || cat /data/a.txt"],
+  ["prov_for_pipe", "for i in 1 2; do cat /data/a.txt | wc -l; done"],
+  ["prov_for_nested", "for i in 1 2; do for j in 1 2; do cat /data/b.txt; done; done"],
+  ["prov_cmdsub", "cat $(echo /data/a.txt)"],
+  ["prov_deep_mix", "for i in 1 2; do cat /data/a.txt | wc -l && cat /data/b.txt; done"],
+];
+
 // Not-found errors must always show the full virtual path the user typed
 // (mount prefix included) plus the GNU strerror, identically across backends
 // and languages. Each case prints exit code and stderr.
@@ -891,6 +960,75 @@ export async function runCases(ws: Workspace): Promise<void> {
       process.stdout.write(`${name} FAIL exit=${result.exitCode} elapsed=${elapsed.toFixed(3)}\n`);
     }
   }
+
+  await runProvisionCases(ws);
+}
+
+function provisionLine(result: ProvisionResult): string {
+  return (
+    `net=${result.networkRead} write=${result.networkWrite} ` +
+    `cache=${result.cacheRead} ops=${String(result.readOps)} ` +
+    `hits=${String(result.cacheHits)} precision=${result.precision}`
+  );
+}
+
+export async function runProvisionCases(ws: Workspace): Promise<void> {
+  await ws.cache.clear();
+  for (const [name, cmd] of PROVISION_CASES) {
+    const result = await ws.execute(cmd, { provision: true });
+    process.stdout.write(`=== ${name} ===\n`);
+    process.stdout.write(provisionLine(result) + "\n");
+  }
+}
+
+// Provision probe for bespoke suites: one file read, one search, one
+// listing. Rendered/virtual files without a backend size print UNKNOWN
+// floors; files with real sizes print exact totals.
+export async function runProvisionProbe(ws: Workspace, filePath: string): Promise<void> {
+  const parent = filePath.slice(0, filePath.lastIndexOf("/")) || "/";
+  const probes: ReadonlyArray<readonly [string, string]> = [
+    ["prov_probe_cat", `cat ${filePath}`],
+    ["prov_probe_grep", `grep x ${filePath}`],
+    ["prov_probe_ls", `ls ${parent}`],
+  ];
+  for (const [name, cmd] of probes) {
+    const result = await ws.execute(cmd, { provision: true });
+    process.stdout.write(`=== ${name} ===\n`);
+    process.stdout.write(provisionLine(result) + "\n");
+  }
+}
+
+// Cache-hit flipping for read-caching backends (cachesReads=true). Once a
+// path is in the file cache, provision reports the bytes as cache_read
+// instead of network_read. Both populate routes are covered: write-through
+// (tee) and read-through (a real cat).
+export async function runProvisionCacheCases(ws: Workspace, mount = "/data"): Promise<void> {
+  const m = mount.replace(/\/+$/, "");
+  const a = `${m}/provcache.txt`;
+  const b = `${m}/provcache_b.txt`;
+  await ws.execute(`tee ${a} > /dev/null`, { stdin: ENC.encode("cache flip probe\n") });
+  await ws.execute(`tee ${b} > /dev/null`, { stdin: ENC.encode("second file\n") });
+  process.stdout.write("=== prov_cache_write_through ===\n");
+  let result = await ws.execute(`cat ${a}`, { provision: true });
+  process.stdout.write(provisionLine(result) + "\n");
+  await ws.cache.clear();
+  process.stdout.write("=== prov_cache_cold ===\n");
+  result = await ws.execute(`cat ${a}`, { provision: true });
+  process.stdout.write(provisionLine(result) + "\n");
+  await ws.execute(`cat ${a} > /dev/null`);
+  process.stdout.write("=== prov_cache_read_through ===\n");
+  result = await ws.execute(`cat ${a}`, { provision: true });
+  process.stdout.write(provisionLine(result) + "\n");
+  // A single cached path flips the whole command's estimate: hits counts
+  // cached paths, the byte split is not per-path.
+  process.stdout.write("=== prov_cache_partial ===\n");
+  result = await ws.execute(`cat ${a} ${b}`, { provision: true });
+  process.stdout.write(provisionLine(result) + "\n");
+  await ws.cache.clear();
+  process.stdout.write("=== prov_cache_cleared ===\n");
+  result = await ws.execute(`cat ${a}`, { provision: true });
+  process.stdout.write(provisionLine(result) + "\n");
+  await ws.execute(`rm ${a} ${b}`);
 }
 
 // Pure assertion (no stdout, not in truth.txt): a backend that reports real

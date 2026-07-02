@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from collections.abc import Callable
 
 from mirage.accessor.base import Accessor
@@ -19,6 +20,8 @@ from mirage.cache.index import IndexCacheStore
 from mirage.core.jq import is_jsonl_path, is_streamable_jsonl_expr
 from mirage.provision.types import Precision, ProvisionResult
 from mirage.types import PathSpec
+
+logger = logging.getLogger(__name__)
 
 
 async def _resolve_sizes(
@@ -37,11 +40,14 @@ async def _resolve_sizes(
             if lookup.entry is not None:
                 size = lookup.entry.size
         if size is None:
+            # A provision estimate must degrade, never fail: any stat
+            # error (missing file, transient backend error) leaves the
+            # path unresolved and the result UNKNOWN (mirrors TS).
             try:
                 file_stat = await stat(accessor, p, index)
                 size = file_stat.size
-            except (FileNotFoundError, ValueError):
-                pass
+            except Exception as exc:
+                logger.debug("provision stat failed for %s: %s", path_str, exc)
         if size is not None:
             resolved.append((path_str, size))
         else:
@@ -112,7 +118,8 @@ def make_head_tail_provision(stat: Callable) -> Callable:
                 read_ops=len(paths),
                 precision=Precision.UNKNOWN,
             )
-        if c is not None:
+        # A byte-count -c only; boolean -c flags (e.g. file -c) don't cap.
+        if c is not None and not isinstance(c, bool):
             c_bytes = int(c)
             total = sum(min(c_bytes, size) for _, size in resolved)
             return ProvisionResult(
@@ -153,17 +160,6 @@ async def metadata_provision(
     )
 
 
-async def stat_provision(
-    accessor: Accessor | None = None,
-    paths: list[PathSpec] | None = None,
-    *_args: str,
-    **kwargs,
-) -> ProvisionResult:
-    """Cost estimate for stat: the command string, no reads."""
-    return ProvisionResult(
-        command=f"stat {paths[0].virtual}" if paths else "stat")
-
-
 def make_jq_provision(stat: Callable) -> Callable:
     """Provision for jq: streamable jsonl reads a range, else whole file."""
 
@@ -180,7 +176,8 @@ def make_jq_provision(stat: Callable) -> Callable:
         key = p.mount_path if isinstance(p, PathSpec) else p
         try:
             file_stat = await stat(accessor, p, index)
-        except (FileNotFoundError, ValueError):
+        except Exception as exc:
+            logger.debug("provision stat failed for %s: %s", key, exc)
             return ProvisionResult(command="jq", precision=Precision.UNKNOWN)
         expr = texts[0]
         shown = p.virtual if isinstance(p, PathSpec) else p
@@ -228,17 +225,124 @@ def make_search_provision(stat: Callable) -> Callable:
     return search_provision
 
 
+def make_transform_provision(stat: Callable) -> Callable:
+    """Provision for read-transform-write commands (gzip, tar, split).
+
+    The operands are read fully, so the read side is a known floor, but
+    the output size (compression ratio, piece count) is unknowable
+    before running, so precision stays UNKNOWN.
+    """
+    base = make_file_read_provision(stat)
+
+    async def transform_provision(
+        accessor: Accessor,
+        paths: list[PathSpec],
+        *_args: str,
+        command: str = "",
+        index: IndexCacheStore | None = None,
+        **kwargs,
+    ) -> ProvisionResult:
+        result = await base(accessor, paths, command=command, index=index)
+        result.precision = Precision.UNKNOWN
+        return result
+
+    return transform_provision
+
+
+def make_copy_provision(stat: Callable) -> Callable:
+    """Provision for cp: bytes bracket 0 (server-side copy) to the total.
+
+    Reads the source sizes and reports both network_read and
+    network_write as a 0..total range: a same-backend copy can be
+    server-side (zero client bytes) while a streamed copy moves the
+    full byte count each way.
+    """
+
+    async def copy_provision(
+        accessor: Accessor,
+        paths: list[PathSpec],
+        *_args: str,
+        command: str = "",
+        index: IndexCacheStore | None = None,
+        **kwargs,
+    ) -> ProvisionResult:
+        sources = paths[:-1] if len(paths) > 1 else paths
+        if not sources:
+            return ProvisionResult(command=command,
+                                   precision=Precision.UNKNOWN)
+        resolved, missing = await _resolve_sizes(stat, accessor, sources,
+                                                 index)
+        total = sum(size for _, size in resolved)
+        precision = (Precision.UNKNOWN
+                     if missing > 0 or not resolved else Precision.RANGE)
+        return ProvisionResult(
+            command=command,
+            network_read_low=0,
+            network_read_high=total,
+            network_write_low=0,
+            network_write_high=total,
+            read_ops=len(sources),
+            precision=precision,
+        )
+
+    return copy_provision
+
+
+async def write_metadata_provision(
+    accessor: Accessor,
+    paths: list[PathSpec],
+    *_args: str,
+    command: str = "",
+    r: bool = False,
+    R: bool = False,
+    index: IndexCacheStore | None = None,
+    **kwargs,
+) -> ProvisionResult:
+    """Provision for metadata-only writes (rm, mkdir, touch, ln).
+
+    These never move content bytes on any backend; the op count is the
+    operand count. A recursive rm walks an unknown subtree, so its op
+    count is only a floor and precision degrades to UNKNOWN.
+    """
+    n = max(1, len(paths) if paths else 1)
+    precision = Precision.UNKNOWN if r or R else Precision.EXACT
+    return ProvisionResult(
+        command=command,
+        network_read_low=0,
+        network_read_high=0,
+        read_ops=n,
+        precision=precision,
+    )
+
+
+async def pure_provision(
+    accessor: Accessor | None = None,
+    paths: list[PathSpec] | None = None,
+    *_args: str,
+    command: str = "",
+    **kwargs,
+) -> ProvisionResult:
+    """Provision for pure local computation (seq, date, bc): zero cost."""
+    return ProvisionResult(command=command, precision=Precision.EXACT)
+
+
 FILE_READ_COMMANDS = frozenset({
     "awk", "base64", "cat", "cmp", "column", "comm", "cut", "diff", "expand",
-    "fmt", "fold", "join", "look", "md5", "nl", "paste", "rev", "sha256sum",
-    "shuf", "sort", "strings", "tac", "tr", "tsort", "unexpand", "uniq", "wc",
-    "xxd", "zcat"
+    "fmt", "fold", "iconv", "join", "look", "md5", "nl", "paste", "rev",
+    "sha256sum", "shuf", "sort", "strings", "tac", "tr", "tsort", "unexpand",
+    "uniq", "wc", "xxd", "zcat"
 })
-HEAD_TAIL_COMMANDS = frozenset({"head", "tail"})
+# file reads a bounded prefix (magic bytes), so it shares head/tail's
+# 0..size range estimate.
+HEAD_TAIL_COMMANDS = frozenset({"file", "head", "tail"})
 SEARCH_COMMANDS = frozenset({"grep", "rg", "zgrep"})
 METADATA_COMMANDS = frozenset({
-    "basename", "dirname", "du", "find", "ls", "readlink", "realpath", "tree"
+    "basename", "dirname", "du", "find", "ls", "readlink", "realpath", "stat",
+    "tree"
 })
+TRANSFORM_COMMANDS = frozenset(
+    {"csplit", "gunzip", "gzip", "patch", "split", "tar", "unzip", "zip"})
+WRITE_METADATA_COMMANDS = frozenset({"ln", "mkdir", "mktemp", "rm", "touch"})
 
 
 def default_provision(name: str, stat: Callable) -> Callable | None:
@@ -246,9 +350,13 @@ def default_provision(name: str, stat: Callable) -> Callable | None:
 
     Whole-file readers stat their operands and charge the byte total;
     searches charge a worst-case full read; metadata commands charge op
-    counts only. Write commands and anything unlisted return None so the
-    planner reports UNKNOWN. A backend disables a default by passing an
-    explicit None in provision_overrides.
+    counts only; transforms keep the read floor with UNKNOWN output;
+    cp brackets 0..total on both read and write; metadata writes are
+    zero-byte op counts. mv, tee, and anything unlisted return None so
+    the planner reports UNKNOWN (mv may be a free rename or a full
+    cross-mount copy; tee's stdin size is unknowable). A backend
+    disables a default by passing an explicit None in
+    provision_overrides.
 
     Args:
         name (str): Builder/command name.
@@ -266,8 +374,12 @@ def default_provision(name: str, stat: Callable) -> Callable | None:
         return make_search_provision(stat)
     if name in METADATA_COMMANDS:
         return metadata_provision
+    if name in TRANSFORM_COMMANDS:
+        return make_transform_provision(stat)
+    if name in WRITE_METADATA_COMMANDS:
+        return write_metadata_provision
+    if name == "cp":
+        return make_copy_provision(stat)
     if name == "jq":
         return make_jq_provision(stat)
-    if name == "stat":
-        return stat_provision
     return None

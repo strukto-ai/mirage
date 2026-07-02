@@ -30,23 +30,13 @@ from mirage.core.mongodb.read import read as mongodb_read
 from mirage.core.mongodb.scope import detect_scope
 from mirage.core.mongodb.types import ScopeLevel
 from mirage.io.types import ByteSource, IOResult
-from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
 
 
-async def wc_provision(
-    accessor: MongoDBAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    **_extra: object,
-) -> ProvisionResult:
-    return await file_read_provision(
-        accessor, paths,
-        "wc " + " ".join(p.virtual if isinstance(p, PathSpec) else p
-                         for p in paths))
-
-
-@command("wc", resource="mongodb", spec=SPECS["wc"], provision=wc_provision)
+@command("wc",
+         resource="mongodb",
+         spec=SPECS["wc"],
+         provision=file_read_provision)
 async def wc(
     accessor: MongoDBAccessor,
     paths: list[PathSpec],

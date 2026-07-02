@@ -22,9 +22,13 @@ import type { CommandOpts } from '../../config.ts'
 import { RAM_COMMANDS } from '../ram/index.ts'
 import {
   defaultProvision,
+  makeCopyProvision,
   makeFileReadProvision,
   makeHeadTailProvision,
+  makeTransformProvision,
   metadataProvision,
+  pureProvision,
+  writeMetadataProvision,
 } from './provision.ts'
 
 const SIZES: Record<string, number> = { '/data/known.txt': 5, '/data/big.txt': 100 }
@@ -55,25 +59,32 @@ function registered(name: string) {
 }
 
 describe('defaultProvision families', () => {
-  it('maps read families and leaves writes null', () => {
+  it('maps read families and leaves unknowables null', () => {
     expect(defaultProvision('sort', stat)).not.toBeNull()
     expect(defaultProvision('grep', stat)).not.toBeNull()
+    expect(defaultProvision('iconv', stat)).not.toBeNull()
+    expect(defaultProvision('file', stat)).not.toBeNull()
     expect(defaultProvision('ls', stat)).toBe(metadataProvision)
-    expect(defaultProvision('cp', stat)).toBeNull()
+    expect(defaultProvision('stat', stat)).toBe(metadataProvision)
+    expect(defaultProvision('du', stat)).toBe(metadataProvision)
+    expect(defaultProvision('gzip', stat)).not.toBeNull()
+    expect(defaultProvision('cp', stat)).not.toBeNull()
+    expect(defaultProvision('rm', stat)).toBe(writeMetadataProvision)
+    expect(defaultProvision('mv', stat)).toBeNull()
     expect(defaultProvision('tee', stat)).toBeNull()
   })
 })
 
 describe('factory default provisions', () => {
-  it('registers defaults for read commands and none for writes', () => {
-    for (const name of ['grep', 'sort', 'ls', 'find', 'md5', 'cat', 'head']) {
+  it('registers defaults for estimable commands and none for tee', () => {
+    for (const name of ['grep', 'sort', 'ls', 'find', 'md5', 'cat', 'head', 'cp', 'gzip', 'rm']) {
       const rc = registered(name)
       expect(rc, name).toBeDefined()
       expect(rc?.provisionFn, name).not.toBeNull()
     }
-    const cp = registered('cp')
-    expect(cp).toBeDefined()
-    expect(cp?.provisionFn ?? null).toBeNull()
+    const tee = registered('tee')
+    expect(tee).toBeDefined()
+    expect(tee?.provisionFn ?? null).toBeNull()
   })
 })
 
@@ -118,5 +129,61 @@ describe('size-aware estimators', () => {
     expect(result.networkReadLow).toBe(0)
     expect(result.networkReadHigh).toBe(5)
     expect(result.readOps).toBe(2)
+  })
+
+  it('transform keeps the read floor with unknown output', async () => {
+    const provision = makeTransformProvision(stat)
+    const result = (await provision(
+      undefined as unknown as Accessor,
+      [spec('/data/known.txt')],
+      [],
+      opts('gzip'),
+    )) as ProvisionResult
+    expect(result.precision).toBe(Precision.UNKNOWN)
+    expect(result.networkReadLow).toBe(5)
+    expect(result.networkReadHigh).toBe(5)
+    expect(result.readOps).toBe(1)
+  })
+
+  it('cp brackets read and write between 0 and the source total', async () => {
+    const provision = makeCopyProvision(stat)
+    const result = (await provision(
+      undefined as unknown as Accessor,
+      [spec('/data/known.txt'), spec('/data/dest.txt')],
+      [],
+      opts('cp'),
+    )) as ProvisionResult
+    expect(result.precision).toBe(Precision.RANGE)
+    expect(result.networkReadLow).toBe(0)
+    expect(result.networkReadHigh).toBe(5)
+    expect(result.networkWriteLow).toBe(0)
+    expect(result.networkWriteHigh).toBe(5)
+    expect(result.readOps).toBe(1)
+  })
+
+  it('metadata writes are zero-byte; recursive rm floors', async () => {
+    const plain = await writeMetadataProvision(
+      undefined as unknown as Accessor,
+      [spec('/data/known.txt')],
+      [],
+      opts('rm'),
+    )
+    expect(plain.precision).toBe(Precision.EXACT)
+    expect(plain.networkReadHigh).toBe(0)
+    expect(plain.readOps).toBe(1)
+    const recursive = await writeMetadataProvision(
+      undefined as unknown as Accessor,
+      [spec('/data/known.txt')],
+      [],
+      { command: 'rm', flags: { r: true } } as unknown as CommandOpts,
+    )
+    expect(recursive.precision).toBe(Precision.UNKNOWN)
+  })
+
+  it('pure commands are zero-cost exact', async () => {
+    const result = await pureProvision(undefined as unknown as Accessor, [], [], opts('seq'))
+    expect(result.precision).toBe(Precision.EXACT)
+    expect(result.networkReadHigh).toBe(0)
+    expect(result.readOps).toBe(0)
   })
 })

@@ -160,15 +160,19 @@ export {
   type CommandIO,
   type MakeGenericCommandsOptions,
   defaultProvision,
+  makeCopyProvision,
   makeFileReadProvision,
   makeGenericCommands,
   makeHeadTailProvision,
   makeJqProvision,
   makeResolveGlob,
   makeSearchProvision,
+  makeTransformProvision,
   metadataProvision,
+  pureProvision,
   resolveGlobOf,
-  statProvision,
+  withDefaultProvisions,
+  writeMetadataProvision,
 } from './commands/builtin/generic_bind/index.ts'
 export {
   FILETYPE_ENTRIES,
@@ -218,21 +222,21 @@ export { zipGeneric } from './commands/builtin/generic/zip_cmd.ts'
 export { tarGeneric } from './commands/builtin/generic/tar.ts'
 export { realpathGeneric } from './commands/builtin/generic/realpath.ts'
 export { findGeneric, findSizeMtimeError, invalidFindArg } from './commands/builtin/generic/find.ts'
-export { statGeneric, statProvisionGeneric } from './commands/builtin/generic/stat.ts'
+export { statGeneric } from './commands/builtin/generic/stat.ts'
 export { diffGeneric } from './commands/builtin/generic/diff.ts'
 export { duGeneric } from './commands/builtin/generic/du.ts'
 export { treeGeneric } from './commands/builtin/generic/tree.ts'
 export { lsGeneric } from './commands/builtin/generic/ls.ts'
 export { fileGeneric } from './commands/builtin/generic/file.ts'
 export { sha256sumGeneric } from './commands/builtin/generic/sha256sum.ts'
-export { jqGeneric, jqProvisionGeneric } from './commands/builtin/generic/jq.ts'
+export { jqGeneric } from './commands/builtin/generic/jq.ts'
 export { grepGeneric } from './commands/builtin/generic/grep.ts'
 export { rgGeneric } from './commands/builtin/generic/rg.ts'
 export { cpGeneric } from './commands/builtin/generic/cp.ts'
 export { mvGeneric } from './commands/builtin/generic/mv.ts'
 export { awkGeneric } from './commands/builtin/generic/awk.ts'
-export { catGeneric, catProvisionGeneric } from './commands/builtin/generic/cat.ts'
-export { headGeneric, headProvisionGeneric } from './commands/builtin/generic/head.ts'
+export { catGeneric } from './commands/builtin/generic/cat.ts'
+export { headGeneric } from './commands/builtin/generic/head.ts'
 export { tailGeneric } from './commands/builtin/generic/tail.ts'
 export { wcGeneric } from './commands/builtin/generic/wc.ts'
 export { readlinkGeneric } from './commands/builtin/generic/readlink.ts'
@@ -547,11 +551,6 @@ export { truncate } from './core/s3/truncate.ts'
 export { unlink } from './core/s3/unlink.ts'
 export { write } from './core/s3/write.ts'
 export { S3_OPS } from './ops/s3/index.ts'
-export {
-  fileReadProvision as s3FileReadProvision,
-  headTailProvision as s3HeadTailProvision,
-  metadataProvision as s3MetadataProvision,
-} from './commands/builtin/s3/provision.ts'
 export {
   HttpSlackTransport,
   NodeSlackTransport,

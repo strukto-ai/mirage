@@ -160,3 +160,9 @@ stat: /knowledge/__nf_missing__.txt: No such file or directory
 === nf_grep ===
 exit=1
 grep: /knowledge/__nf_missing__.txt: No such file or directory
+=== prov_probe_cat ===
+net=190 write=0 cache=0 ops=1 hits=0 precision=exact
+=== prov_probe_grep ===
+net=190 write=0 cache=0 ops=1 hits=0 precision=exact
+=== prov_probe_ls ===
+net=0 write=0 cache=0 ops=1 hits=0 precision=exact

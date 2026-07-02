@@ -14,7 +14,6 @@
 
 import { CachableAsyncIterator } from '../../../io/cachable_iterator.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { ProvisionResult } from '../../../provision/types.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { resolveSource } from '../utils/stream.ts'
@@ -56,22 +55,6 @@ export async function* numberLines(source: AsyncIterable<Uint8Array>): AsyncIter
     lineNo += 1
     yield ENC.encode(`${formatLineNo(lineNo)}\t`)
     yield buf
-  }
-}
-
-export async function catProvisionGeneric(paths: PathSpec[], stat: Stat): Promise<ProvisionResult> {
-  const [first] = paths
-  if (first === undefined) return new ProvisionResult({ command: 'cat' })
-  try {
-    const s = await stat(first)
-    return new ProvisionResult({
-      command: `cat ${first.virtual}`,
-      networkReadLow: s.size ?? 0,
-      networkReadHigh: s.size ?? 0,
-      readOps: 1,
-    })
-  } catch {
-    return new ProvisionResult({ command: 'cat' })
   }
 }
 

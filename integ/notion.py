@@ -17,7 +17,7 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from cases import run_not_found
+from cases import run_not_found, run_provision_probe
 
 from mirage import MountMode, Workspace
 from mirage.resource.notion import NotionConfig, NotionResource
@@ -359,6 +359,7 @@ async def main() -> None:
         for name, cmd in EXIT_CODE_CASES:
             await _run_exit(ws, name, cmd)
         await run_not_found(ws, MOUNT)
+        await run_provision_probe(ws, f"{DIR_A}/page.json")
     finally:
         server.shutdown()
 

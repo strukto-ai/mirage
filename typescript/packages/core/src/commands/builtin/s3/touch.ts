@@ -20,6 +20,7 @@ import { IOResult } from '../../../io/types.ts'
 import { type PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { writeMetadataProvision } from '../generic_bind/provision.ts'
 
 const ENC = new TextEncoder()
 
@@ -51,4 +52,5 @@ export const S3_TOUCH = command({
   spec: specOf('touch'),
   fn: touchCommand,
   write: true,
+  provision: writeMetadataProvision,
 })

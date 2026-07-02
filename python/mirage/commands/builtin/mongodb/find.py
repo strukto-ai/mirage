@@ -26,25 +26,14 @@ from mirage.core.mongodb.readdir import is_dir_name
 from mirage.core.mongodb.readdir import readdir as _readdir
 from mirage.core.mongodb.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
-from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
-
-
-async def find_provision(
-    accessor: MongoDBAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    **_extra: object,
-) -> ProvisionResult:
-    return await metadata_provision("find " + " ".join(
-        p.virtual if isinstance(p, PathSpec) else p for p in paths))
 
 
 @command("find",
          resource="mongodb",
          spec=SPECS["find"],
-         provision=find_provision)
+         provision=metadata_provision)
 async def find(
     accessor: MongoDBAccessor,
     paths: list[PathSpec],

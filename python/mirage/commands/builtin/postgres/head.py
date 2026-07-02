@@ -19,33 +19,20 @@ from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.head import head as generic_head
 from mirage.commands.builtin.generic.head import head_multi
-from mirage.commands.builtin.postgres._provision import file_read_provision
+from mirage.commands.builtin.postgres._provision import head_tail_provision
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.postgres.glob import resolve_glob
 from mirage.core.postgres.read import read as postgres_read
 from mirage.io.types import ByteSource, IOResult
-from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
-
-
-async def head_provision(
-    accessor: PostgresAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    **_extra: object,
-) -> ProvisionResult:
-    return await file_read_provision(
-        accessor, paths,
-        "head " + " ".join(p.virtual if isinstance(p, PathSpec) else p
-                           for p in paths))
 
 
 @command("head",
          resource="postgres",
          spec=SPECS["head"],
-         provision=head_provision)
+         provision=head_tail_provision)
 async def head(
     accessor: PostgresAccessor,
     paths: list[PathSpec],

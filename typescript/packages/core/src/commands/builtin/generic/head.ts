@@ -14,7 +14,6 @@
 
 import { cacheAwareStreamEager } from '../../../cache/read_through.ts'
 import { IOResult } from '../../../io/types.ts'
-import { Precision, ProvisionResult } from '../../../provision/types.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { numberFlagError } from '../tail_helper.ts'
@@ -127,33 +126,6 @@ async function* headMulti(
     }
     const source = stream(p)
     for await (const chunk of headStream(source, lines, bytesMode)) yield chunk
-  }
-}
-
-export async function headProvisionGeneric(
-  paths: PathSpec[],
-  _texts: string[],
-  opts: CommandOpts,
-  stat: Stat,
-): Promise<ProvisionResult> {
-  const [first] = paths
-  if (first === undefined) return new ProvisionResult({ command: 'head' })
-  try {
-    const s = await stat(first)
-    const fileSize = s.size ?? 0
-    const nFlag = typeof opts.flags.n === 'string' ? Number.parseInt(opts.flags.n, 10) : null
-    const lines = nFlag !== null && Number.isFinite(nFlag) ? nFlag : 10
-    const avgLine = 80
-    const low = Math.min(lines * avgLine, fileSize)
-    return new ProvisionResult({
-      command: `head ${first.virtual}`,
-      networkReadLow: low,
-      networkReadHigh: fileSize,
-      readOps: 1,
-      precision: Precision.RANGE,
-    })
-  } catch {
-    return new ProvisionResult({ command: 'head' })
   }
 }
 

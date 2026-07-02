@@ -17,6 +17,7 @@ from functools import partial
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.find import find as generic_find
+from mirage.commands.builtin.generic_bind.provision import metadata_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.history.find import find as find_core
@@ -25,7 +26,10 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("find", resource="history", spec=SPECS["find"])
+@command("find",
+         resource="history",
+         spec=SPECS["find"],
+         provision=metadata_provision)
 async def find(
     accessor: HistoryAccessor,
     paths: list[PathSpec],

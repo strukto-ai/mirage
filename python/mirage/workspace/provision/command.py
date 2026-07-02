@@ -61,7 +61,14 @@ async def handle_command_provision(
     try:
         mount = registry.mount_for(mount_path)
     except ValueError:
-        return ProvisionResult(command=cmd_str, precision=Precision.UNKNOWN)
+        # Pathless commands (seq, date, ...) still need a mount to
+        # resolve their registration; any mount carries the general
+        # commands, so fall back to the first one.
+        mounts = registry.mounts()
+        if not mounts:
+            return ProvisionResult(command=cmd_str,
+                                   precision=Precision.UNKNOWN)
+        mount = mounts[0]
 
     extension = get_extension(first_scope.virtual) if first_scope else None
     cmd = mount.resolve_command(cmd_name, extension)

@@ -12,15 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  ResourceName,
-  command,
-  jqGeneric,
-  jqProvisionGeneric,
-  specOf,
-} from '@struktoai/mirage-core'
+import { ResourceName, command, jqGeneric, specOf } from '@struktoai/mirage-core'
 import { stream as opfsStream } from '../../../core/opfs/stream.ts'
-import { stat as opfsStat } from '../../../core/opfs/stat.ts'
 import type { OPFSAccessor } from '../../../accessor/opfs.ts'
 
 export const OPFS_JQ = command({
@@ -29,6 +22,4 @@ export const OPFS_JQ = command({
   spec: specOf('jq'),
   fn: (accessor: OPFSAccessor, paths, texts, opts) =>
     jqGeneric(paths, texts, opts, (p) => opfsStream(accessor, p)),
-  provision: (accessor: OPFSAccessor, paths, texts, _opts) =>
-    jqProvisionGeneric(paths, texts, (p) => opfsStat(accessor, p)),
 })

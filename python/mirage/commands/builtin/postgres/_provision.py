@@ -12,41 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.postgres import PostgresAccessor
-from mirage.cache.index import IndexCacheStore
-from mirage.provision.types import Precision, ProvisionResult
-from mirage.types import PathSpec
+from mirage.commands.builtin.generic_bind.provision import (
+    make_file_read_provision, make_head_tail_provision, make_search_provision,
+    metadata_provision)
+from mirage.core.postgres.stat import stat as _stat
 
+file_read_provision = make_file_read_provision(_stat)
+head_tail_provision = make_head_tail_provision(_stat)
+search_provision = make_search_provision(_stat)
 
-async def file_read_provision(
-    accessor: PostgresAccessor,
-    paths: list[PathSpec],
-    command: str,
-    index: IndexCacheStore = None,
-) -> ProvisionResult:
-    if not paths:
-        return ProvisionResult(command=command, precision=Precision.UNKNOWN)
-    ops = 0
-    if index is not None:
-        for p in paths:
-            path_str = p.virtual if isinstance(p, PathSpec) else p
-            lookup = await index.get(path_str)
-            if lookup.entry is not None:
-                ops += 1
-    return ProvisionResult(
-        command=command,
-        network_read_low=0,
-        network_read_high=0,
-        read_ops=ops,
-        precision=Precision.EXACT,
-    )
-
-
-async def metadata_provision(command: str) -> ProvisionResult:
-    return ProvisionResult(
-        command=command,
-        network_read_low=0,
-        network_read_high=0,
-        read_ops=0,
-        precision=Precision.EXACT,
-    )
+__all__ = [
+    "file_read_provision",
+    "head_tail_provision",
+    "metadata_provision",
+    "search_provision",
+]

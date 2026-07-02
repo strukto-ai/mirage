@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
-  type ProvisionFn,
   type RegisteredCommand,
   ResourceName,
   makeFiletypeCommands,
@@ -22,7 +21,6 @@ import {
 import type { SSHAccessor } from '../../../accessor/ssh.ts'
 import { read as sshRead } from '../../../core/ssh/read.ts'
 import { stat as sshStat } from '../../../core/ssh/stat.ts'
-import { fileReadProvision, metadataProvision } from './_provision.ts'
 import { SSH_CMD_OPS } from './ops.ts'
 import { SSH_SED } from './sed.ts'
 
@@ -32,13 +30,6 @@ export const SSH_COMMANDS: readonly RegisteredCommand[] = [
     readBytes: sshRead,
     statEntry: sshStat,
   }),
-  ...makeGenericCommands<SSHAccessor>(ResourceName.SSH, SSH_CMD_OPS, {
-    provisionOverrides: {
-      grep: fileReadProvision as ProvisionFn,
-      rg: fileReadProvision as ProvisionFn,
-      ls: metadataProvision as ProvisionFn,
-      find: metadataProvision as ProvisionFn,
-    },
-  }),
+  ...makeGenericCommands<SSHAccessor>(ResourceName.SSH, SSH_CMD_OPS),
   ...SSH_SED,
 ]

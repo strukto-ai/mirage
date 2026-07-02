@@ -19,7 +19,7 @@ import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { statGeneric } from '../generic/stat.ts'
-import { metadataProvision } from './provision.ts'
+import { metadataProvision } from '../generic_bind/provision.ts'
 
 async function statCommand(
   accessor: S3Accessor,

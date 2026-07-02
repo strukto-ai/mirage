@@ -17,21 +17,25 @@ from mirage.commands.builtin.generic_bind.adapter import (CommandIO,
 from mirage.commands.builtin.generic_bind.factory import (
     make_generic_commands, with_read_cache, with_stat_cache)
 from mirage.commands.builtin.generic_bind.provision import (
-    default_provision, make_file_read_provision, make_head_tail_provision,
-    make_jq_provision, make_search_provision, metadata_provision,
-    stat_provision)
+    default_provision, make_copy_provision, make_file_read_provision,
+    make_head_tail_provision, make_jq_provision, make_search_provision,
+    make_transform_provision, metadata_provision, pure_provision,
+    write_metadata_provision)
 
 __all__ = [
     "CommandIO",
     "default_provision",
+    "make_copy_provision",
     "make_file_read_provision",
     "make_generic_commands",
     "make_head_tail_provision",
     "make_jq_provision",
     "make_resolve_glob",
     "make_search_provision",
+    "make_transform_provision",
     "metadata_provision",
-    "stat_provision",
+    "pure_provision",
     "with_read_cache",
     "with_stat_cache",
+    "write_metadata_provision",
 ]

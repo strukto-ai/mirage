@@ -20,7 +20,7 @@ from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
-from cases import run_not_found
+from cases import run_not_found, run_provision_probe
 
 from mirage import MountMode, Workspace
 from mirage.resource.dify import DifyConfig, DifyResource
@@ -331,6 +331,7 @@ async def main() -> None:
         for name, tmpl in WARM_READ_CASES:
             await _warm_read(base_url, name, tmpl)
         await run_not_found(ws, MOUNT)
+        await run_provision_probe(ws, f"{MOUNT}guides/auth")
     finally:
         server.shutdown()
 

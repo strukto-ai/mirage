@@ -130,7 +130,16 @@ export class Dispatcher {
     }
   }
 
+  // The file cache only holds paths for read-caching mounts, mirroring
+  // Python's is_cacheable_path gate; without it every backend's reads
+  // land in the cache and provision reports phantom cache hits.
+  isCacheablePath = (path: string): boolean => {
+    const mount = this.namespace.mountFor(path)
+    if (mount === null) return false
+    return cachesReads(mount.resource)
+  }
+
   async applyIo(io: IOResult): Promise<void> {
-    await applyIo(this.cache, io)
+    await applyIo(this.cache, io, this.isCacheablePath)
   }
 }

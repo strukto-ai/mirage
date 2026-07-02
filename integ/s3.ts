@@ -28,7 +28,7 @@ import {
   Workspace,
 } from "@struktoai/mirage-node";
 import { ConsistencyPolicy } from "@struktoai/mirage-core";
-import { runNotFound } from "./cases.ts";
+import { runNotFound, runProvisionCacheCases } from "./cases.ts";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -444,6 +444,26 @@ async function main(): Promise<void> {
       else DEFAULT_COMMAND_SAFEGUARDS.sleep = prevSleep;
     }
     await runNotFound(ws, "/s3");
+    // The suite workspace is read-only; the cache-flip probe seeds its
+    // own files, so it gets a write-mode mount on the same bucket.
+    const wsWrite = new Workspace(
+      {
+        "/s3": new S3Resource({
+          bucket: S3_BUCKET,
+          region: REGION,
+          endpoint: ENDPOINT,
+          accessKeyId: ACCESS,
+          secretAccessKey: SECRET,
+          forcePathStyle: true,
+        }),
+      },
+      { mode: MountMode.WRITE },
+    );
+    try {
+      await runProvisionCacheCases(wsWrite, "/s3");
+    } finally {
+      await wsWrite.close();
+    }
     await runConsistency();
     await runCoherence();
   } finally {

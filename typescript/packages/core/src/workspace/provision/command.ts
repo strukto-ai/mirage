@@ -59,7 +59,10 @@ export async function handleCommandProvision(
     }
   }
   const mountPath = firstScope !== null ? firstScope.virtual : session.cwd
-  const mount = registry.mountFor(mountPath)
+  // Pathless commands (seq, date, ...) still need a mount to resolve
+  // their registration; any mount carries the general commands, so fall
+  // back to the first one.
+  const mount = registry.mountFor(mountPath) ?? registry.allMounts()[0] ?? null
   if (mount === null) {
     return new ProvisionResult({ command: cmdStr, precision: Precision.UNKNOWN })
   }

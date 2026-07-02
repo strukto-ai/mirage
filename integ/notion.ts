@@ -22,7 +22,7 @@ import {
 import { NotionResource as BrowserNotionResource } from "@struktoai/mirage-browser";
 import { MemoryOAuthClientProvider } from "@struktoai/mirage-core";
 import { MountMode, NotionResource, Workspace } from "@struktoai/mirage-node";
-import { runNotFound } from "./cases.ts";
+import { runNotFound, runProvisionProbe } from "./cases.ts";
 
 const MOUNT = "/notion";
 const PAGE_A = "aaaa1111-2222-3333-4444-555566667777";
@@ -477,6 +477,7 @@ async function main(): Promise<void> {
       process.stderr.write(`mcp parity: ${n}/${n} cases byte-identical\n`);
     }
     await runNotFound(restWs, MOUNT);
+    await runProvisionProbe(restWs, `${DIR_A}/page.json`);
   } finally {
     await restWs.close();
     await mcpWs.close();

@@ -15,6 +15,7 @@
 import re
 
 from mirage.accessor.base import Accessor, NOOPAccessor
+from mirage.commands.builtin.generic_bind.provision import pure_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
@@ -83,7 +84,7 @@ def _expr_eval(args: tuple[str, ...]) -> tuple[str, int]:
     return "", 2
 
 
-@command("expr", resource=None, spec=SPECS["expr"])
+@command("expr", resource=None, spec=SPECS["expr"], provision=pure_provision)
 async def expr(
     accessor: Accessor = NOOPAccessor(),
     paths: list[PathSpec] | None = None,

@@ -122,6 +122,24 @@ async function main(): Promise<void> {
   process.stdout.write(log.stdoutText + '\n')
 
   console.log('')
+  console.log('=== PROVISION (dry-run cost estimates) ===')
+  console.log('')
+  // Read families estimate bytes from stat; pipes/&&/; sum, || takes a
+  // min-max envelope, and writes report UNKNOWN.
+  for (const cmd of [
+    'cat /data/hello.txt',
+    'sort /data/hello.txt | head -n 1',
+    'head /data/hello.txt || cat /data/hello.txt',
+    'tee /data/out.txt',
+  ]) {
+    const plan = await ws.execute(cmd, { provision: true })
+    console.log(
+      `  ${cmd}: net=${plan.networkRead} ops=${String(plan.readOps)} ` +
+        `precision=${plan.precision}`,
+    )
+  }
+
+  console.log('')
   console.log('=== PERSISTENCE ===')
   console.log('')
   const tmpDir = mkdtempSync(join(tmpdir(), 'mirage-snap-'))

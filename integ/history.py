@@ -94,6 +94,18 @@ async def main() -> None:
         print(f"=== {name} ===")
         print(f"nonzero_exit={result.exit_code != 0}")
 
+    # Provision over the rendered histfile view: sizes come from the
+    # deterministic recorded-command state at this point in the run.
+    for pv_name, pv_cmd in (("prov_probe_cat", "cat /.bash_history"),
+                            ("prov_probe_grep", "grep x /.bash_history"),
+                            ("prov_probe_ls", "ls /.bash_history")):
+        result = await ws.execute(pv_cmd, provision=True)
+        print(f"=== {pv_name} ===")
+        print(f"net={result.network_read} write={result.network_write} "
+              f"cache={result.cache_read} ops={result.read_ops} "
+              f"hits={result.cache_hits} "
+              f"precision={result.precision.value}")
+
     # ----- observer: the hidden recorder behind the views -----
     events = await ws.observer.events()
     types = sorted({e["type"] for e in events})

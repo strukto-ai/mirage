@@ -14,9 +14,8 @@
 
 import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
 import { ResourceName } from '../../../types.ts'
-import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
+import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { metadataProvision } from './_provision.ts'
 import { MONGODB_CAT } from './cat.ts'
 import { MONGODB_FIND } from './find.ts'
 import { MONGODB_GREP } from './grep.ts'
@@ -30,9 +29,6 @@ const MONGODB_OVERRIDES = new Set(['cat', 'find', 'grep', 'rg', 'tail', 'wc'])
 export const MONGODB_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<MongoDBAccessor>(ResourceName.MONGODB, MONGODB_CMD_OPS, {
     overrides: MONGODB_OVERRIDES,
-    provisionOverrides: {
-      ls: metadataProvision as ProvisionFn,
-    },
   }),
   ...MONGODB_CAT,
   ...MONGODB_FIND,

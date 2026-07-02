@@ -118,14 +118,23 @@ mirage provision --workspace_id demo \
   --command "cat /s3/data/example.jsonl | wc -l"
 ```
 
-Every factory-built backend estimates read commands out of the box, by
+Every factory-built backend estimates commands out of the box, by
 family: whole-file readers (`cat`, `sort`, `md5`, ...) charge the byte
-total from `stat`, `head`/`tail` charge a bounded range, `grep`/`rg`
-charge a worst-case full read, and metadata commands (`ls`, `find`,
-`tree`, ...) charge op counts only. Write commands report
-`precision=unknown`. Virtual files whose size cannot be resolved (for
-example a rendered `chat.jsonl`) degrade the estimate to
-`precision=unknown` while keeping the known byte total as a floor.
+total from `stat`, `head`/`tail`/`file` charge a bounded range,
+`grep`/`rg` charge a worst-case full read, and metadata commands (`ls`,
+`find`, `stat`, `du`, ...) charge op counts only. Transforms (`gzip`,
+`tar`, `split`, ...) keep the read total as a floor with
+`precision=unknown` output; `cp` brackets both read and write between 0
+(server-side copy) and the source total; metadata writes (`rm`,
+`mkdir`, `touch`, ...) are zero-byte op counts, with recursive `rm`
+degrading to a floor; pure commands (`seq`, `date`, `bc`, `expr`) and
+shell builtins (`echo`, `cd`, ...) are zero-cost. Anything the planner
+cannot estimate honestly -- `mv` (free rename or full cross-mount
+copy), `tee` (stdin size), arbitrary programs -- reports
+`precision=unknown` with all totals as floors, never an error. Virtual
+files whose size cannot be resolved (for example a rendered
+`chat.jsonl`) degrade the estimate to `precision=unknown` while keeping
+the known byte total as a floor.
 
 Provision is optional when you register your own commands: leave it out
 and the planner reports `precision=unknown`. To opt in with one line,

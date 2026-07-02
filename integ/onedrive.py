@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from cases import run_not_found  # noqa: E402
+from cases import run_not_found, run_provision_cache_cases  # noqa: E402
 from onedrive_server import start_fake_graph  # noqa: E402
 
 from mirage import MountMode, Workspace  # noqa: E402
@@ -249,6 +249,15 @@ async def main() -> None:
             else:
                 _safeguard.DEFAULT_COMMAND_SAFEGUARDS["sleep"] = prev_sleep
         await run_not_found(ws, MOUNT)
+        # The suite workspace is read-only; the cache-flip probe seeds its
+        # own files, so it gets a write-mode mount on the same fake drive.
+        ws_write = Workspace(
+            {
+                MOUNT + "/":
+                OneDriveResource(OneDriveConfig(access_token="integ-token"))
+            },
+            mode=MountMode.WRITE)
+        await run_provision_cache_cases(ws_write, MOUNT)
         await _run_consistency(state)
     finally:
         await runner.cleanup()

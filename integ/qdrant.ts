@@ -109,6 +109,21 @@ async function runCases(ws: Workspace): Promise<void> {
     process.stdout.write(`exit=${result.exitCode}\n`);
     if (err) process.stdout.write(err + "\n");
   }
+  const provTarget = `${MOUNT}cat/big/1.txt`;
+  const provProbes: ReadonlyArray<readonly [string, string]> = [
+    ["prov_probe_cat", `cat ${provTarget}`],
+    ["prov_probe_grep", `grep x ${provTarget}`],
+    ["prov_probe_ls", `ls ${MOUNT}cat/big`],
+  ];
+  for (const [name, cmd] of provProbes) {
+    const result = await ws.execute(cmd, { provision: true });
+    process.stdout.write(`=== ${name} ===\n`);
+    process.stdout.write(
+      `net=${result.networkRead} write=${result.networkWrite} ` +
+        `cache=${result.cacheRead} ops=${String(result.readOps)} ` +
+        `hits=${String(result.cacheHits)} precision=${result.precision}\n`,
+    );
+  }
 }
 
 function client(): QdrantClient {

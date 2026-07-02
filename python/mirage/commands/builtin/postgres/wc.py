@@ -29,23 +29,13 @@ from mirage.core.postgres.glob import resolve_glob
 from mirage.core.postgres.read import read as postgres_read
 from mirage.core.postgres.scope import detect_scope
 from mirage.io.types import ByteSource, IOResult
-from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
 
 
-async def wc_provision(
-    accessor: PostgresAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    **_extra: object,
-) -> ProvisionResult:
-    return await file_read_provision(
-        accessor, paths,
-        "wc " + " ".join(p.virtual if isinstance(p, PathSpec) else p
-                         for p in paths))
-
-
-@command("wc", resource="postgres", spec=SPECS["wc"], provision=wc_provision)
+@command("wc",
+         resource="postgres",
+         spec=SPECS["wc"],
+         provision=file_read_provision)
 async def wc(
     accessor: PostgresAccessor,
     paths: list[PathSpec],

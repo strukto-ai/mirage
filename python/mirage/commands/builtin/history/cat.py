@@ -17,15 +17,21 @@ from collections.abc import AsyncIterator
 from mirage.accessor.history import HistoryAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.cat import cat as generic_cat
+from mirage.commands.builtin.generic_bind.provision import \
+    make_file_read_provision
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.history.read import read as history_read
+from mirage.core.history.stat import stat as history_stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("cat", resource="history", spec=SPECS["cat"])
+@command("cat",
+         resource="history",
+         spec=SPECS["cat"],
+         provision=make_file_read_provision(history_stat))
 async def cat(
     accessor: HistoryAccessor,
     paths: list[PathSpec],

@@ -29,23 +29,13 @@ from mirage.core.mongodb.types import ScopeLevel
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
-from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
 
 
-async def cat_provision(
-    accessor: MongoDBAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    **_extra: object,
-) -> ProvisionResult:
-    return await file_read_provision(
-        accessor, paths,
-        "cat " + " ".join(p.virtual if isinstance(p, PathSpec) else p
-                          for p in paths))
-
-
-@command("cat", resource="mongodb", spec=SPECS["cat"], provision=cat_provision)
+@command("cat",
+         resource="mongodb",
+         spec=SPECS["cat"],
+         provision=file_read_provision)
 async def cat(
     accessor: MongoDBAccessor,
     paths: list[PathSpec],

@@ -19,6 +19,7 @@ import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { type PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { writeMetadataProvision } from '../generic_bind/provision.ts'
 
 const ENC = new TextEncoder()
 
@@ -50,4 +51,5 @@ export const S3_MKDIR = command({
   spec: specOf('mkdir'),
   fn: mkdirCommand,
   write: true,
+  provision: writeMetadataProvision,
 })

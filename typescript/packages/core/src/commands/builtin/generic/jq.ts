@@ -23,44 +23,11 @@ import {
   parseJsonPath,
 } from '../../../core/jq/index.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import { Precision, ProvisionResult } from '../../../provision/types.ts'
-import type { FileStat, PathSpec } from '../../../types.ts'
+import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
-
-export async function jqProvisionGeneric(
-  paths: PathSpec[],
-  texts: string[],
-  stat: (p: PathSpec) => Promise<FileStat>,
-): Promise<ProvisionResult> {
-  const [first] = paths
-  const [expr] = texts
-  if (first === undefined || expr === undefined) return new ProvisionResult({ command: 'jq' })
-  try {
-    const s = await stat(first)
-    const fileSize = s.size ?? 0
-    if (isJsonlPath(first.virtual) && isStreamableJsonlExpr(expr)) {
-      return new ProvisionResult({
-        command: `jq '${expr}' ${first.virtual}`,
-        networkReadLow: 0,
-        networkReadHigh: fileSize,
-        readOps: 1,
-        precision: Precision.RANGE,
-      })
-    }
-    return new ProvisionResult({
-      command: `jq '${expr}' ${first.virtual}`,
-      networkReadLow: fileSize,
-      networkReadHigh: fileSize,
-      readOps: 1,
-      precision: Precision.EXACT,
-    })
-  } catch {
-    return new ProvisionResult({ command: 'jq' })
-  }
-}
 
 export async function jqGeneric(
   paths: PathSpec[],

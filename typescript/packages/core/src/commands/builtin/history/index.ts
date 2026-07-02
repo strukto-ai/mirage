@@ -20,15 +20,16 @@ import { stream as histStream } from '../../../core/history/stream.ts'
 import { ResourceName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { command } from '../../config.ts'
+import { withDefaultProvisions } from '../generic_bind/provision.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { concatAggregate, headerAggregate, prefixAggregate, wcAggregate } from '../aggregators.ts'
-import { catGeneric, catProvisionGeneric } from '../generic/cat.ts'
+import { catGeneric } from '../generic/cat.ts'
 import { findGeneric } from '../generic/find.ts'
 import { grepGeneric } from '../generic/grep.ts'
-import { headGeneric, headProvisionGeneric } from '../generic/head.ts'
+import { headGeneric } from '../generic/head.ts'
 import { lsGeneric } from '../generic/ls.ts'
 import { rgGeneric } from '../generic/rg.ts'
-import { statGeneric, statProvisionGeneric } from '../generic/stat.ts'
+import { statGeneric } from '../generic/stat.ts'
 import { tailGeneric } from '../generic/tail.ts'
 import { treeGeneric } from '../generic/tree.ts'
 import { wcGeneric } from '../generic/wc.ts'
@@ -48,8 +49,6 @@ const HISTORY_CAT = command({
       (p) => histStat(a, p),
       (p) => histStream(a, p),
     ),
-  provision: (a: HistoryAccessor, paths, _texts, _opts) =>
-    catProvisionGeneric(paths, (p) => histStat(a, p)),
   aggregate: concatAggregate,
 })
 
@@ -98,8 +97,6 @@ const HISTORY_HEAD = command({
       (p) => histStat(a, p),
       (p) => histStream(a, p),
     ),
-  provision: (a: HistoryAccessor, paths, texts, opts) =>
-    headProvisionGeneric(paths, texts, opts, (p) => histStat(a, p)),
   aggregate: headerAggregate,
 })
 
@@ -139,7 +136,6 @@ const HISTORY_STAT = command({
   resource: R,
   spec: specOf('stat'),
   fn: (a: HistoryAccessor, paths, _texts, opts) => statGeneric(paths, opts, (p) => histStat(a, p)),
-  provision: statProvisionGeneric,
 })
 
 const HISTORY_TREE = command({
@@ -163,16 +159,21 @@ const HISTORY_FIND = command({
     findGeneric(paths, texts, opts, (root, options) => histFind(a, root, options)),
 })
 
-export const HISTORY_COMMANDS: readonly RegisteredCommand[] = [
-  ...HISTORY_CAT,
-  ...HISTORY_GREP,
-  ...HISTORY_RG,
-  ...HISTORY_HEAD,
-  ...HISTORY_TAIL,
-  ...HISTORY_WC,
-  ...HISTORY_LS,
-  ...HISTORY_STAT,
-  ...HISTORY_TREE,
-  ...HISTORY_FIND,
-  ...HISTORY_HISTORY,
-]
+// The rendered histfile stats with a real size, so the shared family
+// defaults give exact estimates over the view mount.
+export const HISTORY_COMMANDS: readonly RegisteredCommand[] = withDefaultProvisions(
+  [
+    ...HISTORY_CAT,
+    ...HISTORY_GREP,
+    ...HISTORY_RG,
+    ...HISTORY_HEAD,
+    ...HISTORY_TAIL,
+    ...HISTORY_WC,
+    ...HISTORY_LS,
+    ...HISTORY_STAT,
+    ...HISTORY_TREE,
+    ...HISTORY_FIND,
+    ...HISTORY_HISTORY,
+  ],
+  histStat,
+)

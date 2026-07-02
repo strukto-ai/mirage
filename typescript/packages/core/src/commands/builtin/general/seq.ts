@@ -17,6 +17,7 @@ import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { pureProvision } from '../generic_bind/provision.ts'
 
 const ENC = new TextEncoder()
 
@@ -130,4 +131,5 @@ export const GENERAL_SEQ = command({
   resource: null,
   spec: specOf('seq'),
   fn: seqCommand,
+  provision: pureProvision,
 })

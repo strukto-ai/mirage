@@ -31,7 +31,7 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { tailGeneric } from '../generic/tail.ts'
 import { parseN } from '../tail_helper.ts'
-import { fileReadProvision } from './_provision.ts'
+import { headTailProvision } from './_provision.ts'
 
 const ENC = new TextEncoder()
 
@@ -102,5 +102,5 @@ export const MONGODB_TAIL = command({
   resource: ResourceName.MONGODB,
   spec: specOf('tail'),
   fn: tailCommand,
-  provision: fileReadProvision,
+  provision: headTailProvision,
 })

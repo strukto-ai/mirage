@@ -22,7 +22,7 @@ import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { headGeneric } from '../generic/head.ts'
-import { fileReadProvision } from './_provision.ts'
+import { headTailProvision } from './_provision.ts'
 
 // Row reads on tables/views push LIMIT into the query instead of fetching
 // the whole relation; headGeneric then trims the already-small chunk. Falls
@@ -68,5 +68,5 @@ export const POSTGRES_HEAD = command({
   resource: ResourceName.POSTGRES,
   spec: specOf('head'),
   fn: headCommand,
-  provision: fileReadProvision,
+  provision: headTailProvision,
 })

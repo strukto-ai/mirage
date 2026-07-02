@@ -19,6 +19,7 @@ import { ResourceName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { duGeneric } from '../generic/du.ts'
+import { metadataProvision } from '../generic_bind/provision.ts'
 
 async function duCommand(
   accessor: S3Accessor,
@@ -41,4 +42,5 @@ export const S3_DU = command({
   resource: ResourceName.S3,
   spec: specOf('du'),
   fn: duCommand,
+  provision: metadataProvision,
 })

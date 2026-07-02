@@ -19,7 +19,7 @@ from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.grep import grep as generic_grep
 from mirage.commands.builtin.grep_helper import pattern_arg
-from mirage.commands.builtin.mongodb._provision import file_read_provision
+from mirage.commands.builtin.mongodb._provision import search_provision
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
@@ -35,25 +35,13 @@ from mirage.core.mongodb.stat import stat as _stat
 from mirage.core.mongodb.stream import read_stream
 from mirage.core.mongodb.types import ScopeLevel
 from mirage.io.types import ByteSource, IOResult
-from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
-
-
-async def grep_provision(
-    accessor: MongoDBAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    **_extra: object,
-) -> ProvisionResult:
-    return await file_read_provision(
-        accessor, paths,
-        "grep " + " ".join(texts + tuple(str(p) for p in paths)))
 
 
 @command("grep",
          resource="mongodb",
          spec=SPECS["grep"],
-         provision=grep_provision)
+         provision=search_provision)
 async def grep(
     accessor: MongoDBAccessor,
     paths: list[PathSpec],

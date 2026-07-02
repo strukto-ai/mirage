@@ -23,7 +23,7 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { tailGeneric } from '../generic/tail.ts'
 import { parseN } from '../tail_helper.ts'
-import { fileReadProvision } from './_provision.ts'
+import { headTailProvision } from './_provision.ts'
 
 // Row reads on tables/views fetch only the last N rows (COUNT + OFFSET)
 // instead of the whole relation; tailGeneric then trims the already-small
@@ -67,5 +67,5 @@ export const POSTGRES_TAIL = command({
   resource: ResourceName.POSTGRES,
   spec: specOf('tail'),
   fn: tailCommand,
-  provision: fileReadProvision,
+  provision: headTailProvision,
 })

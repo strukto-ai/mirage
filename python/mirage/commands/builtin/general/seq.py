@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor, NOOPAccessor
+from mirage.commands.builtin.generic_bind.provision import pure_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
@@ -48,7 +49,7 @@ def _seq_generate(texts: tuple[str, ...], separator: str, width: str | None,
     return separator.join(parts) + "\n"
 
 
-@command("seq", resource=None, spec=SPECS["seq"])
+@command("seq", resource=None, spec=SPECS["seq"], provision=pure_provision)
 async def seq(
     accessor: Accessor = NOOPAccessor(),
     paths: list[PathSpec] | None = None,

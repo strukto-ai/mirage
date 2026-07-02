@@ -19,16 +19,22 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.wc import (WCCounts, format_wc,
                                                 format_wc_lines)
 from mirage.commands.builtin.generic.wc import wc as generic_wc
+from mirage.commands.builtin.generic_bind.provision import \
+    make_file_read_provision
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.history.read import read as history_read
+from mirage.core.history.stat import stat as history_stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("wc", resource="history", spec=SPECS["wc"])
+@command("wc",
+         resource="history",
+         spec=SPECS["wc"],
+         provision=make_file_read_provision(history_stat))
 async def wc(
     accessor: HistoryAccessor,
     paths: list[PathSpec],

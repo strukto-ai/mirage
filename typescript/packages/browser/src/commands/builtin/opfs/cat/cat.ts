@@ -12,14 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  ResourceName,
-  catGeneric,
-  catProvisionGeneric,
-  command,
-  concatAggregate,
-  specOf,
-} from '@struktoai/mirage-core'
+import { ResourceName, catGeneric, command, concatAggregate, specOf } from '@struktoai/mirage-core'
 import { stream as opfsStream } from '../../../../core/opfs/stream.ts'
 import { stat as opfsStat } from '../../../../core/opfs/stat.ts'
 import type { OPFSAccessor } from '../../../../accessor/opfs.ts'
@@ -36,7 +29,5 @@ export const OPFS_CAT = command({
       (p) => opfsStat(accessor, p),
       (p) => opfsStream(accessor, p),
     ),
-  provision: (accessor: OPFSAccessor, paths, _texts, _opts) =>
-    catProvisionGeneric(paths, (p) => opfsStat(accessor, p)),
   aggregate: concatAggregate,
 })

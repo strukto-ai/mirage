@@ -33,7 +33,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { grepGeneric } from '../generic/grep.ts'
 import { patternArg } from '../grep_helper.ts'
 import { formatRecords } from '../utils/output.ts'
-import { fileReadProvision } from './_provision.ts'
+import { searchProvision } from './_provision.ts'
 
 async function* postgresStream(
   accessor: PostgresAccessor,
@@ -113,5 +113,5 @@ export const POSTGRES_GREP = command({
   resource: ResourceName.POSTGRES,
   spec: specOf('grep'),
   fn: grepCommand,
-  provision: fileReadProvision,
+  provision: searchProvision,
 })
