@@ -272,7 +272,14 @@ export class Workspace {
         mount.commandSafeguards.set(cmd, sg)
       }
     }
-    this.fs = new WorkspaceFS((path) => this.resolve(path), this.opsRegistry)
+    this.fs = new WorkspaceFS(
+      (path) => this.resolve(path),
+      this.opsRegistry,
+      async (rec) => {
+        this.records.push(rec)
+        await this.observer.logOp(rec, this.agentId, this.sessionManager.defaultId)
+      },
+    )
     for (const m of this.registry.allMounts()) {
       if (m.prefix === HISTORY_PREFIX || m.prefix === HISTORY_PREFIX + '/') continue
       if (this.syntheticRootAnchor && m.prefix === '/') continue

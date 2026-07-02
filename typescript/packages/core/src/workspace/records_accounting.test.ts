@@ -48,4 +48,18 @@ describe('Workspace record accounting', () => {
     expect(ws.networkRecords).toEqual([])
     expect(ws.cacheRecords).toEqual([])
   })
+
+  it('WorkspaceFS ops land in ws.records', async () => {
+    const ws = new Workspace({ '/data/': new RAMResource() }, { mode: MountMode.WRITE })
+    await ws.fs.writeFile('/data/a.txt', 'hello')
+    await ws.fs.readFile('/data/a.txt')
+    await ws.fs.readdir('/data')
+    await ws.fs.stat('/data/a.txt')
+    const ops = ws.records.map((r) => r.op)
+    expect(ops).toEqual(['write', 'read', 'readdir', 'stat'])
+    expect(ws.records[0]?.bytes).toBe(5)
+    expect(ws.records[1]?.bytes).toBe(5)
+    expect(ws.records[0]?.path).toBe('/data/a.txt')
+    expect(ws.records.every((r) => r.source === 'ram')).toBe(true)
+  })
 })

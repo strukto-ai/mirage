@@ -63,13 +63,13 @@ async function main(): Promise<void> {
     const types = await fs.promises.readFile('/github/python/mirage/types.py', 'utf-8')
     for (const line of types.split('\n').slice(0, 5)) console.log(`  ${line}`)
 
-    console.log('\n--- fs.statSync().isDirectory() checks ---')
+    console.log('\n--- fs.promises.stat().isDirectory() checks ---')
     const coreStat = await fs.promises.stat('/github/python/mirage/core')
     console.log(`  /github/python/mirage/core: ${String(coreStat.isDirectory())}`)
     const projStat = await fs.promises.stat('/github/python/pyproject.toml')
     console.log(`  /github/python/pyproject.toml: ${String(projStat.isDirectory())}`)
 
-    console.log('\n--- fs.statSync().isFile() checks ---')
+    console.log('\n--- fs.promises.stat().isFile() checks ---')
     console.log(`  /github/python/pyproject.toml: ${String(projStat.isFile())}`)
     console.log(`  /github/python/mirage/core: ${String(coreStat.isFile())}`)
 

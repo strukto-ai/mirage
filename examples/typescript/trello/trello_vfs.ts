@@ -47,6 +47,12 @@ function buildConfig(): TrelloConfig {
   }
 }
 
+const exists = (p: string): Promise<boolean> =>
+  fs.promises.stat(p).then(
+    () => true,
+    () => false,
+  )
+
 async function main(): Promise<void> {
   const resource = new TrelloResource(buildConfig())
   const ws = new Workspace({ '/trello': resource }, { mode: MountMode.READ })
@@ -139,16 +145,17 @@ async function main(): Promise<void> {
           }
         }
 
-        console.log(`\n--- existsSync() ---`)
-        console.log(`  exists: ${String(fs.existsSync(`${cardPath}/card.json`))}`)
-        console.log(`  nonexistent: ${String(fs.existsSync('/trello/nope'))}`)
+        console.log(`\n--- exists via fs.promises.stat() ---`)
+        console.log(`  exists: ${String(await exists(`${cardPath}/card.json`))}`)
+        console.log(`  nonexistent: ${String(await exists('/trello/nope'))}`)
       }
     }
 
-    console.log('\n--- session observer ---')
-    const logEntries = await fs.promises.readdir('/.sessions')
-    for (const e of logEntries) {
-      console.log(`  ${e}`)
+    console.log('\n--- bash history ---')
+    const history = await fs.promises.readFile('/.bash_history', 'utf-8')
+    const histLines = history.split('\n').filter((line) => line.trim() !== '')
+    for (let i = 0; i < Math.min(6, histLines.length); i++) {
+      console.log(`  ${histLines[i]!.slice(0, 120)}`)
     }
 
     const records = ws.records
