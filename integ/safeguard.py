@@ -44,9 +44,9 @@ CASES: list[tuple[str, str]] = [
     ("timeout_in_pipe", "sleep 2 | cat"),
 ]
 
-VFS_CASES: list[tuple[str, str, str]] = [
-    ("vfs_read_truncate", "/c/f.txt", "/c"),
-    ("vfs_read_error", "/d/f.txt", "/d"),
+VFS_CASES: list[tuple[str, str]] = [
+    ("vfs_read_truncate", "/c/f.txt"),
+    ("vfs_read_error", "/d/f.txt"),
 ]
 
 
@@ -115,11 +115,10 @@ async def main() -> None:
         if "timed out" in err:
             print("note=timed_out")
 
-    for name, path, prefix in VFS_CASES:
+    for name, path in VFS_CASES:
         print(f"=== {name} ===")
         try:
-            value, _ = await ws.dispatch(
-                "read", PathSpec.from_str_path(path, prefix=prefix))
+            value, _ = await ws.dispatch("read", PathSpec.from_str_path(path))
             print(f"read={value.decode()}")
         except SafeguardExceededError:
             print("read=<raised SafeguardExceededError>")
