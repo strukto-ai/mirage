@@ -20,8 +20,8 @@ except ImportError as _err:
     raise ImportError("RedisIndexCacheStore requires the 'redis' extra. "
                       "Install with: pip install mirage-ai[redis]") from _err
 
-from mirage.cache.index.config import (IndexConfig, IndexEntry, ListResult,
-                                       LookupResult, LookupStatus)
+from mirage.cache.index.config import (IndexEntry, ListResult, LookupResult,
+                                       LookupStatus)
 from mirage.cache.index.store import IndexCacheStore
 from mirage.core.timeutil import to_iso_z
 
@@ -65,11 +65,6 @@ class RedisIndexCacheStore(IndexCacheStore):
         p = key_prefix or ""
         self._entry_prefix = f"{p}{ENTRY_PREFIX}"
         self._children_prefix = f"{p}{CHILDREN_PREFIX}"
-
-    @classmethod
-    def from_config(cls, config: IndexConfig,
-                    **kwargs) -> "RedisIndexCacheStore":
-        return cls(ttl=config.ttl, **kwargs)
 
     def _entry_key(self, resource_path: str) -> str:
         return f"{self._entry_prefix}{resource_path}"

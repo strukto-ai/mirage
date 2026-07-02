@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 import pytest
 
-from mirage.core.slack.channels import list_channels_stream, list_dms_stream
+from mirage.core.slack.channels import list_channels_stream
 from mirage.resource.slack.config import SlackConfig
 
 
@@ -59,18 +59,3 @@ async def test_list_channels_stream_yields_pages():
     assert calls[0]["types"] == "public_channel,private_channel"
     assert calls[0]["exclude_archived"] == "true"
     assert calls[0]["limit"] == 200
-
-
-@pytest.mark.asyncio
-async def test_list_dms_stream_uses_im_mpim_types():
-    cfg = SlackConfig(token="xoxb-t")
-    calls = []
-
-    async def fake_get(_cfg, _method, params=None, token=None):
-        calls.append(dict(params or {}))
-        return {"channels": [], "response_metadata": {"next_cursor": ""}}
-
-    with patch("mirage.core.slack.paginate.slack_get", new=fake_get):
-        async for _ in list_dms_stream(cfg):
-            pass
-    assert calls[0]["types"] == "im,mpim"

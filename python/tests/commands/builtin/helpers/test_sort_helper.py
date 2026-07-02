@@ -12,109 +12,105 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.sort_helper import sort_lines as _sort_impl
+import pytest
+
+from mirage.commands.builtin.generic.sort import sort
 
 
-def _norm(path):
-    return "/" + path.strip("/")
+async def _rb(_accessor, _path):
+    raise AssertionError("stdin-driven tests never read paths")
 
 
-def _write(backend, path, data):
-    backend.accessor.store.files[_norm(path)] = data
-
-
-def _read(backend, path):
-    return backend.accessor.store.files[_norm(path)]
-
-
-def sort_lines(backend, path, **kwargs):
-    return _sort_impl(lambda p: _read(backend, p), path, **kwargs)
+async def sort_lines(data: bytes, **kwargs) -> list[str]:
+    output, _ = await sort([], read_bytes=_rb, stdin=data, **kwargs)
+    return output.decode().splitlines()
 
 
 class TestSortDefault:
 
-    def test_alphabetical(self, backend):
-        _write(backend, "/tmp/f.txt", b"banana\napple\ncherry")
-        result = sort_lines(backend, "/tmp/f.txt")
+    @pytest.mark.asyncio
+    async def test_alphabetical(self):
+        result = await sort_lines(b"banana\napple\ncherry")
         assert result == ["apple", "banana", "cherry"]
 
-    def test_already_sorted(self, backend):
-        _write(backend, "/tmp/f.txt", b"a\nb\nc")
-        result = sort_lines(backend, "/tmp/f.txt")
+    @pytest.mark.asyncio
+    async def test_already_sorted(self):
+        result = await sort_lines(b"a\nb\nc")
         assert result == ["a", "b", "c"]
 
 
 class TestSortReverse:
 
-    def test_reverse(self, backend):
-        _write(backend, "/tmp/f.txt", b"banana\napple\ncherry")
-        result = sort_lines(backend, "/tmp/f.txt", reverse=True)
+    @pytest.mark.asyncio
+    async def test_reverse(self):
+        result = await sort_lines(b"banana\napple\ncherry", reverse=True)
         assert result == ["cherry", "banana", "apple"]
 
 
 class TestSortNumeric:
 
-    def test_numeric(self, backend):
-        _write(backend, "/tmp/f.txt", b"10\n2\n30\n1")
-        result = sort_lines(backend, "/tmp/f.txt", numeric=True)
+    @pytest.mark.asyncio
+    async def test_numeric(self):
+        result = await sort_lines(b"10\n2\n30\n1", numeric=True)
         assert result == ["1", "2", "10", "30"]
 
-    def test_non_numeric_lines(self, backend):
-        _write(backend, "/tmp/f.txt", b"10\nabc\n2\nxyz")
-        result = sort_lines(backend, "/tmp/f.txt", numeric=True)
+    @pytest.mark.asyncio
+    async def test_non_numeric_lines(self):
+        result = await sort_lines(b"10\nabc\n2\nxyz", numeric=True)
         assert result[0] in ("abc", "xyz")
         assert "10" in result
 
 
 class TestSortUnique:
 
-    def test_unique(self, backend):
-        _write(backend, "/tmp/f.txt", b"banana\napple\nbanana\napple\ncherry")
-        result = sort_lines(backend, "/tmp/f.txt", unique=True)
+    @pytest.mark.asyncio
+    async def test_unique(self):
+        result = await sort_lines(b"banana\napple\nbanana\napple\ncherry",
+                                  unique=True)
         assert result == ["apple", "banana", "cherry"]
 
 
 class TestSortIgnoreCase:
 
-    def test_ignore_case(self, backend):
-        _write(backend, "/tmp/f.txt", b"Banana\napple\nCherry")
-        result = sort_lines(backend, "/tmp/f.txt", ignore_case=True)
+    @pytest.mark.asyncio
+    async def test_ignore_case(self):
+        result = await sort_lines(b"Banana\napple\nCherry", fold_case=True)
         assert result == ["apple", "Banana", "Cherry"]
 
 
 class TestSortKeyField:
 
-    def test_key_field_numeric(self, backend):
-        _write(backend, "/tmp/f.txt", b"a 10\nb 2\nc 30")
-        result = sort_lines(backend, "/tmp/f.txt", key_field=2, numeric=True)
+    @pytest.mark.asyncio
+    async def test_key_field_numeric(self):
+        result = await sort_lines(b"a 10\nb 2\nc 30",
+                                  key_field=2,
+                                  numeric=True)
         assert result == ["b 2", "a 10", "c 30"]
 
 
 class TestSortFieldSep:
 
-    def test_field_sep_with_key(self, backend):
-        _write(backend, "/tmp/f.txt", b"a:10\nb:2\nc:30")
-        result = sort_lines(backend,
-                            "/tmp/f.txt",
-                            field_sep=":",
-                            key_field=2,
-                            numeric=True)
+    @pytest.mark.asyncio
+    async def test_field_sep_with_key(self):
+        result = await sort_lines(b"a:10\nb:2\nc:30",
+                                  field_separator=":",
+                                  key_field=2,
+                                  numeric=True)
         assert result == ["b:2", "a:10", "c:30"]
 
 
 class TestSortMixed:
 
-    def test_numeric_reverse(self, backend):
-        _write(backend, "/tmp/f.txt", b"10\n2\n30\n1")
-        result = sort_lines(backend, "/tmp/f.txt", numeric=True, reverse=True)
+    @pytest.mark.asyncio
+    async def test_numeric_reverse(self):
+        result = await sort_lines(b"10\n2\n30\n1", numeric=True, reverse=True)
         assert result == ["30", "10", "2", "1"]
 
-    def test_unique_ignore_case(self, backend):
-        _write(backend, "/tmp/f.txt", b"Apple\napple\nBanana\nbanana")
-        result = sort_lines(backend,
-                            "/tmp/f.txt",
-                            unique=True,
-                            ignore_case=True)
+    @pytest.mark.asyncio
+    async def test_unique_ignore_case(self):
+        result = await sort_lines(b"Apple\napple\nBanana\nbanana",
+                                  unique=True,
+                                  fold_case=True)
         assert len(result) == 2
         assert result[0].lower() == "apple"
         assert result[1].lower() == "banana"

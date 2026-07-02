@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
 import type { SlackResponse, SlackTransport } from './_client.ts'
-import { fetchMessagesForDay, streamMessagesForDay, streamThreadReplies } from './history.ts'
+import { fetchMessagesForDay, streamMessagesForDay } from './history.ts'
 
 class FakeTransport implements SlackTransport {
   public readonly calls: { endpoint: string; params?: Record<string, string> }[] = []
@@ -72,22 +72,5 @@ describe('fetchMessagesForDay (eager + sort)', () => {
     const t = new FakeTransport((call) => pages[call - 1] ?? { ok: false })
     const msgs = await fetchMessagesForDay(new SlackAccessor(t), 'C1', '2026-04-04')
     expect(msgs.map((m) => m.ts)).toEqual(['1.0', '2.0', '3.0'])
-  })
-})
-
-describe('streamThreadReplies', () => {
-  it('paginates conversations.replies', async () => {
-    const pages: SlackResponse[] = [
-      { ok: true, messages: [{ ts: '1.0' }], response_metadata: { next_cursor: 'c' } },
-      { ok: true, messages: [{ ts: '1.5' }], response_metadata: { next_cursor: '' } },
-    ]
-    const t = new FakeTransport((call) => pages[call - 1] ?? { ok: false })
-    const ts: string[] = []
-    for await (const page of streamThreadReplies(new SlackAccessor(t), 'C1', '1.0')) {
-      for (const m of page) ts.push((m as { ts: string }).ts)
-    }
-    expect(ts).toEqual(['1.0', '1.5'])
-    expect(t.calls[0]?.endpoint).toBe('conversations.replies')
-    expect(t.calls[0]?.params).toMatchObject({ channel: 'C1', ts: '1.0' })
   })
 })

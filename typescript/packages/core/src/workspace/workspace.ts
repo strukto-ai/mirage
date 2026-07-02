@@ -486,6 +486,30 @@ export class Workspace {
     this.cache.maxDrainBytes = value
   }
 
+  /** Records that hit a remote resource (not cache). */
+  get networkRecords(): OpRecord[] {
+    return this.records.filter((r) => !r.isCache)
+  }
+
+  /** Total bytes transferred over the network. */
+  get networkBytes(): number {
+    let total = 0
+    for (const r of this.records) if (!r.isCache) total += r.bytes
+    return total
+  }
+
+  /** Records served from in-memory cache. */
+  get cacheRecords(): OpRecord[] {
+    return this.records.filter((r) => r.isCache)
+  }
+
+  /** Total bytes served from cache. */
+  get cacheBytes(): number {
+    let total = 0
+    for (const r of this.records) if (r.isCache) total += r.bytes
+    return total
+  }
+
   get filePrompt(): string {
     return buildFilePrompt(this.registry.allMounts())
   }

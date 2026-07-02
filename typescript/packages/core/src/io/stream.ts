@@ -87,26 +87,6 @@ export async function closeQuietly(stream: ByteSource | null): Promise<void> {
   }
 }
 
-export async function peekExitCode(stream: ByteSource | null): Promise<ByteSource | null> {
-  if (stream === null || stream instanceof Uint8Array) return stream
-  const iter = stream[Symbol.asyncIterator]()
-  const first = await iter.next()
-  if (first.done === true) return null
-  return prependChunk(first.value, iter)
-}
-
-async function* prependChunk(
-  first: Uint8Array,
-  rest: AsyncIterator<Uint8Array>,
-): AsyncIterable<Uint8Array> {
-  yield first
-  for (;;) {
-    const r = await rest.next()
-    if (r.done === true) break
-    yield r.value
-  }
-}
-
 export async function* asyncChain(...streams: (ByteSource | null)[]): AsyncIterable<Uint8Array> {
   for (const stream of streams) {
     if (stream === null) continue

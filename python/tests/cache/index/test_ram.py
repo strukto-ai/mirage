@@ -16,7 +16,7 @@ from datetime import datetime
 
 import pytest
 
-from mirage.cache.index import IndexConfig, IndexEntry, RAMIndexCacheStore
+from mirage.cache.index import IndexEntry, RAMIndexCacheStore
 
 
 @pytest.fixture
@@ -76,10 +76,3 @@ async def test_locks_cleaned_after_clear(store):
     await store.put("/b", entry)
     await store.clear()
     assert len(store._key_locks) == 0
-
-
-@pytest.mark.asyncio
-async def test_from_config():
-    config = IndexConfig(ttl=120)
-    store = RAMIndexCacheStore.from_config(config)
-    assert store._ttl == 120

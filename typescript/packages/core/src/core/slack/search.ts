@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SlackAccessor } from '../../accessor/slack.ts'
-import { offsetPages } from './paginate.ts'
 
 const ENC = new TextEncoder()
 
@@ -33,30 +32,6 @@ export async function searchMessages(
   return ENC.encode(JSON.stringify(data))
 }
 
-export function searchMessagesStream(
-  accessor: SlackAccessor,
-  query: string,
-  options: { count?: number; startPage?: number; maxPages?: number } = {},
-): AsyncIterableIterator<Record<string, unknown>[]> {
-  const count = options.count ?? 100
-  const baseParams: Record<string, string> = {
-    query,
-    count: String(count),
-    sort: 'timestamp',
-  }
-  const opts: { startPage?: number; maxPages?: number } = {}
-  if (options.startPage !== undefined) opts.startPage = options.startPage
-  if (options.maxPages !== undefined) opts.maxPages = options.maxPages
-  return offsetPages(
-    accessor.transport,
-    'search.messages',
-    baseParams,
-    ['messages', 'pagination', 'page_count'],
-    ['messages', 'matches'],
-    opts,
-  )
-}
-
 export async function searchFiles(
   accessor: SlackAccessor,
   query: string,
@@ -71,28 +46,4 @@ export async function searchFiles(
   }
   const data = await accessor.transport.call('search.files', params)
   return ENC.encode(JSON.stringify(data))
-}
-
-export function searchFilesStream(
-  accessor: SlackAccessor,
-  query: string,
-  options: { count?: number; startPage?: number; maxPages?: number } = {},
-): AsyncIterableIterator<Record<string, unknown>[]> {
-  const count = options.count ?? 100
-  const baseParams: Record<string, string> = {
-    query,
-    count: String(count),
-    sort: 'timestamp',
-  }
-  const opts: { startPage?: number; maxPages?: number } = {}
-  if (options.startPage !== undefined) opts.startPage = options.startPage
-  if (options.maxPages !== undefined) opts.maxPages = options.maxPages
-  return offsetPages(
-    accessor.transport,
-    'search.files',
-    baseParams,
-    ['files', 'pagination', 'page_count'],
-    ['files', 'matches'],
-    opts,
-  )
 }

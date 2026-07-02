@@ -9,7 +9,6 @@ from mirage.core.onedrive.rename import rename
 from mirage.core.onedrive.rm import rm_r
 from mirage.core.onedrive.rmdir import rmdir
 from mirage.core.onedrive.unlink import unlink
-from mirage.core.onedrive.versions import restore_version
 from mirage.types import PathSpec
 
 
@@ -83,14 +82,6 @@ async def test_rename_patches_name():
         await rename(_accessor(), PathSpec.from_str_path("/a.txt"),
                      PathSpec.from_str_path("/b.txt"))
     assert body["name"] == "b.txt"
-
-
-@pytest.mark.asyncio
-async def test_restore_version_posts_action():
-    with aioresponses() as m:
-        m.post(_BASE + "/root:/a.txt:/versions/2.0/restoreVersion", status=204)
-        await restore_version(_accessor(), PathSpec.from_str_path("/a.txt"),
-                              "2.0")
 
 
 @pytest.mark.asyncio

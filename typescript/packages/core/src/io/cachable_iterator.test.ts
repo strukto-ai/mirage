@@ -61,34 +61,4 @@ describe('CachableAsyncIterator', () => {
     expect(full).toBe(true)
     expect(new TextDecoder().decode(bytes)).toBe('ab')
   })
-
-  it('waitForDrain resolves once normal iteration exhausts the source', async () => {
-    const ci = new CachableAsyncIterator(fromChunks([encode('x')]))
-    const waiter = ci.waitForDrain()
-    for await (const _chunk of ci) {
-      void _chunk
-    }
-    const bytes = await waiter
-    expect(new TextDecoder().decode(bytes)).toBe('x')
-  })
-
-  it('waitForDrain resolves when source throws', async () => {
-    async function* broken(): AsyncIterable<Uint8Array> {
-      await Promise.resolve()
-      yield encode('a')
-      throw new Error('boom')
-    }
-    const ci = new CachableAsyncIterator(broken())
-    const waiter = ci.waitForDrain()
-    try {
-      for await (const _chunk of ci) {
-        void _chunk
-      }
-    } catch {
-      // expected
-    }
-    const bytes = await waiter
-    expect(new TextDecoder().decode(bytes)).toBe('a')
-    expect(ci.exhausted).toBe(true)
-  })
 })

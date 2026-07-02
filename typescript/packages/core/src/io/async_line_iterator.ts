@@ -60,23 +60,6 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
     this.buf = this.buf.subarray(idx + 1)
     return line
   }
-
-  async remainingBytes(): Promise<Uint8Array> {
-    const chunks: Uint8Array[] = []
-    if (this.buf.byteLength > 0) {
-      chunks.push(this.buf)
-      this.buf = new Uint8Array(0)
-    }
-    if (!this.exhausted) {
-      for (;;) {
-        const result = await this.source.next()
-        if (result.done === true) break
-        chunks.push(result.value)
-      }
-      this.exhausted = true
-    }
-    return concat(chunks)
-  }
 }
 
 function indexOf(buf: Uint8Array, byte: number): number {
@@ -92,17 +75,5 @@ function concat2(a: Uint8Array, b: Uint8Array): Uint8Array {
   const out = new Uint8Array(a.byteLength + b.byteLength)
   out.set(a, 0)
   out.set(b, a.byteLength)
-  return out
-}
-
-function concat(chunks: Uint8Array[]): Uint8Array {
-  let total = 0
-  for (const c of chunks) total += c.byteLength
-  const out = new Uint8Array(total)
-  let offset = 0
-  for (const c of chunks) {
-    out.set(c, offset)
-    offset += c.byteLength
-  }
   return out
 }

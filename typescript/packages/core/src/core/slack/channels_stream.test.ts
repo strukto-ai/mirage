@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
 import type { SlackResponse, SlackTransport } from './_client.ts'
-import { listChannels, listChannelsStream, listDmsStream } from './channels.ts'
+import { listChannels, listChannelsStream } from './channels.ts'
 
 class FakeTransport implements SlackTransport {
   public readonly calls: { endpoint: string; params?: Record<string, string> }[] = []
@@ -88,19 +88,5 @@ describe('listChannels (eager wrapper)', () => {
     const t = new FakeTransport((call) => pages[call - 1] ?? { ok: false })
     const out = await listChannels(new SlackAccessor(t))
     expect(out.map((c) => c.id)).toEqual(['C1', 'C2', 'C3'])
-  })
-})
-
-describe('listDmsStream', () => {
-  it('uses types=im,mpim', async () => {
-    const t = new FakeTransport(() => ({
-      ok: true,
-      channels: [],
-      response_metadata: { next_cursor: '' },
-    }))
-    for await (const _page of listDmsStream(new SlackAccessor(t))) {
-      void _page
-    }
-    expect(t.calls[0]?.params?.types).toBe('im,mpim')
   })
 })

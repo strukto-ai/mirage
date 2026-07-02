@@ -18,10 +18,9 @@ import pytest
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index import RAMIndexCacheStore
-from mirage.cache.index.config import IndexConfig
 from mirage.core.slack.readdir import _fetch_day, _latest_message_ts, readdir
 from mirage.resource.slack.config import SlackConfig
-from mirage.types import IndexType, PathSpec
+from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
 
@@ -32,8 +31,7 @@ def config():
 
 @pytest.fixture
 def index():
-    return RAMIndexCacheStore.from_config(
-        IndexConfig(type=IndexType.RAM, ttl=600))
+    return RAMIndexCacheStore(ttl=600)
 
 
 @pytest.mark.asyncio

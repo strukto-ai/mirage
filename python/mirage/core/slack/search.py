@@ -13,10 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from collections.abc import AsyncIterator
 
 from mirage.core.slack._client import slack_get, slack_search_available
-from mirage.core.slack.paginate import offset_pages
 from mirage.resource.slack.config import SlackConfig
 
 
@@ -55,40 +53,6 @@ async def search_messages(
     return json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode()
 
 
-def search_messages_stream(
-    config: SlackConfig,
-    query: str,
-    count: int = 100,
-    start_page: int = 1,
-    max_pages: int | None = None,
-) -> AsyncIterator[list[dict]]:
-    """Page-streaming search.messages; yields match lists per Slack page.
-
-    Args:
-        config (SlackConfig): Slack credentials.
-        query (str): search query.
-        count (int): results per page (Slack caps at 100).
-        start_page (int): 1-based starting page.
-        max_pages (int | None): cap on pages walked; None = unbounded.
-
-    Yields:
-        list[dict]: matches in one Slack page.
-    """
-    return offset_pages(
-        config,
-        "search.messages",
-        base_params={
-            "query": query,
-            "count": str(count),
-            "sort": "timestamp",
-        },
-        pages_path=("messages", "pagination", "page_count"),
-        items_path=("messages", "matches"),
-        start_page=start_page,
-        max_pages=max_pages,
-    )
-
-
 async def search_files(
     config: SlackConfig,
     query: str,
@@ -118,37 +82,3 @@ async def search_files(
         params=params,
     )
     return json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode()
-
-
-def search_files_stream(
-    config: SlackConfig,
-    query: str,
-    count: int = 100,
-    start_page: int = 1,
-    max_pages: int | None = None,
-) -> AsyncIterator[list[dict]]:
-    """Page-streaming search.files; yields file lists per Slack page.
-
-    Args:
-        config (SlackConfig): Slack credentials.
-        query (str): search query.
-        count (int): results per page (Slack caps at 100).
-        start_page (int): 1-based starting page.
-        max_pages (int | None): cap on pages walked; None = unbounded.
-
-    Yields:
-        list[dict]: file matches in one Slack page.
-    """
-    return offset_pages(
-        config,
-        "search.files",
-        base_params={
-            "query": query,
-            "count": str(count),
-            "sort": "timestamp",
-        },
-        pages_path=("files", "pagination", "page_count"),
-        items_path=("files", "matches"),
-        start_page=start_page,
-        max_pages=max_pages,
-    )

@@ -90,34 +90,3 @@ export async function getHistoryJsonl(
   const lines = messages.map((m) => JSON.stringify(m))
   return encoder.encode(lines.join('\n') + '\n')
 }
-
-export function streamThreadReplies(
-  accessor: SlackAccessor,
-  channelId: string,
-  threadTs: string,
-  options: { limit?: number } = {},
-): AsyncIterableIterator<SlackMessage[]> {
-  const limit = options.limit ?? 200
-  return cursorPages<SlackMessage>(
-    accessor.transport,
-    'conversations.replies',
-    {
-      channel: channelId,
-      ts: threadTs,
-      limit: String(limit),
-    },
-    'messages',
-  )
-}
-
-export async function getThreadJsonl(
-  accessor: SlackAccessor,
-  channelId: string,
-  threadTs: string,
-): Promise<SlackMessage[]> {
-  const replies: SlackMessage[] = []
-  for await (const page of streamThreadReplies(accessor, channelId, threadTs)) {
-    replies.push(...page)
-  }
-  return replies
-}

@@ -101,30 +101,6 @@ async def close_quietly(stream: ByteSource | None) -> None:
         pass
 
 
-async def _prepend_chunk(
-    first: bytes,
-    rest: AsyncIterator[bytes],
-) -> AsyncIterator[bytes]:
-    yield first
-    async for chunk in rest:
-        yield chunk
-
-
-async def peek_exit_code(
-    stream: ByteSource | None,
-    io: IOResult,
-) -> ByteSource | None:
-    if stream is None or isinstance(stream, bytes):
-        return stream
-    first: bytes | None = None
-    async for chunk in stream:
-        first = chunk
-        break
-    if first is None:
-        return None
-    return _prepend_chunk(first, stream)
-
-
 async def async_chain(*streams: ByteSource | None, ) -> AsyncIterator[bytes]:
     for stream in streams:
         if stream is None:

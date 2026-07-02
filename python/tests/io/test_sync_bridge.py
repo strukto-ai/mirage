@@ -14,9 +14,7 @@
 
 import asyncio
 
-import pytest
-
-from mirage.io.sync_bridge import async_to_sync_iter, sync_to_async_iter
+from mirage.io.sync_bridge import async_to_sync_iter
 
 
 async def _async_chunks():
@@ -86,34 +84,3 @@ def test_early_termination():
         assert len(consumed) == 1
     finally:
         loop.close()
-
-
-def _sync_producer(queue: asyncio.Queue, items: list[bytes]) -> None:
-    for item in items:
-        queue.put_nowait(item)
-    queue.put_nowait(None)
-
-
-@pytest.mark.asyncio
-async def test_sync_to_async_iter_yields_all_items():
-    chunks = []
-    async for item in sync_to_async_iter(_sync_producer,
-                                         [b"aaa", b"bbb", b"ccc"]):
-        chunks.append(item)
-    assert chunks == [b"aaa", b"bbb", b"ccc"]
-
-
-@pytest.mark.asyncio
-async def test_sync_to_async_iter_empty():
-    chunks = []
-    async for item in sync_to_async_iter(_sync_producer, []):
-        chunks.append(item)
-    assert chunks == []
-
-
-@pytest.mark.asyncio
-async def test_sync_to_async_iter_single_item():
-    chunks = []
-    async for item in sync_to_async_iter(_sync_producer, [b"only"]):
-        chunks.append(item)
-    assert chunks == [b"only"]

@@ -15,7 +15,7 @@
 import asyncio
 
 from mirage.io.stream import (async_chain, drain, exit_on_empty,
-                              merge_stdout_stderr, peek_exit_code, quiet_match)
+                              merge_stdout_stderr, quiet_match)
 from mirage.io.types import IOResult
 
 
@@ -93,53 +93,6 @@ def test_drain_bytes():
 
     async def run():
         await drain(b"hello")
-
-    asyncio.run(run())
-
-
-def test_peek_exit_code_nonempty():
-
-    async def run():
-        io = IOResult()
-        stream = exit_on_empty(_make_stream(b"line1\n", b"line2\n"), io)
-        resolved_stream = await peek_exit_code(stream, io)
-        assert io.exit_code == 0
-        chunks = []
-        async for chunk in resolved_stream:
-            chunks.append(chunk)
-        assert b"".join(chunks) == b"line1\nline2\n"
-
-    asyncio.run(run())
-
-
-def test_peek_exit_code_empty():
-
-    async def run():
-        io = IOResult()
-        stream = exit_on_empty(_make_stream(), io)
-        resolved_stream = await peek_exit_code(stream, io)
-        assert io.exit_code == 1
-        assert resolved_stream is None
-
-    asyncio.run(run())
-
-
-def test_peek_exit_code_none():
-
-    async def run():
-        io = IOResult()
-        result = await peek_exit_code(None, io)
-        assert result is None
-
-    asyncio.run(run())
-
-
-def test_peek_exit_code_bytes():
-
-    async def run():
-        io = IOResult()
-        result = await peek_exit_code(b"hello", io)
-        assert result == b"hello"
 
     asyncio.run(run())
 

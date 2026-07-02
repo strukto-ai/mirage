@@ -16,14 +16,9 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
   private readonly source: AsyncIterator<Uint8Array>
   private readonly buffer: Uint8Array[] = []
   private exhaustedFlag = false
-  private drainResolve: (() => void) | null = null
-  private readonly drainPromise: Promise<void>
 
   constructor(source: AsyncIterable<Uint8Array>) {
     this.source = source[Symbol.asyncIterator]()
-    this.drainPromise = new Promise<void>((resolve) => {
-      this.drainResolve = resolve
-    })
   }
 
   get exhausted(): boolean {
@@ -42,13 +37,13 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
     try {
       const result = await this.source.next()
       if (result.done === true) {
-        this.markExhausted()
+        this.exhaustedFlag = true
         return { done: true, value: undefined }
       }
       this.buffer.push(result.value)
       return { done: false, value: result.value }
     } catch (err) {
-      this.markExhausted()
+      this.exhaustedFlag = true
       throw err
     }
   }
@@ -61,7 +56,7 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
         this.buffer.push(result.value)
       }
     } finally {
-      this.markExhausted()
+      this.exhaustedFlag = true
     }
     return concat(this.buffer)
   }
@@ -78,23 +73,9 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
         if (total > maxBytes) return [concat(this.buffer), false]
       }
     } finally {
-      this.markExhausted()
+      this.exhaustedFlag = true
     }
     return [concat(this.buffer), true]
-  }
-
-  async waitForDrain(): Promise<Uint8Array> {
-    await this.drainPromise
-    return concat(this.buffer)
-  }
-
-  private markExhausted(): void {
-    this.exhaustedFlag = true
-    if (this.drainResolve !== null) {
-      const resolve = this.drainResolve
-      this.drainResolve = null
-      resolve()
-    }
   }
 }
 

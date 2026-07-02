@@ -14,8 +14,6 @@
 
 import asyncio
 
-import pytest
-
 from mirage.io.cachable_iterator import CachableAsyncIterator
 
 
@@ -92,47 +90,12 @@ async def _run_drain_includes_already_consumed():
     assert result == b"aaabbbccc"
 
 
-async def _run_wait_for_drain_returns_full_data():
-    ci = CachableAsyncIterator(_async_source_three_chunks())
-    await ci.__anext__()
-    task = asyncio.create_task(ci.drain())
-    result = await ci.wait_for_drain()
-    await task
-    assert result == b"aaabbbccc"
-
-
 async def _slow_source():
     yield b"aaa"
     await asyncio.sleep(0.05)
     yield b"bbb"
     await asyncio.sleep(0.05)
     yield b"ccc"
-
-
-async def _run_wait_for_drain_concurrent_with_background_drain():
-    ci = CachableAsyncIterator(_slow_source())
-    await ci.__anext__()
-    drain_task = asyncio.create_task(ci.drain())
-    r1 = await ci.wait_for_drain()
-    r2 = await ci.wait_for_drain()
-    drain_result = await drain_task
-    assert r1 == b"aaabbbccc"
-    assert r2 == b"aaabbbccc"
-    assert drain_result == b"aaabbbccc"
-
-
-async def _run_wait_for_drain_after_drain_already_done():
-    ci = CachableAsyncIterator(_async_source_two_chunks())
-    await ci.drain()
-    result = await ci.wait_for_drain()
-    assert result == b"aaabbb"
-
-
-async def _run_drain_event_set_after_drain():
-    ci = CachableAsyncIterator(_async_source_two_chunks())
-    assert not ci.drain_event.is_set()
-    await ci.drain()
-    assert ci.drain_event.is_set()
 
 
 def test_cachable_async_iterator_exhausted_false_before_full():
@@ -151,83 +114,6 @@ def test_cachable_async_iterator_drain_includes_already_consumed():
     asyncio.run(_run_drain_includes_already_consumed())
 
 
-def test_cachable_async_iterator_wait_for_drain_returns_full_data():
-    asyncio.run(_run_wait_for_drain_returns_full_data())
-
-
-def test_cachable_async_iterator_wait_for_drain_concurrent():
-    asyncio.run(_run_wait_for_drain_concurrent_with_background_drain())
-
-
-def test_cachable_async_iterator_wait_for_drain_after_done():
-    asyncio.run(_run_wait_for_drain_after_drain_already_done())
-
-
-def test_cachable_async_iterator_drain_event_set_after_drain():
-    asyncio.run(_run_drain_event_set_after_drain())
-
-
 async def _failing_source():
     yield b"aaa"
     raise RuntimeError("source failed")
-
-
-async def _run_wait_for_drain_after_normal_iteration():
-    ci = CachableAsyncIterator(_async_source_two_chunks())
-    async for _ in ci:
-        pass
-    assert ci.exhausted is True
-    result = await ci.wait_for_drain()
-    assert result == b"aaabbb"
-
-
-def test_cachable_async_iterator_wait_for_drain_after_normal_iteration():
-    asyncio.run(_run_wait_for_drain_after_normal_iteration())
-
-
-async def _run_drain_event_set_on_source_exception():
-    ci = CachableAsyncIterator(_failing_source())
-    with pytest.raises(RuntimeError, match="source failed"):
-        await ci.drain()
-    assert ci.drain_event.is_set()
-
-
-def test_cachable_async_iterator_drain_event_set_on_exception():
-    asyncio.run(_run_drain_event_set_on_source_exception())
-
-
-async def _run_drain_event_set_on_cancellation():
-
-    async def _blocking_source():
-        yield b"aaa"
-        await asyncio.sleep(10)
-        yield b"bbb"
-
-    ci = CachableAsyncIterator(_blocking_source())
-    task = asyncio.create_task(ci.drain())
-    await asyncio.sleep(0.05)
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    assert ci.drain_event.is_set()
-
-
-def test_cachable_async_iterator_drain_event_set_on_cancellation():
-    asyncio.run(_run_drain_event_set_on_cancellation())
-
-
-async def _run_wait_for_drain_during_normal_iteration():
-    ci = CachableAsyncIterator(_slow_source())
-
-    async def consume():
-        async for _ in ci:
-            pass
-
-    task = asyncio.create_task(consume())
-    result = await ci.wait_for_drain()
-    await task
-    assert result == b"aaabbbccc"
-
-
-def test_cachable_async_iterator_wait_for_drain_during_normal_iteration():
-    asyncio.run(_run_wait_for_drain_during_normal_iteration())

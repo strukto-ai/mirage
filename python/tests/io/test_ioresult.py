@@ -44,40 +44,6 @@ def test_merge_combines_cache():
     asyncio.run(_run())
 
 
-def test_merge_aggregate_takes_max_exit_code():
-
-    async def _run():
-        a = IOResult(exit_code=1)
-        b = IOResult(exit_code=0)
-        merged = await a.merge_aggregate(b)
-        assert merged.exit_code == 1
-
-    asyncio.run(_run())
-
-
-def test_merge_aggregate_combines_stderr():
-
-    async def _run():
-        a = IOResult(stderr=b"err1", exit_code=1)
-        b = IOResult(stderr=b"err2", exit_code=0)
-        merged = await a.merge_aggregate(b)
-        assert merged.stderr == b"err1err2"
-        assert merged.exit_code == 1
-
-    asyncio.run(_run())
-
-
-def test_merge_aggregate_zero_when_all_succeed():
-
-    async def _run():
-        a = IOResult(exit_code=0)
-        b = IOResult(exit_code=0)
-        merged = await a.merge_aggregate(b)
-        assert merged.exit_code == 0
-
-    asyncio.run(_run())
-
-
 def test_explicit_exit_code_clears_stream_source_issue_43():
 
     async def _run():

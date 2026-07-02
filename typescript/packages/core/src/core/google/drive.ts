@@ -192,13 +192,6 @@ export async function listAllFiles(
   return files
 }
 
-export async function getFileMetadata(tm: TokenManager, fileId: string): Promise<DriveFile> {
-  const url = `${DRIVE_API_BASE}/files/${fileId}`
-  const fields =
-    'id,name,mimeType,size,' + 'createdTime,modifiedTime,' + 'owners,capabilities/canEdit,parents'
-  return (await googleGet(tm, url, { fields, supportsAllDrives: 'true' })) as DriveFile
-}
-
 export async function downloadFile(tm: TokenManager, fileId: string): Promise<Uint8Array> {
   const url = `${DRIVE_API_BASE}/files/${fileId}?alt=media&supportsAllDrives=true`
   return googleGetBytes(tm, url)

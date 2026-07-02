@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
-from typing import Any
 
 from mirage.core.slack._client import slack_get
 from mirage.resource.slack.config import SlackConfig
@@ -47,58 +46,3 @@ async def cursor_pages(
         cursor = data.get("response_metadata", {}).get("next_cursor") or None
         if cursor is None:
             return
-
-
-def _get_nested(d: dict, path: tuple[str, ...]) -> Any:
-    cur: Any = d
-    for k in path:
-        if not isinstance(cur, dict):
-            return None
-        cur = cur.get(k)
-    return cur
-
-
-async def offset_pages(
-    config: SlackConfig,
-    endpoint: str,
-    base_params: dict,
-    pages_path: tuple[str, ...],
-    items_path: tuple[str, ...],
-    start_page: int = 1,
-    max_pages: int | None = None,
-) -> AsyncIterator[list[dict]]:
-    """Walk a page-paginated Slack endpoint (search, files.list, ...).
-
-    Args:
-        config (SlackConfig): Slack credentials.
-        endpoint (str): Slack API method, e.g. "search.messages".
-        base_params (dict): per-request params; "page" is set here.
-        pages_path (tuple[str, ...]): nested path to total page count
-            in the response, e.g. ("messages", "pagination",
-            "page_count").
-        items_path (tuple[str, ...]): nested path to items list, e.g.
-            ("messages", "matches").
-        start_page (int): page number to start from (1-based).
-        max_pages (int | None): cap on pages fetched; None = unbounded.
-    Yields:
-        list[dict]: items from each page.
-    """
-    page = start_page
-    total_pages: int | None = None
-    fetched = 0
-    while True:
-        params = dict(base_params)
-        params["page"] = str(page)
-        data = await slack_get(config, endpoint, params=params)
-        items = _get_nested(data, items_path) or []
-        yield items
-        fetched += 1
-        if total_pages is None:
-            total_pages = _get_nested(
-                data, pages_path
-            ) or 1  # stop after one page if pagination metadata is missing
-        if page >= total_pages:
-            return
-        if max_pages is not None and fetched >= max_pages:
-            return
-        page += 1

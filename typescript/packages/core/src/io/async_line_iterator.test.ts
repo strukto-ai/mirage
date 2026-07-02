@@ -58,25 +58,9 @@ describe('AsyncLineIterator', () => {
     expect(await it.readline()).toBeNull()
   })
 
-  it('remainingBytes returns unconsumed data', async () => {
-    const it = new AsyncLineIterator(fromChunks([encode('foo\nbar\nbaz')]))
-    const first = await it.readline()
-    if (first === null) throw new Error('expected line')
-    expect(decode(first)).toBe('foo')
-    const rest = await it.remainingBytes()
-    expect(decode(rest)).toBe('bar\nbaz')
-  })
-
-  it('remainingBytes drains source after no lines read', async () => {
-    const it = new AsyncLineIterator(fromChunks([encode('ab'), encode('cd')]))
-    const rest = await it.remainingBytes()
-    expect(decode(rest)).toBe('abcd')
-  })
-
   it('handles empty source', async () => {
     const it = new AsyncLineIterator(fromChunks([]))
     expect(await it.readline()).toBeNull()
-    expect((await it.remainingBytes()).byteLength).toBe(0)
   })
 
   it('preserves empty lines', async () => {

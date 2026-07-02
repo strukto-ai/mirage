@@ -14,8 +14,7 @@
 
 from datetime import datetime
 
-from mirage.cache.index.config import (IndexConfig, IndexEntry, ListResult,
-                                       LookupResult)
+from mirage.cache.index.config import IndexEntry, ListResult, LookupResult
 
 
 class IndexCacheStore:
@@ -46,8 +45,4 @@ class IndexCacheStore:
         raise NotImplementedError
 
     async def clear(self) -> None:
-        raise NotImplementedError
-
-    @classmethod
-    def from_config(cls, config: IndexConfig) -> "IndexCacheStore":
         raise NotImplementedError

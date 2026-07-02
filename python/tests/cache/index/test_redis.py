@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 import pytest_asyncio
 
-from mirage.cache.index import IndexEntry, LookupStatus, RedisIndexConfig
+from mirage.cache.index import IndexEntry, LookupStatus
 from mirage.cache.index.redis import RedisIndexCacheStore
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
@@ -213,14 +213,3 @@ async def test_key_prefix_isolation():
     await s2.clear()
     await s1.close()
     await s2.close()
-
-
-@pytest.mark.asyncio
-async def test_from_config():
-    config = RedisIndexConfig(ttl=120, url=REDIS_URL, key_prefix="test:cfg:")
-    s = RedisIndexCacheStore.from_config(config,
-                                         url=REDIS_URL,
-                                         key_prefix="test:cfg:")
-    assert s._ttl == 120
-    await s.clear()
-    await s.close()

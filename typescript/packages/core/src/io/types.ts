@@ -121,12 +121,6 @@ export class IOResult {
     result.streamSource = other
     return result
   }
-
-  async mergeAggregate(other: IOResult): Promise<IOResult> {
-    const result = await this.merge(other)
-    result.exitCode = Math.max(this.exitCode, other.exitCode)
-    return result
-  }
 }
 
 function decodeBytes(bytes: Uint8Array, errors: 'replace' | 'strict'): string {

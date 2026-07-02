@@ -66,22 +66,6 @@ async def list_channels(
     return out
 
 
-def list_dms_stream(
-    config: SlackConfig,
-    limit: int = 200,
-) -> AsyncIterator[list[dict]]:
-    """Page-streaming variant for direct messages.
-
-    Args:
-        config (SlackConfig): Slack credentials.
-        limit (int): max per page.
-
-    Yields:
-        list[dict]: DM channels in one Slack page.
-    """
-    return list_channels_stream(config, types="im,mpim", limit=limit)
-
-
 async def list_dms(
     config: SlackConfig,
     limit: int = 200,

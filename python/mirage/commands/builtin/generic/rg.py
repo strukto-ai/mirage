@@ -92,7 +92,6 @@ async def rg(
     read_stream: Callable[..., AsyncIterator[bytes]] | None,
     accessor: object = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
-    scope_check: Callable[..., Awaitable[str | None]] | None = None,
     index: IndexCacheStore | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run ripgrep-style fallback search over backend paths or stdin.
@@ -116,8 +115,6 @@ async def rg(
         accessor (object): Backend accessor passed through wrapper helpers.
         stdin (AsyncIterator[bytes] | bytes | None): Input used when paths is
             empty.
-        scope_check (Callable[..., Awaitable[str | None]] | None): Optional
-            backend warning hook.
         index (IndexCacheStore | None): Optional cache index for wrapped
             backend calls.
 
@@ -152,10 +149,6 @@ async def rg(
                      index=index,
                      prefix=mount_prefix)
 
-        scope_warning_str: str | None = None
-        if scope_check is not None and not paths[0].resolved:
-            scope_warning_str = await scope_check(rd, st, paths[0], True)
-
         is_dir = False
         try:
             s = await st(paths[0].virtual)
@@ -171,8 +164,6 @@ async def rg(
                       or f.context_after or f.file_type or f.glob_pattern)
         if needs_full:
             warnings_f: list[str] = []
-            if scope_warning_str:
-                warnings_f.append(scope_warning_str)
             results: list[str] = []
             for p in paths:
                 hits_full = await rg_full(

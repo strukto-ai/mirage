@@ -13,13 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { KeyLock } from '../lock.ts'
-import {
-  LookupStatus,
-  type IndexConfig,
-  type IndexEntry,
-  type ListResult,
-  type LookupResult,
-} from './config.ts'
+import { LookupStatus, type IndexEntry, type ListResult, type LookupResult } from './config.ts'
 import { IndexCacheStore } from './store.ts'
 
 export class RAMIndexCacheStore extends IndexCacheStore {
@@ -32,10 +26,6 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   constructor(options: { ttl?: number } = {}) {
     super()
     this.ttl = options.ttl ?? 600
-  }
-
-  static fromConfig(config: IndexConfig): RAMIndexCacheStore {
-    return new RAMIndexCacheStore({ ttl: config.ttl ?? 600 })
   }
 
   get(resourcePath: string): Promise<LookupResult> {
