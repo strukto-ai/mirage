@@ -82,5 +82,10 @@ class FileCacheMixin:
         raise NotImplementedError
 
     @property
+    def cache_entries(self) -> int:
+        """Number of cached entries; 0 for stores that don't track them."""
+        return 0
+
+    @property
     def cache_limit(self) -> int:
         raise NotImplementedError

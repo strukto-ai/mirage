@@ -85,13 +85,6 @@ async def test_file_len(store):
 
 
 @pytest.mark.asyncio
-async def test_get_range(store):
-    await store.set_file("/a.txt", b"hello world")
-    result = await store.get_range("/a.txt", 0, 4)
-    assert result == b"hello"
-
-
-@pytest.mark.asyncio
 async def test_has_dir(store):
     assert await store.has_dir("/") is True
     assert await store.has_dir("/sub") is False

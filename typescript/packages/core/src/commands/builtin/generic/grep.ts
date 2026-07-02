@@ -112,7 +112,6 @@ export async function grepGeneric(
   stat: Stat,
   readdir: Readdir,
   stream: Stream,
-  showFilename = false,
 ): Promise<CommandFnResult> {
   stream = cacheAwareStream(stream)
   const resolution = await resolvePatternFromFlags(
@@ -222,7 +221,7 @@ export async function grepGeneric(
       ]
     }
 
-    if (paths.length > 1 || showFilename) {
+    if (paths.length > 1) {
       const allResults: string[] = []
       const multiWarnings: string[] = []
       for (const p of paths) {

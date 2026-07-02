@@ -82,7 +82,6 @@ async def grep(
     read_stream: Callable[..., AsyncIterator[bytes]] | None,
     accessor: object = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
-    show_filename: bool = False,
     index: IndexCacheStore | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run grep-style fallback search over backend paths or stdin.
@@ -106,8 +105,6 @@ async def grep(
         accessor (object): Backend accessor passed through wrapper helpers.
         stdin (AsyncIterator[bytes] | bytes | None): Input used when paths is
             empty.
-        show_filename (bool): Force filename prefixes on a single path,
-            for callers that pre-expanded a multi-file scope.
         index (IndexCacheStore | None): Optional cache index for wrapped
             backend calls.
 
@@ -225,7 +222,7 @@ async def grep(
         pat = compile_pattern(pattern, f.ignore_case, f.fixed_string,
                               f.whole_word)
 
-        if len(paths) > 1 or show_filename:
+        if len(paths) > 1:
             all_results = []
             multi_warnings: list[str] = []
             for p in paths:

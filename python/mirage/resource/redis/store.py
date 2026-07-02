@@ -96,10 +96,6 @@ class RedisStore:
         length = await self._client.strlen(self._fk(path))
         return length
 
-    async def get_range(self, path: str, start: int, end: int) -> bytes:
-        data = await self._client.getrange(self._fk(path), start, end)
-        return data
-
     async def has_dir(self, path: str) -> bool:
         return bool(await self._client.sismember(self._dk(), path))
 
