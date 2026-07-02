@@ -69,6 +69,27 @@ async function main(): Promise<void> {
 main()
 ```
 
+## Estimate Before You Run
+
+`execute(..., { provision: true })` returns a `ProvisionResult` instead
+of running the command: network/cache bytes, read ops, and a
+`precision` telling you how much to trust the numbers (`exact`,
+`range`, `unknown` -- totals under `unknown` are floors). Pipelines,
+`&&`/`||`, `if`/`case`, loops, and subshells aggregate automatically.
+
+```ts
+const plan = await ws.execute('cat /data/user.json | wc -l', { provision: true })
+console.log(plan.networkRead, plan.readOps, plan.precision)
+```
+
+Read commands are estimated out of the box on every backend. When you
+register your own command, pass `provision:` to `command({...})`
+(reuse a helper like `makeFileReadProvision(myStat)` or
+`defaultProvision(name, myStat)`, or wrap a bespoke command list with
+`withDefaultProvisions(commands, myStat)`), or omit it and the planner
+reports `unknown`. Full semantics live in the
+[CLI provision docs](/home/cli#5-dry-run-with-provision).
+
 ## Output Safeguards
 
 To keep huge reads from flooding an agent, `cat`, `grep`, `rg`, `head`,

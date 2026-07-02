@@ -84,6 +84,27 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
+## Estimate Before You Run
+
+`execute(..., provision=True)` returns a `ProvisionResult` instead of
+running the command: network/cache bytes, read ops, and a `precision`
+telling you how much to trust the numbers (`exact`, `range`,
+`unknown` -- totals under `unknown` are floors). Pipelines, `&&`/`||`,
+`if`/`case`, loops, and subshells aggregate automatically.
+
+```python
+plan = await ws.execute("cat /data/user.json | wc -l", provision=True)
+print(plan.network_read, plan.read_ops, plan.precision)
+```
+
+Read commands are estimated out of the box on every backend. When you
+register your own command, pass `provision=` to the `@command`
+decorator (reuse a helper like `make_file_read_provision(my_stat)` or
+`default_provision(name, my_stat)` from
+`mirage.commands.builtin.generic_bind`), or omit it and the planner
+reports `unknown`. Full semantics live in the
+[CLI provision docs](/home/cli#5-dry-run-with-provision).
+
 ## Output Safeguards
 
 To keep huge reads from flooding an agent, `cat`, `grep`, `rg`, `head`,

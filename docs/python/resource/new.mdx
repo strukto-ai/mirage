@@ -176,6 +176,27 @@ Copy from an existing resource (Discord/Slack), then:
 1. Add or remove scope-based optimizations depending on API capabilities.
 1. Add resource-specific commands (send message, etc.).
 
+**Provision (dry-run estimates).** Factory-built commands
+(`make_generic_commands`) get family-default estimators for free, so
+`ws.execute(cmd, provision=True)` works without extra wiring. For
+bespoke commands, pass `provision=` to the decorator, reusing the
+shared helpers from `mirage.commands.builtin.generic_bind`:
+
+```python
+from mirage.commands.builtin.generic_bind.provision import (
+    make_file_read_provision, metadata_provision)
+from mirage.core.<name>.stat import stat as my_stat
+
+@command("cat", resource="<name>", spec=SPECS["cat"],
+         provision=make_file_read_provision(my_stat))
+async def cat(...): ...
+```
+
+Omit `provision=` and the planner honestly reports
+`precision=unknown`. If your resource renders virtual files (a
+`chat.jsonl` built from messages), have `stat` report `size=None`
+rather than 0 so estimates degrade to floors instead of lying.
+
 ### 8. Resource Class
 
 ```python
