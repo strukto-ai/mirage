@@ -81,3 +81,136 @@ class ProvisionResult(BaseModel):
     @property
     def cache_write(self) -> str:
         return self._fmt_range(self.cache_write_low, self.cache_write_high)
+
+    def scaled(self, n: int, command: str | None = None) -> "ProvisionResult":
+        """Multiply every combinable field by an iteration count.
+
+        Args:
+            n (int): Iteration count (e.g. for-loop repetitions).
+            command (str | None): Command label for the scaled result.
+
+        Returns:
+            ProvisionResult: New result with byte and op counters scaled;
+            precision is carried over and estimated_cost_usd is dropped.
+        """
+        fields = {f: getattr(self, f) * n for f in COMBINE_FIELDS}
+        return ProvisionResult(command=command,
+                               precision=self.precision,
+                               **fields)
+
+
+COMBINE_FIELDS = (
+    "network_read_low",
+    "network_read_high",
+    "cache_read_low",
+    "cache_read_high",
+    "network_write_low",
+    "network_write_high",
+    "cache_write_low",
+    "cache_write_high",
+    "read_ops",
+    "cache_hits",
+)
+LOW_FIELDS = tuple(f for f in COMBINE_FIELDS if not f.endswith("_high"))
+HIGH_FIELDS = tuple(f for f in COMBINE_FIELDS if f.endswith("_high"))
+
+_PRECISION_ORDER = {
+    Precision.EXACT: 0,
+    Precision.RANGE: 1,
+    Precision.UPPER_BOUND: 2,
+    Precision.UNKNOWN: 3,
+}
+
+
+def combined_precision(children: list[ProvisionResult]) -> Precision:
+    """Worst precision across children (EXACT < RANGE < UPPER_BOUND <
+    UNKNOWN).
+
+    Missing knowledge is carried by precision, not by null fields: when
+    this returns UNKNOWN the combined numeric totals are lower bounds.
+
+    Args:
+        children (list[ProvisionResult]): Child results.
+
+    Returns:
+        Precision: Worst child precision; EXACT for no children.
+    """
+    if not children:
+        return Precision.EXACT
+    return max((c.precision for c in children),
+               key=lambda p: _PRECISION_ORDER[p])
+
+
+def combined_cost(children: list[ProvisionResult]) -> float | None:
+    """Sum child costs; None unless every child has one.
+
+    estimated_cost_usd is the only nullable field, so a single costless
+    child makes the total unknowable rather than silently undercounted.
+
+    Args:
+        children (list[ProvisionResult]): Child results.
+
+    Returns:
+        float | None: Total cost, or None when any child lacks one.
+    """
+    costs = [
+        c.estimated_cost_usd for c in children
+        if c.estimated_cost_usd is not None
+    ]
+    if children and len(costs) == len(children):
+        return sum(costs)
+    return None
+
+
+def combine_sum(op: str, children: list[ProvisionResult]) -> ProvisionResult:
+    """Combine children that all run: field-wise sums (|, ;, &&).
+
+    Args:
+        op (str): Operator label stored on the combined result.
+        children (list[ProvisionResult]): Child results.
+
+    Returns:
+        ProvisionResult: Field-wise sums with worst-of precision.
+    """
+    fields = {f: sum(getattr(c, f) for c in children) for f in COMBINE_FIELDS}
+    return ProvisionResult(op=op,
+                           children=children,
+                           precision=combined_precision(children),
+                           estimated_cost_usd=combined_cost(children),
+                           **fields)
+
+
+def combine_alternative(op: str,
+                        children: list[ProvisionResult]) -> ProvisionResult:
+    """Combine children where only one runs (||): best/worst envelope.
+
+    Lows and op counters take the cheapest child (min), highs the most
+    expensive (max), so the result brackets every possible branch.
+
+    Args:
+        op (str): Operator label stored on the combined result.
+        children (list[ProvisionResult]): Child results.
+
+    Returns:
+        ProvisionResult: Envelope result; precision is RANGE unless a
+        child is UNKNOWN, cost is the cheapest child's when all have one.
+    """
+    fields = {
+        f: min((getattr(c, f) for c in children), default=0)
+        for f in LOW_FIELDS
+    }
+    fields.update({
+        f: max((getattr(c, f) for c in children), default=0)
+        for f in HIGH_FIELDS
+    })
+    cost = combined_cost(children)
+    if cost is not None:
+        cost = min(c.estimated_cost_usd for c in children
+                   if c.estimated_cost_usd is not None)
+    precision = (Precision.UNKNOWN if combined_precision(children)
+                 == Precision.UNKNOWN else Precision.RANGE)
+    return ProvisionResult(op=op,
+                           children=children,
+                           precision=precision,
+                           estimated_cost_usd=cost,
+                           **fields)

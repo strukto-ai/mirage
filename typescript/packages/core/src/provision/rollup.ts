@@ -12,8 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Precision, ProvisionResult } from './types.ts'
+import { combineAlternative, combineSum, Precision, ProvisionResult } from './types.ts'
 
+/**
+ * Aggregate plan results for a pipe (all stages run). A stage downstream of
+ * an UNKNOWN stage cannot be trusted either (its input volume is
+ * unknowable), so its precision is degraded before the field-wise sum.
+ */
 export function rollupPipe(children: ProvisionResult[]): ProvisionResult {
   let unknownSeen = false
   for (const child of children) {
@@ -23,93 +28,16 @@ export function rollupPipe(children: ProvisionResult[]): ProvisionResult {
       unknownSeen = true
     }
   }
-  const hasUnknown = children.some((c) => c.precision === Precision.UNKNOWN)
-  const hasRange = children.some((c) => c.precision === Precision.RANGE)
-  const precision = hasUnknown ? Precision.UNKNOWN : hasRange ? Precision.RANGE : Precision.EXACT
-
-  const allCosts = children.map((c) => c.estimatedCostUsd).filter((c): c is number => c !== null)
-  const cost =
-    allCosts.length === children.length && children.length > 0
-      ? allCosts.reduce((a, b) => a + b, 0)
-      : null
-
-  return new ProvisionResult({
-    op: '|',
-    children,
-    networkReadLow: sum(children, (c) => c.networkReadLow),
-    networkReadHigh: sum(children, (c) => c.networkReadHigh),
-    cacheReadLow: sum(children, (c) => c.cacheReadLow),
-    cacheReadHigh: sum(children, (c) => c.cacheReadHigh),
-    networkWriteLow: sum(children, (c) => c.networkWriteLow),
-    networkWriteHigh: sum(children, (c) => c.networkWriteHigh),
-    cacheWriteLow: sum(children, (c) => c.cacheWriteLow),
-    cacheWriteHigh: sum(children, (c) => c.cacheWriteHigh),
-    readOps: sum(children, (c) => c.readOps),
-    cacheHits: sum(children, (c) => c.cacheHits),
-    precision,
-    estimatedCostUsd: cost,
-  })
+  return combineSum('|', children)
 }
 
+/**
+ * Aggregate plan results for ;, &&, ||: sums when every command runs, a
+ * min/max envelope for || where only one branch runs.
+ */
 export function rollupList(op: string, children: ProvisionResult[]): ProvisionResult {
-  const hasUnknown = children.some((c) => c.precision === Precision.UNKNOWN)
-  const hasRange = children.some((c) => c.precision === Precision.RANGE)
-  const basePrecision = hasUnknown
-    ? Precision.UNKNOWN
-    : hasRange
-      ? Precision.RANGE
-      : Precision.EXACT
-
-  const allCosts = children.map((c) => c.estimatedCostUsd).filter((c): c is number => c !== null)
-  let cost: number | null =
-    allCosts.length === children.length && children.length > 0
-      ? allCosts.reduce((a, b) => a + b, 0)
-      : null
-
   if (op === '||') {
-    cost = allCosts.length > 0 ? Math.min(...allCosts) : null
-    return new ProvisionResult({
-      op,
-      children,
-      networkReadLow: min(children, (c) => c.networkReadLow),
-      networkReadHigh: max(children, (c) => c.networkReadHigh),
-      cacheReadLow: min(children, (c) => c.cacheReadLow),
-      cacheReadHigh: max(children, (c) => c.cacheReadHigh),
-      networkWriteLow: min(children, (c) => c.networkWriteLow),
-      networkWriteHigh: max(children, (c) => c.networkWriteHigh),
-      cacheWriteLow: min(children, (c) => c.cacheWriteLow),
-      cacheWriteHigh: max(children, (c) => c.cacheWriteHigh),
-      readOps: min(children, (c) => c.readOps),
-      cacheHits: min(children, (c) => c.cacheHits),
-      precision: basePrecision !== Precision.UNKNOWN ? Precision.RANGE : Precision.UNKNOWN,
-      estimatedCostUsd: cost,
-    })
+    return combineAlternative(op, children)
   }
-
-  return new ProvisionResult({
-    op,
-    children,
-    networkReadLow: sum(children, (c) => c.networkReadLow),
-    networkReadHigh: sum(children, (c) => c.networkReadHigh),
-    cacheReadLow: sum(children, (c) => c.cacheReadLow),
-    cacheReadHigh: sum(children, (c) => c.cacheReadHigh),
-    networkWriteLow: sum(children, (c) => c.networkWriteLow),
-    networkWriteHigh: sum(children, (c) => c.networkWriteHigh),
-    cacheWriteLow: sum(children, (c) => c.cacheWriteLow),
-    cacheWriteHigh: sum(children, (c) => c.cacheWriteHigh),
-    readOps: sum(children, (c) => c.readOps),
-    cacheHits: sum(children, (c) => c.cacheHits),
-    precision: basePrecision,
-    estimatedCostUsd: cost,
-  })
-}
-
-function sum<T>(items: readonly T[], pick: (t: T) => number): number {
-  return items.reduce((acc, t) => acc + pick(t), 0)
-}
-function min<T>(items: readonly T[], pick: (t: T) => number): number {
-  return items.length === 0 ? 0 : Math.min(...items.map(pick))
-}
-function max<T>(items: readonly T[], pick: (t: T) => number): number {
-  return items.length === 0 ? 0 : Math.max(...items.map(pick))
+  return combineSum(op, children)
 }

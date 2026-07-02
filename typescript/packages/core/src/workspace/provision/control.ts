@@ -57,20 +57,7 @@ export async function handleForProvision(
   session: Session,
 ): Promise<ProvisionResult> {
   const result = await planBody(provisionNode, body, session)
-  return new ProvisionResult({
-    command: 'for',
-    networkReadLow: result.networkReadLow * n,
-    networkReadHigh: result.networkReadHigh * n,
-    cacheReadLow: result.cacheReadLow * n,
-    cacheReadHigh: result.cacheReadHigh * n,
-    networkWriteLow: result.networkWriteLow * n,
-    networkWriteHigh: result.networkWriteHigh * n,
-    cacheWriteLow: result.cacheWriteLow * n,
-    cacheWriteHigh: result.cacheWriteHigh * n,
-    readOps: result.readOps * n,
-    cacheHits: result.cacheHits * n,
-    precision: result.precision,
-  })
+  return result.scaled(n, 'for')
 }
 
 export async function handleWhileProvision(

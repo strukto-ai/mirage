@@ -56,20 +56,7 @@ async def handle_for_provision(
 ) -> ProvisionResult:
     """Plan a for loop: body cost x iteration count."""
     result = await _plan_body(provision_node_fn, body, session)
-    return ProvisionResult(
-        command="for",
-        network_read_low=result.network_read_low * n,
-        network_read_high=result.network_read_high * n,
-        cache_read_low=result.cache_read_low * n,
-        cache_read_high=result.cache_read_high * n,
-        network_write_low=result.network_write_low * n,
-        network_write_high=result.network_write_high * n,
-        cache_write_low=result.cache_write_low * n,
-        cache_write_high=result.cache_write_high * n,
-        read_ops=result.read_ops * n,
-        cache_hits=result.cache_hits * n,
-        precision=result.precision,
-    )
+    return result.scaled(n, command="for")
 
 
 async def handle_while_provision(
