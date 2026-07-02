@@ -49,6 +49,7 @@ import {
   ConsistencyPolicy,
   DEFAULT_AGENT_ID,
   DriftPolicy,
+  FileStat,
   FileType,
   MountMode,
   type PathSpec,
@@ -653,7 +654,11 @@ export class Workspace {
           opName,
         ),
     )
-    return applyOpSafeguard(result, opOverride)
+    const guarded = await applyOpSafeguard(result, opOverride)
+    if (opName === 'stat' && guarded instanceof FileStat) {
+      return this.dispatcher.mergeOverlayStat(path, guarded)
+    }
+    return guarded
   }
 
   async resolve(path: string): Promise<[Resource, PathSpec, MountMode]> {

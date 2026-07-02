@@ -22,6 +22,7 @@ from mirage.ops.disk.read.read import read
 from mirage.ops.disk.readdir import readdir
 from mirage.ops.disk.rename import rename
 from mirage.ops.disk.rmdir import rmdir
+from mirage.ops.disk.set_attrs import set_attrs
 from mirage.ops.disk.stat import stat
 from mirage.ops.disk.truncate import truncate
 from mirage.ops.disk.unlink import unlink
@@ -40,6 +41,6 @@ read_parquet = try_load_command("mirage.ops.disk.read.read_parquet",
 
 OPS = [
     c for c in (append_bytes, create, mkdir, read, read_feather, read_hdf5,
-                read_orc, read_parquet, readdir, rename, rmdir, stat, truncate,
-                unlink, write_bytes) if c is not None
+                read_orc, read_parquet, readdir, rename, rmdir, set_attrs,
+                stat, truncate, unlink, write_bytes) if c is not None
 ]

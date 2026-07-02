@@ -169,29 +169,32 @@ async def prepare_mv(
     namespace: Namespace,
     dispatch: Callable,
     items: list[str | PathSpec],
-) -> tuple[list[str | PathSpec], str | None, tuple[ByteSource | None, IOResult,
-                                                   ExecutionNode] | None]:
-    """Adjust a two-operand ``mv`` for symlink operands.
+) -> tuple[list[str | PathSpec], str | None, tuple[str, str] | None,
+           tuple[ByteSource | None, IOResult, ExecutionNode] | None]:
+    """Adjust a two-operand ``mv`` for node-meta operands.
 
     A link source renames the link entry itself (into a destination
     directory when one exists, mirroring rename(2) preceded by mv's dst
     stat). A link destination whose target is a directory is followed
     (mv moves into it); any other link destination is replaced, so its
-    entry must drop once the backend move succeeds.
+    entry must drop once the backend move succeeds. A plain source that
+    carries overlay attributes has its meta travel with the file once the
+    backend move succeeds.
 
     Args:
-        namespace (Namespace): addressing authority holding the link table.
+        namespace (Namespace): addressing authority holding the node table.
         dispatch (Callable): op dispatcher used to stat the destination.
         items (list[str | PathSpec]): classified command parts.
 
     Returns:
         tuple: (possibly rewritten parts, link path to unlink after a
+        successful backend move, (src, dst) meta rename to apply after a
         successful backend move, early result when the mv completed as a
         pure namespace rename).
     """
     paths = [p for p in items if isinstance(p, PathSpec)]
     if len(paths) != 2:
-        return items, None, None
+        return items, None, None, None
     src, dst = paths
 
     if namespace.is_link(src.virtual):
@@ -202,17 +205,26 @@ async def prepare_mv(
                           src.virtual.rsplit("/", 1)[-1])
         namespace.unlink(target_dst)
         namespace.rename(src.virtual, target_dst)
-        return items, None, (None, IOResult(),
-                             ExecutionNode(command="mv", exit_code=0))
+        return items, None, None, (None, IOResult(),
+                                   ExecutionNode(command="mv", exit_code=0))
+
+    post_rename: tuple[str, str] | None = None
+    if namespace.meta_for(src.virtual) is not None:
+        target_dst = dst.virtual
+        stat = await _stat_or_none(dispatch, dst)
+        if stat is not None and stat.type == FileType.DIRECTORY:
+            target_dst = (dst.virtual.rstrip("/") + "/" +
+                          src.virtual.rsplit("/", 1)[-1])
+        post_rename = (src.virtual, target_dst)
 
     if namespace.is_link(dst.virtual):
         followed = namespace.follow(dst.virtual)
         stat = await _stat_or_none(dispatch, PathSpec.from_str_path(followed))
         if stat is not None and stat.type == FileType.DIRECTORY:
-            return follow_paths(namespace, items), None, None
-        return items, dst.virtual, None
+            return follow_paths(namespace, items), None, post_rename, None
+        return items, dst.virtual, post_rename, None
 
-    return items, None, None
+    return items, None, post_rename, None
 
 
 async def _stat_or_none(dispatch: Callable, path: PathSpec):

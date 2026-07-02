@@ -15,7 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { LinearResource, MountMode, Workspace, type LinearConfig } from '@struktoai/mirage-node'
+import { LinearResource, MountMode, Workspace, type FileStat, type LinearConfig } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../.env.development') })
@@ -98,6 +98,21 @@ async function main(): Promise<void> {
 
     console.log(`\n=== stat ${i0}/issue.json ===`)
     await run(ws, `stat "${issuePath}/issue.json"`)
+
+
+    // chmod/chown/touch never hit the Linear API: attrs land in the
+    // workspace namespace (durable, snapshot-captured) and merge into
+    // dispatch-level stat.
+    console.log(`=== metadata overlay on ${issuePath}/issue.json ===`)
+    const metaRes = await ws.execute(
+      `chmod 640 "${issuePath}/issue.json" && chown 500:dev "${issuePath}/issue.json" && touch -t 202601021530 "${issuePath}/issue.json"`,
+    )
+    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+    const metaSt = (await ws.dispatch('stat', `${issuePath}/issue.json`)) as FileStat
+    const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+    console.log(
+      `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+    )
 
     console.log(`\n=== wc / tail issue.json ===`)
     await run(ws, `wc "${issuePath}/issue.json"`)

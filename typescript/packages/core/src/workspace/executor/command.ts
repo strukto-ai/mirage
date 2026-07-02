@@ -300,7 +300,7 @@ export async function handleCommand(
     let stdout = initialStdout
     if (cmdName === 'ls' && io.exitCode === 0) {
       stdout = await injectChildMounts(stdout, registry, paths, flagKwargs, session.cwd)
-      if (namespace !== undefined && namespace.symlinks.size > 0) {
+      if (namespace?.hasLinks() === true) {
         stdout = await injectLinks(stdout, namespace, paths, flagKwargs, session.cwd)
       }
     }

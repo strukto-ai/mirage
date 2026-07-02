@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.postgres import PostgresConfig, PostgresResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -77,6 +78,21 @@ async def main():
 
     fp = f"/pg/public/tables/{table}/rows.jsonl"
     await _run(ws, f'stat "{fp}"')
+
+    # chmod/chown/touch never hit Postgres: attrs land in the workspace
+    # namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print(f"=== metadata overlay on {fp} ===")
+    meta_res = await ws.execute(f'chmod 640 "{fp}" && chown 500:dev "{fp}"'
+                                f' && touch -t 202601021530 "{fp}"')
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    try:
+        meta_st, _ = await ws.dispatch("stat", PathSpec.from_str_path(fp))
+        print(
+            f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+            f"gid={meta_st.gid} mtime={meta_st.modified}")
+    except FileNotFoundError:
+        print("  dispatch stat: target missing in this environment")
 
     print("\n" + "=" * 60)
     print("HEAD / TAIL / WC (predicate pushdown to SQL)")

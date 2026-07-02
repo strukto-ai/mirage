@@ -25,21 +25,27 @@ export async function rename(accessor: RedisAccessor, src: PathSpec, dst: PathSp
   if (await store.hasFile(s)) {
     const data = await store.getFile(s)
     const mod = await store.getModified(s)
+    const attrs = await store.getAttrs(s)
     if (data === null) throw new Error(`file not found: ${s}`)
     await store.delFile(s)
     await store.delModified(s)
+    await store.delAttrs(s)
     await store.setFile(d, data)
     await store.setModified(d, mod ?? now)
+    if (Object.keys(attrs).length > 0) await store.setAttrs(d, attrs)
     await invalidateAfterUnlink(s)
     await invalidateAfterWrite(d)
     return
   }
   if (await store.hasDir(s)) {
     const mod = await store.getModified(s)
+    const attrs = await store.getAttrs(s)
     await store.removeDir(s)
     await store.delModified(s)
+    await store.delAttrs(s)
     await store.addDir(d)
     await store.setModified(d, mod ?? now)
+    if (Object.keys(attrs).length > 0) await store.setAttrs(d, attrs)
     const prefix = rstripSlash(s) + '/'
     const dPrefix = rstripSlash(d) + '/'
     const files = await store.listFiles()
@@ -48,8 +54,11 @@ export async function rename(accessor: RedisAccessor, src: PathSpec, dst: PathSp
         const newKey = dPrefix + key.slice(prefix.length)
         const data = await store.getFile(key)
         if (data === null) continue
+        const subAttrs = await store.getAttrs(key)
         await store.delFile(key)
+        await store.delAttrs(key)
         await store.setFile(newKey, data)
+        if (Object.keys(subAttrs).length > 0) await store.setAttrs(newKey, subAttrs)
       }
     }
     await invalidateAfterUnlink(s)

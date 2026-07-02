@@ -16,7 +16,7 @@ import { setServers } from 'node:dns'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { MongoDBResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { MongoDBResource, MountMode, Workspace, type FileStat } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 setServers(['8.8.8.8', '1.1.1.1'])
@@ -90,6 +90,21 @@ try {
   await run(`tail -n 3 "${collDoc}"`)
   await run(`wc -l "${collDoc}"`)
   await run(`stat "${collDoc}"`)
+
+
+  // chmod/chown/touch never hit MongoDB: attrs land in the
+  // workspace namespace (durable, snapshot-captured) and merge into
+  // dispatch-level stat.
+  console.log(`=== metadata overlay on ${collDoc} ===`)
+  const metaRes = await ws.execute(
+    `chmod 640 "${collDoc}" && chown 500:dev "${collDoc}" && touch -t 202601021530 "${collDoc}"`,
+  )
+  console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+  const metaSt = (await ws.dispatch('stat', `${collDoc}`)) as FileStat
+  const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+  console.log(
+    `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+  )
   await run(`head -n 2 "${viewDoc}"`)
 
   console.log('\n' + '='.repeat(60))

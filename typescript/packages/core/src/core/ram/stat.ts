@@ -20,12 +20,17 @@ import { enoent } from '../../utils/errors.ts'
 
 export function stat(accessor: RAMAccessor, path: PathSpec): Promise<FileStat> {
   const p = norm(path.mountPath)
+  const attrs = accessor.store.attrs.get(p) ?? {}
   if (accessor.store.dirs.has(p)) {
     return Promise.resolve(
       new FileStat({
         name: basename(p),
         modified: accessor.store.modified.get(p) ?? null,
         type: FileType.DIRECTORY,
+        mode: attrs.mode,
+        uid: attrs.uid,
+        gid: attrs.gid,
+        atime: attrs.atime,
       }),
     )
   }
@@ -39,6 +44,10 @@ export function stat(accessor: RAMAccessor, path: PathSpec): Promise<FileStat> {
       size: data.byteLength,
       modified: accessor.store.modified.get(p) ?? null,
       type: guessType(p),
+      mode: attrs.mode,
+      uid: attrs.uid,
+      gid: attrs.gid,
+      atime: attrs.atime,
     }),
   )
 }

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import dotenv from 'dotenv'
-import { MountMode, SupabaseResource, Workspace, type SupabaseConfig } from '@struktoai/mirage-node'
+import { MountMode, SupabaseResource, Workspace, type FileStat, type SupabaseConfig } from '@struktoai/mirage-node'
 
 dotenv.config({ path: '.env.development' })
 
@@ -74,6 +74,14 @@ async function main(): Promise<void> {
     console.log(`\n=== echo > ${key} ===`)
     const writeResult = await run(ws, `echo 'hello from TS Supabase' > ${key}`)
     console.log(`  exit=${String(writeResult.exitCode)}${writeResult.stderr ? `  stderr=${writeResult.stderr}` : ''}`)
+    if (writeResult.exitCode !== 0) {
+      // Free-tier Supabase pauses idle projects; every S3 call then
+      // returns HTTP 540, which the SDK reports as a deserialization
+      // error. Bail out with a hint instead of failing every section.
+      console.log('supabase mount unavailable (paused project or bad creds);')
+      console.log('unpause the project in the Supabase dashboard and rerun')
+      return
+    }
 
     console.log(`\n=== cat ${key} ===`)
     console.log(`  ${(await run(ws, `cat ${key}`)).stdout.trim()}`)
@@ -86,6 +94,25 @@ async function main(): Promise<void> {
 
     console.log(`\n=== ls /supabase/ts-demo/ ===`)
     console.log((await run(ws, 'ls /supabase/ts-demo/')).stdout)
+
+
+    // chmod/chown/touch never hit the Storage API: attrs land in the
+    // workspace namespace (durable, snapshot-captured) and merge into
+    // dispatch-level stat.
+    console.log(`=== metadata overlay on ${key} ===`)
+    const metaRes = await ws.execute(
+      `chmod 640 "${key}" && chown 500:dev "${key}" && touch -t 202601021530 "${key}"`,
+    )
+    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+    try {
+      const metaSt = (await ws.dispatch('stat', `${key}`)) as FileStat
+      const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+      console.log(
+        `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+      )
+    } catch {
+      console.log('  dispatch stat: target unavailable (check bucket contents)')
+    }
 
     console.log(`\n=== rm ${key} ===`)
     const rmResult = await run(ws, `rm ${key}`)

@@ -20,3 +20,6 @@ class RAMStore:
     files: dict[str, bytes] = field(default_factory=dict)
     dirs: set[str] = field(default_factory=lambda: {"/"})
     modified: dict[str, str] = field(default_factory=dict)
+    # Per-path metadata set via setattr (mode/uid/gid/atime); stored, not
+    # enforced: mount mode does real access control.
+    attrs: dict[str, dict] = field(default_factory=dict)

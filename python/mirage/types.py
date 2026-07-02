@@ -81,6 +81,10 @@ class FileStat(BaseModel):
     fingerprint: str | None = None
     revision: str | None = None
     type: FileType | None = None
+    mode: int | None = None
+    uid: int | str | None = None
+    gid: int | str | None = None
+    atime: str | None = None
     extra: dict = Field(default_factory=dict)
 
 
@@ -287,7 +291,7 @@ class StateKey(StrEnum):
     JOBS = "jobs"
     FINGERPRINTS = "fingerprints"
     LIVE_ONLY_MOUNTS = "live_only_mounts"
-    SYMLINKS = "symlinks"
+    NODES = "nodes"
 
 
 class DriftPolicy(StrEnum):

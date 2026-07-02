@@ -15,7 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { GmailResource, MountMode, Workspace, type GmailConfig } from '@struktoai/mirage-node'
+import { GmailResource, MountMode, Workspace, type FileStat, type GmailConfig } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../.env.development'), override: true })
@@ -101,6 +101,21 @@ async function main(): Promise<void> {
     printSection('tail -n 3', (await run(ws, `tail -n 3 ${msgPath}`)).out, '')
     printSection('wc -l', (await run(ws, `wc -l ${msgPath}`)).out, '')
     printSection('stat', (await run(ws, `stat ${msgPath}`)).out, '')
+
+
+    // chmod/chown/touch never hit the Gmail API: attrs land in the
+    // workspace namespace (durable, snapshot-captured) and merge into
+    // dispatch-level stat.
+    console.log(`=== metadata overlay on ${msgPath} ===`)
+    const metaRes = await ws.execute(
+      `chmod 640 "${msgPath}" && chown 500:dev "${msgPath}" && touch -t 202601021530 "${msgPath}"`,
+    )
+    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+    const metaSt = (await ws.dispatch('stat', `${msgPath}`)) as FileStat
+    const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+    console.log(
+      `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+    )
     printSection('jq .subject', (await run(ws, `jq ".subject" ${msgPath}`)).out, '')
     printSection('jq .from', (await run(ws, `jq ".from" ${msgPath}`)).out, '')
     printSection('nl', (await run(ws, `nl ${msgPath}`)).out, '', 300)

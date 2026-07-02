@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { homedir } from 'node:os'
-import { MountMode, SSHResource, type SSHConfig, Workspace } from '@struktoai/mirage-node'
+import { MountMode, SSHResource, type FileStat, type SSHConfig, Workspace } from '@struktoai/mirage-node'
 
 const config: SSHConfig = {
   host: 'dev',
@@ -44,6 +44,21 @@ async function main(): Promise<void> {
     await show('head -n 1 /ssh/data.txt', 'head -n 1 /ssh/data.txt')
     await show('wc /ssh/readme.txt', 'wc /ssh/readme.txt')
     await show('grep hello /ssh/readme.txt', 'grep hello /ssh/readme.txt')
+
+
+    // chmod/chown/touch never hit the SFTP server: attrs land in the
+    // workspace namespace (durable, snapshot-captured) and merge into
+    // dispatch-level stat.
+    console.log(`=== metadata overlay on /ssh/readme.txt ===`)
+    const metaRes = await ws.execute(
+      `chmod 640 "/ssh/readme.txt" && chown 500:dev "/ssh/readme.txt" && touch -t 202601021530 "/ssh/readme.txt"`,
+    )
+    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+    const metaSt = (await ws.dispatch('stat', `/ssh/readme.txt`)) as FileStat
+    const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+    console.log(
+      `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+    )
 
     // ── generic text commands (delegate to shared generics) ──
     const generics = [

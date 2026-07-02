@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.gslides import GSlidesConfig, GSlidesResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -72,6 +73,19 @@ async def main() -> None:
     print("=== stat ===")
     r = await ws.execute(f"stat /gslides/owned/{first}")
     print(await r.stdout_str())
+
+    # chmod/chown/touch never hit the Slides API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print(f"=== metadata overlay on /gslides/owned/{first} ===")
+    r = await ws.execute(f'chmod 640 "/gslides/owned/{first}"'
+                         f' && chown 500:dev "/gslides/owned/{first}"'
+                         f' && touch -t 202601021530 "/gslides/owned/{first}"')
+    print(f"  chmod/chown/touch exit={r.exit_code}")
+    st, _ = await ws.dispatch(
+        "stat", PathSpec.from_str_path(f"/gslides/owned/{first}"))
+    print(f"  dispatch stat: mode={oct(st.mode)[2:]} uid={st.uid} "
+          f"gid={st.gid} mtime={st.modified}")
 
     print("=== jq .title ===")
     r = await ws.execute(f'jq ".title" /gslides/owned/{first}')

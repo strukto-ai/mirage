@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.gdocs import GDocsConfig, GDocsResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -72,6 +73,19 @@ async def main() -> None:
     print("=== stat ===")
     r = await ws.execute(f"stat /gdocs/owned/{first}")
     print(await r.stdout_str())
+
+    # chmod/chown/touch never hit the Docs API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print(f"=== metadata overlay on /gdocs/owned/{first} ===")
+    r = await ws.execute(f'chmod 640 "/gdocs/owned/{first}"'
+                         f' && chown 500:dev "/gdocs/owned/{first}"'
+                         f' && touch -t 202601021530 "/gdocs/owned/{first}"')
+    print(f"  chmod/chown/touch exit={r.exit_code}")
+    st, _ = await ws.dispatch("stat",
+                              PathSpec.from_str_path(f"/gdocs/owned/{first}"))
+    print(f"  dispatch stat: mode={oct(st.mode)[2:]} uid={st.uid} "
+          f"gid={st.gid} mtime={st.modified}")
 
     print("=== jq .title ===")
     r = await ws.execute(f'jq ".title" /gdocs/owned/{first}')

@@ -55,6 +55,7 @@ class DevStore:
         self.files: _DevFiles = _DevFiles()
         self.dirs: set[str] = {"/"}
         self.modified: dict[str, str] = {}
+        self.attrs: dict[str, dict] = {}
 
 
 class DevResource(BaseResource):

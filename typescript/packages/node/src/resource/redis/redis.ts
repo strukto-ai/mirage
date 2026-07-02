@@ -69,6 +69,8 @@ export interface RedisResourceState {
   keyPrefix: string
   files: Record<string, Uint8Array>
   dirs: string[]
+  attrs?: Record<string, Record<string, string>>
+  modified?: Record<string, string>
 }
 
 export class RedisResource extends BaseResource implements Resource {
@@ -222,6 +224,22 @@ export class RedisResource extends BaseResource implements Resource {
       if (data !== null) files[key] = data
     }
     const dirs = [...(await this.store.listDirs())].sort()
+    const c = await this.store.client()
+    const attrs: Record<string, Record<string, string>> = {}
+    const attrsStrip = `${this.keyPrefix}attrs:`.length
+    for await (const key of c.scanIterator({ MATCH: `${this.keyPrefix}attrs:*` })) {
+      for (const k of Array.isArray(key) ? key : [key]) {
+        attrs[k.slice(attrsStrip)] = { ...(await c.hGetAll(k)) }
+      }
+    }
+    const modified: Record<string, string> = {}
+    const modStrip = `${this.keyPrefix}modified:`.length
+    for await (const key of c.scanIterator({ MATCH: `${this.keyPrefix}modified:*` })) {
+      for (const k of Array.isArray(key) ? key : [key]) {
+        const val = await c.get(k)
+        if (val !== null) modified[k.slice(modStrip)] = val
+      }
+    }
     return {
       type: this.kind,
       config: {
@@ -231,6 +249,8 @@ export class RedisResource extends BaseResource implements Resource {
       keyPrefix: this.keyPrefix,
       files,
       dirs,
+      attrs,
+      modified,
     }
   }
 
@@ -246,6 +266,14 @@ export class RedisResource extends BaseResource implements Resource {
     }
     for (const dir of state.dirs) {
       pipe.sAdd(dirKey, dir)
+    }
+    for (const [path, fields] of Object.entries(state.attrs ?? {})) {
+      if (Object.keys(fields).length > 0) {
+        pipe.hSet(`${this.keyPrefix}attrs:${path}`, fields)
+      }
+    }
+    for (const [path, ts] of Object.entries(state.modified ?? {})) {
+      pipe.set(`${this.keyPrefix}modified:${path}`, ts)
     }
     await pipe.exec()
   }

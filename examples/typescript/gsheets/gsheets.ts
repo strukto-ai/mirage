@@ -15,7 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { GSheetsResource, MountMode, Workspace, type GSheetsConfig } from '@struktoai/mirage-node'
+import { GSheetsResource, MountMode, Workspace, type FileStat, type GSheetsConfig } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../.env.development'), override: true })
@@ -66,6 +66,21 @@ async function main(): Promise<void> {
     const stat = await run(ws, `stat "/gsheets/owned/${first}"`)
     console.log('=== stat ===')
     console.log(`  ${stat.out.trim()}`)
+
+
+    // chmod/chown/touch never hit the Sheets API: attrs land in the
+    // workspace namespace (durable, snapshot-captured) and merge into
+    // dispatch-level stat.
+    console.log(`=== metadata overlay on /gsheets/owned/${first} ===`)
+    const metaRes = await ws.execute(
+      `chmod 640 "/gsheets/owned/${first}" && chown 500:dev "/gsheets/owned/${first}" && touch -t 202601021530 "/gsheets/owned/${first}"`,
+    )
+    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+    const metaSt = (await ws.dispatch('stat', `/gsheets/owned/${first}`)) as FileStat
+    const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+    console.log(
+      `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+    )
 
     const jq = await run(ws, `jq ".properties.title" "/gsheets/owned/${first}"`)
     console.log('=== jq .properties.title ===')

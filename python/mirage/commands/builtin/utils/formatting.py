@@ -33,10 +33,19 @@ def _human_size(n: int) -> str:
     return f"{text}{units[i]}"
 
 
+def _perm_triplet(bits: int) -> str:
+    return (("r" if bits & 4 else "-") + ("w" if bits & 2 else "-") +
+            ("x" if bits & 1 else "-"))
+
+
 def _ls_mode_string(s: FileStat) -> str:
     is_dir = s.type == FileType.DIRECTORY
     type_char = "d" if is_dir else "-"
-    perms = "rwxr-xr-x" if is_dir else "rw-r--r--"
+    if s.mode is not None:
+        perms = (_perm_triplet(s.mode >> 6) + _perm_triplet(s.mode >> 3) +
+                 _perm_triplet(s.mode))
+    else:
+        perms = "rwxr-xr-x" if is_dir else "rw-r--r--"
     return f"{type_char}{perms}"
 
 
@@ -75,5 +84,7 @@ def format_ls_long(
         mode = _ls_mode_string(s)
         size = raw_size.rjust(width)
         time = _ls_time_string(s.modified)
-        out.append(f"{mode} 1 {owner} {group} {size} {time} {s.name}")
+        who = str(s.uid) if s.uid is not None else owner
+        grp = str(s.gid) if s.gid is not None else group
+        out.append(f"{mode} 1 {who} {grp} {size} {time} {s.name}")
     return out

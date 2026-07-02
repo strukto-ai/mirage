@@ -180,6 +180,7 @@ async function statOrNull(dispatch: DispatchFn, path: PathSpec): Promise<FileSta
 export interface PreparedMv {
   items: (string | PathSpec)[]
   postUnlink: string | null
+  postRename: [string, string] | null
   early: Result | null
 }
 
@@ -197,7 +198,7 @@ export async function prepareMv(
   const src = paths[0]
   const dst = paths[1]
   if (paths.length !== 2 || src === undefined || dst === undefined) {
-    return { items, postUnlink: null, early: null }
+    return { items, postUnlink: null, postRename: null, early: null }
   }
 
   if (namespace.isLink(src.virtual)) {
@@ -210,19 +211,32 @@ export async function prepareMv(
     namespace.unlink(targetDst)
     namespace.rename(src.virtual, targetDst)
     const early: Result = [null, new IOResult(), new ExecutionNode({ command: 'mv', exitCode: 0 })]
-    return { items, postUnlink: null, early }
+    return { items, postUnlink: null, postRename: null, early }
+  }
+
+  // A plain source carrying overlay attributes has its meta travel with
+  // the file once the backend move succeeds.
+  let postRename: [string, string] | null = null
+  if (namespace.metaFor(src.virtual) !== null) {
+    let targetDst = dst.virtual
+    const stat = await statOrNull(dispatch, dst)
+    if (stat !== null && stat.type === FileType.DIRECTORY) {
+      const name = src.virtual.slice(src.virtual.lastIndexOf('/') + 1)
+      targetDst = rstripSlash(dst.virtual) + '/' + name
+    }
+    postRename = [src.virtual, targetDst]
   }
 
   if (namespace.isLink(dst.virtual)) {
     const followed = namespace.follow(dst.virtual)
     const stat = await statOrNull(dispatch, PathSpec.fromStrPath(followed))
     if (stat !== null && stat.type === FileType.DIRECTORY) {
-      return { items: followPaths(namespace, items), postUnlink: null, early: null }
+      return { items: followPaths(namespace, items), postUnlink: null, postRename, early: null }
     }
-    return { items, postUnlink: dst.virtual, early: null }
+    return { items, postUnlink: dst.virtual, postRename, early: null }
   }
 
-  return { items, postUnlink: null, early: null }
+  return { items, postUnlink: null, postRename, early: null }
 }
 
 export function handleReadlink(

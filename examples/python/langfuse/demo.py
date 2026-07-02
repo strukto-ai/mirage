@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.langfuse import LangfuseConfig, LangfuseResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -165,6 +166,20 @@ async def main():
 
     await _run(ws, 'stat "/langfuse/prompts/summarize"')
     await _run(ws, 'stat "/langfuse/datasets/qa-eval"')
+
+    # chmod/chown/touch never hit the Langfuse API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print("=== metadata overlay on /langfuse/prompts/summarize ===")
+    meta_res = await ws.execute(
+        'chmod 640 "/langfuse/prompts/summarize"'
+        ' && chown 500:dev "/langfuse/prompts/summarize"'
+        ' && touch -t 202601021530 "/langfuse/prompts/summarize"')
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    meta_st, _ = await ws.dispatch(
+        "stat", PathSpec.from_str_path("/langfuse/prompts/summarize"))
+    print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+          f"gid={meta_st.gid} mtime={meta_st.modified}")
 
     print("\n" + "=" * 60)
     print("TREE, FIND, NAVIGATION")

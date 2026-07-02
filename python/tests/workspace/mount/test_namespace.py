@@ -117,3 +117,50 @@ def test_purge_under_drops_nested_entries(namespace):
     assert namespace.purge_under("/data/sub") == 2
     assert namespace.is_link("/data/keep") is True
     assert namespace.is_link("/data/sub/a") is False
+
+
+def test_set_attrs_creates_overlay_node(namespace):
+    namespace.set_attrs("/data/f.txt", mode=0o601, uid=500, gid="dev")
+    meta = namespace.meta_for("/data/f.txt")
+    assert meta.target is None
+    assert meta.mode == 0o601
+    assert meta.uid == 500
+    assert meta.gid == "dev"
+    assert namespace.is_link("/data/f.txt") is False
+
+
+def test_set_attrs_partial_update_keeps_fields(namespace):
+    namespace.set_attrs("/data/f.txt", mode=0o600)
+    namespace.set_attrs("/data/f.txt", uid="alice")
+    meta = namespace.meta_for("/data/f.txt")
+    assert meta.mode == 0o600
+    assert meta.uid == "alice"
+
+
+def test_set_attrs_on_link_keeps_target(namespace):
+    namespace.symlink("/data/link", "/t1", 1.0)
+    namespace.set_attrs("/data/link", mtime=2.0)
+    meta = namespace.meta_for("/data/link")
+    assert meta.target == "/t1"
+    assert meta.mtime == 2.0
+    assert namespace.readlink("/data/link") == "/t1"
+
+
+def test_overlay_nodes_are_not_links(namespace):
+    namespace.set_attrs("/data/f.txt", mode=0o600)
+    assert namespace.symlink_targets() == {}
+    assert namespace.has_links() is False
+    assert namespace.links_under("/data") == {}
+
+
+def test_unlink_drops_overlay_node(namespace):
+    namespace.set_attrs("/data/f.txt", mode=0o600)
+    namespace.unlink("/data/f.txt")
+    assert namespace.meta_for("/data/f.txt") is None
+
+
+def test_rename_moves_overlay_node(namespace):
+    namespace.set_attrs("/data/f.txt", mode=0o600)
+    namespace.rename("/data/f.txt", "/data/g.txt")
+    assert namespace.meta_for("/data/f.txt") is None
+    assert namespace.meta_for("/data/g.txt").mode == 0o600

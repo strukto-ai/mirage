@@ -16,6 +16,7 @@ import asyncio
 
 from mirage import MountMode, Workspace
 from mirage.resource.ssh import SSHConfig, SSHResource
+from mirage.types import PathSpec
 
 # ~/.ssh/config:
 #   Host dev
@@ -71,6 +72,19 @@ async def main() -> None:
     print("=== grep hello /ssh/readme.txt ===")
     result = await ws.execute("grep hello /ssh/readme.txt")
     print(await result.stdout_str())
+
+    # chmod/chown/touch never hit the SFTP server: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print("=== metadata overlay on /ssh/readme.txt ===")
+    meta_res = await ws.execute('chmod 640 "/ssh/readme.txt"'
+                                ' && chown 500:dev "/ssh/readme.txt"'
+                                ' && touch -t 202601021530 "/ssh/readme.txt"')
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    meta_st, _ = await ws.dispatch("stat",
+                                   PathSpec.from_str_path("/ssh/readme.txt"))
+    print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+          f"gid={meta_st.gid} mtime={meta_st.modified}")
 
     # ── generic text commands (delegate to shared generics) ──
     for cmd in [

@@ -18,7 +18,7 @@ import { Binary, Int32, Utf8 } from 'apache-arrow'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { LanceDBResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { LanceDBResource, MountMode, Workspace, type FileStat } from '@struktoai/mirage-node'
 
 const FASHION_VOCAB = [
   'men', 'women', 'tshirt', 'shirt', 'jeans', 'shoes', 'sneakers', 'heels',
@@ -128,6 +128,21 @@ async function main(): Promise<void> {
   console.log('\n=== stat /fashion/Men/Shoes/White/3.jpg (raw image bytes) ===')
   const s = await ws.execute("stat -c '%s' /fashion/Men/Shoes/White/3.jpg")
   console.log(`  image size: ${DEC.decode(s.stdout).trim()} bytes`)
+
+
+  // chmod/chown/touch never hit LanceDB: attrs land in the
+  // workspace namespace (durable, snapshot-captured) and merge into
+  // dispatch-level stat.
+  console.log(`=== metadata overlay on /fashion/Men/Shoes/White/3.md ===`)
+  const metaRes = await ws.execute(
+    `chmod 640 "/fashion/Men/Shoes/White/3.md" && chown 500:dev "/fashion/Men/Shoes/White/3.md" && touch -t 202601021530 "/fashion/Men/Shoes/White/3.md"`,
+  )
+  console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+  const metaSt = (await ws.dispatch('stat', `/fashion/Men/Shoes/White/3.md`)) as FileStat
+  const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+  console.log(
+    `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+  )
 
   await show(ws, 'search "white running sneakers" /fashion')
 

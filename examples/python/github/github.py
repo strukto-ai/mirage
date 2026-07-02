@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.github import GitHubConfig, GitHubResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -77,6 +78,20 @@ async def main() -> None:
 
     r = await ws.execute("stat /github/python/mirage/types.py")
     print(await r.stdout_str())
+
+    # chmod/chown/touch never hit the GitHub API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print("=== metadata overlay on /github/python/mirage/types.py ===")
+    meta_res = await ws.execute(
+        'chmod 640 "/github/python/mirage/types.py"'
+        ' && chown 500:dev "/github/python/mirage/types.py"'
+        ' && touch -t 202601021530 "/github/python/mirage/types.py"')
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    meta_st, _ = await ws.dispatch(
+        "stat", PathSpec.from_str_path("/github/python/mirage/types.py"))
+    print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+          f"gid={meta_st.gid} mtime={meta_st.modified}")
 
     r = await ws.execute("du /github/python/mirage/core")
     print(await r.stdout_str())

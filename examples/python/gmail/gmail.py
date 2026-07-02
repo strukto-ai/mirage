@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.gmail import GmailConfig, GmailResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -107,6 +108,18 @@ async def main() -> None:
     print("=== stat ===")
     result = await ws.execute(f"stat {msg_path}")
     print(await result.stdout_str())
+
+    # chmod/chown/touch never hit the Gmail API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print(f"=== metadata overlay on {msg_path} ===")
+    result = await ws.execute(f'chmod 640 "{msg_path}" && chown 500:dev'
+                              f' "{msg_path}"'
+                              f' && touch -t 202601021530 "{msg_path}"')
+    print(f"  chmod/chown/touch exit={result.exit_code}")
+    st, _ = await ws.dispatch("stat", PathSpec.from_str_path(msg_path))
+    print(f"  dispatch stat: mode={oct(st.mode)[2:]} uid={st.uid} "
+          f"gid={st.gid} mtime={st.modified}")
 
     # jq
     print("=== jq .subject ===")

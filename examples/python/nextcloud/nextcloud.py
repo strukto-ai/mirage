@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.nextcloud import NextcloudConfig, NextcloudResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -69,6 +70,18 @@ async def main():
     print(f"=== sha256sum {test_file} ===")
     r = await ws.execute(f"sha256sum {test_file}")
     print((await r.stdout_str()).strip())
+
+    # chmod/chown/touch never hit the WebDAV server: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print(f"=== metadata overlay on {test_file} ===")
+    meta_res = await ws.execute(f'chmod 640 "{test_file}"'
+                                f' && chown 500:dev "{test_file}"'
+                                f' && touch -t 202601021530 "{test_file}"')
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    meta_st, _ = await ws.dispatch("stat", PathSpec.from_str_path(test_file))
+    print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+          f"gid={meta_st.gid} mtime={meta_st.modified}")
 
     print(f"\n=== rm {test_file} ===")
     r = await ws.execute(f"rm {test_file}")

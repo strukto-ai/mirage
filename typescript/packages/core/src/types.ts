@@ -189,6 +189,10 @@ export interface FileStatInit {
   fingerprint?: string | null
   revision?: string | null
   type?: FileType | null
+  mode?: number | null
+  uid?: number | string | null
+  gid?: number | string | null
+  atime?: string | null
   extra?: Record<string, unknown>
 }
 
@@ -199,6 +203,10 @@ export class FileStat {
   readonly fingerprint: string | null
   readonly revision: string | null
   readonly type: FileType | null
+  readonly mode: number | null
+  readonly uid: number | string | null
+  readonly gid: number | string | null
+  readonly atime: string | null
   readonly extra: Record<string, unknown>
 
   constructor(init: FileStatInit) {
@@ -208,6 +216,10 @@ export class FileStat {
     this.fingerprint = init.fingerprint ?? null
     this.revision = init.revision ?? null
     this.type = init.type ?? null
+    this.mode = init.mode ?? null
+    this.uid = init.uid ?? null
+    this.gid = init.gid ?? null
+    this.atime = init.atime ?? null
     this.extra = init.extra ?? {}
     Object.freeze(this)
   }

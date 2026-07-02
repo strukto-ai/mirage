@@ -24,6 +24,9 @@ from mirage.workspace.executor.builtins.man import (_collect_man_hits,
                                                     _render_man_entry,
                                                     _render_man_index,
                                                     handle_man)
+from mirage.workspace.executor.builtins.metadata import (handle_chmod,
+                                                         handle_chown,
+                                                         handle_touch)
 from mirage.workspace.executor.builtins.scope import _scope_path, _to_scope
 from mirage.workspace.executor.builtins.script import (handle_bash,
                                                        handle_eval,
@@ -57,6 +60,9 @@ __all__ = [
     'link_flags',
     'NO_FOLLOW_COMMANDS',
     'follow_paths',
+    'handle_chmod',
+    'handle_chown',
+    'handle_touch',
     'prepare_mv',
     'strip_link_operands',
     'handle_man',

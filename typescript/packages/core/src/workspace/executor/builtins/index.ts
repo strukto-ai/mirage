@@ -25,6 +25,14 @@ export {
   stripLinkOperands,
 } from './links.ts'
 export {
+  handleChmod,
+  handleChown,
+  handleTouch,
+  parseMode,
+  parseOwner,
+  parseTouchStamp,
+} from './metadata.ts'
+export {
   handleExport,
   handleLocal,
   handlePrintenv,

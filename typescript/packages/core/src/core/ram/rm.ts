@@ -25,6 +25,7 @@ export async function rmR(accessor: RAMAccessor, path: PathSpec): Promise<void> 
     if (key === p || key.startsWith(prefix)) {
       accessor.store.files.delete(key)
       accessor.store.modified.delete(key)
+      accessor.store.attrs.delete(key)
     }
   }
   await invalidateAfterUnlink(path)
@@ -32,6 +33,7 @@ export async function rmR(accessor: RAMAccessor, path: PathSpec): Promise<void> 
     if (key === p || key.startsWith(prefix)) {
       accessor.store.dirs.delete(key)
       accessor.store.modified.delete(key)
+      accessor.store.attrs.delete(key)
     }
   }
   return Promise.resolve()

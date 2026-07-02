@@ -45,6 +45,8 @@ import {
   handleEval,
   handleExport,
   handleHistory,
+  handleChmod,
+  handleChown,
   handleLn,
   handleLocal,
   handleMan,
@@ -52,6 +54,7 @@ import {
   handlePrintf,
   handleRead,
   handleReadlink,
+  handleTouch,
   handleReturn,
   handleSet,
   handleShift,
@@ -523,10 +526,23 @@ async function runCommandBody(
     }
   }
 
+  // Metadata commands (namespace-routed: resolve-then-setattr with
+  // overlay fallback; they run their own link follow).
+  if (name === 'chmod') {
+    return handleChmod(namespace, dispatch, classified.slice(1))
+  }
+  if (name === 'chown') {
+    return handleChown(namespace, dispatch, classified.slice(1))
+  }
+  if (name === 'touch') {
+    return handleTouch(namespace, dispatch, classified.slice(1))
+  }
+
   // Symlink-aware dispatch: reads follow links (open(2)); rm/mv act on
   // the link entry itself (lstat semantics).
   let postUnlink: string | null = null
-  if (namespace.symlinks.size > 0) {
+  let postRename: [string, string] | null = null
+  if (namespace.nodes.size > 0) {
     try {
       if (name === 'rm') {
         const [rest, removed] = stripLinkOperands(namespace, classified.slice(1))
@@ -538,6 +554,7 @@ async function runCommandBody(
         const prepared = await prepareMv(namespace, dispatch, classified.slice(1))
         classified = [...classified.slice(0, 1), ...prepared.items]
         postUnlink = prepared.postUnlink
+        postRename = prepared.postRename
         if (prepared.early !== null) return prepared.early
       } else if (!NO_FOLLOW_COMMANDS.has(name)) {
         classified = [...classified.slice(0, 1), ...followPaths(namespace, classified.slice(1))]
@@ -573,13 +590,19 @@ async function runCommandBody(
     namespace,
   )
 
-  if (io.exitCode === 0 && namespace.symlinks.size > 0) {
+  if (io.exitCode === 0 && namespace.nodes.size > 0) {
     if (name === 'rm') {
+      // A removed path takes its node meta (overlay attrs) with it; a
+      // removed dir purges everything underneath.
       for (const item of classified.slice(1)) {
-        if (item instanceof PathSpec) namespace.purgeUnder(item.virtual)
+        if (item instanceof PathSpec) {
+          namespace.unlink(item.virtual)
+          namespace.purgeUnder(item.virtual)
+        }
       }
     }
     if (postUnlink !== null) namespace.unlink(postUnlink)
+    if (postRename !== null) namespace.rename(postRename[0], postRename[1])
   }
   return [stdout, io, execNode]
 }

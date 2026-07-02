@@ -97,6 +97,10 @@ class DiskResource(BaseResource):
         return {
             "type": self.name,
             "files": files,
+            "attrs": {
+                k: dict(v)
+                for k, v in self.accessor.attrs.items()
+            },
         }
 
     def load_state(self, state: dict) -> None:
@@ -105,3 +109,8 @@ class DiskResource(BaseResource):
             target = self.root / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
+        self.accessor.attrs.clear()
+        self.accessor.attrs.update({
+            k: dict(v)
+            for k, v in state.get("attrs", {}).items()
+        })

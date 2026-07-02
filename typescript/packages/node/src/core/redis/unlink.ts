@@ -24,5 +24,6 @@ export async function unlink(accessor: RedisAccessor, path: PathSpec): Promise<v
   }
   await store.delFile(p)
   await store.delModified(p)
+  await store.delAttrs(p)
   await invalidateAfterUnlink(p)
 }

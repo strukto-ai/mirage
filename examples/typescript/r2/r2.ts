@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import dotenv from 'dotenv'
-import { MountMode, R2Resource, Workspace, type R2Config } from '@struktoai/mirage-node'
+import { MountMode, R2Resource, Workspace, type FileStat, type R2Config } from '@struktoai/mirage-node'
 
 dotenv.config({ path: '.env.development' })
 
@@ -246,6 +246,21 @@ async function main(): Promise<void> {
     console.log('\n=== grep "$(echo queue)" /r2/data/example.jsonl | wc -l (sub as pattern) ===')
     r = await run(ws, 'grep "$(echo queue)" /r2/data/example.jsonl | wc -l')
     console.log(`  count: ${r.stdout.trim()}`)
+
+
+    // chmod/chown/touch never hit the R2 API: attrs land in the
+    // workspace namespace (durable, snapshot-captured) and merge into
+    // dispatch-level stat.
+    console.log(`=== metadata overlay on /r2/data/example.jsonl ===`)
+    const metaRes = await ws.execute(
+      `chmod 640 "/r2/data/example.jsonl" && chown 500:dev "/r2/data/example.jsonl" && touch -t 202601021530 "/r2/data/example.jsonl"`,
+    )
+    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+    const metaSt = (await ws.dispatch('stat', `/r2/data/example.jsonl`)) as FileStat
+    const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+    console.log(
+      `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+    )
   } finally {
     await ws.close()
   }

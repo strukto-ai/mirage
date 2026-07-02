@@ -84,6 +84,29 @@ async function main(): Promise<void> {
   await runLabeled(ws, 'md5 /data/hello.txt', 'md5 /data/hello.txt')
   await runLabeled(ws, 'base64 /data/hello.txt', 'base64 /data/hello.txt')
 
+  console.log('')
+  console.log('=== METADATA (chmod / chown / touch) ===')
+  console.log('')
+  await ws.execute('chmod 640 /data/hello.txt')
+  await ws.execute('chown 500:staff /data/hello.txt')
+  await ws.execute('touch -t 202601021530 /data/hello.txt')
+  await runLabeled(
+    ws,
+    'chmod 640 + chown 500:staff + touch -t 202601021530',
+    'ls -l /data/hello.txt',
+  )
+
+  await ws.execute('chmod u+x,go-r /data/hello.txt')
+  await runLabeled(ws, 'chmod u+x,go-r (symbolic, composes on current mode)', 'ls -l /data/hello.txt')
+
+  console.log('=== mv carries metadata ===')
+  await ws.execute('mv /data/hello.txt /data/moved.txt')
+  const mvMeta = await ws.execute('ls -l /data/moved.txt')
+  print(mvMeta.stdout)
+  await ws.execute('mv /data/moved.txt /data/hello.txt')
+
+  await runLabeled(ws, 'touch -c missing.txt does not create', 'touch -c /data/ghost.txt && ls /data/')
+
   await runLabeled(ws, 'history (last 5)', 'history 5')
 
   console.log('')

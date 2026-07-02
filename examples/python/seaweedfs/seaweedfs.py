@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.seaweedfs import SeaweedFSConfig, SeaweedFSResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -52,6 +53,20 @@ async def main():
         "/seaweedfs/data/config.json",
         b'{"name":"mirage","version":1,"tags":["s3","seaweedfs"]}')
     await ws.ops.write("/seaweedfs/notes.txt", b"hello from seaweedfs\n")
+
+    # chmod/chown/touch never hit the SeaweedFS API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print("=== metadata overlay on /seaweedfs/notes.txt ===")
+    meta_res = await ws.execute(
+        'chmod 640 "/seaweedfs/notes.txt"'
+        ' && chown 500:dev "/seaweedfs/notes.txt"'
+        ' && touch -t 202601021530 "/seaweedfs/notes.txt"')
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    meta_st, _ = await ws.dispatch(
+        "stat", PathSpec.from_str_path("/seaweedfs/notes.txt"))
+    print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+          f"gid={meta_st.gid} mtime={meta_st.modified}")
 
     print("\n--- ls /seaweedfs/ ---")
     r = await ws.execute("ls /seaweedfs/")

@@ -94,9 +94,17 @@ class RAMResource(BaseResource):
             "files": dict(self._store.files),
             "dirs": list(self._store.dirs),
             "modified": dict(self._store.modified),
+            "attrs": {
+                k: dict(v)
+                for k, v in self._store.attrs.items()
+            },
         }
 
     def load_state(self, state: dict) -> None:
         self._store.files = dict(state.get("files", {}))
         self._store.dirs = set(state.get("dirs", ["/"]))
         self._store.modified = dict(state.get("modified", {}))
+        self._store.attrs = {
+            k: dict(v)
+            for k, v in state.get("attrs", {}).items()
+        }
