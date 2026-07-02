@@ -5,6 +5,7 @@ from mirage.core.chroma._client import fetch_page_chunks, query_contains
 from mirage.core.chroma.path import resolve_path
 from mirage.core.chroma.walk import walk
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key, mount_prefix_of, rekey
 
 
 async def grep_bytes(
@@ -48,7 +49,8 @@ async def grep_bytes(
     """
     regex = compile_pattern(pattern, ignore_case, fixed_string, whole_word)
     targets = await target_slugs(accessor, paths, index)
-    mount_prefix = paths[0].prefix if paths else ""
+    mount_prefix = mount_prefix_of(paths[0].virtual,
+                                   paths[0].resource_path) if paths else ""
     lines: list[str] = []
     reads: dict[str, bytes] = {}
     slug_to_path = {slug: path for path, slug in targets.items()}
@@ -62,7 +64,8 @@ async def grep_bytes(
         content = await fetch_page_chunks(accessor, slug)
         path = slug_to_path.get(slug, "/" + slug)
         data = content.encode()
-        reads[PathSpec.from_str_path(path, mount_prefix).strip_prefix] = data
+        reads[PathSpec.from_str_path(path, mount_key(
+            path, mount_prefix)).mount_path] = data
         hits = grep_lines(path, split_lines(content), regex, invert,
                           line_numbers, count_only, files_only, only_matching,
                           max_count)
@@ -100,7 +103,7 @@ async def target_slugs(accessor, paths: list[PathSpec],
     for path in paths:
         resolved = await resolve_path(accessor, path, index)
         if resolved.entry is not None and not resolved.is_dir:
-            targets[path.original] = str(resolved.entry.extra["slug"])
+            targets[path.virtual] = str(resolved.entry.extra["slug"])
             continue
         if resolved.is_dir:
             children = await walk(accessor,
@@ -109,7 +112,8 @@ async def target_slugs(accessor, paths: list[PathSpec],
                                   include_root=False,
                                   strip_prefix=False)
             for child in children:
-                child_spec = PathSpec.from_str_path(child, path.prefix)
+                child_spec = PathSpec.from_str_path(
+                    child, rekey(path.virtual, path.resource_path, child))
                 child_resolved = await resolve_path(accessor, child_spec,
                                                     index)
                 if (child_resolved.entry is not None

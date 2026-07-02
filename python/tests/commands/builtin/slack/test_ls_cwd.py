@@ -31,7 +31,7 @@ def config():
 async def test_ls_no_args_after_cd_returns_cwd_entries(config):
     """Regression for bug: `ls` (no args) returned empty after `cd /slack/...`.
 
-    Root cause: `slack/ls.py` rebuilt a fresh `PathSpec` from `cwd.original`
+    Root cause: `slack/ls.py` rebuilt a fresh `PathSpec` from `cwd.virtual`
     without preserving the mount prefix, so readdir treated the mount prefix
     segment as a container name and returned [].
     """

@@ -165,7 +165,7 @@ export async function handleFor(
 
   try {
     for (const val of values) {
-      session.env[variable] = val instanceof PathSpec ? val.original : val
+      session.env[variable] = val instanceof PathSpec ? val.virtual : val
       try {
         const [stdout, io] = await executeBody(executeNode, body, session, stdin, callStack)
         allStdout.push(stdout)

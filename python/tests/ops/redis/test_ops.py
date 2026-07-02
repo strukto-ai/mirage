@@ -39,7 +39,10 @@ pytestmark = pytest.mark.skipif(not REDIS_URL, reason="REDIS_URL not set")
 
 
 def _scope(path: str) -> PathSpec:
-    return PathSpec(original=path, directory=path, resolved=True)
+    return PathSpec(resource_path=(path).strip("/"),
+                    virtual=path,
+                    directory=path,
+                    resolved=True)
 
 
 @pytest_asyncio.fixture()
@@ -133,7 +136,11 @@ async def test_op_unlink_not_found(accessor):
 
 @pytest.mark.asyncio
 async def test_op_rmdir(accessor):
-    await mkdir(accessor, PathSpec(original="/empty", directory="/empty"))
+    await mkdir(
+        accessor,
+        PathSpec(resource_path=("/empty").strip("/"),
+                 virtual="/empty",
+                 directory="/empty"))
     await rmdir(accessor, _scope("/empty"))
     assert not await accessor.store.has_dir("/empty")
 

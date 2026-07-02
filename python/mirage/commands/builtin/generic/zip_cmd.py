@@ -27,7 +27,7 @@ async def zip_cmd(
         for p in file_paths:
             data = await read_bytes(accessor, p)
             arcname = posixpath.basename(
-                p.original) if j else p.original.lstrip("/")
+                p.virtual) if j else p.virtual.lstrip("/")
             zf.writestr(arcname, data)
             if not q:
                 output_lines.append(f"  adding: {arcname}")
@@ -35,7 +35,7 @@ async def zip_cmd(
     await write_bytes(accessor, archive_path, archive)
     stdout = ("\n".join(output_lines) +
               "\n").encode() if output_lines else None
-    return stdout, IOResult(writes={archive_path.strip_prefix: archive})
+    return stdout, IOResult(writes={archive_path.mount_path: archive})
 
 
 __all__ = ["zip_cmd"]

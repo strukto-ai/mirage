@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { materialize } from '../../../io/types.ts'
@@ -66,10 +67,13 @@ describe('slack cat', () => {
     const out = await runCat(
       [
         new PathSpec({
-          original: '/mnt/slack/channels/general__C1/2024-01-01/chat.jsonl',
+          virtual: '/mnt/slack/channels/general__C1/2024-01-01/chat.jsonl',
           directory: '/mnt/slack/channels/general__C1/',
           resolved: false,
-          prefix: '/mnt/slack',
+          resourcePath: mountKey(
+            '/mnt/slack/channels/general__C1/2024-01-01/chat.jsonl',
+            '/mnt/slack',
+          ),
         }),
       ],
       {},
@@ -92,10 +96,13 @@ describe('slack cat', () => {
     const out = await runCat(
       [
         new PathSpec({
-          original: '/mnt/slack/channels/general__C1/2024-01-01/chat.jsonl',
+          virtual: '/mnt/slack/channels/general__C1/2024-01-01/chat.jsonl',
           directory: '/mnt/slack/channels/general__C1/',
           resolved: false,
-          prefix: '/mnt/slack',
+          resourcePath: mountKey(
+            '/mnt/slack/channels/general__C1/2024-01-01/chat.jsonl',
+            '/mnt/slack',
+          ),
         }),
       ],
       { n: true },
@@ -126,10 +133,10 @@ describe('slack cat', () => {
     })
     const mkPath = (date: string): PathSpec =>
       new PathSpec({
-        original: `/mnt/slack/channels/general__C1/${date}/chat.jsonl`,
+        virtual: `/mnt/slack/channels/general__C1/${date}/chat.jsonl`,
         directory: `/mnt/slack/channels/general__C1/`,
         resolved: false,
-        prefix: '/mnt/slack',
+        resourcePath: mountKey(`/mnt/slack/channels/general__C1/${date}/chat.jsonl`, '/mnt/slack'),
       })
     const out = await runCat(
       [mkPath('2024-01-01'), mkPath('2024-01-02'), mkPath('2024-01-03')],

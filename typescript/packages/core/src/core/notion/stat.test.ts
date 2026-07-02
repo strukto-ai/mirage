@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
@@ -45,8 +46,8 @@ function makeAccessor(transport: NotionTransport): NotionStatAccessor {
   return { transport }
 }
 
-function spec(original: string, prefix = ''): PathSpec {
-  return new PathSpec({ original, directory: original, prefix })
+function spec(virtual: string, prefix = ''): PathSpec {
+  return new PathSpec({ virtual, directory: virtual, resourcePath: mountKey(virtual, prefix) })
 }
 
 const PAGE_ID = 'aaaa1111-2222-3333-4444-555566667777'
@@ -212,10 +213,10 @@ describe('notion stat', () => {
   it('honors a path prefix', async () => {
     const transport = new FakeTransport()
     const segment = `Page__${PAGE_ID}`
-    const original = `/notion/pages/${segment}/`
+    const virtual = `/notion/pages/${segment}/`
     const result = await stat(
       makeAccessor(transport),
-      new PathSpec({ original, directory: original, prefix: '/notion' }),
+      new PathSpec({ virtual, directory: virtual, resourcePath: mountKey(virtual, '/notion') }),
       undefined,
     )
     expect(result.name).toBe(segment)

@@ -6,6 +6,7 @@ from mirage.core.chroma.path import resolve_path
 from mirage.core.chroma.stat import stat
 from mirage.core.chroma.walk import walk
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 
 async def find(
@@ -45,8 +46,9 @@ async def find(
     start_name = start_basename(path)
     filtered: list[str] = []
     for item in results:
-        if await _matches(accessor, item, path.prefix, index,
-                          path.strip_prefix, tree, needs_kind, min_size,
+        if await _matches(accessor, item,
+                          mount_prefix_of(path.virtual, path.resource_path),
+                          index, path.mount_path, tree, needs_kind, min_size,
                           max_size, mindepth, start_name):
             filtered.append(item)
     return sorted(filtered)
@@ -69,7 +71,7 @@ async def _matches(
     item_norm = item.rstrip("/") or "/"
     item_name = (start_name if item_norm == root_norm else
                  item.rstrip("/").rsplit("/", 1)[-1])
-    spec = PathSpec.from_str_path(item, prefix)
+    spec = PathSpec.from_str_path(item, mount_key(item, prefix))
     kind = "f"
     if needs_kind:
         resolved = await resolve_path(accessor, spec, index)

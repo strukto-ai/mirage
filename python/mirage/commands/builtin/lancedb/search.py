@@ -20,6 +20,7 @@ from mirage.core.lancedb.search import search_rows_output
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_prefix_of
 
 
 def _default_paths(paths: list[PathSpec],
@@ -28,7 +29,9 @@ def _default_paths(paths: list[PathSpec],
         return paths
     if cwd is not None:
         return [cwd]
-    return [PathSpec(original="/", directory="/")]
+    return [
+        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/")
+    ]
 
 
 async def search_provision(
@@ -62,7 +65,9 @@ async def search(
     cwd = _extra.get("cwd")
     target_paths = _default_paths(paths,
                                   cwd if isinstance(cwd, PathSpec) else None)
-    mount_prefix = target_paths[0].prefix if target_paths else ""
+    mount_prefix = mount_prefix_of(
+        target_paths[0].virtual,
+        target_paths[0].resource_path) if target_paths else ""
     limit = int(top_k) if top_k is not None else accessor.config.search_limit
     output = await search_rows_output(accessor,
                                       query,

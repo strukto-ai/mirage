@@ -6,6 +6,7 @@ from aioresponses import aioresponses
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
 from mirage.core.sharepoint._resolver import _drive_cache, _site_cache, resolve
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 _SITE_ID = "tenant.sharepoint.com,site-guid,web-guid"
 _DRIVE_ID = "b!driveXYZ"
@@ -30,7 +31,9 @@ def _reset_caches():
 
 @pytest.mark.asyncio
 async def test_resolve_root():
-    path = PathSpec(original="/sp/", directory="/sp/", prefix="/sp")
+    path = PathSpec(resource_path=mount_key("/sp/", "/sp"),
+                    virtual="/sp/",
+                    directory="/sp/")
     result = await resolve(_accessor(), path)
     assert result.level == "root"
 
@@ -38,9 +41,9 @@ async def test_resolve_root():
 @pytest.mark.asyncio
 async def test_resolve_site():
     _site_cache["Engineering"] = _SITE_ID
-    path = PathSpec(original="/sp/Engineering",
-                    directory="/sp/Engineering",
-                    prefix="/sp")
+    path = PathSpec(resource_path=mount_key("/sp/Engineering", "/sp"),
+                    virtual="/sp/Engineering",
+                    directory="/sp/Engineering")
     result = await resolve(_accessor(), path)
     assert result.level == "site"
     assert result.site_id == _SITE_ID
@@ -50,9 +53,10 @@ async def test_resolve_site():
 async def test_resolve_drive():
     _site_cache["Engineering"] = _SITE_ID
     _drive_cache[(_SITE_ID, "Documents")] = _DRIVE_ID
-    path = PathSpec(original="/sp/Engineering/Documents",
-                    directory="/sp/Engineering/Documents",
-                    prefix="/sp")
+    path = PathSpec(resource_path=mount_key("/sp/Engineering/Documents",
+                                            "/sp"),
+                    virtual="/sp/Engineering/Documents",
+                    directory="/sp/Engineering/Documents")
     result = await resolve(_accessor(), path)
     assert result.level == "drive"
     assert result.drive_id == _DRIVE_ID
@@ -62,9 +66,10 @@ async def test_resolve_drive():
 async def test_resolve_item():
     _site_cache["Engineering"] = _SITE_ID
     _drive_cache[(_SITE_ID, "Documents")] = _DRIVE_ID
-    path = PathSpec(original="/sp/Engineering/Documents/sub/file.txt",
-                    directory="/sp/Engineering/Documents/sub/file.txt",
-                    prefix="/sp")
+    path = PathSpec(resource_path=mount_key(
+        "/sp/Engineering/Documents/sub/file.txt", "/sp"),
+                    virtual="/sp/Engineering/Documents/sub/file.txt",
+                    directory="/sp/Engineering/Documents/sub/file.txt")
     result = await resolve(_accessor(), path)
     assert result.level == "item"
     assert result.drive_id == _DRIVE_ID
@@ -84,9 +89,9 @@ async def test_resolve_unknown_site():
                       },
                   ]
               })
-        path = PathSpec(original="/sp/NoSuchSite",
-                        directory="/sp/NoSuchSite",
-                        prefix="/sp")
+        path = PathSpec(resource_path=mount_key("/sp/NoSuchSite", "/sp"),
+                        virtual="/sp/NoSuchSite",
+                        directory="/sp/NoSuchSite")
         result = await resolve(_accessor(), path)
     assert result.level == "site"
     assert result.site_id is None

@@ -14,6 +14,7 @@
 
 from mirage.core.gmail.scope import detect_scope
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def _gs(path: str,
@@ -21,11 +22,11 @@ def _gs(path: str,
         pattern: str | None = None,
         directory: str | None = None) -> PathSpec:
     return PathSpec(
-        original=path,
+        resource_path=mount_key(path, prefix),
+        virtual=path,
         directory=directory
         or (path.rsplit("/", 1)[0] + "/" if "/" in path else "/"),
         pattern=pattern,
-        prefix=prefix,
     )
 
 
@@ -70,11 +71,12 @@ def test_attachment_path():
 
 def test_glob_in_date_dir():
     spec = PathSpec(
-        original="/gmail/INBOX/2026-04-10/*.gmail.json",
+        resource_path=mount_key("/gmail/INBOX/2026-04-10/*.gmail.json",
+                                "/gmail"),
+        virtual="/gmail/INBOX/2026-04-10/*.gmail.json",
         directory="/gmail/INBOX/2026-04-10/",
         pattern="*.gmail.json",
         resolved=False,
-        prefix="/gmail",
     )
     scope = detect_scope(spec)
     assert scope.use_native is True

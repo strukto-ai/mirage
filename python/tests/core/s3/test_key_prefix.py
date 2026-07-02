@@ -35,7 +35,7 @@ def _accessor(key_prefix: str | None = None) -> S3Accessor:
 
 
 def _path(p: str) -> PathSpec:
-    return PathSpec(original=p, directory=p)
+    return PathSpec(virtual=p, directory=p, resource_path=p.strip("/"))
 
 
 def test_normalize_empty_returns_none():
@@ -85,17 +85,18 @@ def test_resolve_glob_with_prefix():
         accessor = _accessor(PREFIX)
         index = RAMIndexCacheStore()
         glob_path = PathSpec(
-            original="/*.txt",
+            resource_path=("/*.txt").strip("/"),
+            virtual="/*.txt",
             directory="/",
             pattern="*.txt",
             resolved=False,
         )
         results = asyncio.run(resolve_glob(accessor, [glob_path], index))
     for r in results:
-        assert "users" not in r.original, (
-            f"key_prefix leaked into glob result: {r.original}")
-        assert "abc" not in r.original, (
-            f"key_prefix leaked into glob result: {r.original}")
+        assert "users" not in r.virtual, (
+            f"key_prefix leaked into glob result: {r.virtual}")
+        assert "abc" not in r.virtual, (
+            f"key_prefix leaked into glob result: {r.virtual}")
 
 
 def test_stat_with_prefix():

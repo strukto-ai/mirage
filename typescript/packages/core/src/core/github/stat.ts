@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GitHubAccessor } from '../../accessor/github.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
@@ -21,8 +22,8 @@ import { stripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
 
 function stripPrefix(path: PathSpec): string {
-  const prefix = path.prefix
-  let p = path.original
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  let p = path.virtual
   if (prefix !== '' && p.startsWith(prefix)) {
     p = p.slice(prefix.length) || '/'
   }
@@ -46,7 +47,7 @@ export async function stat(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<FileStat> {
-  const prefix = path.prefix
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
   const p = stripPrefix(path)
   const trimmed = stripSlash(p)
   if (trimmed === '') {
@@ -62,10 +63,10 @@ export async function stat(
       await coreReaddir(
         accessor,
         new PathSpec({
-          original: parentPath,
+          virtual: parentPath,
           directory: parentPath,
           resolved: false,
-          prefix,
+          resourcePath: mountKey(parentPath, prefix),
         }),
         index,
       )

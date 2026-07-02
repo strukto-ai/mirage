@@ -41,13 +41,13 @@ async def cmp_cmd(
     for idx in range(min(len(data1), len(data2))):
         if data1[idx] != data2[idx]:
             line = 1 + data1[:idx].count(ord(b"\n"))
-            msg = (f"{p0.original} {p1.original}"
+            msg = (f"{p0.virtual} {p1.virtual}"
                    f" differ: char {idx + 1}, line {line}")
             if print_bytes:
                 msg += (f" is {data1[idx]:o} {chr(data1[idx])}"
                         f" {data2[idx]:o} {chr(data2[idx])}")
             return format_records([msg]), IOResult(exit_code=1)
-    shorter = p0.original if len(data1) < len(data2) else p1.original
+    shorter = p0.virtual if len(data1) < len(data2) else p1.virtual
     msg = f"cmp: EOF on {shorter}"
     return format_records([msg]), IOResult(exit_code=1)
 

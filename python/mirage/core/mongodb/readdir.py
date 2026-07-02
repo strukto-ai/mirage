@@ -22,6 +22,7 @@ from mirage.core.mongodb.types import (KIND_TO_DIR, KIND_TO_RESOURCE_TYPE,
                                        ScopeLevel)
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_prefix_of
 
 
 def is_dir_name(child: str) -> bool:
@@ -37,8 +38,10 @@ async def readdir(
     index: IndexCacheStore = None,
 ) -> list[str]:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    prefix = path.prefix or ""
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
     scope = detect_scope(path)
     virtual_key = (prefix + scope.resource_path).rstrip("/") or "/"
 

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import { normalizeDatabricksVolumeConfig } from '../../resource/databricks_volume/config.ts'
 import { PathSpec } from '../../types.ts'
@@ -28,8 +29,8 @@ export function makeAccessor(rootPath = '/root'): DatabricksVolumeAccessor {
   return new DatabricksVolumeAccessor(config, 'https://dbc.example.com', 'tok-123')
 }
 
-export function spec(original: string, prefix = '/volume'): PathSpec {
-  return PathSpec.fromStrPath(original, prefix)
+export function spec(virtual: string, prefix = '/volume'): PathSpec {
+  return PathSpec.fromStrPath(virtual, mountKey(virtual, prefix))
 }
 
 export function jsonResponse(data: unknown, status = 200): Response {

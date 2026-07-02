@@ -65,10 +65,10 @@ export async function tailGeneric(
       }
       if (bytesMode !== null) {
         chunks.push(bytesMode === 0 ? new Uint8Array(0) : raw.slice(-bytesMode))
-        if (bytesMode >= raw.byteLength) cache.push(p.original)
+        if (bytesMode >= raw.byteLength) cache.push(p.virtual)
       } else {
         chunks.push(tailBytes(raw, lines, null, plusMode))
-        if (!plusMode && lines >= countNewlines(raw)) cache.push(p.original)
+        if (!plusMode && lines >= countNewlines(raw)) cache.push(p.virtual)
       }
     }
     const out: ByteSource = concat(chunks)

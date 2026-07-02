@@ -192,54 +192,66 @@ class ResourceName(str, Enum):
 
 @dataclass(frozen=True)
 class PathSpec:
-    original: str
+    virtual: str
     directory: str
+    resource_path: str
     pattern: str | None = None
     resolved: bool = True
-    prefix: str = ""
-    as_typed: str | None = None
+    raw_path: str | None = None
 
     @property
     def display(self) -> str:
         """The path as the user typed it, for rendering in output.
 
-        Falls back to ``original`` (the resolved absolute path) when no
-        as-typed form was recorded, e.g. for absolute arguments.
+        Falls back to ``virtual`` (the resolved absolute path) when no
+        raw form was recorded, e.g. for absolute arguments.
         """
-        return self.as_typed if self.as_typed is not None else self.original
+        return self.raw_path if self.raw_path is not None else self.virtual
 
     @property
-    def strip_prefix(self) -> str:
-        if self.prefix and self.original.startswith(self.prefix):
-            rest = self.original[len(self.prefix):]
-            if self.prefix.endswith("/") or rest == "" or rest.startswith("/"):
-                return rest or "/"
-        return self.original
+    def mount_path(self) -> str:
+        """Mount-relative path with a leading slash.
 
-    @property
-    def key(self) -> str:
-        return self.strip_prefix.strip("/")
+        Pure formatting of ``resource_path`` ("" -> "/", "sub/x" ->
+        "/sub/x"); used for byte-accounting keys and path arithmetic that
+        work in slash-framed mount-relative space.
+        """
+        return "/" + self.resource_path
 
     @property
     def dir(self) -> "PathSpec":
         """Directory PathSpec, carrying pattern for readdir filtering."""
+        # The directory's resource_path is its virtual form with this
+        # path's mount prefix removed; the prefix length is recovered from
+        # the (virtual, resource_path) pair. Idempotent for specs that are
+        # already directories.
+        cut = len(self.virtual.rstrip("/")) - len(self.resource_path)
         return PathSpec(
-            original=self.directory,
+            virtual=self.directory,
             directory=self.directory,
             pattern=self.pattern,
             resolved=False,
-            prefix=self.prefix,
+            resource_path=self.directory[cut:].strip("/"),
         )
 
     def child(self, name: str) -> str:
-        return self.original.rstrip("/") + "/" + name
+        return self.virtual.rstrip("/") + "/" + name
 
     @staticmethod
-    def from_str_path(path: str, prefix: str = "") -> "PathSpec":
+    def from_str_path(path: str,
+                      resource_path: str | None = None) -> "PathSpec":
+        """Wrap a path string; defaults to a root-mounted resource_path.
+
+        Args:
+            path (str): virtual path string.
+            resource_path (str | None): backend key; when None the path is
+                assumed root-mounted (no mount prefix to strip).
+        """
         return PathSpec(
-            original=path,
+            virtual=path,
             directory=path[:path.rfind("/") + 1] or "/",
-            prefix=prefix,
+            resource_path=(path.strip("/")
+                           if resource_path is None else resource_path),
         )
 
 

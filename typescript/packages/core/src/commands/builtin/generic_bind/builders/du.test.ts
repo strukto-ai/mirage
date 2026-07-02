@@ -35,15 +35,15 @@ async function* emptyStream(): AsyncIterable<Uint8Array> {
 }
 
 const OPS: CommandIO = {
-  readdir: (_a, p) => Promise.resolve(TREE[p.original]?.children ?? []),
+  readdir: (_a, p) => Promise.resolve(TREE[p.virtual]?.children ?? []),
   readBytes: () => Promise.resolve(new Uint8Array()),
   readStream: () => emptyStream(),
   stat: (_a, p) => {
-    const node = TREE[p.original]
+    const node = TREE[p.virtual]
     if (node === undefined) return Promise.reject(new Error('ENOENT'))
     return Promise.resolve(
       new FileStat({
-        name: p.original,
+        name: p.virtual,
         type: node.dir ? FileType.DIRECTORY : FileType.TEXT,
         size: node.size ?? null,
       }),

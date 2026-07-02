@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../../utils/slash.ts'
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../../types.ts'
 import { makeResolveGlob } from './adapter.ts'
@@ -19,7 +20,13 @@ import { makeResolveGlob } from './adapter.ts'
 const accessor = {} as never
 
 function glob(dir: string, pattern: string): PathSpec {
-  return new PathSpec({ original: dir, directory: dir, pattern, resolved: false })
+  return new PathSpec({
+    resourcePath: stripSlash(dir),
+    virtual: dir,
+    directory: dir,
+    pattern,
+    resolved: false,
+  })
 }
 
 describe('makeResolveGlob', () => {
@@ -27,14 +34,19 @@ describe('makeResolveGlob', () => {
     const readdir = () => Promise.resolve(['/d/a.txt', '/d/b.log', '/d/c.txt'])
     const resolveGlob = makeResolveGlob(readdir)
     const out = await resolveGlob(accessor, [glob('/d/', '*.txt')])
-    expect(out.map((p) => p.original).sort()).toEqual(['/d/a.txt', '/d/c.txt'])
+    expect(out.map((p) => p.virtual).sort()).toEqual(['/d/a.txt', '/d/c.txt'])
     expect(out.every((p) => p.resolved)).toBe(true)
   })
 
   it('passes an already-resolved path through unchanged', async () => {
     const readdir = () => Promise.reject(new Error('should not readdir'))
     const resolveGlob = makeResolveGlob(readdir)
-    const p = new PathSpec({ original: '/d/a.txt', directory: '/d/', resolved: true })
+    const p = new PathSpec({
+      resourcePath: stripSlash('/d/a.txt'),
+      virtual: '/d/a.txt',
+      directory: '/d/',
+      resolved: true,
+    })
     const out = await resolveGlob(accessor, [p])
     expect(out).toEqual([p])
   })
@@ -49,7 +61,12 @@ describe('makeResolveGlob', () => {
   it('passes a plain non-pattern unresolved path through', async () => {
     const readdir = () => Promise.reject(new Error('should not readdir'))
     const resolveGlob = makeResolveGlob(readdir)
-    const p = new PathSpec({ original: '/d/a.txt', directory: '/d/', resolved: false })
+    const p = new PathSpec({
+      resourcePath: stripSlash('/d/a.txt'),
+      virtual: '/d/a.txt',
+      directory: '/d/',
+      resolved: false,
+    })
     const out = await resolveGlob(accessor, [p])
     expect(out).toEqual([p])
   })

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GitHubCIAccessor } from '../../accessor/github_ci.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -28,8 +29,8 @@ function safeName(name: string | undefined): string {
 }
 
 function stripPrefix(path: PathSpec): string {
-  const prefix = path.prefix
-  let p = path.pattern !== null ? path.directory : path.original
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  let p = path.pattern !== null ? path.directory : path.virtual
   if (prefix !== '' && p.startsWith(prefix)) {
     p = p.slice(prefix.length) || '/'
   }
@@ -41,7 +42,7 @@ export async function readdir(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<string[]> {
-  const prefix = path.prefix
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
   const stripped = stripPrefix(path)
   const key = stripSlash(stripped)
   const virtualKey = key === '' ? (prefix === '' ? '/' : prefix) : `${prefix}/${key}`
@@ -113,15 +114,15 @@ export async function readdir(
       const lookup = await index.get(virtualKey)
       if (lookup.entry === undefined || lookup.entry === null) {
         const parent = new PathSpec({
-          original: `${prefix}/runs`,
+          virtual: `${prefix}/runs`,
           directory: `${prefix}/runs`,
           resolved: false,
-          prefix,
+          resourcePath: mountKey(`${prefix}/runs`, prefix),
         })
         await readdir(accessor, parent, index)
         const recheck = await index.get(virtualKey)
         if (recheck.entry === undefined || recheck.entry === null) {
-          throw enoent(path.original)
+          throw enoent(path.virtual)
         }
       }
     }
@@ -130,25 +131,25 @@ export async function readdir(
   }
 
   if (parts.length === 3 && parts[0] === 'runs' && parts[2] === 'jobs') {
-    if (index === undefined) throw enoent(path.original)
+    if (index === undefined) throw enoent(path.virtual)
     const listing = await index.listDir(virtualKey)
     if (listing.entries !== undefined && listing.entries !== null) return listing.entries
     const runDirname = parts[1]
-    if (runDirname === undefined) throw enoent(path.original)
+    if (runDirname === undefined) throw enoent(path.virtual)
     const runVirtual = `${prefix}/runs/${runDirname}`
     let runLookup = await index.get(runVirtual)
     if (runLookup.entry === undefined || runLookup.entry === null) {
       const parent = new PathSpec({
-        original: `${prefix}/runs`,
+        virtual: `${prefix}/runs`,
         directory: `${prefix}/runs`,
         resolved: false,
-        prefix,
+        resourcePath: mountKey(`${prefix}/runs`, prefix),
       })
       await readdir(accessor, parent, index)
       runLookup = await index.get(runVirtual)
     }
     if (runLookup.entry === undefined || runLookup.entry === null) {
-      throw enoent(path.original)
+      throw enoent(path.virtual)
     }
     const runId = runLookup.entry.id
     const jobs = await listJobsForRun(accessor.transport, accessor.owner, accessor.repo, runId)
@@ -186,25 +187,25 @@ export async function readdir(
   }
 
   if (parts.length === 3 && parts[0] === 'runs' && parts[2] === 'artifacts') {
-    if (index === undefined) throw enoent(path.original)
+    if (index === undefined) throw enoent(path.virtual)
     const listing = await index.listDir(virtualKey)
     if (listing.entries !== undefined && listing.entries !== null) return listing.entries
     const runDirname = parts[1]
-    if (runDirname === undefined) throw enoent(path.original)
+    if (runDirname === undefined) throw enoent(path.virtual)
     const runVirtual = `${prefix}/runs/${runDirname}`
     let runLookup = await index.get(runVirtual)
     if (runLookup.entry === undefined || runLookup.entry === null) {
       const parent = new PathSpec({
-        original: `${prefix}/runs`,
+        virtual: `${prefix}/runs`,
         directory: `${prefix}/runs`,
         resolved: false,
-        prefix,
+        resourcePath: mountKey(`${prefix}/runs`, prefix),
       })
       await readdir(accessor, parent, index)
       runLookup = await index.get(runVirtual)
     }
     if (runLookup.entry === undefined || runLookup.entry === null) {
-      throw enoent(path.original)
+      throw enoent(path.virtual)
     }
     const runId = runLookup.entry.id
     const artifacts = await listArtifacts(accessor.transport, accessor.owner, accessor.repo, runId)

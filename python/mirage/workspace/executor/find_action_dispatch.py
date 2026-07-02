@@ -65,8 +65,9 @@ async def _apply_find_actions(
                 errors.append(msg.encode())
                 continue
             ps = PathSpec(
-                original=path,
+                virtual=path,
                 directory=path[:path.rfind("/") + 1] or "/",
+                resource_path="",
                 resolved=True,
             )
             try:
@@ -94,8 +95,9 @@ async def _apply_find_actions(
                 errors.append(f"find: cannot ls '{path}': no mount\n".encode())
                 continue
             ps = PathSpec(
-                original=path,
+                virtual=path,
                 directory=path[:path.rfind("/") + 1] or "/",
+                resource_path="",
                 resolved=True,
             )
             try:

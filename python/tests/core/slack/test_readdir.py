@@ -42,7 +42,9 @@ def index():
 @pytest.mark.asyncio
 async def test_readdir_root(accessor, index):
     result = await readdir(accessor,
-                           PathSpec(original="/", directory="/"),
+                           PathSpec(resource_path=("/").strip("/"),
+                                    virtual="/",
+                                    directory="/"),
                            index=index)
     assert result == ["/channels", "/dms", "/users"]
 
@@ -65,7 +67,8 @@ async def test_readdir_channels(accessor, index):
             return_value=channels,
     ):
         result = await readdir(accessor,
-                               PathSpec(original="/channels",
+                               PathSpec(resource_path=("/channels").strip("/"),
+                                        virtual="/channels",
                                         directory="/channels"),
                                index=index)
 
@@ -91,7 +94,9 @@ async def test_readdir_users(accessor, index):
             return_value=users,
     ):
         result = await readdir(accessor,
-                               PathSpec(original="/users", directory="/users"),
+                               PathSpec(resource_path=("/users").strip("/"),
+                                        virtual="/users",
+                                        directory="/users"),
                                index=index)
 
     assert "/users/alice__U001.json" in result
@@ -116,10 +121,12 @@ async def test_readdir_channel_dates(accessor, index):
     with patch("mirage.core.slack.readdir._latest_message_ts",
                new_callable=AsyncMock,
                return_value=now.timestamp()):
-        result = await readdir(accessor,
-                               PathSpec(original="/channels/general__C001",
-                                        directory="/channels/general__C001"),
-                               index=index)
+        result = await readdir(
+            accessor,
+            PathSpec(resource_path=("/channels/general__C001").strip("/"),
+                     virtual="/channels/general__C001",
+                     directory="/channels/general__C001"),
+            index=index)
 
     assert len(result) >= 1
     assert all(not r.endswith(".jsonl") for r in result)
@@ -157,7 +164,9 @@ async def test_readdir_channels_stores_created(accessor, index):
             return_value=channels,
     ):
         await readdir(accessor,
-                      PathSpec(original="/channels", directory="/channels"),
+                      PathSpec(resource_path=("/channels").strip("/"),
+                               virtual="/channels",
+                               directory="/channels"),
                       index=index)
     lookup = await index.get("/channels/general__C001")
     assert lookup.entry is not None
@@ -183,10 +192,12 @@ async def test_readdir_channel_dates_with_created(accessor, index):
     with patch("mirage.core.slack.readdir._latest_message_ts",
                new_callable=AsyncMock,
                return_value=now.timestamp()):
-        result = await readdir(accessor,
-                               PathSpec(original="/channels/general__C001",
-                                        directory="/channels/general__C001"),
-                               index=index)
+        result = await readdir(
+            accessor,
+            PathSpec(resource_path=("/channels/general__C001").strip("/"),
+                     virtual="/channels/general__C001",
+                     directory="/channels/general__C001"),
+            index=index)
     assert len(result) == 90
     assert all(not r.endswith(".jsonl") for r in result)
     assert result[0].endswith(now.strftime('%Y-%m-%d'))
@@ -212,8 +223,10 @@ async def test_readdir_channel_dates_cached_in_entries(accessor, index):
                new_callable=AsyncMock,
                return_value=now.timestamp()):
         await readdir(accessor,
-                      PathSpec(original="/channels/general__C001",
-                               directory="/channels/general__C001"),
+                      PathSpec(
+                          resource_path=("/channels/general__C001").strip("/"),
+                          virtual="/channels/general__C001",
+                          directory="/channels/general__C001"),
                       index=index)
     listing = await index.list_dir("/channels/general__C001")
     assert listing.entries is not None
@@ -252,7 +265,9 @@ async def test_readdir_date_dir_returns_chat_and_files(accessor, index):
                return_value=[]):
         result = await readdir(
             accessor,
-            PathSpec(original="/channels/general__C001/2026-04-10",
+            PathSpec(resource_path=(
+                "/channels/general__C001/2026-04-10").strip("/"),
+                     virtual="/channels/general__C001/2026-04-10",
                      directory="/channels/general__C001/2026-04-10"),
             index=index,
         )

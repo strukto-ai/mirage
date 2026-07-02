@@ -39,7 +39,7 @@ export const MKDIR_BUILDER: Builder = {
     const lines: string[] = []
     for (const p of resolved) {
       await mkdir(accessor, p, parents)
-      if (verbose) lines.push(`mkdir: created directory '${p.original}'`)
+      if (verbose) lines.push(`mkdir: created directory '${p.virtual}'`)
     }
     const out = lines.length > 0 ? new TextEncoder().encode(lines.join('\n') + '\n') : null
     return [out, new IOResult()]

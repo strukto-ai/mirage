@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -56,7 +57,7 @@ export async function readdir(
   index?: IndexCacheStore,
 ): Promise<string[]> {
   const listPath = path.pattern !== null ? path.dir : path
-  const virtualKey = rstripSlash(listPath.original) || '/'
+  const virtualKey = rstripSlash(listPath.virtual) || '/'
   if (index !== undefined) {
     const listing = await index.listDir(virtualKey)
     if (listing.entries !== undefined && listing.entries !== null) return listing.entries
@@ -66,16 +67,16 @@ export async function readdir(
   try {
     entries = await listDirectoryContents(accessor, remotePath)
   } catch (exc) {
-    if (isNotFound(exc)) throw notFoundError(listPath.original)
+    if (isNotFound(exc)) throw notFoundError(listPath.virtual)
     throw exc
   }
   const pairs = entries
     .map(
       (entry) =>
-        [virtualPath(accessor.config, entry.path, path.prefix), entry] as [
-          string,
-          DbxDirectoryEntry,
-        ],
+        [
+          virtualPath(accessor.config, entry.path, mountPrefixOf(path.virtual, path.resourcePath)),
+          entry,
+        ] as [string, DbxDirectoryEntry],
     )
     .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
   const names: string[] = []

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { DiscordAccessor } from '../../accessor/discord.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -85,14 +86,14 @@ interface Normalized {
 }
 
 function normalize(path: PathSpec): Normalized {
-  const prefix = path.prefix
-  let raw = path.pattern !== null ? path.directory : path.original
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  let raw = path.pattern !== null ? path.directory : path.virtual
   if (prefix !== '' && raw.startsWith(prefix)) {
     raw = raw.slice(prefix.length) || '/'
   }
   const key = stripSlash(raw)
   const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
-  return { prefix, key, virtualKey, rawPath: path.original }
+  return { prefix, key, virtualKey, rawPath: path.virtual }
 }
 
 async function ensureGuildId(
@@ -106,9 +107,9 @@ async function ensureGuildId(
   let lookup = await index.get(vk)
   if (lookup.entry === undefined || lookup.entry === null) {
     const root = new PathSpec({
-      original: prefix !== '' ? prefix : '/',
+      virtual: prefix !== '' ? prefix : '/',
       directory: prefix !== '' ? prefix : '/',
-      prefix,
+      resourcePath: mountKey(prefix !== '' ? prefix : '/', prefix),
     })
     await readdir(accessor, root, index)
     lookup = await index.get(vk)
@@ -130,7 +131,11 @@ async function ensureChannelLookup(
     const parentPath = `${prefix}/${parts.slice(0, 2).join('/')}`
     await readdir(
       accessor,
-      new PathSpec({ original: parentPath, directory: parentPath, prefix }),
+      new PathSpec({
+        virtual: parentPath,
+        directory: parentPath,
+        resourcePath: mountKey(parentPath, prefix),
+      }),
       index,
     )
     lookup = await index.get(channelVk)
@@ -331,7 +336,11 @@ async function readdirFilesDir(
   if (cached.entries !== undefined && cached.entries !== null) return cached.entries
   const dateKey = parts.slice(0, 4).join('/')
   const dateVk = `${prefix}/${dateKey}`
-  await readdir(accessor, new PathSpec({ original: dateVk, directory: dateVk, prefix }), index)
+  await readdir(
+    accessor,
+    new PathSpec({ virtual: dateVk, directory: dateVk, resourcePath: mountKey(dateVk, prefix) }),
+    index,
+  )
   const after = await index.listDir(virtualKey)
   if (after.entries === undefined || after.entries === null) throw enoent(rawPath)
   return after.entries
@@ -353,9 +362,9 @@ export async function readdir(
       const lookup = await index.get(virtualKey)
       if (lookup.entry === undefined || lookup.entry === null) {
         const root = new PathSpec({
-          original: prefix !== '' ? prefix : '/',
+          virtual: prefix !== '' ? prefix : '/',
           directory: prefix !== '' ? prefix : '/',
-          prefix,
+          resourcePath: mountKey(prefix !== '' ? prefix : '/', prefix),
         })
         await readdir(accessor, root, index)
         const retry = await index.get(virtualKey)

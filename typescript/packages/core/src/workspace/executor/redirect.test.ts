@@ -44,7 +44,7 @@ describe('handleRedirect > / >>', () => {
     const writes: { path: string; data: Uint8Array }[] = []
     const dispatch = vi.fn<DispatchFn>((op, path, args) => {
       if (op === 'write') {
-        writes.push({ path: path.original, data: args?.[0] as Uint8Array })
+        writes.push({ path: path.virtual, data: args?.[0] as Uint8Array })
       }
       return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
     })
@@ -71,7 +71,7 @@ describe('handleRedirect > / >>', () => {
     const dispatch = vi.fn<DispatchFn>((op, path, args) => {
       if (op === 'read')
         return Promise.resolve<[unknown, IOResult]>([encode('pre-'), new IOResult()])
-      if (op === 'write') writes.push({ path: path.original, data: args?.[0] as Uint8Array })
+      if (op === 'write') writes.push({ path: path.virtual, data: args?.[0] as Uint8Array })
       return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
     })
     const execute: ExecuteNodeFn = () =>
@@ -171,7 +171,7 @@ describe('handleRedirect &> (both to file)', () => {
   it('writes stdout+stderr combined to the target', async () => {
     const writes: { data: Uint8Array; path: string }[] = []
     const dispatch = vi.fn<DispatchFn>((op, p, args) => {
-      if (op === 'write') writes.push({ path: p.original, data: args?.[0] as Uint8Array })
+      if (op === 'write') writes.push({ path: p.virtual, data: args?.[0] as Uint8Array })
       return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
     })
     const execute: ExecuteNodeFn = () =>

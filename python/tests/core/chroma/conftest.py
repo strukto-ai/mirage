@@ -6,6 +6,7 @@ import pytest
 
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 class FakeCollection:
@@ -135,12 +136,13 @@ def chroma_index() -> RAMIndexCacheStore:
 
 @pytest.fixture
 def knowledge_root() -> PathSpec:
-    return PathSpec(original="/knowledge",
-                    directory="/knowledge",
-                    prefix="/knowledge/")
+    return PathSpec(resource_path=mount_key("/knowledge", "/knowledge"),
+                    virtual="/knowledge",
+                    directory="/knowledge")
 
 
 @pytest.fixture
 def quickstart_path() -> PathSpec:
-    return PathSpec.from_str_path("/knowledge/guides/quickstart",
-                                  "/knowledge/")
+    return PathSpec.from_str_path(
+        "/knowledge/guides/quickstart",
+        mount_key("/knowledge/guides/quickstart", "/knowledge"))

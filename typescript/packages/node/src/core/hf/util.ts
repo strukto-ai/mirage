@@ -12,13 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountPrefixOf } from '@struktoai/mirage-core'
 import type { PathSpec } from '@struktoai/mirage-core'
 
 export function rawPathOf(path: PathSpec): string {
-  const prefix = path.prefix
-  return prefix !== '' && path.original.startsWith(prefix)
-    ? path.original.slice(prefix.length) || '/'
-    : path.original
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  return prefix !== '' && path.virtual.startsWith(prefix)
+    ? path.virtual.slice(prefix.length) || '/'
+    : path.virtual
 }
 
 export function hfKey(rawPath: string): string {

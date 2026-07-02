@@ -47,7 +47,7 @@ export async function rename(
       // Moving a directory into its own subtree would run away in the
       // recursive copy and then rmRecursive would delete the original.
       // Refuse before either side effect.
-      throw new Error(`cannot move '${s.original}' to a subdirectory of itself, '${d.original}'`)
+      throw new Error(`cannot move '${s.virtual}' to a subdirectory of itself, '${d.virtual}'`)
     }
     await copy(accessor, s, d, index, true)
     await rmRecursive(accessor, s, index)

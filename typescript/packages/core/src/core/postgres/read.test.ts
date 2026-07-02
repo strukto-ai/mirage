@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('./_client.ts', () => ({
@@ -66,7 +67,11 @@ describe('read', () => {
     })
     const out = await read(
       makeAccessor(),
-      new PathSpec({ original: '/pg/database.json', directory: '/pg/', prefix: '/pg' }),
+      new PathSpec({
+        virtual: '/pg/database.json',
+        directory: '/pg/',
+        resourcePath: mountKey('/pg/database.json', '/pg'),
+      }),
     )
     const parsed = JSON.parse(decode(out)) as { database: string }
     expect(parsed.database).toBe('db')
@@ -88,9 +93,9 @@ describe('read', () => {
     await read(
       makeAccessor(),
       new PathSpec({
-        original: '/pg/public/tables/users/schema.json',
+        virtual: '/pg/public/tables/users/schema.json',
         directory: '/pg/public/tables/users/',
-        prefix: '/pg',
+        resourcePath: mountKey('/pg/public/tables/users/schema.json', '/pg'),
       }),
     )
     expect(_schema.buildEntitySchemaJson).toHaveBeenCalledWith(
@@ -107,9 +112,9 @@ describe('read', () => {
       read(
         makeAccessor({ dsn: 'postgres://h/db', maxReadRows: 10_000, maxReadBytes: 1_000_000 }),
         new PathSpec({
-          original: '/pg/public/tables/users/rows.jsonl',
+          virtual: '/pg/public/tables/users/rows.jsonl',
           directory: '/pg/public/tables/users/',
-          prefix: '/pg',
+          resourcePath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
         }),
       ),
     ).rejects.toThrow(/too large to read entirely/)
@@ -124,9 +129,9 @@ describe('read', () => {
     const out = await read(
       makeAccessor({ dsn: 'postgres://h/db', maxReadRows: 10_000, maxReadBytes: 1_000_000 }),
       new PathSpec({
-        original: '/pg/public/tables/users/rows.jsonl',
+        virtual: '/pg/public/tables/users/rows.jsonl',
         directory: '/pg/public/tables/users/',
-        prefix: '/pg',
+        resourcePath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
       }),
     )
     expect(decode(out)).toBe('{"id":1,"name":"a"}\n{"id":2,"name":"b"}\n')
@@ -137,9 +142,9 @@ describe('read', () => {
     await read(
       makeAccessor(),
       new PathSpec({
-        original: '/pg/public/tables/users/rows.jsonl',
+        virtual: '/pg/public/tables/users/rows.jsonl',
         directory: '/pg/public/tables/users/',
-        prefix: '/pg',
+        resourcePath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
       }),
       undefined,
       { limit: 10, offset: 5 },
@@ -157,9 +162,9 @@ describe('read', () => {
     const out = await read(
       makeAccessor(),
       new PathSpec({
-        original: '/pg/public/tables/users/rows.jsonl',
+        virtual: '/pg/public/tables/users/rows.jsonl',
         directory: '/pg/public/tables/users/',
-        prefix: '/pg',
+        resourcePath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
       }),
     )
     expect(decode(out)).toBe('{"ts":"2026-04-30T00:00:00.000Z"}\n')

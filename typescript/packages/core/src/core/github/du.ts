@@ -12,13 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GitHubAccessor } from '../../accessor/github.ts'
 import type { PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 
 function strip(path: PathSpec): string {
-  const prefix = path.prefix
-  let p = path.original
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  let p = path.virtual
   if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
   return stripSlash(p)
 }

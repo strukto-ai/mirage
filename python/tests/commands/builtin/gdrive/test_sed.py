@@ -24,6 +24,7 @@ from mirage.core.google._client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.fixture
@@ -54,9 +55,9 @@ def index():
 
 
 def _scope(path: str, prefix: str = "") -> PathSpec:
-    return PathSpec(original=path,
-                    directory=path.rsplit("/", 1)[0] or "/",
-                    prefix=prefix)
+    return PathSpec(resource_path=mount_key(path, prefix),
+                    virtual=path,
+                    directory=path.rsplit("/", 1)[0] or "/")
 
 
 @pytest.mark.asyncio

@@ -40,10 +40,12 @@ async def find(
     index: IndexCacheStore = None,
 ) -> list[str]:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
     if index is None:
         raise ValueError("find: no tree loaded")
-    base = path.strip_prefix.strip("/")
+    base = path.mount_path.strip("/")
     base_depth = 0 if base == "" else base.count("/") + 1
     start_name = start_basename(path)
     results: list[str] = []

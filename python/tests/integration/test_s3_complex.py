@@ -24,6 +24,7 @@ from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Config, S3Resource
 from mirage.types import MountMode, PathSpec
+from mirage.utils.key_prefix import mount_key
 from mirage.workspace import Workspace
 
 DATA_DIR = Path(__file__).resolve().parents[3] / "data"
@@ -319,10 +320,10 @@ async def test_grep_then_jq_with_and_or_list(ws):
 
 
 def _resolved(original: str) -> PathSpec:
-    return PathSpec(original=original,
+    return PathSpec(resource_path=mount_key(original, "/s3"),
+                    virtual=original,
                     directory=original,
-                    resolved=True,
-                    prefix="/s3/")
+                    resolved=True)
 
 
 @pytest.mark.asyncio
@@ -341,8 +342,8 @@ async def test_cat_multifile_caches_materialized_bytes_per_file():
         source, io = await s3_cat(backend.accessor, [a, b], index=None)
 
         assert io.reads[
-            "reports/summary.txt"] == b"alpha report\nbeta report\n"
-        assert io.reads["archive/2026/q1/deep.txt"] == b"deep archive\n"
+            "/reports/summary.txt"] == b"alpha report\nbeta report\n"
+        assert io.reads["/archive/2026/q1/deep.txt"] == b"deep archive\n"
         assert all(isinstance(v, bytes) for v in io.reads.values())
 
         combined = b"".join([chunk async for chunk in source])
@@ -359,4 +360,4 @@ async def test_cat_single_file_keeps_streaming_cachable():
         a = _resolved("/s3/reports/summary.txt")
         source, io = await s3_cat(backend.accessor, [a], index=None)
         assert isinstance(source, CachableAsyncIterator)
-        assert io.reads["reports/summary.txt"] is source
+        assert io.reads["/reports/summary.txt"] is source

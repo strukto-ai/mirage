@@ -12,24 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf, stripMount } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { awkStream } from './awk_helper.ts'
 import { resolveSource } from '../utils/stream.ts'
-import { lstripSlash } from '../../../utils/slash.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
-
-function stripMount(virtualPath: string, prefix: string): string {
-  if (prefix !== '' && virtualPath.startsWith(prefix + '/')) {
-    return '/' + lstripSlash(virtualPath.slice(prefix.length))
-  }
-  return virtualPath
-}
 
 export async function awkGeneric(
   paths: PathSpec[],
@@ -42,21 +35,23 @@ export async function awkGeneric(
   let dataPaths: string[]
   if (fFlag !== null) {
     const programPath = fFlag
-    const mountPrefix = paths[0]?.prefix ?? opts.mountPrefix ?? ''
-    const programSpec = PathSpec.fromStrPath(programPath, mountPrefix)
+    const mountPrefix =
+      (paths[0] === undefined
+        ? undefined
+        : mountPrefixOf(paths[0].virtual, paths[0].resourcePath)) ??
+      opts.mountPrefix ??
+      ''
+    const programSpec = PathSpec.fromStrPath(programPath, mountKey(programPath, mountPrefix))
     try {
       program = DEC.decode(await materialize(stream(programSpec))).trim()
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
     }
-    dataPaths = [
-      ...texts.map((t) => stripMount(t, mountPrefix)),
-      ...paths.map((p) => p.stripPrefix),
-    ]
+    dataPaths = [...texts.map((t) => stripMount(t, mountPrefix)), ...paths.map((p) => p.mountPath)]
   } else if (texts.length > 0 && texts[0] !== undefined) {
     program = texts[0]
-    dataPaths = paths.map((p) => p.stripPrefix)
+    dataPaths = paths.map((p) => p.mountPath)
   } else {
     return [
       null,

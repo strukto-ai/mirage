@@ -18,7 +18,7 @@ import { norm } from './utils.ts'
 import { invalidateAfterUnlink, rstripSlash } from '@struktoai/mirage-core'
 
 export async function rmdir(accessor: RedisAccessor, path: PathSpec): Promise<void> {
-  const p = norm(path.stripPrefix)
+  const p = norm(path.mountPath)
   const store = accessor.store
   if (!(await store.hasDir(p))) {
     throw new Error(`not a directory: ${p}`)

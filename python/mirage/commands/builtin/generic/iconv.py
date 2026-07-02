@@ -27,7 +27,7 @@ async def iconv(
     decoded = raw.decode(from_enc, errors=err_mode)
     encoded = decoded.encode(to_enc, errors=err_mode)
     if output_path is not None:
-        target = output_path.strip_prefix
+        target = output_path.mount_path
         await write_bytes(accessor, target, encoded)
         return None, IOResult(writes={target: encoded})
     return encoded, IOResult()

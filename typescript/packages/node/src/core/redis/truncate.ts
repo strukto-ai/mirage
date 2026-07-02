@@ -21,7 +21,7 @@ export async function truncate(
   path: PathSpec,
   length: number,
 ): Promise<void> {
-  const p = norm(path.stripPrefix)
+  const p = norm(path.mountPath)
   const store = accessor.store
   const existing = await store.getFile(p)
   const data = existing ?? new Uint8Array(0)

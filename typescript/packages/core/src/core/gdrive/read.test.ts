@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../utils/slash.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as DriveModule from '../google/drive.ts'
 
@@ -57,7 +58,11 @@ describe('gdrive read auto-bootstrap', () => {
 
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
-    const path = new PathSpec({ original: '/report.pdf', directory: '/report.pdf' })
+    const path = new PathSpec({
+      resourcePath: stripSlash('/report.pdf'),
+      virtual: '/report.pdf',
+      directory: '/report.pdf',
+    })
     const out = await read(accessor, path, index)
     expect(new TextDecoder().decode(out)).toBe('pdf-bytes')
   })
@@ -80,7 +85,11 @@ describe('gdrive read auto-bootstrap', () => {
 
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
-    const path = new PathSpec({ original: '/missing.txt', directory: '/missing.txt' })
+    const path = new PathSpec({
+      resourcePath: stripSlash('/missing.txt'),
+      virtual: '/missing.txt',
+      directory: '/missing.txt',
+    })
     await expect(read(accessor, path, index)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
@@ -98,7 +107,11 @@ describe('gdrive read auto-bootstrap', () => {
         extra: { drive_id: 'drive1' },
       }),
     )
-    const path = new PathSpec({ original: '/Team Drive', directory: '/Team Drive' })
+    const path = new PathSpec({
+      resourcePath: stripSlash('/Team Drive'),
+      virtual: '/Team Drive',
+      directory: '/Team Drive',
+    })
     await expect(read(accessor, path, index)).rejects.toThrow(/EISDIR/)
     expect(vi.mocked(drive.downloadFile)).not.toHaveBeenCalled()
   })

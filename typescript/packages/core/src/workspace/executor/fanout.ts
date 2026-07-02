@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
 import { PathSpec } from '../../types.ts'
@@ -43,7 +44,7 @@ export function shouldFanOut(
   registry: MountRegistry,
 ): boolean {
   if (paths.length === 0 || paths[0] === undefined) return false
-  if (registry.descendantMounts(paths[0].original).length === 0) return false
+  if (registry.descendantMounts(paths[0].virtual).length === 0) return false
   if (TRAVERSAL_CMDS.has(cmdName)) return true
   if (cmdName === 'grep') {
     return flagKwargs.r === true || flagKwargs.R === true || flagKwargs.recursive === true
@@ -188,7 +189,7 @@ export async function fanOutTraversal(
   stdin: ByteSource | null,
   ensureOpen: ((resource: Resource) => Promise<void>) | undefined,
 ): Promise<Result> {
-  const targetPath = paths[0]?.original ?? cwd
+  const targetPath = paths[0]?.virtual ?? cwd
   const descendants = registry.descendantMounts(targetPath)
   const descendantPrefixes = descendants.map((m) => rstripSlash(m.prefix))
 
@@ -214,9 +215,9 @@ export async function fanOutTraversal(
       const mountRoot = rstripSlash(mount.prefix) || '/'
       subPaths = [
         new PathSpec({
-          original: mountRoot,
+          virtual: mountRoot,
           directory: mountRoot,
-          prefix: rstripSlash(mount.prefix),
+          resourcePath: mountKey(mountRoot, rstripSlash(mount.prefix)),
         }),
       ]
     }

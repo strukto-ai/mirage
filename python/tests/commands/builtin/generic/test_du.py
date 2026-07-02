@@ -5,7 +5,9 @@ from mirage.types import PathSpec
 
 
 def _spec(path: str) -> PathSpec:
-    return PathSpec(original=path, directory=path)
+    return PathSpec(virtual=path,
+                    directory=path,
+                    resource_path=path.strip("/"))
 
 
 def _make_list_backend(tree: dict[str, int]):
@@ -15,20 +17,20 @@ def _make_list_backend(tree: dict[str, int]):
     (dirpath, total) entry, mirroring the real backends."""
 
     async def compute_total(p: PathSpec) -> int:
-        prefix = p.original.rstrip("/") + "/"
+        prefix = p.virtual.rstrip("/") + "/"
         return sum(size for path, size in tree.items()
-                   if path == p.original or path.startswith(prefix))
+                   if path == p.virtual or path.startswith(prefix))
 
     async def compute_all(p: PathSpec) -> list[tuple[str, int]]:
-        prefix = p.original.rstrip("/") + "/"
+        prefix = p.virtual.rstrip("/") + "/"
         entries: list[tuple[str, int]] = []
         total = 0
         for path, size in sorted(tree.items()):
-            if path == p.original or path.startswith(prefix):
+            if path == p.virtual or path.startswith(prefix):
                 entries.append((path, size))
                 total += size
-        if p.original not in dict(entries):
-            entries.append((p.original, total))
+        if p.virtual not in dict(entries):
+            entries.append((p.virtual, total))
         return entries
 
     return compute_total, compute_all
@@ -43,19 +45,19 @@ def _make_backend(tree: dict[str, int]):
     """
 
     async def compute_total(p: PathSpec) -> int:
-        prefix = p.original.rstrip("/") + "/"
+        prefix = p.virtual.rstrip("/") + "/"
         total = 0
         for path, size in tree.items():
-            if path == p.original or path.startswith(prefix):
+            if path == p.virtual or path.startswith(prefix):
                 total += size
         return total
 
     async def compute_all(p: PathSpec, ) -> tuple[list[tuple[str, int]], int]:
-        prefix = p.original.rstrip("/") + "/"
+        prefix = p.virtual.rstrip("/") + "/"
         entries: list[tuple[str, int]] = []
         total = 0
         for path, size in sorted(tree.items()):
-            if path == p.original or path.startswith(prefix):
+            if path == p.virtual or path.startswith(prefix):
                 entries.append((path, size))
                 total += size
         return entries, total

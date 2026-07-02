@@ -17,8 +17,7 @@ async def readlink(
     normalize = f or e or m
     results: list[str] = []
     for p in paths:
-        vp = p.prefix + "/" + p.original.lstrip(
-            "/") if p.prefix else p.original
+        vp = p.virtual
         if normalize:
             vp = posixpath.normpath(vp)
         results.append(vp)

@@ -19,6 +19,7 @@ from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.builders.head import head
 from mirage.commands.builtin.generic_bind.builders.tail import tail
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def _ops(chunks):
@@ -32,8 +33,10 @@ def _ops(chunks):
 
 def _paths(*names: str) -> list[PathSpec]:
     return [
-        PathSpec(original=n, directory="/data", prefix="", resolved=True)
-        for n in names
+        PathSpec(resource_path=mount_key(n, ""),
+                 virtual=n,
+                 directory="/data",
+                 resolved=True) for n in names
     ]
 
 
@@ -51,7 +54,7 @@ def _streamer(chunks_by_path):
     def read_stream(accessor, path, index=None):
 
         async def gen():
-            for ch in chunks_by_path[path.original]:
+            for ch in chunks_by_path[path.virtual]:
                 yield ch
 
         return gen()

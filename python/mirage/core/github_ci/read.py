@@ -23,6 +23,7 @@ from mirage.core.github_ci.runs import (download_job_log, get_job, get_run,
 from mirage.core.github_ci.workflows import get_workflow
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_prefix_of
 
 
 async def read(
@@ -31,10 +32,12 @@ async def read(
     index: IndexCacheStore = None,
 ) -> bytes:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    virtual = path.original
-    prefix = path.prefix
-    key = path.key
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    virtual = path.virtual
+    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    key = path.resource_path
     parts = key.split("/")
 
     # /workflows/<name>_<id>.json

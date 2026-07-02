@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../utils/slash.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ReaddirModule from './readdir.ts'
 import type * as StatModule from './stat.ts'
@@ -47,17 +49,17 @@ function enoent(p: string): Error {
 
 function mockTree(tree: Record<string, string[]>): void {
   vi.mocked(readdirMod.readdir).mockImplementation((_accessor, spec) => {
-    const children = tree[spec.original]
-    if (children === undefined) return Promise.reject(enoent(spec.original))
+    const children = tree[spec.virtual]
+    if (children === undefined) return Promise.reject(enoent(spec.virtual))
     return Promise.resolve(children)
   })
 }
 
 function mockStats(stats: Record<string, { size?: number; modified?: string }>): void {
   vi.mocked(statMod.stat).mockImplementation((_accessor, spec) => {
-    const entry = stats[spec.original]
-    if (entry === undefined) return Promise.reject(enoent(spec.original))
-    const name = spec.original.split('/').pop() ?? ''
+    const entry = stats[spec.virtual]
+    if (entry === undefined) return Promise.reject(enoent(spec.virtual))
+    const name = spec.virtual.split('/').pop() ?? ''
     return Promise.resolve(
       new FileStat({
         name,
@@ -75,7 +77,7 @@ const TREE: Record<string, string[]> = {
   '/docs/inner': ['/docs/inner/deep.md'],
 }
 
-const ROOT = new PathSpec({ original: '/', directory: '/' })
+const ROOT = new PathSpec({ resourcePath: stripSlash('/'), virtual: '/', directory: '/' })
 
 const SIZES: Record<string, { size?: number; modified?: string }> = {
   '/docs': { modified: '2026-01-05T00:00:00Z' },
@@ -131,7 +133,11 @@ describe('gdrive core find', () => {
       '/mnt/gdv': ['/mnt/gdv/docs/', '/mnt/gdv/notes.txt'],
       '/mnt/gdv/docs': ['/mnt/gdv/docs/readme.md'],
     })
-    const root = new PathSpec({ original: '/mnt/gdv', directory: '/mnt/gdv', prefix: '/mnt/gdv' })
+    const root = new PathSpec({
+      virtual: '/mnt/gdv',
+      directory: '/mnt/gdv',
+      resourcePath: mountKey('/mnt/gdv', '/mnt/gdv'),
+    })
     const out = await find(makeAccessor(), root)
     expect(out).toEqual(['/docs', '/docs/readme.md', '/notes.txt'])
   })
@@ -139,7 +145,7 @@ describe('gdrive core find', () => {
   it('does not stat slash-marked directory entries', async () => {
     mockTree(TREE)
     await find(makeAccessor(), ROOT, { name: '*.md' })
-    const statted = vi.mocked(statMod.stat).mock.calls.map((c) => c[1].original)
+    const statted = vi.mocked(statMod.stat).mock.calls.map((c) => c[1].virtual)
     expect(statted).not.toContain('/docs')
     expect(statted).not.toContain('/docs/inner')
   })
@@ -161,7 +167,7 @@ describe('gdrive core find', () => {
   it('stats files for type detection and size filtering only', async () => {
     mockTree(TREE)
     await find(makeAccessor(), ROOT, { name: '*.md', minSize: 1024 })
-    const statted = [...new Set(vi.mocked(statMod.stat).mock.calls.map((c) => c[1].original))]
+    const statted = [...new Set(vi.mocked(statMod.stat).mock.calls.map((c) => c[1].virtual))]
     expect(statted.sort()).toEqual(['/docs/inner/deep.md', '/docs/readme.md', '/notes.txt'])
   })
 
@@ -193,7 +199,11 @@ describe('gdrive core find', () => {
       '/mnt/gdv': ['/mnt/gdv/docs/', '/mnt/gdv/notes.txt'],
       '/mnt/gdv/docs': ['/mnt/gdv/docs/readme.md'],
     })
-    const root = new PathSpec({ original: '/mnt/gdv', directory: '/mnt/gdv', prefix: '/mnt/gdv' })
+    const root = new PathSpec({
+      virtual: '/mnt/gdv',
+      directory: '/mnt/gdv',
+      resourcePath: mountKey('/mnt/gdv', '/mnt/gdv'),
+    })
     const out = await find(makeAccessor(), root, { pathPattern: '/docs/*' })
     expect(out).toEqual(['/docs/readme.md'])
   })
@@ -237,7 +247,7 @@ describe('gdrive core find', () => {
 
   it('propagates non-ENOENT readdir errors', async () => {
     vi.mocked(readdirMod.readdir).mockImplementation((_accessor, spec) => {
-      if (spec.original === '/') return Promise.resolve(['/bad/'])
+      if (spec.virtual === '/') return Promise.resolve(['/bad/'])
       return Promise.reject(new Error('rate limited'))
     })
     await expect(find(makeAccessor(), ROOT)).rejects.toThrow('rate limited')

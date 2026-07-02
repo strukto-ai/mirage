@@ -47,8 +47,9 @@ async def _eval_test(dispatch: Callable, argv: list) -> bool:
                 return False
         if op == "-d":
             scope = val if isinstance(val, PathSpec) else PathSpec(
-                original=_scope_path(val),
+                virtual=_scope_path(val),
                 directory=_scope_path(val),
+                resource_path="",
                 resolved=False)
             try:
                 await dispatch("readdir", scope)

@@ -122,7 +122,7 @@ export async function uniqGeneric(
   if (paths.length > 0) {
     const first = paths[0]
     if (first === undefined) return [null, new IOResult()]
-    return [uniqStream(stream(first), uniqOpts), new IOResult({ cache: [first.stripPrefix] })]
+    return [uniqStream(stream(first), uniqOpts), new IOResult({ cache: [first.mountPath] })]
   }
   try {
     const source = resolveSource(opts.stdin, 'uniq: missing operand')

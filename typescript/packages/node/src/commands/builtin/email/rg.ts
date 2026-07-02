@@ -18,6 +18,7 @@ import {
   command,
   compilePattern,
   grepLines,
+  mountPrefixOf,
   patternArg,
   rgGeneric,
   specOf,
@@ -85,7 +86,10 @@ async function rgCommand(
     if (first !== undefined) {
       const scope = detectScope(first)
       if (scope.useNative && !pattern.includes('\n')) {
-        const filePrefix = first.prefix !== '' ? first.prefix : ''
+        const filePrefix =
+          mountPrefixOf(first.virtual, first.resourcePath) !== ''
+            ? mountPrefixOf(first.virtual, first.resourcePath)
+            : ''
         const pairs = await searchAndFormat(accessor, scope, pattern, filePrefix, maxCount ?? 50)
         const lines: string[] = []
         for (const [vfsPath, msgText] of pairs) {

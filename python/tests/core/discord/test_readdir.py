@@ -47,8 +47,11 @@ async def test_readdir_root(accessor, index):
             new_callable=AsyncMock,
             return_value=guilds,
     ):
-        result = await readdir(accessor, PathSpec(original="/", directory="/"),
-                               index)
+        result = await readdir(
+            accessor,
+            PathSpec(resource_path=("/").strip("/"),
+                     virtual="/",
+                     directory="/"), index)
 
     assert "/My Server__G001" in result
 
@@ -66,8 +69,11 @@ async def test_readdir_root_with_slash_in_name(accessor, index):
             new_callable=AsyncMock,
             return_value=guilds,
     ):
-        result = await readdir(accessor, PathSpec(original="/", directory="/"),
-                               index)
+        result = await readdir(
+            accessor,
+            PathSpec(resource_path=("/").strip("/"),
+                     virtual="/",
+                     directory="/"), index)
 
     assert result == ["/A∕B Test Server__G001"]
 
@@ -85,8 +91,11 @@ async def test_readdir_root_with_apostrophe(accessor, index):
             new_callable=AsyncMock,
             return_value=guilds,
     ):
-        result = await readdir(accessor, PathSpec(original="/", directory="/"),
-                               index)
+        result = await readdir(
+            accessor,
+            PathSpec(resource_path=("/").strip("/"),
+                     virtual="/",
+                     directory="/"), index)
 
     assert "/Zecheng's Server__G001" in result
 
@@ -104,8 +113,10 @@ async def test_readdir_guild(accessor, index):
     )
 
     result = await readdir(
-        accessor, PathSpec(original="/My Server", directory="/My Server"),
-        index)
+        accessor,
+        PathSpec(resource_path=("/My Server").strip("/"),
+                 virtual="/My Server",
+                 directory="/My Server"), index)
 
     assert result == [
         "/My Server/channels",
@@ -143,7 +154,8 @@ async def test_readdir_channels(accessor, index):
     ):
         result = await readdir(
             accessor,
-            PathSpec(original="/My Server/channels",
+            PathSpec(resource_path=("/My Server/channels").strip("/"),
+                     virtual="/My Server/channels",
                      directory="/My Server/channels"), index)
 
     assert "/My Server/channels/general__C001" in result
@@ -173,7 +185,8 @@ async def test_readdir_channel_dates(accessor, index):
 
     result = await readdir(
         accessor,
-        PathSpec(original="/My Server/channels/general",
+        PathSpec(resource_path=("/My Server/channels/general").strip("/"),
+                 virtual="/My Server/channels/general",
                  directory="/My Server/channels/general"), index)
 
     assert len(result) >= 1

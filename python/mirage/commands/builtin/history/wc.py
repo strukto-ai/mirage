@@ -47,7 +47,7 @@ async def wc(
         totals = WCCounts()
         for p in paths:
             counts = await generic_wc(await history_read(accessor, p, index))
-            rows.append((counts, p.original))
+            rows.append((counts, p.virtual))
             totals.merge(counts)
         if len(paths) > 1:
             rows.append((totals, "total"))

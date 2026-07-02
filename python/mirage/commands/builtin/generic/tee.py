@@ -30,8 +30,8 @@ async def tee(
         except FileNotFoundError:
             pass
     await write_bytes(accessor, paths[0], write_data)
-    return raw, IOResult(writes={paths[0].strip_prefix: write_data},
-                         cache=[paths[0].strip_prefix])
+    return raw, IOResult(writes={paths[0].mount_path: write_data},
+                         cache=[paths[0].mount_path])
 
 
 __all__ = ["tee"]

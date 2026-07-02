@@ -28,6 +28,7 @@ from mirage.core.qdrant.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 
 async def find_provision(
@@ -37,7 +38,7 @@ async def find_provision(
     **_extra: object,
 ) -> ProvisionResult:
     return await metadata_provision("find " + " ".join(
-        p.original if isinstance(p, PathSpec) else p for p in paths))
+        p.virtual if isinstance(p, PathSpec) else p for p in paths))
 
 
 @command("find",
@@ -63,8 +64,8 @@ async def find(
 ) -> tuple[ByteSource | None, IOResult]:
     paths = await resolve_glob(accessor, paths, index)
     p0 = paths[0] if paths else None
-    search_path = p0.original if p0 else "/"
-    search_prefix = p0.prefix if p0 else ""
+    search_path = p0.virtual if p0 else "/"
+    search_prefix = mount_prefix_of(p0.virtual, p0.resource_path) if p0 else ""
     args = parse_find_args(texts,
                            name=name,
                            type=type,
@@ -74,10 +75,10 @@ async def find(
                            iname=iname,
                            path=path,
                            mindepth=mindepth)
-    search_spec = PathSpec(original=search_path,
+    search_spec = PathSpec(virtual=search_path,
                            directory=search_path,
                            resolved=False,
-                           prefix=search_prefix)
+                           resource_path=mount_key(search_path, search_prefix))
     results = await walk_find(search_spec,
                               readdir=partial(_readdir, accessor),
                               stat=partial(_stat, accessor),

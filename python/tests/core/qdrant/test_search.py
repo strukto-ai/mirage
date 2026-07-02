@@ -2,10 +2,13 @@ import pytest
 
 from mirage.core.qdrant.search import search_rows_output
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def _ps(path: str) -> PathSpec:
-    return PathSpec(original=path, directory=path, prefix="/db")
+    return PathSpec(resource_path=mount_key(path, "/db"),
+                    virtual=path,
+                    directory=path)
 
 
 @pytest.mark.asyncio

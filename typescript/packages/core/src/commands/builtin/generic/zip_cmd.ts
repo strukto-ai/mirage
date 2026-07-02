@@ -163,7 +163,7 @@ export async function zipGeneric(
     const raw = await materialize(stream(p))
     const data = new Uint8Array(raw.byteLength)
     data.set(raw)
-    const arcname = junkPaths ? gnuBasename(p.original) : lstripSlash(p.original)
+    const arcname = junkPaths ? gnuBasename(p.virtual) : lstripSlash(p.virtual)
     const compressed = await deflateRaw(data)
     items.push({
       name: arcname,
@@ -179,5 +179,5 @@ export async function zipGeneric(
   await write(archivePath, archive)
   const stdout: ByteSource | null =
     outputLines.length > 0 ? ENC.encode(outputLines.join('\n') + '\n') : null
-  return [stdout, new IOResult({ writes: { [archivePath.stripPrefix]: archive } })]
+  return [stdout, new IOResult({ writes: { [archivePath.mountPath]: archive } })]
 }

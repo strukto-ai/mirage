@@ -18,7 +18,7 @@ import { norm } from './utils.ts'
 import { invalidateAfterUnlink } from '../../cache/context.ts'
 
 export async function rmdir(accessor: RAMAccessor, path: PathSpec): Promise<void> {
-  const p = norm(path.stripPrefix)
+  const p = norm(path.mountPath)
   accessor.store.dirs.delete(p)
   accessor.store.modified.delete(p)
   await invalidateAfterUnlink(path)

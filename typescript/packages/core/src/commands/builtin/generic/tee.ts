@@ -49,8 +49,8 @@ export async function teeGeneric(
   return [
     out,
     new IOResult({
-      writes: { [first.stripPrefix]: writeData },
-      cache: [first.stripPrefix],
+      writes: { [first.mountPath]: writeData },
+      cache: [first.mountPath],
     }),
   ]
 }

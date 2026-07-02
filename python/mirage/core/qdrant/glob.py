@@ -20,6 +20,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.constants import SCOPE_ERROR
 from mirage.core.qdrant.readdir import readdir
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,8 @@ async def resolve_glob(
     result: list[PathSpec] = []
     for p in paths:
         if isinstance(p, str):
-            result.append(PathSpec(original=p, directory=p))
+            result.append(
+                PathSpec(virtual=p, directory=p, resource_path=p.strip("/")))
             continue
         if p.resolved:
             result.append(p)
@@ -40,9 +42,10 @@ async def resolve_glob(
             entries = await readdir(accessor, p.dir, index)
             matched = [
                 PathSpec(
-                    original=e,
+                    virtual=e,
                     directory=p.directory,
-                    prefix=p.prefix,
+                    resource_path=mount_key(
+                        e, mount_prefix_of(p.virtual, p.resource_path)),
                 ) for e in entries
                 if fnmatch.fnmatch(e.rsplit("/", 1)[-1], p.pattern)
             ]

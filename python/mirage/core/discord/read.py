@@ -22,6 +22,7 @@ from mirage.core.discord.members import list_members
 from mirage.core.discord.readdir import readdir as _readdir
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 
 async def _ensure_channel(
@@ -43,10 +44,12 @@ async def read(
     index: IndexCacheStore = None,
 ) -> bytes:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    virtual = path.original if isinstance(path, PathSpec) else path
-    prefix = path.prefix
-    key = path.key
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    virtual = path.virtual if isinstance(path, PathSpec) else path
+    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    key = path.resource_path
     parts = key.split("/")
 
     # <guild>/channels/<ch>/<date>/chat.jsonl
@@ -69,9 +72,9 @@ async def read(
             # Hydrate via date dir readdir, which triggers _fetch_day
             date_key = "/".join(parts[:4])
             date_spec = PathSpec(
-                original=prefix + "/" + date_key,
+                virtual=prefix + "/" + date_key,
                 directory=prefix + "/" + date_key,
-                prefix=prefix,
+                resource_path=mount_key(prefix + "/" + date_key, prefix),
             )
             await _readdir(accessor, date_spec, index)
             lookup = await index.get(virtual_key)

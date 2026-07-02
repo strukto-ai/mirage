@@ -17,7 +17,7 @@ from mirage.types import PathSpec
 
 
 def _ps(p: str) -> PathSpec:
-    return PathSpec(original=p, directory=p)
+    return PathSpec(virtual=p, directory=p, resource_path=p.strip("/"))
 
 
 def test_root():

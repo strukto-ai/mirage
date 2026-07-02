@@ -18,7 +18,7 @@ import { type PathSpec, invalidateAfterUnlink } from '@struktoai/mirage-core'
 import { resolveSafe } from './utils.ts'
 
 export async function rmdir(accessor: DiskAccessor, path: PathSpec): Promise<void> {
-  const full = resolveSafe(accessor.root, path.stripPrefix)
+  const full = resolveSafe(accessor.root, path.mountPath)
   try {
     await fsRmdir(full)
   } catch (err) {

@@ -65,7 +65,9 @@ async def _populate_index(index: RAMIndexCacheStore) -> None:
 @pytest.mark.asyncio
 async def test_stat_root(accessor, index):
     result = await stat(accessor,
-                        PathSpec(original="/", directory="/"),
+                        PathSpec(resource_path=("/").strip("/"),
+                                 virtual="/",
+                                 directory="/"),
                         index=index)
     assert result.type == FileType.DIRECTORY
     assert result.name == "/"
@@ -74,10 +76,12 @@ async def test_stat_root(accessor, index):
 @pytest.mark.asyncio
 async def test_stat_channel(accessor, index):
     await _populate_index(index)
-    result = await stat(accessor,
-                        PathSpec(original="/channels/general__C001",
-                                 directory="/channels/general__C001"),
-                        index=index)
+    result = await stat(
+        accessor,
+        PathSpec(resource_path=("/channels/general__C001").strip("/"),
+                 virtual="/channels/general__C001",
+                 directory="/channels/general__C001"),
+        index=index)
     assert result.type == FileType.DIRECTORY
     assert result.extra["channel_id"] == "C001"
     assert result.modified == "2021-01-01T00:00:00Z"
@@ -87,8 +91,10 @@ async def test_stat_channel(accessor, index):
 async def test_stat_user(accessor, index):
     await _populate_index(index)
     result = await stat(accessor,
-                        PathSpec(original="/users/alice.json",
-                                 directory="/users/alice.json"),
+                        PathSpec(
+                            resource_path=("/users/alice.json").strip("/"),
+                            virtual="/users/alice.json",
+                            directory="/users/alice.json"),
                         index=index)
     assert result.type == FileType.JSON
     assert result.extra["user_id"] == "U001"
@@ -99,7 +105,9 @@ async def test_stat_jsonl(accessor, index):
     await _populate_index(index)
     result = await stat(
         accessor,
-        PathSpec(original="/channels/general__C001/2023-11-14/chat.jsonl",
+        PathSpec(resource_path=(
+            "/channels/general__C001/2023-11-14/chat.jsonl").strip("/"),
+                 virtual="/channels/general__C001/2023-11-14/chat.jsonl",
                  directory="/channels/general__C001/2023-11-14/chat.jsonl"),
         index=index)
     assert result.type == FileType.TEXT
@@ -110,7 +118,8 @@ async def test_stat_jsonl(accessor, index):
 async def test_stat_not_found(accessor, index):
     with pytest.raises(FileNotFoundError):
         await stat(accessor,
-                   PathSpec(original="/nonexistent/path",
+                   PathSpec(resource_path=("/nonexistent/path").strip("/"),
+                            virtual="/nonexistent/path",
                             directory="/nonexistent/path"),
                    index=index)
 
@@ -124,27 +133,35 @@ async def test_stat_date_dir(accessor, index):
                     resource_type="slack/date_dir",
                     vfs_name="2026-04-10")),
     ])
-    s = await stat(accessor,
-                   PathSpec(original="/channels/general__C001/2026-04-10",
-                            directory="/channels/general__C001/2026-04-10"),
-                   index=index)
+    s = await stat(
+        accessor,
+        PathSpec(
+            resource_path=("/channels/general__C001/2026-04-10").strip("/"),
+            virtual="/channels/general__C001/2026-04-10",
+            directory="/channels/general__C001/2026-04-10"),
+        index=index)
     assert s.type == FileType.DIRECTORY
 
 
 @pytest.mark.asyncio
 async def test_stat_non_date_dir_not_found(accessor, index):
     with pytest.raises(FileNotFoundError):
-        await stat(accessor,
-                   PathSpec(original="/channels/general__C001/notadate",
-                            directory="/channels/general__C001/notadate"),
-                   index=index)
+        await stat(
+            accessor,
+            PathSpec(
+                resource_path=("/channels/general__C001/notadate").strip("/"),
+                virtual="/channels/general__C001/notadate",
+                directory="/channels/general__C001/notadate"),
+            index=index)
 
 
 @pytest.mark.asyncio
 async def test_stat_chat_jsonl(accessor, index):
     s = await stat(
         accessor,
-        PathSpec(original="/channels/general__C001/2026-04-10/chat.jsonl",
+        PathSpec(resource_path=(
+            "/channels/general__C001/2026-04-10/chat.jsonl").strip("/"),
+                 virtual="/channels/general__C001/2026-04-10/chat.jsonl",
                  directory="/channels/general__C001/2026-04-10/chat.jsonl"),
         index=index)
     assert s.type == FileType.TEXT
@@ -152,11 +169,13 @@ async def test_stat_chat_jsonl(accessor, index):
 
 @pytest.mark.asyncio
 async def test_stat_files_dir(accessor, index):
-    s = await stat(accessor,
-                   PathSpec(
-                       original="/channels/general__C001/2026-04-10/files",
-                       directory="/channels/general__C001/2026-04-10/files"),
-                   index=index)
+    s = await stat(
+        accessor,
+        PathSpec(resource_path=(
+            "/channels/general__C001/2026-04-10/files").strip("/"),
+                 virtual="/channels/general__C001/2026-04-10/files",
+                 directory="/channels/general__C001/2026-04-10/files"),
+        index=index)
     assert s.type == FileType.DIRECTORY
 
 
@@ -179,7 +198,10 @@ async def test_stat_file_blob_pdf(accessor, index):
     s = await stat(
         accessor,
         PathSpec(
-            original="/channels/general__C001/2026-04-10/files/report__F1.pdf",
+            resource_path=(
+                "/channels/general__C001/2026-04-10/files/report__F1.pdf"
+            ).strip("/"),
+            virtual="/channels/general__C001/2026-04-10/files/report__F1.pdf",
             directory="/channels/general__C001/2026-04-10/files/report__F1.pdf"
         ),
         index=index)
@@ -206,7 +228,10 @@ async def test_stat_file_blob_text(accessor, index):
     s = await stat(
         accessor,
         PathSpec(
-            original="/channels/general__C001/2026-04-10/files/notes__F2.txt",
+            resource_path=(
+                "/channels/general__C001/2026-04-10/files/notes__F2.txt"
+            ).strip("/"),
+            virtual="/channels/general__C001/2026-04-10/files/notes__F2.txt",
             directory="/channels/general__C001/2026-04-10/files/notes__F2.txt"
         ),
         index=index)
@@ -232,7 +257,10 @@ async def test_stat_file_blob_unknown_mimetype_is_binary(accessor, index):
     s = await stat(
         accessor,
         PathSpec(
-            original="/channels/general__C001/2026-04-10/files/data__F3.bin",
+            resource_path=(
+                "/channels/general__C001/2026-04-10/files/data__F3.bin"
+            ).strip("/"),
+            virtual="/channels/general__C001/2026-04-10/files/data__F3.bin",
             directory="/channels/general__C001/2026-04-10/files/data__F3.bin"),
         index=index)
     assert s.type == FileType.BINARY

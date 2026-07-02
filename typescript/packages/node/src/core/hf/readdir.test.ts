@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PathSpec, RAMIndexCacheStore } from '@struktoai/mirage-core'
+import { PathSpec, RAMIndexCacheStore, mountKey } from '@struktoai/mirage-core'
 import { describe, expect, it } from 'vitest'
 import { HfModelsAccessor } from '../../accessor/hf.ts'
 import { fakeHfOperator, installFakeOperator } from './mock.ts'
@@ -45,7 +45,10 @@ describe('hf readdir', () => {
 
   it('applies the mount prefix to returned entries', async () => {
     const accessor = accessorWith(FILES)
-    const entries = await readdir(accessor, PathSpec.fromStrPath('/m/onnx', '/m'))
+    const entries = await readdir(
+      accessor,
+      PathSpec.fromStrPath('/m/onnx', mountKey('/m/onnx', '/m')),
+    )
     expect(entries).toEqual(['/m/onnx/model.onnx'])
   })
 

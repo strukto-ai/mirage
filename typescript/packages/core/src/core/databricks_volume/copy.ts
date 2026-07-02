@@ -78,7 +78,7 @@ export async function copy(
   // so a missing source or `cp` of a directory still raises.
   const samePath = backendPath(accessor.config, s) === backendPath(accessor.config, d)
   if (srcStat.type === FileType.DIRECTORY) {
-    if (!recursive) throw isADirectoryError(s.original)
+    if (!recursive) throw isADirectoryError(s.virtual)
     if (samePath) return
     const remoteSrc = backendPath(accessor.config, s)
     const remoteDst = backendPath(accessor.config, d)
@@ -86,7 +86,7 @@ export async function copy(
       // Copying a directory into its own subtree creates the destination
       // inside the source, so the walk would descend into the fresh copy
       // forever. Refuse before any create_directory/upload.
-      throw new Error(`cannot copy a directory, '${s.original}', into itself, '${d.original}'`)
+      throw new Error(`cannot copy a directory, '${s.virtual}', into itself, '${d.virtual}'`)
     }
     await copyTree(accessor, remoteSrc, remoteDst)
     return

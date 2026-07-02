@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../utils/slash.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ReaddirModule from './readdir.ts'
 import type * as StatModule from './stat.ts'
@@ -41,17 +43,17 @@ function makeAccessor(): BoxAccessor {
 
 function mockTree(tree: Record<string, string[]>): void {
   vi.mocked(readdirMod.readdir).mockImplementation((_accessor, spec) => {
-    const children = tree[spec.original]
-    if (children === undefined) return Promise.reject(new Error(`ENOENT: ${spec.original}`))
+    const children = tree[spec.virtual]
+    if (children === undefined) return Promise.reject(new Error(`ENOENT: ${spec.virtual}`))
     return Promise.resolve(children)
   })
 }
 
 function mockStats(stats: Record<string, { size?: number }>): void {
   vi.mocked(statMod.stat).mockImplementation((_accessor, spec) => {
-    const entry = stats[spec.original]
-    if (entry === undefined) return Promise.reject(new Error(`ENOENT: ${spec.original}`))
-    const name = spec.original.split('/').pop() ?? ''
+    const entry = stats[spec.virtual]
+    if (entry === undefined) return Promise.reject(new Error(`ENOENT: ${spec.virtual}`))
+    const name = spec.virtual.split('/').pop() ?? ''
     return Promise.resolve(
       new FileStat({
         name,
@@ -78,7 +80,7 @@ const SIZES: Record<string, { size?: number }> = {
   '/notes.txt': { size: 10 },
 }
 
-const ROOT = new PathSpec({ original: '/', directory: '/' })
+const ROOT = new PathSpec({ resourcePath: stripSlash('/'), virtual: '/', directory: '/' })
 
 describe('box core du', () => {
   beforeEach(() => {
@@ -95,7 +97,11 @@ describe('box core du', () => {
   it('returns the size of a single file', async () => {
     mockTree(TREE)
     mockStats(SIZES)
-    const file = new PathSpec({ original: '/notes.txt', directory: '/notes.txt' })
+    const file = new PathSpec({
+      resourcePath: stripSlash('/notes.txt'),
+      virtual: '/notes.txt',
+      directory: '/notes.txt',
+    })
     expect(await du(makeAccessor(), file)).toBe(10)
   })
 
@@ -110,7 +116,11 @@ describe('box core du', () => {
       '/mnt/box/docs/readme.md': { size: 2048 },
       '/mnt/box/notes.txt': { size: 10 },
     })
-    const root = new PathSpec({ original: '/mnt/box', directory: '/mnt/box', prefix: '/mnt/box' })
+    const root = new PathSpec({
+      virtual: '/mnt/box',
+      directory: '/mnt/box',
+      resourcePath: mountKey('/mnt/box', '/mnt/box'),
+    })
     const [entries, total] = await duAll(makeAccessor(), root)
     expect(entries).toEqual([
       ['/docs/readme.md', 2048],

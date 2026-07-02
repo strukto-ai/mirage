@@ -20,8 +20,8 @@ import { enoent } from '../../utils/errors.ts'
 import { invalidateAfterUnlink, invalidateAfterWrite } from '../../cache/context.ts'
 
 export async function rename(accessor: RAMAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
-  const s = norm(src.stripPrefix)
-  const d = norm(dst.stripPrefix)
+  const s = norm(src.mountPath)
+  const d = norm(dst.mountPath)
   const now = nowIso()
   const srcFile = accessor.store.files.get(s)
   if (srcFile !== undefined) {

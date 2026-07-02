@@ -110,7 +110,7 @@ async def handle_redirect(
             continue
 
         scope = _ensure_scope(r.target)
-        path = scope.original
+        path = scope.virtual
 
         # &> or &>> — both stdout+stderr to file
         if fd == -1:

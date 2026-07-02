@@ -14,6 +14,7 @@
 
 from mirage.core.slack.scope import coalesce_scopes, detect_scope
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def _gs(path: str,
@@ -21,11 +22,11 @@ def _gs(path: str,
         pattern: str | None = None,
         directory: str | None = None) -> PathSpec:
     return PathSpec(
-        original=path,
+        resource_path=mount_key(path, prefix),
+        virtual=path,
         directory=directory
         or (path.rsplit("/", 1)[0] + "/" if "/" in path else "/"),
         pattern=pattern,
-        prefix=prefix,
     )
 
 
@@ -65,11 +66,12 @@ def test_channel_dm_dir():
 
 def test_channel_glob_jsonl():
     spec = PathSpec(
-        original="/slack/channels/general__C1/*/chat.jsonl",
+        resource_path=mount_key("/slack/channels/general__C1/*/chat.jsonl",
+                                "/slack"),
+        virtual="/slack/channels/general__C1/*/chat.jsonl",
         directory="/slack/channels/general__C1/",
         pattern="*/chat.jsonl",
         resolved=False,
-        prefix="/slack",
     )
     scope = detect_scope(spec)
     assert scope.use_native is True
@@ -110,7 +112,9 @@ def test_dirname_without_id():
 
 
 def _spec(path: str, prefix: str = "/slack") -> PathSpec:
-    return PathSpec(original=path, directory=path, prefix=prefix)
+    return PathSpec(resource_path=mount_key(path, prefix),
+                    virtual=path,
+                    directory=path)
 
 
 def test_coalesce_concrete_jsonl_paths_same_channel():
@@ -185,11 +189,12 @@ def test_specific_file_blob():
 
 def test_glob_files_in_day():
     spec = PathSpec(
-        original="/slack/channels/general__C1/2026-04-10/files/*.pdf",
+        resource_path=mount_key(
+            "/slack/channels/general__C1/2026-04-10/files/*.pdf", "/slack"),
+        virtual="/slack/channels/general__C1/2026-04-10/files/*.pdf",
         directory="/slack/channels/general__C1/2026-04-10/files/",
         pattern="*.pdf",
         resolved=False,
-        prefix="/slack",
     )
     scope = detect_scope(spec)
     assert scope.use_native is True

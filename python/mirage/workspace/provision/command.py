@@ -19,6 +19,7 @@ from mirage.commands.resolve import get_extension
 from mirage.commands.spec import parse_command, parse_to_kwargs
 from mirage.provision import Precision, ProvisionResult
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import Session
 
@@ -32,7 +33,7 @@ async def _check_cache_hits(
         return 0
     hits = 0
     for p in parts[1:]:
-        if isinstance(p, PathSpec) and await cache.exists(p.original):
+        if isinstance(p, PathSpec) and await cache.exists(p.virtual):
             hits += 1
     return hits
 
@@ -47,7 +48,7 @@ async def handle_command_provision(
         return ProvisionResult(precision=Precision.EXACT)
 
     cmd_name = str(parts[0])
-    cmd_str = " ".join(p.original if isinstance(p, PathSpec) else p
+    cmd_str = " ".join(p.virtual if isinstance(p, PathSpec) else p
                        for p in parts)
 
     first_scope = None
@@ -55,14 +56,14 @@ async def handle_command_provision(
         if isinstance(p, PathSpec):
             first_scope = p
             break
-    mount_path = first_scope.original if first_scope else session.cwd
+    mount_path = first_scope.virtual if first_scope else session.cwd
 
     try:
         mount = registry.mount_for(mount_path)
     except ValueError:
         return ProvisionResult(command=cmd_str, precision=Precision.UNKNOWN)
 
-    extension = get_extension(first_scope.original) if first_scope else None
+    extension = get_extension(first_scope.virtual) if first_scope else None
     cmd = mount.resolve_command(cmd_name, extension)
     if cmd is None or cmd.provision_fn is None:
         return ProvisionResult(command=cmd_str, precision=Precision.UNKNOWN)
@@ -71,12 +72,14 @@ async def handle_command_provision(
     resource_scopes = []
     for i, p in enumerate(parts[1:], start=1):
         if isinstance(p, PathSpec):
-            scoped = dataclasses.replace(p, prefix=mount_prefix)
+            scoped = dataclasses.replace(p,
+                                         resource_path=mount_key(
+                                             p.virtual, mount_prefix))
             parts[i] = scoped
             resource_scopes.append(scoped)
 
     # Parse flags so plan functions receive them as kwargs (e.g. r=True)
-    argv = [p.original if isinstance(p, PathSpec) else p for p in parts[1:]]
+    argv = [p.virtual if isinstance(p, PathSpec) else p for p in parts[1:]]
     spec = mount.spec_for(cmd_name)
     if spec is not None:
         parsed = parse_command(spec, argv, cwd=session.cwd)

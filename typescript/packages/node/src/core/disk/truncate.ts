@@ -22,7 +22,7 @@ export async function truncate(
   path: PathSpec,
   length: number,
 ): Promise<void> {
-  const full = resolveSafe(accessor.root, path.stripPrefix)
+  const full = resolveSafe(accessor.root, path.mountPath)
   let data: Buffer
   try {
     data = await readFile(full)

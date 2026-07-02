@@ -46,7 +46,7 @@ def _should_fan_out(
     """
     if not paths:
         return False
-    target = paths[0].original
+    target = paths[0].virtual
     if not registry.descendant_mounts(target):
         return False
     if cmd_name in _TRAVERSAL_CMDS:
@@ -258,7 +258,7 @@ async def _fan_out_traversal(
     directory entries (subject to depth and -type filters) because
     mirage's per-mount find doesn't emit the path argument itself.
     """
-    target_path = paths[0].original
+    target_path = paths[0].virtual
     descendants = registry.descendant_mounts(target_path)
     descendant_prefixes = [m.prefix.rstrip("/") for m in descendants]
 
@@ -280,8 +280,9 @@ async def _fan_out_traversal(
                 continue
             sub_texts = _adjust_depth_texts(texts, target_path, mount.prefix)
             sub_paths = [
-                PathSpec(original=mount_root,
+                PathSpec(virtual=mount_root,
                          directory=mount_root,
+                         resource_path="",
                          resolved=True)
             ]
         try:

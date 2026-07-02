@@ -53,11 +53,11 @@ async function rmOne(
     } else if (opts.removeDir) {
       const children = await s3Readdir(accessor, path, index ?? undefined)
       if (children.length > 0) {
-        throw new Error(`directory not empty: ${path.original}`)
+        throw new Error(`directory not empty: ${path.virtual}`)
       }
       await s3Rmdir(accessor, path)
     } else {
-      throw new Error(`${path.original}: is a directory (use recursive=True)`)
+      throw new Error(`${path.virtual}: is a directory (use recursive=True)`)
     }
   } else {
     await s3Unlink(accessor, path)
@@ -87,8 +87,8 @@ async function rmCommand(
       const msg = err instanceof Error ? err.message : String(err)
       return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
     }
-    writes[p.stripPrefix] = new Uint8Array()
-    if (verbose) verboseParts.push(`removed '${p.original}'`)
+    writes[p.mountPath] = new Uint8Array()
+    if (verbose) verboseParts.push(`removed '${p.virtual}'`)
   }
   const output: ByteSource | null = verbose ? formatRecords(verboseParts) : null
   return [output, new IOResult({ writes })]

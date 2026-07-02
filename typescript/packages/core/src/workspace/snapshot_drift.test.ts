@@ -87,15 +87,15 @@ class FakeRemoteResource implements Resource {
   }
 
   stat(p: PathSpec): Promise<FileStat> {
-    const entry = this.accessor.blobs.get(p.original)
+    const entry = this.accessor.blobs.get(p.virtual)
     if (entry === undefined) {
-      const err = new Error(`not found: ${p.original}`) as Error & { code: string }
+      const err = new Error(`not found: ${p.virtual}`) as Error & { code: string }
       err.code = 'ENOENT'
       return Promise.reject(err)
     }
     return Promise.resolve(
       new FileStat({
-        name: p.original.split('/').pop() ?? p.original,
+        name: p.virtual.split('/').pop() ?? p.virtual,
         size: entry.bytes.byteLength,
         type: FileType.TEXT,
         fingerprint: entry.fingerprint,
@@ -116,25 +116,25 @@ const readOp: RegisteredOp = {
   write: false,
   fn: (accessor: Accessor, scope: PathSpec, _args: readonly unknown[], _kwargs: OpKwargs) => {
     const acc = accessor as unknown as FakeRemoteAccessor
-    const pinned = revisionFor(scope.original)
-    const entry = acc.blobs.get(scope.original)
+    const pinned = revisionFor(scope.virtual)
+    const entry = acc.blobs.get(scope.virtual)
     if (entry === undefined) {
-      const err = new Error(`not found: ${scope.original}`) as Error & { code: string }
+      const err = new Error(`not found: ${scope.virtual}`) as Error & { code: string }
       err.code = 'ENOENT'
       throw err
     }
     if (pinned !== null) {
-      const history = acc.versionedHistory.get(scope.original)
+      const history = acc.versionedHistory.get(scope.virtual)
       const pinnedBytes = history?.get(pinned)
       if (pinnedBytes !== undefined) {
-        record('read', scope.original, 'fake-remote', pinnedBytes.byteLength, performance.now(), {
+        record('read', scope.virtual, 'fake-remote', pinnedBytes.byteLength, performance.now(), {
           fingerprint: entry.fingerprint,
           revision: pinned,
         })
         return Promise.resolve(pinnedBytes)
       }
     }
-    record('read', scope.original, 'fake-remote', entry.bytes.byteLength, performance.now(), {
+    record('read', scope.virtual, 'fake-remote', entry.bytes.byteLength, performance.now(), {
       fingerprint: entry.fingerprint,
       revision: entry.revision,
     })
@@ -149,15 +149,15 @@ const statOp: RegisteredOp = {
   write: false,
   fn: (accessor: Accessor, scope: PathSpec) => {
     const acc = accessor as unknown as FakeRemoteAccessor
-    const entry = acc.blobs.get(scope.original)
+    const entry = acc.blobs.get(scope.virtual)
     if (entry === undefined) {
-      const err = new Error(`not found: ${scope.original}`) as Error & { code: string }
+      const err = new Error(`not found: ${scope.virtual}`) as Error & { code: string }
       err.code = 'ENOENT'
       return Promise.reject(err)
     }
     return Promise.resolve(
       new FileStat({
-        name: scope.original.split('/').pop() ?? scope.original,
+        name: scope.virtual.split('/').pop() ?? scope.virtual,
         size: entry.bytes.byteLength,
         type: FileType.TEXT,
         fingerprint: entry.fingerprint,

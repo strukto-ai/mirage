@@ -33,7 +33,7 @@ export async function stat(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<FileStat> {
-  const key = path.key
+  const key = path.resourcePath
 
   if (key === '' || key === 'pages' || key === 'databases') {
     return new FileStat({ name: key !== '' ? key : '/', type: FileType.DIRECTORY })
@@ -47,13 +47,13 @@ export async function stat(
   }
 
   if (lastSegment === 'database.json') {
-    if (parts[0] !== 'databases' || parts.length !== 3) throw enoent(path.original)
+    if (parts[0] !== 'databases' || parts.length !== 3) throw enoent(path.virtual)
     const databaseSegment = parts[parts.length - 2] ?? ''
     let parsedDatabase: { id: string; title: string }
     try {
       parsedDatabase = parseSegment(databaseSegment)
     } catch {
-      throw enoent(path.original)
+      throw enoent(path.virtual)
     }
     return new FileStat({
       name: 'database.json',
@@ -67,7 +67,7 @@ export async function stat(
     try {
       parsedDatabase = parseSegment(lastSegment)
     } catch {
-      throw enoent(path.original)
+      throw enoent(path.virtual)
     }
     if (index !== undefined) {
       const result = await index.get(`/${key}`)
@@ -97,7 +97,7 @@ export async function stat(
     try {
       parsed = parseSegment(lastSegment)
     } catch {
-      throw enoent(path.original)
+      throw enoent(path.virtual)
     }
     if (index !== undefined) {
       const result = await index.get(`/${key}`)
@@ -117,5 +117,5 @@ export async function stat(
     })
   }
 
-  throw enoent(path.original)
+  throw enoent(path.virtual)
 }

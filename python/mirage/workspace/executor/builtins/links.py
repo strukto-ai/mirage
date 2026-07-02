@@ -25,7 +25,7 @@ from mirage.workspace.types import ExecutionNode
 
 def _typed(arg: str | PathSpec) -> str:
     if isinstance(arg, PathSpec):
-        return arg.as_typed or arg.original
+        return arg.raw_path or arg.virtual
     return arg
 
 
@@ -37,7 +37,7 @@ def _split_flags(
     operands: list[str | PathSpec] = []
     parsing = True
     for arg in args:
-        s = arg.original if isinstance(arg, PathSpec) else str(arg)
+        s = arg.virtual if isinstance(arg, PathSpec) else str(arg)
         if parsing and s == "--":
             parsing = False
             continue
@@ -57,7 +57,7 @@ def link_flags(args: list[str | PathSpec], known: str) -> set[str]:
 
 def _abs(arg: str | PathSpec, cwd: str) -> str:
     if isinstance(arg, PathSpec):
-        return arg.original
+        return arg.virtual
     return resolve_path(arg, cwd)
 
 

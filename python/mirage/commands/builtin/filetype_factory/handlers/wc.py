@@ -41,10 +41,10 @@ async def _ft_wc(resolve_glob,
     try:
         raw = await read(accessor, p, index)
         return str(module.wc(raw)).encode(), IOResult(
-            reads={p.strip_prefix: raw}, cache=[p.strip_prefix])
+            reads={p.mount_path: raw}, cache=[p.mount_path])
     except Exception as e:
         return None, IOResult(
             exit_code=1,
-            stderr=f"wc: {p.original}: failed to read as {_fmt(module)}: {e}".
+            stderr=f"wc: {p.virtual}: failed to read as {_fmt(module)}: {e}".
             encode(),
         )

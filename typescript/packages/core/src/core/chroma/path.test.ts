@@ -12,13 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 
 import { PathSpec } from '../../types.ts'
 import { virtualKeyFor } from './path.ts'
 
-function ps(original: string, prefix = ''): PathSpec {
-  return new PathSpec({ original, directory: original, prefix })
+function ps(virtual: string, prefix = ''): PathSpec {
+  return new PathSpec({ virtual, directory: virtual, resourcePath: mountKey(virtual, prefix) })
 }
 
 describe('virtualKeyFor', () => {
@@ -34,8 +35,10 @@ describe('virtualKeyFor', () => {
   })
 
   it('prefixes mount-relative paths', () => {
-    expect(virtualKeyFor(ps('/guides/auth.md', '/knowledge'))).toBe('/knowledge/guides/auth.md')
-    expect(virtualKeyFor(ps('/', '/knowledge'))).toBe('/knowledge')
+    expect(virtualKeyFor(ps('/knowledge/guides/auth.md', '/knowledge'))).toBe(
+      '/knowledge/guides/auth.md',
+    )
+    expect(virtualKeyFor(ps('/knowledge', '/knowledge'))).toBe('/knowledge')
   })
 
   it('normalizes when no prefix is set', () => {
@@ -45,11 +48,11 @@ describe('virtualKeyFor', () => {
 
   it('uses the directory for glob patterns', () => {
     const spec = new PathSpec({
-      original: '/knowledge/guides/*.md',
+      virtual: '/knowledge/guides/*.md',
       directory: '/knowledge/guides/',
       pattern: '*.md',
       resolved: false,
-      prefix: '/knowledge',
+      resourcePath: mountKey('/knowledge/guides/*.md', '/knowledge'),
     })
     expect(virtualKeyFor(spec)).toBe('/knowledge/guides')
   })

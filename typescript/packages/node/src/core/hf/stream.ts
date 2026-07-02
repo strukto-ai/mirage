@@ -34,7 +34,7 @@ export async function* stream(
   _index?: IndexCacheStore,
   chunkSize: number = DEFAULT_CHUNK_SIZE,
 ): AsyncIterable<Uint8Array> {
-  const virtual = path.original
+  const virtual = path.virtual
   const rawPath = rawPathOf(path)
   const key = hfKey(rawPath)
   const op = await accessor.operator()

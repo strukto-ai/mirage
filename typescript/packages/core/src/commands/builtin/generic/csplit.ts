@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../../utils/slash.ts'
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -58,8 +60,13 @@ function padNum(n: number, digits: number): string {
   return s.length >= digits ? s : '0'.repeat(digits - s.length) + s
 }
 
-function makePathSpec(original: string): PathSpec {
-  return new PathSpec({ original, directory: original, resolved: true })
+function makePathSpec(virtual: string): PathSpec {
+  return new PathSpec({
+    virtual,
+    directory: virtual,
+    resourcePath: stripSlash(virtual),
+    resolved: true,
+  })
 }
 
 async function writePart(
@@ -81,10 +88,10 @@ export async function csplitGeneric(
 ): Promise<CommandFnResult> {
   const rawPrefix = typeof opts.flags.f === 'string' ? opts.flags.f : 'xx'
   const prefix = new PathSpec({
-    original: rawPrefix,
+    virtual: rawPrefix,
     directory: rawPrefix,
-    prefix: opts.mountPrefix ?? '',
-  }).stripPrefix
+    resourcePath: mountKey(rawPrefix, opts.mountPrefix ?? ''),
+  }).mountPath
   const digits = typeof opts.flags.n === 'string' ? Number.parseInt(opts.flags.n, 10) : 2
   const quiet = opts.flags.s === true
   const keep = opts.flags.k === true

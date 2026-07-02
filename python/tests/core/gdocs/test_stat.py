@@ -21,6 +21,7 @@ from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.gdocs.stat import stat
 from mirage.types import FileType, PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.fixture
@@ -37,8 +38,9 @@ def index():
 async def test_stat_root(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(original="/gdocs", directory="/gdocs", prefix="/gdocs"),
-        index)
+        PathSpec(resource_path=mount_key("/gdocs", "/gdocs"),
+                 virtual="/gdocs",
+                 directory="/gdocs"), index)
     assert result.type == FileType.DIRECTORY
     assert result.name == "/"
 
@@ -47,9 +49,9 @@ async def test_stat_root(accessor, index):
 async def test_stat_owned_dir(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(original="/gdocs/owned",
-                 directory="/gdocs/owned",
-                 prefix="/gdocs"), index)
+        PathSpec(resource_path=mount_key("/gdocs/owned", "/gdocs"),
+                 virtual="/gdocs/owned",
+                 directory="/gdocs/owned"), index)
     assert result.type == FileType.DIRECTORY
     assert result.name == "owned"
 
@@ -58,9 +60,9 @@ async def test_stat_owned_dir(accessor, index):
 async def test_stat_shared_dir(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(original="/gdocs/shared",
-                 directory="/gdocs/shared",
-                 prefix="/gdocs"), index)
+        PathSpec(resource_path=mount_key("/gdocs/shared", "/gdocs"),
+                 virtual="/gdocs/shared",
+                 directory="/gdocs/shared"), index)
     assert result.type == FileType.DIRECTORY
     assert result.name == "shared"
 
@@ -78,9 +80,10 @@ async def test_stat_doc(accessor, index):
     ])
     result = await stat(
         accessor,
-        PathSpec(original="/gdocs/owned/2026-04-01_My_Doc__doc1.gdoc.json",
-                 directory="/gdocs/owned/2026-04-01_My_Doc__doc1.gdoc.json",
-                 prefix="/gdocs"),
+        PathSpec(resource_path=mount_key(
+            "/gdocs/owned/2026-04-01_My_Doc__doc1.gdoc.json", "/gdocs"),
+                 virtual="/gdocs/owned/2026-04-01_My_Doc__doc1.gdoc.json",
+                 directory="/gdocs/owned/2026-04-01_My_Doc__doc1.gdoc.json"),
         index,
     )
     assert result.name == "2026-04-01_My_Doc__doc1.gdoc.json"
@@ -108,9 +111,11 @@ async def test_stat_not_found(accessor, index):
         with pytest.raises(FileNotFoundError):
             await stat(
                 accessor,
-                PathSpec(original="/gdocs/owned/nonexistent.gdoc.json",
-                         directory="/gdocs/owned/nonexistent.gdoc.json",
-                         prefix="/gdocs"), index)
+                PathSpec(resource_path=mount_key(
+                    "/gdocs/owned/nonexistent.gdoc.json", "/gdocs"),
+                         virtual="/gdocs/owned/nonexistent.gdoc.json",
+                         directory="/gdocs/owned/nonexistent.gdoc.json"),
+                index)
 
 
 @pytest.mark.asyncio
@@ -132,8 +137,9 @@ async def test_stat_cache_miss_falls_back_via_readdir(accessor, index):
     ) as mock_list:
         result = await stat(
             accessor,
-            PathSpec(original=target, directory=target, prefix="/gdocs"),
-            index)
+            PathSpec(resource_path=mount_key(target, "/gdocs"),
+                     virtual=target,
+                     directory=target), index)
     assert result.type == FileType.JSON
     assert result.extra["doc_id"] == "doc1"
     assert mock_list.call_count == 1
@@ -144,6 +150,7 @@ async def test_stat_cache_miss_with_index_none_raises(accessor):
     with pytest.raises(FileNotFoundError):
         await stat(
             accessor,
-            PathSpec(original="/gdocs/owned/doc.gdoc.json",
-                     directory="/gdocs/owned/doc.gdoc.json",
-                     prefix="/gdocs"), None)
+            PathSpec(resource_path=mount_key("/gdocs/owned/doc.gdoc.json",
+                                             "/gdocs"),
+                     virtual="/gdocs/owned/doc.gdoc.json",
+                     directory="/gdocs/owned/doc.gdoc.json"), None)

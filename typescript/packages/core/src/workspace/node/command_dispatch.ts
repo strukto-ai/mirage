@@ -91,7 +91,7 @@ function splitCdOptions(args: (string | PathSpec)[]): {
   let parsing = true
   let physical = false
   for (const arg of args) {
-    const s = arg instanceof PathSpec ? arg.original : arg
+    const s = arg instanceof PathSpec ? arg.virtual : arg
     if (parsing) {
       if (s === '--') {
         parsing = false
@@ -315,7 +315,7 @@ async function runCommandBody(
 
   const classified = classifyParts(expanded, registry, session.cwd, textArgs, pathArgs)
   const resolved = await resolveGlobs(classified, registry, textArgs)
-  const finalExpanded = resolved.map((p) => (p instanceof PathSpec ? p.original : p))
+  const finalExpanded = resolved.map((p) => (p instanceof PathSpec ? p.virtual : p))
 
   // Unsupported bash builtins. Constructs the parser accepts but the
   // executor cannot honor. Returning a clear error lets LLMs detect a
@@ -378,7 +378,7 @@ async function runCommandBody(
       )
     }
     const raw = operands[0]
-    const rawStr = raw instanceof PathSpec ? raw.original : String(raw)
+    const rawStr = raw instanceof PathSpec ? raw.virtual : String(raw)
     if (rawStr === '-') {
       const old = session.env.OLDPWD
       if (!old) {
@@ -404,7 +404,7 @@ async function runCommandBody(
     let cdpathTarget: string
     if (raw instanceof PathSpec) {
       path = raw
-      cdpathTarget = raw.asTyped ?? raw.original
+      cdpathTarget = raw.rawPath ?? raw.virtual
     } else if (rawStr.startsWith('/')) {
       path = rawStr
       cdpathTarget = rawStr

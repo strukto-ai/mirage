@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '@struktoai/mirage-core'
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '@struktoai/mirage-core'
 import { makeMockAccessor, spec } from '../../test-utils.ts'
@@ -25,19 +26,20 @@ describe('opfs/glob.resolveGlob', () => {
     await writeBytes(accessor, spec('/b.json'), new Uint8Array())
     await writeBytes(accessor, spec('/c.txt'), new Uint8Array())
     const pattern = new PathSpec({
-      original: '/*.json',
+      resourcePath: stripSlash('/*.json'),
+      virtual: '/*.json',
       directory: '/',
       pattern: '*.json',
       resolved: false,
     })
     const out = await resolveGlob(accessor, [pattern])
-    const originals = out.map((p) => p.original).sort()
+    const originals = out.map((p) => p.virtual).sort()
     expect(originals).toEqual(['/a.json', '/b.json'])
   })
 
   it('passes through resolved paths unchanged', async () => {
     const accessor = makeMockAccessor()
     const out = await resolveGlob(accessor, [spec('/x')])
-    expect(out.map((p) => p.original)).toEqual(['/x'])
+    expect(out.map((p) => p.virtual)).toEqual(['/x'])
   })
 })

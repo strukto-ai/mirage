@@ -24,7 +24,7 @@ export async function appendBytes(
   data: Uint8Array,
 ): Promise<void> {
   const start = performance.now()
-  const p = norm(path.stripPrefix)
+  const p = norm(path.mountPath)
   const existing = accessor.store.files.get(p)
   if (existing) {
     const combined = new Uint8Array(existing.byteLength + data.byteLength)

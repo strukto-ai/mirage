@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { rekey } from '../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
@@ -37,7 +38,7 @@ export async function resolveGlob(
       for (const entry of entries) {
         const entryBase = entry.split('/').pop() ?? ''
         if (!fnmatch(entryBase, p.pattern)) continue
-        matched.push(PathSpec.fromStrPath(entry, p.prefix))
+        matched.push(PathSpec.fromStrPath(entry, rekey(p.virtual, p.resourcePath, entry)))
       }
       const truncated = matched.length > SCOPE_ERROR ? matched.slice(0, SCOPE_ERROR) : matched
       result.push(...truncated)

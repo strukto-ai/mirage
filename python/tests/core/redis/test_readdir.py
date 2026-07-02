@@ -52,8 +52,10 @@ def index():
 
 @pytest.mark.asyncio
 async def test_readdir_root(accessor, index):
-    entries = await readdir(accessor, PathSpec(original="/", directory="/"),
-                            index)
+    entries = await readdir(
+        accessor,
+        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"),
+        index)
     assert "/a.txt" in entries
     assert "/b.txt" in entries
     assert "/sub" in entries
@@ -62,8 +64,11 @@ async def test_readdir_root(accessor, index):
 
 @pytest.mark.asyncio
 async def test_readdir_subdir(accessor, index):
-    entries = await readdir(accessor,
-                            PathSpec(original="/sub", directory="/sub"), index)
+    entries = await readdir(
+        accessor,
+        PathSpec(resource_path=("/sub").strip("/"),
+                 virtual="/sub",
+                 directory="/sub"), index)
     assert "/sub/c.txt" in entries
     assert "/sub/d.txt" in entries
     assert "/sub/deep" in entries
@@ -77,8 +82,11 @@ async def test_readdir_empty_dir(index):
     await s.add_dir("/")
     await s.add_dir("/empty")
     a = RedisAccessor(s)
-    entries = await readdir(a, PathSpec(original="/empty", directory="/empty"),
-                            index)
+    entries = await readdir(
+        a,
+        PathSpec(resource_path=("/empty").strip("/"),
+                 virtual="/empty",
+                 directory="/empty"), index)
     assert entries == []
     await s.clear()
     await s.close()
@@ -92,8 +100,10 @@ async def test_readdir_not_found(index):
     a = RedisAccessor(s)
     with pytest.raises(FileNotFoundError):
         await readdir(
-            a, PathSpec(original="/nonexistent", directory="/nonexistent"),
-            index)
+            a,
+            PathSpec(resource_path=("/nonexistent").strip("/"),
+                     virtual="/nonexistent",
+                     directory="/nonexistent"), index)
     await s.clear()
     await s.close()
 
@@ -101,6 +111,9 @@ async def test_readdir_not_found(index):
 @pytest.mark.asyncio
 async def test_readdir_deep(accessor, index):
     entries = await readdir(
-        accessor, PathSpec(original="/sub/deep", directory="/sub/deep"), index)
+        accessor,
+        PathSpec(resource_path=("/sub/deep").strip("/"),
+                 virtual="/sub/deep",
+                 directory="/sub/deep"), index)
     assert "/sub/deep/e.txt" in entries
     assert len(entries) == 1

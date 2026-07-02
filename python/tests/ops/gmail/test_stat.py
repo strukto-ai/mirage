@@ -19,6 +19,7 @@ import pytest
 from mirage.accessor.gmail import GmailAccessor
 from mirage.ops.gmail.stat import stat
 from mirage.types import FileStat, PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.fixture
@@ -36,9 +37,9 @@ async def test_stat_calls_core(accessor):
             return_value=fake_stat,
     ) as mock:
         scope = PathSpec(
-            original="/gmail/inbox/msg.txt",
+            resource_path=mount_key("/gmail/inbox/msg.txt", "/gmail"),
+            virtual="/gmail/inbox/msg.txt",
             directory="/gmail/inbox",
-            prefix="/gmail",
         )
         result = await fn(accessor, scope, index=None)
         mock.assert_called_once_with(accessor, scope, None)

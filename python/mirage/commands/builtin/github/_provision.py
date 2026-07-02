@@ -29,7 +29,7 @@ async def file_read_provision(
     total = 0
     ops = 0
     for p in paths:
-        result = await index.get(p if isinstance(p, str) else p.original)
+        result = await index.get(p if isinstance(p, str) else p.virtual)
         if result.entry and result.entry.size:
             total += result.entry.size
             ops += 1

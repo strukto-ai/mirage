@@ -50,7 +50,7 @@ export async function read(
 
   if (scope.level === ScopeLevel.DOCUMENTS && scope.database !== null && scope.name !== null) {
     if (!(await entityExists(accessor, scope.database, scope.name, scope.kind))) {
-      throw notFound(spec.original)
+      throw notFound(spec.virtual)
     }
     const chunks: Uint8Array[] = []
     let total = 0
@@ -69,7 +69,7 @@ export async function read(
 
   if (scope.level === ScopeLevel.SCHEMA_JSON && scope.database !== null && scope.name !== null) {
     if (!(await entityExists(accessor, scope.database, scope.name, scope.kind))) {
-      throw notFound(spec.original)
+      throw notFound(spec.virtual)
     }
     const payload = await buildCollectionSchemaJson(accessor, scope.database, scope.name)
     return new TextEncoder().encode(
@@ -78,12 +78,12 @@ export async function read(
   }
 
   if (scope.level === ScopeLevel.DATABASE_JSON && scope.database !== null) {
-    if (!(await databaseExists(accessor, scope.database))) throw notFound(spec.original)
+    if (!(await databaseExists(accessor, scope.database))) throw notFound(spec.virtual)
     const payload = await buildDatabaseJson(accessor, scope.database)
     return new TextEncoder().encode(
       stringifyDoc(payload as unknown as Record<string, unknown>) + '\n',
     )
   }
 
-  throw notFound(spec.original)
+  throw notFound(spec.virtual)
 }

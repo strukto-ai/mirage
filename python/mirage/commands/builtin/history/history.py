@@ -72,7 +72,7 @@ async def history_cmd(
         await observer.log_command_text(
             " ".join(texts),
             session=session,
-            cwd=cwd.original if cwd is not None else None)
+            cwd=cwd.virtual if cwd is not None else None)
     if p and not s:
         out = "\n".join(texts) + "\n" if texts else ""
         return out.encode(), IOResult()

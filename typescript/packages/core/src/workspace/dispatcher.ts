@@ -56,10 +56,10 @@ export class Dispatcher {
   }
 
   dispatch: DispatchFn = async (opName, path, args, kwargs) => {
-    const [resource, scope, mode] = await this.namespace.resolve(path.original)
+    const [resource, scope, mode] = await this.namespace.resolve(path.virtual)
     const caches = cachesReads(resource)
     if (caches && DISPATCH_READ_OPS.has(opName)) {
-      let cached = await this.cache.get(path.original)
+      let cached = await this.cache.get(path.virtual)
       if (
         cached !== null &&
         this.consistency === ConsistencyPolicy.ALWAYS &&
@@ -71,23 +71,23 @@ export class Dispatcher {
         } catch {
           remoteFp = null
         }
-        if (remoteFp !== null && !(await this.cache.isFresh(path.original, remoteFp))) {
-          await this.cache.remove(path.original)
+        if (remoteFp !== null && !(await this.cache.isFresh(path.virtual, remoteFp))) {
+          await this.cache.remove(path.virtual)
           cached = null
         }
       }
       if (cached !== null) {
-        return [cached, new IOResult({ reads: { [path.original]: cached } })]
+        return [cached, new IOResult({ reads: { [path.virtual]: cached } })]
       }
     }
     if (mode === MountMode.READ && this.opsRegistry.find(opName, resource.kind)?.write === true) {
-      throw new Error(`mount at '${path.original}' is read-only`)
+      throw new Error(`mount at '${path.virtual}' is read-only`)
     }
     const fullKwargs: OpKwargs =
       kwargs?.index === undefined && resource.index !== undefined
         ? { ...(kwargs ?? {}), index: resource.index }
         : (kwargs ?? {})
-    const mount = this.namespace.mountFor(path.original)
+    const mount = this.namespace.mountFor(path.virtual)
     const result = await runWithRevisions(
       mount !== null && mount.revisions.size > 0 ? mount.revisions : null,
       async () =>
@@ -101,7 +101,7 @@ export class Dispatcher {
         ),
     )
     if (DISPATCH_WRITE_OPS.has(opName)) {
-      await this.invalidateAfterWriteByPath(path.original)
+      await this.invalidateAfterWriteByPath(path.virtual)
     }
     return [result, new IOResult()]
   }

@@ -46,6 +46,7 @@ from mirage.resource.redis.prompt import PROMPT
 from mirage.resource.redis.store import RedisStore
 from mirage.resource.secrets import REDACTED_SECRET
 from mirage.types import PathSpec, ResourceName
+from mirage.utils.key_prefix import mount_key
 
 _REDIS_OPS = {
     "read_bytes": read_bytes,
@@ -92,9 +93,9 @@ class RedisResource(BaseResource):
     async def resolve_glob(self, paths, prefix: str = ""):
         if prefix:
             paths = [
-                dataclasses.replace(p, prefix=prefix)
-                if isinstance(p, PathSpec) and not p.prefix else p
-                for p in paths
+                dataclasses.replace(p,
+                                    resource_path=mount_key(p.virtual, prefix))
+                if isinstance(p, PathSpec) else p for p in paths
             ]
         return await _resolve_glob(self.accessor, paths, self._index)
 

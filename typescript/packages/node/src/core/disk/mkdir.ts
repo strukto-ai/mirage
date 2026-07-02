@@ -22,7 +22,7 @@ export async function mkdir(
   path: PathSpec,
   parents = false,
 ): Promise<void> {
-  const full = resolveSafe(accessor.root, path.stripPrefix)
+  const full = resolveSafe(accessor.root, path.mountPath)
   if (parents) {
     await fsMkdir(full, { recursive: true })
     await invalidateAfterWrite(path)
@@ -33,7 +33,7 @@ export async function mkdir(
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code
     if (code === 'ENOENT') {
-      throw new Error(`parent directory does not exist: ${path.stripPrefix}`)
+      throw new Error(`parent directory does not exist: ${path.mountPath}`)
     }
     if (code !== 'EEXIST') throw err
   }

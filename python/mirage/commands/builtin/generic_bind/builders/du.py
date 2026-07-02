@@ -21,6 +21,7 @@ from mirage.commands.builtin.generic.du import du_multi
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
+from mirage.utils.key_prefix import rekey
 
 
 async def _du_walk(ops: CommandIO, accessor: Accessor,
@@ -37,10 +38,11 @@ async def _du_walk(ops: CommandIO, accessor: Accessor,
     except (FileNotFoundError, ValueError):
         return 0
     for child in children:
-        child_spec = PathSpec(original=child,
+        child_spec = PathSpec(virtual=child,
                               directory=child,
                               resolved=False,
-                              prefix=path.prefix)
+                              resource_path=rekey(path.virtual,
+                                                  path.resource_path, child))
         total += await _du_walk(ops, accessor, index, child_spec)
     return total
 

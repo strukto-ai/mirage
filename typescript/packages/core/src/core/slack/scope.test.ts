@@ -12,19 +12,29 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../utils/slash.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { detectScope } from './scope.ts'
 import { PathSpec } from '../../types.ts'
 
 describe('detectScope', () => {
   it('root → useNative=true, resourcePath /', () => {
-    const s = detectScope(new PathSpec({ original: '/', directory: '/' }))
+    const s = detectScope(
+      new PathSpec({ resourcePath: stripSlash('/'), virtual: '/', directory: '/' }),
+    )
     expect(s.useNative).toBe(true)
     expect(s.resourcePath).toBe('/')
   })
 
   it('/channels → container=channels, useNative=true', () => {
-    const s = detectScope(new PathSpec({ original: '/channels', directory: '/channels' }))
+    const s = detectScope(
+      new PathSpec({
+        resourcePath: stripSlash('/channels'),
+        virtual: '/channels',
+        directory: '/channels',
+      }),
+    )
     expect(s.useNative).toBe(true)
     expect(s.container).toBe('channels')
   })
@@ -32,7 +42,8 @@ describe('detectScope', () => {
   it('/channels/general__C123 → channelName=general, channelId=C123', () => {
     const s = detectScope(
       new PathSpec({
-        original: '/channels/general__C123',
+        resourcePath: stripSlash('/channels/general__C123'),
+        virtual: '/channels/general__C123',
         directory: '/channels/general__C123',
       }),
     )
@@ -45,7 +56,8 @@ describe('detectScope', () => {
   it('/channels/general__C123/2026-04-24 → date scope, useNative=true', () => {
     const s = detectScope(
       new PathSpec({
-        original: '/channels/general__C123/2026-04-24',
+        resourcePath: stripSlash('/channels/general__C123/2026-04-24'),
+        virtual: '/channels/general__C123/2026-04-24',
         directory: '/channels/general__C123/2026-04-24',
       }),
     )
@@ -57,7 +69,8 @@ describe('detectScope', () => {
   it('/channels/<chan>/<date>/chat.jsonl → messages target, useNative=false', () => {
     const s = detectScope(
       new PathSpec({
-        original: '/channels/general__C123/2026-04-24/chat.jsonl',
+        resourcePath: stripSlash('/channels/general__C123/2026-04-24/chat.jsonl'),
+        virtual: '/channels/general__C123/2026-04-24/chat.jsonl',
         directory: '/channels/general__C123/2026-04-24/chat.jsonl',
       }),
     )
@@ -69,7 +82,8 @@ describe('detectScope', () => {
   it('/channels/<chan>/<date>/files → files target, useNative=true', () => {
     const s = detectScope(
       new PathSpec({
-        original: '/channels/general__C123/2026-04-24/files',
+        resourcePath: stripSlash('/channels/general__C123/2026-04-24/files'),
+        virtual: '/channels/general__C123/2026-04-24/files',
         directory: '/channels/general__C123/2026-04-24/files',
       }),
     )
@@ -80,7 +94,8 @@ describe('detectScope', () => {
   it('/channels/<chan>/<date>/files/<blob> → files target, useNative=false', () => {
     const s = detectScope(
       new PathSpec({
-        original: '/channels/general__C123/2026-04-24/files/foo__F1.pdf',
+        resourcePath: stripSlash('/channels/general__C123/2026-04-24/files/foo__F1.pdf'),
+        virtual: '/channels/general__C123/2026-04-24/files/foo__F1.pdf',
         directory: '/channels/general__C123/2026-04-24/files/foo__F1.pdf',
       }),
     )
@@ -89,7 +104,9 @@ describe('detectScope', () => {
   })
 
   it('/users → useNative=false, resourcePath=users', () => {
-    const s = detectScope(new PathSpec({ original: '/users', directory: '/users' }))
+    const s = detectScope(
+      new PathSpec({ resourcePath: stripSlash('/users'), virtual: '/users', directory: '/users' }),
+    )
     expect(s.useNative).toBe(false)
     expect(s.resourcePath).toBe('users')
   })
@@ -97,7 +114,8 @@ describe('detectScope', () => {
   it('handles dirname without __id (just name)', () => {
     const s = detectScope(
       new PathSpec({
-        original: '/channels/general',
+        resourcePath: stripSlash('/channels/general'),
+        virtual: '/channels/general',
         directory: '/channels/general',
       }),
     )
@@ -108,9 +126,9 @@ describe('detectScope', () => {
   it('respects PathSpec.prefix', () => {
     const s = detectScope(
       new PathSpec({
-        original: '/slack/channels/general__C1',
+        virtual: '/slack/channels/general__C1',
         directory: '/slack/channels/general__C1',
-        prefix: '/slack',
+        resourcePath: mountKey('/slack/channels/general__C1', '/slack'),
       }),
     )
     expect(s.channelName).toBe('general')

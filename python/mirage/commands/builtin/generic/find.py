@@ -11,6 +11,7 @@ from mirage.commands.builtin.find_parse import parse_find_expression
 from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, FindType, PathSpec
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.path import rebase_display
 
 
@@ -79,10 +80,10 @@ async def apply_mtime_filter(
     filtered: list[str] = []
     for r in results:
         try:
-            spec = PathSpec(original=r,
+            spec = PathSpec(virtual=r,
                             directory=r,
                             resolved=False,
-                            prefix=mount_prefix)
+                            resource_path=mount_key(r, mount_prefix))
             s = await stat(spec)
         except (FileNotFoundError, ValueError):
             continue
@@ -158,15 +159,16 @@ async def find(
         empty=args.empty,
         tree=args.tree,
     )
+    root_prefix = mount_prefix_of(search_path.virtual,
+                                  search_path.resource_path)
     if stat is not None:
         results = await apply_mtime_filter(results,
                                            mtime_min=args.mtime_min,
                                            mtime_max=args.mtime_max,
                                            stat=stat,
-                                           mount_prefix=search_path.prefix)
-    results = apply_mount_prefix(results, search_path.prefix)
-    results = rebase_display(results, search_path.original,
-                             search_path.display)
+                                           mount_prefix=root_prefix)
+    results = apply_mount_prefix(results, root_prefix)
+    results = rebase_display(results, search_path.virtual, search_path.display)
     return format_records(results), IOResult()
 
 
@@ -190,10 +192,10 @@ async def _stat_entry(
     prefix: str,
     index: IndexCacheStore | None,
 ) -> FileStat | None:
-    spec = PathSpec(original=path,
+    spec = PathSpec(virtual=path,
                     directory=path,
                     resolved=False,
-                    prefix=prefix)
+                    resource_path=mount_key(path, prefix))
     try:
         return await stat(spec, index)
     except FileNotFoundError:
@@ -212,10 +214,10 @@ async def _is_empty_entry(
     index: IndexCacheStore | None,
 ) -> bool:
     if is_dir:
-        spec = PathSpec(original=path,
+        spec = PathSpec(virtual=path,
                         directory=path,
                         resolved=False,
-                        prefix=prefix)
+                        resource_path=mount_key(path, prefix))
         try:
             return len(await readdir(spec, index)) == 0
         except FileNotFoundError:
@@ -243,20 +245,21 @@ async def _walk_collect(
         # Only vanished dirs are skipped; API errors (rate limit, auth)
         # propagate.
         return
+    prefix = mount_prefix_of(spec.virtual, spec.resource_path)
     for child in children:
         hint = is_dir_name(child)
         trimmed = child.rstrip("/") if child.endswith("/") else child
         if hint is None:
-            st = await _stat_entry(stat, trimmed, spec.prefix, index)
+            st = await _stat_entry(stat, trimmed, prefix, index)
             is_dir = st is not None and st.type == FileType.DIRECTORY
         else:
             is_dir = hint
         acc.append((trimmed, is_dir))
         if is_dir:
-            child_spec = PathSpec(original=trimmed,
+            child_spec = PathSpec(virtual=trimmed,
                                   directory=trimmed,
                                   resolved=False,
-                                  prefix=spec.prefix)
+                                  resource_path=mount_key(trimmed, prefix))
             await _walk_collect(readdir, stat, is_dir_name, child_spec, index,
                                 maxdepth, depth + 1, acc)
 
@@ -272,10 +275,10 @@ async def walk_find(
     args: FindArgs,
 ) -> list[str]:
     collected: list[tuple[str, bool]] = []
-    prefix = search_path.prefix
-    search_key = search_path.strip_prefix.strip("/")
-    root_path = (search_path.original.rstrip("/")
-                 if search_path.original != "/" else "/")
+    prefix = mount_prefix_of(search_path.virtual, search_path.resource_path)
+    search_key = search_path.mount_path.strip("/")
+    root_path = (search_path.virtual.rstrip("/")
+                 if search_path.virtual != "/" else "/")
     root_stat = await _stat_entry(stat, root_path, prefix, index)
     if root_stat is not None:
         collected.append((root_path, root_stat.type == FileType.DIRECTORY))

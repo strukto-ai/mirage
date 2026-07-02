@@ -4,6 +4,7 @@ import pytest
 
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.types import FileType, PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def document(
@@ -53,9 +54,9 @@ async def test_stat_light_uses_index_entry_without_detail_call(monkeypatch):
 
     index = RAMIndexCacheStore()
     path = PathSpec(
-        original="/knowledge/guides/quickstart",
+        resource_path=mount_key("/knowledge/guides/quickstart", "/knowledge"),
+        virtual="/knowledge/guides/quickstart",
         directory="/knowledge/guides/quickstart",
-        prefix="/knowledge/",
     )
 
     item = await stat.stat_light(accessor(), path, index)
@@ -82,9 +83,9 @@ async def test_stat_light_returns_directory_without_detail_call(monkeypatch):
 
     index = RAMIndexCacheStore()
     path = PathSpec(
-        original="/knowledge/guides",
+        resource_path=mount_key("/knowledge/guides", "/knowledge"),
+        virtual="/knowledge/guides",
         directory="/knowledge/guides",
-        prefix="/knowledge/",
     )
 
     item = await stat.stat_light(accessor(), path, index)

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../utils/slash.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { isEnoent, modifiedTs, walkFind, type WalkFindDeps } from './find.ts'
@@ -28,14 +30,14 @@ function makeDeps(
 ): WalkFindDeps {
   return {
     readdir: (spec) => {
-      const children = tree[spec.original]
-      if (children === undefined) return Promise.reject(enoent(spec.original))
+      const children = tree[spec.virtual]
+      if (children === undefined) return Promise.reject(enoent(spec.virtual))
       return Promise.resolve(children)
     },
     stat: (spec) => {
-      const entry = stats[spec.original]
-      if (entry === undefined) return Promise.reject(enoent(spec.original))
-      const name = spec.original.split('/').pop() ?? ''
+      const entry = stats[spec.virtual]
+      if (entry === undefined) return Promise.reject(enoent(spec.virtual))
+      const name = spec.virtual.split('/').pop() ?? ''
       return Promise.resolve(
         new FileStat({
           name,
@@ -49,7 +51,7 @@ function makeDeps(
   }
 }
 
-const ROOT = new PathSpec({ original: '/', directory: '/' })
+const ROOT = new PathSpec({ resourcePath: stripSlash('/'), virtual: '/', directory: '/' })
 
 describe('walkFind', () => {
   it('walks recursively and sorts by codepoint', async () => {
@@ -84,7 +86,7 @@ describe('walkFind', () => {
     const limited: WalkFindDeps = {
       ...makeDeps({}),
       readdir: (spec) =>
-        spec.original === '/'
+        spec.virtual === '/'
           ? Promise.resolve(['/bad/'])
           : Promise.reject(new Error('rate limited')),
     }
@@ -98,7 +100,11 @@ describe('walkFind', () => {
 
   it('strips the mount prefix from returned keys', async () => {
     const deps = makeDeps({ '/mnt/x': ['/mnt/x/a.txt'] }, { '/mnt/x/a.txt': { size: 1 } })
-    const root = new PathSpec({ original: '/mnt/x', directory: '/mnt/x', prefix: '/mnt/x' })
+    const root = new PathSpec({
+      virtual: '/mnt/x',
+      directory: '/mnt/x',
+      resourcePath: mountKey('/mnt/x', '/mnt/x'),
+    })
     expect(await walkFind(root, deps)).toEqual(['/a.txt'])
   })
 

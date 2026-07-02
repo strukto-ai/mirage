@@ -11,6 +11,7 @@ from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_prefix_of
 
 
 def _parse_program(program: str) -> tuple[str, str]:
@@ -277,15 +278,18 @@ async def awk(
     index: IndexCacheStore | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if program_file is not None:
-        f_path = program_file.strip_prefix
+        f_path = program_file.mount_path
         program = (await read_bytes(accessor,
                                     f_path)).decode(errors="replace").strip()
-        mount_prefix = paths[0].prefix if paths else program_file.prefix
+        mount_prefix = mount_prefix_of(
+            paths[0].virtual,
+            paths[0].resource_path) if paths else mount_prefix_of(
+                program_file.virtual, program_file.resource_path)
         data_paths = [_strip_mount(t, mount_prefix)
-                      for t in texts] + [p.strip_prefix for p in paths]
+                      for t in texts] + [p.mount_path for p in paths]
     elif texts:
         program = texts[0]
-        data_paths = [p.strip_prefix for p in paths]
+        data_paths = [p.mount_path for p in paths]
     else:
         raise ValueError(
             "awk: usage: awk [-F fs] [-v var=val] 'program' [file ...]")

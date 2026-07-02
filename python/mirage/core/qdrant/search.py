@@ -29,7 +29,7 @@ def _target_table(paths: list[PathSpec], config: QdrantConfig) -> str | None:
     if config.collection:
         return config.collection
     for path in paths:
-        raw = path.strip_prefix if isinstance(path, PathSpec) else path
+        raw = path.mount_path if isinstance(path, PathSpec) else path
         key = raw.strip("/")
         if key:
             return key.split("/")[0]

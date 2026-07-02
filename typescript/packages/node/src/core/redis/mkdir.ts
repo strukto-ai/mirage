@@ -22,7 +22,7 @@ export async function mkdir(
   path: PathSpec,
   parents = false,
 ): Promise<void> {
-  const p = norm(path.stripPrefix)
+  const p = norm(path.mountPath)
   const store = accessor.store
   if (parents) {
     const parts = stripSlash(p).split('/')

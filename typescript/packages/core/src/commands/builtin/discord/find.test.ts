@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../../utils/slash.ts'
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { materialize } from '../../../io/types.ts'
@@ -58,10 +60,10 @@ describe('discord find', () => {
     const out = await runFind(
       [
         new PathSpec({
-          original: '/mnt/discord/My Server__G1/channels/general__C1',
+          virtual: '/mnt/discord/My Server__G1/channels/general__C1',
           directory: '/mnt/discord/My Server__G1/channels/general__C1',
           resolved: false,
-          prefix: '/mnt/discord',
+          resourcePath: mountKey('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
         }),
       ],
       { name: 'chat.jsonl' },
@@ -78,7 +80,14 @@ describe('discord find', () => {
     const resource = makeFakeResource(new FakeDiscordTransport())
     const result = await cmd.fn(
       resource.accessor,
-      [new PathSpec({ original: '/mnt/discord', directory: '/mnt/discord', resolved: false })],
+      [
+        new PathSpec({
+          resourcePath: stripSlash('/mnt/discord'),
+          virtual: '/mnt/discord',
+          directory: '/mnt/discord',
+          resolved: false,
+        }),
+      ],
       [],
       { stdin: null, flags: { maxdepth: 'abc' }, filetypeFns: null, cwd: '/', resource },
     )

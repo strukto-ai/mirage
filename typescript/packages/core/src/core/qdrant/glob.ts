@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { QdrantAccessor } from '../../accessor/qdrant.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
@@ -35,7 +36,14 @@ export async function resolveGlob(
       const matched = entries
         .filter((e) => fnmatch(e.split('/').pop() ?? '', pat))
         .slice(0, SCOPE_ERROR)
-        .map((e) => new PathSpec({ original: e, directory: p.directory, prefix: p.prefix }))
+        .map(
+          (e) =>
+            new PathSpec({
+              virtual: e,
+              directory: p.directory,
+              resourcePath: mountKey(e, mountPrefixOf(p.virtual, p.resourcePath)),
+            }),
+        )
       result.push(...matched)
     } else {
       result.push(p)

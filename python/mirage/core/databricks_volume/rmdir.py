@@ -57,7 +57,7 @@ async def rmdir(
             raise enoent(path) from exc
         raise
     if entries:
-        raise OSError(f"directory not empty: {path.original}")
+        raise OSError(f"directory not empty: {path.virtual}")
     try:
         await asyncio.to_thread(_delete_directory_sync, accessor, remote_path)
     except Exception as exc:

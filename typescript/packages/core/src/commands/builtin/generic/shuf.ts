@@ -66,7 +66,7 @@ export async function shufGeneric(
   const sep = zeroSep ? '\x00' : '\n'
 
   if (echoMode) {
-    const base = paths.length > 0 ? paths.map((p) => p.stripPrefix) : [...texts]
+    const base = paths.length > 0 ? paths.map((p) => p.mountPath) : [...texts]
     const out = processItems(base, repeat, nFlag)
     const result: ByteSource = ENC.encode(out.join(sep) + sep)
     return [result, new IOResult()]

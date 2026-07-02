@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -36,8 +37,15 @@ export async function sedGeneric(
   const fVals = opts.flags.f
   const fList = Array.isArray(fVals) ? fVals : typeof fVals === 'string' ? [fVals] : []
   const scriptParts = [...eList]
+  const firstPath = paths[0]
+  const scriptPrefix =
+    (firstPath === undefined
+      ? undefined
+      : mountPrefixOf(firstPath.virtual, firstPath.resourcePath)) ??
+    opts.mountPrefix ??
+    ''
   for (const filePath of fList) {
-    const spec = PathSpec.fromStrPath(filePath, paths[0]?.prefix ?? opts.mountPrefix ?? '')
+    const spec = PathSpec.fromStrPath(filePath, mountKey(filePath, scriptPrefix))
     let text = DEC.decode(await materialize(stream(spec)))
     if (text.endsWith('\n')) text = text.slice(0, -1)
     scriptParts.push(text)
@@ -85,9 +93,9 @@ export async function sedGeneric(
           const newText = executeProgram(text, commands, false, extended)
           const newData = ENC.encode(newText)
           await write(p, newData)
-          writes[p.stripPrefix] = newData
+          writes[p.mountPath] = newData
         }
-        return [null, new IOResult({ writes, cache: paths.map((p) => p.stripPrefix) })]
+        return [null, new IOResult({ writes, cache: paths.map((p) => p.mountPath) })]
       }
       const outputs: string[] = []
       for (const p of paths) {
@@ -96,7 +104,7 @@ export async function sedGeneric(
         outputs.push(executeProgram(text, commands, false, extended))
       }
       const out: ByteSource = ENC.encode(outputs.join(''))
-      return [out, new IOResult({ cache: paths.map((p) => p.stripPrefix) })]
+      return [out, new IOResult({ cache: paths.map((p) => p.mountPath) })]
     }
 
     const modifying = inPlace && commands.some((c) => c.cmd === 's' || c.cmd === 'd')
@@ -109,13 +117,13 @@ export async function sedGeneric(
       if (modifying) {
         const newData = ENC.encode(result)
         await write(p, newData)
-        writes[p.stripPrefix] = newData
+        writes[p.mountPath] = newData
       } else {
         allOutputs.push(result)
       }
     }
     if (modifying) {
-      return [null, new IOResult({ writes, cache: paths.map((p) => p.stripPrefix) })]
+      return [null, new IOResult({ writes, cache: paths.map((p) => p.mountPath) })]
     }
     const out: ByteSource = ENC.encode(allOutputs.join('\n'))
     return [out, new IOResult()]

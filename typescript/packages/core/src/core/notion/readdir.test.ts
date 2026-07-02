@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
@@ -45,8 +46,8 @@ function makeAccessor(transport: NotionTransport): NotionReaddirAccessor {
   return { transport }
 }
 
-function spec(original: string, prefix = ''): PathSpec {
-  return new PathSpec({ original, directory: original, prefix })
+function spec(virtual: string, prefix = ''): PathSpec {
+  return new PathSpec({ virtual, directory: virtual, resourcePath: mountKey(virtual, prefix) })
 }
 
 const TOP1_ID = 'aaaa1111-2222-3333-4444-555566667777'
@@ -79,7 +80,11 @@ describe('notion readdir root', () => {
     const transport = new FakeTransport()
     const out = await readdir(
       makeAccessor(transport),
-      new PathSpec({ original: '/notion', directory: '/notion', prefix: '/notion' }),
+      new PathSpec({
+        virtual: '/notion',
+        directory: '/notion',
+        resourcePath: mountKey('/notion', '/notion'),
+      }),
       undefined,
     )
     expect(out).toEqual(['/notion/pages', '/notion/databases'])
@@ -123,7 +128,11 @@ describe('notion readdir pages', () => {
     })
     const out = await readdir(
       makeAccessor(transport),
-      new PathSpec({ original: '/notion/pages', directory: '/notion/pages', prefix: '/notion' }),
+      new PathSpec({
+        virtual: '/notion/pages',
+        directory: '/notion/pages',
+        resourcePath: mountKey('/notion/pages', '/notion'),
+      }),
       undefined,
     )
     expect(out).toEqual([`/notion/pages/Top1__${TOP1_ID}`, `/notion/pages/Top2__${TOP2_ID}`])
@@ -273,7 +282,11 @@ describe('notion readdir subtree', () => {
     const dirPath = `/notion/pages/Top1__${TOP1_ID}`
     const out = await readdir(
       makeAccessor(transport),
-      new PathSpec({ original: dirPath, directory: dirPath, prefix: '/notion' }),
+      new PathSpec({
+        virtual: dirPath,
+        directory: dirPath,
+        resourcePath: mountKey(dirPath, '/notion'),
+      }),
       undefined,
     )
     expect(out).toEqual([`${dirPath}/page.json`, `${dirPath}/ChildA__${CHILD1_ID}`])

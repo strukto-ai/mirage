@@ -30,32 +30,32 @@ export async function read(
   _index?: IndexCacheStore,
 ): Promise<Uint8Array> {
   void _index
-  const key = path.key
-  if (key === '') throw enoent(path.original)
+  const key = path.resourcePath
+  if (key === '') throw enoent(path.virtual)
   const parts = key.split('/')
   const last = parts[parts.length - 1] ?? ''
-  if (last !== 'page.json' && last !== 'database.json') throw enoent(path.original)
+  if (last !== 'page.json' && last !== 'database.json') throw enoent(path.virtual)
   if (last === 'database.json') {
-    if (parts[0] !== 'databases' || parts.length !== 3) throw enoent(path.original)
+    if (parts[0] !== 'databases' || parts.length !== 3) throw enoent(path.virtual)
     const databaseSegment = parts[parts.length - 2] ?? ''
     let parsedDatabase: { id: string; title: string }
     try {
       parsedDatabase = parseSegment(databaseSegment)
     } catch {
-      throw enoent(path.original)
+      throw enoent(path.virtual)
     }
     const database = await getDatabase(accessor.transport, parsedDatabase.id)
     return toJsonBytes(normalizeDatabase(database))
   }
   const isPageJson =
     (parts[0] === 'pages' && parts.length >= 3) || (parts[0] === 'databases' && parts.length >= 4)
-  if (!isPageJson) throw enoent(path.original)
+  if (!isPageJson) throw enoent(path.virtual)
   const parentSegment = parts[parts.length - 2] ?? ''
   let parsed: { id: string; title: string }
   try {
     parsed = parseSegment(parentSegment)
   } catch {
-    throw enoent(path.original)
+    throw enoent(path.virtual)
   }
   const [page, blocks] = await Promise.all([
     getPage(accessor.transport, parsed.id),

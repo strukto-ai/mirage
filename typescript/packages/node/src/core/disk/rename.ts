@@ -23,8 +23,8 @@ import {
 import { resolveSafe } from './utils.ts'
 
 export async function rename(accessor: DiskAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
-  const s = resolveSafe(accessor.root, src.stripPrefix)
-  const d = resolveSafe(accessor.root, dst.stripPrefix)
+  const s = resolveSafe(accessor.root, src.mountPath)
+  const d = resolveSafe(accessor.root, dst.mountPath)
   try {
     await fsRename(s, d)
   } catch (err) {

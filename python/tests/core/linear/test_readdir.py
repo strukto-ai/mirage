@@ -22,6 +22,7 @@ from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.linear.readdir import readdir
 from mirage.resource.linear.config import LinearConfig
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.fixture
@@ -36,8 +37,10 @@ def index():
 
 @pytest.mark.asyncio
 async def test_readdir_root(accessor, index):
-    result = await readdir(accessor, PathSpec(original="/", directory="/"),
-                           index)
+    result = await readdir(
+        accessor,
+        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"),
+        index)
     assert result == ["/teams"]
 
 
@@ -55,9 +58,11 @@ async def test_readdir_teams(accessor, index):
     with patch("mirage.core.linear.readdir.list_teams",
                new_callable=AsyncMock,
                return_value=teams):
-        result = await readdir(accessor,
-                               PathSpec(original="/teams", directory="/teams"),
-                               index)
+        result = await readdir(
+            accessor,
+            PathSpec(resource_path=("/teams").strip("/"),
+                     virtual="/teams",
+                     directory="/teams"), index)
     assert result == ["/teams/ENG__Engineering__TEAM1"]
 
 
@@ -72,9 +77,9 @@ async def test_readdir_teams_keeps_prefix_on_warm_cache_hit(accessor, index):
             "nodes": []
         },
     }]
-    spec = PathSpec(original="/linear/teams",
-                    directory="/linear/teams",
-                    prefix="/linear")
+    spec = PathSpec(resource_path=mount_key("/linear/teams", "/linear"),
+                    virtual="/linear/teams",
+                    directory="/linear/teams")
     with patch("mirage.core.linear.readdir.list_teams",
                new_callable=AsyncMock,
                return_value=teams):
@@ -108,7 +113,9 @@ async def test_readdir_team_members(accessor, index):
                return_value=users):
         result = await readdir(
             accessor,
-            PathSpec(original="/teams/ENG__Engineering__TEAM1/members",
+            PathSpec(resource_path=(
+                "/teams/ENG__Engineering__TEAM1/members").strip("/"),
+                     virtual="/teams/ENG__Engineering__TEAM1/members",
                      directory="/teams/ENG__Engineering__TEAM1/members"),
             index,
         )
@@ -132,7 +139,10 @@ async def test_readdir_issue_folder(accessor, index):
     result = await readdir(
         accessor,
         PathSpec(
-            original="/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1",
+            resource_path=(
+                "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1"
+            ).strip("/"),
+            virtual="/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1",
             directory="/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1"),
         index,
     )

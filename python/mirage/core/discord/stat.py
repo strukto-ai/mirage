@@ -21,6 +21,7 @@ from mirage.core.discord.readdir import readdir as _readdir
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.filetype import filetype_from_mimetype
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 VIRTUAL_DIRS = {"", "channels", "members"}
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -36,9 +37,9 @@ async def _populate_via_parent(
     try:
         await _readdir(
             accessor,
-            PathSpec(original=parent_virtual,
+            PathSpec(virtual=parent_virtual,
                      directory=parent_virtual,
-                     prefix=prefix),
+                     resource_path=mount_key(parent_virtual, prefix)),
             index=index,
         )
     # best-effort cache populate; canonical ENOENT raised below
@@ -52,10 +53,12 @@ async def stat(
     index: IndexCacheStore = None,
 ) -> FileStat:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    virtual = path.original
-    prefix = path.prefix
-    key = path.key
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    virtual = path.virtual
+    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    key = path.resource_path
 
     if not key:
         return FileStat(name="/", type=FileType.DIRECTORY)

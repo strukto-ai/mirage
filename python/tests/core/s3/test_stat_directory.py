@@ -40,12 +40,16 @@ def test_trailing_slash_prefers_directory_over_coexisting_object():
         accessor = _accessor()
         file_stat = asyncio.run(
             stat(accessor,
-                 PathSpec(original="/csv", directory="/"),
+                 PathSpec(resource_path=("/csv").strip("/"),
+                          virtual="/csv",
+                          directory="/"),
                  index=None))
         assert file_stat.type != FileType.DIRECTORY
         dir_stat = asyncio.run(
             stat(accessor,
-                 PathSpec(original="/csv/", directory="/csv/"),
+                 PathSpec(resource_path=("/csv/").strip("/"),
+                          virtual="/csv/",
+                          directory="/csv/"),
                  index=None))
         assert dir_stat.type == FileType.DIRECTORY
     finally:

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { SlackAccessor } from '../../../accessor/slack.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import {
@@ -58,7 +59,7 @@ async function grepCommand(
   if (firstPath !== undefined && pattern !== null && !pattern.includes('\n')) {
     const scope = detectScope(firstPath)
     if (scope.useNative) {
-      const filePrefix = firstPath.prefix
+      const filePrefix = mountPrefixOf(firstPath.virtual, firstPath.resourcePath)
       const query = buildQuery(pattern, scope)
       const count = maxCount ?? 100
       const target = scope.target

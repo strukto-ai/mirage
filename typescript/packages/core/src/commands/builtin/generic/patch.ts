@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, stripMount } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { readStdinAsync } from '../utils/stream.ts'
-import { lstripSlash } from '../../../utils/slash.ts'
+import { lstripSlash, stripSlash } from '../../../utils/slash.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -34,14 +35,13 @@ function splitLinesNoTrailing(text: string): string[] {
   return stripped === '' ? [] : stripped.split('\n')
 }
 
-function makePathSpec(original: string): PathSpec {
-  return new PathSpec({ original, directory: original, resolved: true })
-}
-
-function stripMount(p: string, mountPrefix: string): string {
-  if (mountPrefix !== '' && p.startsWith(mountPrefix + '/')) return p.slice(mountPrefix.length)
-  if (p === mountPrefix) return '/'
-  return p
+function makePathSpec(virtual: string): PathSpec {
+  return new PathSpec({
+    virtual,
+    directory: virtual,
+    resourcePath: stripSlash(virtual),
+    resolved: true,
+  })
 }
 
 function applyHunks(
@@ -161,10 +161,10 @@ export async function patchGeneric(
   if (iFlag !== null) {
     const resolved = stripMount(iFlag, mountPrefix)
     const spec = new PathSpec({
-      original: resolved,
+      virtual: resolved,
       directory: resolved,
       resolved: true,
-      prefix: mountPrefix,
+      resourcePath: mountKey(resolved, mountPrefix),
     })
     patchData = await materialize(stream(spec))
   } else if (paths.length > 0) {
@@ -182,14 +182,19 @@ export async function patchGeneric(
   const writes: Record<string, Uint8Array> = {}
 
   for (const [filePath, hunks] of fileHunks) {
-    let original = ''
+    let content = ''
     try {
-      const spec = new PathSpec({ original: filePath, directory: filePath, resolved: true })
-      original = DEC.decode(await materialize(stream(spec)))
+      const spec = new PathSpec({
+        resourcePath: stripSlash(filePath),
+        virtual: filePath,
+        directory: filePath,
+        resolved: true,
+      })
+      content = DEC.decode(await materialize(stream(spec)))
     } catch (err) {
       if (!(err instanceof Error) || !/not found/i.test(err.message)) throw err
     }
-    const originalLines = splitLinesNoTrailing(original)
+    const originalLines = splitLinesNoTrailing(content)
 
     let effective = hunks
     if (reverseMode) {

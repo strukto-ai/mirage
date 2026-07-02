@@ -34,23 +34,31 @@ def store():
 @pytest.mark.asyncio
 async def test_read_bytes(store):
     result = await read_bytes(
-        store, PathSpec(original="/hello.txt", directory="/hello.txt"))
+        store,
+        PathSpec(resource_path=("/hello.txt").strip("/"),
+                 virtual="/hello.txt",
+                 directory="/hello.txt"))
     assert result == b"hello world"
 
 
 @pytest.mark.asyncio
 async def test_read_bytes_nested(store):
     result = await read_bytes(
-        store, PathSpec(original="/sub/nested.txt",
-                        directory="/sub/nested.txt"))
+        store,
+        PathSpec(resource_path=("/sub/nested.txt").strip("/"),
+                 virtual="/sub/nested.txt",
+                 directory="/sub/nested.txt"))
     assert result == b"nested"
 
 
 @pytest.mark.asyncio
 async def test_read_bytes_not_found(store):
     with pytest.raises(FileNotFoundError):
-        await read_bytes(store,
-                         PathSpec(original="/nope.txt", directory="/nope.txt"))
+        await read_bytes(
+            store,
+            PathSpec(resource_path=("/nope.txt").strip("/"),
+                     virtual="/nope.txt",
+                     directory="/nope.txt"))
 
 
 @pytest.mark.asyncio
@@ -59,8 +67,11 @@ async def test_read_bytes_empty_file():
 
     a = RAMAccessor(s)
     s.files["/empty"] = b""
-    result = await read_bytes(a, PathSpec(original="/empty",
-                                          directory="/empty"))
+    result = await read_bytes(
+        a,
+        PathSpec(resource_path=("/empty").strip("/"),
+                 virtual="/empty",
+                 directory="/empty"))
     assert result == b""
 
 
@@ -71,7 +82,11 @@ async def test_read_bytes_binary_data():
     a = RAMAccessor(s)
     data = bytes(range(256))
     s.files["/bin"] = data
-    result = await read_bytes(a, PathSpec(original="/bin", directory="/bin"))
+    result = await read_bytes(
+        a,
+        PathSpec(resource_path=("/bin").strip("/"),
+                 virtual="/bin",
+                 directory="/bin"))
     assert result == data
 
 
@@ -82,5 +97,8 @@ async def test_read_bytes_normalizes_path():
     a = RAMAccessor(s)
     s.files["/file.txt"] = b"data"
     result = await read_bytes(
-        a, PathSpec(original="file.txt", directory="file.txt"))
+        a,
+        PathSpec(resource_path=("file.txt").strip("/"),
+                 virtual="file.txt",
+                 directory="file.txt"))
     assert result == b"data"

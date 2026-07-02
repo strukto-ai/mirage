@@ -19,7 +19,9 @@ from mirage.types import PathSpec
 
 
 def _ps(path: str) -> PathSpec:
-    return PathSpec(original=path, directory=path)
+    return PathSpec(virtual=path,
+                    directory=path,
+                    resource_path=path.strip("/"))
 
 
 @pytest.mark.asyncio

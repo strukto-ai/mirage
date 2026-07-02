@@ -27,7 +27,7 @@ from mirage.types import PathSpec
 
 
 async def _du_total(index: IndexCacheStore, path: PathSpec) -> int:
-    key = "/" + path.key if path.key else "/"
+    key = "/" + path.resource_path if path.resource_path else "/"
     du_prefix = key.rstrip("/") + "/"
     total = 0
     for ep, entry in index._entries.items():
@@ -44,7 +44,7 @@ async def du_provision(
     **_extra: object,
 ) -> ProvisionResult:
     return await metadata_provision("du " + " ".join(
-        p.original if isinstance(p, PathSpec) else p for p in paths))
+        p.virtual if isinstance(p, PathSpec) else p for p in paths))
 
 
 @command("du", resource="github", spec=SPECS["du"], provision=du_provision)

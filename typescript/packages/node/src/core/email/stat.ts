@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IndexCacheStore, PathSpec } from '@struktoai/mirage-core'
-import { FileStat, FileType } from '@struktoai/mirage-core'
+import { FileStat, FileType, mountPrefixOf } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../accessor/email.ts'
 import { listFolders } from './folders.ts'
 
@@ -44,20 +44,20 @@ export async function stat(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<FileStat> {
-  const prefix = path.prefix
-  const key = path.key
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const key = path.resourcePath
   if (key === '') return new FileStat({ name: '/', type: FileType.DIRECTORY })
 
-  if (index === undefined) throw enoent(path.original)
+  if (index === undefined) throw enoent(path.virtual)
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
   const result = await index.get(virtualKey)
   if (result.entry === undefined || result.entry === null) {
     if (!key.includes('/')) {
       const folders = await listFolders(accessor)
       if (folders.includes(key)) return new FileStat({ name: key, type: FileType.DIRECTORY })
-      throw enoent(path.original)
+      throw enoent(path.virtual)
     }
-    throw enoent(path.original)
+    throw enoent(path.virtual)
   }
   const rt = result.entry.resourceType
   const vfsName = result.entry.vfsName !== '' ? result.entry.vfsName : result.entry.name

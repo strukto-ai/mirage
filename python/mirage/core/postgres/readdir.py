@@ -18,6 +18,7 @@ from mirage.core.postgres import _client
 from mirage.core.postgres.scope import detect_scope
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 
 def is_dir_name(child: str) -> bool:
@@ -31,12 +32,17 @@ async def readdir(accessor: PostgresAccessor,
                   path: PathSpec,
                   index: IndexCacheStore = None) -> list[str]:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    prefix = path.prefix
-    raw = path.directory if path.pattern else path.original
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    raw = path.directory if path.pattern else path.virtual
     if prefix and raw.startswith(prefix):
         raw = raw[len(prefix):] or "/"
-    scope = detect_scope(PathSpec(original=raw, directory=raw, prefix=prefix))
+    scope = detect_scope(
+        PathSpec(virtual=raw,
+                 directory=raw,
+                 resource_path=mount_key(raw, prefix)))
     virtual_key = (prefix or "") + raw
 
     if scope.level == "root":

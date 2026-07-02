@@ -25,6 +25,7 @@ from mirage.core.gmail.messages import (_extract_attachments, _extract_header,
 from mirage.core.google.drive import GoogleFileSuffix
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 logger = logging.getLogger(__name__)
 
@@ -139,10 +140,12 @@ async def readdir(
     index: IndexCacheStore = None,
 ) -> list[str]:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    virtual = path.original
-    prefix = path.prefix
-    path = (path.dir if path.pattern else path).strip_prefix
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    virtual = path.virtual
+    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    path = (path.dir if path.pattern else path).mount_path
     key = path.strip("/")
     virtual_key = prefix + "/" + key if key else prefix or "/"
     parts = key.split("/") if key else []
@@ -185,9 +188,9 @@ async def readdir(
             # Auto-bootstrap: populate label index.
             try:
                 root = PathSpec(
-                    original=prefix or "/",
+                    virtual=prefix or "/",
                     directory=prefix or "/",
-                    prefix=prefix,
+                    resource_path=mount_key(prefix or "/", prefix),
                 )
                 await readdir(accessor, root, index)
                 result = await index.get(label_key)
@@ -232,9 +235,9 @@ async def readdir(
             if label_result.entry is None:
                 try:
                     root = PathSpec(
-                        original=prefix or "/",
+                        virtual=prefix or "/",
                         directory=prefix or "/",
-                        prefix=prefix,
+                        resource_path=mount_key(prefix or "/", prefix),
                     )
                     await readdir(accessor, root, index)
                     label_result = await index.get(label_key)
@@ -267,8 +270,10 @@ async def readdir(
                     return cached.entries
                 raise enoent(virtual)
         label_path = prefix + "/" + parts[0] if prefix else "/" + parts[0]
-        await readdir(accessor,
-                      PathSpec.from_str_path(label_path, prefix=prefix), index)
+        await readdir(
+            accessor,
+            PathSpec.from_str_path(label_path, mount_key(label_path, prefix)),
+            index)
         cached = await index.list_dir(virtual_key)
         if cached.entries is not None:
             return cached.entries
@@ -282,8 +287,10 @@ async def readdir(
             return cached.entries
         date_path = (prefix + "/" + parts[0] + "/" +
                      parts[1] if prefix else "/" + parts[0] + "/" + parts[1])
-        await readdir(accessor, PathSpec.from_str_path(date_path,
-                                                       prefix=prefix), index)
+        await readdir(
+            accessor,
+            PathSpec.from_str_path(date_path, mount_key(date_path, prefix)),
+            index)
         cached = await index.list_dir(virtual_key)
         if cached.entries is not None:
             return cached.entries

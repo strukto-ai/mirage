@@ -161,7 +161,7 @@ export async function find(
   options: FindOptions = {},
 ): Promise<string[]> {
   const virtual = norm(stripPrefix(p))
-  const startName = startBasename(p.original)
+  const startName = startBasename(p.virtual)
   const results: string[] = []
   const baseDepth = (virtual.match(/\//g) ?? []).length
   const typeKind: 'f' | 'd' | null = isFileType(options.type)

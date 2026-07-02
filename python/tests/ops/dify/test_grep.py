@@ -8,7 +8,7 @@ op_grep = importlib.import_module("mirage.ops.dify.grep")
 
 
 async def grep_bytes(accessor, paths, pattern, index):
-    return b"match", {paths[0].original: b"content"}
+    return b"match", {paths[0].virtual: b"content"}
 
 
 @pytest.mark.asyncio

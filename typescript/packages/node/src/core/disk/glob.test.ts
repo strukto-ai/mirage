@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '@struktoai/mirage-core'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -37,18 +38,19 @@ afterEach(() => {
 describe('core/disk/glob.resolveGlob', () => {
   it('expands a glob pattern into matching paths', async () => {
     const pattern = new PathSpec({
-      original: '/*.json',
+      resourcePath: stripSlash('/*.json'),
+      virtual: '/*.json',
       directory: '/',
       pattern: '*.json',
       resolved: false,
     })
     const out = await resolveGlob(accessor, [pattern])
-    const originals = out.map((p) => p.original).sort()
+    const originals = out.map((p) => p.virtual).sort()
     expect(originals).toEqual(['/a.json', '/b.json'])
   })
 
   it('passes through already-resolved paths unchanged', async () => {
     const out = await resolveGlob(accessor, [spec('/c.txt')])
-    expect(out.map((p) => p.original)).toEqual(['/c.txt'])
+    expect(out.map((p) => p.virtual)).toEqual(['/c.txt'])
   })
 })

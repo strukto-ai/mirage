@@ -31,6 +31,7 @@ from mirage.core.email.search import search_messages
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 
 async def _walk(
@@ -50,10 +51,13 @@ async def _walk(
     for child in children:
         results.append(child)
         if not child.endswith(".email.json"):
-            child_spec = PathSpec(original=child,
+            child_spec = PathSpec(virtual=child,
                                   directory=child,
                                   resolved=False,
-                                  prefix=path.prefix)
+                                  resource_path=mount_key(
+                                      child,
+                                      mount_prefix_of(path.virtual,
+                                                      path.resource_path)))
             results.extend(await _walk(accessor,
                                        child_spec,
                                        index,
@@ -65,7 +69,7 @@ async def _walk(
 def _is_folder_level(paths: list[PathSpec]) -> bool:
     if not paths:
         return False
-    key = paths[0].strip_prefix.strip("/")
+    key = paths[0].mount_path.strip("/")
     parts = [x for x in key.split("/") if x]
     return len(parts) <= 1
 
@@ -77,7 +81,7 @@ async def find_provision(
     **_extra: object,
 ) -> ProvisionResult:
     return await metadata_provision("find " + " ".join(
-        p.original if isinstance(p, PathSpec) else p for p in paths))
+        p.virtual if isinstance(p, PathSpec) else p for p in paths))
 
 
 @command("find",
@@ -104,8 +108,8 @@ async def find(
     index = index
     paths = await resolve_glob(accessor, paths, index)
     p0 = paths[0] if paths else None
-    search_path = p0.original if p0 else "/"
-    search_prefix = p0.prefix if p0 else ""
+    search_path = p0.virtual if p0 else "/"
+    search_prefix = mount_prefix_of(p0.virtual, p0.resource_path) if p0 else ""
 
     if name and _is_folder_level(paths):
         return await _find_server_side(accessor, paths, name, search_prefix)
@@ -115,10 +119,10 @@ async def find(
               if mindepth is not None else None)
     _validate_size_mtime(size, mtime)
 
-    search_spec = PathSpec(original=search_path,
+    search_spec = PathSpec(virtual=search_path,
                            directory=search_path,
                            resolved=False,
-                           prefix=search_prefix)
+                           resource_path=mount_key(search_path, search_prefix))
     all_paths = await _walk(accessor, search_spec, index, md)
     results: list[str] = []
     base_depth = search_path.strip("/").count("/") if search_path.strip(

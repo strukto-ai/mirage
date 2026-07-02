@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { GitHubCIAccessor } from '../../../accessor/github_ci.ts'
 import { resolveGlob } from '../../../core/github_ci/glob.ts'
 import { readdir as ciReaddir } from '../../../core/github_ci/readdir.ts'
@@ -47,10 +48,10 @@ async function walk(
     const isTerminal = TERMINAL_EXTS.some((ext) => child.endsWith(ext))
     if (!isTerminal) {
       const childSpec = new PathSpec({
-        original: child,
+        virtual: child,
         directory: child,
         resolved: false,
-        prefix: path.prefix,
+        resourcePath: mountKey(child, mountPrefixOf(path.virtual, path.resourcePath)),
       })
       const sub = await walk(accessor, childSpec, index, maxDepth, depth + 1)
       results.push(...sub)
@@ -69,10 +70,10 @@ async function findCommand(
   const p0 =
     resolved[0] ??
     new PathSpec({
-      original: '/',
+      virtual: '/',
       directory: '/',
       resolved: false,
-      prefix: opts.mountPrefix ?? '',
+      resourcePath: mountKey('/', opts.mountPrefix ?? ''),
     })
   const nameFlag = typeof opts.flags.name === 'string' ? opts.flags.name : null
   const inameFlag = typeof opts.flags.iname === 'string' ? opts.flags.iname : null
@@ -90,11 +91,13 @@ async function findCommand(
   if (sizeMtimeErr !== null) return sizeMtimeErr
 
   const allPaths = await walk(accessor, p0, opts.index, maxDepth, 0)
-  const searchKey = stripSlash(p0.stripPrefix)
+  const searchKey = stripSlash(p0.mountPath)
   const baseDepth = searchKey === '' ? -1 : searchKey.split('/').length - 1
   const results: string[] = []
   for (const p of [...allPaths].sort()) {
-    const stripped = p.startsWith(p0.prefix) ? p.slice(p0.prefix.length) : p
+    const stripped = p.startsWith(mountPrefixOf(p0.virtual, p0.resourcePath))
+      ? p.slice(mountPrefixOf(p0.virtual, p0.resourcePath).length)
+      : p
     const trimmed = stripSlash(stripped)
     const depth = trimmed === '' ? -1 : trimmed.split('/').length - (baseDepth + 2)
     if (minDepth !== null && depth < minDepth) continue

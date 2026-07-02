@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../utils/slash.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as DriveModule from '../google/drive.ts'
 
@@ -69,7 +70,7 @@ describe('readdir parent recursion', () => {
     const index = new RAMIndexCacheStore()
     const out = await readdir(
       accessor,
-      new PathSpec({ original: '/docs', directory: '/docs' }),
+      new PathSpec({ resourcePath: stripSlash('/docs'), virtual: '/docs', directory: '/docs' }),
       index,
     )
     expect(out).toContain('/docs/notes.txt')
@@ -93,7 +94,11 @@ describe('readdir parent recursion', () => {
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
     await expect(
-      readdir(accessor, new PathSpec({ original: '/docs', directory: '/docs' }), index),
+      readdir(
+        accessor,
+        new PathSpec({ resourcePath: stripSlash('/docs'), virtual: '/docs', directory: '/docs' }),
+        index,
+      ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
@@ -112,7 +117,11 @@ describe('readdir shared drives', () => {
 
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
-    const out = await readdir(accessor, new PathSpec({ original: '/', directory: '/' }), index)
+    const out = await readdir(
+      accessor,
+      new PathSpec({ resourcePath: stripSlash('/'), virtual: '/', directory: '/' }),
+      index,
+    )
     expect(out).toContain('/readme.txt')
     expect(out).toContain('/Team Drive/')
     const entry = (await index.get('/Team Drive')).entry
@@ -130,7 +139,11 @@ describe('readdir shared drives', () => {
 
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
-    const out = await readdir(accessor, new PathSpec({ original: '/', directory: '/' }), index)
+    const out = await readdir(
+      accessor,
+      new PathSpec({ resourcePath: stripSlash('/'), virtual: '/', directory: '/' }),
+      index,
+    )
     expect(out).toEqual(['/Team/', '/Team [Shared Drive]/', '/Team [Shared Drive 2]/'])
     expect((await index.get('/Team')).entry?.id).toBe('drive1')
     expect((await index.get('/Team [Shared Drive]')).entry?.id).toBe('drive2')
@@ -150,7 +163,11 @@ describe('readdir shared drives', () => {
 
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
-    const out = await readdir(accessor, new PathSpec({ original: '/', directory: '/' }), index)
+    const out = await readdir(
+      accessor,
+      new PathSpec({ resourcePath: stripSlash('/'), virtual: '/', directory: '/' }),
+      index,
+    )
     expect(out).toContain('/readme.txt')
   })
 
@@ -174,10 +191,18 @@ describe('readdir shared drives', () => {
 
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
-    await readdir(accessor, new PathSpec({ original: '/', directory: '/' }), index)
+    await readdir(
+      accessor,
+      new PathSpec({ resourcePath: stripSlash('/'), virtual: '/', directory: '/' }),
+      index,
+    )
     const out = await readdir(
       accessor,
-      new PathSpec({ original: '/Team Drive', directory: '/Team Drive' }),
+      new PathSpec({
+        resourcePath: stripSlash('/Team Drive'),
+        virtual: '/Team Drive',
+        directory: '/Team Drive',
+      }),
       index,
     )
     expect(out).toContain('/Team Drive/spec.pdf')

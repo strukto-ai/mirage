@@ -30,6 +30,7 @@ from mirage.core.github.stat import stat as github_stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision import ProvisionResult
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_prefix_of
 
 
 async def _estimate_recursive(index, path: str) -> tuple[int, int]:
@@ -61,8 +62,9 @@ async def grep_provision(
     total = 0
     ops = 0
     for p in paths:
-        p_prefix = p.prefix if isinstance(p, PathSpec) else ""
-        key = p.original if isinstance(p, PathSpec) else str(p)
+        p_prefix = mount_prefix_of(p.virtual, p.resource_path) if isinstance(
+            p, PathSpec) else ""
+        key = p.virtual if isinstance(p, PathSpec) else str(p)
         if p_prefix and key.startswith(p_prefix):
             key = key[len(p_prefix):] or "/"
         result = await index.get(key)

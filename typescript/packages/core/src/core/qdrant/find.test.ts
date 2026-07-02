@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../utils/slash.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ReaddirModule from './readdir.ts'
 import type * as StatModule from './stat.ts'
@@ -46,7 +47,7 @@ function enoent(p: string): Error {
 
 function mockTree(tree: Record<string, string[]>): void {
   vi.mocked(readdirMod.readdir).mockImplementation((_accessor, spec) => {
-    const key = typeof spec === 'string' ? spec : spec.original
+    const key = typeof spec === 'string' ? spec : spec.virtual
     const children = tree[key]
     if (children === undefined) return Promise.reject(enoent(key))
     return Promise.resolve(children)
@@ -55,7 +56,7 @@ function mockTree(tree: Record<string, string[]>): void {
 
 function mockStats(stats: Record<string, { size?: number; modified?: string }>): void {
   vi.mocked(statMod.stat).mockImplementation((_accessor, spec) => {
-    const key = typeof spec === 'string' ? spec : spec.original
+    const key = typeof spec === 'string' ? spec : spec.virtual
     const entry = stats[key]
     if (entry === undefined) return Promise.reject(enoent(key))
     const name = key.split('/').pop() ?? ''
@@ -76,7 +77,7 @@ const TREE: Record<string, string[]> = {
   '/col/grp': ['/col/grp/c.json'],
 }
 
-const ROOT = new PathSpec({ original: '/', directory: '/' })
+const ROOT = new PathSpec({ resourcePath: stripSlash('/'), virtual: '/', directory: '/' })
 
 describe('qdrant core find', () => {
   beforeEach(() => {
@@ -108,7 +109,7 @@ describe('qdrant core find', () => {
 
   it('propagates non-ENOENT readdir errors', async () => {
     vi.mocked(readdirMod.readdir).mockImplementation((_accessor, spec) => {
-      const key = typeof spec === 'string' ? spec : spec.original
+      const key = typeof spec === 'string' ? spec : spec.virtual
       if (key === '/') return Promise.resolve(['/bad'])
       return Promise.reject(new Error('rate limited'))
     })

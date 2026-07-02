@@ -2,6 +2,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.core.chroma.path import resolve_path
 from mirage.core.chroma.readdir import readdir
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import rekey
 
 
 async def walk(
@@ -22,7 +23,7 @@ async def walk(
             return []
         raise
 
-    current = path.strip_prefix if strip_prefix else path.original
+    current = path.mount_path if strip_prefix else path.virtual
     results = [current] if include_root else []
     if not resolved.is_dir or (maxdepth is not None and depth >= maxdepth):
         return results
@@ -35,7 +36,8 @@ async def walk(
         raise
 
     for child in children:
-        child_path = PathSpec.from_str_path(child, path.prefix)
+        child_path = PathSpec.from_str_path(
+            child, rekey(path.virtual, path.resource_path, child))
         results.extend(await walk(accessor,
                                   child_path,
                                   index,

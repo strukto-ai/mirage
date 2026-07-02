@@ -16,6 +16,7 @@ import pytest
 
 from mirage.core.notion import find as find_mod
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.key_prefix import mount_key
 
 _DIRS = {"/db", "/db/sub"}
 _FILES = {
@@ -29,13 +30,13 @@ _CHILDREN = {
 
 
 async def _fake_readdir(accessor, path, index):
-    key = path.original if isinstance(path, PathSpec) else path
+    key = path.virtual if isinstance(path, PathSpec) else path
     key = "/" + key.strip("/") if key.strip("/") else "/"
     return _CHILDREN.get(key, [])
 
 
 async def _fake_stat(accessor, path, index=None):
-    key = path.original if isinstance(path, PathSpec) else path
+    key = path.virtual if isinstance(path, PathSpec) else path
     key = "/" + key.strip("/") if key.strip("/") else "/"
     if key in _DIRS:
         return FileStat(name=key.rsplit("/", 1)[-1] or "/",
@@ -59,7 +60,9 @@ async def test_find_all():
 
 @pytest.mark.asyncio
 async def test_find_name_matches_mount_root_start_path():
-    spec = PathSpec(original="/db", directory="/db", prefix="/db")
+    spec = PathSpec(resource_path=mount_key("/db", "/db"),
+                    virtual="/db",
+                    directory="/db")
     out = await find_mod.find(None, spec, name="db")
     assert out == ["/"]
 

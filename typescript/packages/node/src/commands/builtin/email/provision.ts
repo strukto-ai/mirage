@@ -32,7 +32,7 @@ export async function fileReadProvision(
   let ops = 0
   if (index !== undefined) {
     for (const p of paths) {
-      const lookup = await index.get(p.original)
+      const lookup = await index.get(p.virtual)
       if (lookup.entry !== undefined && lookup.entry !== null) ops += 1
     }
   }

@@ -39,7 +39,7 @@ async function touchCommand(
     if (createOnly) continue
     if (!(await s3Exists(accessor, p))) {
       await s3Write(accessor, p, new Uint8Array(0))
-      writes[p.stripPrefix] = new Uint8Array()
+      writes[p.mountPath] = new Uint8Array()
     }
   }
   return [null, new IOResult({ writes })]

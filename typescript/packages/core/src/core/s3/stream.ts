@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { recordStream, revisionFor } from '../../observe/context.ts'
 import { ResourceName, type PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
@@ -29,8 +30,8 @@ function concatChunks(a: Uint8Array, b: Uint8Array): Uint8Array {
 }
 
 export async function* stream(accessor: S3Accessor, path: PathSpec): AsyncIterable<Uint8Array> {
-  const virtual = path.original
-  const prefix = path.prefix
+  const virtual = path.virtual
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
   const rawPath =
     prefix !== '' && virtual.startsWith(prefix) ? virtual.slice(prefix.length) || '/' : virtual
 

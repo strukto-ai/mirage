@@ -20,10 +20,13 @@ from mirage.commands.builtin.discord.grep import grep
 from mirage.commands.builtin.discord.rg import rg
 from mirage.io.types import IOResult
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def _path(path: str) -> PathSpec:
-    return PathSpec(original=path, directory=path, prefix="/discord")
+    return PathSpec(resource_path=mount_key(path, "/discord"),
+                    virtual=path,
+                    directory=path)
 
 
 def _fake_index():

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../../utils/slash.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { gunzip } from '../../../utils/compress.ts'
@@ -20,8 +21,13 @@ import { resolveSource } from '../utils/stream.ts'
 
 const ENC = new TextEncoder()
 
-function makePathSpec(original: string): PathSpec {
-  return new PathSpec({ original, directory: original, resolved: true })
+function makePathSpec(virtual: string): PathSpec {
+  return new PathSpec({
+    virtual,
+    directory: virtual,
+    resourcePath: stripSlash(virtual),
+    resolved: true,
+  })
 }
 
 function concat(chunks: Uint8Array[]): Uint8Array {
@@ -81,7 +87,7 @@ export async function gunzipGeneric(
   const writes: Record<string, Uint8Array> = {}
   for (const p of paths) {
     const raw = await materialize(stream(p))
-    const pStripped = p.stripPrefix
+    const pStripped = p.mountPath
     const outPath = pStripped.endsWith('.gz') ? pStripped.slice(0, -3) : pStripped + '.out'
     const outData = await gunzip(raw)
     await write(makePathSpec(outPath), outData)

@@ -24,6 +24,7 @@ from mirage.commands.builtin.generic.tail import tail_multi
 from mirage.commands.builtin.generic.wc import format_multi
 from mirage.io.types import materialize
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.key_prefix import mount_key
 
 _PAYLOAD = b"alpha\nbeta\n"
 
@@ -40,7 +41,9 @@ class _CountingReader:
 
 
 def _spec() -> PathSpec:
-    return PathSpec(original="/s3/a.txt", directory="/s3/", prefix="/s3/")
+    return PathSpec(resource_path=mount_key("/s3/a.txt", "/s3/"),
+                    virtual="/s3/a.txt",
+                    directory="/s3/")
 
 
 async def _warm_manager() -> CacheManager:

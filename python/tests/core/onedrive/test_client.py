@@ -6,18 +6,23 @@ from mirage.core.onedrive._client import (GraphError, drive_base, graph_get,
                                           graph_get_bytes, graph_list, headers,
                                           item_url, split_path)
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def test_split_path_strips_real_prefix():
-    p = PathSpec(original="/od/a.txt", directory="/od/a.txt", prefix="/od")
+    p = PathSpec(resource_path=mount_key("/od/a.txt", "/od"),
+                 virtual="/od/a.txt",
+                 directory="/od/a.txt")
     assert split_path(p) == ("/od", "a.txt")
 
 
 def test_split_path_does_not_strip_sibling_prefix_match():
-    p = PathSpec(original="database.txt",
-                 directory="database.txt",
-                 prefix="data")
-    assert split_path(p) == ("data", "database.txt")
+    # `/data` must not be stripped from the sibling `/database.txt`; the
+    # boundary guard lives in mount_key, whose output split_path returns.
+    p = PathSpec(resource_path=mount_key("/database.txt", "/data"),
+                 virtual="/database.txt",
+                 directory="/database.txt")
+    assert split_path(p) == ("", "database.txt")
 
 
 def test_headers_resolves_callable_token():

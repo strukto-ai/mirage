@@ -19,6 +19,7 @@ import pytest
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.search import SearchResult, narrow_paths, search_code
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.fixture
@@ -73,7 +74,11 @@ async def test_search_code_with_path_filter(mock_get, config):
 async def test_narrow_paths_strips_leading_slash_in_filter(
         mock_search, config):
     mock_search.return_value = [SearchResult(path="src/main.py", sha="aaa")]
-    paths = [PathSpec(original="/src", directory="/src", prefix="")]
+    paths = [
+        PathSpec(resource_path=mount_key("/src", ""),
+                 virtual="/src",
+                 directory="/src")
+    ]
     await narrow_paths(config, "acme", "proj", "import", paths)
     _, kwargs = mock_search.await_args
     assert kwargs["path_filter"] == "src"
@@ -83,7 +88,9 @@ async def test_narrow_paths_strips_leading_slash_in_filter(
 @patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
 async def test_narrow_paths_root_uses_no_filter(mock_search, config):
     mock_search.return_value = [SearchResult(path="src/main.py", sha="aaa")]
-    paths = [PathSpec(original="/", directory="/", prefix="")]
+    paths = [
+        PathSpec(resource_path=mount_key("/", ""), virtual="/", directory="/")
+    ]
     await narrow_paths(config, "acme", "proj", "import", paths)
     _, kwargs = mock_search.await_args
     assert kwargs["path_filter"] is None
@@ -97,16 +104,24 @@ async def test_narrow_paths_normalizes_results_with_leading_slash(
         SearchResult(path="src/main.py", sha="aaa"),
         SearchResult(path="src/utils.py", sha="bbb"),
     ]
-    paths = [PathSpec(original="/gh", directory="/gh", prefix="/gh")]
+    paths = [
+        PathSpec(resource_path=mount_key("/gh", "/gh"),
+                 virtual="/gh",
+                 directory="/gh")
+    ]
     out = await narrow_paths(config, "acme", "proj", "import", paths)
-    assert [p.original for p in out] == ["/gh/src/main.py", "/gh/src/utils.py"]
-    assert all(p.prefix == "/gh" for p in out)
+    assert [p.virtual for p in out] == ["/gh/src/main.py", "/gh/src/utils.py"]
+    assert [p.resource_path for p in out] == ["src/main.py", "src/utils.py"]
 
 
 @pytest.mark.asyncio
 @patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
 async def test_narrow_paths_logs_and_continues_on_error(mock_search, config):
     mock_search.side_effect = RuntimeError("boom")
-    paths = [PathSpec(original="/src", directory="/src", prefix="")]
+    paths = [
+        PathSpec(resource_path=mount_key("/src", ""),
+                 virtual="/src",
+                 directory="/src")
+    ]
     out = await narrow_paths(config, "acme", "proj", "import", paths)
     assert out == []

@@ -22,6 +22,7 @@ from mirage.commands.builtin.github_ci.grep import grep
 from mirage.io.stream import materialize
 from mirage.resource.github_ci.config import GitHubCIConfig
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.fixture
@@ -36,7 +37,9 @@ def index():
 
 
 def _scope(path: str, prefix: str = "") -> PathSpec:
-    return PathSpec(original=path, directory=path, prefix=prefix)
+    return PathSpec(resource_path=mount_key(path, prefix),
+                    virtual=path,
+                    directory=path)
 
 
 @pytest.mark.asyncio
@@ -84,17 +87,17 @@ async def test_grep_recursive_directory(accessor, index):
     file_stat = FileStat(name="ci.json", type=FileType.JSON)
 
     async def fake_stat(_acc, p, _idx=None):
-        if p.original.endswith(".json"):
+        if p.virtual.endswith(".json"):
             return file_stat
         return dir_stat
 
     async def fake_readdir(_acc, p, _idx=None):
-        if p.original == "/workflows":
+        if p.virtual == "/workflows":
             return ["/workflows/ci_1.json", "/workflows/build_2.json"]
         return []
 
     async def fake_read(_acc, p, _idx=None):
-        if "ci_1" in p.original:
+        if "ci_1" in p.virtual:
             return b"name: Test\non: push\n"
         return b"name: Build\non: push\n"
 

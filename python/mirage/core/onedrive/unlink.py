@@ -21,7 +21,7 @@ from mirage.utils.errors import enoent
 
 
 async def unlink(accessor: OneDriveAccessor, path: PathSpec) -> None:
-    virtual = path.original if isinstance(path, PathSpec) else path
+    virtual = path.virtual if isinstance(path, PathSpec) else path
     _, stripped = split_path(path)
     try:
         await graph_delete(accessor.config,

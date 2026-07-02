@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { fnmatch, type IndexCacheStore, PathSpec } from '@struktoai/mirage-core'
+import { PathSpec, fnmatch, rekey, type IndexCacheStore } from '@struktoai/mirage-core'
 import type { HfAccessor } from '../../accessor/hf.ts'
 import { SCOPE_ERROR } from './constants.ts'
 import { readdir } from './readdir.ts'
@@ -34,7 +34,7 @@ export async function resolveGlob(
       for (const entry of entries) {
         const entryBase = entry.split('/').pop() ?? ''
         if (!fnmatch(entryBase, p.pattern)) continue
-        matched.push(PathSpec.fromStrPath(entry, p.prefix))
+        matched.push(PathSpec.fromStrPath(entry, rekey(p.virtual, p.resourcePath, entry)))
       }
       if (matched.length > SCOPE_ERROR) {
         console.warn(

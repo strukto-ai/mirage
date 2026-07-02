@@ -36,7 +36,12 @@ ABS_DATE_DIR = "/" + DATE_DIR_PATH
 
 
 def _glob_result(path: str) -> list[PathSpec]:
-    return [PathSpec(original=path, directory="/", resolved=True)]
+    return [
+        PathSpec(resource_path=(path).strip("/"),
+                 virtual=path,
+                 directory="/",
+                 resolved=True)
+    ]
 
 
 FAKE_JSONL = (
@@ -46,7 +51,12 @@ FAKE_JSONL = (
 
 
 def _make_glob(path: str, resolved: bool = True) -> list[PathSpec]:
-    return [PathSpec(original=path, directory="/", resolved=resolved)]
+    return [
+        PathSpec(resource_path=(path).strip("/"),
+                 virtual=path,
+                 directory="/",
+                 resolved=resolved)
+    ]
 
 
 def _run(coro):

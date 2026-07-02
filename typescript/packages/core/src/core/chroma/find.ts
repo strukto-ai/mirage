@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { ChromaAccessor } from '../../accessor/chroma.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { FindOptions } from '../../resource/base.ts'
@@ -59,7 +60,7 @@ async function matches(
   const rootNorm = rstripSlash(root) !== '' ? rstripSlash(root) : '/'
   const itemNorm = rstripSlash(item) !== '' ? rstripSlash(item) : '/'
   const itemName = itemNorm === rootNorm ? startName : (rstripSlash(item).split('/').pop() ?? '')
-  const spec = PathSpec.fromStrPath(item, prefix)
+  const spec = PathSpec.fromStrPath(item, mountKey(item, prefix))
   let kind: 'd' | 'f' = 'f'
   if (needsKind) {
     const resolved = await resolvePath(accessor, spec, index)
@@ -113,16 +114,16 @@ export async function find(
       orNames: options.orNames,
     })
   const needsKind = treeHasType(tree)
-  const startName = startBasename(path.original)
+  const startName = startBasename(path.virtual)
   const filtered: string[] = []
   for (const item of results) {
     if (
       await matches(
         accessor,
         item,
-        path.prefix,
+        mountPrefixOf(path.virtual, path.resourcePath),
         index,
-        path.stripPrefix,
+        path.mountPath,
         options,
         tree,
         needsKind,

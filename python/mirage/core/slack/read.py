@@ -21,6 +21,7 @@ from mirage.core.slack.history import get_history_jsonl
 from mirage.core.slack.users import get_user_profile
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_prefix_of
 
 
 async def read(
@@ -29,10 +30,13 @@ async def read(
     index: IndexCacheStore = None,
 ) -> bytes:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    virtual = path.original
-    prefix = path.prefix if isinstance(path, PathSpec) else ""
-    raw = path.original if isinstance(path, PathSpec) else path
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    virtual = path.virtual
+    prefix = mount_prefix_of(path.virtual, path.resource_path) if isinstance(
+        path, PathSpec) else ""
+    raw = path.virtual if isinstance(path, PathSpec) else path
     if prefix and raw.startswith(prefix):
         raw = raw[len(prefix):] or "/"
     key = raw.strip("/")

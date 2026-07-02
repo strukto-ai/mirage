@@ -43,7 +43,10 @@ async def accessor():
 @pytest.mark.asyncio
 async def test_read_bytes(accessor):
     result = await read_bytes(
-        accessor, PathSpec(original="/hello.txt", directory="/hello.txt"))
+        accessor,
+        PathSpec(resource_path=("/hello.txt").strip("/"),
+                 virtual="/hello.txt",
+                 directory="/hello.txt"))
     assert result == b"hello world"
 
 
@@ -51,15 +54,20 @@ async def test_read_bytes(accessor):
 async def test_read_bytes_nested(accessor):
     result = await read_bytes(
         accessor,
-        PathSpec(original="/sub/nested.txt", directory="/sub/nested.txt"))
+        PathSpec(resource_path=("/sub/nested.txt").strip("/"),
+                 virtual="/sub/nested.txt",
+                 directory="/sub/nested.txt"))
     assert result == b"nested"
 
 
 @pytest.mark.asyncio
 async def test_read_bytes_not_found(accessor):
     with pytest.raises(FileNotFoundError):
-        await read_bytes(accessor,
-                         PathSpec(original="/nope.txt", directory="/nope.txt"))
+        await read_bytes(
+            accessor,
+            PathSpec(resource_path=("/nope.txt").strip("/"),
+                     virtual="/nope.txt",
+                     directory="/nope.txt"))
 
 
 @pytest.mark.asyncio
@@ -68,8 +76,11 @@ async def test_read_bytes_empty_file():
     await s.clear()
     await s.set_file("/empty", b"")
     a = RedisAccessor(s)
-    result = await read_bytes(a, PathSpec(original="/empty",
-                                          directory="/empty"))
+    result = await read_bytes(
+        a,
+        PathSpec(resource_path=("/empty").strip("/"),
+                 virtual="/empty",
+                 directory="/empty"))
     assert result == b""
     await s.clear()
     await s.close()
@@ -82,7 +93,11 @@ async def test_read_bytes_binary_data():
     data = bytes(range(256))
     await s.set_file("/bin", data)
     a = RedisAccessor(s)
-    result = await read_bytes(a, PathSpec(original="/bin", directory="/bin"))
+    result = await read_bytes(
+        a,
+        PathSpec(resource_path=("/bin").strip("/"),
+                 virtual="/bin",
+                 directory="/bin"))
     assert result == data
     await s.clear()
     await s.close()
@@ -95,7 +110,10 @@ async def test_read_bytes_normalizes_path():
     await s.set_file("/file.txt", b"data")
     a = RedisAccessor(s)
     result = await read_bytes(
-        a, PathSpec(original="file.txt", directory="file.txt"))
+        a,
+        PathSpec(resource_path=("file.txt").strip("/"),
+                 virtual="file.txt",
+                 directory="file.txt"))
     assert result == b"data"
     await s.clear()
     await s.close()

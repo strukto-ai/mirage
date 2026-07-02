@@ -37,7 +37,7 @@ def test_classify_backslash_escaped_absolute():
     registry.mount("/ram/", resource, MountMode.WRITE)
     result = classify_word(r"/ram/Zecheng\'s\ Server/", registry, "/")
     assert isinstance(result, PathSpec)
-    assert result.original == "/ram/Zecheng's Server"
+    assert result.virtual == "/ram/Zecheng's Server"
 
 
 def test_classify_quoted_path():
@@ -47,4 +47,4 @@ def test_classify_quoted_path():
     registry.mount("/ram/", resource, MountMode.WRITE)
     result = classify_word("/ram/Zecheng's Server/", registry, "/")
     assert isinstance(result, PathSpec)
-    assert result.original == "/ram/Zecheng's Server"
+    assert result.virtual == "/ram/Zecheng's Server"

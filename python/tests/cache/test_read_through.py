@@ -21,6 +21,7 @@ from mirage.cache.read_through import (cache_aware_read_bytes,
                                        cache_aware_read_stream,
                                        cached_prefix_bytes)
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 class _CountingBackend:
@@ -40,7 +41,9 @@ class _CountingBackend:
 
 
 def _spec() -> PathSpec:
-    return PathSpec(original="/s3/a.txt", directory="/s3/", prefix="/s3/")
+    return PathSpec(resource_path=mount_key("/s3/a.txt", "/s3/"),
+                    virtual="/s3/a.txt",
+                    directory="/s3/")
 
 
 async def _warm_manager(data: bytes) -> CacheManager:

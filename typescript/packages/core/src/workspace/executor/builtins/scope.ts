@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../../utils/slash.ts'
 import type { ByteSource, IOResult as IOResultType } from '../../../io/types.ts'
 import type { IOResult } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -24,9 +25,9 @@ export type ExecuteStringFn = (script: string, opts: { sessionId: string }) => P
 export function toScope(path: string): PathSpec {
   const lastSlash = path.lastIndexOf('/')
   const directory = lastSlash >= 0 ? path.slice(0, lastSlash + 1) : '/'
-  return new PathSpec({ original: path, directory, resolved: true })
+  return new PathSpec({ resourcePath: stripSlash(path), virtual: path, directory, resolved: true })
 }
 
 export function scopePath(val: string | PathSpec): string {
-  return val instanceof PathSpec ? val.original : val
+  return val instanceof PathSpec ? val.virtual : val
 }

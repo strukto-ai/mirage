@@ -70,7 +70,7 @@ export async function cmpGeneric(
     if (data1[idx] !== data2[idx]) {
       let line = 1
       for (let k = 0; k < idx; k++) if (data1[k] === 0x0a) line += 1
-      let msg = `${p0.original} ${p1.original} differ: char ${String(idx + 1)}, line ${String(line)}`
+      let msg = `${p0.virtual} ${p1.virtual} differ: char ${String(idx + 1)}, line ${String(line)}`
       if (opts.flags.b === true) {
         msg += ` is ${octal(data1[idx] ?? 0)} ${String.fromCharCode(data1[idx] ?? 0)} ${octal(data2[idx] ?? 0)} ${String.fromCharCode(data2[idx] ?? 0)}`
       }
@@ -78,5 +78,5 @@ export async function cmpGeneric(
     }
   }
   const shorter = data1.byteLength < data2.byteLength ? p0 : p1
-  return [formatRecords([`cmp: EOF on ${shorter.original}`]), new IOResult({ exitCode: 1 })]
+  return [formatRecords([`cmp: EOF on ${shorter.virtual}`]), new IOResult({ exitCode: 1 })]
 }

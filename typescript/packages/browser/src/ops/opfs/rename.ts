@@ -24,7 +24,7 @@ export const renameOp: RegisteredOp = {
   write: true,
   fn: (accessor: OPFSAccessor, path: PathSpec, args: readonly unknown[]) => {
     const dst = args[0]
-    if (dst === undefined || dst === null || typeof dst !== 'object' || !('original' in dst)) {
+    if (dst === undefined || dst === null || typeof dst !== 'object' || !('virtual' in dst)) {
       throw new TypeError('rename op requires a PathSpec destination as the first arg')
     }
     return coreRename(accessor, path, dst as PathSpec)

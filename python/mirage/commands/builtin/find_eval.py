@@ -22,7 +22,7 @@ def start_basename(path: PathSpec | str) -> str:
     """Basename of a find start path, as GNU would print and match it.
 
     Single source of truth for the start path's own name across every
-    backend find op. Reads ``path.original`` (the path as written, with
+    backend find op. Reads ``path.virtual`` (the path as written, with
     its mount prefix) so the name is correct whether the start is the
     mount root or a nested directory.
 
@@ -32,7 +32,7 @@ def start_basename(path: PathSpec | str) -> str:
     Returns:
         str: The start path's basename, or "" for the bare root "/".
     """
-    original = path.original if isinstance(path, PathSpec) else str(path)
+    original = path.virtual if isinstance(path, PathSpec) else str(path)
     return original.rstrip("/").rsplit("/", 1)[-1]
 
 

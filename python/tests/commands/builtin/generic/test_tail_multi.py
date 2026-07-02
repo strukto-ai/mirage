@@ -16,12 +16,15 @@ import pytest
 
 from mirage.commands.builtin.generic.tail import tail_multi
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def _paths(*names: str) -> list[PathSpec]:
     return [
-        PathSpec(original=n, directory="/d", prefix="", resolved=True)
-        for n in names
+        PathSpec(resource_path=mount_key(n, ""),
+                 virtual=n,
+                 directory="/d",
+                 resolved=True) for n in names
     ]
 
 
@@ -37,7 +40,7 @@ async def test_tail_multi_bytes_reader_no_headers():
     data = {"/a": b"a1\na2\na3\n", "/b": b"b1\nb2\n"}
 
     async def read(accessor, p, index):
-        return data[p.original]
+        return data[p.virtual]
 
     out = await _collect(
         tail_multi(_paths("/a", "/b"), read=read, n=1, show_headers=False))
@@ -49,7 +52,7 @@ async def test_tail_multi_with_headers():
     data = {"/a": b"a1\na2\n", "/b": b"b1\nb2\n"}
 
     async def read(accessor, p, index):
-        return data[p.original]
+        return data[p.virtual]
 
     out = await _collect(
         tail_multi(_paths("/a", "/b"), read=read, n=1, show_headers=True))
@@ -63,7 +66,7 @@ async def test_tail_multi_stream_reader():
     def read(accessor, p, index):
 
         async def gen():
-            for ch in chunks[p.original]:
+            for ch in chunks[p.virtual]:
                 yield ch
 
         return gen()

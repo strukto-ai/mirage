@@ -19,7 +19,7 @@ async def paste(
     file_lines: list[list[str]] = []
     remaining_stdin = stdin
     for p in paths:
-        if p.original == "-":
+        if p.virtual == "-":
             raw = await _read_stdin_async(remaining_stdin)
             data = raw.decode(errors="replace") if raw else ""
             remaining_stdin = None

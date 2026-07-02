@@ -18,10 +18,11 @@ from mirage.core.databricks_volume.create import create
 from mirage.core.databricks_volume.unlink import unlink
 from mirage.core.databricks_volume.write import write_bytes
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def _path(path: str) -> PathSpec:
-    return PathSpec.from_str_path(path, "/dbx")
+    return PathSpec.from_str_path(path, mount_key(path, "/dbx"))
 
 
 def _seed_directory(files, path: str) -> None:

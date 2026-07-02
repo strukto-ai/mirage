@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GitHubCIAccessor } from '../../accessor/github_ci.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
@@ -25,8 +26,8 @@ import { enoent } from '../../utils/errors.ts'
 const ENC = new TextEncoder()
 
 function stripPrefix(path: PathSpec): string {
-  const prefix = path.prefix
-  let p = path.original
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  let p = path.virtual
   if (prefix !== '' && p.startsWith(prefix)) {
     p = p.slice(prefix.length) || '/'
   }
@@ -42,7 +43,7 @@ export async function read(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<Uint8Array> {
-  const prefix = path.prefix
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
   const stripped = stripPrefix(path)
   const key = stripSlash(stripped)
   const parts = key === '' ? [] : key.split('/')

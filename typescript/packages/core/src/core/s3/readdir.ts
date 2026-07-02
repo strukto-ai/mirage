@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { IndexEntry, ResourceType } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
@@ -24,10 +25,10 @@ export async function readdir(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<string[]> {
-  const original = path.original
-  const prefix = path.prefix
+  const original = path.virtual
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
   // When called from resolveGlob with a pattern, use path.directory for the
-  // listing; direct callers pass pattern=null so we use path.original.
+  // listing; direct callers pass pattern=null so we use path.virtual.
   const virtual = path.pattern !== null ? path.directory : original
   const rawPath =
     prefix !== '' && virtual.startsWith(prefix) ? virtual.slice(prefix.length) || '/' : virtual

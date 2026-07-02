@@ -39,7 +39,16 @@ export async function duGeneric(
   const maxDepthRaw = opts.flags['max-depth']
   const maxDepth = typeof maxDepthRaw === 'string' ? Number.parseInt(maxDepthRaw, 10) : null
   const targets =
-    paths.length > 0 ? paths : [new PathSpec({ original: '/', directory: '/', resolved: false })]
+    paths.length > 0
+      ? paths
+      : [
+          new PathSpec({
+            resourcePath: stripSlash('/'),
+            virtual: '/',
+            directory: '/',
+            resolved: false,
+          }),
+        ]
   const fmt = (size: number): string => (human ? humanSize(size) : String(size))
   const lines: string[] = []
   let grand = 0
@@ -49,7 +58,7 @@ export async function duGeneric(
         const [entries, total] = await computeAll(root)
         const filtered =
           maxDepth !== null
-            ? entries.filter(([p]) => depthOf(p, root.original) <= maxDepth)
+            ? entries.filter(([p]) => depthOf(p, root.virtual) <= maxDepth)
             : entries
         for (const [p, size] of filtered) lines.push(`${fmt(size)}\t${p}`)
         lines.push(`${fmt(total)}\t${root.display}`)
@@ -86,7 +95,16 @@ export async function duMulti(
   const human = opts.flags.h === true
   const cumulative = opts.flags.c === true
   const targets =
-    paths.length > 0 ? paths : [new PathSpec({ original: '/', directory: '/', resolved: false })]
+    paths.length > 0
+      ? paths
+      : [
+          new PathSpec({
+            resourcePath: stripSlash('/'),
+            virtual: '/',
+            directory: '/',
+            resolved: false,
+          }),
+        ]
   const fmt = (size: number): string => (human ? humanSize(size) : String(size))
   const lines: string[] = []
   let grand = 0

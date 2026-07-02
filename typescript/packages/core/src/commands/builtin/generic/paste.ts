@@ -35,7 +35,7 @@ export async function pasteGeneric(
   const fileLines: string[][] = []
   let stdinConsumed = false
   for (const p of paths) {
-    if (p.original === '-') {
+    if (p.virtual === '-') {
       const raw = stdinConsumed ? null : await readStdinAsync(opts.stdin)
       stdinConsumed = true
       fileLines.push(splitLinesNoEnds(raw !== null ? DEC.decode(raw) : ''))

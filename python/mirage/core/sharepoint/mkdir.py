@@ -26,7 +26,7 @@ async def _create_dir(accessor: SharePointAccessor, drive_id: str,
 async def mkdir(accessor: SharePointAccessor,
                 path: PathSpec,
                 parents: bool = False) -> None:
-    virtual = path.original if isinstance(path, PathSpec) else path
+    virtual = path.virtual if isinstance(path, PathSpec) else path
     _, stripped = split_path(path)
     if not stripped:
         return

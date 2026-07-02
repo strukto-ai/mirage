@@ -72,8 +72,10 @@ def tree():
 async def test_stat_file(tree):
     index = _index_from_tree(tree)
     result = await stat(
-        None, PathSpec(original="/src/main.py", directory="/src/main.py"),
-        index)
+        None,
+        PathSpec(resource_path=("/src/main.py").strip("/"),
+                 virtual="/src/main.py",
+                 directory="/src/main.py"), index)
     assert result.name == "main.py"
     assert result.size == 120
     assert result.type == FileType.TEXT
@@ -83,8 +85,11 @@ async def test_stat_file(tree):
 @pytest.mark.asyncio
 async def test_stat_directory(tree):
     index = _index_from_tree(tree)
-    result = await stat(None, PathSpec(original="/src", directory="/src"),
-                        index)
+    result = await stat(
+        None,
+        PathSpec(resource_path=("/src").strip("/"),
+                 virtual="/src",
+                 directory="/src"), index)
     assert result.name == "src"
     assert result.type == FileType.DIRECTORY
 
@@ -92,7 +97,10 @@ async def test_stat_directory(tree):
 @pytest.mark.asyncio
 async def test_stat_root(tree):
     index = _index_from_tree(tree)
-    result = await stat(None, PathSpec(original="/", directory="/"), index)
+    result = await stat(
+        None,
+        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"),
+        index)
     assert result.name == "/"
     assert result.type == FileType.DIRECTORY
 
@@ -103,14 +111,18 @@ async def test_stat_not_found(tree):
     with pytest.raises(FileNotFoundError):
         await stat(
             None,
-            PathSpec(original="/nonexistent.py", directory="/nonexistent.py"),
-            index)
+            PathSpec(resource_path=("/nonexistent.py").strip("/"),
+                     virtual="/nonexistent.py",
+                     directory="/nonexistent.py"), index)
 
 
 @pytest.mark.asyncio
 async def test_stat_strip_slashes(tree):
     index = _index_from_tree(tree)
     result = await stat(
-        None, PathSpec(original="/README.md", directory="/README.md"), index)
+        None,
+        PathSpec(resource_path=("/README.md").strip("/"),
+                 virtual="/README.md",
+                 directory="/README.md"), index)
     assert result.name == "README.md"
     assert result.size == 50

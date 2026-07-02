@@ -23,9 +23,11 @@ async def mkdir(accessor: RAMAccessor,
                 path: PathSpec,
                 parents: bool = False) -> None:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
     if isinstance(path, PathSpec):
-        path = path.strip_prefix
+        path = path.mount_path
     store = accessor.store
     p = norm(path)
     if parents:

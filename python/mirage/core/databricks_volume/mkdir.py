@@ -46,7 +46,7 @@ async def mkdir(
         await asyncio.to_thread(_create_directory_sync, accessor, remote_path)
         return
     if await exists(accessor, path):
-        raise FileExistsError(path.original)
+        raise FileExistsError(path.virtual)
     parent = parent_path(path)
     parent_stat = await stat(accessor, parent, index)
     if parent_stat.type != FileType.DIRECTORY:

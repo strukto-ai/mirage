@@ -80,7 +80,7 @@ async def rm_recursive(
     file_stat = await stat(accessor, path, index)
     if file_stat.type != FileType.DIRECTORY:
         await unlink(accessor, path, index)
-        return [path.strip_prefix]
+        return [path.mount_path]
     remote_root = backend_path(accessor.config, path)
     try:
         removed = await asyncio.to_thread(_remove_tree_sync, accessor,

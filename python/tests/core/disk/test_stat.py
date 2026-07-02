@@ -18,6 +18,7 @@ from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.disk.stat import stat
 from mirage.types import FileType, PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.mark.asyncio
@@ -27,8 +28,9 @@ async def test_stat_file(tmp_path):
     index = RAMIndexCacheStore(ttl=0)
     result = await stat(
         accessor,
-        PathSpec(original="/hello.txt", directory="/hello.txt",
-                 prefix="/disk"), index)
+        PathSpec(resource_path=mount_key("/hello.txt", "/disk"),
+                 virtual="/hello.txt",
+                 directory="/hello.txt"), index)
     assert result.name == "hello.txt"
     assert result.size == 5
     assert result.modified is not None
@@ -42,8 +44,11 @@ async def test_stat_directory(tmp_path):
     (tmp_path / "sub").mkdir()
     accessor = DiskAccessor(tmp_path)
     index = RAMIndexCacheStore(ttl=0)
-    result = await stat(accessor, PathSpec(original="/sub", directory="/sub"),
-                        index)
+    result = await stat(
+        accessor,
+        PathSpec(resource_path=("/sub").strip("/"),
+                 virtual="/sub",
+                 directory="/sub"), index)
     assert result.type == FileType.DIRECTORY
     assert result.size is None
 
@@ -53,9 +58,11 @@ async def test_stat_file_not_found(tmp_path):
     accessor = DiskAccessor(tmp_path)
     index = RAMIndexCacheStore(ttl=0)
     with pytest.raises(FileNotFoundError):
-        await stat(accessor,
-                   PathSpec(original="/missing.txt", directory="/missing.txt"),
-                   index)
+        await stat(
+            accessor,
+            PathSpec(resource_path=("/missing.txt").strip("/"),
+                     virtual="/missing.txt",
+                     directory="/missing.txt"), index)
 
 
 @pytest.mark.asyncio
@@ -63,9 +70,9 @@ async def test_stat_with_glob_scope(tmp_path):
     (tmp_path / "a.txt").write_text("data")
     accessor = DiskAccessor(tmp_path)
     index = RAMIndexCacheStore(ttl=0)
-    scope = PathSpec(original="/disk/a.txt",
-                     directory="/disk/",
-                     prefix="/disk")
+    scope = PathSpec(resource_path=mount_key("/disk/a.txt", "/disk"),
+                     virtual="/disk/a.txt",
+                     directory="/disk/")
     result = await stat(accessor, scope, index)
     assert result.name == "a.txt"
     assert result.size == 4
@@ -78,8 +85,8 @@ async def test_stat_with_prefix(tmp_path):
     index = RAMIndexCacheStore(ttl=0)
     result = await stat(
         accessor,
-        PathSpec(original="/disk/a.txt",
-                 directory="/disk/a.txt",
-                 prefix="/disk"), index)
+        PathSpec(resource_path=mount_key("/disk/a.txt", "/disk"),
+                 virtual="/disk/a.txt",
+                 directory="/disk/a.txt"), index)
     assert result.name == "a.txt"
     assert result.size == 4

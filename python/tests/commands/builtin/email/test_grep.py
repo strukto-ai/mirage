@@ -7,6 +7,7 @@ import pytest
 
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 sys.modules.setdefault(
     "aioimaplib",
@@ -37,9 +38,9 @@ async def test_grep_server_side_count_uses_real_count():
             "INBOX",
             "foo",
             [
-                PathSpec(original="/email/INBOX",
-                         directory="/email/INBOX",
-                         prefix="/email")
+                PathSpec(resource_path=mount_key("/email/INBOX", "/email"),
+                         virtual="/email/INBOX",
+                         directory="/email/INBOX")
             ],
             c=True,
         )

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -32,10 +33,10 @@ interface WalkOpts {
 
 function childSpec(entryPath: string, prefix: string): PathSpec {
   return new PathSpec({
-    original: entryPath,
+    virtual: entryPath,
     directory: entryPath,
     resolved: false,
-    prefix,
+    resourcePath: mountKey(entryPath, prefix),
   })
 }
 
@@ -96,7 +97,9 @@ async function listDir(
   all: boolean,
 ): Promise<FileStat[]> {
   const entries = await readdir(dir)
-  const stats = await Promise.all(entries.map((p) => stat(childSpec(p, dir.prefix))))
+  const stats = await Promise.all(
+    entries.map((p) => stat(childSpec(p, mountPrefixOf(dir.virtual, dir.resourcePath)))),
+  )
   return all ? stats : stats.filter((s) => !s.name.startsWith('.'))
 }
 
@@ -122,9 +125,16 @@ async function walkGrouped(
   groups.push([dir, sorted])
   for (const s of sorted) {
     if (s.type === FileType.DIRECTORY) {
-      const base = rstripSlash(dir.original)
+      const base = rstripSlash(dir.virtual)
       const childPath = `${base}/${s.name}`
-      await walkGrouped(readdir, stat, childSpec(childPath, dir.prefix), opts, groups, warnings)
+      await walkGrouped(
+        readdir,
+        stat,
+        childSpec(childPath, mountPrefixOf(dir.virtual, dir.resourcePath)),
+        opts,
+        groups,
+        warnings,
+      )
     }
   }
 }
@@ -140,10 +150,10 @@ export async function lsGeneric(
       ? paths
       : [
           new PathSpec({
-            original: opts.cwd,
+            virtual: opts.cwd,
             directory: opts.cwd,
             resolved: false,
-            prefix: opts.mountPrefix ?? '',
+            resourcePath: mountKey(opts.cwd, opts.mountPrefix ?? ''),
           }),
         ]
   const long = opts.flags.args_l === true && opts.flags.args_1 !== true
@@ -193,10 +203,10 @@ export async function lsGeneric(
       if (i > 0) lines.push('')
       const owner =
         targets.find((t) => {
-          const b = rstripSlash(t.original)
-          return dirSpec.original === b || dirSpec.original.startsWith(b + '/')
+          const b = rstripSlash(t.virtual)
+          return dirSpec.virtual === b || dirSpec.virtual.startsWith(b + '/')
         }) ?? dirSpec
-      lines.push(`${rebaseOne(dirSpec.original, owner.original, owner.display)}:`)
+      lines.push(`${rebaseOne(dirSpec.virtual, owner.virtual, owner.display)}:`)
       appendListing(entries, long, human, classify, lines)
     }
     const out: ByteSource = formatRecords(lines)

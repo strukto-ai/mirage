@@ -59,7 +59,7 @@ async function rmCommand(
       const code = (err as { code?: string } | null)?.code
       if (code === 'ENOENT' && force) continue
       if (code === 'ENOENT') {
-        throw new Error(`rm: cannot remove '${path.original}': No such file or directory`)
+        throw new Error(`rm: cannot remove '${path.virtual}': No such file or directory`)
       }
       throw err
     }
@@ -68,11 +68,11 @@ async function rmCommand(
     if (s.type === FileType.DIRECTORY) {
       if (recursive) throw new Error('rm: recursive remove not supported on this backend')
       if (dirFlag) throw new Error('rm: directory remove not supported on this backend')
-      throw new Error(`rm: cannot remove '${path.original}': Is a directory`)
+      throw new Error(`rm: cannot remove '${path.virtual}': Is a directory`)
     }
     await hfUnlink(accessor, path, idx)
-    removed[path.stripPrefix] = new Uint8Array()
-    if (verbose) verboseParts.push(`removed '${path.original}'`)
+    removed[path.mountPath] = new Uint8Array()
+    if (verbose) verboseParts.push(`removed '${path.virtual}'`)
   }
   const output: ByteSource | null = verbose ? lines(verboseParts) : null
   return [output, new IOResult({ writes: removed })]

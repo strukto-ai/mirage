@@ -19,6 +19,7 @@ from mirage.core.notion.pages import (list_block_children, query_database,
 from mirage.core.notion.pathing import (database_dirname, page_dirname,
                                         split_suffix_id)
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.sanitize import sanitize_name
 
 VIRTUAL_ROOTS = ("pages", "databases")
@@ -30,9 +31,11 @@ async def readdir(
     index: IndexCacheStore = None,
 ) -> list[str]:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    prefix = path.prefix
-    path = (path.dir if path.pattern else path).strip_prefix
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    path = (path.dir if path.pattern else path).mount_path
     key = path.strip("/")
     idx_key = "/" + key if key else "/"
 

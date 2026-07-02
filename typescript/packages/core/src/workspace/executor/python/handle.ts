@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -34,11 +35,11 @@ function readAllBytes(data: unknown): Promise<Uint8Array> {
 
 function toPathSpec(p: PathSpec): PathSpec {
   return new PathSpec({
-    original: p.original,
+    virtual: p.virtual,
     directory: p.directory,
     pattern: p.pattern,
     resolved: p.resolved,
-    prefix: p.prefix,
+    resourcePath: mountKey(p.virtual, mountPrefixOf(p.virtual, p.resourcePath)),
   })
 }
 
@@ -54,7 +55,7 @@ export async function handlePython(
   deps: HandlePythonDeps,
 ): Promise<Result> {
   let code = opts.code
-  const cmdStr = pathScope !== null ? `python3 ${pathScope.original}` : 'python3 -c'
+  const cmdStr = pathScope !== null ? `python3 ${pathScope.virtual}` : 'python3 -c'
 
   if (code === null) {
     if (pathScope === null) {
@@ -70,7 +71,7 @@ export async function handlePython(
       const bytes = await readAllBytes(data)
       code = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
     } catch {
-      const err = new TextEncoder().encode(`python3: ${pathScope.original}: No such file\n`)
+      const err = new TextEncoder().encode(`python3: ${pathScope.virtual}: No such file\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: err }),

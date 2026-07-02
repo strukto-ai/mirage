@@ -15,7 +15,7 @@
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { rstripSlash } from '../../../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 
 const ENC = new TextEncoder()
 
@@ -28,8 +28,13 @@ function randomSuffix(length: number): string {
   return out
 }
 
-function makePathSpec(original: string): PathSpec {
-  return new PathSpec({ original, directory: original, resolved: true })
+function makePathSpec(virtual: string): PathSpec {
+  return new PathSpec({
+    virtual,
+    directory: virtual,
+    resourcePath: stripSlash(virtual),
+    resolved: true,
+  })
 }
 
 export async function mktempGeneric(

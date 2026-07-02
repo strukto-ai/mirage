@@ -19,6 +19,7 @@ from mirage.accessor.onedrive import OneDriveAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.core.onedrive.readdir import readdir
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import rekey
 
 
 async def resolve_glob(
@@ -29,14 +30,18 @@ async def resolve_glob(
     result: list[PathSpec] = []
     for p in paths:
         if isinstance(p, str):
-            result.append(PathSpec(original=p, directory=posixpath.dirname(p)))
+            result.append(
+                PathSpec(resource_path=(p).strip("/"),
+                         virtual=p,
+                         directory=posixpath.dirname(p)))
             continue
         if p.resolved:
             result.append(p)
         elif p.pattern:
             entries = await readdir(accessor, p.dir, index)
             matched = [
-                PathSpec.from_str_path(e, p.prefix) for e in entries
+                PathSpec.from_str_path(e, rekey(p.virtual, p.resource_path, e))
+                for e in entries
                 if fnmatch.fnmatch(e.rsplit("/", 1)[-1], p.pattern)
             ]
             result.extend(matched)

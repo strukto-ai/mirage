@@ -39,7 +39,7 @@ def configured_root(config: DatabricksVolumeConfig) -> str:
 
 def backend_path(config: DatabricksVolumeConfig, path: PathSpec | str) -> str:
     if isinstance(path, PathSpec):
-        raw = path.strip_prefix
+        raw = path.mount_path
     else:
         raw = path
     relative = raw.strip("/")

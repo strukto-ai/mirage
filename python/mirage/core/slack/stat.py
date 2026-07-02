@@ -21,6 +21,7 @@ from mirage.core.timeutil import epoch_to_iso
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.filetype import filetype_from_mimetype
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 VIRTUAL_DIRS = {"", "channels", "dms", "users"}
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -48,9 +49,9 @@ async def _populate_via_parent(
     try:
         await _readdir(
             accessor,
-            PathSpec(original=parent_virtual,
+            PathSpec(virtual=parent_virtual,
                      directory=parent_virtual,
-                     prefix=prefix),
+                     resource_path=mount_key(parent_virtual, prefix)),
             index=index,
         )
     # best-effort cache populate; canonical ENOENT raised below
@@ -64,10 +65,13 @@ async def stat(
     index: IndexCacheStore = None,
 ) -> FileStat:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    virtual = path.original
-    prefix = path.prefix if isinstance(path, PathSpec) else ""
-    raw = path.original if isinstance(path, PathSpec) else path
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    virtual = path.virtual
+    prefix = mount_prefix_of(path.virtual, path.resource_path) if isinstance(
+        path, PathSpec) else ""
+    raw = path.virtual if isinstance(path, PathSpec) else path
     if prefix and raw.startswith(prefix):
         raw = raw[len(prefix):] or "/"
     key = raw.strip("/")

@@ -36,7 +36,7 @@ export function isCrossMount(
   if (!allowed || scopes.length < 2) return false
   const mounts = new Set<string>()
   for (const s of scopes) {
-    const m = registry.mountFor(s.original)
+    const m = registry.mountFor(s.virtual)
     if (m !== null) mounts.add(m.prefix)
   }
   return mounts.size > 1

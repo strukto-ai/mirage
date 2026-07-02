@@ -30,11 +30,11 @@ async def _ft_stat(resolve_glob,
     p = paths[0]
     try:
         raw = await read(accessor, p, index)
-        return module.stat(raw), IOResult(reads={p.strip_prefix: raw},
-                                          cache=[p.strip_prefix])
+        return module.stat(raw), IOResult(reads={p.mount_path: raw},
+                                          cache=[p.mount_path])
     except Exception as e:
         return None, IOResult(
             exit_code=1,
-            stderr=f"stat: {p.original}: failed to read as {_fmt(module)}: {e}"
-            .encode(),
+            stderr=f"stat: {p.virtual}: failed to read as {_fmt(module)}: {e}".
+            encode(),
         )

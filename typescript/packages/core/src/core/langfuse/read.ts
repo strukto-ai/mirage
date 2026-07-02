@@ -35,7 +35,7 @@ export async function read(
   path: PathSpec,
   _index?: IndexCacheStore,
 ): Promise<Uint8Array> {
-  const key = path.key
+  const key = path.resourcePath
   if (key === '') throw enoent(path)
   const parts = key.split('/')
   for (const part of parts) {

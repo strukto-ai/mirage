@@ -161,8 +161,8 @@ async def handle_for(
 
     try:
         for val in values:
-            # env stores strings only; PathSpec → .original
-            session.env[variable] = (val.original
+            # env stores strings only; PathSpec → .virtual
+            session.env[variable] = (val.virtual
                                      if isinstance(val, PathSpec) else val)
             try:
                 stdout, io, _ = await _execute_body(execute_node, body,
@@ -319,8 +319,8 @@ async def handle_select(
 
     try:
         for val in values:
-            # env stores strings only; PathSpec → .original
-            session.env[variable] = (val.original
+            # env stores strings only; PathSpec → .virtual
+            session.env[variable] = (val.virtual
                                      if isinstance(val, PathSpec) else val)
             try:
                 stdout, io, _ = await _execute_body(execute_node, body,

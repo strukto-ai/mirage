@@ -20,6 +20,7 @@ from mirage.accessor.gslides import GSlidesAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.gslides.read import read
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.fixture
@@ -55,9 +56,11 @@ async def test_read_auto_bootstraps_from_empty_index(accessor, index):
             ),
     ):
         path = PathSpec(
-            original="/gslides/owned/2026-04-01_Deck__slide1.gslide.json",
+            resource_path=mount_key(
+                "/gslides/owned/2026-04-01_Deck__slide1.gslide.json",
+                "/gslides"),
+            virtual="/gslides/owned/2026-04-01_Deck__slide1.gslide.json",
             directory="/gslides/owned/2026-04-01_Deck__slide1.gslide.json",
-            prefix="/gslides",
         )
         result = await read(accessor, path, index)
         assert b"slide1" in result
@@ -79,9 +82,10 @@ async def test_read_missing_file_raises_after_recursion(accessor, index):
             ),
     ):
         path = PathSpec(
-            original="/gslides/owned/Missing__xyz.gslide.json",
+            resource_path=mount_key("/gslides/owned/Missing__xyz.gslide.json",
+                                    "/gslides"),
+            virtual="/gslides/owned/Missing__xyz.gslide.json",
             directory="/gslides/owned/Missing__xyz.gslide.json",
-            prefix="/gslides",
         )
         with pytest.raises(FileNotFoundError):
             await read(accessor, path, index)

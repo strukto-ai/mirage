@@ -5,7 +5,9 @@ from mirage.types import FileStat, FileType, PathSpec
 
 
 def _spec(path: str) -> PathSpec:
-    return PathSpec(original=path, directory=path)
+    return PathSpec(virtual=path,
+                    directory=path,
+                    resource_path=path.strip("/"))
 
 
 def _file(name: str, size: int = 0) -> FileStat:
@@ -19,19 +21,19 @@ def _dir(name: str) -> FileStat:
 def _make_backend(tree_map: dict[str, FileStat]):
 
     async def stat(p: PathSpec, index=None) -> FileStat:
-        if p.original not in tree_map:
-            raise FileNotFoundError(p.original)
-        return tree_map[p.original]
+        if p.virtual not in tree_map:
+            raise FileNotFoundError(p.virtual)
+        return tree_map[p.virtual]
 
     async def readdir(p: PathSpec, _index=None) -> list[str]:
-        if p.original not in tree_map:
-            raise FileNotFoundError(p.original)
-        if tree_map[p.original].type != FileType.DIRECTORY:
-            raise ValueError(f"not a directory: {p.original}")
-        prefix = p.original.rstrip("/") + "/"
+        if p.virtual not in tree_map:
+            raise FileNotFoundError(p.virtual)
+        if tree_map[p.virtual].type != FileType.DIRECTORY:
+            raise ValueError(f"not a directory: {p.virtual}")
+        prefix = p.virtual.rstrip("/") + "/"
         children: list[str] = []
         for key in tree_map:
-            if key == p.original:
+            if key == p.virtual:
                 continue
             if key.startswith(prefix):
                 remainder = key[len(prefix):]

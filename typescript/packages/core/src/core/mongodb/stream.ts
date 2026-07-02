@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../utils/slash.ts'
 import { EJSON } from 'bson'
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { PathSpec } from '../../types.ts'
@@ -99,10 +100,13 @@ export async function* readStream(
   path: PathSpec | string,
   options: { batchSize?: number } = {},
 ): AsyncIterableIterator<Uint8Array> {
-  const ps = typeof path === 'string' ? new PathSpec({ original: path, directory: path }) : path
+  const ps =
+    typeof path === 'string'
+      ? new PathSpec({ resourcePath: stripSlash(path), virtual: path, directory: path })
+      : path
   const scope = detectScope(ps)
   if (scope.level !== ScopeLevel.DOCUMENTS || scope.database === null || scope.name === null) {
-    throw notFound(ps.original)
+    throw notFound(ps.virtual)
   }
   const elide = elisionPaths(accessor, scope.database, scope.name)
   const batchSize = options.batchSize ?? 100
@@ -119,10 +123,13 @@ export async function* watchStream(
   accessor: MongoDBAccessor,
   path: PathSpec | string,
 ): AsyncIterableIterator<Uint8Array> {
-  const ps = typeof path === 'string' ? new PathSpec({ original: path, directory: path }) : path
+  const ps =
+    typeof path === 'string'
+      ? new PathSpec({ resourcePath: stripSlash(path), virtual: path, directory: path })
+      : path
   const scope = detectScope(ps)
   if (scope.level !== ScopeLevel.DOCUMENTS || scope.database === null || scope.name === null) {
-    throw notFound(ps.original)
+    throw notFound(ps.virtual)
   }
   const elide = elisionPaths(accessor, scope.database, scope.name)
   for await (const doc of iterInserts(accessor, scope.database, scope.name)) {

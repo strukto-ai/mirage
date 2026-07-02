@@ -29,8 +29,10 @@ def _resolve(root: Path, path: str) -> Path:
 
 async def exists(accessor: DiskAccessor, path: PathSpec) -> bool:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
     if isinstance(path, PathSpec):
-        path = path.strip_prefix
+        path = path.mount_path
     p = _resolve(accessor.root, path)
     return await aio_path.exists(p)

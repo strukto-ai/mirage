@@ -52,7 +52,7 @@ async function wgetCommand(
     const output = q ? '' : `Spider mode: ${url} exists (${String(data.byteLength)} bytes)`
     return [ENC.encode(output), new IOResult()]
   }
-  const dest = argsO ?? paths[0]?.original ?? url.slice(url.lastIndexOf('/') + 1)
+  const dest = argsO ?? paths[0]?.virtual ?? url.slice(url.lastIndexOf('/') + 1)
   if (opts.dispatch !== undefined) {
     const scope = resolveTarget(dest, opts.cwd)
     try {

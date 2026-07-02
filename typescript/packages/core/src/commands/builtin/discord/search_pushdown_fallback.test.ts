@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { DiscordApiError, type DiscordTransport } from '../../../core/discord/_client.ts'
@@ -52,10 +53,10 @@ describe('discord grep push-down fallback', () => {
       resource.accessor,
       [
         new PathSpec({
-          original: '/mnt/discord/My Server__G1/channels/general__C1',
+          virtual: '/mnt/discord/My Server__G1/channels/general__C1',
           directory: '/mnt/discord/My Server__G1/channels/general__C1',
           resolved: false,
-          prefix: '/mnt/discord',
+          resourcePath: mountKey('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
         }),
       ],
       ['hi'],
@@ -88,10 +89,10 @@ describe('discord rg push-down fallback', () => {
       resource.accessor,
       [
         new PathSpec({
-          original: '/mnt/discord/My Server__G1/channels/general__C1',
+          virtual: '/mnt/discord/My Server__G1/channels/general__C1',
           directory: '/mnt/discord/My Server__G1/channels/general__C1',
           resolved: false,
-          prefix: '/mnt/discord',
+          resourcePath: mountKey('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
         }),
       ],
       ['hi'],

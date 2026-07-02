@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 import type * as DriveModule from '../google/drive.ts'
 
@@ -48,10 +49,10 @@ describe('gdocs readdir', () => {
     await readdir(
       accessor,
       new PathSpec({
-        original: '/gdocs/owned/2026-05-*',
+        virtual: '/gdocs/owned/2026-05-*',
         directory: '/gdocs/owned',
         pattern: '2026-05-*',
-        prefix: '/gdocs',
+        resourcePath: mountKey('/gdocs/owned/2026-05-*', '/gdocs'),
       }),
       index,
     )
@@ -73,9 +74,9 @@ describe('gdocs readdir', () => {
     await readdir(
       accessor,
       new PathSpec({
-        original: '/gdocs/owned',
+        virtual: '/gdocs/owned',
         directory: '/gdocs/owned',
-        prefix: '/gdocs',
+        resourcePath: mountKey('/gdocs/owned', '/gdocs'),
       }),
       index,
     )
@@ -97,10 +98,10 @@ describe('gdocs readdir', () => {
     await readdir(
       accessor,
       new PathSpec({
-        original: '/gdocs/owned/*foo*',
+        virtual: '/gdocs/owned/*foo*',
         directory: '/gdocs/owned',
         pattern: '*foo*',
-        prefix: '/gdocs',
+        resourcePath: mountKey('/gdocs/owned/*foo*', '/gdocs'),
       }),
       index,
     )
@@ -137,19 +138,19 @@ describe('gdocs readdir', () => {
     await readdir(
       accessor,
       new PathSpec({
-        original: '/gdocs/owned/2026-05-*',
+        virtual: '/gdocs/owned/2026-05-*',
         directory: '/gdocs/owned',
         pattern: '2026-05-*',
-        prefix: '/gdocs',
+        resourcePath: mountKey('/gdocs/owned/2026-05-*', '/gdocs'),
       }),
       index,
     )
     const result = await readdir(
       accessor,
       new PathSpec({
-        original: '/gdocs/owned',
+        virtual: '/gdocs/owned',
         directory: '/gdocs/owned',
-        prefix: '/gdocs',
+        resourcePath: mountKey('/gdocs/owned', '/gdocs'),
       }),
       index,
     )
@@ -172,10 +173,10 @@ describe('gdocs readdir', () => {
     const listed = await readdir(
       accessor,
       new PathSpec({
-        original: '/gdocs/shared/2026-05-*',
+        virtual: '/gdocs/shared/2026-05-*',
         directory: '/gdocs/shared',
         pattern: '2026-05-*',
-        prefix: '/gdocs',
+        resourcePath: mountKey('/gdocs/shared/2026-05-*', '/gdocs'),
       }),
       index,
     )
@@ -184,7 +185,11 @@ describe('gdocs readdir', () => {
     if (matched === undefined) throw new Error('expected one match')
     const result = await stat(
       accessor,
-      new PathSpec({ original: matched, directory: matched, prefix: '/gdocs' }),
+      new PathSpec({
+        virtual: matched,
+        directory: matched,
+        resourcePath: mountKey(matched, '/gdocs'),
+      }),
       index,
     )
     expect(result.extra.doc_id).toBe('may1')

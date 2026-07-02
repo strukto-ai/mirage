@@ -20,7 +20,7 @@ import { enoent } from '../../utils/errors.ts'
 
 export function read(accessor: RAMAccessor, path: PathSpec): Promise<Uint8Array> {
   const start = performance.now()
-  const p = norm(path.stripPrefix)
+  const p = norm(path.mountPath)
   const data = accessor.store.files.get(p)
   if (data === undefined) {
     throw enoent(path)

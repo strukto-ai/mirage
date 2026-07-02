@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../utils/slash.ts'
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('./readdir.ts', () => ({
@@ -41,7 +43,11 @@ describe('resolveGlob', () => {
   })
 
   it('passes through resolved paths unchanged', async () => {
-    const p = new PathSpec({ original: '/pg/public', directory: '/pg/' })
+    const p = new PathSpec({
+      resourcePath: stripSlash('/pg/public'),
+      virtual: '/pg/public',
+      directory: '/pg/',
+    })
     expect(await resolveGlob(makeAccessor(), [p])).toEqual([p])
   })
 
@@ -52,20 +58,23 @@ describe('resolveGlob', () => {
       '/pg/public/tables/teams',
     ])
     const p = new PathSpec({
-      original: '/pg/public/tables/u*',
+      virtual: '/pg/public/tables/u*',
       directory: '/pg/public/tables/',
       pattern: 'u*',
       resolved: false,
-      prefix: '/pg',
+      resourcePath: mountKey('/pg/public/tables/u*', '/pg'),
     })
     const out = await resolveGlob(makeAccessor(), [p])
-    expect(out.map((x) => x.original)).toEqual(['/pg/public/tables/users'])
-    expect(out[0]?.prefix).toBe('/pg')
+    expect(out.map((x) => x.virtual)).toEqual(['/pg/public/tables/users'])
+    expect(
+      out[0] === undefined ? undefined : mountPrefixOf(out[0].virtual, out[0].resourcePath),
+    ).toBe('/pg')
   })
 
   it('passes through unresolved-but-no-pattern paths unchanged', async () => {
     const p = new PathSpec({
-      original: '/pg/public',
+      resourcePath: stripSlash('/pg/public'),
+      virtual: '/pg/public',
       directory: '/pg/',
       resolved: false,
     })

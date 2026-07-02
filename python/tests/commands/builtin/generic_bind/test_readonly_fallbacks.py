@@ -32,7 +32,7 @@ _DIRS = {"/g", "/g/sub"}
 
 
 async def _readdir(accessor, path, index=None):
-    base = (path.original if isinstance(path, PathSpec) else path).rstrip("/")
+    base = (path.virtual if isinstance(path, PathSpec) else path).rstrip("/")
     out = []
     for p in list(_FILES) + sorted(_DIRS):
         parent = p.rsplit("/", 1)[0] or "/"
@@ -42,7 +42,7 @@ async def _readdir(accessor, path, index=None):
 
 
 async def _stat(accessor, path, index=None):
-    p = path.original if isinstance(path, PathSpec) else path
+    p = path.virtual if isinstance(path, PathSpec) else path
     p = p.rstrip("/") or "/"
     if p in _DIRS:
         return FileStat(name=p.rsplit("/", 1)[-1], type=FileType.DIRECTORY)
@@ -54,7 +54,7 @@ async def _stat(accessor, path, index=None):
 
 
 async def _read(accessor, path, index=None):
-    p = path.original if isinstance(path, PathSpec) else path
+    p = path.virtual if isinstance(path, PathSpec) else path
     return _FILES[p.rstrip("/")]
 
 
@@ -70,7 +70,10 @@ def _ops() -> CommandIO:
 
 
 def _spec(original: str) -> PathSpec:
-    return PathSpec(original=original, directory=original, resolved=True)
+    return PathSpec(resource_path=(original).strip("/"),
+                    virtual=original,
+                    directory=original,
+                    resolved=True)
 
 
 @pytest.mark.asyncio

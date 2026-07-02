@@ -16,6 +16,7 @@ import asyncio
 
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
+from mirage.utils.key_prefix import mount_key
 from mirage.workspace import Workspace
 
 
@@ -38,9 +39,9 @@ def test_dispatch_write_invalidates_parent_dir_index():
     async def run():
         before = await ws.readdir("/r/data")
         scope = PathSpec(
-            original="/r/data/b.txt",
+            resource_path=mount_key("/r/data/b.txt", "/r"),
+            virtual="/r/data/b.txt",
             directory="/r/data",
-            prefix="/r",
             resolved=True,
         )
         await ws.dispatch("write", scope, data=b"b")
@@ -62,9 +63,9 @@ def test_dispatch_unlink_invalidates_parent_dir_index():
     async def run():
         before = await ws.readdir("/r/data")
         scope = PathSpec(
-            original="/r/data/c.txt",
+            resource_path=mount_key("/r/data/c.txt", "/r"),
+            virtual="/r/data/c.txt",
             directory="/r/data",
-            prefix="/r",
             resolved=True,
         )
         await ws.dispatch("unlink", scope)

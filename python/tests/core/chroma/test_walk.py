@@ -16,6 +16,7 @@ import pytest
 
 from mirage.core.chroma.walk import walk
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.mark.asyncio
@@ -60,14 +61,16 @@ async def test_walk_strip_prefix(chroma_accessor, chroma_index,
 
 @pytest.mark.asyncio
 async def test_walk_missing_raises(chroma_accessor, chroma_index):
-    path = PathSpec.from_str_path("/knowledge/missing", "/knowledge/")
+    path = PathSpec.from_str_path(
+        "/knowledge/missing", mount_key("/knowledge/missing", "/knowledge"))
     with pytest.raises(FileNotFoundError):
         await walk(chroma_accessor, path, chroma_index)
 
 
 @pytest.mark.asyncio
 async def test_walk_missing_ignored(chroma_accessor, chroma_index):
-    path = PathSpec.from_str_path("/knowledge/missing", "/knowledge/")
+    path = PathSpec.from_str_path(
+        "/knowledge/missing", mount_key("/knowledge/missing", "/knowledge"))
     results = await walk(chroma_accessor,
                          path,
                          chroma_index,

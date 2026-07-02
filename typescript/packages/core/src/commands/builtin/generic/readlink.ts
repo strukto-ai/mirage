@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -46,7 +47,10 @@ export function readlinkGeneric(
   const noNewline = opts.flags.n === true
   const results: string[] = []
   for (const p of paths) {
-    let vp = p.prefix !== '' ? p.prefix + '/' + lstripSlash(p.original) : p.original
+    let vp =
+      mountPrefixOf(p.virtual, p.resourcePath) !== ''
+        ? mountPrefixOf(p.virtual, p.resourcePath) + '/' + lstripSlash(p.virtual)
+        : p.virtual
     if (normalize) vp = normPath(vp)
     results.push(vp)
   }

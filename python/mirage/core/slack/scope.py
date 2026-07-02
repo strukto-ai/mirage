@@ -16,6 +16,7 @@ import re
 from dataclasses import dataclass
 
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_prefix_of
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -40,8 +41,10 @@ def _split_dirname(dirname: str) -> tuple[str, str | None]:
 
 def detect_scope(path: PathSpec) -> SlackScope:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    prefix = path.prefix or ""
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
 
     if path.pattern:
         dir_key = path.directory.strip("/")
@@ -71,7 +74,7 @@ def detect_scope(path: PathSpec) -> SlackScope:
                 resource_path=dir_key,
             )
 
-    key = path.key
+    key = path.resource_path
     if not key:
         return SlackScope(use_native=True, resource_path="/")
 

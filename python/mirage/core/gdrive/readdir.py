@@ -20,6 +20,7 @@ from mirage.core.google.drive import (MIME_TO_EXT, list_files,
                                       list_shared_drives)
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +48,12 @@ async def readdir(
     index: IndexCacheStore = None,
 ) -> list[str]:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    virtual = path.original
-    prefix = path.prefix
-    path = (path.dir if path.pattern else path).strip_prefix
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    virtual = path.virtual
+    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    path = (path.dir if path.pattern else path).mount_path
     key = path.strip("/")
     virtual_key = prefix + "/" + key if key else prefix or "/"
 
@@ -72,8 +75,8 @@ async def readdir(
         if result.entry is None:
             parent_virtual = virtual_key.rstrip("/").rsplit("/", 1)[0] or "/"
             if parent_virtual != virtual_key:
-                parent_path = PathSpec.from_str_path(parent_virtual,
-                                                     prefix=prefix)
+                parent_path = PathSpec.from_str_path(
+                    parent_virtual, mount_key(parent_virtual, prefix))
                 await readdir(accessor, parent_path, index)
                 result = await index.get(virtual_key)
             if result.entry is None:

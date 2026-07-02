@@ -51,7 +51,7 @@ export function configuredRoot(config: DatabricksVolumeConfig): string {
 }
 
 export function backendPath(config: DatabricksVolumeConfig, path: PathSpec | string): string {
-  const raw = path instanceof PathSpec ? path.stripPrefix : path
+  const raw = path instanceof PathSpec ? path.mountPath : path
   const relative = stripSlash(raw)
   const root = configuredRoot(config)
   const remotePath = normalizePosix(relative !== '' ? `${root}/${relative}` : root)

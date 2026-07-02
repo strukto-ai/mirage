@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
@@ -26,12 +27,14 @@ export async function readdir(
   index?: IndexCacheStore,
 ): Promise<string[]> {
   const spec = typeof path === 'string' ? PathSpec.fromStrPath(path) : path
-  const prefix = spec.prefix
-  let raw = spec.pattern !== null ? spec.directory : spec.original
+  const prefix = mountPrefixOf(spec.virtual, spec.resourcePath)
+  let raw = spec.pattern !== null ? spec.directory : spec.virtual
   if (prefix !== '' && raw.startsWith(prefix)) {
     raw = raw.slice(prefix.length) || '/'
   }
-  const scope = detectScope(new PathSpec({ original: raw, directory: raw, prefix }))
+  const scope = detectScope(
+    new PathSpec({ virtual: raw, directory: raw, resourcePath: mountKey(raw, prefix) }),
+  )
   const virtualKey = (prefix !== '' ? prefix : '') + raw
 
   if (scope.level === 'root') {

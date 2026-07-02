@@ -9,7 +9,7 @@ from mirage.utils.errors import enoent
 async def rm_r(accessor: NextcloudAccessor, path: PathSpec) -> None:
     if isinstance(path, str):
         path = PathSpec.from_str_path(path)
-    raw = path.strip_prefix
+    raw = path.mount_path
     key = raw.strip("/") + "/"
     op = accessor.operator()
     try:

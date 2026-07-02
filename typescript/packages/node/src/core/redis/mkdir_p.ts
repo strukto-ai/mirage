@@ -18,7 +18,7 @@ import { norm, nowIso } from './utils.ts'
 import { stripSlash } from '@struktoai/mirage-core'
 
 export async function mkdirP(accessor: RedisAccessor, path: PathSpec): Promise<void> {
-  const p = norm(path.stripPrefix)
+  const p = norm(path.mountPath)
   const store = accessor.store
   const parts = stripSlash(p).split('/')
   let current = ''

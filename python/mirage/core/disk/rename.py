@@ -31,13 +31,17 @@ def _resolve(root: Path, path: str) -> Path:
 
 async def rename(accessor: DiskAccessor, src: PathSpec, dst: PathSpec) -> None:
     if isinstance(src, str):
-        src = PathSpec(original=src, directory=src)
+        src = PathSpec(virtual=src,
+                       directory=src,
+                       resource_path=src.strip("/"))
     if isinstance(src, PathSpec):
-        src = src.strip_prefix
+        src = src.mount_path
     if isinstance(dst, str):
-        dst = PathSpec(original=dst, directory=dst)
+        dst = PathSpec(virtual=dst,
+                       directory=dst,
+                       resource_path=dst.strip("/"))
     if isinstance(dst, PathSpec):
-        dst = dst.strip_prefix
+        dst = dst.mount_path
     root = accessor.root
     await invalidate_after_unlink(src)
     await invalidate_after_write(dst)

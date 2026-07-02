@@ -19,12 +19,13 @@ import pytest
 from mirage.accessor.gsheets import GSheetsAccessor
 from mirage.ops.gsheets.read import read
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def _scope(path: str, prefix: str = "/gsheets") -> PathSpec:
-    return PathSpec(original=path,
-                    directory=path.rsplit("/", 1)[0] or "/",
-                    prefix=prefix)
+    return PathSpec(resource_path=mount_key(path, prefix),
+                    virtual=path,
+                    directory=path.rsplit("/", 1)[0] or "/")
 
 
 @pytest.fixture

@@ -41,7 +41,7 @@ async def _rm(
         if force:
             return
         raise
-    label = path.original if isinstance(path, PathSpec) else path
+    label = path.virtual if isinstance(path, PathSpec) else path
     if s.type == FileType.DIRECTORY:
         if recursive:
             await rm_r(accessor, path)
@@ -83,8 +83,8 @@ async def rm(
                   force=f,
                   remove_dir=d,
                   index=index)
-        removed[p.strip_prefix] = b""
+        removed[p.mount_path] = b""
         if v:
-            verbose_parts.append(f"removed '{p.original}'")
+            verbose_parts.append(f"removed '{p.virtual}'")
     output = format_optional_records(verbose_parts) if v else None
     return output, IOResult(writes=removed)

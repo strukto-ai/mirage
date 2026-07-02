@@ -18,6 +18,7 @@
 // regex-extracted literals) and filesOnlyShortcircuit (the -l short-circuit
 // that returns the narrowed file list without reading any blobs).
 
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { GitHubAccessor } from '../../../accessor/github.ts'
 import type { GitHubTransport } from '../../../core/github/_client.ts'
@@ -64,7 +65,12 @@ function makeAccessor(searchHits: string[], calls: SearchCall[]): GitHubAccessor
 }
 
 function subdir(): PathSpec {
-  return new PathSpec({ original: '/src', directory: '/src', prefix: '', resolved: false })
+  return new PathSpec({
+    virtual: '/src',
+    directory: '/src',
+    resourcePath: mountKey('/src', ''),
+    resolved: false,
+  })
 }
 
 describe('narrowScope', () => {
@@ -74,7 +80,7 @@ describe('narrowScope', () => {
     const res = await narrowScope(acc, [subdir()], 'import', false, true)
     expect(res.usedSearch).toBe(true)
     expect(res.fileCount).toBe(2)
-    expect(res.resolved.map((p) => p.original).sort()).toEqual(['/src/f1.py', '/src/f2.py'])
+    expect(res.resolved.map((p) => p.virtual).sort()).toEqual(['/src/f1.py', '/src/f2.py'])
     expect(calls[0]?.q).toContain('import')
     expect(calls[0]?.q).toContain('path:src')
   })
@@ -108,7 +114,12 @@ describe('narrowScope', () => {
 })
 
 function spec(path: string): PathSpec {
-  return new PathSpec({ original: path, directory: '', prefix: '', resolved: true })
+  return new PathSpec({
+    virtual: path,
+    directory: '',
+    resourcePath: mountKey(path, ''),
+    resolved: true,
+  })
 }
 
 describe('filesOnlyShortcircuit', () => {

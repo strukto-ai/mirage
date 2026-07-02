@@ -18,6 +18,8 @@ import {
   DATABRICKS_VOLUME_OPS,
   DATABRICKS_VOLUME_PROMPT,
   DatabricksVolumeAccessor,
+  PathSpec,
+  ResourceName,
   databricksVolumeCopy,
   databricksVolumeCreate,
   databricksVolumeExists,
@@ -33,14 +35,14 @@ import {
   databricksVolumeStat,
   databricksVolumeUnlink,
   databricksVolumeWrite,
+  mountKey,
+  mountPrefixOf,
+  resolveDatabricksVolumeGlob,
   type FileStat,
   type FindOptions,
-  PathSpec,
   type RegisteredCommand,
   type RegisteredOp,
   type Resource,
-  ResourceName,
-  resolveDatabricksVolumeGlob,
 } from '@struktoai/mirage-core'
 import {
   redactDatabricksVolumeConfig,
@@ -196,14 +198,14 @@ export class DatabricksVolumeResource extends BaseResource implements Resource {
   glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective = prefix
       ? paths.map((p) =>
-          p.prefix
+          mountPrefixOf(p.virtual, p.resourcePath)
             ? p
             : new PathSpec({
-                original: p.original,
+                virtual: p.virtual,
                 directory: p.directory,
                 ...(p.pattern !== null ? { pattern: p.pattern } : {}),
                 resolved: p.resolved,
-                prefix,
+                resourcePath: mountKey(p.virtual, prefix),
               }),
         )
       : paths

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { rekey } from '../../../../utils/key_prefix.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../../cache/index/store.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
@@ -39,7 +40,12 @@ async function duWalk(
   }
   let total = 0
   for (const child of children) {
-    total += await duWalk(ops, accessor, index, PathSpec.fromStrPath(child, path.prefix))
+    total += await duWalk(
+      ops,
+      accessor,
+      index,
+      PathSpec.fromStrPath(child, rekey(path.virtual, path.resourcePath, child)),
+    )
   }
   return total
 }

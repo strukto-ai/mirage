@@ -18,6 +18,7 @@ from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.github.find import find
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def _index() -> RAMIndexCacheStore:
@@ -38,7 +39,9 @@ def _index() -> RAMIndexCacheStore:
 
 
 def _spec(path: str, prefix: str = "") -> PathSpec:
-    return PathSpec(original=path, directory=path, prefix=prefix)
+    return PathSpec(resource_path=mount_key(path, prefix),
+                    virtual=path,
+                    directory=path)
 
 
 @pytest.mark.asyncio

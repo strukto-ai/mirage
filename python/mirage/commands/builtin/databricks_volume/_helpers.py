@@ -25,14 +25,15 @@ from mirage.core.databricks_volume.readdir import readdir as _readdir
 from mirage.core.databricks_volume.stat import stat as _stat
 from mirage.core.databricks_volume.stream import read_stream as _read_stream
 from mirage.types import FileType, PathSpec
+from mirage.utils.key_prefix import mount_prefix_of
 
 
 def path_prefix(paths: list[PathSpec],
                 fallback: PathSpec | None = None) -> str:
     if paths:
-        return paths[0].prefix
+        return mount_prefix_of(paths[0].virtual, paths[0].resource_path)
     if fallback is not None:
-        return fallback.prefix
+        return mount_prefix_of(fallback.virtual, fallback.resource_path)
     return ""
 
 
@@ -57,11 +58,11 @@ async def find_files(
         path (PathSpec | str): Search root; a file root yields itself.
         type (str | None): "f" (file) or "d" (directory) filter.
     """
-    spec = path if isinstance(path, PathSpec) else PathSpec(original=path,
-                                                            directory=path)
+    spec = path if isinstance(path, PathSpec) else PathSpec(
+        resource_path=(path).strip("/"), virtual=path, directory=path)
     file_stat = await _stat(accessor, spec, index)
     if file_stat.type != FileType.DIRECTORY:
-        return [spec.strip_prefix]
+        return [spec.mount_path]
     args = parse_find_args((), type=type)
     results = await walk_find(spec,
                               readdir=partial(_readdir, accessor),
@@ -69,7 +70,7 @@ async def find_files(
                               is_dir_name=is_dir_name,
                               index=index,
                               args=args)
-    prefix = spec.prefix
+    prefix = mount_prefix_of(spec.virtual, spec.resource_path)
     return [
         p[len(prefix):] if prefix and p.startswith(prefix) else p
         for p in results

@@ -38,6 +38,7 @@ from mirage.ops.onedrive import OPS as ONEDRIVE_OPS
 from mirage.resource.base import BaseResource
 from mirage.resource.onedrive.prompt import PROMPT
 from mirage.types import PathSpec, ResourceName
+from mirage.utils.key_prefix import mount_key
 
 _ONEDRIVE_OPS = {
     "read_bytes": read_bytes,
@@ -81,9 +82,9 @@ class OneDriveResource(BaseResource):
     async def resolve_glob(self, paths, prefix: str = ""):
         if prefix:
             paths = [
-                dataclasses.replace(p, prefix=prefix)
-                if isinstance(p, PathSpec) and not p.prefix else p
-                for p in paths
+                dataclasses.replace(p,
+                                    resource_path=mount_key(p.virtual, prefix))
+                if isinstance(p, PathSpec) else p for p in paths
             ]
         return await _resolve_glob(self.accessor, paths, self._index)
 

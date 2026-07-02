@@ -262,7 +262,7 @@ async def test_format_multi_multi_path_emits_total_and_trailing_newline():
     data = {"/a.txt": b"hello\n", "/b.txt": b"world\nworld\n"}
 
     async def fake_read(_accessor, path):
-        return data[path.original]
+        return data[path.virtual]
 
     out = await format_multi(paths, read=fake_read, args_l=True)
     assert out.endswith(b"\n")

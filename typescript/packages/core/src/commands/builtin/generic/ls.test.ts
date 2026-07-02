@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
@@ -27,11 +28,16 @@ const MODIFIED: Record<string, string> = {
 }
 
 function key(p: PathSpec): string {
-  return rstripSlash(p.original) || '/'
+  return rstripSlash(p.virtual) || '/'
 }
 
 function spec(path: string): PathSpec {
-  return new PathSpec({ original: path, directory: path, resolved: false, prefix: '' })
+  return new PathSpec({
+    virtual: path,
+    directory: path,
+    resolved: false,
+    resourcePath: mountKey(path, ''),
+  })
 }
 
 function opts(flags: Record<string, string | boolean | string[]>): CommandOpts {

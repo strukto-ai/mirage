@@ -19,6 +19,7 @@ import pytest
 from mirage.core.github.scope import (count_scope_files, is_repo_root,
                                       scope_relative_key)
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.fixture
@@ -41,12 +42,16 @@ def entries():
 
 
 def test_scope_relative_key_strips_mount_prefix():
-    path = PathSpec(original="/gh/src", directory="/gh/src", prefix="/gh")
+    path = PathSpec(resource_path=mount_key("/gh/src", "/gh"),
+                    virtual="/gh/src",
+                    directory="/gh/src")
     assert scope_relative_key(path) == "/src"
 
 
 def test_scope_relative_key_root_becomes_slash():
-    path = PathSpec(original="/gh", directory="/gh", prefix="/gh")
+    path = PathSpec(resource_path=mount_key("/gh", "/gh"),
+                    virtual="/gh",
+                    directory="/gh")
     assert scope_relative_key(path) == "/"
 
 

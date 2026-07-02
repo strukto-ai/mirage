@@ -132,8 +132,8 @@ export async function find(
   p: PathSpec,
   options: FindOptions = {},
 ): Promise<string[]> {
-  const virtual = norm(p.stripPrefix)
-  const startName = startBasename(p.original)
+  const virtual = norm(p.mountPath)
+  const startName = startBasename(p.virtual)
   const full = resolveSafe(accessor.root, virtual)
   const baseDepth = virtual === '/' ? 0 : (virtual.match(/\//g) ?? []).length
   const results: string[] = []

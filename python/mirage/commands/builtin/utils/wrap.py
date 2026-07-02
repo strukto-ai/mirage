@@ -16,12 +16,15 @@ from collections.abc import AsyncIterator
 from typing import Any, Callable
 
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def to_pathspec(path: Any, prefix: str = "") -> PathSpec:
     if isinstance(path, PathSpec):
         return path
-    return PathSpec(original=path, directory=path, prefix=prefix)
+    return PathSpec(virtual=path,
+                    directory=path,
+                    resource_path=mount_key(path, prefix))
 
 
 async def call_readdir(

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { LangfuseAccessor } from '../../../accessor/langfuse.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { resolveLangfuseGlob } from '../../../core/langfuse/glob.ts'
@@ -45,10 +46,10 @@ async function walk(
     results.push(child)
     if (!child.endsWith('.json') && !child.endsWith('.jsonl')) {
       const childSpec = new PathSpec({
-        original: child,
+        virtual: child,
         directory: child,
         resolved: false,
-        prefix: path.prefix,
+        resourcePath: mountKey(child, mountPrefixOf(path.virtual, path.resourcePath)),
       })
       const sub = await walk(accessor, childSpec, index, maxDepth, depth + 1)
       results.push(...sub)
@@ -65,8 +66,8 @@ async function findCommand(
 ): Promise<CommandFnResult> {
   const resolved = await resolveLangfuseGlob(accessor, paths, opts.index ?? undefined)
   const p0 = resolved[0]
-  const searchPath = p0 !== undefined ? p0.original : '/'
-  const searchPrefix = p0 !== undefined ? p0.prefix : ''
+  const searchPath = p0 !== undefined ? p0.virtual : '/'
+  const searchPrefix = p0 !== undefined ? mountPrefixOf(p0.virtual, p0.resourcePath) : ''
   const nameFlag = typeof opts.flags.name === 'string' ? opts.flags.name : null
   const inameFlag = typeof opts.flags.iname === 'string' ? opts.flags.iname : null
   const maxDepthFlag = typeof opts.flags.maxdepth === 'string' ? opts.flags.maxdepth : null
@@ -80,10 +81,10 @@ async function findCommand(
   const sizeMtimeErr = findSizeMtimeError(sizeFlag, mtimeFlag)
   if (sizeMtimeErr !== null) return sizeMtimeErr
   const searchSpec = new PathSpec({
-    original: searchPath,
+    virtual: searchPath,
     directory: searchPath,
     resolved: false,
-    prefix: searchPrefix,
+    resourcePath: mountKey(searchPath, searchPrefix),
   })
   const allPaths = await walk(accessor, searchSpec, opts.index ?? undefined, md, 0)
   const stripped = stripSlash(searchPath)

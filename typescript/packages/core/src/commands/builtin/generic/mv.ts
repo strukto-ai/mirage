@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { rekey } from '../../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -59,49 +60,49 @@ export async function mvGeneric(
   const errors: string[] = []
   for (const [src, target] of copyTargets(sources, dst, dstIsDir)) {
     if (!(await pathExists(stat, src))) {
-      errors.push(`mv: cannot stat '${src.original}': No such file or directory`)
+      errors.push(`mv: cannot stat '${src.virtual}': No such file or directory`)
       continue
     }
     if (keyOf(src) === keyOf(target)) {
-      errors.push(`mv: '${src.original}' and '${target.original}' are the same file`)
+      errors.push(`mv: '${src.virtual}' and '${target.virtual}' are the same file`)
       continue
     }
     if (keyOf(target).startsWith(keyOf(src) + '/')) {
       errors.push(
-        `mv: cannot move '${src.original}' to a subdirectory of itself, '${target.original}'`,
+        `mv: cannot move '${src.virtual}' to a subdirectory of itself, '${target.virtual}'`,
       )
       continue
     }
     if (noClobber && (await pathExists(stat, target))) continue
     if (rename === undefined && prim !== undefined) {
-      const srcBase = rstripSlash(src.stripPrefix)
-      const dstBase = rstripSlash(target.stripPrefix)
+      const srcBase = rstripSlash(src.mountPath)
+      const dstBase = rstripSlash(target.mountPath)
       const entries = await cpWalk(prim.readdir, stat, src, index)
       for (const { path: entry, isDir } of entries) {
         const entryDst = dstBase + entry.slice(srcBase.length)
-        const entryDstSpec = PathSpec.fromStrPath(entryDst, target.prefix)
+        const entryDstSpec = PathSpec.fromStrPath(entryDst)
         if (isDir) {
           if (!(await isDirectory(stat, entryDstSpec, index))) await prim.mkdir(entryDstSpec)
         } else {
-          await prim.write(
-            entryDstSpec,
-            await prim.readBytes(PathSpec.fromStrPath(entry, src.prefix)),
-          )
+          await prim.write(entryDstSpec, await prim.readBytes(PathSpec.fromStrPath(entry)))
         }
       }
       for (let i = entries.length - 1; i >= 0; i -= 1) {
         const node = entries[i]
         if (node === undefined) continue
-        const spec = PathSpec.fromStrPath(node.path, src.prefix)
+        const spec = PathSpec.fromStrPath(
+          node.path,
+          rekey(src.virtual, src.resourcePath, node.path),
+        )
         if (node.isDir) await prim.rmdir(spec)
         else await prim.unlink(spec)
       }
     } else if (rename !== undefined) {
       await rename(src, target)
     }
-    writes[src.stripPrefix] = new Uint8Array()
-    writes[target.stripPrefix] = new Uint8Array()
-    if (verbose) lines.push(`'${src.original}' -> '${target.original}'`)
+    writes[src.mountPath] = new Uint8Array()
+    writes[target.mountPath] = new Uint8Array()
+    if (verbose) lines.push(`'${src.virtual}' -> '${target.virtual}'`)
   }
   const output: ByteSource | null = lines.length > 0 ? ENC.encode(lines.join('\n') + '\n') : null
   const stderr = errors.length > 0 ? ENC.encode(errors.join('\n') + '\n') : null

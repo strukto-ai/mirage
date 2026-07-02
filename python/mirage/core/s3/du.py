@@ -25,9 +25,11 @@ async def du(accessor: S3Accessor, path: PathSpec) -> int:
         path (PathSpec | str): Prefix path.
     """
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
     if isinstance(path, PathSpec):
-        path = path.strip_prefix
+        path = path.mount_path
     config = accessor.config
     key = _key(path, config)
     stem = key.rstrip("/")
@@ -54,9 +56,11 @@ async def du_all(accessor: S3Accessor,
         path (PathSpec | str): Prefix path.
     """
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
     if isinstance(path, PathSpec):
-        path = path.strip_prefix
+        path = path.mount_path
     config = accessor.config
     key = _key(path, config)
     stem = key.rstrip("/")

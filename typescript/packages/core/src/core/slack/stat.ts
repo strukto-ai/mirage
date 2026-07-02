@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { SlackAccessor } from '../../accessor/slack.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
@@ -51,10 +52,10 @@ async function lookupWithFallback(
     await coreReaddir(
       accessor,
       new PathSpec({
-        original: parentVirtual,
+        virtual: parentVirtual,
         directory: parentVirtual,
         resolved: false,
-        prefix,
+        resourcePath: mountKey(parentVirtual, prefix),
       }),
       index,
     )
@@ -69,8 +70,8 @@ export async function stat(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<FileStat> {
-  const prefix = path.prefix
-  let raw = path.original
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  let raw = path.virtual
   if (prefix !== '' && raw.startsWith(prefix)) {
     raw = raw.slice(prefix.length) || '/'
   }

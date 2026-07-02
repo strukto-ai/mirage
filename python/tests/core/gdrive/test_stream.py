@@ -83,7 +83,8 @@ async def test_stream_file(accessor, index):
         data = await _collect(
             stream(
                 accessor,
-                PathSpec(original="/Team Drive/report.pdf",
+                PathSpec(resource_path=("/Team Drive/report.pdf").strip("/"),
+                         virtual="/Team Drive/report.pdf",
                          directory="/Team Drive/report.pdf"), index))
         assert data == b"chunk1chunk2"
 
@@ -99,7 +100,8 @@ async def test_stream_not_found(accessor, index):
             await _collect(
                 stream(
                     accessor,
-                    PathSpec(original="/missing/file.txt",
+                    PathSpec(resource_path=("/missing/file.txt").strip("/"),
+                             virtual="/missing/file.txt",
                              directory="/missing/file.txt"), index))
 
 
@@ -131,7 +133,9 @@ async def test_stream_auto_bootstraps_from_empty_index(accessor, index):
         data = await _collect(
             stream(
                 accessor,
-                PathSpec(original="/report.pdf", directory="/report.pdf"),
+                PathSpec(resource_path=("/report.pdf").strip("/"),
+                         virtual="/report.pdf",
+                         directory="/report.pdf"),
                 index,
             ))
         assert data == b"chunk1chunk2"
@@ -150,8 +154,11 @@ async def test_stream_folder_raises(accessor, index):
         ))
     with pytest.raises(IsADirectoryError):
         await _collect(
-            stream(accessor, PathSpec(original="/data", directory="/data"),
-                   index))
+            stream(
+                accessor,
+                PathSpec(resource_path=("/data").strip("/"),
+                         virtual="/data",
+                         directory="/data"), index))
 
 
 @pytest.mark.asyncio
@@ -173,7 +180,9 @@ async def test_stream_shared_drive_raises(accessor, index):
             await _collect(
                 stream(
                     accessor,
-                    PathSpec(original="/Team Drive", directory="/Team Drive"),
+                    PathSpec(resource_path=("/Team Drive").strip("/"),
+                             virtual="/Team Drive",
+                             directory="/Team Drive"),
                     index,
                 ))
     mock_download.assert_not_called()

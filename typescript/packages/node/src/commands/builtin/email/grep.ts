@@ -19,21 +19,23 @@ import {
   command,
   compilePattern,
   exitOnEmpty,
+  formatRecords,
   grepFilesOnly,
   grepLines,
   grepStream,
+  mountKey,
+  mountPrefixOf,
   prefixAggregate,
   quietMatch,
   resolveSource,
   specOf,
-  yieldBytes,
   type AsyncReadBytesFn,
   type AsyncReaddirFn,
   type AsyncStatFn,
   type ByteSource,
   type CommandFnResult,
   type CommandOpts,
-  formatRecords,
+  yieldBytes,
 } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { resolveGlob } from '../../../core/email/glob.ts'
@@ -119,7 +121,10 @@ async function grepCommand(
     if (first !== undefined) {
       const scope = detectScope(first)
       if (scope.useNative && !pattern.includes('\n')) {
-        const filePrefix = first.prefix !== '' ? first.prefix : ''
+        const filePrefix =
+          mountPrefixOf(first.virtual, first.resourcePath) !== ''
+            ? mountPrefixOf(first.virtual, first.resourcePath)
+            : ''
         const pairs = await searchAndFormat(accessor, scope, pattern, filePrefix, f.maxCount ?? 50)
         const lines: string[] = []
         for (const [vfsPath, msgText] of pairs) {
@@ -139,31 +144,34 @@ async function grepCommand(
 
     const resolved = await resolveGlob(accessor, paths, opts.index ?? undefined)
     if (resolved.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
-    const filePrefix = resolved[0]?.prefix ?? ''
+    const filePrefix =
+      (resolved[0] === undefined
+        ? undefined
+        : mountPrefixOf(resolved[0].virtual, resolved[0].resourcePath)) ?? ''
     const readdirFn: AsyncReaddirFn = async (path) => {
       const spec = new PathSpec({
-        original: path,
+        virtual: path,
         directory: path,
         resolved: false,
-        prefix: filePrefix,
+        resourcePath: mountKey(path, filePrefix),
       })
       return emailReaddir(accessor, spec, opts.index ?? undefined)
     }
     const statFn: AsyncStatFn = async (path) => {
       const spec = new PathSpec({
-        original: path,
+        virtual: path,
         directory: path,
         resolved: false,
-        prefix: filePrefix,
+        resourcePath: mountKey(path, filePrefix),
       })
       return emailStat(accessor, spec, opts.index ?? undefined)
     }
     const readBytesFn: AsyncReadBytesFn = async (path) => {
       const spec = new PathSpec({
-        original: path,
+        virtual: path,
         directory: path,
         resolved: true,
-        prefix: filePrefix,
+        resourcePath: mountKey(path, filePrefix),
       })
       return emailRead(accessor, spec, opts.index ?? undefined)
     }
@@ -176,7 +184,7 @@ async function grepCommand(
         readdirFn,
         statFn,
         readBytesFn,
-        firstResolved.original,
+        firstResolved.virtual,
         pattern,
         {
           recursive,
@@ -205,11 +213,11 @@ async function grepCommand(
         const data = splitLinesNoTrailing(
           DEC.decode(await emailRead(accessor, p, opts.index ?? undefined)),
         )
-        const hits = grepLines(p.original, data, pat, f)
+        const hits = grepLines(p.virtual, data, pat, f)
         if (f.countOnly) {
-          if (hits.length > 0) allResults.push(`${p.original}:${hits[0] ?? ''}`)
+          if (hits.length > 0) allResults.push(`${p.virtual}:${hits[0] ?? ''}`)
         } else {
-          for (const h of hits) allResults.push(`${p.original}:${h}`)
+          for (const h of hits) allResults.push(`${p.virtual}:${h}`)
         }
       }
       if (allResults.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]

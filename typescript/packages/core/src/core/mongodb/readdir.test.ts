@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('./_client.ts', () => ({
@@ -36,7 +37,7 @@ function makeAccessor(): MongoDBAccessor {
 }
 
 function ps(p: string): PathSpec {
-  return new PathSpec({ original: p, directory: p, prefix: '/mongo' })
+  return new PathSpec({ virtual: p, directory: p, resourcePath: mountKey(p, '/mongo') })
 }
 
 describe('readdir', () => {

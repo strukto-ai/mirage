@@ -19,6 +19,7 @@ from mirage.core.google.drive import GoogleFileSuffix, list_all_files
 from mirage.resource.gslides.slide_entry import make_filename
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_prefix_of
 
 MIME = "application/vnd.google-apps.presentation"
 
@@ -34,14 +35,16 @@ async def readdir(
     index: IndexCacheStore = None,
 ) -> list[str]:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    virtual = path.original
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    virtual = path.virtual
     modified_range = None
     if isinstance(path, PathSpec):
-        prefix = path.prefix
+        prefix = mount_prefix_of(path.virtual, path.resource_path)
         if path.pattern:
             modified_range = glob_to_modified_range(path.pattern)
-        path = path.directory if path.pattern else path.original
+        path = path.directory if path.pattern else path.virtual
     if prefix and path.startswith(prefix):
         rest = path[len(prefix):]
         if prefix.endswith("/") or rest == "" or rest.startswith("/"):

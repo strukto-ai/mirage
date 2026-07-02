@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize, type IOResult } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
@@ -24,7 +25,12 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 function spec(path: string): PathSpec {
-  return new PathSpec({ original: path, directory: path, resolved: false, prefix: '' })
+  return new PathSpec({
+    virtual: path,
+    directory: path,
+    resolved: false,
+    resourcePath: mountKey(path, ''),
+  })
 }
 
 function opts(flags: Record<string, string | boolean | string[]>): CommandOpts {
@@ -40,19 +46,19 @@ function opts(flags: Record<string, string | boolean | string[]>): CommandOpts {
 const stat = (p: PathSpec): Promise<FileStat> =>
   Promise.resolve(
     new FileStat({
-      name: p.original.split('/').pop() ?? '',
-      type: p.original === '/data' ? FileType.DIRECTORY : FileType.TEXT,
+      name: p.virtual.split('/').pop() ?? '',
+      type: p.virtual === '/data' ? FileType.DIRECTORY : FileType.TEXT,
     }),
   )
 const readdir = (p: PathSpec): Promise<string[]> =>
-  Promise.resolve(p.original === '/data' ? ['/data/a.txt', '/data/bad.txt'] : [])
+  Promise.resolve(p.virtual === '/data' ? ['/data/a.txt', '/data/bad.txt'] : [])
 
 async function* good(): AsyncIterable<Uint8Array> {
   await Promise.resolve()
   yield ENC.encode('alice\n')
 }
 function stream(p: PathSpec): AsyncIterable<Uint8Array> {
-  if (p.original === '/data/bad.txt') throw new Error('boom')
+  if (p.virtual === '/data/bad.txt') throw new Error('boom')
   return good()
 }
 

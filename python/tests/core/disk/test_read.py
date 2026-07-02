@@ -18,6 +18,7 @@ from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.disk.read import read_bytes
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.mark.asyncio
@@ -27,8 +28,9 @@ async def test_read_file(tmp_path):
     index = RAMIndexCacheStore(ttl=0)
     result = await read_bytes(
         accessor,
-        PathSpec(original="/hello.txt", directory="/hello.txt",
-                 prefix="/disk"), index)
+        PathSpec(resource_path=mount_key("/hello.txt", "/disk"),
+                 virtual="/hello.txt",
+                 directory="/hello.txt"), index)
     assert result == b"hello world"
 
 
@@ -39,7 +41,9 @@ async def test_read_file_not_found(tmp_path):
     with pytest.raises(FileNotFoundError):
         await read_bytes(
             accessor,
-            PathSpec(original="/missing.txt", directory="/missing.txt"), index)
+            PathSpec(resource_path=("/missing.txt").strip("/"),
+                     virtual="/missing.txt",
+                     directory="/missing.txt"), index)
 
 
 @pytest.mark.asyncio
@@ -47,8 +51,8 @@ async def test_read_with_glob_scope_and_prefix(tmp_path):
     (tmp_path / "data.bin").write_bytes(b"\x00\x01\x02")
     accessor = DiskAccessor(tmp_path)
     index = RAMIndexCacheStore(ttl=0)
-    scope = PathSpec(original="/disk/data.bin",
-                     directory="/disk/",
-                     prefix="/disk")
+    scope = PathSpec(resource_path=mount_key("/disk/data.bin", "/disk"),
+                     virtual="/disk/data.bin",
+                     directory="/disk/")
     result = await read_bytes(accessor, scope, index)
     assert result == b"\x00\x01\x02"

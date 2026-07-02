@@ -20,7 +20,7 @@ import { enoent } from '../../utils/errors.ts'
 
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function* stream(accessor: RAMAccessor, path: PathSpec): AsyncIterable<Uint8Array> {
-  const p = norm(path.stripPrefix)
+  const p = norm(path.mountPath)
   const data = accessor.store.files.get(p)
   if (data === undefined) throw enoent(path)
   const rec = recordStream('read', p, ResourceName.RAM)

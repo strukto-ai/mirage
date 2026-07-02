@@ -24,6 +24,7 @@ from mirage.commands.spec.types import FlagView
 from mirage.io.stream import exit_on_empty
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import rebase_display
 
 
@@ -133,7 +134,8 @@ async def rg(
     f = parse_flags(fl, never_match)
 
     if paths:
-        mount_prefix = paths[0].prefix
+        mount_prefix = mount_prefix_of(paths[0].virtual,
+                                       paths[0].resource_path)
         rd = partial(call_readdir,
                      readdir,
                      accessor,
@@ -156,11 +158,11 @@ async def rg(
 
         is_dir = False
         try:
-            s = await st(paths[0].original)
+            s = await st(paths[0].virtual)
             is_dir = s.type == FileType.DIRECTORY
         except (FileNotFoundError, ValueError):
             try:
-                await rd(paths[0].original)
+                await rd(paths[0].virtual)
                 is_dir = True
             except (FileNotFoundError, ValueError):
                 pass
@@ -177,7 +179,7 @@ async def rg(
                     rd,
                     st,
                     rb,
-                    p.original,
+                    p.virtual,
                     pattern,
                     ignore_case=f.ignore_case,
                     invert=f.invert,
@@ -196,8 +198,7 @@ async def rg(
                     warnings=warnings_f,
                     file_prefix=p.display if len(paths) > 1 else None,
                 )
-                results.extend(rebase_display(hits_full, p.original,
-                                              p.display))
+                results.extend(rebase_display(hits_full, p.virtual, p.display))
             stderr = format_optional_records(warnings_f)
             if not results:
                 return b"", IOResult(exit_code=1, stderr=stderr)
@@ -210,7 +211,7 @@ async def rg(
             all_results: list[str] = []
             for p in paths:
                 data = split_lines((await
-                                    rb(p.original)).decode(errors="replace"))
+                                    rb(p.virtual)).decode(errors="replace"))
                 hits = grep_lines(p.display, data, pat, f.invert,
                                   f.line_numbers, f.count_only, f.files_only,
                                   f.only_matching, f.max_count)
@@ -228,7 +229,7 @@ async def rg(
         if read_stream is not None:
             source: AsyncIterator[bytes] = read_stream(accessor, paths[0])
         else:
-            data = await rb(paths[0].original)
+            data = await rb(paths[0].virtual)
             source = _wrap_bytes(data)
         stream = grep_stream(
             source,

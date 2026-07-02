@@ -20,6 +20,7 @@ from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.notion import readdir as readdir_mod
 from mirage.core.notion.stat import stat
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 _ACCESSOR = SimpleNamespace(config=None)
 
@@ -53,7 +54,9 @@ def _patch(monkeypatch):
 
 
 def _spec(original: str, prefix: str = "") -> PathSpec:
-    return PathSpec(original=original, directory=original, prefix=prefix)
+    return PathSpec(resource_path=mount_key(original, prefix),
+                    virtual=original,
+                    directory=original)
 
 
 @pytest.mark.asyncio

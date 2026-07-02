@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { rekey } from '../../utils/key_prefix.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
@@ -38,7 +39,7 @@ export async function resolveGlob(
         const trimmed = rstripSlash(entry)
         const base = trimmed.split('/').pop() ?? trimmed
         if (!fnmatch(base, p.pattern)) continue
-        matched.push(PathSpec.fromStrPath(trimmed, p.prefix))
+        matched.push(PathSpec.fromStrPath(trimmed, rekey(p.virtual, p.resourcePath, trimmed)))
       }
       const truncated = matched.length > SCOPE_ERROR ? matched.slice(0, SCOPE_ERROR) : matched
       result.push(...truncated)

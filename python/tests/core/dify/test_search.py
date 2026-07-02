@@ -4,6 +4,7 @@ import pytest
 
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def document(document_id: str, name: str, slug: str | None = None) -> dict:
@@ -105,9 +106,10 @@ async def test_search_segments_scopes_folder_to_all_documents(monkeypatch):
         accessor(),
         "login docs",
         [
-            PathSpec(original="/knowledge/guides",
-                     directory="/knowledge/guides",
-                     prefix="/knowledge/")
+            PathSpec(resource_path=mount_key("/knowledge/guides",
+                                             "/knowledge"),
+                     virtual="/knowledge/guides",
+                     directory="/knowledge/guides")
         ],
         RAMIndexCacheStore(),
         method="hybrid",
@@ -156,12 +158,14 @@ async def test_search_segments_unions_slug_and_name_based_paths(monkeypatch):
         accessor(),
         "setup",
         [
-            PathSpec(original="/knowledge/guides/api",
-                     directory="/knowledge/guides/api",
-                     prefix="/knowledge/"),
-            PathSpec(original="/knowledge/README.md",
-                     directory="/knowledge/README.md",
-                     prefix="/knowledge/"),
+            PathSpec(resource_path=mount_key("/knowledge/guides/api",
+                                             "/knowledge"),
+                     virtual="/knowledge/guides/api",
+                     directory="/knowledge/guides/api"),
+            PathSpec(resource_path=mount_key("/knowledge/README.md",
+                                             "/knowledge"),
+                     virtual="/knowledge/README.md",
+                     directory="/knowledge/README.md"),
         ],
         RAMIndexCacheStore(),
     )
@@ -195,9 +199,10 @@ async def test_search_segments_uses_configured_slug_metadata_name(monkeypatch):
         custom_slug_accessor(),
         "setup",
         [
-            PathSpec(original="/knowledge/guides/api",
-                     directory="/knowledge/guides/api",
-                     prefix="/knowledge/")
+            PathSpec(resource_path=mount_key("/knowledge/guides/api",
+                                             "/knowledge"),
+                     virtual="/knowledge/guides/api",
+                     directory="/knowledge/guides/api")
         ],
         RAMIndexCacheStore(),
     )

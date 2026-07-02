@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('./_client.ts', () => ({
@@ -43,7 +44,11 @@ describe('readdir', () => {
   it('lists root: database.json + schemas with mount prefix', async () => {
     vi.mocked(_client.listSchemas).mockResolvedValue(['public', 'analytics'])
     const accessor = makeAccessor()
-    const path = new PathSpec({ original: '/pg/', directory: '/pg/', prefix: '/pg' })
+    const path = new PathSpec({
+      virtual: '/pg/',
+      directory: '/pg/',
+      resourcePath: mountKey('/pg/', '/pg'),
+    })
     const out = await readdir(accessor, path)
     expect(out).toEqual(['/pg/database.json', '/pg/public', '/pg/analytics'])
   })
@@ -51,7 +56,11 @@ describe('readdir', () => {
   it('lists schema: tables and views directories', async () => {
     const out = await readdir(
       makeAccessor(),
-      new PathSpec({ original: '/pg/public', directory: '/pg/public', prefix: '/pg' }),
+      new PathSpec({
+        virtual: '/pg/public',
+        directory: '/pg/public',
+        resourcePath: mountKey('/pg/public', '/pg'),
+      }),
     )
     expect(out).toEqual(['/pg/public/tables', '/pg/public/views'])
   })
@@ -61,9 +70,9 @@ describe('readdir', () => {
     const out = await readdir(
       makeAccessor(),
       new PathSpec({
-        original: '/pg/public/tables',
+        virtual: '/pg/public/tables',
         directory: '/pg/public/tables',
-        prefix: '/pg',
+        resourcePath: mountKey('/pg/public/tables', '/pg'),
       }),
     )
     expect(out).toEqual(['/pg/public/tables/users', '/pg/public/tables/orders'])
@@ -75,9 +84,9 @@ describe('readdir', () => {
     const out = await readdir(
       makeAccessor(),
       new PathSpec({
-        original: '/pg/public/views',
+        virtual: '/pg/public/views',
         directory: '/pg/public/views',
-        prefix: '/pg',
+        resourcePath: mountKey('/pg/public/views', '/pg'),
       }),
     )
     expect(out).toEqual(['/pg/public/views/a_mview', '/pg/public/views/z_view'])
@@ -87,9 +96,9 @@ describe('readdir', () => {
     const out = await readdir(
       makeAccessor(),
       new PathSpec({
-        original: '/pg/public/tables/users',
+        virtual: '/pg/public/tables/users',
         directory: '/pg/public/tables/users',
-        prefix: '/pg',
+        resourcePath: mountKey('/pg/public/tables/users', '/pg'),
       }),
     )
     expect(out).toEqual([
@@ -102,7 +111,11 @@ describe('readdir', () => {
     vi.mocked(_client.listSchemas).mockResolvedValue(['public'])
     const index = new RAMIndexCacheStore()
     const accessor = makeAccessor()
-    const path = new PathSpec({ original: '/pg/', directory: '/pg/', prefix: '/pg' })
+    const path = new PathSpec({
+      virtual: '/pg/',
+      directory: '/pg/',
+      resourcePath: mountKey('/pg/', '/pg'),
+    })
     await readdir(accessor, path, index)
     vi.mocked(_client.listSchemas).mockClear()
     await readdir(accessor, path, index)
@@ -114,9 +127,9 @@ describe('readdir', () => {
       readdir(
         makeAccessor(),
         new PathSpec({
-          original: '/pg/public/tables/users/schema.json',
+          virtual: '/pg/public/tables/users/schema.json',
           directory: '/pg/public/tables/users/',
-          prefix: '/pg',
+          resourcePath: mountKey('/pg/public/tables/users/schema.json', '/pg'),
         }),
       ),
     ).rejects.toMatchObject({ code: 'ENOENT' })

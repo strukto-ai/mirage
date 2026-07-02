@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
@@ -40,9 +41,9 @@ export async function resolveGlob(
         .map(
           (e) =>
             new PathSpec({
-              original: e,
+              virtual: e,
               directory: p.directory,
-              prefix: p.prefix,
+              resourcePath: mountKey(e, mountPrefixOf(p.virtual, p.resourcePath)),
             }),
         )
       const truncated = matched.slice(0, SCOPE_ERROR)

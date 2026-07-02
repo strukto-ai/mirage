@@ -46,8 +46,8 @@ async function rmCommand(
       const msg = err instanceof Error ? err.message : String(err)
       return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
     }
-    writes[p.stripPrefix] = new Uint8Array()
-    if (verbose) verboseParts.push(`removed '${p.original}'`)
+    writes[p.mountPath] = new Uint8Array()
+    if (verbose) verboseParts.push(`removed '${p.virtual}'`)
   }
   const output: ByteSource | null = verbose ? formatRecords(verboseParts) : null
   return [output, new IOResult({ writes })]

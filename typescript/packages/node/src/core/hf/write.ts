@@ -34,6 +34,6 @@ export async function write(
     if (isNotFound(err)) throw enoent(path)
     throw err
   }
-  record('write', path.original, accessor.resourceName, data.byteLength, startMs)
+  record('write', path.virtual, accessor.resourceName, data.byteLength, startMs)
   await invalidateAfterWrite(path)
 }

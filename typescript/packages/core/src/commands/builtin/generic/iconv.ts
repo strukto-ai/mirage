@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -142,9 +143,9 @@ export async function iconvGeneric(
   const encoded = encodeText(decoded, toEnc)
   const outPath = typeof opts.flags.o === 'string' ? opts.flags.o : null
   if (outPath !== null) {
-    const spec = PathSpec.fromStrPath(outPath, opts.mountPrefix ?? '')
+    const spec = PathSpec.fromStrPath(outPath, mountKey(outPath, opts.mountPrefix ?? ''))
     await write(spec, encoded)
-    return [null, new IOResult({ writes: { [spec.stripPrefix]: encoded } })]
+    return [null, new IOResult({ writes: { [spec.mountPath]: encoded } })]
   }
   const result: ByteSource = encoded
   return [result, new IOResult()]

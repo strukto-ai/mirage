@@ -19,7 +19,7 @@ import { resolveSafe } from './utils.ts'
 
 export async function read(accessor: DiskAccessor, path: PathSpec): Promise<Uint8Array> {
   const start = performance.now()
-  const virtual = path.stripPrefix
+  const virtual = path.mountPath
   const full = resolveSafe(accessor.root, virtual)
   let data: Buffer
   try {

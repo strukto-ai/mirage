@@ -37,12 +37,12 @@ async def _ft_rg(resolve_glob,
         if c:
             count = len(result.decode().strip().splitlines()) - 1
             return str(max(0, count)).encode(), IOResult(
-                reads={p.strip_prefix: raw}, cache=[p.strip_prefix])
-        return result, IOResult(reads={p.strip_prefix: raw},
-                                cache=[p.strip_prefix])
+                reads={p.mount_path: raw}, cache=[p.mount_path])
+        return result, IOResult(reads={p.mount_path: raw},
+                                cache=[p.mount_path])
     except Exception as e:
         return None, IOResult(
             exit_code=1,
-            stderr=f"rg: {p.original}: failed to read as {_fmt(module)}: {e}".
+            stderr=f"rg: {p.virtual}: failed to read as {_fmt(module)}: {e}".
             encode(),
         )

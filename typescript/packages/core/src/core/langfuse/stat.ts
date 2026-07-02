@@ -25,7 +25,7 @@ export async function stat(
   _index?: IndexCacheStore,
 ): Promise<FileStat> {
   void accessor
-  const key = path.key
+  const key = path.resourcePath
 
   if (key === '') {
     return Promise.resolve(new FileStat({ name: '/', type: FileType.DIRECTORY }))

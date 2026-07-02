@@ -47,7 +47,7 @@ export class CacheManager {
   }
 
   private virtual(path: string | PathSpec): string {
-    let p = path instanceof PathSpec ? path.stripPrefix : path
+    let p = path instanceof PathSpec ? path.mountPath : path
     if (!p.startsWith('/')) p = '/' + p
     if (this.prefix !== '' && !p.startsWith(this.prefix)) {
       return this.prefix + p

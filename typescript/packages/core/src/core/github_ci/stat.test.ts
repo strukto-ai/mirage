@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../utils/slash.ts'
 import { describe, expect, it } from 'vitest'
 import { GitHubCIAccessor } from '../../accessor/github_ci.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
@@ -36,8 +37,8 @@ function accessor(): GitHubCIAccessor {
   return new GitHubCIAccessor({ transport: new NoopTransport(), owner: 'o', repo: 'r' })
 }
 
-function spec(original: string): PathSpec {
-  return new PathSpec({ original, directory: original })
+function spec(virtual: string): PathSpec {
+  return new PathSpec({ virtual, directory: virtual, resourcePath: stripSlash(virtual) })
 }
 
 describe('github_ci stat modified', () => {

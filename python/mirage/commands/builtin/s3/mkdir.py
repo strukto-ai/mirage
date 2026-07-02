@@ -40,8 +40,8 @@ async def mkdir(
     writes: dict[str, bytes] = {}
     for path in paths:
         await mkdir_impl(accessor, path)
-        writes[path.strip_prefix] = b""
+        writes[path.mount_path] = b""
         if v:
-            lines.append(f"mkdir: created directory '{path.original}'")
+            lines.append(f"mkdir: created directory '{path.virtual}'")
     output = ("\n".join(lines) + "\n").encode() if lines else None
     return output, IOResult(writes=writes)

@@ -19,17 +19,20 @@ from mirage.cache.index import IndexCacheStore
 from mirage.observe.context import record_stream
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import norm
 
 
 async def stream(accessor: RedisAccessor,
                  path: PathSpec) -> AsyncIterator[bytes]:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    virtual = path.original
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    virtual = path.virtual
     if isinstance(path, PathSpec):
-        prefix = path.prefix
-        path = path.original
+        prefix = mount_prefix_of(path.virtual, path.resource_path)
+        path = path.virtual
         if prefix and path.startswith(prefix):
             rest = path[len(prefix):]
             if prefix.endswith("/") or rest == "" or rest.startswith("/"):
@@ -51,11 +54,13 @@ async def read_stream(
     index: IndexCacheStore = None,
 ) -> AsyncIterator[bytes]:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    virtual = path.original if isinstance(path, PathSpec) else path
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    virtual = path.virtual if isinstance(path, PathSpec) else path
     if isinstance(path, PathSpec):
-        prefix = path.prefix
-        path = path.original
+        prefix = mount_prefix_of(path.virtual, path.resource_path)
+        path = path.virtual
     if prefix and path.startswith(prefix):
         rest = path[len(prefix):]
         if prefix.endswith("/") or rest == "" or rest.startswith("/"):

@@ -25,7 +25,10 @@ from mirage.types import PathSpec
 
 
 def _flat(scopes: list[PathSpec]) -> list[PathSpec]:
-    return [dataclasses.replace(s, prefix="") for s in scopes]
+    return [
+        dataclasses.replace(s, resource_path=s.virtual.strip("/"))
+        for s in scopes
+    ]
 
 
 async def run_compare(cmd_name: str, scopes: list[PathSpec], flag_kwargs: dict,

@@ -14,6 +14,7 @@ from mirage.core.databricks_volume.readdir import readdir
 from mirage.core.databricks_volume.stat import stat
 from mirage.resource.databricks_volume import DatabricksVolumeConfig
 from mirage.types import LsSortBy, PathSpec
+from mirage.utils.key_prefix import mount_key
 from tests.core.databricks_volume.conftest import (FakeClient, FakeFiles,
                                                    directory_entry, file_entry)
 
@@ -64,7 +65,8 @@ def _ls_stat(accessor: DatabricksVolumeAccessor):
 async def test_ls_lists_once_without_per_entry_metadata(sort_by, long):
     accessor, files, index, root = _rig()
     _seed_flat(files, root, count=5)
-    path = PathSpec.from_str_path("/volume/sub", "/volume")
+    path = PathSpec.from_str_path("/volume/sub",
+                                  mount_key("/volume/sub", "/volume"))
     await generic_ls([path],
                      readdir=_ls_readdir(accessor),
                      stat=_ls_stat(accessor),
@@ -86,7 +88,8 @@ async def test_ls_recursive_one_list_per_directory():
     files.directories[f"{root}/sub/inner"] = [
         file_entry(f"{root}/sub/inner/b.txt", size=2, modified=MODIFIED_MS),
     ]
-    path = PathSpec.from_str_path("/volume/sub", "/volume")
+    path = PathSpec.from_str_path("/volume/sub",
+                                  mount_key("/volume/sub", "/volume"))
     await generic_ls([path],
                      readdir=_ls_readdir(accessor),
                      stat=_ls_stat(accessor),
@@ -108,7 +111,8 @@ async def test_tree_one_list_per_directory_without_metadata():
     files.directories[f"{root}/sub/inner"] = [
         file_entry(f"{root}/sub/inner/b.txt", size=2, modified=MODIFIED_MS),
     ]
-    path = PathSpec.from_str_path("/volume/sub", "/volume")
+    path = PathSpec.from_str_path("/volume/sub",
+                                  mount_key("/volume/sub", "/volume"))
     await generic_tree(path,
                        readdir=_ls_readdir(accessor),
                        stat=_ls_stat(accessor),
@@ -121,7 +125,8 @@ async def test_tree_one_list_per_directory_without_metadata():
 
 async def _run_find(accessor, index, *, type=None, size=None, mtime=None):
     args = parse_find_args((), type=type, size=size, mtime=mtime)
-    path = PathSpec.from_str_path("/volume/sub", "/volume")
+    path = PathSpec.from_str_path("/volume/sub",
+                                  mount_key("/volume/sub", "/volume"))
     return await walk_find(path,
                            readdir=_ls_readdir(accessor),
                            stat=_ls_stat(accessor),

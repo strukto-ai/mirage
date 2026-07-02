@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
@@ -72,9 +73,9 @@ describe('resolveSlackGlob', () => {
     const t = new FakeSlackTransport()
     const idx = new RAMIndexCacheStore()
     const resolved = new PathSpec({
-      original: '/mnt/slack/channels/general__C1/2026-04-24.jsonl',
+      virtual: '/mnt/slack/channels/general__C1/2026-04-24.jsonl',
       directory: '/mnt/slack/channels/general__C1/',
-      prefix: '/mnt/slack',
+      resourcePath: mountKey('/mnt/slack/channels/general__C1/2026-04-24.jsonl', '/mnt/slack'),
       resolved: true,
     })
     const out = await resolveSlackGlob(new SlackAccessor(t), [resolved], idx)
@@ -87,9 +88,9 @@ describe('resolveSlackGlob', () => {
     const t = new FakeSlackTransport()
     const idx = new RAMIndexCacheStore()
     const noPattern = new PathSpec({
-      original: '/mnt/slack/channels/general__C1',
+      virtual: '/mnt/slack/channels/general__C1',
       directory: '/mnt/slack/channels/general__C1',
-      prefix: '/mnt/slack',
+      resourcePath: mountKey('/mnt/slack/channels/general__C1', '/mnt/slack'),
       resolved: false,
     })
     const out = await resolveSlackGlob(new SlackAccessor(t), [noPattern], idx)
@@ -107,21 +108,21 @@ describe('resolveSlackGlob', () => {
       'README.md',
     ])
     const spec = new PathSpec({
-      original: '/mnt/slack/channels/general__C1/*.jsonl',
+      virtual: '/mnt/slack/channels/general__C1/*.jsonl',
       directory: '/mnt/slack/channels/general__C1',
       pattern: '*.jsonl',
-      prefix: '/mnt/slack',
+      resourcePath: mountKey('/mnt/slack/channels/general__C1/*.jsonl', '/mnt/slack'),
       resolved: false,
     })
     const out = await resolveSlackGlob(new SlackAccessor(t), [spec], idx)
     expect(out).toHaveLength(2)
-    const originals = out.map((p) => p.original).sort()
+    const originals = out.map((p) => p.virtual).sort()
     expect(originals).toEqual([
       '/mnt/slack/channels/general__C1/2026-04-23.jsonl',
       '/mnt/slack/channels/general__C1/2026-04-24.jsonl',
     ])
     for (const p of out) {
-      expect(p.prefix).toBe('/mnt/slack')
+      expect(mountPrefixOf(p.virtual, p.resourcePath)).toBe('/mnt/slack')
     }
   })
 
@@ -130,10 +131,10 @@ describe('resolveSlackGlob', () => {
     const idx = new RAMIndexCacheStore()
     await seedChannelDir(idx, '/mnt/slack', 'general__C1', 'C1', ['2026-04-24.jsonl', 'README.md'])
     const spec = new PathSpec({
-      original: '/mnt/slack/channels/general__C1/*.csv',
+      virtual: '/mnt/slack/channels/general__C1/*.csv',
       directory: '/mnt/slack/channels/general__C1',
       pattern: '*.csv',
-      prefix: '/mnt/slack',
+      resourcePath: mountKey('/mnt/slack/channels/general__C1/*.csv', '/mnt/slack'),
       resolved: false,
     })
     const out = await resolveSlackGlob(new SlackAccessor(t), [spec], idx)
@@ -149,10 +150,10 @@ describe('resolveSlackGlob', () => {
     }
     await seedChannelDir(idx, '/mnt/slack', 'general__C1', 'C1', filenames)
     const spec = new PathSpec({
-      original: '/mnt/slack/channels/general__C1/*.jsonl',
+      virtual: '/mnt/slack/channels/general__C1/*.jsonl',
       directory: '/mnt/slack/channels/general__C1',
       pattern: '*.jsonl',
-      prefix: '/mnt/slack',
+      resourcePath: mountKey('/mnt/slack/channels/general__C1/*.jsonl', '/mnt/slack'),
       resolved: false,
     })
     const out = await resolveSlackGlob(new SlackAccessor(t), [spec], idx)
@@ -167,28 +168,28 @@ describe('resolveSlackGlob', () => {
       '2026-04-23.jsonl',
     ])
     const resolved = new PathSpec({
-      original: '/mnt/slack/users/alice__U1.json',
+      virtual: '/mnt/slack/users/alice__U1.json',
       directory: '/mnt/slack/users/',
-      prefix: '/mnt/slack',
+      resourcePath: mountKey('/mnt/slack/users/alice__U1.json', '/mnt/slack'),
       resolved: true,
     })
     const patterned = new PathSpec({
-      original: '/mnt/slack/channels/general__C1/*.jsonl',
+      virtual: '/mnt/slack/channels/general__C1/*.jsonl',
       directory: '/mnt/slack/channels/general__C1',
       pattern: '*.jsonl',
-      prefix: '/mnt/slack',
+      resourcePath: mountKey('/mnt/slack/channels/general__C1/*.jsonl', '/mnt/slack'),
       resolved: false,
     })
     const noPattern = new PathSpec({
-      original: '/mnt/slack/channels/eng__C2',
+      virtual: '/mnt/slack/channels/eng__C2',
       directory: '/mnt/slack/channels/eng__C2',
-      prefix: '/mnt/slack',
+      resourcePath: mountKey('/mnt/slack/channels/eng__C2', '/mnt/slack'),
       resolved: false,
     })
     const out = await resolveSlackGlob(new SlackAccessor(t), [resolved, patterned, noPattern], idx)
     expect(out).toHaveLength(4)
     expect(out[0]).toBe(resolved)
-    const middle = [out[1]?.original, out[2]?.original].sort()
+    const middle = [out[1]?.virtual, out[2]?.virtual].sort()
     expect(middle).toEqual([
       '/mnt/slack/channels/general__C1/2026-04-23.jsonl',
       '/mnt/slack/channels/general__C1/2026-04-24.jsonl',

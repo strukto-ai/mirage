@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { DiscordAccessor } from '../../accessor/discord.ts'
 import type {
@@ -53,9 +54,9 @@ describe('ops/discord/readdir', () => {
     const out = (await readdirOp.fn(
       accessor,
       new PathSpec({
-        original: '/mnt/discord',
+        virtual: '/mnt/discord',
         directory: '/mnt/discord',
-        prefix: '/mnt/discord',
+        resourcePath: mountKey('/mnt/discord', '/mnt/discord'),
       }),
       [],
       {},

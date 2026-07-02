@@ -21,9 +21,9 @@ from mirage.types import FindType
 @pytest.mark.asyncio
 async def test_find_all(chroma_accessor, chroma_index, knowledge_root):
     results = await find(chroma_accessor, knowledge_root, index=chroma_index)
-    assert "guides/quickstart" in results
-    assert "api/reference" in results
-    assert "guides" in results
+    assert "/guides/quickstart" in results
+    assert "/api/reference" in results
+    assert "/guides" in results
 
 
 @pytest.mark.asyncio
@@ -34,7 +34,7 @@ async def test_find_name_matches_mount_root_start_path(chroma_accessor,
                          knowledge_root,
                          name="knowledge",
                          index=chroma_index)
-    assert results == ["/knowledge"]
+    assert results == ["/"]
 
 
 @pytest.mark.asyncio
@@ -43,7 +43,7 @@ async def test_find_by_name(chroma_accessor, chroma_index, knowledge_root):
                          knowledge_root,
                          name="quick*",
                          index=chroma_index)
-    assert results == ["guides/quickstart"]
+    assert results == ["/guides/quickstart"]
 
 
 @pytest.mark.asyncio
@@ -52,7 +52,7 @@ async def test_find_type_file(chroma_accessor, chroma_index, knowledge_root):
                          knowledge_root,
                          type=FindType.FILE,
                          index=chroma_index)
-    assert sorted(results) == ["api/reference", "guides/quickstart"]
+    assert sorted(results) == ["/api/reference", "/guides/quickstart"]
 
 
 @pytest.mark.asyncio
@@ -62,8 +62,8 @@ async def test_find_type_directory(chroma_accessor, chroma_index,
                          knowledge_root,
                          type=FindType.DIRECTORY,
                          index=chroma_index)
-    assert "guides" in results
-    assert "guides/quickstart" not in results
+    assert "/guides" in results
+    assert "/guides/quickstart" not in results
 
 
 @pytest.mark.asyncio
@@ -73,7 +73,7 @@ async def test_find_iname_case_insensitive(chroma_accessor, chroma_index,
                          knowledge_root,
                          iname="QUICK*",
                          index=chroma_index)
-    assert results == ["guides/quickstart"]
+    assert results == ["/guides/quickstart"]
 
 
 @pytest.mark.asyncio

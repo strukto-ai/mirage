@@ -14,26 +14,28 @@
 
 import {
   BaseResource,
-  fetchGitHubRepoInfo,
-  fetchGitHubTree,
-  type FileStat,
   GITHUB_COMMANDS,
   GITHUB_VFS_OPS,
   GitHubAccessor,
   HttpGitHubTransport,
-  type IndexCacheStore,
   PathSpec,
   RAMIndexCacheStore,
-  type RegisteredCommand,
-  type RegisteredOp,
-  type Resource,
   ResourceName,
+  fetchGitHubRepoInfo,
+  fetchGitHubTree,
   githubBuildTreeMap,
   githubPopulateIndex,
   githubRead,
   githubReaddir,
   githubResolveGlob,
   githubStat,
+  mountKey,
+  mountPrefixOf,
+  type FileStat,
+  type IndexCacheStore,
+  type RegisteredCommand,
+  type RegisteredOp,
+  type Resource,
 } from '@struktoai/mirage-core'
 import { redactGitHubConfig, type GitHubConfig, type GitHubConfigRedacted } from './config.ts'
 
@@ -109,7 +111,7 @@ export class GitHubResource extends BaseResource implements Resource {
   }
 
   async fingerprint(p: PathSpec): Promise<string | null> {
-    const lookup = await this.index.get(p.original)
+    const lookup = await this.index.get(p.virtual)
     return lookup.entry?.id ?? null
   }
 
@@ -117,14 +119,14 @@ export class GitHubResource extends BaseResource implements Resource {
     const effective =
       prefix !== ''
         ? paths.map((p) =>
-            p.prefix !== ''
+            mountPrefixOf(p.virtual, p.resourcePath) !== ''
               ? p
               : new PathSpec({
-                  original: p.original,
+                  virtual: p.virtual,
                   directory: p.directory,
                   ...(p.pattern !== null ? { pattern: p.pattern } : {}),
                   resolved: p.resolved,
-                  prefix,
+                  resourcePath: mountKey(p.virtual, prefix),
                 }),
           )
         : paths

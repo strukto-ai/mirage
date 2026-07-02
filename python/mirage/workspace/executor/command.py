@@ -84,18 +84,18 @@ def _check_mount_root_guard_raw(
         return None
 
     def _is_root(p: PathSpec) -> bool:
-        return registry.is_mount_root(p.original)
+        return registry.is_mount_root(p.virtual)
 
     if cmd_name == "rm":
         for p in paths:
             if _is_root(p):
-                msg = (f"rm: cannot remove '{p.original}': "
+                msg = (f"rm: cannot remove '{p.virtual}': "
                        f"Device or resource busy\n")
                 return msg, 1
     elif cmd_name == "mv":
         if _is_root(paths[0]):
-            dst = paths[1].original if len(paths) > 1 else "?"
-            msg = (f"mv: cannot move '{paths[0].original}' to '{dst}': "
+            dst = paths[1].virtual if len(paths) > 1 else "?"
+            msg = (f"mv: cannot move '{paths[0].virtual}' to '{dst}': "
                    f"Device or resource busy\n")
             return msg, 1
     elif cmd_name == "mkdir":
@@ -108,18 +108,18 @@ def _check_mount_root_guard_raw(
                 return None
         for p in paths:
             if _is_root(p):
-                msg = (f"mkdir: cannot create directory '{p.original}': "
+                msg = (f"mkdir: cannot create directory '{p.virtual}': "
                        f"File exists\n")
                 return msg, 1
     elif cmd_name == "touch":
         for p in paths:
             if _is_root(p):
-                msg = (f"touch: cannot touch '{p.original}': "
+                msg = (f"touch: cannot touch '{p.virtual}': "
                        f"Is a directory\n")
                 return msg, 1
     elif cmd_name == "ln":
         if _is_root(paths[-1]):
-            msg = (f"ln: failed to create link '{paths[-1].original}': "
+            msg = (f"ln: failed to create link '{paths[-1].virtual}': "
                    f"File exists\n")
             return msg, 1
     return None
@@ -154,14 +154,14 @@ def _parse_flags(
     """
     # Build string argv and PathSpec lookup
     argv = [
-        item.original if isinstance(item, PathSpec) else item for item in parts
+        item.virtual if isinstance(item, PathSpec) else item for item in parts
     ]
     scope_map: dict[str, PathSpec] = {}
     for item in parts:
         if isinstance(item, PathSpec):
-            scope_map[item.original] = item
-            stripped = item.original.rstrip("/")
-            if stripped and stripped != item.original:
+            scope_map[item.virtual] = item
+            stripped = item.virtual.rstrip("/")
+            if stripped and stripped != item.virtual:
                 scope_map[stripped] = item
 
     spec = mount.spec_for(cmd_name)
@@ -192,15 +192,17 @@ def _parse_flags(
                 flag_kwargs[key] = [
                     scope_map.get(
                         part,
-                        PathSpec(original=part,
+                        PathSpec(virtual=part,
                                  directory=part[:part.rfind("/") + 1] or "/",
+                                 resource_path="",
                                  resolved=True)) for part in value
                 ]
             elif key in single_path_keys and isinstance(value, str):
                 flag_kwargs[key] = scope_map.get(
                     value,
-                    PathSpec(original=value,
+                    PathSpec(virtual=value,
                              directory=value[:value.rfind("/") + 1] or "/",
+                             resource_path="",
                              resolved=True))
             elif isinstance(value, str) and value in scope_map:
                 flag_kwargs[key] = scope_map[value]
@@ -213,8 +215,9 @@ def _parse_flags(
                 scope = scope_map.get(value)
                 if scope is None:
                     scope = PathSpec(
-                        original=value,
+                        virtual=value,
                         directory=value[:value.rfind("/") + 1] or "/",
+                        resource_path="",
                         resolved=True,
                     )
                 paths.append(scope)
@@ -247,13 +250,13 @@ async def handle_command(
         return None, IOResult(), ExecutionNode(command="", exit_code=0)
 
     cmd_name = str(parts[0])
-    cmd_str = " ".join(p.original if isinstance(p, PathSpec) else p
+    cmd_str = " ".join(p.virtual if isinstance(p, PathSpec) else p
                        for p in parts)
 
     # Job builtins
     if cmd_name in _JOB_BUILTINS and job_table is not None:
         text_parts = [
-            p.original if isinstance(p, PathSpec) else p for p in parts
+            p.virtual if isinstance(p, PathSpec) else p for p in parts
         ]
         if cmd_name in ("wait", "fg"):
             return await handle_wait(job_table, text_parts)
@@ -269,7 +272,7 @@ async def handle_command(
         func_body = session.functions[cmd_name]
         cs = call_stack or CallStack()
         text_args = [
-            p.original if isinstance(p, PathSpec) else p for p in parts[1:]
+            p.virtual if isinstance(p, PathSpec) else p for p in parts[1:]
         ]
         cs.push(text_args, function_name=cmd_name)
         saved_locals: dict[str, str | None] = {}
@@ -307,9 +310,7 @@ async def handle_command(
     # Cross-mount: paths span different mounts (e.g. cp /ram/a /disk/b).
     # Use dispatch to read/write across mounts directly.
     path_scopes = [p for p in parts[1:] if isinstance(p, PathSpec)]
-    raw_argv = [
-        p.original if isinstance(p, PathSpec) else p for p in parts[1:]
-    ]
+    raw_argv = [p.virtual if isinstance(p, PathSpec) else p for p in parts[1:]]
     early_guard = _check_mount_root_guard_raw(cmd_name, path_scopes, registry,
                                               raw_argv)
     if early_guard is not None:
@@ -346,7 +347,7 @@ async def handle_command(
             mounts = []
             for s in path_scopes:
                 try:
-                    mounts.append(registry.mount_for(s.original))
+                    mounts.append(registry.mount_for(s.virtual))
                 except ValueError:
                     pass
             io.safeguard = (resolve_across_mounts(cmd_name, mounts)
@@ -359,7 +360,7 @@ async def handle_command(
         mount_prefixes = set()
         for s in path_scopes:
             try:
-                mount_prefixes.add(registry.mount_for(s.original).prefix)
+                mount_prefixes.add(registry.mount_for(s.virtual).prefix)
             except ValueError:
                 pass
         if len(mount_prefixes) > 1:
@@ -389,7 +390,7 @@ async def handle_command(
     try:
         assert_mount_allowed(mount.prefix)
         for ps in path_scopes:
-            target = registry.mount_for(ps.original)
+            target = registry.mount_for(ps.virtual)
             assert_mount_allowed(target.prefix)
     except PermissionError as exc:
         err = f"{exc}\n".encode()
@@ -489,7 +490,7 @@ async def _inject_child_mounts(
         return stdout
     if len(paths) > 1:
         return stdout
-    listed = paths[0].original if paths else cwd
+    listed = paths[0].virtual if paths else cwd
     include_hidden = (flag_kwargs.get("a") is True
                       or flag_kwargs.get("A") is True)
     child_names = registry.child_mount_names(listed, include_hidden)

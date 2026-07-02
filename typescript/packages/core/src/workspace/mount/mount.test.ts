@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { command, type CommandFn, RegisteredCommand } from '../../commands/config.ts'
 import { CommandSpec, Operand, OperandKind } from '../../commands/spec/types.ts'
@@ -194,13 +195,16 @@ describe('Mount.executeCmd', () => {
     const m = makeMount()
     let seenPrefix: string | null = null
     const fn: CommandFn = (_accessor, paths) => {
-      seenPrefix = paths[0]?.prefix ?? null
+      seenPrefix =
+        (paths[0] === undefined
+          ? undefined
+          : mountPrefixOf(paths[0].virtual, paths[0].resourcePath)) ?? null
       return [null, new IOResult()]
     }
     const [cmd] = command({ name: 'cat', resource: 'ram', spec: BASIC_SPEC, fn })
     if (cmd === undefined) throw new Error('missing')
     m.register(cmd)
-    await m.executeCmd('cat', [PathSpec.fromStrPath('/hello.txt')], [], {})
+    await m.executeCmd('cat', [PathSpec.fromStrPath('/ram/hello.txt')], [], {})
     expect(seenPrefix).toBe('/ram')
   })
 })
@@ -214,7 +218,7 @@ describe('Mount.executeOp', () => {
       filetype: null,
       write: false,
       fn: (_accessor: Accessor, path: PathSpec) =>
-        Promise.resolve(new TextEncoder().encode(path.original)),
+        Promise.resolve(new TextEncoder().encode(path.virtual)),
     }
     m.registerOp(op)
     const result = await m.executeOp('read', '/x.txt')
@@ -256,7 +260,7 @@ describe('Mount.revisions', () => {
       filetype: null,
       write: false,
       fn: (_accessor: Accessor, path: PathSpec) => {
-        observed = revisionFor(path.original)
+        observed = revisionFor(path.virtual)
         return Promise.resolve(new Uint8Array())
       },
     }

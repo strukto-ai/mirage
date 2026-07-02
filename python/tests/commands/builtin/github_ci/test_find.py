@@ -23,6 +23,7 @@ from mirage.commands.errors import FindParseError
 from mirage.io.stream import materialize
 from mirage.resource.github_ci.config import GitHubCIConfig
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.fixture
@@ -37,7 +38,9 @@ def index():
 
 
 def _scope(path: str, prefix: str = "") -> PathSpec:
-    return PathSpec(original=path, directory=path, prefix=prefix)
+    return PathSpec(resource_path=mount_key(path, prefix),
+                    virtual=path,
+                    directory=path)
 
 
 @pytest.mark.asyncio
@@ -65,9 +68,9 @@ async def test_find_invalid_maxdepth_raises_find_parse_error(accessor, index):
 async def test_find_single_run_allowed(accessor, index):
 
     async def fake_readdir(_acc, p, _idx=None):
-        if p.original == "/runs/wf_1":
+        if p.virtual == "/runs/wf_1":
             return ["/runs/wf_1/run.json", "/runs/wf_1/jobs"]
-        if p.original == "/runs/wf_1/jobs":
+        if p.virtual == "/runs/wf_1/jobs":
             return ["/runs/wf_1/jobs/build_1.log"]
         return []
 

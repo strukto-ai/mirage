@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../../utils/key_prefix.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
 import { PathSpec, type ResourceName } from '../../../types.ts'
@@ -34,10 +35,10 @@ function positionalAsPaths(texts: string[], opts: CommandOpts): PathSpec[] {
     const resolved = resolvePath(opts.cwd, t)
     const slash = resolved.lastIndexOf('/')
     return new PathSpec({
-      original: resolved,
+      virtual: resolved,
       directory: slash >= 0 ? resolved.slice(0, slash + 1) : '/',
       resolved: true,
-      prefix,
+      resourcePath: mountKey(resolved, prefix),
     })
   })
 }

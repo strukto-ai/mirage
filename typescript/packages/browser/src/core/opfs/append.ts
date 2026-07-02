@@ -23,7 +23,7 @@ export async function appendBytes(
 ): Promise<void> {
   const root = accessor.rootHandle
   const start = performance.now()
-  const virtual = p.stripPrefix
+  const virtual = p.mountPath
   const handle = await resolveFileHandle(root, virtual, { create: true })
   const existing = await handle.getFile()
   const existingBytes = new Uint8Array(await existing.arrayBuffer())

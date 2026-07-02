@@ -9,7 +9,7 @@ async def mkdir(accessor: NextcloudAccessor,
     # opendal create_dir creates missing parents; parents is implicit.
     if isinstance(path, str):
         path = PathSpec.from_str_path(path)
-    key = path.strip_prefix.strip("/") + "/"
+    key = path.mount_path.strip("/") + "/"
     op = accessor.operator()
     await op.create_dir(key)
     await invalidate_after_write(path)

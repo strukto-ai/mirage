@@ -1,4 +1,4 @@
-import { PathSpec, normalizeKeyPrefix } from '@struktoai/mirage-core'
+import { PathSpec, mountKey, normalizeKeyPrefix, stripSlash } from '@struktoai/mirage-core'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { S3Resource } from './s3.ts'
 import { installS3Mock, S3MockStore, type S3Mock } from './mock.ts'
@@ -8,8 +8,8 @@ const PREFIX = 'users/abc/'
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
-function mkPath(original: string): PathSpec {
-  return new PathSpec({ original, directory: original, prefix: '' })
+function mkPath(virtual: string): PathSpec {
+  return new PathSpec({ virtual, directory: virtual, resourcePath: stripSlash(virtual) })
 }
 
 describe('normalizeKeyPrefix', () => {
@@ -86,7 +86,11 @@ describe('S3Resource operations with keyPrefix (mocked)', () => {
   it('readdir returns prefix-free user paths and stores under prefixed keys', async () => {
     store.set(BUCKET, 'users/abc/dir/a.txt', ENC.encode('a'))
     store.set(BUCKET, 'users/abc/dir/b.txt', ENC.encode('b'))
-    const dirPath = new PathSpec({ original: '/dir/', directory: '/dir/', prefix: '' })
+    const dirPath = new PathSpec({
+      virtual: '/dir/',
+      directory: '/dir/',
+      resourcePath: mountKey('/dir/', ''),
+    })
     const entries = await resource.readdir(dirPath)
     for (const entry of entries) {
       expect(entry).not.toContain(PREFIX)
@@ -98,16 +102,16 @@ describe('S3Resource operations with keyPrefix (mocked)', () => {
     store.set(BUCKET, 'users/abc/gdir/x.txt', ENC.encode('x'))
     store.set(BUCKET, 'users/abc/gdir/y.md', ENC.encode('y'))
     const globPath = new PathSpec({
-      original: '/gdir/*.txt',
+      virtual: '/gdir/*.txt',
       directory: '/gdir/',
       pattern: '*.txt',
       resolved: false,
-      prefix: '',
+      resourcePath: mountKey('/gdir/*.txt', ''),
     })
     const results = await resource.glob([globPath])
     expect(results.length).toBe(1)
-    expect(results[0]?.original).toBe('/gdir/x.txt')
-    expect(results[0]?.original).not.toContain(PREFIX)
+    expect(results[0]?.virtual).toBe('/gdir/x.txt')
+    expect(results[0]?.virtual).not.toContain(PREFIX)
   })
 
   it('copy stores destination under prefixed bucket key', async () => {

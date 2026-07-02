@@ -31,7 +31,7 @@ export async function find(
   path: PathSpec,
   options: FindOptions = {},
 ): Promise<string[]> {
-  if (!VIEW_KEYS.includes(stripSlash(path.stripPrefix))) return []
+  if (!VIEW_KEYS.includes(stripSlash(path.mountPath))) return []
   if (options.maxDepth !== null && options.maxDepth !== undefined && options.maxDepth < 0) {
     return []
   }
@@ -62,7 +62,7 @@ export async function find(
       empty: options.empty,
     })
   const entry: FindEntry = {
-    key: path.original,
+    key: path.virtual,
     name: VIEW_NAME,
     kind: 'f',
     depth: 0,

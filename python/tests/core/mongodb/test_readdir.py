@@ -21,6 +21,7 @@ from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.mongodb.readdir import is_dir_name, readdir
 from mirage.resource.mongodb.config import MongoDBConfig
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.fixture
@@ -35,7 +36,7 @@ def accessor():
 
 
 def _path(s: str) -> PathSpec:
-    return PathSpec(original=s, directory=s)
+    return PathSpec(virtual=s, directory=s, resource_path=s.strip("/"))
 
 
 @pytest.fixture(autouse=True)
@@ -166,9 +167,9 @@ async def test_readdir_entity_raises_when_collection_missing(accessor, index):
 
 @pytest.mark.asyncio
 async def test_readdir_prefix_carries_through(accessor, index):
-    p = PathSpec(original="/mongo/sample_mflix",
-                 directory="/mongo/sample_mflix",
-                 prefix="/mongo")
+    p = PathSpec(resource_path=mount_key("/mongo/sample_mflix", "/mongo"),
+                 virtual="/mongo/sample_mflix",
+                 directory="/mongo/sample_mflix")
     result = await readdir(accessor, p, index)
     assert result == [
         "/mongo/sample_mflix/database.json",

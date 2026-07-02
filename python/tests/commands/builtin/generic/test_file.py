@@ -5,21 +5,23 @@ from mirage.types import FileStat, FileType, PathSpec
 
 
 def _spec(path: str) -> PathSpec:
-    return PathSpec(original=path, directory=path)
+    return PathSpec(virtual=path,
+                    directory=path,
+                    resource_path=path.strip("/"))
 
 
 def _make_backend(files: dict[str, tuple[bytes, FileType]], dirs: set[str]):
 
     async def stat_fn(accessor: object, p: PathSpec) -> FileStat:
-        if p.original in dirs:
-            return FileStat(name=p.original, type=FileType.DIRECTORY, size=0)
-        if p.original in files:
-            data, ftype = files[p.original]
-            return FileStat(name=p.original, type=ftype, size=len(data))
-        raise FileNotFoundError(p.original)
+        if p.virtual in dirs:
+            return FileStat(name=p.virtual, type=FileType.DIRECTORY, size=0)
+        if p.virtual in files:
+            data, ftype = files[p.virtual]
+            return FileStat(name=p.virtual, type=ftype, size=len(data))
+        raise FileNotFoundError(p.virtual)
 
     async def read_bytes(accessor: object, p: PathSpec) -> bytes:
-        return files[p.original][0]
+        return files[p.virtual][0]
 
     return stat_fn, read_bytes
 

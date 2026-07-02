@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
@@ -44,8 +45,8 @@ class FakeTransport implements SlackTransport {
   }
 }
 
-function spec(original: string, prefix = ''): PathSpec {
-  return new PathSpec({ original, directory: original, prefix })
+function spec(virtual: string, prefix = ''): PathSpec {
+  return new PathSpec({ virtual, directory: virtual, resourcePath: mountKey(virtual, prefix) })
 }
 
 describe('dateRange', () => {

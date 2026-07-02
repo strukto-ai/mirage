@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../utils/slash.ts'
 import { describe, expect, it } from 'vitest'
 
 import { resolveLanceDBConfig } from '../../resource/lancedb/config.ts'
@@ -28,7 +29,7 @@ const config = resolveLanceDBConfig({
 })
 
 function ps(p: string): PathSpec {
-  return new PathSpec({ original: p, directory: p })
+  return new PathSpec({ resourcePath: stripSlash(p), virtual: p, directory: p })
 }
 
 describe('lancedb scope', () => {

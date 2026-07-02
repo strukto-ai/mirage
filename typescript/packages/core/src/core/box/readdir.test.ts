@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../utils/slash.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 import type * as ApiModule from './api.ts'
 
@@ -58,7 +60,11 @@ describe('box readdir', () => {
 
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
-    const out = await readdir(accessor, new PathSpec({ original: '/', directory: '/' }), index)
+    const out = await readdir(
+      accessor,
+      new PathSpec({ resourcePath: stripSlash('/'), virtual: '/', directory: '/' }),
+      index,
+    )
     expect(out).toEqual(['/docs/', '/notes.txt'])
   })
 
@@ -77,7 +83,7 @@ describe('box readdir', () => {
     const index = new RAMIndexCacheStore()
     const out = await readdir(
       accessor,
-      new PathSpec({ original: '/docs', directory: '/docs' }),
+      new PathSpec({ resourcePath: stripSlash('/docs'), virtual: '/docs', directory: '/docs' }),
       index,
     )
     expect(out).toContain('/docs/note.md')
@@ -92,7 +98,7 @@ describe('box readdir', () => {
     const index = new RAMIndexCacheStore()
     const out = await readdir(
       accessor,
-      new PathSpec({ original: '/box', directory: '/box', prefix: '/box' }),
+      new PathSpec({ virtual: '/box', directory: '/box', resourcePath: mountKey('/box', '/box') }),
       index,
     )
     expect(out).toEqual(['/box/a.txt'])

@@ -19,7 +19,7 @@ import { stripSlash } from '../../utils/slash.ts'
 import { invalidateAfterWrite } from '../../cache/context.ts'
 
 export async function mkdir(accessor: RAMAccessor, path: PathSpec, parents = false): Promise<void> {
-  const p = norm(path.stripPrefix)
+  const p = norm(path.mountPath)
   if (parents) {
     const parts = stripSlash(p).split('/').filter(Boolean)
     let current = ''

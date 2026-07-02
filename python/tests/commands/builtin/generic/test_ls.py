@@ -8,7 +8,9 @@ from mirage.types import FileStat, FileType, LsSortBy, PathSpec
 
 
 def _spec(path: str) -> PathSpec:
-    return PathSpec(original=path, directory=path)
+    return PathSpec(virtual=path,
+                    directory=path,
+                    resource_path=path.strip("/"))
 
 
 def _make_fs_backend(tree: dict[str, FileStat]):
@@ -19,19 +21,19 @@ def _make_fs_backend(tree: dict[str, FileStat]):
     """
 
     async def stat(p: PathSpec, index=None) -> FileStat:
-        if p.original not in tree:
-            raise FileNotFoundError(p.original)
-        return tree[p.original]
+        if p.virtual not in tree:
+            raise FileNotFoundError(p.virtual)
+        return tree[p.virtual]
 
     async def readdir(p: PathSpec, _index=None) -> list[str]:
-        if p.original not in tree:
-            raise FileNotFoundError(p.original)
-        if tree[p.original].type != FileType.DIRECTORY:
-            raise ValueError(f"not a directory: {p.original}")
-        prefix = p.original.rstrip("/") + "/"
+        if p.virtual not in tree:
+            raise FileNotFoundError(p.virtual)
+        if tree[p.virtual].type != FileType.DIRECTORY:
+            raise ValueError(f"not a directory: {p.virtual}")
+        prefix = p.virtual.rstrip("/") + "/"
         children: list[str] = []
         for key in tree:
-            if key == p.original:
+            if key == p.virtual:
                 continue
             if key.startswith(prefix):
                 remainder = key[len(prefix):]
@@ -268,9 +270,9 @@ async def test_walk_empty_readdir_falls_back_to_file():
     fstat = _file("a.parquet", 5)
 
     async def stat(p, index=None):
-        if p.original == "/data/a.parquet":
+        if p.virtual == "/data/a.parquet":
             return fstat
-        raise FileNotFoundError(p.original)
+        raise FileNotFoundError(p.virtual)
 
     async def readdir(p, _index=None):
         return []

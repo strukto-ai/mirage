@@ -17,6 +17,7 @@ from dataclasses import dataclass
 
 from mirage.cache.index import IndexCacheStore
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_prefix_of
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -73,9 +74,11 @@ async def detect_scope(
         /<guild>/channels/<ch>/<date>/files/<blob>     → file_blob
     """
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
 
-    prefix = path.prefix or ""
+    prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
 
     if path.pattern and path.pattern.endswith(".jsonl"):
         dir_key = _strip_prefix(path.directory, prefix)
@@ -94,7 +97,7 @@ async def detect_scope(
                 resource_path=dir_key,
             )
 
-    key = _strip_prefix(path.original, prefix)
+    key = _strip_prefix(path.virtual, prefix)
 
     if not key:
         return DiscordScope(level="root", resource_path="/")

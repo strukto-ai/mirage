@@ -22,6 +22,7 @@ from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.trello.readdir import readdir
 from mirage.resource.trello.config import TrelloConfig
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.fixture
@@ -44,8 +45,9 @@ async def test_readdir_root(accessor, index):
 async def test_readdir_root_with_prefix(accessor, index):
     result = await readdir(
         accessor,
-        PathSpec(original="trello/", directory="trello/", prefix="trello"),
-        index)
+        PathSpec(resource_path=mount_key("trello/", "trello"),
+                 virtual="trello/",
+                 directory="trello/"), index)
     assert result == ["trello/workspaces"]
 
 
@@ -63,9 +65,9 @@ async def test_readdir_workspaces(accessor, index):
 async def test_readdir_workspaces_keeps_prefix_on_warm_cache_hit(
         accessor, index):
     workspaces = [{"id": "ws1", "displayName": "Engineering", "name": "eng"}]
-    spec = PathSpec(original="trello/workspaces",
-                    directory="trello/workspaces",
-                    prefix="trello")
+    spec = PathSpec(resource_path=mount_key("trello/workspaces", "trello"),
+                    virtual="trello/workspaces",
+                    directory="trello/workspaces")
     with patch("mirage.core.trello.readdir.list_workspaces",
                new_callable=AsyncMock,
                return_value=workspaces):

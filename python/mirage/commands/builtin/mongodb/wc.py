@@ -42,7 +42,7 @@ async def wc_provision(
 ) -> ProvisionResult:
     return await file_read_provision(
         accessor, paths,
-        "wc " + " ".join(p.original if isinstance(p, PathSpec) else p
+        "wc " + " ".join(p.virtual if isinstance(p, PathSpec) else p
                          for p in paths))
 
 
@@ -75,7 +75,7 @@ async def wc(
             for p, scope in zip(paths, scopes):
                 count = await count_documents(accessor.client, scope.database,
                                               scope.name)
-                rows.append((WCCounts(lines=count), p.original))
+                rows.append((WCCounts(lines=count), p.virtual))
                 total += count
             if len(paths) > 1:
                 rows.append((WCCounts(lines=total), "total"))
@@ -85,7 +85,7 @@ async def wc(
         for p in paths:
             data = await mongodb_read(accessor, p, index)
             counts = await generic_wc(data)
-            rows.append((counts, p.original))
+            rows.append((counts, p.virtual))
             totals.merge(counts)
         if len(paths) > 1:
             rows.append((totals, "total"))

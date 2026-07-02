@@ -7,6 +7,7 @@ from mirage.cache.index import IndexCacheStore, IndexEntry, ResourceType
 from mirage.core.nextcloud.constants import SCOPE_ERROR
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_prefix_of
 
 logger = logging.getLogger(__name__)
 
@@ -14,9 +15,11 @@ logger = logging.getLogger(__name__)
 async def readdir(accessor: NextcloudAccessor, path: PathSpec,
                   index: IndexCacheStore) -> list[str]:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    prefix = path.prefix
-    target = path.directory if path.pattern else path.original
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    target = path.directory if path.pattern else path.virtual
     if prefix and target.startswith(prefix):
         rest = target[len(prefix):]
         if prefix.endswith("/") or rest == "" or rest.startswith("/"):

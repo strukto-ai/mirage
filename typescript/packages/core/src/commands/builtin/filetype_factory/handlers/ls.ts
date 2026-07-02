@@ -38,7 +38,7 @@ export async function ftLs<A extends Accessor>(
   try {
     const raw = await readBytes(accessor, first, opts.index ?? undefined)
     const out: ByteSource = await entry.module.ls(raw, meta)
-    return [out, new IOResult({ cache: [first.stripPrefix] })]
+    return [out, new IOResult({ cache: [first.mountPath] })]
   } catch {
     return [entry.module.lsFallback(meta), new IOResult()]
   }

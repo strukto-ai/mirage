@@ -40,16 +40,21 @@ def index():
 
 @pytest.mark.asyncio
 async def test_stat_root(accessor, index):
-    result = await stat(accessor, PathSpec(original="/", directory="/"), index)
+    result = await stat(
+        accessor,
+        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"),
+        index)
     assert result.type == FileType.DIRECTORY
     assert result.name == "/"
 
 
 @pytest.mark.asyncio
 async def test_stat_traces_dir(accessor, index):
-    result = await stat(accessor,
-                        PathSpec(original="/traces", directory="/traces"),
-                        index)
+    result = await stat(
+        accessor,
+        PathSpec(resource_path=("/traces").strip("/"),
+                 virtual="/traces",
+                 directory="/traces"), index)
     assert result.type == FileType.DIRECTORY
     assert result.name == "traces"
 
@@ -58,8 +63,9 @@ async def test_stat_traces_dir(accessor, index):
 async def test_stat_trace_file(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(original="/traces/abc.json", directory="/traces/abc.json"),
-        index)
+        PathSpec(resource_path=("/traces/abc.json").strip("/"),
+                 virtual="/traces/abc.json",
+                 directory="/traces/abc.json"), index)
     assert result.type == FileType.JSON
     assert result.name == "abc.json"
 
@@ -68,7 +74,9 @@ async def test_stat_trace_file(accessor, index):
 async def test_stat_session_dir(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(original="/sessions/sid1", directory="/sessions/sid1"), index)
+        PathSpec(resource_path=("/sessions/sid1").strip("/"),
+                 virtual="/sessions/sid1",
+                 directory="/sessions/sid1"), index)
     assert result.type == FileType.DIRECTORY
     assert result.extra["session_id"] == "sid1"
 
@@ -77,7 +85,8 @@ async def test_stat_session_dir(accessor, index):
 async def test_stat_prompt_version_file(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(original="/prompts/summarize/1.json",
+        PathSpec(resource_path=("/prompts/summarize/1.json").strip("/"),
+                 virtual="/prompts/summarize/1.json",
                  directory="/prompts/summarize/1.json"), index)
     assert result.type == FileType.JSON
     assert result.name == "1.json"
@@ -87,7 +96,8 @@ async def test_stat_prompt_version_file(accessor, index):
 async def test_stat_dataset_items(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(original="/datasets/qa-eval/items.jsonl",
+        PathSpec(resource_path=("/datasets/qa-eval/items.jsonl").strip("/"),
+                 virtual="/datasets/qa-eval/items.jsonl",
                  directory="/datasets/qa-eval/items.jsonl"), index)
     assert result.type == FileType.TEXT
     assert result.name == "items.jsonl"
@@ -96,15 +106,19 @@ async def test_stat_dataset_items(accessor, index):
 @pytest.mark.asyncio
 async def test_stat_dotfile_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
-        await stat(accessor, PathSpec(original="/.hidden",
-                                      directory="/.hidden"), index)
+        await stat(
+            accessor,
+            PathSpec(resource_path=("/.hidden").strip("/"),
+                     virtual="/.hidden",
+                     directory="/.hidden"), index)
 
 
 @pytest.mark.asyncio
 async def test_stat_dataset_runs_dir(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(original="/datasets/qa-eval/runs",
+        PathSpec(resource_path=("/datasets/qa-eval/runs").strip("/"),
+                 virtual="/datasets/qa-eval/runs",
                  directory="/datasets/qa-eval/runs"), index)
     assert result.type == FileType.DIRECTORY
     assert result.name == "runs"

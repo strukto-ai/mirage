@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { rekey } from '../../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
@@ -21,12 +22,12 @@ export type StatFn = (path: PathSpec, index?: IndexCacheStore) => Promise<FileSt
 export type BackendKeyFn = (path: PathSpec) => string
 
 export function backendKeyDefault(path: PathSpec): string {
-  return rstripSlash(path.stripPrefix)
+  return rstripSlash(path.mountPath)
 }
 
 export function childPath(parent: PathSpec, name: string): PathSpec {
-  const base = rstripSlash(parent.original)
-  return PathSpec.fromStrPath(`${base}/${name}`, parent.prefix)
+  const child = `${rstripSlash(parent.virtual)}/${name}`
+  return PathSpec.fromStrPath(child, rekey(parent.virtual, parent.resourcePath, child))
 }
 
 export function copyTargets(
@@ -35,14 +36,14 @@ export function copyTargets(
   dstIsDir: boolean,
 ): [PathSpec, PathSpec][] {
   if (sources.length > 1 && !dstIsDir) {
-    throw new Error(`target '${dst.original}' is not a directory`)
+    throw new Error(`target '${dst.virtual}' is not a directory`)
   }
   if (!dstIsDir) {
     const first = sources[0]
     return first === undefined ? [] : [[first, dst]]
   }
   return sources.map((src): [PathSpec, PathSpec] => {
-    const name = rstripSlash(src.stripPrefix).split('/').pop() ?? ''
+    const name = rstripSlash(src.mountPath).split('/').pop() ?? ''
     return [src, childPath(dst, name)]
   })
 }

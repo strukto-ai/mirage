@@ -41,7 +41,7 @@ async def cat_provision(
 ) -> ProvisionResult:
     return await file_read_provision(
         accessor, paths,
-        "cat " + " ".join(p.original if isinstance(p, PathSpec) else p
+        "cat " + " ".join(p.virtual if isinstance(p, PathSpec) else p
                           for p in paths))
 
 
@@ -71,8 +71,7 @@ async def cat(
                     read_stream(accessor, p, index))
             else:
                 value = await mongodb_read(accessor, p, index)
-            io = IOResult(reads={p.strip_prefix: value},
-                          cache=[p.strip_prefix])
+            io = IOResult(reads={p.mount_path: value}, cache=[p.mount_path])
             source: ByteSource = value
         else:
             reads: dict[str, ByteSource] = {}
@@ -86,7 +85,7 @@ async def cat(
                     ])
                 else:
                     data = await mongodb_read(accessor, p, index)
-                reads[p.strip_prefix] = data
+                reads[p.mount_path] = data
                 parts.append(data)
             io = IOResult(reads=reads, cache=list(reads))
             source = async_chain(*parts)

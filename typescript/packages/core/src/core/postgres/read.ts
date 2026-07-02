@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
 import { encodeBase64 } from '../../utils/base64.ts'
@@ -42,12 +43,14 @@ export async function read(
   options: ReadOptions = {},
 ): Promise<Uint8Array> {
   const spec = typeof path === 'string' ? PathSpec.fromStrPath(path) : path
-  const prefix = spec.prefix
-  let raw = spec.original
+  const prefix = mountPrefixOf(spec.virtual, spec.resourcePath)
+  let raw = spec.virtual
   if (prefix !== '' && raw.startsWith(prefix)) {
     raw = raw.slice(prefix.length) || '/'
   }
-  const scope = detectScope(new PathSpec({ original: raw, directory: raw, prefix }))
+  const scope = detectScope(
+    new PathSpec({ virtual: raw, directory: raw, resourcePath: mountKey(raw, prefix) }),
+  )
 
   if (scope.level === 'database_json') {
     const doc = await buildDatabaseJson(accessor)

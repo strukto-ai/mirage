@@ -23,6 +23,7 @@ from typing import NamedTuple
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import rekey
 
 logger = logging.getLogger(__name__)
 
@@ -71,14 +72,18 @@ def make_resolve_glob(readdir: Callable,
         for p in paths:
             if isinstance(p, str):
                 result.append(
-                    PathSpec(original=p, directory=posixpath.dirname(p)))
+                    PathSpec(virtual=p,
+                             directory=posixpath.dirname(p),
+                             resource_path=p.strip("/")))
                 continue
             if p.resolved:
                 result.append(p)
             elif p.pattern:
                 entries = await readdir(accessor, p.dir, index)
                 matched = [
-                    PathSpec.from_str_path(e, p.prefix) for e in entries
+                    PathSpec.from_str_path(
+                        e, rekey(p.virtual, p.resource_path, e))
+                    for e in entries
                     if fnmatch.fnmatch(e.rsplit("/", 1)[-1], p.pattern)
                 ]
                 if (max_glob_matches is not None

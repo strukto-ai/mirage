@@ -42,7 +42,7 @@ export const LN_BUILDER: Builder = {
     const data = await ops.readBytes(accessor, source, idx)
     await write(accessor, dest, data)
     const out: ByteSource | null =
-      opts.flags.v === true ? ENC.encode(`'${source.original}' -> '${dest.original}'\n`) : null
-    return [out, new IOResult({ writes: { [dest.stripPrefix]: data } })]
+      opts.flags.v === true ? ENC.encode(`'${source.virtual}' -> '${dest.virtual}'\n`) : null
+    return [out, new IOResult({ writes: { [dest.mountPath]: data } })]
   },
 }

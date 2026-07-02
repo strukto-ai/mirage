@@ -18,8 +18,8 @@ import { norm, nowIso } from './utils.ts'
 import { rstripSlash } from '@struktoai/mirage-core'
 
 export async function rename(accessor: RedisAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
-  const s = norm(src.stripPrefix)
-  const d = norm(dst.stripPrefix)
+  const s = norm(src.mountPath)
+  const d = norm(dst.mountPath)
   const now = nowIso()
   const store = accessor.store
   if (await store.hasFile(s)) {

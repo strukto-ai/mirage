@@ -31,7 +31,7 @@ function toStr(value: unknown): string {
 function targetTable(paths: PathSpec[], config: LanceDBConfigResolved): string | null {
   if (config.table !== null) return config.table
   for (const path of paths) {
-    const key = stripSlash(path.stripPrefix)
+    const key = stripSlash(path.mountPath)
     if (key !== '') return key.split('/')[0] ?? null
   }
   return null

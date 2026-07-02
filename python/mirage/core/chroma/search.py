@@ -4,6 +4,7 @@ from mirage.cache.index import IndexCacheStore, IndexEntry
 from mirage.core.chroma.path import resolve_path
 from mirage.core.chroma.walk import walk
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_prefix_of, rekey
 from mirage.utils.score import score_from_distance
 
 
@@ -17,7 +18,8 @@ async def search_segments(
 ) -> bytes:
     validate_args(query, top_k)
     if not mount_prefix and paths:
-        mount_prefix = paths[0].prefix
+        mount_prefix = mount_prefix_of(paths[0].virtual,
+                                       paths[0].resource_path)
     kwargs: dict[str, Any] = {
         "query_texts": [query],
         "n_results": top_k,
@@ -67,7 +69,8 @@ async def target_entries(
                                   include_root=False,
                                   strip_prefix=False)
             for child in children:
-                child_spec = PathSpec.from_str_path(child, path.prefix)
+                child_spec = PathSpec.from_str_path(
+                    child, rekey(path.virtual, path.resource_path, child))
                 child_resolved = await resolve_path(accessor, child_spec,
                                                     index)
                 if (child_resolved.entry is not None

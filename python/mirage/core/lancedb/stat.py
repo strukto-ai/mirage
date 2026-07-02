@@ -28,7 +28,7 @@ _IMAGE_TYPES = {
 
 
 def _name_of(path: PathSpec) -> str:
-    stripped = path.original.rstrip("/")
+    stripped = path.virtual.rstrip("/")
     return stripped.rsplit("/", 1)[-1] or "/"
 
 
@@ -38,15 +38,17 @@ async def stat(
     index: IndexCacheStore = None,
 ) -> FileStat:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
     config = accessor.config
     scope = detect_scope(path, config)
 
     if scope.level == ScopeLevel.UNKNOWN:
-        raise FileNotFoundError(path.original)
+        raise FileNotFoundError(path.virtual)
 
     if scope.table and not await table_exists(accessor, scope.table):
-        raise FileNotFoundError(path.original)
+        raise FileNotFoundError(path.virtual)
 
     if scope.level in (ScopeLevel.ROOT, ScopeLevel.GROUP_DIR):
         return FileStat(name=_name_of(path), type=FileType.DIRECTORY)

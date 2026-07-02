@@ -5,6 +5,7 @@ from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 
 async def _sha256_stream(source: AsyncIterator[bytes],
@@ -29,9 +30,9 @@ async def _sha256_multi(
 
 def _resolve_check_target(filename: str, mount_prefix: str) -> str | PathSpec:
     if mount_prefix and filename.startswith(mount_prefix + "/"):
-        return PathSpec(original=filename,
+        return PathSpec(virtual=filename,
                         directory=filename,
-                        prefix=mount_prefix)
+                        resource_path=mount_key(filename, mount_prefix))
     return filename
 
 
@@ -42,7 +43,8 @@ async def _sha256_check(
     read_stream: Callable[..., AsyncIterator[bytes]],
 ) -> tuple[bytes, int]:
     data = (await read_bytes(accessor, path)).decode(errors="replace")
-    mount_prefix = path.prefix if isinstance(path, PathSpec) else ""
+    mount_prefix = mount_prefix_of(
+        path.virtual, path.resource_path) if isinstance(path, PathSpec) else ""
     lines: list[str] = []
     failed = False
     for line in split_lines(data):
@@ -80,7 +82,7 @@ async def sha256sum(
     if paths:
         return _sha256_multi(
             accessor, paths,
-            read_stream), IOResult(cache=[p.strip_prefix for p in paths])
+            read_stream), IOResult(cache=[p.mount_path for p in paths])
     source = _resolve_source(stdin)
     return _sha256_stream(source, "-"), IOResult()
 

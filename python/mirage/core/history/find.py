@@ -62,7 +62,7 @@ async def find(
     Returns:
         list[str]: The view path relative to the mount, or empty.
     """
-    key = path.strip_prefix if isinstance(path, PathSpec) else path
+    key = path.mount_path if isinstance(path, PathSpec) else path
     if key.strip("/") not in VIEW_KEYS:
         raise FileNotFoundError(key)
     if maxdepth is not None and maxdepth < 0:
@@ -82,7 +82,7 @@ async def find(
                                                     name_exclude=name_exclude,
                                                     or_names=or_names,
                                                     empty=empty)
-    full = path.original if isinstance(path, PathSpec) else path
+    full = path.virtual if isinstance(path, PathSpec) else path
     entry = FindEntry(key=full,
                       name=VIEW_NAME,
                       kind="f",

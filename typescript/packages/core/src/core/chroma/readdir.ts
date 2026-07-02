@@ -31,11 +31,11 @@ export async function readdir(
 ): Promise<string[]> {
   const spec = typeof path === 'string' ? PathSpec.fromStrPath(path) : path
   const resolved = await resolvePath(accessor, spec, index)
-  if (!resolved.isDir) throw enotdir(spec.original)
+  if (!resolved.isDir) throw enotdir(spec.virtual)
   if (index === undefined) throw new Error('chroma: missing index')
   const listing = await index.listDir(resolved.virtualKey)
   if (listing.entries === undefined || listing.entries === null) {
-    throw enoent(spec.original)
+    throw enoent(spec.virtual)
   }
   return listing.entries
 }

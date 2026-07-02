@@ -13,17 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PathSpec } from '@struktoai/mirage-core'
-import { lstripSlash, rstripSlash } from '@struktoai/mirage-core'
+import { lstripSlash, mountPrefixOf, rstripSlash } from '@struktoai/mirage-core'
 
 const S_IFMT = 0o170000
 const S_IFDIR = 0o040000
 const S_IFREG = 0o100000
 
 export function stripPrefix(p: PathSpec): string {
-  if (p.prefix && p.original.startsWith(p.prefix)) {
-    return p.original.slice(p.prefix.length) || '/'
+  if (
+    mountPrefixOf(p.virtual, p.resourcePath) &&
+    p.virtual.startsWith(mountPrefixOf(p.virtual, p.resourcePath))
+  ) {
+    return p.virtual.slice(mountPrefixOf(p.virtual, p.resourcePath).length) || '/'
   }
-  return p.original
+  return p.virtual
 }
 
 export function joinRoot(root: string, rel: string): string {

@@ -39,6 +39,7 @@ from mirage.resource.base import BaseResource
 from mirage.resource.ram.prompt import PROMPT
 from mirage.resource.ram.store import RAMStore
 from mirage.types import PathSpec, ResourceName
+from mirage.utils.key_prefix import mount_key
 
 _RAM_OPS = {
     "read_bytes": read_bytes,
@@ -81,9 +82,9 @@ class RAMResource(BaseResource):
     async def resolve_glob(self, paths, prefix: str = ""):
         if prefix:
             paths = [
-                dataclasses.replace(p, prefix=prefix)
-                if isinstance(p, PathSpec) and not p.prefix else p
-                for p in paths
+                dataclasses.replace(p,
+                                    resource_path=mount_key(p.virtual, prefix))
+                if isinstance(p, PathSpec) else p for p in paths
             ]
         return await _resolve_glob(self.accessor, paths, self._index)
 

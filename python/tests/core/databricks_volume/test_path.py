@@ -4,14 +4,15 @@ from pydantic import ValidationError
 from mirage.core.databricks_volume.path import backend_path, virtual_path
 from mirage.resource.databricks_volume import DatabricksVolumeConfig
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def test_backend_path_uses_volume_root_and_strips_mount_prefix(
         databricks_config):
     path = PathSpec(
-        original="/volume/reports/latest.md",
+        resource_path=mount_key("/volume/reports/latest.md", "/volume"),
+        virtual="/volume/reports/latest.md",
         directory="/volume/reports",
-        prefix="/volume",
     )
     assert backend_path(
         databricks_config,
@@ -20,9 +21,9 @@ def test_backend_path_uses_volume_root_and_strips_mount_prefix(
 
 def test_backend_path_allows_normalized_path_inside_root(databricks_config):
     path = PathSpec(
-        original="/volume/reports/../latest.md",
+        resource_path=mount_key("/volume/reports/../latest.md", "/volume"),
+        virtual="/volume/reports/../latest.md",
         directory="/volume/reports",
-        prefix="/volume",
     )
     assert backend_path(
         databricks_config,
@@ -31,9 +32,10 @@ def test_backend_path_allows_normalized_path_inside_root(databricks_config):
 
 def test_backend_path_rejects_escape_above_configured_root(databricks_config):
     path = PathSpec(
-        original="/volume/../../other_schema/other_volume/secret.txt",
+        resource_path=mount_key(
+            "/volume/../../other_schema/other_volume/secret.txt", "/volume"),
+        virtual="/volume/../../other_schema/other_volume/secret.txt",
         directory="/volume",
-        prefix="/volume",
     )
     with pytest.raises(ValueError, match="escapes Databricks volume root"):
         backend_path(databricks_config, path)

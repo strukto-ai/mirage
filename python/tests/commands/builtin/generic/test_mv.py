@@ -19,11 +19,13 @@ from mirage.types import FileStat, FileType, PathSpec
 
 
 def _spec(path: str) -> PathSpec:
-    return PathSpec(original=path, directory=path)
+    return PathSpec(virtual=path,
+                    directory=path,
+                    resource_path=path.strip("/"))
 
 
 def _key(p) -> str:
-    return (p.original if isinstance(p, PathSpec) else p).rstrip("/")
+    return (p.virtual if isinstance(p, PathSpec) else p).rstrip("/")
 
 
 def _make_backend(files: dict[str, bytes], dirs: set[str]):

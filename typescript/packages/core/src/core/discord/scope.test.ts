@@ -12,20 +12,30 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../utils/slash.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { detectScope } from './scope.ts'
 import { PathSpec } from '../../types.ts'
 
 describe('detectScope', () => {
   it('root → level=root, useNative=true, resourcePath /', () => {
-    const s = detectScope(new PathSpec({ original: '/', directory: '/' }))
+    const s = detectScope(
+      new PathSpec({ resourcePath: stripSlash('/'), virtual: '/', directory: '/' }),
+    )
     expect(s.level).toBe('root')
     expect(s.useNative).toBe(true)
     expect(s.resourcePath).toBe('/')
   })
 
   it('/myserver__G1 → level=guild, guildName=myserver, guildId=G1, useNative=true', () => {
-    const s = detectScope(new PathSpec({ original: '/myserver__G1', directory: '/myserver__G1' }))
+    const s = detectScope(
+      new PathSpec({
+        resourcePath: stripSlash('/myserver__G1'),
+        virtual: '/myserver__G1',
+        directory: '/myserver__G1',
+      }),
+    )
     expect(s.level).toBe('guild')
     expect(s.guildName).toBe('myserver')
     expect(s.guildId).toBe('G1')
@@ -35,7 +45,8 @@ describe('detectScope', () => {
   it('/myserver__G1/channels → level=guild, container=channels, guildId=G1, useNative=true', () => {
     const s = detectScope(
       new PathSpec({
-        original: '/myserver__G1/channels',
+        resourcePath: stripSlash('/myserver__G1/channels'),
+        virtual: '/myserver__G1/channels',
         directory: '/myserver__G1/channels',
       }),
     )
@@ -48,7 +59,8 @@ describe('detectScope', () => {
   it('/myserver__G1/members → level=guild, container=members, guildId=G1, useNative=false', () => {
     const s = detectScope(
       new PathSpec({
-        original: '/myserver__G1/members',
+        resourcePath: stripSlash('/myserver__G1/members'),
+        virtual: '/myserver__G1/members',
         directory: '/myserver__G1/members',
       }),
     )
@@ -61,7 +73,8 @@ describe('detectScope', () => {
   it('/myserver__G1/channels/general__C1 → level=channel, useNative=true', () => {
     const s = detectScope(
       new PathSpec({
-        original: '/myserver__G1/channels/general__C1',
+        resourcePath: stripSlash('/myserver__G1/channels/general__C1'),
+        virtual: '/myserver__G1/channels/general__C1',
         directory: '/myserver__G1/channels/general__C1',
       }),
     )
@@ -77,7 +90,8 @@ describe('detectScope', () => {
   it('/myserver__G1/channels/general__C1/2026-04-24/chat.jsonl → level=messages', () => {
     const s = detectScope(
       new PathSpec({
-        original: '/myserver__G1/channels/general__C1/2026-04-24/chat.jsonl',
+        resourcePath: stripSlash('/myserver__G1/channels/general__C1/2026-04-24/chat.jsonl'),
+        virtual: '/myserver__G1/channels/general__C1/2026-04-24/chat.jsonl',
         directory: '/myserver__G1/channels/general__C1/2026-04-24/chat.jsonl',
       }),
     )
@@ -92,7 +106,8 @@ describe('detectScope', () => {
   it('/myserver__G1/channels/general__C1/2026-04-24 → level=date', () => {
     const s = detectScope(
       new PathSpec({
-        original: '/myserver__G1/channels/general__C1/2026-04-24',
+        resourcePath: stripSlash('/myserver__G1/channels/general__C1/2026-04-24'),
+        virtual: '/myserver__G1/channels/general__C1/2026-04-24',
         directory: '/myserver__G1/channels/general__C1/2026-04-24',
       }),
     )
@@ -104,7 +119,10 @@ describe('detectScope', () => {
   it('/myserver__G1/channels/general__C1/2026-04-24/files/blob.png → level=file_blob', () => {
     const s = detectScope(
       new PathSpec({
-        original: '/myserver__G1/channels/general__C1/2026-04-24/files/blob__A1.png',
+        resourcePath: stripSlash(
+          '/myserver__G1/channels/general__C1/2026-04-24/files/blob__A1.png',
+        ),
+        virtual: '/myserver__G1/channels/general__C1/2026-04-24/files/blob__A1.png',
         directory: '/myserver__G1/channels/general__C1/2026-04-24/files/blob__A1.png',
       }),
     )
@@ -115,7 +133,8 @@ describe('detectScope', () => {
   it('*.jsonl glob in channel dir → level=channel, useNative=true', () => {
     const s = detectScope(
       new PathSpec({
-        original: '/myserver__G1/channels/general__C1/*.jsonl',
+        resourcePath: stripSlash('/myserver__G1/channels/general__C1/*.jsonl'),
+        virtual: '/myserver__G1/channels/general__C1/*.jsonl',
         directory: '/myserver__G1/channels/general__C1',
         pattern: '*.jsonl',
       }),
@@ -130,7 +149,8 @@ describe('detectScope', () => {
   it('handles dirname without __id (just name) gracefully', () => {
     const s = detectScope(
       new PathSpec({
-        original: '/myserver__G1/channels/general',
+        resourcePath: stripSlash('/myserver__G1/channels/general'),
+        virtual: '/myserver__G1/channels/general',
         directory: '/myserver__G1/channels/general',
       }),
     )
@@ -142,9 +162,9 @@ describe('detectScope', () => {
   it('respects PathSpec.prefix', () => {
     const s = detectScope(
       new PathSpec({
-        original: '/discord/myserver__G1/channels/general__C1',
+        virtual: '/discord/myserver__G1/channels/general__C1',
         directory: '/discord/myserver__G1/channels/general__C1',
-        prefix: '/discord',
+        resourcePath: mountKey('/discord/myserver__G1/channels/general__C1', '/discord'),
       }),
     )
     expect(s.level).toBe('channel')
@@ -157,10 +177,10 @@ describe('detectScope', () => {
   it('respects PathSpec.prefix on glob inside channel dir', () => {
     const s = detectScope(
       new PathSpec({
-        original: '/discord/myserver__G1/channels/general__C1/*.jsonl',
+        virtual: '/discord/myserver__G1/channels/general__C1/*.jsonl',
         directory: '/discord/myserver__G1/channels/general__C1',
         pattern: '*.jsonl',
-        prefix: '/discord',
+        resourcePath: mountKey('/discord/myserver__G1/channels/general__C1/*.jsonl', '/discord'),
       }),
     )
     expect(s.level).toBe('channel')
@@ -172,7 +192,8 @@ describe('detectScope', () => {
   it('member json file → level=member, container=members, useNative=false', () => {
     const s = detectScope(
       new PathSpec({
-        original: '/myserver__G1/members/alice__U1.json',
+        resourcePath: stripSlash('/myserver__G1/members/alice__U1.json'),
+        virtual: '/myserver__G1/members/alice__U1.json',
         directory: '/myserver__G1/members/alice__U1.json',
       }),
     )
@@ -187,7 +208,13 @@ describe('detectScope', () => {
   })
 
   it('guild dirname without __id parsed gracefully', () => {
-    const s = detectScope(new PathSpec({ original: '/myserver', directory: '/myserver' }))
+    const s = detectScope(
+      new PathSpec({
+        resourcePath: stripSlash('/myserver'),
+        virtual: '/myserver',
+        directory: '/myserver',
+      }),
+    )
     expect(s.level).toBe('guild')
     expect(s.guildName).toBe('myserver')
     expect(s.guildId).toBeUndefined()

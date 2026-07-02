@@ -2,6 +2,7 @@ import pytest
 
 from mirage.core.chroma import search
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.mark.asyncio
@@ -11,9 +12,10 @@ async def test_search_segments_scopes_folder_to_candidate_slugs(
         chroma_accessor,
         "setup",
         [
-            PathSpec(original="/knowledge/guides",
-                     directory="/knowledge/guides",
-                     prefix="/knowledge/")
+            PathSpec(resource_path=mount_key("/knowledge/guides",
+                                             "/knowledge"),
+                     virtual="/knowledge/guides",
+                     directory="/knowledge/guides")
         ],
         chroma_index,
         top_k=3,

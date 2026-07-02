@@ -157,7 +157,7 @@ export async function xxdGeneric(
     const first = paths[0]
     if (first === undefined) return [null, new IOResult()]
     source = stream(first)
-    cache.push(first.original)
+    cache.push(first.virtual)
   } else {
     source = resolveSource(opts.stdin)
   }

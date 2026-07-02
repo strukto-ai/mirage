@@ -23,7 +23,9 @@ def test_disk_stat_returns_fingerprint_from_mtime(tmp_path):
     p = tmp_path / "f.txt"
     p.write_bytes(b"hi")
     accessor = DiskAccessor(root=tmp_path)
-    scope = PathSpec(original="/f.txt", directory="/")
+    scope = PathSpec(resource_path=("/f.txt").strip("/"),
+                     virtual="/f.txt",
+                     directory="/")
     result = asyncio.run(stat(accessor, scope))
     assert result.fingerprint is not None
     assert result.fingerprint == result.modified

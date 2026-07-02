@@ -16,6 +16,7 @@ import pytest
 
 from mirage.core.chroma.stat import stat, stat_name
 from mirage.types import FileType, PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.mark.asyncio
@@ -29,7 +30,8 @@ async def test_stat_file(chroma_accessor, chroma_index, quickstart_path):
 
 @pytest.mark.asyncio
 async def test_stat_directory(chroma_accessor, chroma_index):
-    path = PathSpec.from_str_path("/knowledge/guides", "/knowledge/")
+    path = PathSpec.from_str_path("/knowledge/guides",
+                                  mount_key("/knowledge/guides", "/knowledge"))
     result = await stat(chroma_accessor, path, chroma_index)
     assert result.type == FileType.DIRECTORY
     assert result.name == "guides"
@@ -37,7 +39,8 @@ async def test_stat_directory(chroma_accessor, chroma_index):
 
 @pytest.mark.asyncio
 async def test_stat_missing_raises(chroma_accessor, chroma_index):
-    path = PathSpec.from_str_path("/knowledge/missing", "/knowledge/")
+    path = PathSpec.from_str_path(
+        "/knowledge/missing", mount_key("/knowledge/missing", "/knowledge"))
     with pytest.raises(FileNotFoundError):
         await stat(chroma_accessor, path, chroma_index)
 

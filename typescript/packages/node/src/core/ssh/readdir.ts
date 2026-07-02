@@ -16,11 +16,14 @@ import type { FileEntryWithStats } from 'ssh2'
 import type { PathSpec } from '@struktoai/mirage-core'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { isNoSuchFile, joinRoot, stripPrefix } from './utils.ts'
-import { enoent, stripSlash } from '@struktoai/mirage-core'
+import { enoent, mountPrefixOf, stripSlash } from '@struktoai/mirage-core'
 
 export async function readdir(accessor: SSHAccessor, p: PathSpec): Promise<string[]> {
   const sftp = await accessor.sftp()
-  const virtual = p.pattern !== null ? p.directory.slice(p.prefix.length) || '/' : stripPrefix(p)
+  const virtual =
+    p.pattern !== null
+      ? p.directory.slice(mountPrefixOf(p.virtual, p.resourcePath).length) || '/'
+      : stripPrefix(p)
   const remote = joinRoot(accessor.config.root ?? '/', virtual)
   const list = await new Promise<FileEntryWithStats[]>((resolveFn, rejectFn) => {
     sftp.readdir(remote, (err, entries) => {
@@ -34,7 +37,7 @@ export async function readdir(accessor: SSHAccessor, p: PathSpec): Promise<strin
   })
   const base = `/${stripSlash(virtual)}`
   const dirPrefix = base === '/' ? '/' : `${base}/`
-  const mountPrefix = p.prefix
+  const mountPrefix = mountPrefixOf(p.virtual, p.resourcePath)
   const names: string[] = []
   for (const entry of list) {
     if (entry.filename === '.' || entry.filename === '..') continue

@@ -16,6 +16,7 @@ import pytest
 
 from mirage.core.chroma.glob import resolve_glob
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.mark.asyncio
@@ -28,22 +29,24 @@ async def test_plain_path_passes_through(chroma_accessor, chroma_index,
 
 @pytest.mark.asyncio
 async def test_pattern_expands_against_readdir(chroma_accessor, chroma_index):
-    pattern = PathSpec(original="/knowledge/guides/quick*",
+    pattern = PathSpec(resource_path=mount_key("/knowledge/guides/quick*",
+                                               "/knowledge"),
+                       virtual="/knowledge/guides/quick*",
                        directory="/knowledge/guides",
                        pattern="quick*",
-                       resolved=False,
-                       prefix="/knowledge/")
+                       resolved=False)
     result = await resolve_glob(chroma_accessor, [pattern], chroma_index)
-    assert [p.original for p in result] == ["/knowledge/guides/quickstart"]
+    assert [p.virtual for p in result] == ["/knowledge/guides/quickstart"]
 
 
 @pytest.mark.asyncio
 async def test_pattern_without_match_expands_to_nothing(
         chroma_accessor, chroma_index):
-    pattern = PathSpec(original="/knowledge/guides/*.zip",
+    pattern = PathSpec(resource_path=mount_key("/knowledge/guides/*.zip",
+                                               "/knowledge"),
+                       virtual="/knowledge/guides/*.zip",
                        directory="/knowledge/guides",
                        pattern="*.zip",
-                       resolved=False,
-                       prefix="/knowledge/")
+                       resolved=False)
     result = await resolve_glob(chroma_accessor, [pattern], chroma_index)
     assert result == []

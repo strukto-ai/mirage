@@ -3,6 +3,7 @@ import pytest
 from mirage.cache.index.config import IndexEntry
 from mirage.core.dify import path
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 from .conftest import folder_entry, noop_ensure_tree
 
@@ -23,12 +24,15 @@ async def test_resolve_path_finds_files_and_directories(
 
     file_result = await path.resolve_path(
         dify_accessor,
-        PathSpec.from_str_path("/knowledge/README.md", "/knowledge/"),
+        PathSpec.from_str_path("/knowledge/README.md",
+                               mount_key("/knowledge/README.md",
+                                         "/knowledge")),
         dify_index,
     )
     dir_result = await path.resolve_path(
         dify_accessor,
-        PathSpec.from_str_path("/knowledge/guides", "/knowledge/"),
+        PathSpec.from_str_path("/knowledge/guides",
+                               mount_key("/knowledge/guides", "/knowledge")),
         dify_index,
     )
 
@@ -50,7 +54,9 @@ async def test_resolve_path_raises_missing(monkeypatch, dify_accessor,
     with pytest.raises(FileNotFoundError):
         await path.resolve_path(
             dify_accessor,
-            PathSpec.from_str_path("/knowledge/missing", "/knowledge/"),
+            PathSpec.from_str_path(
+                "/knowledge/missing",
+                mount_key("/knowledge/missing", "/knowledge")),
             dify_index,
         )
 
@@ -58,10 +64,11 @@ async def test_resolve_path_raises_missing(monkeypatch, dify_accessor,
 def test_virtual_key_for_honors_prefix_and_patterns():
     assert path.virtual_key_for(
         PathSpec.from_str_path(
-            "guides/quickstart",
-            "/knowledge/")) == "/knowledge/guides/quickstart"
+            "/knowledge/guides/quickstart",
+            "guides/quickstart")) == "/knowledge/guides/quickstart"
     assert path.virtual_key_for(
-        PathSpec(original="/knowledge/guides/*.md",
+        PathSpec(resource_path=mount_key("/knowledge/guides/*.md",
+                                         "/knowledge"),
+                 virtual="/knowledge/guides/*.md",
                  directory="/knowledge/guides",
-                 pattern="*.md",
-                 prefix="/knowledge/")) == "/knowledge/guides"
+                 pattern="*.md")) == "/knowledge/guides"

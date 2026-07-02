@@ -19,6 +19,7 @@ from mirage.core.langfuse._client import (fetch_dataset_runs, fetch_datasets,
                                           fetch_traces)
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_prefix_of
 
 TOP_LEVEL_DIRS = ["traces", "sessions", "prompts", "datasets"]
 
@@ -37,10 +38,12 @@ async def readdir(
         prefix (str): mount prefix for virtual index keys.
     """
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    virtual = path.original
-    prefix = path.prefix
-    path = (path.dir if path.pattern else path).strip_prefix
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    virtual = path.virtual
+    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    path = (path.dir if path.pattern else path).mount_path
     key = path.strip("/")
 
     if key and any(p.startswith(".") for p in key.split("/")):

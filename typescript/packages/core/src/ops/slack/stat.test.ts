@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
@@ -56,9 +57,9 @@ describe('ops/slack/stat', () => {
     const out = (await statOp.fn(
       accessor,
       new PathSpec({
-        original: '/mnt/slack/channels/general__C1',
+        virtual: '/mnt/slack/channels/general__C1',
         directory: '/mnt/slack/channels/general__C1',
-        prefix: '/mnt/slack',
+        resourcePath: mountKey('/mnt/slack/channels/general__C1', '/mnt/slack'),
       }),
       [],
       { index: idx },

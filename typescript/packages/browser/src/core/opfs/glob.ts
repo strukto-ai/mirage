@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '@struktoai/mirage-core'
 import { PathSpec } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
 import { SCOPE_ERROR } from './constants.ts'
@@ -29,10 +30,10 @@ export async function resolveGlob(
       result.push(p)
     } else if (p.pattern !== null) {
       const dirSpec = new PathSpec({
-        original: p.directory,
+        virtual: p.directory,
         directory: p.directory,
         resolved: true,
-        prefix: p.prefix,
+        resourcePath: mountKey(p.directory, mountPrefixOf(p.virtual, p.resourcePath)),
       })
       const entries = await readdir(accessor, dirSpec)
       const matched: PathSpec[] = []
@@ -40,10 +41,10 @@ export async function resolveGlob(
         if (fnmatch(gnuBasename(e), p.pattern)) {
           matched.push(
             new PathSpec({
-              original: e,
+              virtual: e,
               directory: p.directory,
               resolved: true,
-              prefix: p.prefix,
+              resourcePath: mountKey(e, mountPrefixOf(p.virtual, p.resourcePath)),
             }),
           )
         }

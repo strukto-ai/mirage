@@ -30,11 +30,11 @@ async def _ft_cat(resolve_glob,
     p = paths[0]
     try:
         raw = await read(accessor, p, index)
-        return module.cat(raw), IOResult(reads={p.strip_prefix: raw},
-                                         cache=[p.strip_prefix])
+        return module.cat(raw), IOResult(reads={p.mount_path: raw},
+                                         cache=[p.mount_path])
     except Exception as e:
         return None, IOResult(
             exit_code=1,
-            stderr=f"cat: {p.original}: failed to read as {_fmt(module)}: {e}".
+            stderr=f"cat: {p.virtual}: failed to read as {_fmt(module)}: {e}".
             encode(),
         )

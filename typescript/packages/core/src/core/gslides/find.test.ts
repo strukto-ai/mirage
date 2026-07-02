@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../utils/slash.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ReaddirModule from './readdir.ts'
 import type * as StatModule from './stat.ts'
@@ -47,8 +48,8 @@ function enoent(p: string): Error {
 
 function mockTree(tree: Record<string, string[]>): void {
   vi.mocked(readdirMod.readdir).mockImplementation((_accessor, spec) => {
-    const children = tree[spec.original]
-    if (children === undefined) return Promise.reject(enoent(spec.original))
+    const children = tree[spec.virtual]
+    if (children === undefined) return Promise.reject(enoent(spec.virtual))
     return Promise.resolve(children)
   })
 }
@@ -59,7 +60,7 @@ const TREE: Record<string, string[]> = {
   '/shared': [],
 }
 
-const ROOT = new PathSpec({ original: '/', directory: '/' })
+const ROOT = new PathSpec({ resourcePath: stripSlash('/'), virtual: '/', directory: '/' })
 
 describe('gslides core find', () => {
   beforeEach(() => {

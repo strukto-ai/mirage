@@ -8,6 +8,7 @@ from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.sharepoint._resolver import _drive_cache, _site_cache
 from mirage.core.sharepoint.readdir import readdir
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 _BASE = "https://graph.microsoft.com/v1.0"
 _SITE_ID = "tenant.sharepoint.com,site-guid,web-guid"
@@ -57,7 +58,9 @@ async def test_readdir_root_lists_sites():
                       },
                   ]
               })
-        path = PathSpec(original="/sp/", directory="/sp/", prefix="/sp")
+        path = PathSpec(resource_path=mount_key("/sp/", "/sp"),
+                        virtual="/sp/",
+                        directory="/sp/")
         names = await readdir(_accessor(), path, index)
     assert "/sp/Engineering" in names
     assert "/sp/Marketing" in names
@@ -81,9 +84,9 @@ async def test_readdir_site_lists_drives():
                       },
                   ]
               })
-        path = PathSpec(original="/sp/Engineering",
-                        directory="/sp/Engineering",
-                        prefix="/sp")
+        path = PathSpec(resource_path=mount_key("/sp/Engineering", "/sp"),
+                        virtual="/sp/Engineering",
+                        directory="/sp/Engineering")
         names = await readdir(_accessor(), path, index)
     assert "/sp/Engineering/Archives" in names
     assert "/sp/Engineering/Documents" in names
@@ -115,9 +118,10 @@ async def test_readdir_drive_root_lists_children():
                       },
                   ]
               })
-        path = PathSpec(original="/sp/Engineering/Documents",
-                        directory="/sp/Engineering/Documents",
-                        prefix="/sp")
+        path = PathSpec(resource_path=mount_key("/sp/Engineering/Documents",
+                                                "/sp"),
+                        virtual="/sp/Engineering/Documents",
+                        directory="/sp/Engineering/Documents")
         names = await readdir(_accessor(), path, index)
     assert "/sp/Engineering/Documents/readme.md" in names
     assert "/sp/Engineering/Documents/src" in names
@@ -140,9 +144,10 @@ async def test_readdir_populates_index_with_metadata():
                       },
                   ]
               })
-        path = PathSpec(original="/sp/Engineering/Documents",
-                        directory="/sp/Engineering/Documents",
-                        prefix="/sp")
+        path = PathSpec(resource_path=mount_key("/sp/Engineering/Documents",
+                                                "/sp"),
+                        virtual="/sp/Engineering/Documents",
+                        directory="/sp/Engineering/Documents")
         await readdir(_accessor(), path, index)
     lookup = await index.get("/sp/Engineering/Documents/a.txt")
     assert lookup.entry is not None
@@ -166,9 +171,10 @@ async def test_readdir_subfolder():
                       },
                   ]
               })
-        path = PathSpec(original="/sp/Engineering/Documents/src",
-                        directory="/sp/Engineering/Documents/src",
-                        prefix="/sp")
+        path = PathSpec(resource_path=mount_key(
+            "/sp/Engineering/Documents/src", "/sp"),
+                        virtual="/sp/Engineering/Documents/src",
+                        directory="/sp/Engineering/Documents/src")
         names = await readdir(_accessor(), path, index)
     assert "/sp/Engineering/Documents/src/main.py" in names
 
@@ -191,9 +197,10 @@ async def test_readdir_of_file_raises_not_a_directory():
                   "size": 3,
                   "file": {}
               })
-        path = PathSpec(original="/sp/Engineering/Documents/a.txt",
-                        directory="/sp/Engineering/Documents",
-                        prefix="/sp")
+        path = PathSpec(resource_path=mount_key(
+            "/sp/Engineering/Documents/a.txt", "/sp"),
+                        virtual="/sp/Engineering/Documents/a.txt",
+                        directory="/sp/Engineering/Documents")
         with pytest.raises(NotADirectoryError):
             await readdir(_accessor(), path, index)
 
@@ -214,9 +221,10 @@ async def test_readdir_cache_hit():
                       },
                   ]
               })
-        path = PathSpec(original="/sp/Engineering/Documents",
-                        directory="/sp/Engineering/Documents",
-                        prefix="/sp")
+        path = PathSpec(resource_path=mount_key("/sp/Engineering/Documents",
+                                                "/sp"),
+                        virtual="/sp/Engineering/Documents",
+                        directory="/sp/Engineering/Documents")
         await readdir(_accessor(), path, index)
         # Second call should hit cache, no extra HTTP call
         names = await readdir(_accessor(), path, index)

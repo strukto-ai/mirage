@@ -21,6 +21,7 @@ from mirage.accessor.gmail import GmailAccessor
 from mirage.cache.index import IndexEntry, RAMIndexCacheStore
 from mirage.core.gmail.read import read
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.fixture
@@ -53,11 +54,13 @@ async def test_read_message(accessor, index):
         result = await read(
             accessor,
             PathSpec(
-                original="/gmail/INBOX/2026-04-12"
+                resource_path=mount_key(
+                    "/gmail/INBOX/2026-04-12"
+                    "/Test_Email__msg1.gmail.json", "/gmail"),
+                virtual="/gmail/INBOX/2026-04-12"
                 "/Test_Email__msg1.gmail.json",
                 directory="/gmail/INBOX/2026-04-12"
                 "/Test_Email__msg1.gmail.json",
-                prefix="/gmail",
             ),
             index,
         )
@@ -71,9 +74,10 @@ async def test_read_not_found(accessor, index):
     with pytest.raises(FileNotFoundError):
         await read(
             accessor,
-            PathSpec(original="/gmail/INBOX/nonexistent.gmail.json",
-                     directory="/gmail/INBOX/nonexistent.gmail.json",
-                     prefix="/gmail"),
+            PathSpec(resource_path=mount_key(
+                "/gmail/INBOX/nonexistent.gmail.json", "/gmail"),
+                     virtual="/gmail/INBOX/nonexistent.gmail.json",
+                     directory="/gmail/INBOX/nonexistent.gmail.json"),
             index,
         )
 
@@ -92,9 +96,9 @@ async def test_read_is_directory(accessor, index):
     with pytest.raises(IsADirectoryError):
         await read(
             accessor,
-            PathSpec(original="/gmail/INBOX",
-                     directory="/gmail/INBOX",
-                     prefix="/gmail"),
+            PathSpec(resource_path=mount_key("/gmail/INBOX", "/gmail"),
+                     virtual="/gmail/INBOX",
+                     directory="/gmail/INBOX"),
             index,
         )
 
@@ -148,11 +152,13 @@ async def test_read_auto_bootstraps_from_empty_index(accessor, index):
         result = await read(
             accessor,
             PathSpec(
-                original="/gmail/INBOX/2026-04-27"
+                resource_path=mount_key(
+                    "/gmail/INBOX/2026-04-27"
+                    "/Hello_World__msg-1.gmail.json", "/gmail"),
+                virtual="/gmail/INBOX/2026-04-27"
                 "/Hello_World__msg-1.gmail.json",
                 directory="/gmail/INBOX/2026-04-27"
                 "/Hello_World__msg-1.gmail.json",
-                prefix="/gmail",
             ),
             index,
         )
@@ -199,9 +205,11 @@ async def test_read_attachment(accessor, index):
         result = await read(
             accessor,
             PathSpec(
-                original="/gmail/INBOX/2026-04-12/Meeting__msg1/report.pdf",
+                resource_path=mount_key(
+                    "/gmail/INBOX/2026-04-12/Meeting__msg1/report.pdf",
+                    "/gmail"),
+                virtual="/gmail/INBOX/2026-04-12/Meeting__msg1/report.pdf",
                 directory="/gmail/INBOX/2026-04-12/Meeting__msg1/report.pdf",
-                prefix="/gmail",
             ),
             index,
         )

@@ -14,6 +14,7 @@
 
 from mirage.core.langfuse.scope import detect_scope
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def test_root_path():
@@ -89,11 +90,11 @@ def test_datasets_name():
 
 def test_glob_scope_root():
     gs = PathSpec(
-        original="/langfuse/",
+        resource_path=mount_key("/langfuse/", "/langfuse"),
+        virtual="/langfuse/",
         directory="/langfuse/",
         pattern=None,
         resolved=False,
-        prefix="/langfuse",
     )
     scope = detect_scope(gs)
     assert scope.level == "root"
@@ -101,11 +102,11 @@ def test_glob_scope_root():
 
 def test_glob_scope_traces():
     gs = PathSpec(
-        original="/langfuse/traces",
+        resource_path=mount_key("/langfuse/traces", "/langfuse"),
+        virtual="/langfuse/traces",
         directory="/langfuse/",
         pattern=None,
         resolved=False,
-        prefix="/langfuse",
     )
     scope = detect_scope(gs)
     assert scope.level == "traces"
@@ -114,11 +115,11 @@ def test_glob_scope_traces():
 
 def test_glob_scope_file():
     gs = PathSpec(
-        original="/langfuse/traces/abc.json",
+        resource_path=mount_key("/langfuse/traces/abc.json", "/langfuse"),
+        virtual="/langfuse/traces/abc.json",
         directory="/langfuse/traces/",
         pattern="*.json",
         resolved=True,
-        prefix="/langfuse",
     )
     scope = detect_scope(gs)
     assert scope.level == "file"

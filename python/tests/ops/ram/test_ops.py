@@ -33,7 +33,10 @@ from mirage.types import FileType, PathSpec
 
 
 def _scope(path: str) -> PathSpec:
-    return PathSpec(original=path, directory=path, resolved=True)
+    return PathSpec(resource_path=(path).strip("/"),
+                    virtual=path,
+                    directory=path,
+                    resolved=True)
 
 
 @pytest.fixture
@@ -127,7 +130,11 @@ async def test_op_unlink_not_found(accessor):
 
 @pytest.mark.asyncio
 async def test_op_rmdir(accessor, store):
-    await mkdir(accessor, PathSpec(original="/empty", directory="/empty"))
+    await mkdir(
+        accessor,
+        PathSpec(resource_path=("/empty").strip("/"),
+                 virtual="/empty",
+                 directory="/empty"))
     await rmdir(accessor, _scope("/empty"))
     assert "/empty" not in store.dirs
 

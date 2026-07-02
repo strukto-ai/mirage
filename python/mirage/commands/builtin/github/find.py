@@ -35,7 +35,7 @@ async def find_provision(
     **_extra: object,
 ) -> ProvisionResult:
     path_strs = [
-        p.original if isinstance(p, PathSpec) else str(p) for p in paths
+        p.virtual if isinstance(p, PathSpec) else str(p) for p in paths
     ]
     return await metadata_provision("find " + " ".join(path_strs))
 

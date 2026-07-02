@@ -19,6 +19,7 @@ from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def _run(coro):
@@ -90,9 +91,9 @@ async def _pathspec_case() -> bool:
     cache, index = _stores()
     await _seed(cache, index)
     manager = CacheManager(cache, index, "/data/", True)
-    spec = PathSpec(original="/data/arch/h.txt",
-                    directory="/data/arch",
-                    prefix="/data/")
+    spec = PathSpec(resource_path=mount_key("/data/arch/h.txt", "/data/"),
+                    virtual="/data/arch/h.txt",
+                    directory="/data/arch")
     await manager.invalidate_after_write(spec)
     return await cache.exists("/data/arch/h.txt")
 
@@ -105,9 +106,9 @@ async def _cached_hit_case() -> bytes | None:
     cache, index = _stores()
     await cache.set("/data/x.txt", b"cached")
     manager = CacheManager(cache, index, "/data/", True)
-    spec = PathSpec(original="/data/x.txt",
-                    directory="/data/",
-                    prefix="/data/")
+    spec = PathSpec(resource_path=mount_key("/data/x.txt", "/data/"),
+                    virtual="/data/x.txt",
+                    directory="/data/")
     return await manager.cached_bytes(spec)
 
 
@@ -118,9 +119,9 @@ def test_cached_bytes_returns_cached_value():
 async def _cached_miss_case() -> bytes | None:
     cache, index = _stores()
     manager = CacheManager(cache, index, "/data/", True)
-    spec = PathSpec(original="/data/x.txt",
-                    directory="/data/",
-                    prefix="/data/")
+    spec = PathSpec(resource_path=mount_key("/data/x.txt", "/data/"),
+                    virtual="/data/x.txt",
+                    directory="/data/")
     return await manager.cached_bytes(spec)
 
 
@@ -132,9 +133,9 @@ async def _cached_local_case() -> bytes | None:
     cache, index = _stores()
     await cache.set("/data/x.txt", b"cached")
     manager = CacheManager(cache, index, "/data/", False)
-    spec = PathSpec(original="/data/x.txt",
-                    directory="/data/",
-                    prefix="/data/")
+    spec = PathSpec(resource_path=mount_key("/data/x.txt", "/data/"),
+                    virtual="/data/x.txt",
+                    directory="/data/")
     return await manager.cached_bytes(spec)
 
 

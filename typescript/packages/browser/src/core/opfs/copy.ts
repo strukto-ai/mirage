@@ -20,14 +20,14 @@ export async function copy(accessor: OPFSAccessor, src: PathSpec, dst: PathSpec)
   const root = accessor.rootHandle
   let srcHandle: FileSystemFileHandle
   try {
-    srcHandle = await resolveFileHandle(root, src.stripPrefix, { create: false })
+    srcHandle = await resolveFileHandle(root, src.mountPath, { create: false })
   } catch (err) {
-    if (isNotFound(err)) throw new Error(`file not found: ${src.stripPrefix}`)
+    if (isNotFound(err)) throw new Error(`file not found: ${src.mountPath}`)
     throw err
   }
   const file = await srcHandle.getFile()
   const data = new Uint8Array(await file.arrayBuffer())
-  const dstHandle = await resolveFileHandle(root, dst.stripPrefix, { create: true })
+  const dstHandle = await resolveFileHandle(root, dst.mountPath, { create: true })
   const writable = await dstHandle.createWritable()
   await writable.write(toWritableChunk(data))
   await writable.close()

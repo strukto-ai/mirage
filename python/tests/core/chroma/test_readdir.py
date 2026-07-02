@@ -16,6 +16,7 @@ import pytest
 
 from mirage.core.chroma.readdir import readdir
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.mark.asyncio
@@ -27,7 +28,8 @@ async def test_readdir_root_lists_top_level(chroma_accessor, chroma_index,
 
 @pytest.mark.asyncio
 async def test_readdir_subdir(chroma_accessor, chroma_index):
-    path = PathSpec.from_str_path("/knowledge/guides", "/knowledge/")
+    path = PathSpec.from_str_path("/knowledge/guides",
+                                  mount_key("/knowledge/guides", "/knowledge"))
     entries = await readdir(chroma_accessor, path, chroma_index)
     assert entries == ["/knowledge/guides/quickstart"]
 

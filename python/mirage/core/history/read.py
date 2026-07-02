@@ -34,7 +34,7 @@ async def read(accessor: HistoryAccessor,
     Returns:
         bytes: Rendered histfile content, fresh on every call.
     """
-    key = path.strip_prefix if isinstance(path, PathSpec) else path
+    key = path.mount_path if isinstance(path, PathSpec) else path
     if key.strip("/") not in VIEW_KEYS:
         raise FileNotFoundError(key)
     events = await accessor.observer.command_events()

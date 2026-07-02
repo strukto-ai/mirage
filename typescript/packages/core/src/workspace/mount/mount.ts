@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import { type Accessor, NOOPAccessor } from '../../accessor/base.ts'
 import type {
   CommandDispatch,
@@ -332,7 +333,7 @@ export class MountEntry {
     } = {},
   ): Promise<[ByteSource | null, IOResult]> {
     const extension =
-      paths.length > 0 && paths[0] !== undefined ? getExtension(paths[0].original) : null
+      paths.length > 0 && paths[0] !== undefined ? getExtension(paths[0].virtual) : null
 
     const handlers = this.resolveCascade(cmdName, extension, this.cmds, this.generalCmds)
     if (handlers.length === 0) {
@@ -353,12 +354,12 @@ export class MountEntry {
     const prefixedPaths = paths.map(
       (p) =>
         new PathSpec({
-          original: p.original,
+          virtual: p.virtual,
           directory: p.directory,
           pattern: p.pattern,
           resolved: p.resolved,
-          prefix: mountPrefix,
-          asTyped: p.asTyped,
+          resourcePath: mountKey(p.virtual, mountPrefix),
+          rawPath: p.rawPath,
         }),
     )
 
@@ -439,9 +440,9 @@ export class MountEntry {
     const mountPrefix = rstripSlash(this.prefix)
     const lastSlash = path.lastIndexOf('/')
     const scope = new PathSpec({
-      original: path,
+      virtual: path,
       directory: lastSlash > 0 ? path.slice(0, lastSlash + 1) : '/',
-      prefix: mountPrefix,
+      resourcePath: mountKey(path, mountPrefix),
     })
     const effectiveKwargs: OpKwargs = {
       ...kwargs,

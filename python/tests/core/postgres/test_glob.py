@@ -37,12 +37,13 @@ def accessor():
 async def test_resolve_glob_str_path(accessor, index):
     result = await resolve_glob(accessor, ["/public/tables/users"], index)
     assert len(result) == 1
-    assert result[0].original == "/public/tables/users"
+    assert result[0].virtual == "/public/tables/users"
 
 
 @pytest.mark.asyncio
 async def test_resolve_glob_resolved_pathspec(accessor, index):
-    p = PathSpec(original="/public/tables/users",
+    p = PathSpec(resource_path=("/public/tables/users").strip("/"),
+                 virtual="/public/tables/users",
                  directory="/public/tables",
                  resolved=True)
     result = await resolve_glob(accessor, [p], index)
@@ -57,18 +58,20 @@ async def test_resolve_glob_pattern_match(accessor, index):
                    "/public/tables/users", "/public/tables/orders",
                    "/public/tables/teams"
                ]):
-        p = PathSpec(original="/public/tables/u*",
+        p = PathSpec(resource_path=("/public/tables/u*").strip("/"),
+                     virtual="/public/tables/u*",
                      directory="/public/tables",
                      pattern="u*",
                      resolved=False)
         result = await resolve_glob(accessor, [p], index)
     assert len(result) == 1
-    assert result[0].original == "/public/tables/users"
+    assert result[0].virtual == "/public/tables/users"
 
 
 @pytest.mark.asyncio
 async def test_resolve_glob_unresolved_no_pattern(accessor, index):
-    p = PathSpec(original="/public/tables",
+    p = PathSpec(resource_path=("/public/tables").strip("/"),
+                 virtual="/public/tables",
                  directory="/public",
                  resolved=False,
                  pattern=None)

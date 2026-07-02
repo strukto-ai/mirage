@@ -43,7 +43,7 @@ export async function readdir(
   const spec = typeof path === 'string' ? PathSpec.fromStrPath(path) : path
   const config = accessor.config
   const scope = detectScope(spec, config)
-  const base = rstripSlash(spec.original)
+  const base = rstripSlash(spec.virtual)
 
   if (scope.level === ScopeLevel.ROOT) {
     const tables = await accessor.driver.listTables()
@@ -73,5 +73,5 @@ export async function readdir(
     return names.map((name) => `${base}/${name}`)
   }
 
-  throw notFound(spec.original)
+  throw notFound(spec.virtual)
 }

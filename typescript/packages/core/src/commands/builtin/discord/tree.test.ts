@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { materialize } from '../../../io/types.ts'
@@ -54,10 +55,10 @@ describe('discord tree', () => {
     const out = await runTree(
       [
         new PathSpec({
-          original: '/mnt/discord/My Server__G1',
+          virtual: '/mnt/discord/My Server__G1',
           directory: '/mnt/discord/My Server__G1',
           resolved: false,
-          prefix: '/mnt/discord',
+          resourcePath: mountKey('/mnt/discord/My Server__G1', '/mnt/discord'),
         }),
       ],
       { L: '1' },
@@ -81,10 +82,10 @@ describe('discord tree', () => {
     const out = await runTree(
       [
         new PathSpec({
-          original: '/mnt/discord/My Server__G1/channels',
+          virtual: '/mnt/discord/My Server__G1/channels',
           directory: '/mnt/discord/My Server__G1/channels',
           resolved: false,
-          prefix: '/mnt/discord',
+          resourcePath: mountKey('/mnt/discord/My Server__G1/channels', '/mnt/discord'),
         }),
       ],
       {},

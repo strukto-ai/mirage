@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 import type * as MessagesModule from './messages.ts'
 import type * as LabelsModule from './labels.ts'
@@ -77,9 +78,9 @@ describe('gmail read auto-bootstrap', () => {
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
     const path = new PathSpec({
-      original: '/gmail/INBOX/2026-04-27/Hello_World__msg-1.gmail.json',
+      virtual: '/gmail/INBOX/2026-04-27/Hello_World__msg-1.gmail.json',
       directory: '/gmail/INBOX/2026-04-27',
-      prefix: '/gmail',
+      resourcePath: mountKey('/gmail/INBOX/2026-04-27/Hello_World__msg-1.gmail.json', '/gmail'),
     })
     const out = await read(accessor, path, index)
     const parsed = JSON.parse(new TextDecoder().decode(out)) as { subject: string }
@@ -97,9 +98,9 @@ describe('gmail read auto-bootstrap', () => {
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
     const path = new PathSpec({
-      original: '/gmail/INBOX/2026-04-27/Missing__msg-x.gmail.json',
+      virtual: '/gmail/INBOX/2026-04-27/Missing__msg-x.gmail.json',
       directory: '/gmail/INBOX/2026-04-27',
-      prefix: '/gmail',
+      resourcePath: mountKey('/gmail/INBOX/2026-04-27/Missing__msg-x.gmail.json', '/gmail'),
     })
     await expect(read(accessor, path, index)).rejects.toMatchObject({ code: 'ENOENT' })
   })

@@ -18,7 +18,11 @@ async def test_search_op_delegates_to_core(monkeypatch):
         return b"result"
 
     monkeypatch.setattr(search, "search_segments", search_segments)
-    paths = [PathSpec(original="/knowledge/a", directory="/knowledge/a")]
+    paths = [
+        PathSpec(resource_path=("/knowledge/a").strip("/"),
+                 virtual="/knowledge/a",
+                 directory="/knowledge/a")
+    ]
 
     result = await search_op(SimpleNamespace(),
                              paths,

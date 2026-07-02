@@ -4,10 +4,11 @@ from collections.abc import Awaitable, Callable
 
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_prefix_of
 
 
 def _resolve_dest(d: str | PathSpec | None, mount_prefix: str) -> str:
-    d_str = d.original if isinstance(d, PathSpec) else d
+    d_str = d.virtual if isinstance(d, PathSpec) else d
     dest_raw = d_str if d_str else "/"
     if mount_prefix and dest_raw.startswith(mount_prefix + "/"):
         return dest_raw[len(mount_prefix):]
@@ -43,7 +44,7 @@ async def unzip(
         if t:
             bad = zf.testzip()
             if bad is None:
-                msg = f"No errors detected in {archive_path.original}\n"
+                msg = f"No errors detected in {archive_path.virtual}\n"
             else:
                 msg = f"first bad file: {bad}\n"
             return msg.encode(), IOResult()
@@ -53,8 +54,9 @@ async def unzip(
                 if not info.is_dir():
                     chunks.append(zf.read(info.filename))
             return b"".join(chunks), IOResult()
-        mount_prefix = archive_path.prefix if isinstance(
-            archive_path, PathSpec) else ""
+        mount_prefix = mount_prefix_of(
+            archive_path.virtual, archive_path.resource_path) if isinstance(
+                archive_path, PathSpec) else ""
         dest = _resolve_dest(d, mount_prefix)
         writes: dict[str, bytes] = {}
         output_lines: list[str] = []

@@ -23,7 +23,7 @@ export async function writeBytes(
 ): Promise<void> {
   const root = accessor.rootHandle
   const start = performance.now()
-  const virtual = p.stripPrefix
+  const virtual = p.mountPath
   const handle = await resolveFileHandle(root, virtual, { create: true })
   const writable = await handle.createWritable()
   await writable.write(toWritableChunk(data))

@@ -26,6 +26,7 @@ from mirage.core.databricks_volume.path import backend_path
 from mirage.resource.databricks_volume import (DatabricksVolumeConfig,
                                                DatabricksVolumeResource)
 from mirage.types import PathSpec, ResourceName
+from mirage.utils.key_prefix import mount_key
 
 
 class NotFoundError(Exception):
@@ -258,9 +259,9 @@ def test_backend_path_uses_volume_root_and_strips_mount_prefix():
         root_path="/root",
     )
     path = PathSpec(
-        original="/volume/reports/latest.md",
+        resource_path=mount_key("/volume/reports/latest.md", "/volume"),
+        virtual="/volume/reports/latest.md",
         directory="/volume/reports",
-        prefix="/volume",
     )
     assert backend_path(
         config,
@@ -325,29 +326,39 @@ async def test_read_stat_readdir_range_stream_and_exists():
     resource = make_resource(files)
 
     assert await resource.read_bytes(
-        PathSpec.from_str_path("/volume/reports/latest.md",
-                               "/volume")) == b"abcdef"
+        PathSpec.from_str_path(
+            "/volume/reports/latest.md",
+            mount_key("/volume/reports/latest.md", "/volume"))) == b"abcdef"
     assert await resource.range_read(
-        PathSpec.from_str_path("/volume/reports/latest.md", "/volume"), 1,
-        4) == b"bcd"
+        PathSpec.from_str_path(
+            "/volume/reports/latest.md",
+            mount_key("/volume/reports/latest.md", "/volume")), 1, 4) == b"bcd"
     chunks = [
         chunk async for chunk in resource.read_stream(
-            PathSpec.from_str_path("/volume/reports/latest.md", "/volume"),
+            PathSpec.from_str_path(
+                "/volume/reports/latest.md",
+                mount_key("/volume/reports/latest.md", "/volume")),
             chunk_size=2,
         )
     ]
     assert chunks == [b"ab", b"cd", b"ef"]
     file_stat = await resource.stat(
-        PathSpec.from_str_path("/volume/reports/latest.md", "/volume"))
+        PathSpec.from_str_path(
+            "/volume/reports/latest.md",
+            mount_key("/volume/reports/latest.md", "/volume")))
     assert file_stat.name == "latest.md"
     assert file_stat.size == 6
     assert file_stat.modified == "2023-11-14T22:13:20+00:00"
     assert await resource.exists(
-        PathSpec.from_str_path("/volume/reports/latest.md", "/volume"))
+        PathSpec.from_str_path(
+            "/volume/reports/latest.md",
+            mount_key("/volume/reports/latest.md", "/volume")))
     assert not await resource.exists(
-        PathSpec.from_str_path("/volume/missing.md", "/volume"))
+        PathSpec.from_str_path("/volume/missing.md",
+                               mount_key("/volume/missing.md", "/volume")))
     entries = await resource.readdir(
-        PathSpec.from_str_path("/volume/reports", "/volume"),
+        PathSpec.from_str_path("/volume/reports",
+                               mount_key("/volume/reports", "/volume")),
         resource.index,
     )
     assert entries == ["/volume/reports/latest.md"]
@@ -378,16 +389,19 @@ async def test_resource_exposes_file_write_ops():
     resource = make_resource(files)
 
     await resource.write(
-        PathSpec.from_str_path("/volume/new.txt", "/volume"),
+        PathSpec.from_str_path("/volume/new.txt",
+                               mount_key("/volume/new.txt", "/volume")),
         b"hello",
         resource.index,
     )
     await resource.create(
-        PathSpec.from_str_path("/volume/empty.txt", "/volume"),
+        PathSpec.from_str_path("/volume/empty.txt",
+                               mount_key("/volume/empty.txt", "/volume")),
         resource.index,
     )
     await resource.unlink(
-        PathSpec.from_str_path("/volume/new.txt", "/volume"),
+        PathSpec.from_str_path("/volume/new.txt",
+                               mount_key("/volume/new.txt", "/volume")),
         resource.index,
     )
 
@@ -581,7 +595,7 @@ async def test_workspace_execute_uses_databricks_volume_mount_for_ls():
     assert b"debug_output.json" in slash_io.stdout
     mount = await ws._registry.resolve_mount(
         "ls",
-        [PathSpec.from_str_path("/dbx", "/dbx")],
+        [PathSpec.from_str_path("/dbx", mount_key("/dbx", "/dbx"))],
         "/",
     )
     assert mount is not None

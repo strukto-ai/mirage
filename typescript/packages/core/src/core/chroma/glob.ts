@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { rekey } from '../../utils/key_prefix.ts'
 import type { ChromaAccessor } from '../../accessor/chroma.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
@@ -35,7 +36,7 @@ export async function resolveGlob(
       const matched = entries
         .filter((e) => fnmatch(e.split('/').pop() ?? '', pat))
         .slice(0, SCOPE_ERROR)
-        .map((e) => PathSpec.fromStrPath(e, p.prefix))
+        .map((e) => PathSpec.fromStrPath(e, rekey(p.virtual, p.resourcePath, e)))
       result.push(...matched)
     } else {
       result.push(p)

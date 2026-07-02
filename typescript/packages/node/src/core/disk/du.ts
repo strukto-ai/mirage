@@ -82,7 +82,7 @@ async function walkAll(
 }
 
 export async function du(accessor: DiskAccessor, p: PathSpec): Promise<number> {
-  const virtual = p.stripPrefix
+  const virtual = p.mountPath
   const full = resolveSafe(accessor.root, virtual)
   return walkSizes(full)
 }
@@ -91,7 +91,7 @@ export async function duAll(
   accessor: DiskAccessor,
   p: PathSpec,
 ): Promise<[entries: [string, number][], total: number]> {
-  const virtual = norm(p.stripPrefix)
+  const virtual = norm(p.mountPath)
   const full = resolveSafe(accessor.root, virtual)
   const entries: [string, number][] = []
   const total = await walkAll(accessor, full, entries)

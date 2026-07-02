@@ -38,7 +38,10 @@ def _patch_read(monkeypatch):
 def _scope(path: str) -> PathSpec:
     norm = "/" + path.lstrip("/")
     directory = norm.rsplit("/", 1)[0] + "/"
-    return PathSpec(original=norm, directory=directory, resolved=True)
+    return PathSpec(resource_path=(norm).strip("/"),
+                    virtual=norm,
+                    directory=directory,
+                    resolved=True)
 
 
 async def _run(accessor, index, path, expr, **kwargs):

@@ -38,7 +38,7 @@ export async function stat(
   }
 
   if (scope.level === ScopeLevel.DATABASE && scope.database !== null) {
-    if (!(await databaseExists(accessor, scope.database))) throw notFound(spec.original)
+    if (!(await databaseExists(accessor, scope.database))) throw notFound(spec.virtual)
     return new FileStat({
       name: scope.database,
       type: FileType.DIRECTORY,
@@ -47,7 +47,7 @@ export async function stat(
   }
 
   if (scope.level === ScopeLevel.KIND_DIR && scope.database !== null && scope.kind !== null) {
-    if (!(await databaseExists(accessor, scope.database))) throw notFound(spec.original)
+    if (!(await databaseExists(accessor, scope.database))) throw notFound(spec.virtual)
     return new FileStat({
       name: KIND_TO_DIR[scope.kind],
       type: FileType.DIRECTORY,
@@ -62,7 +62,7 @@ export async function stat(
     scope.name !== null
   ) {
     if (!(await entityExists(accessor, scope.database, scope.name, scope.kind))) {
-      throw notFound(spec.original)
+      throw notFound(spec.virtual)
     }
     const docCount = await countDocuments(accessor, scope.database, scope.name)
     return new FileStat({
@@ -84,7 +84,7 @@ export async function stat(
     scope.name !== null
   ) {
     if (!(await entityExists(accessor, scope.database, scope.name, scope.kind))) {
-      throw notFound(spec.original)
+      throw notFound(spec.virtual)
     }
     return documentsStat(accessor, scope.database, scope.kind, scope.name)
   }
@@ -96,7 +96,7 @@ export async function stat(
     scope.name !== null
   ) {
     if (!(await entityExists(accessor, scope.database, scope.name, scope.kind))) {
-      throw notFound(spec.original)
+      throw notFound(spec.virtual)
     }
     return new FileStat({
       name: 'schema.json',
@@ -110,7 +110,7 @@ export async function stat(
   }
 
   if (scope.level === ScopeLevel.DATABASE_JSON && scope.database !== null) {
-    if (!(await databaseExists(accessor, scope.database))) throw notFound(spec.original)
+    if (!(await databaseExists(accessor, scope.database))) throw notFound(spec.virtual)
     return new FileStat({
       name: 'database.json',
       type: FileType.TEXT,
@@ -118,7 +118,7 @@ export async function stat(
     })
   }
 
-  throw notFound(spec.original)
+  throw notFound(spec.virtual)
 }
 
 async function documentsStat(

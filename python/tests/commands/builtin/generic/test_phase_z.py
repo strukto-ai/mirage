@@ -8,12 +8,13 @@ from mirage.commands.builtin.generic.tsort import tsort
 from mirage.commands.builtin.generic.unzip import unzip
 from mirage.commands.builtin.generic.zip_cmd import zip_cmd
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def _spec(path: str, prefix: str = "") -> PathSpec:
-    return PathSpec(original=path,
+    return PathSpec(resource_path=mount_key(path, prefix),
+                    virtual=path,
                     directory=path,
-                    prefix=prefix,
                     resolved=True)
 
 
@@ -21,17 +22,17 @@ def _make_backend(files: dict[str, bytes]):
     store = dict(files)
 
     async def read_bytes(accessor, path, index=None):
-        key = path.original if isinstance(path, PathSpec) else path
+        key = path.virtual if isinstance(path, PathSpec) else path
         if key not in store:
             raise FileNotFoundError(key)
         return store[key]
 
     async def write_bytes(accessor, path, data, index=None):
-        key = path.original if isinstance(path, PathSpec) else path
+        key = path.virtual if isinstance(path, PathSpec) else path
         store[key] = data
 
     async def read_stream(accessor, path, index=None):
-        key = path.original if isinstance(path, PathSpec) else path
+        key = path.virtual if isinstance(path, PathSpec) else path
         if key not in store:
             raise FileNotFoundError(key)
         yield store[key]
@@ -234,7 +235,7 @@ async def test_tar_create_and_list():
                           mkdir_fn=mk,
                           c=True,
                           f=_spec("out.tar"))
-    assert "out.tar" in io_res.writes
+    assert "/out.tar" in io_res.writes
     out, _ = await tar([],
                        read_bytes=rb,
                        write_bytes=wb,

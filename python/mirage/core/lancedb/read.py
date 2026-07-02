@@ -46,12 +46,14 @@ async def read(
     index: IndexCacheStore = None,
 ) -> bytes:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
     config = accessor.config
     scope = detect_scope(path, config)
     if scope.level != ScopeLevel.ROW:
         raise enoent(path)
-    row = await _resolve_row(accessor, scope, config, path.original)
+    row = await _resolve_row(accessor, scope, config, path.virtual)
     if scope.blob:
         if not config.blob_column:
             raise enoent(path)

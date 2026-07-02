@@ -100,7 +100,7 @@ async def test_ignore_case_folds_duplicates():
 
 @pytest.mark.asyncio
 async def test_read_stream_async_generator():
-    p = PathSpec(original="/x", directory="/x")
+    p = PathSpec(resource_path=("/x").strip("/"), virtual="/x", directory="/x")
     source, _io = await uniq([p], read_stream=_generator_read_stream)
     out = b"".join([chunk async for chunk in source])
     assert out == b"dup\nsolo\n"

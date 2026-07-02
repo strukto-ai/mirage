@@ -146,7 +146,7 @@ export async function headProvisionGeneric(
     const avgLine = 80
     const low = Math.min(lines * avgLine, fileSize)
     return new ProvisionResult({
-      command: `head ${first.original}`,
+      command: `head ${first.virtual}`,
       networkReadLow: low,
       networkReadHigh: fileSize,
       readOps: 1,

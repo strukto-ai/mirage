@@ -118,10 +118,10 @@ def files_only_shortcircuit(
     if not fully_literal:
         return None
     hits = [
-        p.original for p in resolved
-        if path_predicate is None or path_predicate(p.original)
+        p.virtual for p in resolved
+        if path_predicate is None or path_predicate(p.virtual)
     ]
     if not hits:
         return b"", IOResult(exit_code=1)
-    displays = rebase_display(hits, scope.original, scope.display)
+    displays = rebase_display(hits, scope.virtual, scope.display)
     return format_records(sorted(displays)), IOResult()

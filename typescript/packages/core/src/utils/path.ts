@@ -25,14 +25,14 @@ export function expandTilde(word: string, home: string | null): string {
   return word
 }
 
-export function rebaseDisplay(paths: string[], original: string, display: string | null): string[] {
-  if (display === null || display === original) return paths
-  return paths.map((p) => rebaseOne(p, original, display))
+export function rebaseDisplay(paths: string[], virtual: string, display: string | null): string[] {
+  if (display === null || display === virtual) return paths
+  return paths.map((p) => rebaseOne(p, virtual, display))
 }
 
-export function rebaseOne(path: string, original: string, display: string | null): string {
-  if (display === null || display === original) return path
-  const base = rstripSlash(original)
+export function rebaseOne(path: string, virtual: string, display: string | null): string {
+  if (display === null || display === virtual) return path
+  const base = rstripSlash(virtual)
   if (path === base) return display
   if (path.startsWith(base + '/')) return rstripSlash(display) + path.slice(base.length)
   return path

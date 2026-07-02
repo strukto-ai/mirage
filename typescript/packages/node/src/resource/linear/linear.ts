@@ -14,23 +14,25 @@
 
 import {
   BaseResource,
-  type FileStat,
   HttpLinearTransport,
   LINEAR_COMMANDS,
   LINEAR_PROMPT,
   LINEAR_VFS_OPS,
   LINEAR_WRITE_PROMPT,
   LinearAccessor,
-  type LinearReaddirFilter,
+  PathSpec,
+  ResourceName,
   linearRead,
   linearReaddir,
   linearStat,
-  PathSpec,
+  mountKey,
+  mountPrefixOf,
+  resolveLinearGlob,
+  type FileStat,
+  type LinearReaddirFilter,
   type RegisteredCommand,
   type RegisteredOp,
   type Resource,
-  ResourceName,
-  resolveLinearGlob,
 } from '@struktoai/mirage-core'
 import { redactLinearConfig, type LinearConfig, type LinearConfigRedacted } from './config.ts'
 
@@ -91,7 +93,7 @@ export class LinearResource extends BaseResource implements Resource {
   }
 
   async fingerprint(p: PathSpec): Promise<string | null> {
-    const lookup = await this.index.get(p.original)
+    const lookup = await this.index.get(p.virtual)
     return lookup.entry?.remoteTime ?? null
   }
 
@@ -99,14 +101,14 @@ export class LinearResource extends BaseResource implements Resource {
     const effective =
       prefix !== ''
         ? paths.map((p) =>
-            p.prefix !== ''
+            mountPrefixOf(p.virtual, p.resourcePath) !== ''
               ? p
               : new PathSpec({
-                  original: p.original,
+                  virtual: p.virtual,
                   directory: p.directory,
                   ...(p.pattern !== null ? { pattern: p.pattern } : {}),
                   resolved: p.resolved,
-                  prefix,
+                  resourcePath: mountKey(p.virtual, prefix),
                 }),
           )
         : paths

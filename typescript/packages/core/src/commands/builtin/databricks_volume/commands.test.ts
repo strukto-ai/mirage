@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -39,8 +40,8 @@ function cmdOf(name: string): RegisteredCommand {
   return cmd
 }
 
-function pathOf(original: string): PathSpec {
-  return PathSpec.fromStrPath(original, '/volume')
+function pathOf(virtual: string): PathSpec {
+  return PathSpec.fromStrPath(virtual, mountKey(virtual, '/volume'))
 }
 
 async function run(
@@ -132,9 +133,9 @@ describe('ls', () => {
     vi.stubGlobal('fetch', fetch)
     const { stdout } = await run('ls', [
       new PathSpec({
-        original: '/volume/',
+        virtual: '/volume/',
         directory: '/volume/',
-        prefix: '/volume',
+        resourcePath: mountKey('/volume/', '/volume'),
         resolved: false,
       }),
     ])

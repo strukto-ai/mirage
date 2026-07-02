@@ -37,6 +37,7 @@ from mirage.core.slack.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_prefix_of
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,8 @@ async def grep(
 
         if (scope.use_native and getattr(scope, "target", None) != "files"
                 and search_available(accessor.config)):
-            file_prefix = paths[0].prefix or ""
+            file_prefix = mount_prefix_of(paths[0].virtual,
+                                          paths[0].resource_path) or ""
             query = build_query(pattern, scope)
             target = getattr(scope, "target", None)
             do_msgs = target in (None, "date", "messages")

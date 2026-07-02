@@ -19,16 +19,19 @@ import pytest
 from mirage.commands.builtin.slack.grep import grep
 from mirage.commands.builtin.slack.rg import rg
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def _concrete_paths(n: int = 7):
     return [
         PathSpec(
-            original=(
+            resource_path=mount_key(
+                f"/slack/channels/general__C1/2026-01-{d:02d}/chat.jsonl",
+                "/slack"),
+            virtual=(
                 f"/slack/channels/general__C1/2026-01-{d:02d}/chat.jsonl"),
             directory=(
                 f"/slack/channels/general__C1/2026-01-{d:02d}/chat.jsonl"),
-            prefix="/slack",
         ) for d in range(1, n + 1)
     ]
 
@@ -70,15 +73,17 @@ async def test_grep_falls_back_when_native_search_raises():
     accessor = AsyncMock()
     accessor.config = AsyncMock()
     paths = [
-        PathSpec(original="/slack/channels/general__C1/*.jsonl",
+        PathSpec(resource_path=mount_key("/slack/channels/general__C1/*.jsonl",
+                                         "/slack"),
+                 virtual="/slack/channels/general__C1/*.jsonl",
                  directory="/slack/channels/general__C1/",
-                 pattern="*.jsonl",
-                 prefix="/slack"),
+                 pattern="*.jsonl"),
     ]
     resolved = [
-        PathSpec(original="/slack/channels/general__C1/2026-04-10/chat.jsonl",
-                 directory="/slack/channels/general__C1/2026-04-10/",
-                 prefix="/slack"),
+        PathSpec(resource_path=mount_key(
+            "/slack/channels/general__C1/2026-04-10/chat.jsonl", "/slack"),
+                 virtual="/slack/channels/general__C1/2026-04-10/chat.jsonl",
+                 directory="/slack/channels/general__C1/2026-04-10/"),
     ]
     with patch(
             "mirage.commands.builtin.slack.grep.search_messages",

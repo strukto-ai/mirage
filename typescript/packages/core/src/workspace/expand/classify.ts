@@ -14,7 +14,7 @@
 
 import { PathSpec } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { rstripSlash } from '../../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 
 const FILENAME_CHAR = /[a-zA-Z0-9_./]/
 const NON_PATH_CHAR = /[(){}=;|&<> ]/
@@ -48,7 +48,8 @@ export function classifyWord(
     if (hasGlob) {
       const lastSlash = path.lastIndexOf('/')
       return new PathSpec({
-        original: path,
+        resourcePath: stripSlash(path),
+        virtual: path,
         directory: path.slice(0, lastSlash + 1),
         pattern: path.slice(lastSlash + 1),
         resolved: false,
@@ -56,14 +57,16 @@ export function classifyWord(
     }
     if (isDir) {
       return new PathSpec({
-        original: path,
+        resourcePath: stripSlash(path),
+        virtual: path,
         directory: `${path}/`,
         resolved: false,
       })
     }
     const lastSlash = path.lastIndexOf('/')
     return new PathSpec({
-      original: path,
+      resourcePath: stripSlash(path),
+      virtual: path,
       directory: path.slice(0, lastSlash + 1),
       resolved: true,
     })
@@ -78,11 +81,12 @@ export function classifyWord(
     if (mount === null) return word
     const lastSlash = path.lastIndexOf('/')
     return new PathSpec({
-      original: path,
+      resourcePath: stripSlash(path),
+      virtual: path,
       directory: path.slice(0, lastSlash + 1),
       pattern: path.slice(lastSlash + 1),
       resolved: false,
-      asTyped: word,
+      rawPath: word,
     })
   }
 
@@ -92,10 +96,11 @@ export function classifyWord(
     const path = posixNormpath(`${rstripSlash(cwd)}/${w}`)
     if (registry.mountFor(path) === null) return word
     return new PathSpec({
-      original: path,
+      resourcePath: stripSlash(path),
+      virtual: path,
       directory: path.slice(0, path.lastIndexOf('/') + 1),
       resolved: true,
-      asTyped: w,
+      rawPath: w,
     })
   }
 
@@ -115,18 +120,20 @@ export function classifyBarePath(
   if (hasGlob) {
     const lastSlash = path.lastIndexOf('/')
     return new PathSpec({
-      original: path,
+      resourcePath: stripSlash(path),
+      virtual: path,
       directory: path.slice(0, lastSlash + 1),
       pattern: path.slice(lastSlash + 1),
       resolved: false,
-      asTyped: word,
+      rawPath: word,
     })
   }
   return new PathSpec({
-    original: path,
+    resourcePath: stripSlash(path),
+    virtual: path,
     directory: path.slice(0, path.lastIndexOf('/') + 1),
     resolved: true,
-    asTyped: word,
+    rawPath: word,
   })
 }
 

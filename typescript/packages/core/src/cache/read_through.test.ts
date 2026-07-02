@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import type { Accessor } from '../accessor/base.ts'
 import { PathSpec } from '../types.ts'
@@ -50,7 +51,11 @@ class CountingBackend {
 }
 
 function spec(): PathSpec {
-  return new PathSpec({ original: '/s3/a.txt', directory: '/s3/', prefix: '/s3/' })
+  return new PathSpec({
+    virtual: '/s3/a.txt',
+    directory: '/s3/',
+    resourcePath: mountKey('/s3/a.txt', '/s3/'),
+  })
 }
 
 async function warmManager(data: Uint8Array): Promise<CacheManager> {

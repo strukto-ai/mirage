@@ -30,7 +30,7 @@ async def _resolve_sizes(
     resolved: list[tuple[str, int]] = []
     missing = 0
     for p in paths:
-        path_str = p.original if isinstance(p, PathSpec) else p
+        path_str = p.virtual if isinstance(p, PathSpec) else p
         size = None
         if index is not None:
             lookup = await index.get(path_str)
@@ -148,7 +148,7 @@ async def stat_provision(
 ) -> ProvisionResult:
     """Cost estimate for stat: the command string, no reads."""
     return ProvisionResult(
-        command=f"stat {paths[0].original}" if paths else "stat")
+        command=f"stat {paths[0].virtual}" if paths else "stat")
 
 
 def make_jq_provision(stat: Callable) -> Callable:
@@ -164,14 +164,14 @@ def make_jq_provision(stat: Callable) -> Callable:
         if not paths or not texts:
             return ProvisionResult(command="jq")
         p = paths[0]
-        key = p.strip_prefix if isinstance(p, PathSpec) else p
+        key = p.mount_path if isinstance(p, PathSpec) else p
         try:
             file_stat = await stat(accessor, p, index)
         except (FileNotFoundError, ValueError):
             return ProvisionResult(command="jq")
         file_size = file_stat.size or 0
         expr = texts[0]
-        shown = p.original if isinstance(p, PathSpec) else p
+        shown = p.virtual if isinstance(p, PathSpec) else p
         rendered = f"jq {expr!r} {shown}"
         if is_jsonl_path(key) and is_streamable_jsonl_expr(expr):
             return ProvisionResult(

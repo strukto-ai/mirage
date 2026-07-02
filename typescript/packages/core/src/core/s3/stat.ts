@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { guessType } from '../../utils/filetype.ts'
@@ -26,8 +27,8 @@ export async function stat(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<FileStat> {
-  const original = path.original
-  const prefix = path.prefix
+  const original = path.virtual
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
   const rawPath =
     prefix !== '' && original.startsWith(prefix) ? original.slice(prefix.length) || '/' : original
   const stripped = stripSlash(rawPath)

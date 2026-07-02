@@ -84,7 +84,7 @@ async def write_bytes(
         _ensure_parent_directory_sync,
         accessor,
         remote_parent,
-        path.original,
+        path.virtual,
     )
     try:
         await asyncio.to_thread(_upload_bytes_sync, accessor, remote_path,
@@ -93,5 +93,5 @@ async def write_bytes(
         if is_not_found(exc):
             raise enoent(path) from exc
         raise
-    record("write", path.original, "databricks_volume", len(data), start_ms)
+    record("write", path.virtual, "databricks_volume", len(data), start_ms)
     await invalidate_after_write(path)

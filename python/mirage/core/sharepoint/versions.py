@@ -19,7 +19,7 @@ async def list_versions(accessor: SharePointAccessor,
                         path: PathSpec) -> list[dict]:
     resolved = await resolve(accessor, path)
     if resolved.drive_id is None or resolved.item_path is None:
-        raise enoent(path.original if isinstance(path, PathSpec) else path)
+        raise enoent(path.virtual if isinstance(path, PathSpec) else path)
     url = item_url(resolved.drive_id, resolved.item_path, action="/versions")
     return await graph_list(accessor.config, url)
 
@@ -50,7 +50,7 @@ async def restore_version(accessor: SharePointAccessor, path: PathSpec,
                           version_id: str) -> None:
     resolved = await resolve(accessor, path)
     if resolved.drive_id is None or resolved.item_path is None:
-        raise enoent(path.original if isinstance(path, PathSpec) else path)
+        raise enoent(path.virtual if isinstance(path, PathSpec) else path)
     action = f"/versions/{quote(version_id, safe='')}/restoreVersion"
     url = item_url(resolved.drive_id, resolved.item_path, action=action)
     await graph_post(accessor.config, url)

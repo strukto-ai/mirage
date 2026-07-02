@@ -38,11 +38,11 @@ async def _ft_head(resolve_glob,
     try:
         lines = int(n) if n is not None else 10
         raw = await read(accessor, p, index)
-        return module.head(raw, n=lines), IOResult(reads={p.strip_prefix: raw},
-                                                   cache=[p.strip_prefix])
+        return module.head(raw, n=lines), IOResult(reads={p.mount_path: raw},
+                                                   cache=[p.mount_path])
     except Exception as e:
         return None, IOResult(
             exit_code=1,
-            stderr=f"head: {p.original}: failed to read as {_fmt(module)}: {e}"
-            .encode(),
+            stderr=f"head: {p.virtual}: failed to read as {_fmt(module)}: {e}".
+            encode(),
         )

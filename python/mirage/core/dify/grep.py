@@ -22,8 +22,8 @@ async def grep_bytes(
         async for line_number, raw_line in _enumerate_lines(stream):
             line = raw_line.decode(errors="replace")
             if regex.search(line):
-                lines.append(f"{path.original}:{line_number}:{line}")
-        reads[path.original] = b"".join(chunks)
+                lines.append(f"{path.virtual}:{line_number}:{line}")
+        reads[path.virtual] = b"".join(chunks)
     return "\n".join(lines).encode(), reads
 
 

@@ -152,10 +152,10 @@ async def zgrep(
         for p in paths:
             raw = await read_bytes(accessor, p)
             data = gziplib.decompress(raw)
-            fname = p.original if show_filename else None
+            fname = p.virtual if show_filename else None
             if f.files_only:
                 if _files_only_match(data, compiled, f.ignore_case, f.invert):
-                    all_results.append(p.original)
+                    all_results.append(p.virtual)
                     any_match = True
             else:
                 result, had_match = _zgrep_search(data, compiled,

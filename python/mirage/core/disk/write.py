@@ -33,9 +33,11 @@ def _resolve(root: Path, path: str) -> Path:
 async def write_bytes(accessor: DiskAccessor, path: PathSpec,
                       data: bytes) -> None:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
     if isinstance(path, PathSpec):
-        path = path.strip_prefix
+        path = path.mount_path
     root = accessor.root
     start_ms = int(time.monotonic() * 1000)
     p = _resolve(root, path)

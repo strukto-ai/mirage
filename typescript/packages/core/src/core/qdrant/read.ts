@@ -47,12 +47,12 @@ export async function read(
   const spec = typeof path === 'string' ? PathSpec.fromStrPath(path) : path
   const config = accessor.config
   const scope = detectScope(spec, config)
-  if (scope.level !== ScopeLevel.ROW) throw enoent(spec.original)
-  const row = await resolveRow(accessor, scope, spec.original)
+  if (scope.level !== ScopeLevel.ROW) throw enoent(spec.virtual)
+  const row = await resolveRow(accessor, scope, spec.virtual)
   if (scope.kind === 'blob') {
-    if (config.blobField === null) throw enoent(spec.original)
+    if (config.blobField === null) throw enoent(spec.virtual)
     const blobValue = row[config.blobField]
-    if (blobValue === null || blobValue === undefined) throw enoent(spec.original)
+    if (blobValue === null || blobValue === undefined) throw enoent(spec.virtual)
     return blobBytes(blobValue)
   }
   if (scope.kind === 'txt') {
@@ -61,7 +61,7 @@ export async function read(
       row[config.textField] === null ||
       row[config.textField] === undefined
     ) {
-      throw enoent(spec.original)
+      throw enoent(spec.virtual)
     }
     return renderText(row, config)
   }

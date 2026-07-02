@@ -17,6 +17,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.core.linear.readdir import readdir as _readdir
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 VIRTUAL_DIRS = {"", "teams"}
 
@@ -32,9 +33,9 @@ async def _populate_via_parent(
     try:
         await _readdir(
             accessor,
-            PathSpec(original=parent_path,
+            PathSpec(virtual=parent_path,
                      directory=parent_path,
-                     prefix=prefix),
+                     resource_path=mount_key(parent_path, prefix)),
             index=index,
         )
     # best-effort cache populate; canonical ENOENT raised below
@@ -48,10 +49,12 @@ async def stat(
     index: IndexCacheStore = None,
 ) -> FileStat:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    virtual = path.original
-    prefix = path.prefix
-    key = path.key
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    virtual = path.virtual
+    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    key = path.resource_path
     idx_key = "/" + key if key else "/"
 
     if key in VIRTUAL_DIRS:

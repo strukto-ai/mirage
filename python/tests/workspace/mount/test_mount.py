@@ -76,7 +76,10 @@ def test_read_only_blocks_write_cmd():
     reg = MountRegistry()
     reg.mount("/ro/", RAMResource(), MountMode.READ)
     mount = reg.mount_for("/ro/file.txt")
-    scope = PathSpec(original="/ro/newdir", directory="/ro/", resolved=True)
+    scope = PathSpec(resource_path=("/ro/newdir").strip("/"),
+                     virtual="/ro/newdir",
+                     directory="/ro/",
+                     resolved=True)
     stdout, io = _run(mount.execute_cmd("mkdir", [scope], [], {}))
     assert io.exit_code != 0
     assert b"read-only" in io.stderr
@@ -86,7 +89,10 @@ def test_write_mode_allows_write_cmd():
     reg = MountRegistry()
     reg.mount("/rw/", RAMResource(), MountMode.WRITE)
     mount = reg.mount_for("/rw/file.txt")
-    scope = PathSpec(original="/rw/newdir", directory="/rw/", resolved=True)
+    scope = PathSpec(resource_path=("/rw/newdir").strip("/"),
+                     virtual="/rw/newdir",
+                     directory="/rw/",
+                     resolved=True)
     stdout, io = _run(mount.execute_cmd("mkdir", [scope], [], {}))
     assert io.exit_code == 0
 
@@ -95,7 +101,10 @@ def test_read_only_allows_read_cmd():
     reg = MountRegistry()
     reg.mount("/ro/", RAMResource(), MountMode.READ)
     mount = reg.mount_for("/ro/")
-    scope = PathSpec(original="/ro/", directory="/ro/", resolved=False)
+    scope = PathSpec(resource_path=("/ro/").strip("/"),
+                     virtual="/ro/",
+                     directory="/ro/",
+                     resolved=False)
     stdout, io = _run(mount.execute_cmd("ls", [scope], [], {}))
     assert io.exit_code == 0
 
@@ -105,7 +114,8 @@ def test_read_only_allows_read_cmd():
 
 def test_execute_cmd_cat(registry):
     mount = registry.mount_for("/data/hello.txt")
-    scope = PathSpec(original="/data/hello.txt",
+    scope = PathSpec(resource_path=("/data/hello.txt").strip("/"),
+                     virtual="/data/hello.txt",
                      directory="/data/",
                      resolved=True)
     stdout, io = _run(mount.execute_cmd("cat", [scope], [], {}))
@@ -122,14 +132,18 @@ def test_execute_cmd_not_found(registry):
 
 def test_execute_cmd_ls(registry):
     mount = registry.mount_for("/data/hello.txt")
-    scope = PathSpec(original="/data/", directory="/data/", resolved=False)
+    scope = PathSpec(resource_path=("/data/").strip("/"),
+                     virtual="/data/",
+                     directory="/data/",
+                     resolved=False)
     stdout, io = _run(mount.execute_cmd("ls", [scope], [], {}))
     assert io.exit_code == 0
 
 
 def test_execute_cmd_with_flag_kwargs(registry):
     mount = registry.mount_for("/data/hello.txt")
-    scope = PathSpec(original="/data/hello.txt",
+    scope = PathSpec(resource_path=("/data/hello.txt").strip("/"),
+                     virtual="/data/hello.txt",
                      directory="/data/",
                      resolved=True)
     stdout, io = _run(mount.execute_cmd("cat", [scope], [], {"n": True}))
@@ -138,7 +152,8 @@ def test_execute_cmd_with_flag_kwargs(registry):
 
 def test_execute_cmd_with_texts(registry):
     mount = registry.mount_for("/data/hello.txt")
-    scope = PathSpec(original="/data/hello.txt",
+    scope = PathSpec(resource_path=("/data/hello.txt").strip("/"),
+                     virtual="/data/hello.txt",
                      directory="/data/",
                      resolved=True)
     stdout, io = _run(mount.execute_cmd("grep", [scope], ["hello"], {}))

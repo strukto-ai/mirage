@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import { IndexEntry, type IndexCacheStore } from '../../cache/index/index.ts'
 import { ResourceType } from '../../cache/index/config.ts'
@@ -24,8 +25,8 @@ export async function readdir(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<string[]> {
-  const virtual = path.pattern !== null ? path.directory : path.stripPrefix
-  const mountPrefix = path.prefix
+  const virtual = path.pattern !== null ? path.directory : path.mountPath
+  const mountPrefix = mountPrefixOf(path.virtual, path.resourcePath)
   const virtualKey = mountPrefix + virtual
   if (index !== undefined) {
     const cached = await index.listDir(virtualKey)

@@ -31,23 +31,23 @@ export async function rmdir(
   const p = ensurePathSpec(path)
   const fileStat = await stat(accessor, p, index)
   if (fileStat.type !== FileType.DIRECTORY) {
-    throw notADirectoryError(p.original)
+    throw notADirectoryError(p.virtual)
   }
   const remotePath = backendPath(accessor.config, p)
   let entries
   try {
     entries = await listDirectoryContents(accessor, remotePath)
   } catch (exc) {
-    if (isNotFound(exc)) throw notFoundError(p.original)
+    if (isNotFound(exc)) throw notFoundError(p.virtual)
     throw exc
   }
   if (entries.length > 0) {
-    throw notEmptyError(p.original)
+    throw notEmptyError(p.virtual)
   }
   try {
     await dbxFetch(accessor, 'DELETE', 'directories', remotePath)
   } catch (exc) {
-    if (isNotFound(exc)) throw notFoundError(p.original)
+    if (isNotFound(exc)) throw notFoundError(p.virtual)
     throw exc
   }
   await invalidateAfterUnlink(p)

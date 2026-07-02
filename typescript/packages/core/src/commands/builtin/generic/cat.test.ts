@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../../utils/slash.ts'
 import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
@@ -27,7 +28,12 @@ const FILES: Record<string, string> = {
 }
 
 function spec(path: string): PathSpec {
-  return new PathSpec({ original: path, directory: path, resolved: true })
+  return new PathSpec({
+    resourcePath: stripSlash(path),
+    virtual: path,
+    directory: path,
+    resolved: true,
+  })
 }
 
 function opts(): CommandOpts {
@@ -41,14 +47,14 @@ async function* fileStream(path: string, pulled: string[]): AsyncIterable<Uint8A
 }
 
 function statFn(p: PathSpec): Promise<FileStat> {
-  return Promise.resolve(new FileStat({ name: p.original, size: 1, type: FileType.TEXT }))
+  return Promise.resolve(new FileStat({ name: p.virtual, size: 1, type: FileType.TEXT }))
 }
 
 describe('catGeneric multi-file streaming', () => {
   it('records one reads entry per file, not the joined stream', async () => {
     const pulled: string[] = []
     const result = await catGeneric([spec('/a.txt'), spec('/b.txt')], [], opts(), statFn, (p) =>
-      fileStream(p.original, pulled),
+      fileStream(p.virtual, pulled),
     )
     expect(result).not.toBeNull()
     const [stdout, io] = result ?? [null, new IOResult()]
@@ -60,7 +66,7 @@ describe('catGeneric multi-file streaming', () => {
   it('does not pull the second file when the consumer stops early', async () => {
     const pulled: string[] = []
     const result = await catGeneric([spec('/a.txt'), spec('/b.txt')], [], opts(), statFn, (p) =>
-      fileStream(p.original, pulled),
+      fileStream(p.virtual, pulled),
     )
     const [stdout] = result ?? [null]
     const iter = (stdout as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]()

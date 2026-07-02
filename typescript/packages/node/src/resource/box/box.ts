@@ -13,22 +13,24 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
-  BaseResource,
   BOX_COMMANDS,
   BOX_PROMPT,
   BOX_VFS_OPS,
+  BaseResource,
   BoxAccessor,
   BoxTokenManager,
-  type FileStat,
   PathSpec,
-  type RegisteredCommand,
-  type RegisteredOp,
-  type Resource,
   ResourceName,
   boxRead,
   boxReaddir,
   boxResolveGlob,
   boxStat,
+  mountKey,
+  mountPrefixOf,
+  type FileStat,
+  type RegisteredCommand,
+  type RegisteredOp,
+  type Resource,
 } from '@struktoai/mirage-core'
 import { redactBoxConfig, type BoxConfig, type BoxConfigRedacted } from './config.ts'
 
@@ -91,7 +93,7 @@ export class BoxResource extends BaseResource implements Resource {
   }
 
   async fingerprint(p: PathSpec): Promise<string | null> {
-    const lookup = await this.index.get(p.original)
+    const lookup = await this.index.get(p.virtual)
     return lookup.entry?.remoteTime ?? null
   }
 
@@ -99,14 +101,14 @@ export class BoxResource extends BaseResource implements Resource {
     const effective =
       prefix !== ''
         ? paths.map((p) =>
-            p.prefix !== ''
+            mountPrefixOf(p.virtual, p.resourcePath) !== ''
               ? p
               : new PathSpec({
-                  original: p.original,
+                  virtual: p.virtual,
                   directory: p.directory,
                   ...(p.pattern !== null ? { pattern: p.pattern } : {}),
                   resolved: p.resolved,
-                  prefix,
+                  resourcePath: mountKey(p.virtual, prefix),
                 }),
           )
         : paths

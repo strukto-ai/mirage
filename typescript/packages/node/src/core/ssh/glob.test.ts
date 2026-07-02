@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, stripSlash } from '@struktoai/mirage-core'
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '@struktoai/mirage-core'
 import { makeFakeAccessor } from './_test_utils.ts'
@@ -28,13 +29,14 @@ describe('core/ssh/glob.resolveGlob', () => {
       dirs: new Map([['/', {}]]),
     })
     const pattern = new PathSpec({
-      original: '/*.json',
+      resourcePath: stripSlash('/*.json'),
+      virtual: '/*.json',
       directory: '/',
       pattern: '*.json',
       resolved: false,
     })
     const out = await resolveGlob(accessor, [pattern])
-    const originals = out.map((p) => p.original).sort()
+    const originals = out.map((p) => p.virtual).sort()
     expect(originals).toEqual(['/a.json', '/b.json'])
   })
 
@@ -44,7 +46,7 @@ describe('core/ssh/glob.resolveGlob', () => {
       dirs: new Map([['/', {}]]),
     })
     const out = await resolveGlob(accessor, [PathSpec.fromStrPath('/c.txt')])
-    expect(out.map((p) => p.original)).toEqual(['/c.txt'])
+    expect(out.map((p) => p.virtual)).toEqual(['/c.txt'])
   })
 
   it('preserves the mount prefix in matched paths', async () => {
@@ -56,13 +58,13 @@ describe('core/ssh/glob.resolveGlob', () => {
       dirs: new Map([['/', {}]]),
     })
     const pattern = new PathSpec({
-      original: '/mnt/ssh/*.json',
+      virtual: '/mnt/ssh/*.json',
       directory: '/mnt/ssh/',
       pattern: '*.json',
       resolved: false,
-      prefix: '/mnt/ssh',
+      resourcePath: mountKey('/mnt/ssh/*.json', '/mnt/ssh'),
     })
     const out = await resolveGlob(accessor, [pattern])
-    expect(out.map((p) => p.original)).toEqual(['/mnt/ssh/a.json'])
+    expect(out.map((p) => p.virtual)).toEqual(['/mnt/ssh/a.json'])
   })
 })

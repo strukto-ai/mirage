@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '@struktoai/mirage-core'
 import os from 'node:os'
 import path from 'node:path'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
@@ -82,12 +83,17 @@ async function populate(
   if (parts.length > 1) {
     const dir = `/${parts.slice(0, -1).join('/')}`
     try {
-      await r.mkdir(new PathSpec({ original: dir, directory: dir }), { recursive: true })
+      await r.mkdir(new PathSpec({ resourcePath: stripSlash(dir), virtual: dir, directory: dir }), {
+        recursive: true,
+      })
     } catch {
       // ignore existing dirs
     }
   }
-  await r.writeFile(new PathSpec({ original: fullPath, directory: fullPath }), content)
+  await r.writeFile(
+    new PathSpec({ resourcePath: stripSlash(fullPath), virtual: fullPath, directory: fullPath }),
+    content,
+  )
 }
 
 interface CrossEnv {

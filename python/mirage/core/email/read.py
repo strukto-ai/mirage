@@ -20,6 +20,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.core.email._client import fetch_attachment, fetch_message
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_prefix_of
 
 
 async def read(
@@ -28,10 +29,12 @@ async def read(
     index: IndexCacheStore = None,
 ) -> bytes:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    virtual = path.original
-    prefix = path.prefix
-    key = path.key
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    virtual = path.virtual
+    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    key = path.resource_path
     if index is None:
         raise enoent(virtual)
     virtual_key = prefix + "/" + key if prefix else "/" + key

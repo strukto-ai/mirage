@@ -30,7 +30,7 @@ async function resolveSizes(
   for (const p of paths) {
     let size: number | null = null
     if (index !== undefined) {
-      const lookup = await index.get(p.original)
+      const lookup = await index.get(p.virtual)
       if (lookup.entry !== undefined && lookup.entry !== null) size = lookup.entry.size
     }
     if (size === null) {
@@ -41,7 +41,7 @@ async function resolveSizes(
         // ignore — counted as missing below
       }
     }
-    if (size !== null) resolved.push([p.original, size])
+    if (size !== null) resolved.push([p.virtual, size])
     else missing += 1
   }
   return { resolved, missing }

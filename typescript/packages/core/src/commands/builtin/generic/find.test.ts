@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../../utils/slash.ts'
 import { describe, expect, it } from 'vitest'
 import type { IOResult } from '../../../io/types.ts'
 import type { FindOptions } from '../../../resource/base.ts'
@@ -32,12 +33,12 @@ function enoent(p: string): Error {
 }
 
 function spec(p: string): PathSpec {
-  return new PathSpec({ original: p, directory: p, resolved: false })
+  return new PathSpec({ resourcePath: stripSlash(p), virtual: p, directory: p, resolved: false })
 }
 
 function fakeFind(root: PathSpec, _options: FindOptions): Promise<string[]> {
-  if (root.original === '/missing') return Promise.reject(enoent(root.original))
-  if (root.original === '/limited') return Promise.reject(new Error('rate limited'))
+  if (root.virtual === '/missing') return Promise.reject(enoent(root.virtual))
+  if (root.virtual === '/limited') return Promise.reject(new Error('rate limited'))
   return Promise.resolve(['/found.txt'])
 }
 

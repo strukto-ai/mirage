@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import { materialize, type IOResult } from '../../io/types.ts'
 import { type FileStat, FileType, PathSpec } from '../../types.ts'
@@ -71,8 +72,13 @@ export async function resolvePatternFromFlags(
   let pattern = patternArg(texts, flags)
   let neverMatch = false
   if (Array.isArray(flags.f)) {
+    const first = paths[0]
+    const prefix =
+      (first === undefined ? undefined : mountPrefixOf(first.virtual, first.resourcePath)) ??
+      mountPrefix ??
+      ''
     for (const filePath of flags.f) {
-      const patternSpec = PathSpec.fromStrPath(filePath, paths[0]?.prefix ?? mountPrefix ?? '')
+      const patternSpec = PathSpec.fromStrPath(filePath, mountKey(filePath, prefix))
       let fileData: Uint8Array
       try {
         fileData = await materialize(stream(patternSpec))

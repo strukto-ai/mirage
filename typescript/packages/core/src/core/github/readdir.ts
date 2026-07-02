@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GitHubAccessor } from '../../accessor/github.ts'
 import { LookupStatus } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -22,8 +23,8 @@ import { stripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
 
 function stripPrefix(path: PathSpec): string {
-  const prefix = path.prefix
-  let p = path.pattern !== null ? path.directory : path.original
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  let p = path.pattern !== null ? path.directory : path.virtual
   if (prefix !== '' && p.startsWith(prefix)) {
     p = p.slice(prefix.length) || '/'
   }
@@ -41,9 +42,9 @@ export async function readdir(
   index?: IndexCacheStore,
 ): Promise<string[]> {
   if (index === undefined) {
-    throw enoent(path.original)
+    throw enoent(path.virtual)
   }
-  const prefix = path.prefix
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
   const stripped = stripPrefix(path)
   const key = normalizeKey(stripped)
 

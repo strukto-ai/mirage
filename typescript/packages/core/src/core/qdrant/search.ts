@@ -42,7 +42,7 @@ function contentExt(row: QdrantRow, config: QdrantConfigResolved): string {
 function targetTable(paths: PathSpec[], config: QdrantConfigResolved): string | null {
   if (config.collection !== null) return config.collection
   for (const path of paths) {
-    const key = stripSlash(path.stripPrefix)
+    const key = stripSlash(path.mountPath)
     if (key !== '') return key.split('/')[0] ?? null
   }
   return null

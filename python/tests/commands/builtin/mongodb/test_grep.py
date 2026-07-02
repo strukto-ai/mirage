@@ -30,7 +30,7 @@ def accessor():
 
 
 def _path(s: str = "/db1/collections/coll1/documents.jsonl") -> PathSpec:
-    return PathSpec(original=s, directory=s)
+    return PathSpec(virtual=s, directory=s, resource_path=s.strip("/"))
 
 
 async def _drain(source) -> bytes:

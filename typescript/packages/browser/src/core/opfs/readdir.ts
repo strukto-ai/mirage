@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountPrefixOf } from '@struktoai/mirage-core'
 import type { PathSpec } from '@struktoai/mirage-core'
 import { enotdir } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
@@ -19,7 +20,7 @@ import { isNotFound, iterEntries, norm, resolveDirHandle } from './utils.ts'
 
 export async function readdir(accessor: OPFSAccessor, path: PathSpec): Promise<string[]> {
   const root = accessor.rootHandle
-  const virtual = path.pattern !== null ? path.directory : path.stripPrefix
+  const virtual = path.pattern !== null ? path.directory : path.mountPath
   let dir: FileSystemDirectoryHandle
   try {
     dir = await resolveDirHandle(root, virtual, { create: false })
@@ -36,6 +37,6 @@ export async function readdir(accessor: OPFSAccessor, path: PathSpec): Promise<s
   }
   const base = norm(virtual)
   const dirPrefix = base === '/' ? '/' : `${base}/`
-  const mountPrefix = path.prefix
+  const mountPrefix = mountPrefixOf(path.virtual, path.resourcePath)
   return names.map((n) => `${mountPrefix}${dirPrefix}${n}`).sort()
 }

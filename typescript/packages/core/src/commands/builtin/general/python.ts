@@ -18,7 +18,7 @@ import { PathSpec } from '../../../types.ts'
 import { handlePython } from '../../../workspace/executor/python/handle.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { rstripSlash } from '../../../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -41,7 +41,7 @@ function resolveScript(name: string, cwd: string): PathSpec {
   const path = normalizePosix(joined)
   const lastSlash = path.lastIndexOf('/')
   const directory = lastSlash >= 0 ? path.slice(0, lastSlash + 1) : '/'
-  return new PathSpec({ original: path, directory, resolved: true })
+  return new PathSpec({ resourcePath: stripSlash(path), virtual: path, directory, resolved: true })
 }
 
 async function pythonCommand(
@@ -86,10 +86,10 @@ async function pythonCommand(
   let scriptPath: PathSpec | null = null
   let argStrs: string[]
   if (hasCode) {
-    argStrs = [...paths.map((p) => p.original), ...texts]
+    argStrs = [...paths.map((p) => p.virtual), ...texts]
   } else if (paths.length > 0) {
     scriptPath = paths[0] ?? null
-    argStrs = [...paths.slice(1).map((p) => p.original), ...texts]
+    argStrs = [...paths.slice(1).map((p) => p.virtual), ...texts]
   } else if (texts.length > 0) {
     scriptPath = resolveScript(texts[0] ?? '', opts.cwd)
     argStrs = texts.slice(1)

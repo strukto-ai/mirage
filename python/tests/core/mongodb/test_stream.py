@@ -56,7 +56,7 @@ def _patched_watch(docs):
 
 
 def _path(s: str) -> PathSpec:
-    return PathSpec(original=s, directory=s)
+    return PathSpec(virtual=s, directory=s, resource_path=s.strip("/"))
 
 
 async def _collect(gen):

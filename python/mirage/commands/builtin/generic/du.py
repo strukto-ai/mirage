@@ -46,7 +46,7 @@ async def _du_one(
     entries = all_entries
     if max_depth is not None:
         entries = [(p, sz) for p, sz in entries
-                   if _depth(p, path.original) <= max_depth]
+                   if _depth(p, path.virtual) <= max_depth]
     if not entries:
         return _format_size(total, h) + "\t" + label, total
 
@@ -106,10 +106,10 @@ async def _du_block(
         total = await compute_total(p0)
         return [_format_size(total, h) + "\t" + p0.display], total
     if not a:
-        all_entries = [(p, sz) for p, sz in all_entries if p == p0.original]
+        all_entries = [(p, sz) for p, sz in all_entries if p == p0.virtual]
     if max_depth is not None:
         all_entries = [(p, sz) for p, sz in all_entries
-                       if _depth(p, p0.original) <= max_depth]
+                       if _depth(p, p0.virtual) <= max_depth]
     if not all_entries:
         total = await compute_total(p0)
         return [_format_size(total, h) + "\t" + p0.display], total

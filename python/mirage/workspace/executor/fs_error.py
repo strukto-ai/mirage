@@ -24,7 +24,7 @@ def format_fs_error(cmd_name: str,
     Produces ``<cmd>: <path>: <strerror>`` so output is byte-identical with
     the TypeScript executor. The path is the bare path carried by the
     exception (``exc.filename`` when set, else ``str(exc)``); backends raise
-    with the resolved absolute path (``PathSpec.original``). When ``paths`` is
+    with the resolved absolute path (``PathSpec.virtual``). When ``paths`` is
     supplied, the absolute path is rewritten to the as-typed form
     (``PathSpec.display``) so a relative argument is reported as typed, like
     GNU.
@@ -38,7 +38,7 @@ def format_fs_error(cmd_name: str,
     path = exc.filename or str(exc)
     if paths:
         for p in paths:
-            if p.original == path:
+            if p.virtual == path:
                 path = p.display
                 break
     strerror = fs_strerror(exc)

@@ -14,7 +14,7 @@ def _rand_suffix(length: int) -> str:
 
 def _build_path(p: str | PathSpec | None, t: bool,
                 texts: tuple[str, ...]) -> tuple[str, str]:
-    p_str = p.original if isinstance(p, PathSpec) else p
+    p_str = p.virtual if isinstance(p, PathSpec) else p
     parent = "/tmp" if t else (p_str if p_str else "/tmp")
     template = texts[0] if texts else "tmp.XXXXXXXXXX"
     i = len(template)

@@ -44,5 +44,5 @@ async def touch(
             continue
         if not await exists(accessor, p):
             await write_bytes(accessor, p, b"")
-            writes[p.strip_prefix] = b""
+            writes[p.mount_path] = b""
     return None, IOResult(writes=writes)

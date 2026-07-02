@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from './utils/slash.ts'
+import { mountKey, mountPrefixOf } from './utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import {
   ConsistencyPolicy,
@@ -164,22 +166,22 @@ describe('FileStat', () => {
 describe('PathSpec.fromStrPath', () => {
   it('splits a nested path into directory + original', () => {
     const p = PathSpec.fromStrPath('/a/b/c.txt')
-    expect(p.original).toBe('/a/b/c.txt')
+    expect(p.virtual).toBe('/a/b/c.txt')
     expect(p.directory).toBe('/a/b/')
-    expect(p.prefix).toBe('')
+    expect(mountPrefixOf(p.virtual, p.resourcePath)).toBe('')
     expect(p.resolved).toBe(true)
     expect(p.pattern).toBeNull()
   })
 
   it('treats a path with no slash as having root directory', () => {
     const p = PathSpec.fromStrPath('c.txt')
-    expect(p.original).toBe('c.txt')
+    expect(p.virtual).toBe('c.txt')
     expect(p.directory).toBe('/')
   })
 
   it('treats root / as its own directory', () => {
     const p = PathSpec.fromStrPath('/')
-    expect(p.original).toBe('/')
+    expect(p.virtual).toBe('/')
     expect(p.directory).toBe('/')
   })
 
@@ -194,47 +196,53 @@ describe('PathSpec.fromStrPath', () => {
   })
 
   it('carries the prefix through construction', () => {
-    const p = PathSpec.fromStrPath('/mnt/s3/data/x.json', '/mnt/s3')
-    expect(p.prefix).toBe('/mnt/s3')
+    const p = PathSpec.fromStrPath(
+      '/mnt/s3/data/x.json',
+      mountKey('/mnt/s3/data/x.json', '/mnt/s3'),
+    )
+    expect(mountPrefixOf(p.virtual, p.resourcePath)).toBe('/mnt/s3')
   })
 })
 
-describe('PathSpec.stripPrefix', () => {
+describe('PathSpec.mountPath', () => {
   it('removes a matching prefix', () => {
-    const p = PathSpec.fromStrPath('/mnt/s3/data/x.json', '/mnt/s3')
-    expect(p.stripPrefix).toBe('/data/x.json')
+    const p = PathSpec.fromStrPath(
+      '/mnt/s3/data/x.json',
+      mountKey('/mnt/s3/data/x.json', '/mnt/s3'),
+    )
+    expect(p.mountPath).toBe('/data/x.json')
   })
 
   it('returns "/" when original equals the prefix exactly', () => {
-    const p = PathSpec.fromStrPath('/mnt/s3', '/mnt/s3')
-    expect(p.stripPrefix).toBe('/')
+    const p = PathSpec.fromStrPath('/mnt/s3', mountKey('/mnt/s3', '/mnt/s3'))
+    expect(p.mountPath).toBe('/')
   })
 
   it('leaves path untouched when prefix does not match', () => {
-    const p = PathSpec.fromStrPath('/other/data', '/mnt/s3')
-    expect(p.stripPrefix).toBe('/other/data')
+    const p = PathSpec.fromStrPath('/other/data', mountKey('/other/data', '/mnt/s3'))
+    expect(p.mountPath).toBe('/other/data')
   })
 
   it('leaves path untouched when prefix is empty', () => {
     const p = PathSpec.fromStrPath('/a/b')
-    expect(p.stripPrefix).toBe('/a/b')
+    expect(p.mountPath).toBe('/a/b')
   })
 })
 
 describe('PathSpec.key', () => {
   it('strips leading and trailing slashes from the prefix-stripped path', () => {
     const p = PathSpec.fromStrPath('/a/b/c.txt')
-    expect(p.key).toBe('a/b/c.txt')
+    expect(p.resourcePath).toBe('a/b/c.txt')
   })
 
   it('returns empty string for the root path', () => {
     const p = PathSpec.fromStrPath('/')
-    expect(p.key).toBe('')
+    expect(p.resourcePath).toBe('')
   })
 
   it('uses stripPrefix as its source', () => {
-    const p = PathSpec.fromStrPath('/mnt/s3/data/', '/mnt/s3')
-    expect(p.key).toBe('data')
+    const p = PathSpec.fromStrPath('/mnt/s3/data/', mountKey('/mnt/s3/data/', '/mnt/s3'))
+    expect(p.resourcePath).toBe('data')
   })
 })
 
@@ -242,14 +250,15 @@ describe('PathSpec.dir', () => {
   it('returns a PathSpec whose original is the directory and resolved is false', () => {
     const p = PathSpec.fromStrPath('/a/b/c.txt')
     const d = p.dir
-    expect(d.original).toBe('/a/b/')
+    expect(d.virtual).toBe('/a/b/')
     expect(d.directory).toBe('/a/b/')
     expect(d.resolved).toBe(false)
   })
 
   it('carries the pattern through', () => {
     const p = new PathSpec({
-      original: '/a/b/*.txt',
+      resourcePath: stripSlash('/a/b/*.txt'),
+      virtual: '/a/b/*.txt',
       directory: '/a/b/',
       pattern: '*.txt',
     })
@@ -257,8 +266,8 @@ describe('PathSpec.dir', () => {
   })
 
   it('carries the prefix through', () => {
-    const p = PathSpec.fromStrPath('/mnt/s3/data/x', '/mnt/s3')
-    expect(p.dir.prefix).toBe('/mnt/s3')
+    const p = PathSpec.fromStrPath('/mnt/s3/data/x', mountKey('/mnt/s3/data/x', '/mnt/s3'))
+    expect(mountPrefixOf(p.dir.virtual, p.dir.resourcePath)).toBe('/mnt/s3')
   })
 })
 
@@ -281,30 +290,46 @@ describe('PathSpec immutability', () => {
   })
 })
 
-describe('PathSpec.stripPrefix / key', () => {
+describe('PathSpec.mountPath / key', () => {
   it('strips the mount prefix at a path boundary', () => {
-    const p = new PathSpec({ original: '/data/sub/x.txt', directory: '/data/sub', prefix: '/data' })
-    expect(p.stripPrefix).toBe('/sub/x.txt')
-    expect(p.key).toBe('sub/x.txt')
+    const p = new PathSpec({
+      virtual: '/data/sub/x.txt',
+      directory: '/data/sub',
+      resourcePath: mountKey('/data/sub/x.txt', '/data'),
+    })
+    expect(p.mountPath).toBe('/sub/x.txt')
+    expect(p.resourcePath).toBe('sub/x.txt')
   })
 
   it('does not strip a sibling that only shares the prefix as a string', () => {
     // `/data` must not be stripped from `/database`, which shares it as a
     // string prefix but not a path prefix.
-    const p = new PathSpec({ original: '/database/x.txt', directory: '/database', prefix: '/data' })
-    expect(p.stripPrefix).toBe('/database/x.txt')
-    expect(p.key).toBe('database/x.txt')
+    const p = new PathSpec({
+      virtual: '/database/x.txt',
+      directory: '/database',
+      resourcePath: mountKey('/database/x.txt', '/data'),
+    })
+    expect(p.mountPath).toBe('/database/x.txt')
+    expect(p.resourcePath).toBe('database/x.txt')
   })
 
   it('reduces to "/" and empty key at the mount root', () => {
-    const p = new PathSpec({ original: '/data', directory: '/data', prefix: '/data' })
-    expect(p.stripPrefix).toBe('/')
-    expect(p.key).toBe('')
+    const p = new PathSpec({
+      virtual: '/data',
+      directory: '/data',
+      resourcePath: mountKey('/data', '/data'),
+    })
+    expect(p.mountPath).toBe('/')
+    expect(p.resourcePath).toBe('')
   })
 
   it('is identity without a prefix', () => {
-    const p = new PathSpec({ original: '/x.txt', directory: '/' })
-    expect(p.stripPrefix).toBe('/x.txt')
-    expect(p.key).toBe('x.txt')
+    const p = new PathSpec({
+      resourcePath: stripSlash('/x.txt'),
+      virtual: '/x.txt',
+      directory: '/',
+    })
+    expect(p.mountPath).toBe('/x.txt')
+    expect(p.resourcePath).toBe('x.txt')
   })
 })

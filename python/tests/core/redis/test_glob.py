@@ -50,23 +50,29 @@ def index():
 
 @pytest.mark.asyncio
 async def test_resolve_glob_file_scope(accessor, index):
-    scopes = [PathSpec(original="/readme.md", directory="/", resolved=True)]
+    scopes = [
+        PathSpec(resource_path=("/readme.md").strip("/"),
+                 virtual="/readme.md",
+                 directory="/",
+                 resolved=True)
+    ]
     result = await resolve_glob(accessor, scopes, index)
-    assert result[0].original == "/readme.md"
+    assert result[0].virtual == "/readme.md"
 
 
 @pytest.mark.asyncio
 async def test_resolve_glob_pattern(accessor, index):
     scopes = [
         PathSpec(
-            original="/src/*.py",
+            resource_path=("/src/*.py").strip("/"),
+            virtual="/src/*.py",
             directory="/src",
             pattern="*.py",
             resolved=False,
         )
     ]
     result = await resolve_glob(accessor, scopes, index)
-    originals = [r.original for r in result]
+    originals = [r.virtual for r in result]
     assert any(o == "/src/main.py" for o in originals)
     assert any(o == "/src/util.py" for o in originals)
     assert not any(o == "/src/data.json" for o in originals)
@@ -76,27 +82,32 @@ async def test_resolve_glob_pattern(accessor, index):
 async def test_resolve_glob_directory_scope(accessor, index):
     scopes = [
         PathSpec(
-            original="/src",
+            resource_path=("/src").strip("/"),
+            virtual="/src",
             directory="/src",
             pattern=None,
             resolved=False,
         )
     ]
     result = await resolve_glob(accessor, scopes, index)
-    assert result[0].original == "/src"
+    assert result[0].virtual == "/src"
 
 
 @pytest.mark.asyncio
 async def test_resolve_glob_multiple_scopes(accessor, index):
     scopes = [
-        PathSpec(original="/readme.md", directory="/", resolved=True),
+        PathSpec(resource_path=("/readme.md").strip("/"),
+                 virtual="/readme.md",
+                 directory="/",
+                 resolved=True),
         PathSpec(
-            original="/src/*.py",
+            resource_path=("/src/*.py").strip("/"),
+            virtual="/src/*.py",
             directory="/src",
             pattern="*.py",
             resolved=False,
         ),
     ]
     result = await resolve_glob(accessor, scopes, index)
-    assert result[0].original == "/readme.md"
+    assert result[0].virtual == "/readme.md"
     assert len(result) == 3

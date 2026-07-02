@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { materialize } from '../../../io/types.ts'
@@ -68,10 +69,10 @@ describe('slack ls', () => {
     const out = await runLs(
       [
         new PathSpec({
-          original: '/mnt/slack',
+          virtual: '/mnt/slack',
           directory: '/mnt/slack',
           resolved: false,
-          prefix: '/mnt/slack',
+          resourcePath: mountKey('/mnt/slack', '/mnt/slack'),
         }),
       ],
       {},
@@ -89,10 +90,10 @@ describe('slack ls', () => {
     const out = await runLs(
       [
         new PathSpec({
-          original: '/mnt/slack/channels',
+          virtual: '/mnt/slack/channels',
           directory: '/mnt/slack/channels',
           resolved: false,
-          prefix: '/mnt/slack',
+          resourcePath: mountKey('/mnt/slack/channels', '/mnt/slack'),
         }),
       ],
       {},
@@ -111,10 +112,10 @@ describe('slack ls', () => {
     const out = await runLs(
       [
         new PathSpec({
-          original: '/mnt/slack/users',
+          virtual: '/mnt/slack/users',
           directory: '/mnt/slack/users',
           resolved: false,
-          prefix: '/mnt/slack',
+          resourcePath: mountKey('/mnt/slack/users', '/mnt/slack'),
         }),
       ],
       {},

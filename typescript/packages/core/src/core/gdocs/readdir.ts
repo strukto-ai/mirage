@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GDocsAccessor } from '../../accessor/gdocs.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -33,9 +34,9 @@ export async function readdir(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<string[]> {
-  const prefix = path.prefix
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
   const modifiedRange = path.pattern ? globToModifiedRange(path.pattern) : null
-  const raw = path.pattern ? path.directory : path.original
+  const raw = path.pattern ? path.directory : path.virtual
   let p = raw
   if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
   const key = stripSlash(p)
@@ -46,7 +47,7 @@ export async function readdir(
   }
 
   if (key !== 'owned' && key !== 'shared') {
-    const e = new Error(`ENOENT: ${path.original}`) as Error & { code: string }
+    const e = new Error(`ENOENT: ${path.virtual}`) as Error & { code: string }
     e.code = 'ENOENT'
     throw e
   }

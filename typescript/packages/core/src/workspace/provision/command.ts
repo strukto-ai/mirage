@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import type { IndexCacheStore } from '../../cache/index/index.ts'
 import { parseCommand, parseToKwargs } from '../../commands/spec/parser.ts'
@@ -33,7 +34,7 @@ async function checkCacheHits(
   let hits = 0
   for (let i = 1; i < parts.length; i++) {
     const p = parts[i]
-    if (p instanceof PathSpec && (await cache.exists(p.original))) hits += 1
+    if (p instanceof PathSpec && (await cache.exists(p.virtual))) hits += 1
   }
   return hits
 }
@@ -46,8 +47,8 @@ export async function handleCommandProvision(
   if (parts.length === 0) return new ProvisionResult({ precision: Precision.EXACT })
   const head = parts[0]
   if (head === undefined) return new ProvisionResult({ precision: Precision.EXACT })
-  const cmdName = typeof head === 'string' ? head : head.original
-  const cmdStr = parts.map((p) => (typeof p === 'string' ? p : p.original)).join(' ')
+  const cmdName = typeof head === 'string' ? head : head.virtual
+  const cmdStr = parts.map((p) => (typeof p === 'string' ? p : p.virtual)).join(' ')
 
   let firstScope: PathSpec | null = null
   for (let i = 1; i < parts.length; i++) {
@@ -57,13 +58,13 @@ export async function handleCommandProvision(
       break
     }
   }
-  const mountPath = firstScope !== null ? firstScope.original : session.cwd
+  const mountPath = firstScope !== null ? firstScope.virtual : session.cwd
   const mount = registry.mountFor(mountPath)
   if (mount === null) {
     return new ProvisionResult({ command: cmdStr, precision: Precision.UNKNOWN })
   }
 
-  const extension = firstScope !== null ? getExtension(firstScope.original) : null
+  const extension = firstScope !== null ? getExtension(firstScope.virtual) : null
   const cmd = mount.resolveCommand(cmdName, extension)
   if (cmd?.provisionFn == null) {
     return new ProvisionResult({ command: cmdStr, precision: Precision.UNKNOWN })
@@ -76,11 +77,11 @@ export async function handleCommandProvision(
     const p = parts[i]
     if (p instanceof PathSpec) {
       const scoped = new PathSpec({
-        original: p.original,
+        virtual: p.virtual,
         directory: p.directory,
         pattern: p.pattern,
         resolved: p.resolved,
-        prefix: mountPrefix,
+        resourcePath: mountKey(p.virtual, mountPrefix),
       })
       scopedParts.push(scoped)
       resourceScopes.push(scoped)
@@ -89,7 +90,7 @@ export async function handleCommandProvision(
     }
   }
 
-  const argv = scopedParts.slice(1).map((p) => (p instanceof PathSpec ? p.original : p))
+  const argv = scopedParts.slice(1).map((p) => (p instanceof PathSpec ? p.virtual : p))
   const spec = mount.specFor(cmdName)
   let flagKwargs: Record<string, string | boolean | string[]> = {}
   let textArgs: string[]

@@ -28,7 +28,9 @@ async def stat(
     index: IndexCacheStore = None,
 ) -> FileStat:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
     scope = detect_scope(path)
 
     if scope.level == ScopeLevel.ROOT:

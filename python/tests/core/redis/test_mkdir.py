@@ -47,7 +47,11 @@ async def mk_store():
 @pytest.mark.asyncio
 async def test_mkdir(mk_store):
     a = await mk_store("test:mkdir:1:")
-    await mkdir(a, PathSpec(original="/newdir", directory="/newdir"))
+    await mkdir(
+        a,
+        PathSpec(resource_path=("/newdir").strip("/"),
+                 virtual="/newdir",
+                 directory="/newdir"))
     assert await a.store.has_dir("/newdir")
     assert await a.store.get_modified("/newdir") is not None
 
@@ -59,14 +63,26 @@ async def test_mkdir_parent_not_found(mk_store):
             FileNotFoundError,
             match="parent directory does not exist",
     ):
-        await mkdir(a, PathSpec(original="/no/parent", directory="/no/parent"))
+        await mkdir(
+            a,
+            PathSpec(resource_path=("/no/parent").strip("/"),
+                     virtual="/no/parent",
+                     directory="/no/parent"))
 
 
 @pytest.mark.asyncio
 async def test_mkdir_already_exists(mk_store):
     a = await mk_store("test:mkdir:3:")
-    await mkdir(a, PathSpec(original="/dir", directory="/dir"))
-    await mkdir(a, PathSpec(original="/dir", directory="/dir"))
+    await mkdir(
+        a,
+        PathSpec(resource_path=("/dir").strip("/"),
+                 virtual="/dir",
+                 directory="/dir"))
+    await mkdir(
+        a,
+        PathSpec(resource_path=("/dir").strip("/"),
+                 virtual="/dir",
+                 directory="/dir"))
     assert await a.store.has_dir("/dir")
 
 
@@ -74,7 +90,9 @@ async def test_mkdir_already_exists(mk_store):
 async def test_mkdir_with_parents(mk_store):
     a = await mk_store("test:mkdir:4:")
     await mkdir(a,
-                PathSpec(original="/a/b/c", directory="/a/b/c"),
+                PathSpec(resource_path=("/a/b/c").strip("/"),
+                         virtual="/a/b/c",
+                         directory="/a/b/c"),
                 parents=True)
     assert await a.store.has_dir("/a")
     assert await a.store.has_dir("/a/b")

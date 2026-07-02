@@ -2,6 +2,7 @@ import pytest
 
 from mirage.core.dify import glob, tree
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 from .conftest import list_nested_documents
 
@@ -10,10 +11,10 @@ from .conftest import list_nested_documents
 async def test_resolve_glob_keeps_unresolved_non_pattern_path(
         monkeypatch, dify_accessor, dify_index):
     monkeypatch.setattr(tree, "list_all_documents", list_nested_documents)
-    path = PathSpec(original="/knowledge/guides",
+    path = PathSpec(resource_path=mount_key("/knowledge/guides", "/knowledge"),
+                    virtual="/knowledge/guides",
                     directory="/knowledge/guides",
-                    resolved=False,
-                    prefix="/knowledge/")
+                    resolved=False)
 
     matches = await glob.resolve_glob(dify_accessor, [path], dify_index)
 
@@ -25,14 +26,15 @@ async def test_resolve_glob_matches_directory_pattern(monkeypatch,
                                                       dify_accessor,
                                                       dify_index):
     monkeypatch.setattr(tree, "list_all_documents", list_nested_documents)
-    path = PathSpec(original="/knowledge/guides/*.md",
+    path = PathSpec(resource_path=mount_key("/knowledge/guides/*.md",
+                                            "/knowledge"),
+                    virtual="/knowledge/guides/*.md",
                     directory="/knowledge/guides",
                     pattern="quick*",
-                    resolved=False,
-                    prefix="/knowledge/")
+                    resolved=False)
 
     matches = await glob.resolve_glob(dify_accessor, [path], dify_index)
 
-    assert [item.original
+    assert [item.virtual
             for item in matches] == ["/knowledge/guides/quickstart"]
     assert matches[0].directory == "/knowledge/guides/"

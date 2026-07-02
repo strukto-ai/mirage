@@ -17,7 +17,7 @@ import type { RedisAccessor } from '../../accessor/redis.ts'
 import { norm } from './utils.ts'
 
 export async function exists(accessor: RedisAccessor, path: PathSpec): Promise<boolean> {
-  const p = norm(path.stripPrefix)
+  const p = norm(path.mountPath)
   const store = accessor.store
   return (await store.hasFile(p)) || (await store.hasDir(p))
 }

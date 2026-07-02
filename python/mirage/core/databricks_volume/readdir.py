@@ -22,6 +22,7 @@ from mirage.core.databricks_volume.path import backend_path, virtual_path
 from mirage.core.databricks_volume.stat import modified_to_iso
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_prefix_of
 
 logger = logging.getLogger(__name__)
 SCOPE_ERROR = 10_000
@@ -40,9 +41,11 @@ async def readdir(
     index: IndexCacheStore,
 ) -> list[str]:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
     list_path = path.dir if path.pattern else path
-    virtual_key = list_path.original.rstrip("/") or "/"
+    virtual_key = list_path.virtual.rstrip("/") or "/"
     listing = await index.list_dir(virtual_key)
     if listing.entries is not None:
         return listing.entries
@@ -58,8 +61,9 @@ async def readdir(
             raise enoent(list_path) from exc
         raise
     pairs = sorted(
-        (virtual_path(accessor.config, entry.path, path.prefix), entry)
-        for entry in entries)
+        (virtual_path(accessor.config, entry.path,
+                      mount_prefix_of(path.virtual, path.resource_path)),
+         entry) for entry in entries)
     names = [name for name, _ in pairs]
     if len(names) > SCOPE_ERROR:
         logger.warning(

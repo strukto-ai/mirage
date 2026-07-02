@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 
 import { PathSpec } from '../types.ts'
@@ -64,9 +65,9 @@ describe('CacheManager', () => {
     const [cache, index] = await seeded()
     const manager = new CacheManager(cache, index, '/data/', true)
     const spec = new PathSpec({
-      original: '/data/arch/h.txt',
+      virtual: '/data/arch/h.txt',
       directory: '/data/arch',
-      prefix: '/data',
+      resourcePath: mountKey('/data/arch/h.txt', '/data'),
     })
     await manager.invalidateAfterWrite(spec)
     expect(await cache.exists('/data/arch/h.txt')).toBe(false)

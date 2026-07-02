@@ -21,12 +21,12 @@ import { ExecutionNode } from '../../types.ts'
 import type { Result } from './scope.ts'
 
 function typed(arg: string | PathSpec): string {
-  if (arg instanceof PathSpec) return arg.asTyped ?? arg.original
+  if (arg instanceof PathSpec) return arg.rawPath ?? arg.virtual
   return arg
 }
 
 function abs(arg: string | PathSpec, cwd: string): string {
-  if (arg instanceof PathSpec) return arg.original
+  if (arg instanceof PathSpec) return arg.virtual
   return resolvePath(cwd, arg)
 }
 
@@ -43,7 +43,7 @@ function splitFlags(
   const operands: (string | PathSpec)[] = []
   let parsing = true
   for (const arg of args) {
-    const s = arg instanceof PathSpec ? arg.original : arg
+    const s = arg instanceof PathSpec ? arg.virtual : arg
     if (parsing && s === '--') {
       parsing = false
       continue

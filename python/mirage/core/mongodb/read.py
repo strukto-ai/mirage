@@ -32,7 +32,9 @@ async def read(
     index: IndexCacheStore = None,
 ) -> bytes:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
     scope = detect_scope(path)
     if scope.level == ScopeLevel.DOCUMENTS:
         if not await entity_exists(accessor.client, accessor.config,

@@ -20,6 +20,7 @@ from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.core.databricks_volume.readdir import readdir
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import rekey
 
 logger = logging.getLogger(__name__)
 SCOPE_ERROR = 10_000
@@ -34,14 +35,18 @@ async def resolve_glob(
     for path in paths:
         if isinstance(path, str):
             result.append(
-                PathSpec(original=path, directory=posixpath.dirname(path)))
+                PathSpec(resource_path=(path).strip("/"),
+                         virtual=path,
+                         directory=posixpath.dirname(path)))
             continue
         if path.resolved:
             result.append(path)
         elif path.pattern:
             entries = await readdir(accessor, path.dir, index)
             matched = [
-                PathSpec.from_str_path(entry, path.prefix) for entry in entries
+                PathSpec.from_str_path(
+                    entry, rekey(path.virtual, path.resource_path, entry))
+                for entry in entries
                 if fnmatch.fnmatch(entry.rsplit("/", 1)[-1], path.pattern)
             ]
             if len(matched) > SCOPE_ERROR:

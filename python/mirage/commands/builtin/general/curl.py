@@ -29,11 +29,14 @@ def _resolve_target(o: str | PathSpec, cwd: PathSpec | None) -> PathSpec:
     if o.startswith("/"):
         path = o
     else:
-        base = cwd.original.rstrip("/") if cwd is not None else ""
+        base = cwd.virtual.rstrip("/") if cwd is not None else ""
         path = f"{base}/{o}" if base else f"/{o}"
     last_slash = path.rfind("/")
     directory = path[:last_slash + 1] if last_slash >= 0 else "/"
-    return PathSpec(original=path, directory=directory, resolved=True)
+    return PathSpec(resource_path=(path).strip("/"),
+                    virtual=path,
+                    directory=directory,
+                    resolved=True)
 
 
 @command("curl", resource=None, spec=SPECS["curl"])
@@ -80,7 +83,7 @@ async def curl(
                                data=body,
                                jina=jina)
     if o is not None:
-        o_str = o.original if isinstance(o, PathSpec) else o
+        o_str = o.virtual if isinstance(o, PathSpec) else o
         if dispatch is not None:
             scope = _resolve_target(o, cwd)
             try:

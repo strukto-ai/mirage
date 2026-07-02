@@ -18,7 +18,7 @@ import type { FindOptions } from '../../../resource/base.ts'
 import { parseFindExpression } from '../findParse.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { rstripSlash } from '../../../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { rebaseDisplay } from '../../../utils/path.ts'
 
 const ENC = new TextEncoder()
@@ -117,7 +117,16 @@ export async function findGeneric(
   const sizeFlag = typeof opts.flags.size === 'string' ? opts.flags.size : null
   const mtimeFlag = typeof opts.flags.mtime === 'string' ? opts.flags.mtime : null
   const targets =
-    paths.length > 0 ? paths : [new PathSpec({ original: '/', directory: '/', resolved: false })]
+    paths.length > 0
+      ? paths
+      : [
+          new PathSpec({
+            resourcePath: stripSlash('/'),
+            virtual: '/',
+            directory: '/',
+            resolved: false,
+          }),
+        ]
   const findType: 'f' | 'd' | null = typeFlag === 'f' ? 'f' : typeFlag === 'd' ? 'd' : null
   const maxDepth = maxDepthFlag !== null ? Number.parseInt(maxDepthFlag, 10) : null
   const minDepth = minDepthFlag !== null ? Number.parseInt(minDepthFlag, 10) : null
@@ -173,18 +182,18 @@ export async function findGeneric(
       if (isEnoent(err)) continue
       throw err
     }
-    const rootKey = rstripSlash(root.stripPrefix) || '/'
+    const rootKey = rstripSlash(root.mountPath) || '/'
     const rootMatches: string[] = []
     for (const key of keys) {
       const displayPath =
-        root.original === '/'
+        root.virtual === '/'
           ? key
           : rootKey === '/' && key === '/'
-            ? rstripSlash(root.original)
-            : rstripSlash(root.original) + key.slice(rootKey === '/' ? 0 : rootKey.length)
+            ? rstripSlash(root.virtual)
+            : rstripSlash(root.virtual) + key.slice(rootKey === '/' ? 0 : rootKey.length)
       rootMatches.push(displayPath)
     }
-    matches.push(...rebaseDisplay(rootMatches, root.original, root.display))
+    matches.push(...rebaseDisplay(rootMatches, root.virtual, root.display))
   }
   matches.sort()
   const out: ByteSource = ENC.encode(matches.length ? matches.join('\n') + '\n' : '')

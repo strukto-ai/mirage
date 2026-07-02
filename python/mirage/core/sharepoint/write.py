@@ -33,7 +33,7 @@ async def _upload_session(accessor: SharePointAccessor, drive_id: str,
 
 async def write_bytes(accessor: SharePointAccessor, path: PathSpec,
                       data: bytes) -> None:
-    virtual = path.original if isinstance(path, PathSpec) else path
+    virtual = path.virtual if isinstance(path, PathSpec) else path
     prefix, stripped = split_path(path)
     resolved = await resolve(accessor, path)
     if resolved.drive_id is None or resolved.item_path is None:

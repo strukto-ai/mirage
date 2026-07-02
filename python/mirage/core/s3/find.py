@@ -58,9 +58,11 @@ async def find(
         mindepth (int | None): Minimum depth to include.
     """
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
     start_name = start_basename(path)
-    path = path.strip_prefix
+    path = path.mount_path
     config = accessor.config
     pfx = _prefix(path, config)
     results: list[str] = []

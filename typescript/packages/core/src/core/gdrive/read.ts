@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
@@ -39,16 +40,16 @@ export async function read(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<Uint8Array> {
-  const prefix = path.prefix
-  const key = path.key
-  if (index === undefined) throw enoent(path.original)
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const key = path.resourcePath
+  if (index === undefined) throw enoent(path.virtual)
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
   let result = await index.get(virtualKey)
   if (result.entry === undefined || result.entry === null) {
     // cold index: list the parent directory to populate the entry, then retry
     const parentKey = rstripSlash(virtualKey).replace(/\/[^/]+$/, '') || '/'
     if (parentKey !== virtualKey) {
-      const parentPath = PathSpec.fromStrPath(parentKey, prefix)
+      const parentPath = PathSpec.fromStrPath(parentKey, mountKey(parentKey, prefix))
       try {
         await readdir(accessor, parentPath, index)
         result = await index.get(virtualKey)
@@ -56,10 +57,10 @@ export async function read(
         // parent refresh failed; fall through to ENOENT
       }
     }
-    if (result.entry === undefined || result.entry === null) throw enoent(path.original)
+    if (result.entry === undefined || result.entry === null) throw enoent(path.virtual)
   }
   const rt = result.entry.resourceType
-  if (DIRECTORY_RESOURCE_TYPES.has(rt)) throw eisdir(path.original)
+  if (DIRECTORY_RESOURCE_TYPES.has(rt)) throw eisdir(path.virtual)
   if (rt === 'gdrive/gdoc') return readDoc(accessor.tokenManager, result.entry.id)
   if (rt === 'gdrive/gsheet') return readSpreadsheet(accessor.tokenManager, result.entry.id)
   if (rt === 'gdrive/gslide') return readPresentation(accessor.tokenManager, result.entry.id)

@@ -77,7 +77,7 @@ describe('handleCrossMount — cp / mv', () => {
     >((op, p) => {
       if (op === 'stat') {
         // dst does not exist yet; src is an existing file.
-        if (p.original === '/disk/b') return Promise.reject(new Error('ENOENT'))
+        if (p.virtual === '/disk/b') return Promise.reject(new Error('ENOENT'))
         return Promise.resolve<[unknown, IOResult]>([fileStat('a'), new IOResult()])
       }
       if (op === 'read')
@@ -107,7 +107,7 @@ describe('handleCrossMount — cp / mv', () => {
       ) => Promise<[unknown, IOResult]>
     >((op, p) => {
       if (op === 'stat') {
-        if (p.original === '/disk/b') return Promise.reject(new Error('ENOENT'))
+        if (p.virtual === '/disk/b') return Promise.reject(new Error('ENOENT'))
         return Promise.resolve<[unknown, IOResult]>([dirStat('a'), new IOResult()])
       }
       return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
@@ -128,9 +128,9 @@ describe('handleCrossMount — cp / mv', () => {
       ) => Promise<[unknown, IOResult]>
     >((op, p) => {
       if (op === 'stat') {
-        if (p.original === '/disk/b' || p.original.startsWith('/disk/'))
+        if (p.virtual === '/disk/b' || p.virtual.startsWith('/disk/'))
           return Promise.reject(new Error('ENOENT'))
-        if (p.original === '/ram/dir')
+        if (p.virtual === '/ram/dir')
           return Promise.resolve<[unknown, IOResult]>([dirStat('dir'), new IOResult()])
         return Promise.resolve<[unknown, IOResult]>([fileStat('f'), new IOResult()])
       }
@@ -165,7 +165,7 @@ describe('handleCrossMount — cp / mv', () => {
       ) => Promise<[unknown, IOResult]>
     >((op, p) => {
       if (op === 'stat') {
-        if (p.original === '/disk/b') return Promise.reject(new Error('ENOENT'))
+        if (p.virtual === '/disk/b') return Promise.reject(new Error('ENOENT'))
         return Promise.resolve<[unknown, IOResult]>([fileStat('a'), new IOResult()])
       }
       if (op === 'read')
@@ -192,7 +192,7 @@ describe('handleCrossMount — cmp', () => {
         kw?: Record<string, unknown>,
       ) => Promise<[unknown, IOResult]>
     >((_op, p) => {
-      if (p.original.startsWith('/ram'))
+      if (p.virtual.startsWith('/ram'))
         return Promise.resolve<[unknown, IOResult]>([aBytes, new IOResult()])
       return Promise.resolve<[unknown, IOResult]>([bBytes, new IOResult()])
     })
@@ -233,7 +233,7 @@ describe('handleCrossMount — multi-read cat/head/tail/grep/wc', () => {
         kw?: Record<string, unknown>,
       ) => Promise<[unknown, IOResult]>
     >((_op, p) => {
-      if (p.original.startsWith('/ram'))
+      if (p.virtual.startsWith('/ram'))
         return Promise.resolve<[unknown, IOResult]>([
           new TextEncoder().encode(aStr),
           new IOResult(),

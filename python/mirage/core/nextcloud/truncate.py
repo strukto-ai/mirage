@@ -9,7 +9,7 @@ async def truncate(accessor: NextcloudAccessor, path: PathSpec,
                    length: int) -> None:
     if isinstance(path, str):
         path = PathSpec.from_str_path(path)
-    key = path.strip_prefix.lstrip("/")
+    key = path.mount_path.lstrip("/")
     op = accessor.operator()
     try:
         data = bytes(await op.read(key))

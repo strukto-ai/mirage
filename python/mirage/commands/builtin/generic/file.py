@@ -56,16 +56,16 @@ async def file_cmd(
         s = await stat_fn(accessor, p)
         if s.type == FileType.DIRECTORY:
             lines.append(
-                _format_file_result(p.original, FileType.DIRECTORY, b, i))
+                _format_file_result(p.virtual, FileType.DIRECTORY, b, i))
             continue
         try:
             header = (await read_bytes(accessor, p))[:512]
         except Exception as exc:
-            _logger.debug("file: failed to read header for %s: %s", p.original,
+            _logger.debug("file: failed to read header for %s: %s", p.virtual,
                           exc)
             header = b""
-        result = _detect(p.original, header, s)
-        lines.append(_format_file_result(p.original, result, b, i))
+        result = _detect(p.virtual, header, s)
+        lines.append(_format_file_result(p.virtual, result, b, i))
     return format_records(lines), IOResult()
 
 

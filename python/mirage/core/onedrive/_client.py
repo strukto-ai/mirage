@@ -20,6 +20,7 @@ import aiohttp
 from mirage.accessor.onedrive import OneDriveConfig
 from mirage.resource.secrets import reveal_secret
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_prefix_of
 
 GRAPH_API = "https://graph.microsoft.com/v1.0"
 RETRY_STATUSES = {429, 503, 504}
@@ -28,14 +29,11 @@ MAX_BACKOFF = 30.0
 
 def split_path(path: PathSpec | str) -> tuple[str, str]:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    prefix = path.prefix or ""
-    raw = path.original
-    if prefix and raw.startswith(prefix):
-        rest = raw[len(prefix):]
-        if prefix.endswith("/") or rest == "" or rest.startswith("/"):
-            raw = rest or "/"
-    return prefix, raw.strip("/")
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
+    return prefix, path.resource_path
 
 
 class GraphError(RuntimeError):

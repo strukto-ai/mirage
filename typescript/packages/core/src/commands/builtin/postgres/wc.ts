@@ -54,7 +54,7 @@ async function wcCommand(
       const scope = rowsScope(p)
       if (scope === null) continue
       const count = await countRows(accessor, scope.schema, scope.entity)
-      rows.push({ values: [count], label: p.original })
+      rows.push({ values: [count], label: p.virtual })
       total += count
     }
     if (resolved.length > 1) rows.push({ values: [total], label: 'total' })

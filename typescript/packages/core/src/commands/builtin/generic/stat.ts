@@ -47,7 +47,7 @@ export function statProvisionGeneric(
 ): ProvisionResult {
   const [first] = paths
   return new ProvisionResult({
-    command: first !== undefined ? `stat ${first.original}` : 'stat',
+    command: first !== undefined ? `stat ${first.virtual}` : 'stat',
   })
 }
 

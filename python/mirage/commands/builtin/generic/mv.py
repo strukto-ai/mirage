@@ -76,23 +76,23 @@ async def mv(
     errors: list[str] = []
     for src, target in copy_targets(sources, dst, dst_is_dir):
         if not await path_exists(stat, src):
-            errors.append(f"mv: cannot stat '{src.original}': "
+            errors.append(f"mv: cannot stat '{src.virtual}': "
                           "No such file or directory")
             continue
         if key_of(src) == key_of(target):
-            errors.append(f"mv: '{src.original}' and '{target.original}' "
+            errors.append(f"mv: '{src.virtual}' and '{target.virtual}' "
                           "are the same file")
             continue
         if key_of(target).startswith(key_of(src) + "/"):
-            errors.append(f"mv: cannot move '{src.original}' to a "
-                          f"subdirectory of itself, '{target.original}'")
+            errors.append(f"mv: cannot move '{src.virtual}' to a "
+                          f"subdirectory of itself, '{target.virtual}'")
             continue
         if n and await path_exists(stat, target):
             continue
         if rename is None:
-            src_base = src.strip_prefix.rstrip("/")
-            dst_base = target.strip_prefix.rstrip("/")
-            entries = await walk(readdir, stat, src.original, index)
+            src_base = src.mount_path.rstrip("/")
+            dst_base = target.mount_path.rstrip("/")
+            entries = await walk(readdir, stat, src.virtual, index)
             for entry, is_dir in entries:
                 entry_dst = dst_base + entry[len(src_base):]
                 if is_dir:
@@ -105,10 +105,10 @@ async def mv(
                 await (rmdir if is_dir else unlink)(entry)
         else:
             await rename(src, target)
-        writes[src.strip_prefix] = b""
-        writes[target.strip_prefix] = b""
+        writes[src.mount_path] = b""
+        writes[target.mount_path] = b""
         if v:
-            lines.append(f"'{src.original}' -> '{target.original}'")
+            lines.append(f"'{src.virtual}' -> '{target.virtual}'")
     output = "\n".join(lines) + "\n" if lines else None
     stderr = ("\n".join(errors) + "\n").encode() if errors else None
     return output.encode() if output else None, IOResult(

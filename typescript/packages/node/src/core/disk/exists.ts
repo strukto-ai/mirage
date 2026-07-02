@@ -18,7 +18,7 @@ import type { PathSpec } from '@struktoai/mirage-core'
 import { resolveSafe } from './utils.ts'
 
 export async function exists(accessor: DiskAccessor, path: PathSpec): Promise<boolean> {
-  const full = resolveSafe(accessor.root, path.stripPrefix)
+  const full = resolveSafe(accessor.root, path.mountPath)
   try {
     await access(full)
     return true

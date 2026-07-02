@@ -14,6 +14,7 @@
 
 from mirage.cache.index import IndexEntry
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_prefix_of
 
 
 def scope_relative_key(path: PathSpec | str) -> str:
@@ -25,8 +26,9 @@ def scope_relative_key(path: PathSpec | str) -> str:
     Returns:
         str: Repo-relative key with a leading slash; ``/`` for the root.
     """
-    prefix = path.prefix if isinstance(path, PathSpec) else ""
-    key = path.original if isinstance(path, PathSpec) else str(path)
+    prefix = mount_prefix_of(path.virtual, path.resource_path) if isinstance(
+        path, PathSpec) else ""
+    key = path.virtual if isinstance(path, PathSpec) else str(path)
     if prefix and key.startswith(prefix):
         key = key[len(prefix):] or "/"
     return key

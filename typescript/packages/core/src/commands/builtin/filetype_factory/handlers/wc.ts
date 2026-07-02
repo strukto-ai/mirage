@@ -37,15 +37,15 @@ export async function ftWc<A extends Accessor>(
   try {
     const raw = await readBytes(accessor, first, opts.index ?? undefined)
     const rows = await entry.module.wc(raw)
-    const out: ByteSource = ENC.encode(`${String(rows)}\t${first.original}\n`)
-    return [out, new IOResult({ cache: [first.stripPrefix] })]
+    const out: ByteSource = ENC.encode(`${String(rows)}\t${first.virtual}\n`)
+    return [out, new IOResult({ cache: [first.mountPath] })]
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return [
       null,
       new IOResult({
         exitCode: 1,
-        stderr: ENC.encode(`wc: ${first.original}: failed to read as ${entry.fmt}: ${msg}\n`),
+        stderr: ENC.encode(`wc: ${first.virtual}: failed to read as ${entry.fmt}: ${msg}\n`),
       }),
     ]
   }

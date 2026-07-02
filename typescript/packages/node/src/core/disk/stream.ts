@@ -18,7 +18,7 @@ import { enoent, type PathSpec, recordStream, ResourceName } from '@struktoai/mi
 import { resolveSafe } from './utils.ts'
 
 export async function* stream(accessor: DiskAccessor, path: PathSpec): AsyncIterable<Uint8Array> {
-  const virtual = path.stripPrefix
+  const virtual = path.mountPath
   const full = resolveSafe(accessor.root, virtual)
   const rec = recordStream('read', virtual, ResourceName.DISK)
   const rs = createReadStream(full, { highWaterMark: 65536 })

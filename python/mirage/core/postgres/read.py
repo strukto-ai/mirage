@@ -22,6 +22,7 @@ from mirage.core.postgres._schema_json import (build_database_json,
 from mirage.core.postgres.scope import detect_scope
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 
 async def read(
@@ -33,12 +34,17 @@ async def read(
     offset: int | None = None,
 ) -> bytes:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    prefix = path.prefix
-    raw = path.original
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    raw = path.virtual
     if prefix and raw.startswith(prefix):
         raw = raw[len(prefix):] or "/"
-    scope = detect_scope(PathSpec(original=raw, directory=raw, prefix=prefix))
+    scope = detect_scope(
+        PathSpec(virtual=raw,
+                 directory=raw,
+                 resource_path=mount_key(raw, prefix)))
 
     if scope.level == "database_json":
         doc = await build_database_json(accessor)

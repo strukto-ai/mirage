@@ -73,7 +73,7 @@ def _split_cd_options(args: _CdArgs) -> tuple[_CdArgs, str | None, bool]:
     parsing = True
     physical = False
     for arg in args:
-        s = arg.original if isinstance(arg, PathSpec) else str(arg)
+        s = arg.virtual if isinstance(arg, PathSpec) else str(arg)
         if parsing:
             if s == "--":
                 parsing = False
@@ -242,7 +242,7 @@ async def _dispatch_command_body(
     # Mount commands receive classified with unresolved globs so
     # each resource can handle pattern pushdown.
     resolved = await resolve_globs(classified, registry, text_args=text_args)
-    expanded = [p.original if isinstance(p, PathSpec) else p for p in resolved]
+    expanded = [p.virtual if isinstance(p, PathSpec) else p for p in resolved]
 
     # ── unsupported bash builtins ──────────────
     # Constructs the parser accepts but the executor cannot honor.
@@ -290,7 +290,7 @@ async def _dispatch_command_body(
                                    links=namespace.symlink_targets(),
                                    physical=physical)
         raw = operands[0]
-        raw_str = raw.original if isinstance(raw, PathSpec) else str(raw)
+        raw_str = raw.virtual if isinstance(raw, PathSpec) else str(raw)
         if raw_str == "-":
             old = session.env.get("OLDPWD")
             if not old:
@@ -306,7 +306,7 @@ async def _dispatch_command_body(
                                    physical=physical)
         if isinstance(raw, PathSpec):
             path = raw
-            cdpath_target = raw.as_typed or raw.original
+            cdpath_target = raw.raw_path or raw.virtual
         elif raw_str.startswith("/"):
             path = raw_str
             cdpath_target = raw_str

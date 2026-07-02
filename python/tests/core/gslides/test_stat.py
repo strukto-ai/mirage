@@ -21,6 +21,7 @@ from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.gslides.stat import stat
 from mirage.types import FileType, PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.fixture
@@ -37,8 +38,9 @@ def index():
 async def test_stat_root(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(original="/gslides", directory="/gslides", prefix="/gslides"),
-        index)
+        PathSpec(resource_path=mount_key("/gslides", "/gslides"),
+                 virtual="/gslides",
+                 directory="/gslides"), index)
     assert result.type == FileType.DIRECTORY
     assert result.name == "/"
 
@@ -47,9 +49,9 @@ async def test_stat_root(accessor, index):
 async def test_stat_owned_dir(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(original="/gslides/owned",
-                 directory="/gslides/owned",
-                 prefix="/gslides"), index)
+        PathSpec(resource_path=mount_key("/gslides/owned", "/gslides"),
+                 virtual="/gslides/owned",
+                 directory="/gslides/owned"), index)
     assert result.type == FileType.DIRECTORY
     assert result.name == "owned"
 
@@ -68,7 +70,9 @@ async def test_stat_deck_from_cache(accessor, index):
     target = "/gslides/owned/2026-04-01_My_Deck__d1.gslide.json"
     result = await stat(
         accessor,
-        PathSpec(original=target, directory=target, prefix="/gslides"),
+        PathSpec(resource_path=mount_key(target, "/gslides"),
+                 virtual=target,
+                 directory=target),
         index,
     )
     assert result.type == FileType.JSON
@@ -95,8 +99,9 @@ async def test_stat_cache_miss_falls_back_via_readdir(accessor, index):
     ) as mock_list:
         result = await stat(
             accessor,
-            PathSpec(original=target, directory=target, prefix="/gslides"),
-            index)
+            PathSpec(resource_path=mount_key(target, "/gslides"),
+                     virtual=target,
+                     directory=target), index)
     assert result.type == FileType.JSON
     assert result.extra["doc_id"] == "d1"
     assert mock_list.call_count == 1
@@ -120,9 +125,10 @@ async def test_stat_not_found_after_fallback(accessor, index):
         with pytest.raises(FileNotFoundError):
             await stat(
                 accessor,
-                PathSpec(original="/gslides/owned/nope.gslide.json",
-                         directory="/gslides/owned/nope.gslide.json",
-                         prefix="/gslides"), index)
+                PathSpec(resource_path=mount_key(
+                    "/gslides/owned/nope.gslide.json", "/gslides"),
+                         virtual="/gslides/owned/nope.gslide.json",
+                         directory="/gslides/owned/nope.gslide.json"), index)
 
 
 @pytest.mark.asyncio
@@ -130,6 +136,7 @@ async def test_stat_index_none_raises(accessor):
     with pytest.raises(FileNotFoundError):
         await stat(
             accessor,
-            PathSpec(original="/gslides/owned/x.gslide.json",
-                     directory="/gslides/owned/x.gslide.json",
-                     prefix="/gslides"), None)
+            PathSpec(resource_path=mount_key("/gslides/owned/x.gslide.json",
+                                             "/gslides"),
+                     virtual="/gslides/owned/x.gslide.json",
+                     directory="/gslides/owned/x.gslide.json"), None)

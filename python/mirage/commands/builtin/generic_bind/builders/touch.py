@@ -40,7 +40,7 @@ async def touch(
             continue
         if not await ops.exists(accessor, p):
             await ops.write(accessor, p, b"")
-            created[p.strip_prefix] = b""
+            created[p.mount_path] = b""
     return None, IOResult(writes=created)
 
 

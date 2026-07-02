@@ -32,7 +32,7 @@ def _entry_stat(item: dict) -> FileStat:
 async def stat(accessor: SharePointAccessor,
                path: PathSpec,
                index: IndexCacheStore = None) -> FileStat:
-    virtual = path.original if isinstance(path, PathSpec) else path
+    virtual = path.virtual if isinstance(path, PathSpec) else path
     prefix, stripped = split_path(path)
     if not stripped:
         return FileStat(name="/", type=FileType.DIRECTORY)

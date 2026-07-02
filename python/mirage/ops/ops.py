@@ -26,6 +26,7 @@ from mirage.ops.config import OpsMount
 from mirage.ops.registry import OpsRegistry, RegisteredOp
 from mirage.runtime import assert_mount_allowed
 from mirage.types import FileStat, MountMode, PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 class Ops:
@@ -138,9 +139,9 @@ class Ops:
         prev_prefix = push_mount_prefix(mount_prefix)
         filetype = self._get_filetype(rel_path)
         scope = PathSpec(
-            original=path,
+            virtual=path,
             directory=path.rsplit("/", 1)[0] or "/",
-            prefix=mount_prefix,
+            resource_path=mount_key(path, mount_prefix),
         )
         try:
             result = await self._registry.call(op,
@@ -232,14 +233,14 @@ class Ops:
             raise PermissionError(f"mount at {src!r} is read-only")
         mount_prefix = self._mount_prefix(src)
         src_scope = PathSpec(
-            original=src,
+            virtual=src,
             directory=src.rsplit("/", 1)[0] or "/",
-            prefix=mount_prefix,
+            resource_path=mount_key(src, mount_prefix),
         )
         dst_scope = PathSpec(
-            original=dst,
+            virtual=dst,
             directory=dst.rsplit("/", 1)[0] or "/",
-            prefix=mount_prefix,
+            resource_path=mount_key(dst, mount_prefix),
         )
         fn = self._registry.resolve("rename", resource_type)
         await fn(accessor, src_scope, dst_scope)

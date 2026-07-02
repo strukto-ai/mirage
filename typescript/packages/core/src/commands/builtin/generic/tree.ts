@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
@@ -50,10 +51,10 @@ async function walkTree(
     if (!treeOpts.showHidden && name.startsWith('.')) continue
     if (treeOpts.ignorePattern !== null && fnmatch(name, treeOpts.ignorePattern)) continue
     const sub = new PathSpec({
-      original: childPath,
+      virtual: childPath,
       directory: childPath,
       resolved: false,
-      prefix: path.prefix,
+      resourcePath: mountKey(childPath, mountPrefixOf(path.virtual, path.resourcePath)),
     })
     let isDir: boolean
     try {
@@ -91,10 +92,10 @@ export async function treeGeneric(
       ? paths
       : [
           new PathSpec({
-            original: opts.cwd,
+            virtual: opts.cwd,
             directory: opts.cwd,
             resolved: false,
-            prefix: opts.mountPrefix ?? '',
+            resourcePath: mountKey(opts.cwd, opts.mountPrefix ?? ''),
           }),
         ]
   const depthRaw = typeof opts.flags.L === 'string' ? opts.flags.L : null

@@ -24,6 +24,7 @@ from mirage.core.gdocs._client import TokenManager
 from mirage.core.gdocs.read import read, read_doc
 from mirage.resource.gdocs.config import GDocsConfig
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.fixture
@@ -93,9 +94,12 @@ async def test_read_via_index(accessor, index):
         result = await read(
             accessor,
             PathSpec(
-                original="/gdocs/owned/2026-04-01_My_Doc__doc1.gdoc.json",
-                directory="/gdocs/owned/2026-04-01_My_Doc__doc1.gdoc.json",
-                prefix="/gdocs"), index)
+                resource_path=mount_key(
+                    "/gdocs/owned/2026-04-01_My_Doc__doc1.gdoc.json",
+                    "/gdocs"),
+                virtual="/gdocs/owned/2026-04-01_My_Doc__doc1.gdoc.json",
+                directory="/gdocs/owned/2026-04-01_My_Doc__doc1.gdoc.json"),
+            index)
         parsed = json.loads(result)
         assert parsed["documentId"] == "abc123"
 
@@ -105,9 +109,10 @@ async def test_read_no_index(accessor):
     with pytest.raises(FileNotFoundError):
         await read(
             accessor,
-            PathSpec(original="/gdocs/owned/nonexistent.gdoc.json",
-                     directory="/gdocs/owned/nonexistent.gdoc.json",
-                     prefix="/gdocs"), None)
+            PathSpec(resource_path=mount_key(
+                "/gdocs/owned/nonexistent.gdoc.json", "/gdocs"),
+                     virtual="/gdocs/owned/nonexistent.gdoc.json",
+                     directory="/gdocs/owned/nonexistent.gdoc.json"), None)
 
 
 @pytest.mark.asyncio
@@ -133,9 +138,10 @@ async def test_read_auto_bootstraps_from_empty_index(accessor, index):
             ),
     ):
         path = PathSpec(
-            original="/gdocs/owned/2026-04-01_Notes__doc1.gdoc.json",
+            resource_path=mount_key(
+                "/gdocs/owned/2026-04-01_Notes__doc1.gdoc.json", "/gdocs"),
+            virtual="/gdocs/owned/2026-04-01_Notes__doc1.gdoc.json",
             directory="/gdocs/owned/2026-04-01_Notes__doc1.gdoc.json",
-            prefix="/gdocs",
         )
         result = await read(accessor, path, index)
         assert b"doc1" in result
@@ -156,9 +162,10 @@ async def test_read_missing_file_raises_after_recursion(accessor, index):
             ),
     ):
         path = PathSpec(
-            original="/gdocs/owned/Missing__xyz.gdoc.json",
+            resource_path=mount_key("/gdocs/owned/Missing__xyz.gdoc.json",
+                                    "/gdocs"),
+            virtual="/gdocs/owned/Missing__xyz.gdoc.json",
             directory="/gdocs/owned/Missing__xyz.gdoc.json",
-            prefix="/gdocs",
         )
         with pytest.raises(FileNotFoundError):
             await read(accessor, path, index)

@@ -47,10 +47,10 @@ export async function read(
   const spec = typeof path === 'string' ? PathSpec.fromStrPath(path) : path
   const config = accessor.config
   const scope = detectScope(spec, config)
-  if (scope.level !== ScopeLevel.ROW) throw notFound(spec.original)
+  if (scope.level !== ScopeLevel.ROW) throw notFound(spec.virtual)
   const row = await resolveRow(accessor, scope)
   if (scope.blob) {
-    if (config.blobColumn === null) throw notFound(spec.original)
+    if (config.blobColumn === null) throw notFound(spec.virtual)
     return blobBytes(row[config.blobColumn])
   }
   return renderCard(row, config)

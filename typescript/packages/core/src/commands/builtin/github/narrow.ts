@@ -93,9 +93,9 @@ export function filesOnlyShortcircuit(
     fixed || pt === PatternType.EXACT || (pt === PatternType.SIMPLE && !pattern.includes('.'))
   if (!fullyLiteral) return null
   const hits = resolved
-    .filter((p) => pathPredicate === undefined || pathPredicate(p.original))
-    .map((p) => p.original)
+    .filter((p) => pathPredicate === undefined || pathPredicate(p.virtual))
+    .map((p) => p.virtual)
   if (hits.length === 0) return [new Uint8Array(), new IOResult({ exitCode: 1 })]
-  const displays = rebaseDisplay(hits, scope.original, scope.display)
+  const displays = rebaseDisplay(hits, scope.virtual, scope.display)
   return [formatRecords([...displays].sort()), new IOResult()]
 }

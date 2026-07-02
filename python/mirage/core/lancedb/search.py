@@ -23,7 +23,7 @@ def _target_table(paths: list[PathSpec], config: LanceDBConfig) -> str | None:
     if config.table:
         return config.table
     for path in paths:
-        raw = path.strip_prefix if isinstance(path, PathSpec) else path
+        raw = path.mount_path if isinstance(path, PathSpec) else path
         key = raw.strip("/")
         if key:
             return key.split("/")[0]

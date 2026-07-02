@@ -30,7 +30,7 @@ def _cat_ops():
 def _spying_stream(real_stream, pulled: list[str]):
 
     def factory(accessor, p: PathSpec, index=None) -> AsyncIterator[bytes]:
-        return _spy_iter(real_stream(accessor, p, index), p.original, pulled)
+        return _spy_iter(real_stream(accessor, p, index), p.virtual, pulled)
 
     return factory
 

@@ -15,26 +15,24 @@
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import IndexCacheStore, IndexEntry
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import norm
 
 
 async def readdir(accessor: RAMAccessor, path: PathSpec,
                   index: IndexCacheStore) -> list[str]:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    if isinstance(path, PathSpec):
-        prefix = path.prefix
-        path = path.directory if path.pattern else path.original
-    if prefix and path.startswith(prefix):
-        rest = path[len(prefix):]
-        if prefix.endswith("/") or rest == "" or rest.startswith("/"):
-            path = rest or "/"
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    target = path.dir if path.pattern else path
+    prefix = mount_prefix_of(target.virtual, target.resource_path)
+    virtual_key = target.virtual
     store = accessor.store
-    virtual_key = prefix + path if prefix else path
     listing = await index.list_dir(virtual_key)
     if listing.entries is not None:
         return listing.entries
-    p = norm(path)
+    p = norm(target.resource_path)
     if p not in store.dirs:
         raise FileNotFoundError(p)
     dir_prefix = p.rstrip("/") + "/"

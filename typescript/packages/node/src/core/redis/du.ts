@@ -18,7 +18,7 @@ import { norm } from './utils.ts'
 import { rstripSlash } from '@struktoai/mirage-core'
 
 export async function du(accessor: RedisAccessor, path: PathSpec): Promise<number> {
-  const p = norm(path.stripPrefix)
+  const p = norm(path.mountPath)
   const store = accessor.store
   const prefix = rstripSlash(p) + '/'
   let total = 0
@@ -34,7 +34,7 @@ export async function duAll(
   accessor: RedisAccessor,
   path: PathSpec,
 ): Promise<{ entries: [string, number][]; total: number }> {
-  const p = norm(path.stripPrefix)
+  const p = norm(path.mountPath)
   const store = accessor.store
   const prefix = rstripSlash(p) + '/'
   const entries: [string, number][] = []

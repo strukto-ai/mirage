@@ -8,6 +8,7 @@ from mirage.core.databricks_volume.readdir import readdir
 from mirage.core.databricks_volume.stat import (_name_from_backend_path,
                                                 modified_to_iso, stat)
 from mirage.types import FileType, PathSpec
+from mirage.utils.key_prefix import mount_key
 
 from .conftest import (ToThreadRecorder, directory_entry, file_entry,
                        file_metadata)
@@ -57,7 +58,9 @@ async def test_stat_file(accessor, files, remote_root):
         size=6,
         modified="Tue, 14 Nov 2023 22:13:20 GMT",
     )
-    path = PathSpec.from_str_path("/volume/reports/latest.md", "/volume")
+    path = PathSpec.from_str_path(
+        "/volume/reports/latest.md",
+        mount_key("/volume/reports/latest.md", "/volume"))
     result = await stat(accessor, path)
     assert result.name == "latest.md"
     assert result.size == 6
@@ -73,9 +76,13 @@ async def test_stat_file_from_index_skips_sdk(accessor, files, index,
                    size=6,
                    modified=1_700_000_000_000),
     ]
-    await readdir(accessor, PathSpec.from_str_path("/volume/reports",
-                                                   "/volume"), index)
-    path = PathSpec.from_str_path("/volume/reports/latest.md", "/volume")
+    await readdir(
+        accessor,
+        PathSpec.from_str_path("/volume/reports",
+                               mount_key("/volume/reports", "/volume")), index)
+    path = PathSpec.from_str_path(
+        "/volume/reports/latest.md",
+        mount_key("/volume/reports/latest.md", "/volume"))
     result = await stat(accessor, path, index)
     assert result.name == "latest.md"
     assert result.size == 6
@@ -91,9 +98,13 @@ async def test_stat_directory_from_index_skips_sdk(accessor, files, index,
     files.directories[f"{remote_root}/reports"] = [
         directory_entry(f"{remote_root}/reports/archive"),
     ]
-    await readdir(accessor, PathSpec.from_str_path("/volume/reports",
-                                                   "/volume"), index)
-    path = PathSpec.from_str_path("/volume/reports/archive", "/volume")
+    await readdir(
+        accessor,
+        PathSpec.from_str_path("/volume/reports",
+                               mount_key("/volume/reports", "/volume")), index)
+    path = PathSpec.from_str_path(
+        "/volume/reports/archive",
+        mount_key("/volume/reports/archive", "/volume"))
     result = await stat(accessor, path, index)
     assert result.name == "archive"
     assert result.type == FileType.DIRECTORY
@@ -111,9 +122,13 @@ async def test_stat_index_negative_cache_raises_without_sdk(
     files.directories[f"{remote_root}/reports"] = [
         file_entry(f"{remote_root}/reports/latest.md", size=6),
     ]
-    await readdir(accessor, PathSpec.from_str_path("/volume/reports",
-                                                   "/volume"), index)
-    path = PathSpec.from_str_path("/volume/reports/missing.md", "/volume")
+    await readdir(
+        accessor,
+        PathSpec.from_str_path("/volume/reports",
+                               mount_key("/volume/reports", "/volume")), index)
+    path = PathSpec.from_str_path(
+        "/volume/reports/missing.md",
+        mount_key("/volume/reports/missing.md", "/volume"))
     with pytest.raises(FileNotFoundError):
         await stat(accessor, path, index)
     assert files.get_metadata_calls == []
@@ -132,9 +147,13 @@ async def test_stat_index_fast_path_matches_sdk(accessor, files, index,
         size=6,
         modified="Tue, 14 Nov 2023 22:13:20 GMT",
     )
-    await readdir(accessor, PathSpec.from_str_path("/volume/reports",
-                                                   "/volume"), index)
-    path = PathSpec.from_str_path("/volume/reports/latest.md", "/volume")
+    await readdir(
+        accessor,
+        PathSpec.from_str_path("/volume/reports",
+                               mount_key("/volume/reports", "/volume")), index)
+    path = PathSpec.from_str_path(
+        "/volume/reports/latest.md",
+        mount_key("/volume/reports/latest.md", "/volume"))
     fast = await stat(accessor, path, index)
     slow = await stat(accessor, path, RAMIndexCacheStore(ttl=600))
     assert fast == slow
@@ -152,9 +171,13 @@ async def test_stat_directory_index_fast_path_matches_sdk(
         directory_entry(f"{remote_root}/reports/archive"),
     ]
     files.directory_metadata.add(f"{remote_root}/reports/archive")
-    await readdir(accessor, PathSpec.from_str_path("/volume/reports",
-                                                   "/volume"), index)
-    path = PathSpec.from_str_path("/volume/reports/archive", "/volume")
+    await readdir(
+        accessor,
+        PathSpec.from_str_path("/volume/reports",
+                               mount_key("/volume/reports", "/volume")), index)
+    path = PathSpec.from_str_path(
+        "/volume/reports/archive",
+        mount_key("/volume/reports/archive", "/volume"))
     fast = await stat(accessor, path, index)
     slow = await stat(accessor, path, RAMIndexCacheStore(ttl=600))
     assert fast == slow
@@ -165,7 +188,7 @@ async def test_stat_directory_index_fast_path_matches_sdk(
 
 @pytest.mark.asyncio
 async def test_stat_root_does_not_call_sdk(accessor, files):
-    path = PathSpec.from_str_path("/volume", "/volume")
+    path = PathSpec.from_str_path("/volume", mount_key("/volume", "/volume"))
     result = await stat(accessor, path)
     assert result.name == "/"
     assert result.type == FileType.DIRECTORY
@@ -180,7 +203,8 @@ async def test_stat_directory_uses_directory_metadata_fallback(
     remote_root,
 ):
     files.directory_metadata.add(f"{remote_root}/reports")
-    path = PathSpec.from_str_path("/volume/reports", "/volume")
+    path = PathSpec.from_str_path("/volume/reports",
+                                  mount_key("/volume/reports", "/volume"))
     result = await stat(accessor, path)
     assert result.name == "reports"
     assert result.size is None
@@ -191,7 +215,8 @@ async def test_stat_directory_uses_directory_metadata_fallback(
 
 @pytest.mark.asyncio
 async def test_stat_missing_path_raises(accessor):
-    path = PathSpec.from_str_path("/volume/missing", "/volume")
+    path = PathSpec.from_str_path("/volume/missing",
+                                  mount_key("/volume/missing", "/volume"))
     with pytest.raises(FileNotFoundError):
         await stat(accessor, path)
 
@@ -202,7 +227,8 @@ async def test_stat_missing_path_checks_directory_metadata(
     files,
     remote_root,
 ):
-    path = PathSpec.from_str_path("/volume/missing", "/volume")
+    path = PathSpec.from_str_path("/volume/missing",
+                                  mount_key("/volume/missing", "/volume"))
     with pytest.raises(FileNotFoundError):
         await stat(accessor, path)
     assert files.get_metadata_calls == [f"{remote_root}/missing"]
@@ -211,7 +237,8 @@ async def test_stat_missing_path_checks_directory_metadata(
 
 @pytest.mark.asyncio
 async def test_stat_rejects_path_escape(accessor):
-    path = PathSpec.from_str_path("/volume/../outside", "/volume")
+    path = PathSpec.from_str_path("/volume/../outside",
+                                  mount_key("/volume/../outside", "/volume"))
     with pytest.raises(ValueError, match="escapes Databricks volume root"):
         await stat(accessor, path)
 
@@ -220,7 +247,8 @@ async def test_stat_rejects_path_escape(accessor):
 async def test_stat_metadata_error_propagates(accessor, files, remote_root):
     remote_path = f"{remote_root}/reports"
     files.metadata_errors[remote_path] = RuntimeError("metadata failed")
-    path = PathSpec.from_str_path("/volume/reports", "/volume")
+    path = PathSpec.from_str_path("/volume/reports",
+                                  mount_key("/volume/reports", "/volume"))
     with pytest.raises(RuntimeError, match="metadata failed"):
         await stat(accessor, path)
     assert files.get_metadata_calls == [remote_path]
@@ -236,7 +264,8 @@ async def test_stat_directory_metadata_error_propagates(
     remote_path = f"{remote_root}/reports"
     files.directory_metadata_errors[remote_path] = RuntimeError(
         "directory metadata failed")
-    path = PathSpec.from_str_path("/volume/reports", "/volume")
+    path = PathSpec.from_str_path("/volume/reports",
+                                  mount_key("/volume/reports", "/volume"))
     with pytest.raises(RuntimeError, match="directory metadata failed"):
         await stat(accessor, path)
     assert files.get_metadata_calls == [remote_path]
@@ -253,7 +282,9 @@ async def test_stat_runs_blocking_metadata_off_event_loop(
     to_thread = ToThreadRecorder()
     monkeypatch.setattr(asyncio, "to_thread", to_thread)
     files.metadata[f"{remote_root}/reports/latest.md"] = file_metadata(size=6)
-    path = PathSpec.from_str_path("/volume/reports/latest.md", "/volume")
+    path = PathSpec.from_str_path(
+        "/volume/reports/latest.md",
+        mount_key("/volume/reports/latest.md", "/volume"))
 
     result = await stat(accessor, path)
 
@@ -271,7 +302,8 @@ async def test_stat_directory_fallback_runs_off_event_loop(
     to_thread = ToThreadRecorder()
     monkeypatch.setattr(asyncio, "to_thread", to_thread)
     files.directory_metadata.add(f"{remote_root}/reports")
-    path = PathSpec.from_str_path("/volume/reports", "/volume")
+    path = PathSpec.from_str_path("/volume/reports",
+                                  mount_key("/volume/reports", "/volume"))
 
     result = await stat(accessor, path)
 

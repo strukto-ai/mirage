@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { materialize } from '../../../io/types.ts'
@@ -56,10 +57,10 @@ describe('slack ls (no args) after cd preserves mount prefix', () => {
       resource.accessor,
       [
         new PathSpec({
-          original: '/slack/channels',
+          virtual: '/slack/channels',
           directory: '/slack/channels',
           resolved: false,
-          prefix: '/slack',
+          resourcePath: mountKey('/slack/channels', '/slack'),
         }),
       ],
       [],

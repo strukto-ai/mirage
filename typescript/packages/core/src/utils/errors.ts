@@ -14,23 +14,23 @@
 
 export interface FsError extends Error {
   code: string
-  // The virtual path the user typed (PathSpec.original) — the ONLY path that
+  // The virtual path the user typed (PathSpec.virtual) — the ONLY path that
   // may ever reach a user-facing error message. Backends pass the PathSpec and
-  // the helper reads .original, so a stripped path or real fs path can never
+  // the helper reads .virtual, so a stripped path or real fs path can never
   // be stamped here by accident.
   virtualPath: string
 }
 
 // Accepts a PathSpec (reads .display, the as-typed form, falling back to
-// .original) or a bare virtual-path string. Taking a structural shape avoids
+// .virtual) or a bare virtual-path string. Taking a structural shape avoids
 // importing the PathSpec class (no import cycle). .display is always virtual
-// (derived from the as-typed arg or .original), never a real fs path.
-function virtualOf(path: string | { original: string; display?: string }): string {
+// (derived from the as-typed arg or .virtual), never a real fs path.
+function virtualOf(path: string | { virtual: string; display?: string }): string {
   if (typeof path === 'string') return path
-  return path.display ?? path.original
+  return path.display ?? path.virtual
 }
 
-function fsError(path: string | { original: string }, code: string): FsError {
+function fsError(path: string | { virtual: string }, code: string): FsError {
   const virtual = virtualOf(path)
   const err = new Error(virtual) as FsError
   err.code = code
@@ -40,11 +40,11 @@ function fsError(path: string | { original: string }, code: string): FsError {
 
 // Mirrors Python's FileNotFoundError(virtual). The GNU strerror suffix
 // ("No such file or directory") is appended once at the command chokepoints.
-export function enoent(path: string | { original: string }): FsError {
+export function enoent(path: string | { virtual: string }): FsError {
   return fsError(path, 'ENOENT')
 }
 
-export function enotdir(path: string | { original: string }): FsError {
+export function enotdir(path: string | { virtual: string }): FsError {
   return fsError(path, 'ENOTDIR')
 }
 

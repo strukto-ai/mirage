@@ -12,25 +12,42 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, stripSlash } from '@struktoai/mirage-core'
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '@struktoai/mirage-core'
 import { isDirectoryAttrs, isFileAttrs, isNoSuchFile, joinRoot, stripPrefix } from './utils.ts'
 
 describe('stripPrefix', () => {
   it('removes the prefix from the original path', () => {
-    const p = new PathSpec({ original: '/ssh/foo/bar', directory: '/ssh/foo', prefix: '/ssh' })
+    const p = new PathSpec({
+      virtual: '/ssh/foo/bar',
+      directory: '/ssh/foo',
+      resourcePath: mountKey('/ssh/foo/bar', '/ssh'),
+    })
     expect(stripPrefix(p)).toBe('/foo/bar')
   })
   it('returns "/" when original equals the prefix', () => {
-    const p = new PathSpec({ original: '/ssh', directory: '/ssh', prefix: '/ssh' })
+    const p = new PathSpec({
+      virtual: '/ssh',
+      directory: '/ssh',
+      resourcePath: mountKey('/ssh', '/ssh'),
+    })
     expect(stripPrefix(p)).toBe('/')
   })
   it('returns the original when the prefix does not match', () => {
-    const p = new PathSpec({ original: '/other/foo', directory: '/other', prefix: '/ssh' })
+    const p = new PathSpec({
+      virtual: '/other/foo',
+      directory: '/other',
+      resourcePath: mountKey('/other/foo', '/ssh'),
+    })
     expect(stripPrefix(p)).toBe('/other/foo')
   })
   it('returns the original when prefix is empty', () => {
-    const p = new PathSpec({ original: '/foo/bar', directory: '/foo' })
+    const p = new PathSpec({
+      resourcePath: stripSlash('/foo/bar'),
+      virtual: '/foo/bar',
+      directory: '/foo',
+    })
     expect(stripPrefix(p)).toBe('/foo/bar')
   })
 })

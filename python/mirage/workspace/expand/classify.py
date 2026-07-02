@@ -17,6 +17,7 @@ import re
 import shlex
 
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 from mirage.workspace.mount import MountRegistry
 
 _FILENAME_CHAR = re.compile(r"[a-zA-Z0-9_./]")
@@ -71,22 +72,26 @@ def classify_word(word: str, registry: MountRegistry,
         path = posixpath.normpath(word)
         if not is_dir and path + "/" == mount.prefix:
             is_dir = True
+        resource_path = mount_key(path, mount.prefix.rstrip("/"))
         if has_glob:
             last_slash = path.rfind("/")
             return PathSpec(
-                original=path,
+                virtual=path,
                 directory=path[:last_slash + 1],
+                resource_path=resource_path,
                 pattern=path[last_slash + 1:],
                 resolved=False,
             )
         if is_dir:
-            return PathSpec(original=path,
+            return PathSpec(virtual=path,
                             directory=path + "/",
+                            resource_path=resource_path,
                             resolved=False)
         last_slash = path.rfind("/")
         return PathSpec(
-            original=path,
+            virtual=path,
             directory=path[:last_slash + 1],
+            resource_path=resource_path,
             resolved=True,
         )
 
@@ -104,11 +109,12 @@ def classify_word(word: str, registry: MountRegistry,
             return word
         last_slash = path.rfind("/")
         return PathSpec(
-            original=path,
+            virtual=path,
             directory=path[:last_slash + 1],
+            resource_path=mount_key(path, mount.prefix.rstrip("/")),
             pattern=path[last_slash + 1:],
             resolved=False,
-            as_typed=word,
+            raw_path=word,
         )
 
     # Relative path (no glob): resolve against cwd if the word
@@ -123,14 +129,15 @@ def classify_word(word: str, registry: MountRegistry,
             word = _unescape_path(word)
         path = posixpath.normpath(cwd.rstrip("/") + "/" + word)
         try:
-            registry.mount_for(path)
+            mount = registry.mount_for(path)
         except ValueError:
             return word
         return PathSpec(
-            original=path,
+            virtual=path,
             directory=path[:path.rfind("/") + 1],
+            resource_path=mount_key(path, mount.prefix.rstrip("/")),
             resolved=True,
-            as_typed=word,
+            raw_path=word,
         )
 
     return word
@@ -148,24 +155,27 @@ def classify_bare_path(word: str, registry: MountRegistry,
         return classified
     path = posixpath.normpath(cwd.rstrip("/") + "/" + word)
     try:
-        registry.mount_for(path)
+        mount = registry.mount_for(path)
     except ValueError:
         return word
+    resource_path = mount_key(path, mount.prefix.rstrip("/"))
     has_glob = any(ch in word for ch in ("*", "?", "["))
     if has_glob:
         last_slash = path.rfind("/")
         return PathSpec(
-            original=path,
+            virtual=path,
             directory=path[:last_slash + 1],
+            resource_path=resource_path,
             pattern=path[last_slash + 1:],
             resolved=False,
-            as_typed=word,
+            raw_path=word,
         )
     return PathSpec(
-        original=path,
+        virtual=path,
         directory=path[:path.rfind("/") + 1],
+        resource_path=resource_path,
         resolved=True,
-        as_typed=word,
+        raw_path=word,
     )
 
 

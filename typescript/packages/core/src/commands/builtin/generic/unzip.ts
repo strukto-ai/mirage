@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { inflateRaw } from '../../../utils/compress.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { lstripSlash, rstripSlash } from '../../../utils/slash.ts'
+import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -70,8 +71,13 @@ async function readZipEntries(data: Uint8Array): Promise<ZipEntry[]> {
   return entries
 }
 
-function makePathSpec(original: string): PathSpec {
-  return new PathSpec({ original, directory: original, resolved: true })
+function makePathSpec(virtual: string): PathSpec {
+  return new PathSpec({
+    virtual,
+    directory: virtual,
+    resourcePath: stripSlash(virtual),
+    resolved: true,
+  })
 }
 
 async function ensureParents(
@@ -104,7 +110,7 @@ export async function unzipGeneric(
   const testMode = opts.flags.t === true
   const pipeMode = opts.flags.p === true
   const quiet = opts.flags.q === true
-  const mountPrefix = archivePath.prefix
+  const mountPrefix = mountPrefixOf(archivePath.virtual, archivePath.resourcePath)
   const destRaw = typeof opts.flags.d === 'string' ? opts.flags.d : '/'
   const dest =
     mountPrefix !== '' && destRaw.startsWith(mountPrefix + '/')
@@ -123,7 +129,7 @@ export async function unzipGeneric(
   }
 
   if (testMode) {
-    const msg = `No errors detected in ${archivePath.original}\n`
+    const msg = `No errors detected in ${archivePath.virtual}\n`
     const out: ByteSource = ENC.encode(msg)
     return [out, new IOResult()]
   }

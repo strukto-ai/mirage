@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileType, PathSpec, type FileStat } from '../../types.ts'
@@ -34,8 +35,8 @@ async function walkSize(
   if (s.type !== FileType.DIRECTORY) {
     const size = s.size ?? 0
     if (entries !== null) {
-      const prefix = path.prefix
-      const raw = rstripSlash(path.original)
+      const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+      const raw = rstripSlash(path.virtual)
       const key = prefix !== '' && raw.startsWith(prefix) ? raw.slice(prefix.length) : raw
       entries.push([key, size])
     }
@@ -51,10 +52,10 @@ async function walkSize(
   for (const child of children) {
     const trimmed = rstripSlash(child)
     const childSpec = new PathSpec({
-      original: trimmed,
+      virtual: trimmed,
       directory: trimmed,
       resolved: false,
-      prefix: path.prefix,
+      resourcePath: mountKey(trimmed, mountPrefixOf(path.virtual, path.resourcePath)),
     })
     total += await walkSize(accessor, childSpec, index, entries)
   }

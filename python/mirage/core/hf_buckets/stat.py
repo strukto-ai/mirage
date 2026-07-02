@@ -20,6 +20,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.filetype import guess_type
+from mirage.utils.key_prefix import mount_prefix_of
 
 
 async def stat(accessor: HfBucketsAccessor,
@@ -27,8 +28,8 @@ async def stat(accessor: HfBucketsAccessor,
                index: IndexCacheStore | None = None) -> FileStat:
     if isinstance(path, str):
         path = PathSpec.from_str_path(path)
-    original_prefix = path.prefix
-    raw = path.original
+    original_prefix = mount_prefix_of(path.virtual, path.resource_path)
+    raw = path.virtual
     if original_prefix and raw.startswith(original_prefix):
         raw = raw[len(original_prefix):] or "/"
     stripped = raw.strip("/")

@@ -7,6 +7,7 @@ from mirage.commands.builtin.utils.output import (format_optional_records,
 from mirage.io.types import IOResult
 from mirage.types import FileStat, FileType, LsSortBy, PathSpec
 from mirage.utils.errors import fs_strerror
+from mirage.utils.key_prefix import rekey
 from mirage.utils.path import rebase_one
 
 
@@ -78,10 +79,11 @@ async def walk(
 
     stats: list[FileStat] = []
     for entry in entries:
-        entry_spec = PathSpec(original=entry,
+        entry_spec = PathSpec(virtual=entry,
                               directory=entry,
                               resolved=False,
-                              prefix=path.prefix)
+                              resource_path=rekey(path.virtual,
+                                                  path.resource_path, entry))
         try:
             s = await stat(entry_spec, index)
         except (FileNotFoundError, ValueError) as exc:
@@ -105,10 +107,12 @@ async def walk(
             nested.append(s)
             if s.type == FileType.DIRECTORY:
                 child_path = path.child(s.name)
-                child_spec = PathSpec(original=child_path,
+                child_spec = PathSpec(virtual=child_path,
                                       directory=child_path,
                                       resolved=False,
-                                      prefix=path.prefix)
+                                      resource_path=rekey(
+                                          path.virtual, path.resource_path,
+                                          child_path))
                 sub, sub_ws = await walk(child_spec,
                                          readdir=readdir,
                                          stat=stat,
@@ -155,10 +159,12 @@ async def walk_grouped(
     for s in here:
         if s.type == FileType.DIRECTORY:
             child_path = path.child(s.name)
-            child_spec = PathSpec(original=child_path,
+            child_spec = PathSpec(virtual=child_path,
                                   directory=child_path,
                                   resolved=False,
-                                  prefix=path.prefix)
+                                  resource_path=rekey(path.virtual,
+                                                      path.resource_path,
+                                                      child_path))
             sub_groups, sub_ws2 = await walk_grouped(child_spec,
                                                      readdir=readdir,
                                                      stat=stat,
@@ -219,7 +225,7 @@ async def ls(
             for g_idx, (dir_spec, entries) in enumerate(groups):
                 if p_idx > 0 or g_idx > 0:
                     results.append("")
-                header = rebase_one(dir_spec.original, p.original, p.display)
+                header = rebase_one(dir_spec.virtual, p.virtual, p.display)
                 results.append(f"{header}:")
                 _render_group(results,
                               entries,

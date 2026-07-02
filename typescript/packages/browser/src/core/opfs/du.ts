@@ -97,7 +97,7 @@ async function sizeOfPath(root: FileSystemDirectoryHandle, virtual: string): Pro
 }
 
 export async function du(accessor: OPFSAccessor, p: PathSpec): Promise<number> {
-  return sizeOfPath(accessor.rootHandle, p.stripPrefix)
+  return sizeOfPath(accessor.rootHandle, p.mountPath)
 }
 
 export async function duAll(
@@ -105,7 +105,7 @@ export async function duAll(
   p: PathSpec,
 ): Promise<[entries: [string, number][], total: number]> {
   const root = accessor.rootHandle
-  const virtual = norm(p.stripPrefix)
+  const virtual = norm(p.mountPath)
   const entries: [string, number][] = []
   try {
     const [parentDir, name] = await resolveParentDirHandle(root, virtual, { create: false })

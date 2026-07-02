@@ -32,19 +32,29 @@ def store():
 
 @pytest.mark.asyncio
 async def test_du_root(store):
-    total = await du(store, PathSpec(original="/", directory="/"))
+    total = await du(
+        store,
+        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"))
     assert total == 5 + 6 + 4
 
 
 @pytest.mark.asyncio
 async def test_du_subdir(store):
-    total = await du(store, PathSpec(original="/sub", directory="/sub"))
+    total = await du(
+        store,
+        PathSpec(resource_path=("/sub").strip("/"),
+                 virtual="/sub",
+                 directory="/sub"))
     assert total == 6 + 4
 
 
 @pytest.mark.asyncio
 async def test_du_single_file(store):
-    total = await du(store, PathSpec(original="/a.txt", directory="/a.txt"))
+    total = await du(
+        store,
+        PathSpec(resource_path=("/a.txt").strip("/"),
+                 virtual="/a.txt",
+                 directory="/a.txt"))
     assert total == 5
 
 
@@ -52,13 +62,17 @@ async def test_du_single_file(store):
 async def test_du_empty():
     s = RAMStore()
     a = RAMAccessor(s)
-    total = await du(a, PathSpec(original="/", directory="/"))
+    total = await du(
+        a, PathSpec(resource_path=("/").strip("/"), virtual="/",
+                    directory="/"))
     assert total == 0
 
 
 @pytest.mark.asyncio
 async def test_du_all_root(store):
-    entries, total = await du_all(store, PathSpec(original="/", directory="/"))
+    entries, total = await du_all(
+        store,
+        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"))
     assert total == 15
     paths = [e[0] for e in entries]
     assert "/a.txt" in paths
@@ -68,7 +82,10 @@ async def test_du_all_root(store):
 
 @pytest.mark.asyncio
 async def test_du_all_subdir(store):
-    entries, total = await du_all(store,
-                                  PathSpec(original="/sub", directory="/sub"))
+    entries, total = await du_all(
+        store,
+        PathSpec(resource_path=("/sub").strip("/"),
+                 virtual="/sub",
+                 directory="/sub"))
     assert total == 10
     assert len(entries) == 2

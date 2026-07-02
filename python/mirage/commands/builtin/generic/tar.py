@@ -36,7 +36,7 @@ async def _create_archive(
     names: list[str] = []
     with tarfile.open(fileobj=buf, mode=f"w{mode_suffix}") as tf:
         for p in paths:
-            name = p.original.lstrip("/")
+            name = p.virtual.lstrip("/")
             if exclude and _excluded(name, exclude):
                 continue
             data = await read_bytes(accessor, p)
@@ -119,8 +119,8 @@ async def tar(
     strip_components: str | None = None,
     exclude: str | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
-    archive_path = f.strip_prefix if f else None
-    dest_path = C.strip_prefix if C else "/"
+    archive_path = f.mount_path if f else None
+    dest_path = C.mount_path if C else "/"
     mode_suffix = _compression_suffix(z, j, J)
     strip_n = int(strip_components) if strip_components else 0
     if c:

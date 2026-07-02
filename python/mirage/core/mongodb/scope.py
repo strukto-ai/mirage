@@ -28,7 +28,7 @@ class MongoDBScope:
 
 
 def detect_scope(path) -> MongoDBScope:
-    raw = path.strip_prefix if isinstance(path, PathSpec) else path
+    raw = path.mount_path if isinstance(path, PathSpec) else path
     key = raw.strip("/")
 
     if not key:

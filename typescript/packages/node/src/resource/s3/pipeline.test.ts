@@ -12,15 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DEFAULT_SESSION_ID, MountMode, PathSpec, RAMResource } from '@struktoai/mirage-core'
+import {
+  DEFAULT_SESSION_ID,
+  MountMode,
+  PathSpec,
+  RAMResource,
+  stripSlash,
+} from '@struktoai/mirage-core'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Workspace } from '../../workspace.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
-function p(original: string): PathSpec {
-  return new PathSpec({ original, directory: original })
+function p(virtual: string): PathSpec {
+  return new PathSpec({ virtual, directory: virtual, resourcePath: stripSlash(virtual) })
 }
 
 function decode(bytes: Uint8Array): string {

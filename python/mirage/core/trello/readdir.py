@@ -22,6 +22,7 @@ from mirage.core.trello.pathing import (board_dirname, card_dirname,
                                         member_filename, workspace_dirname)
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 VIRTUAL_ROOTS = ("workspaces", )
 
@@ -32,10 +33,12 @@ async def readdir(
     index: IndexCacheStore = None,
 ) -> list[str]:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    virtual = path.original
-    prefix = path.prefix
-    path = (path.dir if path.pattern else path).strip_prefix
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    virtual = path.virtual
+    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    path = (path.dir if path.pattern else path).mount_path
     key = path.strip("/")
     idx_key = "/" + key if key else "/"
 
@@ -75,9 +78,9 @@ async def readdir(
             result = await index.get(idx_key)
             if result.entry is None:
                 parent = PathSpec(
-                    original=prefix + "/workspaces",
+                    virtual=prefix + "/workspaces",
                     directory=prefix + "/workspaces",
-                    prefix=prefix,
+                    resource_path=mount_key(prefix + "/workspaces", prefix),
                 )
                 await readdir(accessor, parent, index)
                 result = await index.get(idx_key)
@@ -94,9 +97,9 @@ async def readdir(
             result = await index.get(ws_vkey)
             if result.entry is None:
                 parent = PathSpec(
-                    original=prefix + "/workspaces",
+                    virtual=prefix + "/workspaces",
                     directory=prefix + "/workspaces",
-                    prefix=prefix,
+                    resource_path=mount_key(prefix + "/workspaces", prefix),
                 )
                 await readdir(accessor, parent, index)
                 result = await index.get(ws_vkey)
@@ -134,9 +137,10 @@ async def readdir(
             result = await index.get(idx_key)
             if result.entry is None:
                 parent = PathSpec(
-                    original=prefix + "/" + "/".join(parts[:3]),
+                    virtual=prefix + "/" + "/".join(parts[:3]),
                     directory=prefix + "/" + "/".join(parts[:3]),
-                    prefix=prefix,
+                    resource_path=mount_key(prefix + "/" + "/".join(parts[:3]),
+                                            prefix),
                 )
                 await readdir(accessor, parent, index)
                 result = await index.get(idx_key)
@@ -156,9 +160,10 @@ async def readdir(
             result = await index.get(board_vkey)
             if result.entry is None:
                 parent = PathSpec(
-                    original=prefix + "/" + "/".join(parts[:3]),
+                    virtual=prefix + "/" + "/".join(parts[:3]),
                     directory=prefix + "/" + "/".join(parts[:3]),
-                    prefix=prefix,
+                    resource_path=mount_key(prefix + "/" + "/".join(parts[:3]),
+                                            prefix),
                 )
                 await readdir(accessor, parent, index)
                 result = await index.get(board_vkey)
@@ -195,9 +200,10 @@ async def readdir(
             result = await index.get(board_vkey)
             if result.entry is None:
                 parent = PathSpec(
-                    original=prefix + "/" + "/".join(parts[:3]),
+                    virtual=prefix + "/" + "/".join(parts[:3]),
                     directory=prefix + "/" + "/".join(parts[:3]),
-                    prefix=prefix,
+                    resource_path=mount_key(prefix + "/" + "/".join(parts[:3]),
+                                            prefix),
                 )
                 await readdir(accessor, parent, index)
                 result = await index.get(board_vkey)
@@ -234,9 +240,10 @@ async def readdir(
             result = await index.get(board_vkey)
             if result.entry is None:
                 parent = PathSpec(
-                    original=prefix + "/" + "/".join(parts[:3]),
+                    virtual=prefix + "/" + "/".join(parts[:3]),
                     directory=prefix + "/" + "/".join(parts[:3]),
-                    prefix=prefix,
+                    resource_path=mount_key(prefix + "/" + "/".join(parts[:3]),
+                                            prefix),
                 )
                 await readdir(accessor, parent, index)
                 result = await index.get(board_vkey)
@@ -271,9 +278,10 @@ async def readdir(
             result = await index.get(idx_key)
             if result.entry is None:
                 parent = PathSpec(
-                    original=prefix + "/" + "/".join(parts[:5]),
+                    virtual=prefix + "/" + "/".join(parts[:5]),
                     directory=prefix + "/" + "/".join(parts[:5]),
-                    prefix=prefix,
+                    resource_path=mount_key(prefix + "/" + "/".join(parts[:5]),
+                                            prefix),
                 )
                 await readdir(accessor, parent, index)
                 result = await index.get(idx_key)
@@ -291,9 +299,10 @@ async def readdir(
             result = await index.get(list_vkey)
             if result.entry is None:
                 parent = PathSpec(
-                    original=prefix + "/" + "/".join(parts[:5]),
+                    virtual=prefix + "/" + "/".join(parts[:5]),
                     directory=prefix + "/" + "/".join(parts[:5]),
-                    prefix=prefix,
+                    resource_path=mount_key(prefix + "/" + "/".join(parts[:5]),
+                                            prefix),
                 )
                 await readdir(accessor, parent, index)
                 result = await index.get(list_vkey)
@@ -328,9 +337,10 @@ async def readdir(
             result = await index.get(idx_key)
             if result.entry is None:
                 parent = PathSpec(
-                    original=prefix + "/" + "/".join(parts[:7]),
+                    virtual=prefix + "/" + "/".join(parts[:7]),
                     directory=prefix + "/" + "/".join(parts[:7]),
-                    prefix=prefix,
+                    resource_path=mount_key(prefix + "/" + "/".join(parts[:7]),
+                                            prefix),
                 )
                 await readdir(accessor, parent, index)
                 result = await index.get(idx_key)

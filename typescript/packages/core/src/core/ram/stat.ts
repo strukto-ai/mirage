@@ -19,7 +19,7 @@ import { basename, norm } from './utils.ts'
 import { enoent } from '../../utils/errors.ts'
 
 export function stat(accessor: RAMAccessor, path: PathSpec): Promise<FileStat> {
-  const p = norm(path.stripPrefix)
+  const p = norm(path.mountPath)
   if (accessor.store.dirs.has(p)) {
     return Promise.resolve(
       new FileStat({

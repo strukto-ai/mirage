@@ -12,8 +12,8 @@ async def copy(accessor: NextcloudAccessor, src: PathSpec,
         src = PathSpec.from_str_path(src)
     if isinstance(dst, str):
         dst = PathSpec.from_str_path(dst)
-    src_key = src.strip_prefix.lstrip("/")
-    dst_key = dst.strip_prefix.lstrip("/")
+    src_key = src.mount_path.lstrip("/")
+    dst_key = dst.mount_path.lstrip("/")
     op = accessor.operator()
     try:
         await op.copy(src_key, dst_key)

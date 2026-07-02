@@ -55,7 +55,7 @@ async function wcCommand(
       const scope = documentsScope(p)
       if (scope === null) continue
       const count = await countDocuments(accessor, scope.database, scope.name)
-      rows.push({ values: [count], label: p.original })
+      rows.push({ values: [count], label: p.virtual })
       total += count
     }
     if (resolved.length > 1) rows.push({ values: [total], label: 'total' })

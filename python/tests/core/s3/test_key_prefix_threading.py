@@ -25,7 +25,9 @@ def test_readdir_no_prefix_backward_compat():
     with patch_s3_multi(store):
         config = _make_config(key_prefix=None)
         accessor = S3Accessor(config)
-        path = PathSpec(original="/dir", directory="/dir")
+        path = PathSpec(resource_path=("/dir").strip("/"),
+                        virtual="/dir",
+                        directory="/dir")
         index = RAMIndexCacheStore()
         entries = asyncio.run(readdir(accessor, path, index=index))
     assert any(e.endswith("/a.txt") for e in entries)
@@ -37,7 +39,9 @@ def test_readdir_strips_key_prefix_from_entries():
     with patch_s3_multi(store):
         config = _make_config(key_prefix="prod")
         accessor = S3Accessor(config)
-        path = PathSpec(original="/dir", directory="/dir")
+        path = PathSpec(resource_path=("/dir").strip("/"),
+                        virtual="/dir",
+                        directory="/dir")
         index = RAMIndexCacheStore()
         entries = asyncio.run(readdir(accessor, path, index=index))
     for e in entries:
@@ -49,7 +53,9 @@ def test_read_bytes_with_key_prefix():
     with patch_s3_multi(store):
         config = _make_config(key_prefix="prod")
         accessor = S3Accessor(config)
-        path = PathSpec(original="/hello.txt", directory="/hello.txt")
+        path = PathSpec(resource_path=("/hello.txt").strip("/"),
+                        virtual="/hello.txt",
+                        directory="/hello.txt")
         data = asyncio.run(read_bytes(accessor, path))
     assert data == b"hello"
 
@@ -59,7 +65,9 @@ def test_find_strips_key_prefix_from_results():
     with patch_s3_multi(store):
         config = _make_config(key_prefix="prod")
         accessor = S3Accessor(config)
-        path = PathSpec(original="/dir", directory="/dir")
+        path = PathSpec(resource_path=("/dir").strip("/"),
+                        virtual="/dir",
+                        directory="/dir")
         results = asyncio.run(find(accessor, path))
     for r in results:
         assert "prod" not in r, f"key_prefix leaked into find result: {r}"

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../../core/mongodb/read.ts', () => ({
@@ -40,15 +41,15 @@ function makeAccessor(): MongoDBAccessor {
 
 function mk(name: string): PathSpec {
   return new PathSpec({
-    original: `/mongo/app/${name}`,
+    virtual: `/mongo/app/${name}`,
     directory: '/mongo/app/',
     resolved: true,
-    prefix: '/mongo',
+    resourcePath: mountKey(`/mongo/app/${name}`, '/mongo'),
   })
 }
 
 async function* bytesFor(path: PathSpec | string): AsyncIterable<Uint8Array> {
-  const original = typeof path === 'string' ? path : path.original
+  const original = typeof path === 'string' ? path : path.virtual
   yield await Promise.resolve(ENC.encode(original.endsWith('a.jsonl') ? 'AAA\n' : 'BBB\n'))
 }
 

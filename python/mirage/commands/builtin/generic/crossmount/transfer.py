@@ -25,9 +25,12 @@ from mirage.types import PathSpec
 
 
 def _flat(scopes: list[PathSpec]) -> list[PathSpec]:
-    # Drop each mount prefix so the generic sees one flat namespace of full
-    # virtual paths; the relayed primitives route each full path to its mount.
-    return [dataclasses.replace(s, prefix="") for s in scopes]
+    # Address by full virtual path so the generic sees one flat namespace;
+    # the relayed primitives route each full path to its mount.
+    return [
+        dataclasses.replace(s, resource_path=s.virtual.strip("/"))
+        for s in scopes
+    ]
 
 
 async def run_transfer(cmd_name: str, scopes: list[PathSpec],

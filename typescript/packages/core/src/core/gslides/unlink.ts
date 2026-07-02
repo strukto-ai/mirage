@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { invalidateAfterUnlink } from '../../cache/context.ts'
 import type { GSlidesAccessor } from '../../accessor/gslides.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -33,10 +34,10 @@ export async function unlink(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<void> {
-  const prefix = path.prefix
-  const key = path.key
-  if (VIRTUAL_DIRS.has(key)) throw eisdir(path.original)
-  if (index === undefined) throw enoent(path.original)
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const key = path.resourcePath
+  if (VIRTUAL_DIRS.has(key)) throw eisdir(path.virtual)
+  if (index === undefined) throw enoent(path.virtual)
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
   let result = await index.get(virtualKey)
   if (result.entry === undefined || result.entry === null) {
@@ -47,10 +48,10 @@ export async function unlink(
       await coreReaddir(
         accessor,
         new PathSpec({
-          original: parentVirtual,
+          virtual: parentVirtual,
           directory: parentVirtual,
           resolved: false,
-          prefix,
+          resourcePath: mountKey(parentVirtual, prefix),
         }),
         index,
       )
@@ -59,7 +60,7 @@ export async function unlink(
     }
     result = await index.get(virtualKey)
   }
-  if (result.entry === undefined || result.entry === null) throw enoent(path.original)
+  if (result.entry === undefined || result.entry === null) throw enoent(path.virtual)
   await deleteFile(accessor.tokenManager, result.entry.id)
   const parentDir = virtualKey.includes('/')
     ? virtualKey.slice(0, virtualKey.lastIndexOf('/')) || '/'

@@ -41,9 +41,9 @@ export async function jqProvisionGeneric(
   try {
     const s = await stat(first)
     const fileSize = s.size ?? 0
-    if (isJsonlPath(first.original) && isStreamableJsonlExpr(expr)) {
+    if (isJsonlPath(first.virtual) && isStreamableJsonlExpr(expr)) {
       return new ProvisionResult({
-        command: `jq '${expr}' ${first.original}`,
+        command: `jq '${expr}' ${first.virtual}`,
         networkReadLow: 0,
         networkReadHigh: fileSize,
         readOps: 1,
@@ -51,7 +51,7 @@ export async function jqProvisionGeneric(
       })
     }
     return new ProvisionResult({
-      command: `jq '${expr}' ${first.original}`,
+      command: `jq '${expr}' ${first.virtual}`,
       networkReadLow: fileSize,
       networkReadHigh: fileSize,
       readOps: 1,
@@ -77,15 +77,15 @@ export async function jqGeneric(
   if (paths.length > 0) {
     const first = paths[0]
     if (first === undefined) return [null, new IOResult()]
-    if (isJsonlPath(first.original) && isStreamableJsonlExpr(expression)) {
+    if (isJsonlPath(first.virtual) && isStreamableJsonlExpr(expression)) {
       return [evalJsonlStream(stream(first), expression, raw), new IOResult()]
     }
     const outputs: Uint8Array[] = []
     const spread = expression.includes('[]')
     for (const p of paths) {
       const bytes = await materialize(stream(p))
-      let data = parseJsonPath(bytes, p.original)
-      if (isJsonlPath(p.original) && Array.isArray(data) && !slurp) {
+      let data = parseJsonPath(bytes, p.virtual)
+      if (isJsonlPath(p.virtual) && Array.isArray(data) && !slurp) {
         for (const item of data) {
           const result = await jqEval(item, expression.trim())
           outputs.push(formatJqOutput(result, raw, compact, spread))

@@ -26,10 +26,10 @@ function eisdir(p: string): Error {
   return err
 }
 
-function fileSlug(resolved: ResolvedChromaPath, original: string): string {
-  if (resolved.isDir) throw eisdir(original)
+function fileSlug(resolved: ResolvedChromaPath, virtual: string): string {
+  if (resolved.isDir) throw eisdir(virtual)
   const slug = metadataString(resolved.entry?.extra.slug)
-  if (slug === null) throw eisdir(original)
+  if (slug === null) throw eisdir(virtual)
   return slug
 }
 
@@ -40,7 +40,7 @@ export async function readBytes(
 ): Promise<Uint8Array> {
   const spec = typeof path === 'string' ? PathSpec.fromStrPath(path) : path
   const resolved = await resolvePath(accessor, spec, index)
-  const text = await fetchPageChunks(accessor, fileSlug(resolved, spec.original))
+  const text = await fetchPageChunks(accessor, fileSlug(resolved, spec.virtual))
   return ENC.encode(text)
 }
 
@@ -51,7 +51,7 @@ export async function* readStream(
 ): AsyncIterable<Uint8Array> {
   const spec = typeof path === 'string' ? PathSpec.fromStrPath(path) : path
   const resolved = await resolvePath(accessor, spec, index)
-  const slug = fileSlug(resolved, spec.original)
+  const slug = fileSlug(resolved, spec.virtual)
   let first = true
   for await (const chunk of iterPageChunks(accessor, slug)) {
     if (first) {

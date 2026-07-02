@@ -20,6 +20,7 @@ from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.factory import with_read_cache
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 class _CountingBackend:
@@ -58,7 +59,9 @@ def _ops(backend: _CountingBackend) -> CommandIO:
 
 
 def _spec() -> PathSpec:
-    return PathSpec(original="/s3/a.txt", directory="/s3/", prefix="/s3/")
+    return PathSpec(resource_path=mount_key("/s3/a.txt", "/s3/"),
+                    virtual="/s3/a.txt",
+                    directory="/s3/")
 
 
 async def _drain(source) -> bytes:

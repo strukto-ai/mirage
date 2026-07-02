@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GSlidesAccessor } from '../../accessor/gslides.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
@@ -25,15 +26,15 @@ export async function stat(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<FileStat> {
-  const prefix = path.prefix
-  const key = path.key
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const key = path.resourcePath
 
   if (VIRTUAL_DIRS.has(key)) {
     const name = key !== '' ? key : '/'
     return new FileStat({ name, type: FileType.DIRECTORY })
   }
 
-  if (index === undefined) throw enoent(path.original)
+  if (index === undefined) throw enoent(path.virtual)
 
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
   let result = await index.get(virtualKey)
@@ -45,10 +46,10 @@ export async function stat(
       await coreReaddir(
         accessor,
         new PathSpec({
-          original: parentVirtual,
+          virtual: parentVirtual,
           directory: parentVirtual,
           resolved: false,
-          prefix,
+          resourcePath: mountKey(parentVirtual, prefix),
         }),
         index,
       )
@@ -57,7 +58,7 @@ export async function stat(
     }
     result = await index.get(virtualKey)
     if (result.entry === undefined || result.entry === null) {
-      throw enoent(path.original)
+      throw enoent(path.virtual)
     }
   }
   return new FileStat({

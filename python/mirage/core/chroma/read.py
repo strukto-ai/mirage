@@ -11,7 +11,7 @@ async def read_bytes(accessor, path: PathSpec,
                      index: IndexCacheStore) -> bytes:
     resolved = await resolve_path(accessor, path, index)
     if resolved.is_dir:
-        raise IsADirectoryError(errno.EISDIR, "Is a directory", path.original)
+        raise IsADirectoryError(errno.EISDIR, "Is a directory", path.virtual)
     text = await fetch_page_chunks(accessor, resolved.entry.extra["slug"])
     return text.encode()
 
@@ -20,7 +20,7 @@ async def read_stream(accessor, path: PathSpec,
                       index: IndexCacheStore) -> AsyncIterator[bytes]:
     resolved = await resolve_path(accessor, path, index)
     if resolved.is_dir:
-        raise IsADirectoryError(errno.EISDIR, "Is a directory", path.original)
+        raise IsADirectoryError(errno.EISDIR, "Is a directory", path.virtual)
     first = True
     async for chunk in iter_page_chunks(accessor,
                                         resolved.entry.extra["slug"]):

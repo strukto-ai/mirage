@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GitHubAccessor } from '../../accessor/github.ts'
 import { PathSpec } from '../../types.ts'
 import { lstripSlash, stripSlash } from '../../utils/slash.ts'
@@ -28,8 +29,8 @@ export async function search(
 }
 
 function stripPrefix(p: PathSpec): string {
-  const prefix = p.prefix
-  let raw = p.original
+  const prefix = mountPrefixOf(p.virtual, p.resourcePath)
+  let raw = p.virtual
   if (prefix !== '' && raw.startsWith(prefix)) {
     raw = raw.slice(prefix.length) || '/'
   }
@@ -41,7 +42,9 @@ export async function narrowPaths(
   pattern: string,
   paths: readonly PathSpec[],
 ): Promise<PathSpec[]> {
-  const mountPrefix = paths[0]?.prefix ?? ''
+  const mountPrefix =
+    (paths[0] === undefined ? undefined : mountPrefixOf(paths[0].virtual, paths[0].resourcePath)) ??
+    ''
   const narrowed: string[] = []
   for (const p of paths) {
     const pathFilter = stripSlash(stripPrefix(p))
@@ -58,9 +61,9 @@ export async function narrowPaths(
   return narrowed.map(
     (n) =>
       new PathSpec({
-        original: `${mountPrefix}/${lstripSlash(n)}`,
+        virtual: `${mountPrefix}/${lstripSlash(n)}`,
         directory: '',
-        prefix: mountPrefix,
+        resourcePath: mountKey(`${mountPrefix}/${lstripSlash(n)}`, mountPrefix),
         resolved: true,
       }),
   )

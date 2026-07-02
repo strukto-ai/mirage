@@ -62,7 +62,7 @@ function make(
 }
 
 export function detectScope(path: PathSpec | string, config: QdrantConfigResolved): QdrantScope {
-  const raw = path instanceof PathSpec ? path.stripPrefix : path
+  const raw = path instanceof PathSpec ? path.mountPath : path
   const key = stripSlash(raw)
   const segs = key === '' ? [] : key.split('/')
 

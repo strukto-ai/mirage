@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.resource.ram import RAMResource
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 from mirage.workspace.node.resolve_globs import resolve_globs
 
 
@@ -51,7 +52,10 @@ def test_text_passes_through():
 
 def test_pathspec_without_pattern_preserved():
     reg = _mock_registry()
-    ps = PathSpec(original="/data/file.txt", directory="/data/", resolved=True)
+    ps = PathSpec(resource_path=("/data/file.txt").strip("/"),
+                  virtual="/data/file.txt",
+                  directory="/data/",
+                  resolved=True)
     classified = ["cat", ps]
     result = _run(resolve_globs(classified, reg))
     assert len(result) == 2
@@ -62,14 +66,15 @@ def test_pathspec_without_pattern_preserved():
 
 def test_glob_pathspec_resolved_to_pathspec():
     resolved_ps = PathSpec(
-        original="/data/a.txt",
+        resource_path=mount_key("/data/a.txt", "/data"),
+        virtual="/data/a.txt",
         directory="/data/",
         resolved=True,
-        prefix="/data",
     )
     reg = _mock_registry(resolve_result=[resolved_ps])
     glob_ps = PathSpec(
-        original="/data/*.txt",
+        resource_path=("/data/*.txt").strip("/"),
+        virtual="/data/*.txt",
         directory="/data/",
         pattern="*.txt",
         resolved=False,
@@ -84,12 +89,19 @@ def test_glob_pathspec_resolved_to_pathspec():
 
 def test_glob_multiple_matches_expand():
     matches = [
-        PathSpec(original="/data/a.txt", directory="/data/", resolved=True),
-        PathSpec(original="/data/b.txt", directory="/data/", resolved=True),
+        PathSpec(resource_path=("/data/a.txt").strip("/"),
+                 virtual="/data/a.txt",
+                 directory="/data/",
+                 resolved=True),
+        PathSpec(resource_path=("/data/b.txt").strip("/"),
+                 virtual="/data/b.txt",
+                 directory="/data/",
+                 resolved=True),
     ]
     reg = _mock_registry(resolve_result=matches)
     glob_ps = PathSpec(
-        original="/data/*.txt",
+        resource_path=("/data/*.txt").strip("/"),
+        virtual="/data/*.txt",
         directory="/data/",
         pattern="*.txt",
         resolved=False,
@@ -99,14 +111,15 @@ def test_glob_multiple_matches_expand():
     assert len(result) == 3
     assert result[0] == "ls"
     assert all(isinstance(r, PathSpec) for r in result[1:])
-    assert result[1].original == "/data/a.txt"
-    assert result[2].original == "/data/b.txt"
+    assert result[1].virtual == "/data/a.txt"
+    assert result[2].virtual == "/data/b.txt"
 
 
 def test_glob_string_result_wrapped_in_pathspec():
     reg = _mock_registry(resolve_result=["/a.txt"])
     glob_ps = PathSpec(
-        original="/data/*.txt",
+        resource_path=("/data/*.txt").strip("/"),
+        virtual="/data/*.txt",
         directory="/data/",
         pattern="*.txt",
         resolved=False,
@@ -115,13 +128,14 @@ def test_glob_string_result_wrapped_in_pathspec():
     result = _run(resolve_globs(classified, reg))
     assert len(result) == 2
     assert isinstance(result[1], PathSpec)
-    assert result[1].original == "/data/a.txt"
+    assert result[1].virtual == "/data/a.txt"
 
 
 def test_glob_no_match_returns_original_pathspec():
     reg = _mock_registry(resolve_result=[])
     glob_ps = PathSpec(
-        original="/data/*.xyz",
+        resource_path=("/data/*.xyz").strip("/"),
+        virtual="/data/*.xyz",
         directory="/data/",
         pattern="*.xyz",
         resolved=False,
@@ -135,7 +149,8 @@ def test_glob_no_match_returns_original_pathspec():
 def test_text_args_skip_glob_resolution():
     reg = _mock_registry()
     glob_ps = PathSpec(
-        original="/data/*.txt",
+        resource_path=("/data/*.txt").strip("/"),
+        virtual="/data/*.txt",
         directory="/data/",
         pattern="*.txt",
         resolved=False,
@@ -150,7 +165,10 @@ def test_text_args_skip_glob_resolution():
 
 def test_mixed_text_and_pathspec():
     reg = _mock_registry()
-    ps = PathSpec(original="/data/file.txt", directory="/data/", resolved=True)
+    ps = PathSpec(resource_path=("/data/file.txt").strip("/"),
+                  virtual="/data/file.txt",
+                  directory="/data/",
+                  resolved=True)
     classified = ["grep", "-i", "pattern", ps]
     result = _run(resolve_globs(classified, reg))
     assert result[0] == "grep"
@@ -164,7 +182,8 @@ def test_resolve_error_returns_original_pathspec():
     reg = _mock_registry()
     reg.mount_for = MagicMock(side_effect=ValueError("no mount"))
     glob_ps = PathSpec(
-        original="/unknown/*.txt",
+        resource_path=("/unknown/*.txt").strip("/"),
+        virtual="/unknown/*.txt",
         directory="/unknown/",
         pattern="*.txt",
         resolved=False,
@@ -177,26 +196,27 @@ def test_resolve_error_returns_original_pathspec():
 
 def test_pathspec_dir_carries_pattern():
     ps = PathSpec(
-        original="/data/*.txt",
+        resource_path=mount_key("/data/*.txt", "/data"),
+        virtual="/data/*.txt",
         directory="/data/",
         pattern="*.txt",
         resolved=False,
-        prefix="/data",
     )
     d = ps.dir
-    assert d.original == "/data/"
+    assert d.virtual == "/data/"
     assert d.pattern == "*.txt"
-    assert d.prefix == "/data"
+    assert d.resource_path == ""
 
 
 def test_pathspec_dir_no_pattern():
     ps = PathSpec(
-        original="/data/file.txt",
+        resource_path=("/data/file.txt").strip("/"),
+        virtual="/data/file.txt",
         directory="/data/",
         resolved=True,
     )
     d = ps.dir
-    assert d.original == "/data/"
+    assert d.virtual == "/data/"
     assert d.pattern is None
 
 
@@ -209,7 +229,8 @@ def test_scope_error_truncates_instead_of_crash():
     resource._store.dirs.add("/")
     index = RAMIndexCacheStore()
     glob_ps = PathSpec(
-        original="/*.txt",
+        resource_path=("/*.txt").strip("/"),
+        virtual="/*.txt",
         directory="/",
         pattern="*.txt",
         resolved=False,

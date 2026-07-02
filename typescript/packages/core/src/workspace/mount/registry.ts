@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import { CacheManager } from '../../cache/manager.ts'
 import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
@@ -250,7 +251,7 @@ export class MountRegistry {
         bucket = []
         groups.set(m, bucket)
       }
-      bucket.push(spec.original)
+      bucket.push(spec.virtual)
     }
     return [...groups.entries()]
   }
@@ -271,7 +272,14 @@ export class MountRegistry {
     const hadTrailing = path.endsWith('/')
     const norm = `/${stripSlash(path)}`
     const mountPrefix = rstripSlash(m.prefix)
-    return [m.resource, PathSpec.fromStrPath(hadTrailing ? `${norm}/` : norm, mountPrefix), m.mode]
+    return [
+      m.resource,
+      PathSpec.fromStrPath(
+        hadTrailing ? `${norm}/` : norm,
+        mountKey(hadTrailing ? `${norm}/` : norm, mountPrefix),
+      ),
+      m.mode,
+    ]
   }
 
   mountFor(path: string): MountEntry | null {
@@ -321,7 +329,7 @@ export class MountRegistry {
     pathScopes: readonly PathSpec[],
     cwd: string,
   ): Promise<MountEntry | null> {
-    const mountPath = pathScopes.length > 0 ? (pathScopes[0]?.original ?? cwd) : cwd
+    const mountPath = pathScopes.length > 0 ? (pathScopes[0]?.virtual ?? cwd) : cwd
     let mount = this.mountFor(mountPath)
     if (mount !== null && mount.resolveCommand(cmdName) == null && pathScopes.length > 0) {
       throw new MountCommandUnsupported(cmdName, mount.resource.kind)
@@ -356,14 +364,14 @@ export class MountRegistry {
     if (resource.fingerprint === undefined) return
     const mountPrefix = rstripSlash(realMount.prefix)
     for (const scope of pathScopes) {
-      const key = scope.original
+      const key = scope.virtual
       if (!(await cache.exists(key))) continue
       const prefixedScope = new PathSpec({
-        original: scope.original,
+        virtual: scope.virtual,
         directory: scope.directory,
         pattern: scope.pattern,
         resolved: scope.resolved,
-        prefix: mountPrefix,
+        resourcePath: mountKey(scope.virtual, mountPrefix),
       })
       let remoteFp: string | null = null
       try {

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { ChromaAccessor } from '../../../accessor/chroma.ts'
 import { resolveGlob } from '../../../core/chroma/glob.ts'
 import { searchSegments } from '../../../core/chroma/search.ts'
@@ -25,13 +26,16 @@ const ENC = new TextEncoder()
 
 function defaultPaths(paths: PathSpec[], cwd: string, mountPrefix: string): PathSpec[] {
   if (paths.length > 0) return paths
-  return [PathSpec.fromStrPath(cwd, mountPrefix)]
+  return [PathSpec.fromStrPath(cwd, mountKey(cwd, mountPrefix))]
 }
 
 function isMountRoot(path: PathSpec): boolean {
-  let root = path.prefix !== '' ? rstripSlash(path.prefix) : '/'
+  let root =
+    mountPrefixOf(path.virtual, path.resourcePath) !== ''
+      ? rstripSlash(mountPrefixOf(path.virtual, path.resourcePath))
+      : '/'
   root = root !== '' ? root : '/'
-  const value = rstripSlash(path.original) !== '' ? rstripSlash(path.original) : '/'
+  const value = rstripSlash(path.virtual) !== '' ? rstripSlash(path.virtual) : '/'
   return value === '/' || value === root
 }
 
@@ -47,7 +51,10 @@ async function searchCommand(
   }
   const index = opts.index ?? undefined
   const targetPaths = defaultPaths(paths, opts.cwd, opts.mountPrefix ?? '')
-  const mountPrefix = targetPaths[0]?.prefix ?? ''
+  const mountPrefix =
+    (targetPaths[0] === undefined
+      ? undefined
+      : mountPrefixOf(targetPaths[0].virtual, targetPaths[0].resourcePath)) ?? ''
   const resolvedPaths = targetPaths.some(isMountRoot)
     ? []
     : await resolveGlob(accessor, targetPaths, index)

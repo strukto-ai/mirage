@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountPrefixOf, rekey } from '../../utils/key_prefix.ts'
 import type { Where } from 'chromadb'
 import type { ChromaAccessor } from '../../accessor/chroma.ts'
 import type { IndexEntry } from '../../cache/index/config.ts'
@@ -35,7 +36,10 @@ export async function searchSegments(
 ): Promise<Uint8Array> {
   validateArgs(query, topK)
   if (mountPrefix === '' && paths.length > 0) {
-    mountPrefix = paths[0]?.prefix ?? ''
+    mountPrefix =
+      (paths[0] === undefined
+        ? undefined
+        : mountPrefixOf(paths[0].virtual, paths[0].resourcePath)) ?? ''
   }
   let scopedSlugs: Set<string> | null = null
   let where: Where | undefined
@@ -84,7 +88,7 @@ export async function targetEntries(
         stripPrefix: false,
       })
       for (const child of children) {
-        const childSpec = PathSpec.fromStrPath(child, path.prefix)
+        const childSpec = PathSpec.fromStrPath(child, rekey(path.virtual, path.resourcePath, child))
         const childResolved = await resolvePath(accessor, childSpec, index)
         if (childResolved.entry !== null && !childResolved.isDir) {
           targets.set(String(childResolved.entry.extra.slug), childResolved.entry)

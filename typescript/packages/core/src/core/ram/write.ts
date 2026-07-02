@@ -24,7 +24,7 @@ export async function writeBytes(
   data: Uint8Array,
 ): Promise<void> {
   const start = performance.now()
-  const p = norm(path.stripPrefix)
+  const p = norm(path.mountPath)
   const par = parent(p)
   if (par !== '/' && !accessor.store.dirs.has(par)) {
     throw new Error(`parent directory does not exist: ${par}`)

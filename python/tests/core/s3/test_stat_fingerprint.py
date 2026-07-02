@@ -34,7 +34,9 @@ def test_s3_stat_returns_fingerprint_from_etag():
             aws_secret_access_key="fake",
         )
         accessor = S3Accessor(config)
-        scope = PathSpec(original="/foo.txt", directory="/")
+        scope = PathSpec(resource_path=("/foo.txt").strip("/"),
+                         virtual="/foo.txt",
+                         directory="/")
         result = asyncio.run(stat(accessor, scope, index=None))
         assert result.fingerprint is not None
         assert result.fingerprint == result.extra.get("etag")

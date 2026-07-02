@@ -49,8 +49,7 @@ async def cat(
                 await ops.stat(accessor, p, index)
             cachable = CachableAsyncIterator(
                 ops.read_stream(accessor, p, index))
-            io = IOResult(reads={p.strip_prefix: cachable},
-                          cache=[p.strip_prefix])
+            io = IOResult(reads={p.mount_path: cachable}, cache=[p.mount_path])
             source: ByteSource = cachable
         elif ops.local:
             cachables = [
@@ -58,17 +57,17 @@ async def cat(
                 for p in paths
             ]
             io = IOResult(reads={
-                p.strip_prefix: c
+                p.mount_path: c
                 for p, c in zip(paths, cachables)
             },
-                          cache=[p.strip_prefix for p in paths])
+                          cache=[p.mount_path for p in paths])
             source = chain_cachables(*cachables)
         else:
             reads: dict[str, ByteSource] = {}
             parts: list[bytes] = []
             for p in paths:
                 data = await ops.read_bytes(accessor, p, index)
-                reads[p.strip_prefix] = data
+                reads[p.mount_path] = data
                 parts.append(data)
             io = IOResult(reads=reads, cache=list(reads))
             source = async_chain(*parts)

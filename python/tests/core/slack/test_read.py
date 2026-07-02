@@ -77,7 +77,9 @@ async def test_read_jsonl(accessor, index):
         result = await read(
             accessor,
             PathSpec(
-                original="/channels/general__C001/2023-11-14/chat.jsonl",
+                resource_path=("/channels/general__C001/2023-11-14/chat.jsonl"
+                               ).strip("/"),
+                virtual="/channels/general__C001/2023-11-14/chat.jsonl",
                 directory="/channels/general__C001/2023-11-14/chat.jsonl"),
             index=index)
 
@@ -125,8 +127,10 @@ async def test_read_file_blob(accessor, index):
                return_value=b"%PDF-1.4 fake bytes"):
         data = await read(
             accessor,
-            PathSpec(original=("/channels/general__C001/2026-04-10"
-                               "/files/report__F1.pdf"),
+            PathSpec(resource_path=("/channels/general__C001/2026-04-10"
+                                    "/files/report__F1.pdf").strip("/"),
+                     virtual=("/channels/general__C001/2026-04-10"
+                              "/files/report__F1.pdf"),
                      directory=("/channels/general__C001/2026-04-10"
                                 "/files/report__F1.pdf")),
             index=index,
@@ -148,8 +152,10 @@ async def test_read_user_json(accessor, index):
             return_value=user_data,
     ):
         result = await read(accessor,
-                            PathSpec(original="/users/alice.json",
-                                     directory="/users/alice.json"),
+                            PathSpec(
+                                resource_path=("/users/alice.json").strip("/"),
+                                virtual="/users/alice.json",
+                                directory="/users/alice.json"),
                             index=index)
 
     parsed = json.loads(result)
@@ -161,7 +167,8 @@ async def test_read_user_json(accessor, index):
 async def test_read_not_found(accessor, index):
     with pytest.raises(FileNotFoundError):
         await read(accessor,
-                   PathSpec(original="/nonexistent/path",
+                   PathSpec(resource_path=("/nonexistent/path").strip("/"),
+                            virtual="/nonexistent/path",
                             directory="/nonexistent/path"),
                    index=index)
 

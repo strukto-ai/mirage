@@ -6,6 +6,7 @@ from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
 from mirage.core.sharepoint._resolver import _drive_cache, _site_cache
 from mirage.core.sharepoint.write import write_bytes
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 _BASE = "https://graph.microsoft.com/v1.0"
 _SITE_ID = "tenant.sharepoint.com,site-guid,web-guid"
@@ -45,9 +46,10 @@ async def test_write_small_file():
 
     with aioresponses() as m:
         m.put(url, callback=_cb)
-        path = PathSpec(original="/sp/Engineering/Documents/a.txt",
-                        directory="/sp/Engineering/Documents/a.txt",
-                        prefix="/sp")
+        path = PathSpec(resource_path=mount_key(
+            "/sp/Engineering/Documents/a.txt", "/sp"),
+                        virtual="/sp/Engineering/Documents/a.txt",
+                        directory="/sp/Engineering/Documents/a.txt")
         await write_bytes(_accessor(), path, b"hello")
     assert captured["body"] == b"hello"
 
@@ -73,8 +75,9 @@ async def test_write_large_file_uses_upload_session(monkeypatch):
         m.post(session_url, payload={"uploadUrl": upload_url})
         m.put(upload_url, callback=_chunk_cb)
         m.put(upload_url, callback=_final_cb)
-        path = PathSpec(original="/sp/Engineering/Documents/big.bin",
-                        directory="/sp/Engineering/Documents/big.bin",
-                        prefix="/sp")
+        path = PathSpec(resource_path=mount_key(
+            "/sp/Engineering/Documents/big.bin", "/sp"),
+                        virtual="/sp/Engineering/Documents/big.bin",
+                        directory="/sp/Engineering/Documents/big.bin")
         await write_bytes(_accessor(), path, b"abcdef")
     assert ranges == ["bytes 0-3/6", "bytes 4-5/6"]

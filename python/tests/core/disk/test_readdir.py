@@ -18,6 +18,7 @@ from mirage.accessor.disk import DiskAccessor
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.disk.readdir import readdir
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.mark.asyncio
@@ -25,7 +26,10 @@ async def test_empty_directory(tmp_path):
     accessor = DiskAccessor(tmp_path)
     index = RAMIndexCacheStore(ttl=0)
     result = await readdir(
-        accessor, PathSpec(original="/", directory="/", prefix="/disk"), index)
+        accessor,
+        PathSpec(resource_path=mount_key("/", "/disk"),
+                 virtual="/",
+                 directory="/"), index)
     assert result == []
 
 
@@ -35,8 +39,10 @@ async def test_directory_with_files(tmp_path):
     (tmp_path / "b.txt").write_text("b")
     accessor = DiskAccessor(tmp_path)
     index = RAMIndexCacheStore(ttl=0)
-    result = await readdir(accessor, PathSpec(original="/", directory="/"),
-                           index)
+    result = await readdir(
+        accessor,
+        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"),
+        index)
     assert result == ["/a.txt", "/b.txt"]
 
 
@@ -46,8 +52,10 @@ async def test_directory_with_subdirectories(tmp_path):
     (tmp_path / "file.txt").write_text("x")
     accessor = DiskAccessor(tmp_path)
     index = RAMIndexCacheStore(ttl=0)
-    result = await readdir(accessor, PathSpec(original="/", directory="/"),
-                           index)
+    result = await readdir(
+        accessor,
+        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"),
+        index)
     assert result == ["/file.txt", "/sub"]
 
 
@@ -56,11 +64,15 @@ async def test_cache_hit(tmp_path):
     (tmp_path / "a.txt").write_text("a")
     accessor = DiskAccessor(tmp_path)
     index = RAMIndexCacheStore(ttl=600)
-    first = await readdir(accessor, PathSpec(original="/", directory="/"),
-                          index)
+    first = await readdir(
+        accessor,
+        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"),
+        index)
     (tmp_path / "b.txt").write_text("b")
-    second = await readdir(accessor, PathSpec(original="/", directory="/"),
-                           index)
+    second = await readdir(
+        accessor,
+        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"),
+        index)
     assert first == second
 
 
@@ -71,7 +83,9 @@ async def test_with_prefix(tmp_path):
     index = RAMIndexCacheStore(ttl=0)
     result = await readdir(
         accessor,
-        PathSpec(original="/disk/", directory="/disk/", prefix="/disk"), index)
+        PathSpec(resource_path=mount_key("/disk/", "/disk"),
+                 virtual="/disk/",
+                 directory="/disk/"), index)
     assert result == ["/disk/a.txt"]
 
 
@@ -80,7 +94,9 @@ async def test_with_glob_scope(tmp_path):
     (tmp_path / "a.txt").write_text("a")
     accessor = DiskAccessor(tmp_path)
     index = RAMIndexCacheStore(ttl=0)
-    scope = PathSpec(original="/disk/", directory="/disk/", prefix="/disk")
+    scope = PathSpec(resource_path=mount_key("/disk/", "/disk"),
+                     virtual="/disk/",
+                     directory="/disk/")
     result = await readdir(accessor, scope, index)
     assert result == ["/disk/a.txt"]
 
@@ -91,6 +107,8 @@ async def test_not_a_directory(tmp_path):
     accessor = DiskAccessor(tmp_path)
     index = RAMIndexCacheStore(ttl=0)
     with pytest.raises(NotADirectoryError):
-        await readdir(accessor,
-                      PathSpec(original="/file.txt", directory="/file.txt"),
-                      index)
+        await readdir(
+            accessor,
+            PathSpec(resource_path=("/file.txt").strip("/"),
+                     virtual="/file.txt",
+                     directory="/file.txt"), index)

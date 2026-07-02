@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { SlackAccessor } from '../../accessor/slack.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -96,8 +97,8 @@ interface PathParts {
 }
 
 function normalizePath(path: PathSpec): PathParts {
-  const prefix = path.prefix
-  let raw = path.pattern !== null ? path.directory : path.original
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  let raw = path.pattern !== null ? path.directory : path.virtual
   if (prefix !== '' && raw.startsWith(prefix)) {
     raw = raw.slice(prefix.length) || '/'
   }
@@ -225,9 +226,9 @@ async function readdirChannelDates(
   if (lookup.entry === undefined || lookup.entry === null) {
     const parentPath = `${parts.prefix}/${container}`
     const parent = new PathSpec({
-      original: parentPath,
+      virtual: parentPath,
       directory: parentPath,
-      prefix: parts.prefix,
+      resourcePath: mountKey(parentPath, parts.prefix),
     })
     await readdir(accessor, parent, index)
     lookup = await index.get(parts.virtualKey)
@@ -355,9 +356,9 @@ async function readdirDateContents(
   let parentLookup = await index.get(parentVirtual)
   if (parentLookup.entry === undefined || parentLookup.entry === null) {
     const parent = new PathSpec({
-      original: parentVirtual,
+      virtual: parentVirtual,
       directory: parentVirtual,
-      prefix: parts.prefix,
+      resourcePath: mountKey(parentVirtual, parts.prefix),
     })
     await readdir(accessor, parent, index)
     parentLookup = await index.get(parentVirtual)
@@ -390,9 +391,9 @@ async function readdirFilesDir(
   if (chanSeg === undefined || dateStr === undefined) throw enoent(parts.path)
   const datePath = `${parts.prefix}/${container}/${chanSeg}/${dateStr}`
   const dateSpec = new PathSpec({
-    original: datePath,
+    virtual: datePath,
     directory: datePath,
-    prefix: parts.prefix,
+    resourcePath: mountKey(datePath, parts.prefix),
   })
   await readdir(accessor, dateSpec, index)
   const refreshed = await index.listDir(parts.virtualKey)

@@ -109,26 +109,26 @@ async def cp(
     errors: list[str] = []
     for src, target in copy_targets(sources, dst, dst_is_dir):
         if not await path_exists(stat, src):
-            errors.append(f"cp: cannot stat '{src.original}': "
+            errors.append(f"cp: cannot stat '{src.virtual}': "
                           "No such file or directory")
             continue
         if key_of(src) == key_of(target):
-            errors.append(f"cp: '{src.original}' and '{target.original}' "
+            errors.append(f"cp: '{src.virtual}' and '{target.virtual}' "
                           "are the same file")
             continue
         if recursive and key_of(target).startswith(key_of(src) + "/"):
-            errors.append(f"cp: cannot copy a directory, '{src.original}', "
-                          f"into itself, '{target.original}'")
+            errors.append(f"cp: cannot copy a directory, '{src.virtual}', "
+                          f"into itself, '{target.virtual}'")
             continue
         if not recursive and await is_directory(stat, src, index):
             errors.append("cp: -r not specified; omitting directory "
-                          f"'{src.original}'")
+                          f"'{src.virtual}'")
             continue
         if recursive:
-            src_base = src.strip_prefix.rstrip("/")
-            dst_base = target.strip_prefix.rstrip("/")
+            src_base = src.mount_path.rstrip("/")
+            dst_base = target.mount_path.rstrip("/")
             if copy is None:
-                for entry, is_dir in await walk(readdir, stat, src.original,
+                for entry, is_dir in await walk(readdir, stat, src.virtual,
                                                 index):
                     entry_dst = dst_base + entry[len(src_base):]
                     if is_dir:
@@ -171,9 +171,9 @@ async def cp(
             await write(target, data=await read_bytes(src))
         else:
             await copy(src, target)
-        writes[target.strip_prefix] = b""
+        writes[target.mount_path] = b""
         if v:
-            lines.append(f"'{src.original}' -> '{target.original}'")
+            lines.append(f"'{src.virtual}' -> '{target.virtual}'")
     output = "\n".join(lines) + "\n" if lines else None
     stderr = ("\n".join(errors) + "\n").encode() if errors else None
     return output.encode() if output else None, IOResult(

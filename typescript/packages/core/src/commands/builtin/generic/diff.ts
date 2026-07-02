@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { concat } from '../../../io/cachable_iterator.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { FileType, type FileStat, PathSpec } from '../../../types.ts'
@@ -36,12 +37,12 @@ interface DiffFlags {
 }
 
 function childSpec(parent: PathSpec, name: string): PathSpec {
-  const childPath = `${rstripSlash(parent.original)}/${name}`
+  const childPath = `${rstripSlash(parent.virtual)}/${name}`
   return new PathSpec({
-    original: childPath,
+    virtual: childPath,
     directory: childPath,
     resolved: false,
-    prefix: parent.prefix,
+    resourcePath: mountKey(childPath, mountPrefixOf(parent.virtual, parent.resourcePath)),
   })
 }
 
@@ -81,14 +82,14 @@ async function diffPair(
     textB = textB.replace(/[ \t]+/g, ' ')
   }
   if (flags.q) {
-    if (textA !== textB) return ENC.encode(`Files ${path1.original} and ${path2.original} differ\n`)
+    if (textA !== textB) return ENC.encode(`Files ${path1.virtual} and ${path2.virtual} differ\n`)
     return new Uint8Array(0)
   }
   const aLines = splitLinesKeepEnds(textA)
   const bLines = splitLinesKeepEnds(textB)
   let result: string[]
   if (flags.e) result = edScript(aLines, bLines)
-  else if (flags.u) result = unifiedDiff(aLines, bLines, path1.original, path2.original)
+  else if (flags.u) result = unifiedDiff(aLines, bLines, path1.virtual, path2.virtual)
   else result = normalDiff(aLines, bLines)
   return ENC.encode(result.join(''))
 }
@@ -106,8 +107,8 @@ async function diffDirs(
   const namesA = new Set(rawA.map((e) => gnuBasename(e)))
   const namesB = new Set(rawB.map((e) => gnuBasename(e)))
   const names = [...new Set([...namesA, ...namesB])].sort()
-  const left = rstripSlash(dirA.original)
-  const right = rstripSlash(dirB.original)
+  const left = rstripSlash(dirA.virtual)
+  const right = rstripSlash(dirB.virtual)
   const parts: Uint8Array[] = []
   for (const name of names) {
     if (!namesB.has(name)) {
@@ -128,19 +129,18 @@ async function diffDirs(
       const body = await diffPair(stream, childA, childB, flags)
       if (body.byteLength > 0) {
         if (flags.q) parts.push(body)
-        else
-          parts.push(concat([ENC.encode(`diff -r ${childA.original} ${childB.original}\n`), body]))
+        else parts.push(concat([ENC.encode(`diff -r ${childA.virtual} ${childB.virtual}\n`), body]))
       }
     } else if (aDir) {
       parts.push(
         ENC.encode(
-          `File ${childA.original} is a directory while file ${childB.original} is a regular file\n`,
+          `File ${childA.virtual} is a directory while file ${childB.virtual} is a regular file\n`,
         ),
       )
     } else {
       parts.push(
         ENC.encode(
-          `File ${childA.original} is a regular file while file ${childB.original} is a directory\n`,
+          `File ${childA.virtual} is a regular file while file ${childB.virtual} is a directory\n`,
         ),
       )
     }
@@ -178,5 +178,5 @@ export async function diffGeneric(
   output ??= await diffPair(stream, p0, p1, flags)
   const exitCode = output.byteLength > 0 ? 1 : 0
   const out: ByteSource = output
-  return [out, new IOResult({ exitCode, cache: [p0.stripPrefix, p1.stripPrefix] })]
+  return [out, new IOResult({ exitCode, cache: [p0.mountPath, p1.mountPath] })]
 }

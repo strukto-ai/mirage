@@ -19,6 +19,7 @@ from mirage.cache.index import IndexEntry, RAMIndexCacheStore
 from mirage.core.slack.glob import resolve_glob
 from mirage.resource.slack.config import SlackConfig
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.fixture
@@ -58,12 +59,13 @@ async def test_resolve_glob_files_pdf(accessor, index):
                     })),
     ])
     spec = PathSpec(
-        original="/channels/general__C001/2026-04-10/files/*.pdf",
+        resource_path=mount_key(
+            "/channels/general__C001/2026-04-10/files/*.pdf", ""),
+        virtual="/channels/general__C001/2026-04-10/files/*.pdf",
         directory="/channels/general__C001/2026-04-10/files/",
         pattern="*.pdf",
         resolved=False,
-        prefix="",
     )
     matched = await resolve_glob(accessor, [spec], index=index)
     assert len(matched) == 1
-    assert matched[0].original.endswith("a__F1.pdf")
+    assert matched[0].virtual.endswith("a__F1.pdf")

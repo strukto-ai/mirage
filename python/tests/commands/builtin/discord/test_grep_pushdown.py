@@ -19,6 +19,7 @@ import pytest
 from mirage.commands.builtin.discord.grep import grep
 from mirage.commands.builtin.discord.rg import rg
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def _concrete_paths(n: int = 7):
@@ -28,9 +29,9 @@ def _concrete_paths(n: int = 7):
             f"/discord/myguild/channels/general/2026-01-{d:02d}/chat.jsonl")
         paths.append(
             PathSpec(
-                original=original,
+                resource_path=mount_key(original, "/discord"),
+                virtual=original,
                 directory=original,
-                prefix="/discord",
             ))
     return paths
 
@@ -90,10 +91,11 @@ async def test_discord_grep_falls_back_when_native_raises():
     accessor = AsyncMock()
     accessor.config = AsyncMock()
     paths = [
-        PathSpec(original="/discord/myguild/channels/general/*.jsonl",
+        PathSpec(resource_path=mount_key(
+            "/discord/myguild/channels/general/*.jsonl", "/discord"),
+                 virtual="/discord/myguild/channels/general/*.jsonl",
                  directory="/discord/myguild/channels/general/",
-                 pattern="*.jsonl",
-                 prefix="/discord"),
+                 pattern="*.jsonl"),
     ]
     with patch(
             "mirage.commands.builtin.discord.grep.search_guild",
@@ -150,10 +152,11 @@ async def test_discord_grep_multi_pattern_skips_native_search():
     accessor = AsyncMock()
     accessor.config = AsyncMock()
     paths = [
-        PathSpec(original="/discord/myguild/channels/general/*.jsonl",
+        PathSpec(resource_path=mount_key(
+            "/discord/myguild/channels/general/*.jsonl", "/discord"),
+                 virtual="/discord/myguild/channels/general/*.jsonl",
                  directory="/discord/myguild/channels/general/",
-                 pattern="*.jsonl",
-                 prefix="/discord"),
+                 pattern="*.jsonl"),
     ]
     with patch(
             "mirage.commands.builtin.discord.grep.search_guild",
@@ -221,10 +224,11 @@ async def test_discord_rg_multi_pattern_skips_native_search():
     accessor = AsyncMock()
     accessor.config = AsyncMock()
     paths = [
-        PathSpec(original="/discord/myguild/channels/general/*.jsonl",
+        PathSpec(resource_path=mount_key(
+            "/discord/myguild/channels/general/*.jsonl", "/discord"),
+                 virtual="/discord/myguild/channels/general/*.jsonl",
                  directory="/discord/myguild/channels/general/",
-                 pattern="*.jsonl",
-                 prefix="/discord"),
+                 pattern="*.jsonl"),
     ]
     with patch(
             "mirage.commands.builtin.discord.rg.search_guild",

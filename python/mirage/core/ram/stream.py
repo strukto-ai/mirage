@@ -25,15 +25,11 @@ from mirage.utils.path import norm
 async def stream(accessor: RAMAccessor,
                  path: PathSpec) -> AsyncIterator[bytes]:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    virtual = path.original if isinstance(path, PathSpec) else path
-    if isinstance(path, PathSpec):
-        prefix = path.prefix
-        path = path.original
-        if prefix and path.startswith(prefix):
-            rest = path[len(prefix):]
-            if prefix.endswith("/") or rest == "" or rest.startswith("/"):
-                path = rest or "/"
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    virtual = path.virtual
+    path = norm(path.resource_path)
     store = accessor.store
     key = norm(path)
     if key not in store.files:
@@ -49,15 +45,11 @@ async def read_stream(accessor: RAMAccessor,
                       path: PathSpec,
                       index: IndexCacheStore = None) -> AsyncIterator[bytes]:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    virtual = path.original if isinstance(path, PathSpec) else path
-    if isinstance(path, PathSpec):
-        prefix = path.prefix
-        path = path.original
-    if prefix and path.startswith(prefix):
-        rest = path[len(prefix):]
-        if prefix.endswith("/") or rest == "" or rest.startswith("/"):
-            path = rest or "/"
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    virtual = path.virtual
+    path = norm(path.resource_path)
     try:
         gen = stream(accessor, path)
         async for chunk in gen:

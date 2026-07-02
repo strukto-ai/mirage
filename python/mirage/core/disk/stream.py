@@ -35,10 +35,12 @@ async def read_stream(accessor: DiskAccessor,
                       index: IndexCacheStore = None,
                       chunk_size: int = 8192) -> AsyncIterator[bytes]:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    virtual = path.original
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    virtual = path.virtual
     if isinstance(path, PathSpec):
-        path = path.strip_prefix
+        path = path.mount_path
     root = accessor.root
     rec = record_stream("read", path, "disk")
     p = _resolve(root, path)

@@ -81,7 +81,8 @@ async def _find_walk(
     empty: bool,
     index: IndexCacheStore | None,
 ) -> tuple[ByteSource | None, IOResult]:
-    search = paths[0] if paths else PathSpec(original="/", directory="/")
+    search = paths[0] if paths else PathSpec(
+        virtual="/", directory="/", resource_path="")
     args = parse_find_args(texts,
                            name=name,
                            type=type,

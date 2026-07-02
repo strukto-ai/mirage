@@ -14,24 +14,26 @@
 
 import {
   BaseResource,
-  detectMongoScope,
-  type FileStat,
   MONGODB_COMMANDS,
   MONGODB_OPS,
   MONGODB_PROMPT,
   MongoDBAccessor,
-  type MongoDBConfig,
-  type MongoDBConfigResolved,
+  PathSpec,
+  ResourceName,
+  detectMongoScope,
   mongoRead,
   mongoReaddir,
   mongoStat,
-  PathSpec,
+  mountKey,
+  mountPrefixOf,
+  resolveMongoDBConfig,
+  resolveMongoGlob,
+  type FileStat,
+  type MongoDBConfig,
+  type MongoDBConfigResolved,
   type RegisteredCommand,
   type RegisteredOp,
   type Resource,
-  resolveMongoGlob,
-  ResourceName,
-  resolveMongoDBConfig,
 } from '@struktoai/mirage-core'
 import { MongoDBStore } from './store.ts'
 
@@ -93,14 +95,14 @@ export class MongoDBResource extends BaseResource implements Resource {
     const effective =
       prefix !== ''
         ? paths.map((p) =>
-            p.prefix !== ''
+            mountPrefixOf(p.virtual, p.resourcePath) !== ''
               ? p
               : new PathSpec({
-                  original: p.original,
+                  virtual: p.virtual,
                   directory: p.directory,
                   ...(p.pattern !== null ? { pattern: p.pattern } : {}),
                   resolved: p.resolved,
-                  prefix,
+                  resourcePath: mountKey(p.virtual, prefix),
                 }),
           )
         : paths

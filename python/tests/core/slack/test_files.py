@@ -101,7 +101,9 @@ async def test_files_dir_listing_from_messages(accessor, index,
                return_value=messages_with_files):
         result = await readdir(
             accessor,
-            PathSpec(original="/channels/general__C001/2026-04-10/files",
+            PathSpec(resource_path=(
+                "/channels/general__C001/2026-04-10/files").strip("/"),
+                     virtual="/channels/general__C001/2026-04-10/files",
                      directory="/channels/general__C001/2026-04-10/files"),
             index=index,
         )
@@ -138,7 +140,9 @@ async def test_files_dir_empty_on_no_attachments(accessor, index):
                return_value=no_file_msgs):
         result = await readdir(
             accessor,
-            PathSpec(original="/channels/general__C001/2026-04-10/files",
+            PathSpec(resource_path=(
+                "/channels/general__C001/2026-04-10/files").strip("/"),
+                     virtual="/channels/general__C001/2026-04-10/files",
                      directory="/channels/general__C001/2026-04-10/files"),
             index=index,
         )
@@ -168,7 +172,9 @@ async def test_file_blob_index_entry_stores_url(accessor, index,
                return_value=messages_with_files):
         await readdir(
             accessor,
-            PathSpec(original="/channels/general__C001/2026-04-10/files",
+            PathSpec(resource_path=(
+                "/channels/general__C001/2026-04-10/files").strip("/"),
+                     virtual="/channels/general__C001/2026-04-10/files",
                      directory="/channels/general__C001/2026-04-10/files"),
             index=index,
         )

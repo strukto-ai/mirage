@@ -7,6 +7,7 @@ from mirage.core.sharepoint._resolver import _drive_cache, _site_cache
 from mirage.core.sharepoint.readdir import readdir
 from mirage.core.sharepoint.stat import stat
 from mirage.types import FileType, PathSpec
+from mirage.utils.key_prefix import mount_key
 
 _BASE = "https://graph.microsoft.com/v1.0"
 _SITE_ID = "tenant.sharepoint.com,site-guid,web-guid"
@@ -36,7 +37,9 @@ def _reset_caches():
 
 @pytest.mark.asyncio
 async def test_stat_root_is_directory():
-    path = PathSpec(original="/sp/", directory="/sp/", prefix="/sp")
+    path = PathSpec(resource_path=mount_key("/sp/", "/sp"),
+                    virtual="/sp/",
+                    directory="/sp/")
     result = await stat(_accessor(), path)
     assert result.type == FileType.DIRECTORY
 
@@ -55,9 +58,9 @@ async def test_stat_site_is_directory():
                       },
                   ]
               })
-        path = PathSpec(original="/sp/Engineering",
-                        directory="/sp/Engineering",
-                        prefix="/sp")
+        path = PathSpec(resource_path=mount_key("/sp/Engineering", "/sp"),
+                        virtual="/sp/Engineering",
+                        directory="/sp/Engineering")
         result = await stat(_accessor(), path)
     assert result.type == FileType.DIRECTORY
 
@@ -65,9 +68,10 @@ async def test_stat_site_is_directory():
 @pytest.mark.asyncio
 async def test_stat_drive_is_directory():
     _seed_caches()
-    path = PathSpec(original="/sp/Engineering/Documents",
-                    directory="/sp/Engineering/Documents",
-                    prefix="/sp")
+    path = PathSpec(resource_path=mount_key("/sp/Engineering/Documents",
+                                            "/sp"),
+                    virtual="/sp/Engineering/Documents",
+                    directory="/sp/Engineering/Documents")
     result = await stat(_accessor(), path)
     assert result.type == FileType.DIRECTORY
 
@@ -89,9 +93,10 @@ async def test_stat_file_from_api():
                       "mimeType": "application/vnd.openxml"
                   },
               })
-        path = PathSpec(original="/sp/Engineering/Documents/report.docx",
-                        directory="/sp/Engineering/Documents/report.docx",
-                        prefix="/sp")
+        path = PathSpec(resource_path=mount_key(
+            "/sp/Engineering/Documents/report.docx", "/sp"),
+                        virtual="/sp/Engineering/Documents/report.docx",
+                        directory="/sp/Engineering/Documents/report.docx")
         result = await stat(_accessor(), path)
     assert result.name == "report.docx"
     assert result.size == 1234
@@ -114,9 +119,10 @@ async def test_stat_folder_from_api():
                       "childCount": 2
                   },
               })
-        path = PathSpec(original="/sp/Engineering/Documents/src",
-                        directory="/sp/Engineering/Documents/src",
-                        prefix="/sp")
+        path = PathSpec(resource_path=mount_key(
+            "/sp/Engineering/Documents/src", "/sp"),
+                        virtual="/sp/Engineering/Documents/src",
+                        directory="/sp/Engineering/Documents/src")
         result = await stat(_accessor(), path)
     assert result.type == FileType.DIRECTORY
     assert result.name == "src"
@@ -133,9 +139,10 @@ async def test_stat_missing_raises_file_not_found():
                   "code": "itemNotFound",
                   "message": "no"
               }})
-        path = PathSpec(original="/sp/Engineering/Documents/nope.txt",
-                        directory="/sp/Engineering/Documents/nope.txt",
-                        prefix="/sp")
+        path = PathSpec(resource_path=mount_key(
+            "/sp/Engineering/Documents/nope.txt", "/sp"),
+                        virtual="/sp/Engineering/Documents/nope.txt",
+                        directory="/sp/Engineering/Documents/nope.txt")
         with pytest.raises(FileNotFoundError):
             await stat(_accessor(), path)
 
@@ -157,13 +164,15 @@ async def test_stat_from_index_after_readdir():
                       },
                   ]
               })
-        parent = PathSpec(original="/sp/Engineering/Documents",
-                          directory="/sp/Engineering/Documents",
-                          prefix="/sp")
+        parent = PathSpec(resource_path=mount_key("/sp/Engineering/Documents",
+                                                  "/sp"),
+                          virtual="/sp/Engineering/Documents",
+                          directory="/sp/Engineering/Documents")
         await readdir(_accessor(), parent, index)
-    path = PathSpec(original="/sp/Engineering/Documents/notes.txt",
-                    directory="/sp/Engineering/Documents/notes.txt",
-                    prefix="/sp")
+    path = PathSpec(resource_path=mount_key(
+        "/sp/Engineering/Documents/notes.txt", "/sp"),
+                    virtual="/sp/Engineering/Documents/notes.txt",
+                    directory="/sp/Engineering/Documents/notes.txt")
     result = await stat(_accessor(), path, index)
     assert result.name == "notes.txt"
     assert result.size == 42
@@ -173,16 +182,17 @@ async def test_stat_from_index_after_readdir():
 @pytest.mark.asyncio
 async def test_stat_site_and_drive_have_no_metadata():
     _seed_caches()
-    site_path = PathSpec(original="/sp/Engineering",
-                         directory="/sp/Engineering",
-                         prefix="/sp")
+    site_path = PathSpec(resource_path=mount_key("/sp/Engineering", "/sp"),
+                         virtual="/sp/Engineering",
+                         directory="/sp/Engineering")
     result = await stat(_accessor(), site_path)
     assert result.size is None
     assert result.modified is None
 
-    drive_path = PathSpec(original="/sp/Engineering/Documents",
-                          directory="/sp/Engineering/Documents",
-                          prefix="/sp")
+    drive_path = PathSpec(resource_path=mount_key("/sp/Engineering/Documents",
+                                                  "/sp"),
+                          virtual="/sp/Engineering/Documents",
+                          directory="/sp/Engineering/Documents")
     result = await stat(_accessor(), drive_path)
     assert result.size is None
     assert result.modified is None

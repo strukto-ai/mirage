@@ -17,6 +17,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.core.gsheets.readdir import readdir as _readdir
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 VIRTUAL_DIRS = {"", "owned", "shared"}
 
@@ -27,10 +28,12 @@ async def stat(
     index: IndexCacheStore = None,
 ) -> FileStat:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    virtual = path.original
-    prefix = path.prefix
-    key = path.key
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    virtual = path.virtual
+    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    key = path.resource_path
     if key in VIRTUAL_DIRS:
         name = key if key else "/"
         return FileStat(name=name, type=FileType.DIRECTORY)
@@ -43,9 +46,9 @@ async def stat(
         try:
             await _readdir(
                 accessor,
-                PathSpec(original=parent_virtual,
+                PathSpec(virtual=parent_virtual,
                          directory=parent_virtual,
-                         prefix=prefix),
+                         resource_path=mount_key(parent_virtual, prefix)),
                 index=index,
             )
         # best-effort cache populate; canonical ENOENT raised below

@@ -18,10 +18,11 @@ import pytest
 
 from mirage.core.databricks_volume.rename import rename
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def _path(path: str) -> PathSpec:
-    return PathSpec.from_str_path(path, "/dbx")
+    return PathSpec.from_str_path(path, mount_key(path, "/dbx"))
 
 
 def _seed_directory(files, path: str) -> None:

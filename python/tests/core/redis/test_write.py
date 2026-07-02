@@ -40,21 +40,27 @@ async def accessor():
 
 @pytest.mark.asyncio
 async def test_write_bytes(accessor):
-    await write_bytes(accessor,
-                      PathSpec(original="/hello.txt", directory="/hello.txt"),
-                      b"hello")
+    await write_bytes(
+        accessor,
+        PathSpec(resource_path=("/hello.txt").strip("/"),
+                 virtual="/hello.txt",
+                 directory="/hello.txt"), b"hello")
     assert await accessor.store.get_file("/hello.txt") == b"hello"
     assert await accessor.store.get_modified("/hello.txt") is not None
 
 
 @pytest.mark.asyncio
 async def test_write_bytes_overwrite(accessor):
-    await write_bytes(accessor,
-                      PathSpec(original="/file.txt", directory="/file.txt"),
-                      b"first")
-    await write_bytes(accessor,
-                      PathSpec(original="/file.txt", directory="/file.txt"),
-                      b"second")
+    await write_bytes(
+        accessor,
+        PathSpec(resource_path=("/file.txt").strip("/"),
+                 virtual="/file.txt",
+                 directory="/file.txt"), b"first")
+    await write_bytes(
+        accessor,
+        PathSpec(resource_path=("/file.txt").strip("/"),
+                 virtual="/file.txt",
+                 directory="/file.txt"), b"second")
     assert await accessor.store.get_file("/file.txt") == b"second"
 
 
@@ -70,7 +76,8 @@ async def test_write_bytes_parent_not_found():
     ):
         await write_bytes(
             a,
-            PathSpec(original="/no/parent/file.txt",
+            PathSpec(resource_path=("/no/parent/file.txt").strip("/"),
+                     virtual="/no/parent/file.txt",
                      directory="/no/parent/file.txt"), b"data")
     await s.clear()
     await s.close()
@@ -79,8 +86,10 @@ async def test_write_bytes_parent_not_found():
 @pytest.mark.asyncio
 async def test_write_bytes_to_subdir(accessor):
     await write_bytes(
-        accessor, PathSpec(original="/sub/file.txt",
-                           directory="/sub/file.txt"), b"nested data")
+        accessor,
+        PathSpec(resource_path=("/sub/file.txt").strip("/"),
+                 virtual="/sub/file.txt",
+                 directory="/sub/file.txt"), b"nested data")
     assert await accessor.store.get_file("/sub/file.txt") == b"nested data"
 
 
@@ -91,8 +100,10 @@ async def test_write_bytes_root_parent():
     await s.add_dir("/")
     a = RedisAccessor(s)
     await write_bytes(
-        a, PathSpec(original="/root_file.txt", directory="/root_file.txt"),
-        b"root")
+        a,
+        PathSpec(resource_path=("/root_file.txt").strip("/"),
+                 virtual="/root_file.txt",
+                 directory="/root_file.txt"), b"root")
     assert await s.get_file("/root_file.txt") == b"root"
     await s.clear()
     await s.close()
@@ -100,17 +111,21 @@ async def test_write_bytes_root_parent():
 
 @pytest.mark.asyncio
 async def test_write_bytes_sets_modified(accessor):
-    await write_bytes(accessor,
-                      PathSpec(original="/file.txt", directory="/file.txt"),
-                      b"data")
+    await write_bytes(
+        accessor,
+        PathSpec(resource_path=("/file.txt").strip("/"),
+                 virtual="/file.txt",
+                 directory="/file.txt"), b"data")
     assert await accessor.store.get_modified("/file.txt") is not None
 
 
 @pytest.mark.asyncio
 async def test_write_bytes_modified_uses_z_suffix(accessor):
-    await write_bytes(accessor,
-                      PathSpec(original="/file.txt", directory="/file.txt"),
-                      b"data")
+    await write_bytes(
+        accessor,
+        PathSpec(resource_path=("/file.txt").strip("/"),
+                 virtual="/file.txt",
+                 directory="/file.txt"), b"data")
     modified = await accessor.store.get_modified("/file.txt")
     assert modified is not None
     assert modified.endswith("Z")

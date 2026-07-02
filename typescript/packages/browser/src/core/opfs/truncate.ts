@@ -22,7 +22,7 @@ export async function truncate(
   length: number,
 ): Promise<void> {
   const root = accessor.rootHandle
-  const virtual = path.stripPrefix
+  const virtual = path.mountPath
   let handle: FileSystemFileHandle
   let existing: Uint8Array
   try {

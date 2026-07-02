@@ -41,7 +41,7 @@ export async function stat(
       extra: { children_count: 0 },
     })
   }
-  if (resolved.entry === null) throw enoent(spec.original)
+  if (resolved.entry === null) throw enoent(spec.virtual)
   const updatedAt = resolved.entry.extra.updated_at
   return new FileStat({
     name: resolved.entry.name,

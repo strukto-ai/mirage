@@ -48,42 +48,48 @@ class Dispatcher:
 
     async def dispatch(self, op: str, path: PathSpec,
                        **kwargs: Any) -> tuple[Any, IOResult]:
-        mount = self._namespace.mount_for(path.original)
+        mount = self._namespace.mount_for(path.virtual)
         assert_mount_allowed(mount.prefix)
         caches_reads = mount.resource.caches_reads
 
         if caches_reads and op in _DISPATCH_READ_OPS:
-            cached = await self._cache.get(path.original)
+            cached = await self._cache.get(path.virtual)
             if cached is not None:
                 if self._consistency == ConsistencyPolicy.ALWAYS:
                     try:
                         remote_stat = await mount.execute_op(
-                            "stat", path.original)
+                            "stat", path.virtual)
                     except FileNotFoundError:
-                        await self._cache.remove(path.original)
+                        await self._cache.remove(path.virtual)
                         raise
                     if (remote_stat is not None
                             and remote_stat.fingerprint is not None):
                         fresh = await self._cache.is_fresh(
-                            path.original, remote_stat.fingerprint)
+                            path.virtual, remote_stat.fingerprint)
                         if not fresh:
-                            await self._cache.remove(path.original)
+                            await self._cache.remove(path.virtual)
                             cached = None
                 if cached is not None:
-                    return cached, IOResult(reads={path.original: cached})
+                    return cached, IOResult(reads={path.virtual: cached})
 
-        result = await mount.execute_op(op, path.original, **kwargs)
+        result = await mount.execute_op(op, path.virtual, **kwargs)
         if op in _DISPATCH_WRITE_OPS:
-            await self.invalidate_after_write(mount, path.original)
+            await self.invalidate_after_write(mount, path.virtual)
         return result, IOResult()
 
     async def stat(self, path: str) -> FileStat:
-        scope = PathSpec(original=path, directory=path, resolved=True)
+        scope = PathSpec(virtual=path,
+                         directory=path,
+                         resource_path="",
+                         resolved=True)
         result, _ = await self.dispatch("stat", scope)
         return result
 
     async def readdir(self, path: str) -> list[str]:
-        scope = PathSpec(original=path, directory=path, resolved=False)
+        scope = PathSpec(virtual=path,
+                         directory=path,
+                         resource_path="",
+                         resolved=False)
         raw, _ = await self.dispatch("readdir", scope)
         return raw
 

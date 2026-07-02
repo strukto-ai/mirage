@@ -31,7 +31,7 @@ function stripIdSuffix(name: string): string {
 }
 
 export function detectScope(path: PathSpec | string): LangfuseScope {
-  const raw = path instanceof PathSpec ? path.stripPrefix : path
+  const raw = path instanceof PathSpec ? path.mountPath : path
   const key = stripSlash(raw)
 
   if (key === '') {

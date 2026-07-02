@@ -22,14 +22,16 @@ from mirage.types import FileType, PathSpec
 
 async def du(accessor: SSHAccessor, path: PathSpec) -> int:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
     try:
         info = await stat(accessor, path)
     except FileNotFoundError:
         info = None
     if info is not None and info.type != FileType.DIRECTORY:
         return info.size or 0
-    target = path.strip_prefix if isinstance(path, PathSpec) else path
+    target = path.mount_path if isinstance(path, PathSpec) else path
     config = accessor.config
     sftp = await accessor.sftp()
     return await _du_walk(sftp, _abs(config, target))
@@ -40,14 +42,16 @@ async def du_all(
     path: PathSpec,
 ) -> tuple[list[tuple[str, int]], int]:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
     try:
         info = await stat(accessor, path)
     except FileNotFoundError:
         info = None
     if info is not None and info.type != FileType.DIRECTORY:
         return [], info.size or 0
-    target = path.strip_prefix if isinstance(path, PathSpec) else path
+    target = path.mount_path if isinstance(path, PathSpec) else path
     config = accessor.config
     sftp = await accessor.sftp()
     entries: list[tuple[str, int]] = []

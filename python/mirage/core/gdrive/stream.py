@@ -26,6 +26,7 @@ from mirage.core.gslides.read import read_presentation
 from mirage.observe.context import record_stream
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 
 async def read_stream(
@@ -35,11 +36,13 @@ async def read_stream(
     chunk_size: int = 8192,
 ) -> AsyncIterator[bytes] | bytes:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    virtual = path.original
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    virtual = path.virtual
     if isinstance(path, PathSpec):
-        prefix = path.prefix
-        path = path.original
+        prefix = mount_prefix_of(path.virtual, path.resource_path)
+        path = path.virtual
 
     if prefix and path.startswith(prefix):
         rest = path[len(prefix):]
@@ -55,7 +58,8 @@ async def read_stream(
         # then retry
         parent_key = posixpath.dirname(virtual_key) or "/"
         if parent_key != virtual_key:
-            parent_path = PathSpec.from_str_path(parent_key, prefix=prefix)
+            parent_path = PathSpec.from_str_path(parent_key,
+                                                 mount_key(parent_key, prefix))
             try:
                 await readdir(accessor, parent_path, index)
                 result = await index.get(virtual_key)

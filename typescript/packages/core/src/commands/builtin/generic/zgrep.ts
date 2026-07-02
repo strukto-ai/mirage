@@ -139,7 +139,7 @@ export async function zgrepGeneric(
     for (const p of paths) {
       const compressed = await materialize(stream(p))
       const data = await gunzip(compressed)
-      const fname = showFilename ? p.original : null
+      const fname = showFilename ? p.virtual : null
       if (filesOnly) {
         const text = DEC.decode(data)
         const lines = splitLinesNoTrailing(text)
@@ -147,7 +147,7 @@ export async function zgrepGeneric(
           let hit = pattern.test(line)
           if (invert) hit = !hit
           if (hit) {
-            allResults.push(p.original)
+            allResults.push(p.virtual)
             anyMatch = true
             break
           }

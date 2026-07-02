@@ -28,6 +28,7 @@ from mirage.core.trello.stat import stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import FileType, PathSpec
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 
 async def _walk(
@@ -35,15 +36,18 @@ async def _walk(
     path: PathSpec,
     index: IndexCacheStore | None,
 ) -> list[str]:
-    results = [path.original]
+    results = [path.virtual]
     file_stat = await stat(accessor, path, index)
     if file_stat.type != FileType.DIRECTORY:
         return results
     for entry in await readdir(accessor, path, index):
-        entry_spec = PathSpec(original=entry,
+        entry_spec = PathSpec(virtual=entry,
                               directory=entry,
                               resolved=False,
-                              prefix=path.prefix)
+                              resource_path=mount_key(
+                                  entry,
+                                  mount_prefix_of(path.virtual,
+                                                  path.resource_path)))
         results.extend(await _walk(accessor, entry_spec, index))
     return results
 
@@ -55,7 +59,7 @@ async def find_provision(
     **_extra: object,
 ) -> ProvisionResult:
     return await metadata_provision("find " + " ".join(
-        p.original if isinstance(p, PathSpec) else p for p in paths))
+        p.virtual if isinstance(p, PathSpec) else p for p in paths))
 
 
 @command("find",
@@ -82,8 +86,8 @@ async def find(
     index: IndexCacheStore | None = index
     paths = await resolve_glob(accessor, paths, index)
     p0 = paths[0]
-    root = p0.original
-    pfx = p0.prefix
+    root = p0.virtual
+    pfx = mount_prefix_of(p0.virtual, p0.resource_path)
     max_depth_val = (_parse_depth(maxdepth, "-maxdepth")
                      if maxdepth is not None else None)
     min_depth_val = (_parse_depth(mindepth, "-mindepth")
@@ -109,10 +113,10 @@ async def find(
             continue
         if min_depth_val is not None and depth < min_depth_val:
             continue
-        entry_spec = PathSpec(original=entry_path,
+        entry_spec = PathSpec(virtual=entry_path,
                               directory=entry_path,
                               resolved=False,
-                              prefix=pfx)
+                              resource_path=mount_key(entry_path, pfx))
         file_stat = await stat(accessor, entry_spec, index)
         if (wanted_type == FileType.DIRECTORY
                 and file_stat.type != FileType.DIRECTORY):

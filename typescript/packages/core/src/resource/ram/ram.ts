@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { RAM_COMMANDS } from '../../commands/builtin/ram/index.ts'
 import type { RegisteredCommand } from '../../commands/config.ts'
 import { appendBytes as appendCore } from '../../core/ram/append.ts'
@@ -158,14 +159,14 @@ export class RAMResource extends BaseResource implements Resource {
   glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective = prefix
       ? paths.map((p) =>
-          p.prefix
+          mountPrefixOf(p.virtual, p.resourcePath)
             ? p
             : new PathSpec({
-                original: p.original,
+                virtual: p.virtual,
                 directory: p.directory,
                 ...(p.pattern !== null ? { pattern: p.pattern } : {}),
                 resolved: p.resolved,
-                prefix,
+                resourcePath: mountKey(p.virtual, prefix),
               }),
         )
       : paths

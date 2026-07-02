@@ -42,7 +42,7 @@ async def unlink(
     path = ensure_path_spec(path)
     file_stat = await stat(accessor, path, index)
     if file_stat.type == FileType.DIRECTORY:
-        raise IsADirectoryError(path.original)
+        raise IsADirectoryError(path.virtual)
     remote_path = backend_path(accessor.config, path)
     start_ms = int(time.monotonic() * 1000)
     try:
@@ -51,5 +51,5 @@ async def unlink(
         if is_not_found(exc):
             raise enoent(path) from exc
         raise
-    record("unlink", path.original, "databricks_volume", 0, start_ms)
+    record("unlink", path.virtual, "databricks_volume", 0, start_ms)
     await invalidate_after_unlink(path)

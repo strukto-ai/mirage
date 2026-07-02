@@ -15,7 +15,7 @@ async def range_read(accessor: NextcloudAccessor, path: PathSpec, start: int,
                      end: int) -> bytes:
     if isinstance(path, str):
         path = PathSpec.from_str_path(path)
-    raw = path.strip_prefix
+    raw = path.mount_path
     key = raw.lstrip("/")
     op = accessor.operator()
     start_ms = int(time.monotonic() * 1000)
@@ -38,7 +38,7 @@ async def read_stream(
 ) -> AsyncIterator[bytes]:
     if isinstance(path, str):
         path = PathSpec.from_str_path(path)
-    raw = path.strip_prefix
+    raw = path.mount_path
     key = raw.lstrip("/")
     op = accessor.operator()
     rec = record_stream("read", raw, "nextcloud")

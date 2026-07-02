@@ -22,7 +22,7 @@ _FS_STRERROR: list[tuple[type[OSError], str]] = [
 
 
 def _virtual_of(path: object) -> str:
-    original = getattr(path, "original", None)
+    original = getattr(path, "virtual", None)
     return original if original is not None else str(path)
 
 

@@ -23,6 +23,7 @@ from mirage.core.databricks_volume.path import backend_path
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.filetype import guess_type
+from mirage.utils.key_prefix import mount_prefix_of
 
 
 def modified_to_iso(value) -> str | None:
@@ -80,12 +81,14 @@ async def stat(
     index: IndexCacheStore | None = None,
 ) -> FileStat:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    stripped = path.strip_prefix.strip("/")
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    stripped = path.mount_path.strip("/")
     if not stripped:
         return FileStat(name="/", type=FileType.DIRECTORY)
     if index is not None:
-        prefix = path.prefix
+        prefix = mount_prefix_of(path.virtual, path.resource_path)
         virtual_key = (prefix.rstrip("/") + "/" + stripped if prefix else "/" +
                        stripped)
         lookup = await index.get(virtual_key)

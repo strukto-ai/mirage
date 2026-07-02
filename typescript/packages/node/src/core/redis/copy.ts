@@ -17,8 +17,8 @@ import type { RedisAccessor } from '../../accessor/redis.ts'
 import { norm, nowIso } from './utils.ts'
 
 export async function copy(accessor: RedisAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
-  const s = norm(src.stripPrefix)
-  const d = norm(dst.stripPrefix)
+  const s = norm(src.mountPath)
+  const d = norm(dst.mountPath)
   const store = accessor.store
   const data = await store.getFile(s)
   if (data === null) {

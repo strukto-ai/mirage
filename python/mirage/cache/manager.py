@@ -49,7 +49,7 @@ class CacheManager:
 
     def _virtual(self, path: str | PathSpec) -> str:
         if isinstance(path, PathSpec):
-            path = path.strip_prefix
+            path = path.mount_path
         if not path.startswith("/"):
             path = "/" + path
         if self._prefix and not path.startswith(self._prefix):

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type IndexCacheStore, type PathSpec } from '@struktoai/mirage-core'
+import { mountPrefixOf, type IndexCacheStore, type PathSpec } from '@struktoai/mirage-core'
 import { enotdir } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { RedisIndexEntry } from './entry.ts'
@@ -23,8 +23,8 @@ export async function readdir(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<string[]> {
-  const virtual = path.pattern !== null ? path.directory : path.stripPrefix
-  const mountPrefix = path.prefix
+  const virtual = path.pattern !== null ? path.directory : path.mountPath
+  const mountPrefix = mountPrefixOf(path.virtual, path.resourcePath)
   const virtualKey = mountPrefix + virtual
   if (index !== undefined) {
     const cached = await index.listDir(virtualKey)

@@ -22,9 +22,11 @@ from mirage.types import PathSpec
 @pytest.mark.asyncio
 async def test_write_new_file(tmp_path):
     accessor = DiskAccessor(tmp_path)
-    await write_bytes(accessor,
-                      PathSpec(original="/new.txt", directory="/new.txt"),
-                      b"content")
+    await write_bytes(
+        accessor,
+        PathSpec(resource_path=("/new.txt").strip("/"),
+                 virtual="/new.txt",
+                 directory="/new.txt"), b"content")
     assert (tmp_path / "new.txt").read_bytes() == b"content"
 
 
@@ -32,9 +34,11 @@ async def test_write_new_file(tmp_path):
 async def test_overwrite_existing_file(tmp_path):
     (tmp_path / "exist.txt").write_bytes(b"old")
     accessor = DiskAccessor(tmp_path)
-    await write_bytes(accessor,
-                      PathSpec(original="/exist.txt", directory="/exist.txt"),
-                      b"new")
+    await write_bytes(
+        accessor,
+        PathSpec(resource_path=("/exist.txt").strip("/"),
+                 virtual="/exist.txt",
+                 directory="/exist.txt"), b"new")
     assert (tmp_path / "exist.txt").read_bytes() == b"new"
 
 
@@ -43,6 +47,7 @@ async def test_parent_directory_auto_creation(tmp_path):
     accessor = DiskAccessor(tmp_path)
     await write_bytes(
         accessor,
-        PathSpec(original="/a/b/c/file.txt", directory="/a/b/c/file.txt"),
-        b"deep")
+        PathSpec(resource_path=("/a/b/c/file.txt").strip("/"),
+                 virtual="/a/b/c/file.txt",
+                 directory="/a/b/c/file.txt"), b"deep")
     assert (tmp_path / "a" / "b" / "c" / "file.txt").read_bytes() == b"deep"

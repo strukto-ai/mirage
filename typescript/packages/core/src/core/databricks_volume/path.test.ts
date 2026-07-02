@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import {
@@ -57,9 +58,9 @@ describe('volumeRoot / configuredRoot', () => {
 describe('backendPath', () => {
   it('maps a mounted path under the configured root', () => {
     const path = new PathSpec({
-      original: '/volume/reports/latest.md',
+      virtual: '/volume/reports/latest.md',
       directory: '/volume/reports',
-      prefix: '/volume',
+      resourcePath: mountKey('/volume/reports/latest.md', '/volume'),
     })
     expect(backendPath(CONFIG, path)).toBe(
       '/Volumes/main/default/agent_files/root/reports/latest.md',
@@ -68,18 +69,18 @@ describe('backendPath', () => {
 
   it('allows normalized paths that stay inside the root', () => {
     const path = new PathSpec({
-      original: '/volume/reports/../latest.md',
+      virtual: '/volume/reports/../latest.md',
       directory: '/volume/reports',
-      prefix: '/volume',
+      resourcePath: mountKey('/volume/reports/../latest.md', '/volume'),
     })
     expect(backendPath(CONFIG, path)).toBe('/Volumes/main/default/agent_files/root/latest.md')
   })
 
   it('rejects escapes above the configured root', () => {
     const path = new PathSpec({
-      original: '/volume/../../other_schema/other_volume/secret.txt',
+      virtual: '/volume/../../other_schema/other_volume/secret.txt',
       directory: '/volume',
-      prefix: '/volume',
+      resourcePath: mountKey('/volume/../../other_schema/other_volume/secret.txt', '/volume'),
     })
     expect(() => backendPath(CONFIG, path)).toThrow('escapes Databricks volume root')
   })

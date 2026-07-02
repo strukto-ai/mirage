@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { LanceDBAccessor } from '../../../accessor/lancedb.ts'
 import { searchRowsOutput } from '../../../core/lancedb/search.ts'
 import { IOResult } from '../../../io/types.ts'
@@ -47,7 +48,12 @@ async function searchCommand(
     ]
   }
   const target = defaultPaths(paths, opts.cwd)
-  const mountPrefix = target[0]?.prefix ?? opts.mountPrefix ?? ''
+  const mountPrefix =
+    (target[0] === undefined
+      ? undefined
+      : mountPrefixOf(target[0].virtual, target[0].resourcePath)) ??
+    opts.mountPrefix ??
+    ''
   const topK =
     typeof opts.flags.top_k === 'string'
       ? parseInt(opts.flags.top_k, 10)

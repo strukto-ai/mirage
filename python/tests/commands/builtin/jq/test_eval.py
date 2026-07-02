@@ -23,6 +23,7 @@ from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.builders.jq import jq as jq_builder
 from mirage.core.jq import JQ_EMPTY, jq_eval
 from mirage.types import MountMode, PathSpec
+from mirage.utils.key_prefix import mount_key
 
 from .conftest import collect, jq, mem_ws, run_raw, write_to_backend
 
@@ -1000,9 +1001,9 @@ class TestJqS3Backend:
                         stat=None,
                         is_mounted=lambda a: True,
                         local=False)
-        path = PathSpec(original="/s3/data.json",
+        path = PathSpec(resource_path=mount_key("/s3/data.json", ""),
+                        virtual="/s3/data.json",
                         directory="/s3",
-                        prefix="",
                         resolved=True)
         return asyncio.run(
             _collect_jq(ops, S3Accessor.__new__(S3Accessor), [path], expr))

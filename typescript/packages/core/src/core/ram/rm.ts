@@ -19,7 +19,7 @@ import { rstripSlash } from '../../utils/slash.ts'
 import { invalidateAfterUnlink } from '../../cache/context.ts'
 
 export async function rmR(accessor: RAMAccessor, path: PathSpec): Promise<void> {
-  const p = norm(path.stripPrefix)
+  const p = norm(path.mountPath)
   const prefix = rstripSlash(p) + '/'
   for (const key of [...accessor.store.files.keys()]) {
     if (key === p || key.startsWith(prefix)) {

@@ -20,12 +20,13 @@ from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.ops.gdrive.readdir import readdir
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def _scope(path: str, prefix: str = "") -> PathSpec:
-    return PathSpec(original=path,
-                    directory=path.rsplit("/", 1)[0] or "/",
-                    prefix=prefix)
+    return PathSpec(resource_path=mount_key(path, prefix),
+                    virtual=path,
+                    directory=path.rsplit("/", 1)[0] or "/")
 
 
 @pytest.fixture

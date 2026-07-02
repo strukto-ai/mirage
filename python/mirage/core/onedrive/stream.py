@@ -32,7 +32,7 @@ async def read_stream(
     index: IndexCacheStore = None,
     chunk_size: int = 8192,
 ) -> AsyncIterator[bytes]:
-    virtual = path.original if isinstance(path, PathSpec) else path
+    virtual = path.virtual if isinstance(path, PathSpec) else path
     prefix, stripped = split_path(path)
     config = accessor.config
     pinned = revision_for(virtual)

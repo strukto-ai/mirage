@@ -49,7 +49,7 @@ def _parse_row_file(name: str, config: QdrantConfig) -> tuple[str, str] | None:
 
 
 def detect_scope(path, config: QdrantConfig) -> QdrantScope:
-    raw = path.strip_prefix if isinstance(path, PathSpec) else path
+    raw = path.mount_path if isinstance(path, PathSpec) else path
     key = raw.strip("/")
     segs = key.split("/") if key else []
 

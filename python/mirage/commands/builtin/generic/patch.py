@@ -114,7 +114,7 @@ async def _load_patch_data(
     accessor: object,
 ) -> bytes:
     if i is not None and has_resource:
-        return await read_bytes(accessor, i.strip_prefix)
+        return await read_bytes(accessor, i.mount_path)
     if paths and has_resource:
         return await read_bytes(accessor, paths[0])
     data = await _read_stdin_async(stdin)

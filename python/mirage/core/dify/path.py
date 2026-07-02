@@ -4,6 +4,7 @@ from mirage.cache.index import IndexCacheStore, IndexEntry
 from mirage.core.dify.tree import ensure_tree
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_prefix_of
 
 
 @dataclass(frozen=True)
@@ -17,8 +18,10 @@ class ResolvedDifyPath:
 async def resolve_path(accessor, path: PathSpec,
                        index: IndexCacheStore) -> ResolvedDifyPath:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    mount_prefix = path.prefix or ""
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    mount_prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
     await ensure_tree(accessor, index, mount_prefix)
     virtual_key = virtual_key_for(path)
     result = await index.get(virtual_key)
@@ -38,8 +41,8 @@ async def resolve_path(accessor, path: PathSpec,
 
 
 def virtual_key_for(path: PathSpec) -> str:
-    raw = path.directory if path.pattern else path.original
-    prefix = path.prefix or ""
+    raw = path.directory if path.pattern else path.virtual
+    prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
     if prefix:
         root = prefix.rstrip("/") or "/"
         if raw == root or raw.startswith(root + "/"):

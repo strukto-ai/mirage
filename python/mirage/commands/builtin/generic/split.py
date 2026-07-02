@@ -31,7 +31,7 @@ async def split(
     suffix_len: int = 2,
     numeric_suffix: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
-    prefix_name = paths[1].strip_prefix if len(paths) >= 2 else "x"
+    prefix_name = paths[1].mount_path if len(paths) >= 2 else "x"
     if lines_per_file == 0 and byte_limit == 0 and n_chunks == 0:
         lines_per_file = 1000
     suffix_fn = _numeric_suffix if numeric_suffix else _alpha_suffix

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { gzip, gunzip, getCompressionCodec } from '../../../utils/compress.ts'
@@ -24,8 +25,13 @@ const ENC = new TextEncoder()
 
 type Compression = 'gzip' | 'bzip2' | 'xz' | null
 
-function makePathSpec(original: string, prefix: string): PathSpec {
-  return new PathSpec({ original, directory: original, resolved: true, prefix })
+function makePathSpec(virtual: string, prefix: string): PathSpec {
+  return new PathSpec({
+    virtual,
+    directory: virtual,
+    resourcePath: mountKey(virtual, prefix),
+    resolved: true,
+  })
 }
 
 function detectCompression(data: Uint8Array): Compression {
@@ -112,14 +118,14 @@ export async function tarGeneric(
     const filtered =
       exclude !== null
         ? paths.filter((p) => {
-            const name = p.original.split('/').pop() ?? ''
+            const name = p.virtual.split('/').pop() ?? ''
             return !fnmatch(name, exclude)
           })
         : paths
     const entries: TarEntry[] = []
     for (const p of filtered) {
       const data = await materialize(stream(p))
-      const name = lstripSlash(p.original)
+      const name = lstripSlash(p.virtual)
       entries.push({ name, data, isFile: true })
       if (verbose) verboseLines.push(name)
     }

@@ -6,12 +6,13 @@ from mirage.commands.builtin.generic.mktemp import mktemp
 from mirage.commands.builtin.generic.readlink import readlink
 from mirage.commands.builtin.generic.realpath import realpath
 from mirage.types import FileStat, PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def _spec(original: str, prefix: str = "") -> PathSpec:
-    return PathSpec(original=original,
+    return PathSpec(resource_path=mount_key(original, prefix),
+                    virtual=original,
                     directory=original,
-                    prefix=prefix,
                     resolved=True)
 
 
@@ -99,7 +100,7 @@ async def test_readlink_simple():
 
 @pytest.mark.asyncio
 async def test_readlink_with_prefix():
-    out, _ = await readlink([_spec("b", prefix="/mnt")])
+    out, _ = await readlink([_spec("/mnt/b", prefix="/mnt")])
     assert out == b"/mnt/b\n"
 
 

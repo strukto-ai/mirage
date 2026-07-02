@@ -6,7 +6,7 @@ from mirage.types import PathSpec
 
 
 async def rm_r(accessor: SharePointAccessor, path: PathSpec) -> None:
-    path.original if isinstance(path, PathSpec) else path
+    path.virtual if isinstance(path, PathSpec) else path
     _, stripped = split_path(path)
     if not stripped:
         return

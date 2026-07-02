@@ -22,18 +22,24 @@ from mirage.core.postgres import _client
 from mirage.core.postgres.scope import detect_scope
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 
 async def stat(accessor: PostgresAccessor,
                path: PathSpec,
                index: IndexCacheStore = None) -> FileStat:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    prefix = path.prefix
-    raw = path.original
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    raw = path.virtual
     if prefix and raw.startswith(prefix):
         raw = raw[len(prefix):] or "/"
-    scope = detect_scope(PathSpec(original=raw, directory=raw, prefix=prefix))
+    scope = detect_scope(
+        PathSpec(virtual=raw,
+                 directory=raw,
+                 resource_path=mount_key(raw, prefix)))
 
     if scope.level == "root":
         return FileStat(name="/", type=FileType.DIRECTORY)

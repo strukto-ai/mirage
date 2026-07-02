@@ -24,9 +24,11 @@ from mirage.types import PathSpec
 async def write_bytes(accessor: S3Accessor, path: PathSpec,
                       data: bytes) -> None:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
     if isinstance(path, PathSpec):
-        path = path.strip_prefix
+        path = path.mount_path
     config = accessor.config
     key = _key(path, config)
     start_ms = int(time.monotonic() * 1000)

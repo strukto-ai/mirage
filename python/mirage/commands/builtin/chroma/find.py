@@ -1,4 +1,3 @@
-import dataclasses
 from functools import partial
 
 from mirage.cache.index import IndexCacheStore
@@ -12,13 +11,11 @@ from mirage.core.chroma.stat import stat as stat_core
 from mirage.core.chroma.stat import stat_light
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_prefix_of
 
 
 def _normalize_path(path: PathSpec) -> PathSpec:
-    prefix = path.prefix.rstrip("/")
-    if prefix == path.prefix:
-        return path
-    return dataclasses.replace(path, prefix=prefix)
+    return path
 
 
 def _default_paths(paths: list[PathSpec],
@@ -27,7 +24,9 @@ def _default_paths(paths: list[PathSpec],
         return [_normalize_path(path) for path in paths]
     if cwd is not None:
         return [_normalize_path(cwd)]
-    return [PathSpec(original="/", directory="/")]
+    return [
+        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/")
+    ]
 
 
 def _is_bare_name(texts: tuple[str, ...]) -> bool:
@@ -56,7 +55,8 @@ async def _normalize_find_output(
     if stdout is None:
         return None
     data = stdout if isinstance(stdout, bytes) else b""
-    root = search_path.prefix.rstrip("/") or "/"
+    root = mount_prefix_of(search_path.virtual,
+                           search_path.resource_path).rstrip("/") or "/"
     lines = data.decode().splitlines()
     normalized = [root if line == root + "/" else line for line in lines]
     return format_records(normalized)

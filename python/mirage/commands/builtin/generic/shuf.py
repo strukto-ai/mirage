@@ -34,7 +34,7 @@ async def shuf(
     sep = "\x00" if zero_terminated else "\n"
 
     if echo:
-        items = [p.strip_prefix for p in paths] if paths else list(texts)
+        items = [p.mount_path for p in paths] if paths else list(texts)
         result = _sample(items, count, with_replacement)
         return (sep.join(result) + sep).encode(), IOResult()
 

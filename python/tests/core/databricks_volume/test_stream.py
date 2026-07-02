@@ -2,6 +2,7 @@ import pytest
 
 from mirage.core.databricks_volume.stream import range_read, read_stream
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 class TrackingContents:
@@ -44,7 +45,9 @@ class TrackingFiles:
 @pytest.mark.asyncio
 async def test_read_stream_chunks_file(accessor, files, remote_root):
     files.downloads[f"{remote_root}/reports/latest.md"] = b"abcdef"
-    path = PathSpec.from_str_path("/volume/reports/latest.md", "/volume")
+    path = PathSpec.from_str_path(
+        "/volume/reports/latest.md",
+        mount_key("/volume/reports/latest.md", "/volume"))
     chunks = [
         chunk async for chunk in read_stream(accessor, path, chunk_size=2)
     ]
@@ -57,7 +60,9 @@ async def test_read_stream_chunks_file(accessor, files, remote_root):
 @pytest.mark.asyncio
 async def test_range_read_uses_end_exclusive(accessor, files, remote_root):
     files.downloads[f"{remote_root}/reports/latest.md"] = b"abcdef"
-    path = PathSpec.from_str_path("/volume/reports/latest.md", "/volume")
+    path = PathSpec.from_str_path(
+        "/volume/reports/latest.md",
+        mount_key("/volume/reports/latest.md", "/volume"))
     result = await range_read(accessor, path, 1, 4)
     assert result == b"bcd"
 
@@ -69,7 +74,9 @@ async def test_range_read_uses_single_databricks_range_request(
     remote_root,
 ):
     files.downloads[f"{remote_root}/reports/latest.md"] = b"abcdef"
-    path = PathSpec.from_str_path("/volume/reports/latest.md", "/volume")
+    path = PathSpec.from_str_path(
+        "/volume/reports/latest.md",
+        mount_key("/volume/reports/latest.md", "/volume"))
 
     result = await range_read(accessor, path, 1, 4)
 
@@ -88,7 +95,9 @@ async def test_read_stream_reads_single_download_body_in_chunks(
     contents = TrackingContents(b"abcdef")
     tracking_files = TrackingFiles(contents)
     accessor.client.files = tracking_files
-    path = PathSpec.from_str_path("/volume/reports/latest.md", "/volume")
+    path = PathSpec.from_str_path(
+        "/volume/reports/latest.md",
+        mount_key("/volume/reports/latest.md", "/volume"))
     stream = read_stream(accessor, path, chunk_size=2)
 
     first = await anext(stream)

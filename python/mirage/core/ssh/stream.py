@@ -25,10 +25,12 @@ async def read_stream(accessor: SSHAccessor,
                       index=None,
                       chunk_size: int = 8192):
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    virtual = path.original
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    virtual = path.virtual
     if isinstance(path, PathSpec):
-        path = path.strip_prefix
+        path = path.mount_path
     config = accessor.config
     sftp = await accessor.sftp()
     try:

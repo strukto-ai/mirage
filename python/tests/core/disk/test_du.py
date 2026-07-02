@@ -23,8 +23,11 @@ from mirage.types import PathSpec
 async def test_du_single_file(tmp_path):
     (tmp_path / "a.txt").write_bytes(b"hello")
     accessor = DiskAccessor(tmp_path)
-    result = await du(accessor, PathSpec(original="/a.txt",
-                                         directory="/a.txt"))
+    result = await du(
+        accessor,
+        PathSpec(resource_path=("/a.txt").strip("/"),
+                 virtual="/a.txt",
+                 directory="/a.txt"))
     assert result == 5
 
 
@@ -33,7 +36,9 @@ async def test_du_directory(tmp_path):
     (tmp_path / "a.txt").write_bytes(b"aaa")
     (tmp_path / "b.txt").write_bytes(b"bb")
     accessor = DiskAccessor(tmp_path)
-    result = await du(accessor, PathSpec(original="/", directory="/"))
+    result = await du(
+        accessor,
+        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"))
     assert result == 5
 
 
@@ -43,8 +48,9 @@ async def test_du_all_returns_pairs(tmp_path):
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "b.txt").write_bytes(b"bb")
     accessor = DiskAccessor(tmp_path)
-    entries, total = await du_all(accessor,
-                                  PathSpec(original="/", directory="/"))
+    entries, total = await du_all(
+        accessor,
+        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"))
     paths = [p for p, _ in entries]
     assert "/a.txt" in paths
     assert "/sub/b.txt" in paths

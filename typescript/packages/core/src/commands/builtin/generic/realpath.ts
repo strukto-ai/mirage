@@ -50,9 +50,9 @@ export async function realpathGeneric(
   if (paths.length > 0) {
     for (const p of paths) {
       if (requireExists && !(await pathExists(stat, p))) {
-        throw new Error(`realpath: '${p.original}': No such file or directory`)
+        throw new Error(`realpath: '${p.virtual}': No such file or directory`)
       }
-      lines.push(normalize(p.original, opts.cwd))
+      lines.push(normalize(p.virtual, opts.cwd))
     }
   } else {
     for (const t of texts) lines.push(normalize(t, opts.cwd))

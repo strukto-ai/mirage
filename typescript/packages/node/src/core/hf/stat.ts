@@ -16,9 +16,10 @@ import {
   FileStat,
   FileType,
   guessType,
+  mountPrefixOf,
+  stripSlash,
   type IndexCacheStore,
   type PathSpec,
-  stripSlash,
 } from '@struktoai/mirage-core'
 import type { Metadata } from 'opendal'
 import type { HfAccessor } from '../../accessor/hf.ts'
@@ -30,7 +31,7 @@ export async function stat(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<FileStat> {
-  const prefix = path.prefix
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
   const rawPath = rawPathOf(path)
   const stripped = stripSlash(rawPath)
   if (stripped === '') {

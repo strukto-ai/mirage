@@ -23,14 +23,14 @@ async def test_walk_returns_recursive_paths_with_depth_controls(
                               strip_prefix=True)
 
     assert full == [
-        "/knowledge",
-        "README.md",
-        "guides",
-        "guides/deep",
-        "guides/deep/note",
-        "guides/quickstart",
+        "/",
+        "/README.md",
+        "/guides",
+        "/guides/deep",
+        "/guides/deep/note",
+        "/guides/quickstart",
     ]
-    assert shallow == ["/knowledge", "README.md", "guides"]
+    assert shallow == ["/", "/README.md", "/guides"]
 
 
 @pytest.mark.asyncio

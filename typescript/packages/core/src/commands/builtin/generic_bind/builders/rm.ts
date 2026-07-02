@@ -44,7 +44,7 @@ export const RM_BUILDER: Builder = {
         isDir = st.type === FileType.DIRECTORY
       } catch {
         if (force) continue
-        throw new Error(`rm: cannot remove '${p.original}': No such file or directory`)
+        throw new Error(`rm: cannot remove '${p.virtual}': No such file or directory`)
       }
       if (isDir) {
         if (recursive) {
@@ -55,7 +55,7 @@ export const RM_BUILDER: Builder = {
       } else {
         await unlink(accessor, p)
       }
-      if (verbose) lines.push(`removed '${p.original}'`)
+      if (verbose) lines.push(`removed '${p.virtual}'`)
     }
     const out = lines.length > 0 ? formatRecords(lines) : null
     return [out, new IOResult()]

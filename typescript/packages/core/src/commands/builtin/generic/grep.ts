@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { cacheAwareStream } from '../../../cache/read_through.ts'
 import { exitOnEmpty, quietMatch } from '../../../io/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
@@ -87,7 +88,12 @@ function splitLinesNoTrailing(text: string): string[] {
 }
 
 function makeSpec(path: string, template: PathSpec): PathSpec {
-  return new PathSpec({ original: path, directory: path, resolved: false, prefix: template.prefix })
+  return new PathSpec({
+    virtual: path,
+    directory: path,
+    resolved: false,
+    resourcePath: mountKey(path, mountPrefixOf(template.virtual, template.resourcePath)),
+  })
 }
 
 function filesOnlyOpts(f: FlagSet, recursive: boolean): GrepFilesOnlyOptions {
@@ -166,12 +172,12 @@ export async function grepGeneric(
           readdirFn,
           statFn,
           readBytesFn,
-          p.original,
+          p.virtual,
           pattern,
           filesOnlyOpts(f, recursive),
           warnings,
         )
-        for (const h of rebaseDisplay(hits, p.original, p.display)) results.push(h)
+        for (const h of rebaseDisplay(hits, p.virtual, p.display)) results.push(h)
       }
       const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n') + '\n') : undefined
       if (results.length === 0)
@@ -197,21 +203,21 @@ export async function grepGeneric(
       const warnings: string[] = scopeWarn !== null ? [scopeWarn] : []
       const allResults: string[] = []
       for (const p of paths) {
-        const s = await statFn(p.original)
+        const s = await statFn(p.virtual)
         if (s.type === FileType.DIRECTORY) {
           const res = await grepRecursive(
             readdirFn,
             statFn,
             readBytesFn,
-            p.original,
+            p.virtual,
             pat,
             filesOnlyOpts(f, recursive),
             warnings,
             false,
           )
-          for (const r of rebaseDisplay(res, p.original, p.display)) allResults.push(r)
+          for (const r of rebaseDisplay(res, p.virtual, p.display)) allResults.push(r)
         } else {
-          const data = splitLinesNoTrailing(DEC.decode(await readBytesFn(p.original)))
+          const data = splitLinesNoTrailing(DEC.decode(await readBytesFn(p.virtual)))
           const hits = grepLines(p.display, data, pat, f)
           if (f.countOnly) {
             if (hits.length > 0) allResults.push(`${p.display}:${hits[0] ?? ''}`)
@@ -239,7 +245,7 @@ export async function grepGeneric(
       for (const p of paths) {
         let s: FileStat
         try {
-          s = await statFn(p.original)
+          s = await statFn(p.virtual)
         } catch (err) {
           if ((err as { code?: string }).code === 'ENOENT') {
             multiWarnings.push(`grep: ${p.display}: No such file or directory`)

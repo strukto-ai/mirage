@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { TrelloAccessor } from '../../../accessor/trello.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { resolveTrelloGlob } from '../../../core/trello/glob.ts'
@@ -35,7 +36,7 @@ async function walk(
   path: PathSpec,
   index: IndexCacheStore | undefined,
 ): Promise<string[]> {
-  const results: string[] = [path.original]
+  const results: string[] = [path.virtual]
   let info
   try {
     info = await trelloStat(accessor, path, index)
@@ -51,10 +52,10 @@ async function walk(
   }
   for (const child of children) {
     const childSpec = new PathSpec({
-      original: child,
+      virtual: child,
       directory: child,
       resolved: false,
-      prefix: path.prefix,
+      resourcePath: mountKey(child, mountPrefixOf(path.virtual, path.resourcePath)),
     })
     results.push(...(await walk(accessor, childSpec, index)))
   }
@@ -74,8 +75,8 @@ async function findCommand(
 ): Promise<CommandFnResult> {
   const resolved = await resolveTrelloGlob(accessor, paths, opts.index ?? undefined)
   const p0 = resolved[0]
-  const root = p0 !== undefined ? p0.original : '/'
-  const pfx = p0 !== undefined ? p0.prefix : ''
+  const root = p0 !== undefined ? p0.virtual : '/'
+  const pfx = p0 !== undefined ? mountPrefixOf(p0.virtual, p0.resourcePath) : ''
   const nameFlag = typeof opts.flags.name === 'string' ? opts.flags.name : null
   const inameFlag = typeof opts.flags.iname === 'string' ? opts.flags.iname : null
   const typeFlag = typeof opts.flags.type === 'string' ? opts.flags.type : null
@@ -90,10 +91,10 @@ async function findCommand(
   const sizeMtimeErr = findSizeMtimeError(sizeFlag, mtimeFlag)
   if (sizeMtimeErr !== null) return sizeMtimeErr
   const searchSpec = new PathSpec({
-    original: root,
+    virtual: root,
     directory: root,
     resolved: false,
-    prefix: pfx,
+    resourcePath: mountKey(root, pfx),
   })
   const allPaths = await walk(accessor, searchSpec, opts.index ?? undefined)
   let strippedRoot = root
@@ -110,10 +111,10 @@ async function findCommand(
     if (md !== null && depth > md) continue
     if (mdMin !== null && depth < mdMin) continue
     const entrySpec = new PathSpec({
-      original: entryPath,
+      virtual: entryPath,
       directory: entryPath,
       resolved: false,
-      prefix: pfx,
+      resourcePath: mountKey(entryPath, pfx),
     })
     const info = await trelloStat(accessor, entrySpec, opts.index ?? undefined)
     if (typeFlag === 'd' && info.type !== FileType.DIRECTORY) continue

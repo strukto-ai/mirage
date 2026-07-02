@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
 import type { SlackResponse, SlackTransport } from '../../core/slack/_client.ts'
@@ -40,7 +41,11 @@ describe('ops/slack/readdir', () => {
     const accessor = new SlackAccessor(t)
     const out = await readdirOp.fn(
       accessor,
-      new PathSpec({ original: '/mnt/slack', directory: '/mnt/slack', prefix: '/mnt/slack' }),
+      new PathSpec({
+        virtual: '/mnt/slack',
+        directory: '/mnt/slack',
+        resourcePath: mountKey('/mnt/slack', '/mnt/slack'),
+      }),
       [],
       {},
     )

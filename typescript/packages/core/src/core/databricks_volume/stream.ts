@@ -33,7 +33,7 @@ export async function* readStream(
   accessor: DatabricksVolumeAccessor,
   path: PathSpec,
 ): AsyncIterable<Uint8Array> {
-  const virtual = path.original
+  const virtual = path.virtual
   const remotePath = backendPath(accessor.config, path)
   const rec = recordStream('read', virtual, ResourceName.DATABRICKS_VOLUME)
   let r: Response
@@ -42,7 +42,7 @@ export async function* readStream(
       headers: { Accept: 'application/octet-stream' },
     })
   } catch (exc) {
-    if (isNotFound(exc)) throw notFoundError(path.original)
+    if (isNotFound(exc)) throw notFoundError(path.virtual)
     throw exc
   }
   const body = r.body

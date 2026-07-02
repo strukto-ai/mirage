@@ -51,7 +51,7 @@ def _patched_iter(docs):
 
 
 def _path(s: str) -> PathSpec:
-    return PathSpec(original=s, directory=s)
+    return PathSpec(virtual=s, directory=s, resource_path=s.strip("/"))
 
 
 @pytest.fixture(autouse=True)

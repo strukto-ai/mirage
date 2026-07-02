@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { copy } from './copy.ts'
 import { rename } from './rename.ts'
@@ -177,14 +178,14 @@ describe('resolveGlob', () => {
     )
     vi.stubGlobal('fetch', fetch)
     const pattern = new PathSpec({
-      original: '/volume/*.md',
+      virtual: '/volume/*.md',
       directory: '/volume/',
       pattern: '*.md',
       resolved: false,
-      prefix: '/volume',
+      resourcePath: mountKey('/volume/*.md', '/volume'),
     })
     const resolved = await resolveGlob(makeAccessor(), [pattern])
-    expect(resolved.map((p) => p.original)).toEqual(['/volume/a.md', '/volume/c.md'])
+    expect(resolved.map((p) => p.virtual)).toEqual(['/volume/a.md', '/volume/c.md'])
   })
 
   it('passes through resolved paths untouched', async () => {

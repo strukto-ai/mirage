@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../../../utils/key_prefix.ts'
 import type { ByteSource, IOResult } from '../../../../io/types.ts'
 import type { Resource } from '../../../../resource/base.ts'
 import { type FileStat, PathSpec } from '../../../../types.ts'
@@ -46,12 +47,12 @@ export function flatten(scopes: PathSpec[]): PathSpec[] {
   return scopes.map(
     (s) =>
       new PathSpec({
-        original: s.original,
+        virtual: s.virtual,
         directory: s.directory,
         pattern: s.pattern,
         resolved: s.resolved,
-        prefix: '',
-        asTyped: s.asTyped,
+        resourcePath: mountKey(s.virtual, ''),
+        rawPath: s.rawPath,
       }),
   )
 }

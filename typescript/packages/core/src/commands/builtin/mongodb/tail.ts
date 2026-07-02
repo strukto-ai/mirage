@@ -80,12 +80,14 @@ async function tailCommand(
 ): Promise<CommandFnResult> {
   const resolved =
     paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
+  const first = resolved[0]
   if (
     opts.flags.f === true &&
     resolved.length === 1 &&
-    detectScope(resolved[0]).level === ScopeLevel.DOCUMENTS
+    first !== undefined &&
+    detectScope(first).level === ScopeLevel.DOCUMENTS
   ) {
-    return [watchStream(accessor, resolved[0]), new IOResult()]
+    return [watchStream(accessor, first), new IOResult()]
   }
   const nRaw = typeof opts.flags.n === 'string' ? opts.flags.n : null
   const [lines, plusMode] = parseN(nRaw)

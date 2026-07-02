@@ -17,6 +17,6 @@ import type { PathSpec } from '../../types.ts'
 import { norm } from './utils.ts'
 
 export function exists(accessor: RAMAccessor, path: PathSpec): Promise<boolean> {
-  const p = norm(path.stripPrefix)
+  const p = norm(path.mountPath)
   return Promise.resolve(accessor.store.files.has(p) || accessor.store.dirs.has(p))
 }

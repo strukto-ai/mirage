@@ -143,8 +143,8 @@ export async function find(
   options: FindOptions = {},
 ): Promise<string[]> {
   const root = accessor.rootHandle
-  const virtual = norm(p.stripPrefix)
-  const startName = startBasename(p.original)
+  const virtual = norm(p.mountPath)
+  const startName = startBasename(p.virtual)
   const results: string[] = []
   const tree =
     options.tree ??

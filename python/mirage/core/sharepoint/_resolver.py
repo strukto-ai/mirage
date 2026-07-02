@@ -4,6 +4,7 @@ from typing import Literal
 from mirage.accessor.sharepoint import SharePointAccessor
 from mirage.core.sharepoint._client import GRAPH_API, graph_list
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_prefix_of
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,8 +72,8 @@ async def resolve(accessor: SharePointAccessor,
     if isinstance(path, str):
         raw = path.strip("/")
     else:
-        prefix = path.prefix or ""
-        raw = path.original
+        prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
+        raw = path.virtual
         if prefix and raw.startswith(prefix):
             rest = raw[len(prefix):]
             if prefix.endswith("/") or rest == "" or rest.startswith("/"):

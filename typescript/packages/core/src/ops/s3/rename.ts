@@ -24,7 +24,7 @@ export const renameOp: RegisteredOp = {
   write: true,
   fn: (accessor: S3Accessor, path: PathSpec, args: readonly unknown[]) => {
     const dst = args[0]
-    if (dst === null || typeof dst !== 'object' || !('original' in dst)) {
+    if (dst === null || typeof dst !== 'object' || !('virtual' in dst)) {
       throw new TypeError('rename op requires a dst PathSpec as the first arg')
     }
     return coreRename(accessor, path, dst as PathSpec)

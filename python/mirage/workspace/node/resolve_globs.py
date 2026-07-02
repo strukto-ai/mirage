@@ -15,6 +15,7 @@
 import dataclasses
 
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 from mirage.workspace.mount import MountRegistry
 
 
@@ -38,15 +39,17 @@ async def resolve_globs(
     result: list[str | PathSpec] = []
     for item in classified:
         if isinstance(item, PathSpec) and item.pattern:
-            if text_args and item.original in text_args:
-                result.append(item.original)
+            if text_args and item.virtual in text_args:
+                result.append(item.virtual)
                 continue
             try:
-                mount = registry.mount_for(item.original)
+                mount = registry.mount_for(item.virtual)
                 prefix = mount.prefix.rstrip("/")
-                # Set prefix so readdir can strip the mount prefix
-                # and route to the correct resource-relative path.
-                item = dataclasses.replace(item, prefix=prefix)
+                # Stamp the backend key so readdir addresses the correct
+                # resource-relative path.
+                item = dataclasses.replace(item,
+                                           resource_path=mount_key(
+                                               item.virtual, prefix))
                 resolved = await mount.resource.resolve_glob([item],
                                                              prefix=prefix)
                 for p in resolved:
@@ -54,7 +57,9 @@ async def resolve_globs(
                         result.append(p)
                     else:
                         full = prefix + p if not p.startswith(prefix) else p
-                        result.append(PathSpec.from_str_path(full, prefix))
+                        result.append(
+                            PathSpec.from_str_path(full,
+                                                   mount_key(full, prefix)))
             except (ValueError, AttributeError, TypeError):
                 result.append(item)
         elif isinstance(item, PathSpec):

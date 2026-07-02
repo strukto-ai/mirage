@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { PathSpec } from '@struktoai/mirage-core'
+import { PathSpec, mountKey } from '@struktoai/mirage-core'
 import { makeFakeAccessor } from './_test_utils.ts'
 import { readdir } from './readdir.ts'
 
@@ -54,9 +54,9 @@ describe('core/ssh/readdir', () => {
       ]),
     })
     const p = new PathSpec({
-      original: '/mnt/ssh/data',
+      virtual: '/mnt/ssh/data',
       directory: '/mnt/ssh/data',
-      prefix: '/mnt/ssh',
+      resourcePath: mountKey('/mnt/ssh/data', '/mnt/ssh'),
     })
     const out = await readdir(accessor, p)
     expect(out).toEqual(['/mnt/ssh/data/a.txt'])

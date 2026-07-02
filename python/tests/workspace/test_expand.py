@@ -60,12 +60,16 @@ def _mock_registry(prefixes=None):
 
     def _mount_for(path):
         if prefixes is None:
-            return MagicMock()
+            root = MagicMock()
+            root.prefix = "/"
+            return root
         norm = "/" + path.strip("/")
         for p in sorted(prefixes, key=len, reverse=True):
             norm_p = p.rstrip("/")
             if norm == norm_p or norm.startswith(p):
-                return MagicMock()
+                m = MagicMock()
+                m.prefix = p
+                return m
         raise ValueError(f"no mount matches: {path}")
 
     reg.mount_for = MagicMock(side_effect=_mount_for)
@@ -340,7 +344,7 @@ def test_classify_absolute_file():
     reg = _mock_registry(["/data/"])
     result = classify_word("/data/file.txt", reg, "/")
     assert isinstance(result, PathSpec)
-    assert result.original == "/data/file.txt"
+    assert result.virtual == "/data/file.txt"
     assert result.directory == "/data/"
     assert result.pattern is None
     assert result.resolved is True
@@ -357,7 +361,7 @@ def test_classify_absolute_glob():
     reg = _mock_registry(["/data/"])
     result = classify_word("/data/*.csv", reg, "/")
     assert isinstance(result, PathSpec)
-    assert result.original == "/data/*.csv"
+    assert result.virtual == "/data/*.csv"
     assert result.directory == "/data/"
     assert result.pattern == "*.csv"
     assert result.resolved is False
@@ -381,7 +385,7 @@ def test_classify_relative_glob():
     reg = _mock_registry(["/data/"])
     result = classify_word("*.txt", reg, "/data")
     assert isinstance(result, PathSpec)
-    assert result.original == "/data/*.txt"
+    assert result.virtual == "/data/*.txt"
     assert result.directory == "/data/"
     assert result.pattern == "*.txt"
 
@@ -390,7 +394,7 @@ def test_classify_relative_dotdot_glob():
     reg = _mock_registry(["/data/"])
     result = classify_word("../*.txt", reg, "/data/sub")
     assert isinstance(result, PathSpec)
-    assert result.original == "/data/*.txt"
+    assert result.virtual == "/data/*.txt"
     assert result.directory == "/data/"
     assert result.pattern == "*.txt"
 
@@ -434,7 +438,7 @@ def test_classify_parts_command_name_stays_str():
     assert result[0] == "cat"
     assert isinstance(result[0], str)
     assert isinstance(result[1], PathSpec)
-    assert result[1].original == "/data/file.txt"
+    assert result[1].virtual == "/data/file.txt"
 
 
 def test_classify_parts_mixed():
@@ -452,8 +456,8 @@ def test_classify_parts_multiple_paths():
     result = classify_parts(["diff", "/data/a.txt", "/data/b.txt"], reg, "/")
     assert isinstance(result[1], PathSpec)
     assert isinstance(result[2], PathSpec)
-    assert result[1].original == "/data/a.txt"
-    assert result[2].original == "/data/b.txt"
+    assert result[1].virtual == "/data/a.txt"
+    assert result[2].virtual == "/data/b.txt"
 
 
 def test_classify_parts_glob_in_args():
@@ -506,7 +510,7 @@ def test_expand_and_classify_absolute_path():
     result = _run(expand_and_classify(parts, session, _execute_fn(), reg, "/"))
     assert len(result) == 1
     assert isinstance(result[0], PathSpec)
-    assert result[0].original == "/data/file.txt"
+    assert result[0].virtual == "/data/file.txt"
     assert result[0].resolved is True
 
 
@@ -527,7 +531,7 @@ def test_expand_and_classify_var_to_path():
     result = _run(expand_and_classify(parts, session, _execute_fn(), reg, "/"))
     assert len(result) == 1
     assert isinstance(result[0], PathSpec)
-    assert result[0].original == "/data/report.csv"
+    assert result[0].virtual == "/data/report.csv"
     assert result[0].resolved is True
 
 

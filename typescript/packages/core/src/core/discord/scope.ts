@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 
@@ -55,7 +56,7 @@ function splitDirname(dirname: string): [string, string | undefined] {
 }
 
 export function detectScope(path: PathSpec): DiscordScope {
-  const prefix = path.prefix
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
 
   if (path.pattern?.endsWith('.jsonl')) {
     let dirKey = stripSlashes(path.directory)
@@ -102,7 +103,7 @@ export function detectScope(path: PathSpec): DiscordScope {
     }
   }
 
-  const key = path.key
+  const key = path.resourcePath
   if (!key) return { level: 'root', useNative: true, resourcePath: '/' }
 
   const parts = key.split('/')

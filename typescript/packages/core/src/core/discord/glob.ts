@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { rekey } from '../../utils/key_prefix.ts'
 import type { DiscordAccessor } from '../../accessor/discord.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
@@ -36,7 +37,7 @@ export async function resolveDiscordGlob(
       for (const entry of entries) {
         const base = entry.split('/').pop() ?? entry
         if (!fnmatch(base, p.pattern)) continue
-        matched.push(PathSpec.fromStrPath(entry, p.prefix))
+        matched.push(PathSpec.fromStrPath(entry, rekey(p.virtual, p.resourcePath, entry)))
       }
       const truncated = matched.length > SCOPE_ERROR ? matched.slice(0, SCOPE_ERROR) : matched
       result.push(...truncated)

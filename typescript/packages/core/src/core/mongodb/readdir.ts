@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -34,7 +35,7 @@ export async function readdir(
   index?: IndexCacheStore,
 ): Promise<string[]> {
   const spec = typeof path === 'string' ? PathSpec.fromStrPath(path) : path
-  const prefix = spec.prefix
+  const prefix = mountPrefixOf(spec.virtual, spec.resourcePath)
   const scope = detectScope(spec)
   const virtualKey = rstripSlash(`${prefix}${scope.resourcePath}`) || '/'
 
@@ -43,13 +44,13 @@ export async function readdir(
   }
 
   if (scope.level === ScopeLevel.DATABASE && scope.database !== null) {
-    if (!(await databaseExists(accessor, scope.database))) throw notFound(spec.original)
+    if (!(await databaseExists(accessor, scope.database))) throw notFound(spec.virtual)
     const base = `${prefix}/${scope.database}`
     return [`${base}/database.json`, `${base}/collections`, `${base}/views`]
   }
 
   if (scope.level === ScopeLevel.KIND_DIR && scope.database !== null && scope.kind !== null) {
-    if (!(await databaseExists(accessor, scope.database))) throw notFound(spec.original)
+    if (!(await databaseExists(accessor, scope.database))) throw notFound(spec.virtual)
     return listKindDir(accessor, scope.database, scope.kind, virtualKey, index, prefix)
   }
 
@@ -60,13 +61,13 @@ export async function readdir(
     scope.name !== null
   ) {
     if (!(await entityExists(accessor, scope.database, scope.name, scope.kind))) {
-      throw notFound(spec.original)
+      throw notFound(spec.virtual)
     }
     const base = `${prefix}/${scope.database}/${KIND_TO_DIR[scope.kind]}/${scope.name}`
     return [`${base}/schema.json`, `${base}/documents.jsonl`]
   }
 
-  throw notFound(spec.original)
+  throw notFound(spec.virtual)
 }
 
 async function listRoot(

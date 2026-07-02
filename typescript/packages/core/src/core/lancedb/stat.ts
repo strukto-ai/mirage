@@ -33,7 +33,7 @@ const IMAGE_TYPES: Record<string, FileType> = {
 }
 
 function nameOf(spec: PathSpec): string {
-  const stripped = rstripSlash(spec.original)
+  const stripped = rstripSlash(spec.virtual)
   const last = stripped.split('/').pop()
   return last === undefined || last === '' ? '/' : last
 }
@@ -47,11 +47,11 @@ export async function stat(
   const config = accessor.config
   const scope = detectScope(spec, config)
 
-  if (scope.level === ScopeLevel.UNKNOWN) throw notFound(spec.original)
+  if (scope.level === ScopeLevel.UNKNOWN) throw notFound(spec.virtual)
 
   if (scope.table !== null) {
     const tables = await accessor.driver.listTables()
-    if (!tables.includes(scope.table)) throw notFound(spec.original)
+    if (!tables.includes(scope.table)) throw notFound(spec.virtual)
   }
 
   if (scope.level === ScopeLevel.ROOT || scope.level === ScopeLevel.GROUP_DIR) {

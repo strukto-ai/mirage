@@ -4,6 +4,7 @@ from mirage.commands.builtin.dify.find import find
 from mirage.core.dify import tree
 from mirage.io.types import materialize
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 from .conftest import document
 
@@ -55,7 +56,9 @@ async def test_find_handles_file_missing_and_maxdepth(monkeypatch,
     assert await materialize(maxdepth_stdout) == b"/knowledge\n"
     assert maxdepth_io.exit_code == 0
 
-    missing = PathSpec.from_str_path("/knowledge/missing.md", "/knowledge/")
+    missing = PathSpec.from_str_path(
+        "/knowledge/missing.md",
+        mount_key("/knowledge/missing.md", "/knowledge"))
     missing_stdout, missing_io = await find(dify_accessor, [missing],
                                             index=dify_index)
     assert await materialize(missing_stdout) == b""
@@ -82,11 +85,12 @@ async def test_find_uses_cwd_when_path_missing(monkeypatch, dify_accessor,
 async def test_find_resolves_glob_patterns(monkeypatch, dify_accessor,
                                            dify_index):
     monkeypatch.setattr(tree, "list_all_documents", list_nested_documents)
-    path = PathSpec(original="/knowledge/guides/*.md",
+    path = PathSpec(resource_path=mount_key("/knowledge/guides/*.md",
+                                            "/knowledge"),
+                    virtual="/knowledge/guides/*.md",
                     directory="/knowledge/guides",
                     pattern="*.md",
-                    resolved=False,
-                    prefix="/knowledge/")
+                    resolved=False)
 
     stdout, io = await find(dify_accessor, [path], index=dify_index)
 

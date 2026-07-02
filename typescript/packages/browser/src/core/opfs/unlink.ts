@@ -18,7 +18,7 @@ import { isNotFound, resolveParentDirHandle } from './utils.ts'
 
 export async function unlink(accessor: OPFSAccessor, path: PathSpec): Promise<void> {
   const root = accessor.rootHandle
-  const virtual = path.stripPrefix
+  const virtual = path.mountPath
   let parentDir: FileSystemDirectoryHandle
   let name: string
   try {

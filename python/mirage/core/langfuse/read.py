@@ -21,6 +21,7 @@ from mirage.core.langfuse._client import (fetch_dataset_items,
                                           fetch_trace)
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_prefix_of
 
 
 def _json_bytes(data: dict) -> bytes:
@@ -51,10 +52,12 @@ async def read(
         prefix (str): mount prefix for virtual index keys.
     """
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    virtual = path.original
-    path.prefix
-    key = path.key
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    virtual = path.virtual
+    mount_prefix_of(path.virtual, path.resource_path)
+    key = path.resource_path
 
     if any(p.startswith(".") for p in key.split("/")):
         raise enoent(virtual)

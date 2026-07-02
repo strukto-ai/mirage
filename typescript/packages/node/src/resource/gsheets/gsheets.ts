@@ -14,22 +14,24 @@
 
 import {
   BaseResource,
-  type FileStat,
   GSHEETS_COMMANDS,
   GSHEETS_PROMPT,
   GSHEETS_VFS_OPS,
   GSHEETS_WRITE_PROMPT,
   GSheetsAccessor,
   PathSpec,
-  type RegisteredCommand,
-  type RegisteredOp,
-  type Resource,
   ResourceName,
   TokenManager,
   gsheetsRead,
   gsheetsReaddir,
   gsheetsResolveGlob,
   gsheetsStat,
+  mountKey,
+  mountPrefixOf,
+  type FileStat,
+  type RegisteredCommand,
+  type RegisteredOp,
+  type Resource,
 } from '@struktoai/mirage-core'
 import { redactGSheetsConfig, type GSheetsConfig, type GSheetsConfigRedacted } from './config.ts'
 
@@ -87,7 +89,7 @@ export class GSheetsResource extends BaseResource implements Resource {
   }
 
   async fingerprint(p: PathSpec): Promise<string | null> {
-    const lookup = await this.index.get(p.original)
+    const lookup = await this.index.get(p.virtual)
     return lookup.entry?.remoteTime ?? null
   }
 
@@ -95,14 +97,14 @@ export class GSheetsResource extends BaseResource implements Resource {
     const effective =
       prefix !== ''
         ? paths.map((p) =>
-            p.prefix !== ''
+            mountPrefixOf(p.virtual, p.resourcePath) !== ''
               ? p
               : new PathSpec({
-                  original: p.original,
+                  virtual: p.virtual,
                   directory: p.directory,
                   ...(p.pattern !== null ? { pattern: p.pattern } : {}),
                   resolved: p.resolved,
-                  prefix,
+                  resourcePath: mountKey(p.virtual, prefix),
                 }),
           )
         : paths

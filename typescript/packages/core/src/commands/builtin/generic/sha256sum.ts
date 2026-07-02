@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { sha256Hex } from '../../../utils/hash.ts'
 import { PathSpec } from '../../../types.ts'
@@ -43,16 +44,18 @@ async function* sha256Multi(stream: Stream, paths: readonly PathSpec[]): AsyncIt
   }
 }
 
-function makePathSpec(original: string, mountPrefix: string): PathSpec {
-  if (mountPrefix !== '' && original.startsWith(mountPrefix + '/')) {
-    return new PathSpec({ original, directory: original, resolved: true, prefix: mountPrefix })
-  }
-  return new PathSpec({ original, directory: original, resolved: true })
+function makePathSpec(virtual: string, mountPrefix: string): PathSpec {
+  return new PathSpec({
+    virtual,
+    directory: virtual,
+    resourcePath: mountKey(virtual, mountPrefix),
+    resolved: true,
+  })
 }
 
 async function sha256Check(stream: Stream, p: PathSpec): Promise<[Uint8Array, number]> {
   const data = DEC.decode(await materialize(stream(p)))
-  const mountPrefix = p.prefix
+  const mountPrefix = mountPrefixOf(p.virtual, p.resourcePath)
   const lines: string[] = []
   let failed = false
   for (const line of data.split('\n')) {
@@ -85,7 +88,7 @@ export async function sha256sumGeneric(
     return [result, new IOResult({ exitCode })]
   }
   if (paths.length > 0) {
-    return [sha256Multi(stream, paths), new IOResult({ cache: paths.map((p) => p.stripPrefix) })]
+    return [sha256Multi(stream, paths), new IOResult({ cache: paths.map((p) => p.mountPath) })]
   }
   const source: AsyncIterable<Uint8Array> = resolveSource(opts.stdin)
   return [sha256SingleStream(source, '-'), new IOResult()]

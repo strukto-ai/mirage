@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../utils/slash.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ReaddirModule from './readdir.ts'
 import type * as StatModule from './stat.ts'
@@ -47,17 +48,17 @@ function enoent(p: string): Error {
 
 function mockTree(tree: Record<string, string[]>): void {
   vi.mocked(readdirMod.readdir).mockImplementation((_accessor, spec) => {
-    const children = tree[spec.original]
-    if (children === undefined) return Promise.reject(enoent(spec.original))
+    const children = tree[spec.virtual]
+    if (children === undefined) return Promise.reject(enoent(spec.virtual))
     return Promise.resolve(children)
   })
 }
 
 function mockStats(stats: Record<string, { size?: number | null; modified?: string }>): void {
   vi.mocked(statMod.stat).mockImplementation((_accessor, spec) => {
-    const entry = stats[spec.original]
-    if (entry === undefined) return Promise.reject(enoent(spec.original))
-    const name = spec.original.split('/').pop() ?? ''
+    const entry = stats[spec.virtual]
+    if (entry === undefined) return Promise.reject(enoent(spec.virtual))
+    const name = spec.virtual.split('/').pop() ?? ''
     return Promise.resolve(
       new FileStat({
         name,
@@ -83,7 +84,7 @@ const STATS: Record<string, { size?: number | null; modified?: string }> = {
   '/owned/Doc_A__d1.gdoc.json': { size: null, modified: RECENT },
 }
 
-const ROOT = new PathSpec({ original: '/', directory: '/' })
+const ROOT = new PathSpec({ resourcePath: stripSlash('/'), virtual: '/', directory: '/' })
 
 describe('gdocs core find', () => {
   beforeEach(() => {

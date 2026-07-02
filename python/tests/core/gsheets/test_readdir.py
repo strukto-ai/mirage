@@ -20,6 +20,7 @@ from mirage.accessor.gsheets import GSheetsAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.gsheets.readdir import readdir
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.fixture
@@ -36,8 +37,9 @@ def index():
 async def test_readdir_root(accessor, index):
     result = await readdir(
         accessor,
-        PathSpec(original="/gsheets", directory="/gsheets", prefix="/gsheets"),
-        index)
+        PathSpec(resource_path=mount_key("/gsheets", "/gsheets"),
+                 virtual="/gsheets",
+                 directory="/gsheets"), index)
     assert result == ["/gsheets/owned", "/gsheets/shared"]
 
 
@@ -60,9 +62,9 @@ async def test_readdir_owned(accessor, index):
     ):
         result = await readdir(
             accessor,
-            PathSpec(original="/gsheets/owned",
-                     directory="/gsheets/owned",
-                     prefix="/gsheets"), index)
+            PathSpec(resource_path=mount_key("/gsheets/owned", "/gsheets"),
+                     virtual="/gsheets/owned",
+                     directory="/gsheets/owned"), index)
         assert len(result) == 1
         assert "sheet1" in result[0]
 
@@ -72,9 +74,10 @@ async def test_readdir_file_path_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
         await readdir(
             accessor,
-            PathSpec(original="/gsheets/owned/file.gsheet.json",
-                     directory="/gsheets/owned/file.gsheet.json",
-                     prefix="/gsheets"), index)
+            PathSpec(resource_path=mount_key("/gsheets/owned/file.gsheet.json",
+                                             "/gsheets"),
+                     virtual="/gsheets/owned/file.gsheet.json",
+                     directory="/gsheets/owned/file.gsheet.json"), index)
 
 
 @pytest.mark.asyncio
@@ -82,9 +85,9 @@ async def test_readdir_invalid_path_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
         await readdir(
             accessor,
-            PathSpec(original="/gsheets/bogus",
-                     directory="/gsheets/bogus",
-                     prefix="/gsheets"), index)
+            PathSpec(resource_path=mount_key("/gsheets/bogus", "/gsheets"),
+                     virtual="/gsheets/bogus",
+                     directory="/gsheets/bogus"), index)
 
 
 @pytest.mark.asyncio
@@ -99,10 +102,11 @@ async def test_readdir_owned_pushes_modified_range(accessor, index):
     with patch("mirage.core.gsheets.readdir.list_all_files", new=fake_list):
         await readdir(
             accessor,
-            PathSpec(original="/gsheets/owned/2026-05-*",
+            PathSpec(resource_path=mount_key("/gsheets/owned/2026-05-*",
+                                             "/gsheets"),
+                     virtual="/gsheets/owned/2026-05-*",
                      directory="/gsheets/owned",
-                     pattern="2026-05-*",
-                     prefix="/gsheets"), index)
+                     pattern="2026-05-*"), index)
 
     assert captured["modified_after"] == "2026-05-01T00:00:00Z"
     assert captured["modified_before"] == "2026-06-01T00:00:00Z"
@@ -142,15 +146,16 @@ async def test_readdir_owned_filtered_does_not_cache(accessor, index):
     with patch("mirage.core.gsheets.readdir.list_all_files", new=fake_list):
         await readdir(
             accessor,
-            PathSpec(original="/gsheets/owned/2026-05-*",
+            PathSpec(resource_path=mount_key("/gsheets/owned/2026-05-*",
+                                             "/gsheets"),
+                     virtual="/gsheets/owned/2026-05-*",
                      directory="/gsheets/owned",
-                     pattern="2026-05-*",
-                     prefix="/gsheets"), index)
+                     pattern="2026-05-*"), index)
         result = await readdir(
             accessor,
-            PathSpec(original="/gsheets/owned",
-                     directory="/gsheets/owned",
-                     prefix="/gsheets"), index)
+            PathSpec(resource_path=mount_key("/gsheets/owned", "/gsheets"),
+                     virtual="/gsheets/owned",
+                     directory="/gsheets/owned"), index)
 
     assert call_count["n"] == 2
     assert len(result) == 2
@@ -193,15 +198,16 @@ async def test_readdir_owned_filtered_bypasses_warm_cache(accessor, index):
     with patch("mirage.core.gsheets.readdir.list_all_files", new=fake_list):
         await readdir(
             accessor,
-            PathSpec(original="/gsheets/owned",
-                     directory="/gsheets/owned",
-                     prefix="/gsheets"), index)
+            PathSpec(resource_path=mount_key("/gsheets/owned", "/gsheets"),
+                     virtual="/gsheets/owned",
+                     directory="/gsheets/owned"), index)
         await readdir(
             accessor,
-            PathSpec(original="/gsheets/owned/2026-05-*",
+            PathSpec(resource_path=mount_key("/gsheets/owned/2026-05-*",
+                                             "/gsheets"),
+                     virtual="/gsheets/owned/2026-05-*",
                      directory="/gsheets/owned",
-                     pattern="2026-05-*",
-                     prefix="/gsheets"), index)
+                     pattern="2026-05-*"), index)
 
     assert call_count["n"] == 2
 
@@ -217,9 +223,9 @@ async def test_readdir_owned_no_pattern_omits_range(accessor, index):
     with patch("mirage.core.gsheets.readdir.list_all_files", new=fake_list):
         await readdir(
             accessor,
-            PathSpec(original="/gsheets/owned",
-                     directory="/gsheets/owned",
-                     prefix="/gsheets"), index)
+            PathSpec(resource_path=mount_key("/gsheets/owned", "/gsheets"),
+                     virtual="/gsheets/owned",
+                     directory="/gsheets/owned"), index)
 
     assert captured.get("modified_after") is None
     assert captured.get("modified_before") is None
@@ -236,10 +242,11 @@ async def test_readdir_owned_non_date_pattern_omits_range(accessor, index):
     with patch("mirage.core.gsheets.readdir.list_all_files", new=fake_list):
         await readdir(
             accessor,
-            PathSpec(original="/gsheets/owned/*foo*",
+            PathSpec(resource_path=mount_key("/gsheets/owned/*foo*",
+                                             "/gsheets"),
+                     virtual="/gsheets/owned/*foo*",
                      directory="/gsheets/owned",
-                     pattern="*foo*",
-                     prefix="/gsheets"), index)
+                     pattern="*foo*"), index)
 
     assert captured.get("modified_after") is None
     assert captured.get("modified_before") is None

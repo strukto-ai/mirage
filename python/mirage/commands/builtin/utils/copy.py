@@ -16,6 +16,7 @@ from typing import Awaitable, Callable
 
 from mirage.cache.index import IndexCacheStore
 from mirage.types import FileType, PathSpec
+from mirage.utils.key_prefix import rekey
 
 _SWALLOW = (FileNotFoundError, ValueError)
 
@@ -23,12 +24,13 @@ StatFn = Callable[..., Awaitable[object]]
 
 
 def child_path(parent: PathSpec, name: str) -> PathSpec:
-    base = parent.original.rstrip("/")
-    return PathSpec.from_str_path(f"{base}/{name}", parent.prefix)
+    child = parent.virtual.rstrip("/") + "/" + name
+    return PathSpec.from_str_path(
+        child, rekey(parent.virtual, parent.resource_path, child))
 
 
 def backend_key_default(path: PathSpec) -> str:
-    return path.strip_prefix.rstrip("/")
+    return path.mount_path.rstrip("/")
 
 
 def copy_targets(sources: list[PathSpec], dst: PathSpec,
@@ -49,12 +51,12 @@ def copy_targets(sources: list[PathSpec], dst: PathSpec,
         list[tuple[PathSpec, PathSpec]]: Source-to-target pairs.
     """
     if len(sources) > 1 and not dst_is_dir:
-        raise NotADirectoryError(f"target '{dst.original}' is not a directory")
+        raise NotADirectoryError(f"target '{dst.virtual}' is not a directory")
     if not dst_is_dir:
         return [(sources[0], dst)]
     pairs: list[tuple[PathSpec, PathSpec]] = []
     for src in sources:
-        name = src.strip_prefix.rstrip("/").rsplit("/", 1)[-1]
+        name = src.mount_path.rstrip("/").rsplit("/", 1)[-1]
         pairs.append((src, child_path(dst, name)))
     return pairs
 

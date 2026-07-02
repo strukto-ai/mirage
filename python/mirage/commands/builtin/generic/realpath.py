@@ -24,12 +24,12 @@ async def realpath(
 ) -> tuple[ByteSource | None, IOResult]:
     lines: list[str] = []
     for p in paths:
-        resolved_display = posixpath.normpath(p.original)
+        resolved_display = posixpath.normpath(p.virtual)
         if e:
-            resolved_inner = posixpath.normpath(p.strip_prefix)
+            resolved_inner = posixpath.normpath(p.mount_path)
             if not await _exists(stat_fn, accessor, resolved_inner):
                 raise FileNotFoundError(
-                    f"realpath: '{p.original}': No such file or directory")
+                    f"realpath: '{p.virtual}': No such file or directory")
         lines.append(resolved_display)
     return ("\n".join(lines) + "\n").encode(), IOResult()
 

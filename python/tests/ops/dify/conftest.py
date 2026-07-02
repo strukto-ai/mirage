@@ -4,6 +4,7 @@ import pytest
 
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.fixture
@@ -19,8 +20,9 @@ def dify_index() -> RAMIndexCacheStore:
 
 @pytest.fixture
 def guide_path() -> PathSpec:
-    return PathSpec.from_str_path("/knowledge/guides/quickstart",
-                                  "/knowledge/")
+    return PathSpec.from_str_path(
+        "/knowledge/guides/quickstart",
+        mount_key("/knowledge/guides/quickstart", "/knowledge"))
 
 
 def sample_stat() -> FileStat:

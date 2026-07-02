@@ -96,7 +96,7 @@ describe('Namespace symlink table', () => {
     ws.namespace.symlink('/data/link', '/data/hello.txt', 1)
     const noFollow = await ws.namespace.resolve('/data/link', false)
     const [, spec] = noFollow
-    expect(spec.original).toBe('/data/link')
+    expect(spec.virtual).toBe('/data/link')
     await ws.close()
   })
 

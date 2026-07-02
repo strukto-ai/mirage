@@ -21,6 +21,7 @@ from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.discord.scope import coalesce_scopes, detect_scope
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def _run(coro):
@@ -32,11 +33,11 @@ def _gs(path: str,
         pattern: str | None = None,
         resolved: bool = True) -> PathSpec:
     return PathSpec(
-        original=path,
+        resource_path=mount_key(path, prefix),
+        virtual=path,
         directory=path.rsplit("/", 1)[0] + "/" if "/" in path else "/",
         pattern=pattern,
         resolved=resolved,
-        prefix=prefix,
     )
 
 
@@ -163,11 +164,12 @@ def test_file_blob(index):
 
 def test_glob_jsonl_in_channel(index):
     gs = PathSpec(
-        original="/discord/TestGuild/channels/general/*.jsonl",
+        resource_path=mount_key("/discord/TestGuild/channels/general/*.jsonl",
+                                "/discord"),
+        virtual="/discord/TestGuild/channels/general/*.jsonl",
         directory="/discord/TestGuild/channels/general/",
         pattern="*.jsonl",
         resolved=False,
-        prefix="/discord",
     )
     scope = _run(detect_scope(gs, index))
     assert scope.level == "channel"
@@ -177,11 +179,12 @@ def test_glob_jsonl_in_channel(index):
 
 def test_glob_specific_date(index):
     gs = PathSpec(
-        original="/discord/TestGuild/channels/general/2024-04-*.jsonl",
+        resource_path=mount_key(
+            "/discord/TestGuild/channels/general/2024-04-*.jsonl", "/discord"),
+        virtual="/discord/TestGuild/channels/general/2024-04-*.jsonl",
         directory="/discord/TestGuild/channels/general/",
         pattern="2024-04-*.jsonl",
         resolved=False,
-        prefix="/discord",
     )
     scope = _run(detect_scope(gs, index))
     assert scope.level == "channel"
@@ -190,7 +193,8 @@ def test_glob_specific_date(index):
 
 def test_glob_non_jsonl():
     gs = PathSpec(
-        original="/discord/TestGuild/members/*.json",
+        resource_path=("/discord/TestGuild/members/*.json").strip("/"),
+        virtual="/discord/TestGuild/members/*.json",
         directory="/discord/TestGuild/members/",
         pattern="*.json",
         resolved=False,
@@ -216,7 +220,9 @@ def test_channel_no_index():
 
 
 def _spec(path: str, prefix: str = "/discord") -> PathSpec:
-    return PathSpec(original=path, directory=path, prefix=prefix)
+    return PathSpec(resource_path=mount_key(path, prefix),
+                    virtual=path,
+                    directory=path)
 
 
 @pytest.fixture

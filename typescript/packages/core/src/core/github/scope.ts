@@ -12,13 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { PathSpec } from '../../types.ts'
 import type { TreeEntry } from './tree_entry.ts'
 
 export function scopeRelativeKey(path: PathSpec): string {
-  const prefix = path.prefix
-  let key = path.original
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  let key = path.virtual
   if (prefix !== '' && key.startsWith(prefix)) {
     key = key.slice(prefix.length) || '/'
   }

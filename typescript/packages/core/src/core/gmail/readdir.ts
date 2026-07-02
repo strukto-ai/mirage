@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GmailAccessor } from '../../accessor/gmail.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -63,8 +64,8 @@ export async function readdir(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<string[]> {
-  const prefix = path.prefix
-  const key = (path.pattern !== null ? path.dir : path).key
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const key = (path.pattern !== null ? path.dir : path).resourcePath
   const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
   const parts = key === '' ? [] : key.split('/')
   const depth = parts.length
@@ -96,15 +97,15 @@ export async function readdir(
       const cached = await index.listDir(virtualKey)
       if (cached.entries !== undefined && cached.entries !== null) return cached.entries
     }
-    if (index === undefined) throw enoent(path.original)
+    if (index === undefined) throw enoent(path.virtual)
     const labelKey = prefix !== '' ? `${prefix}/${labelName}` : `/${labelName}`
     let result = await index.get(labelKey)
     if (result.entry === undefined || result.entry === null) {
       try {
         const root = new PathSpec({
-          original: prefix !== '' ? prefix : '/',
+          virtual: prefix !== '' ? prefix : '/',
           directory: prefix !== '' ? prefix : '/',
-          prefix,
+          resourcePath: mountKey(prefix !== '' ? prefix : '/', prefix),
         })
         await readdir(accessor, root, index)
         result = await index.get(labelKey)
@@ -112,7 +113,7 @@ export async function readdir(
         // ignore — falls through to ENOENT below
       }
     }
-    if (result.entry === undefined || result.entry === null) throw enoent(path.original)
+    if (result.entry === undefined || result.entry === null) throw enoent(path.virtual)
     const labelId = result.entry.id
     const msgIds = await listMessages(accessor.tokenManager, { labelId, maxResults: 50 })
     const dateGroups = new Map<string, GmailMessageRaw[]>()
@@ -184,16 +185,20 @@ export async function readdir(
   }
 
   if (depth === 2 || depth === 3) {
-    if (index === undefined) throw enoent(path.original)
+    if (index === undefined) throw enoent(path.virtual)
     let cached = await index.listDir(virtualKey)
     if (cached.entries !== undefined && cached.entries !== null) return cached.entries
     const labelPath = prefix !== '' ? `${prefix}/${parts[0] ?? ''}` : `/${parts[0] ?? ''}`
-    const labelSpec = new PathSpec({ original: labelPath, directory: labelPath, prefix })
+    const labelSpec = new PathSpec({
+      virtual: labelPath,
+      directory: labelPath,
+      resourcePath: mountKey(labelPath, prefix),
+    })
     await readdir(accessor, labelSpec, index)
     cached = await index.listDir(virtualKey)
     if (cached.entries !== undefined && cached.entries !== null) return cached.entries
-    throw enoent(path.original)
+    throw enoent(path.virtual)
   }
 
-  throw enoent(path.original)
+  throw enoent(path.virtual)
 }

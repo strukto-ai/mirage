@@ -585,12 +585,18 @@ class Workspace:
                 raise r
 
     async def stat(self, path: str) -> FileStat:
-        scope = PathSpec(original=path, directory=path, resolved=True)
+        scope = PathSpec(virtual=path,
+                         directory=path,
+                         resource_path="",
+                         resolved=True)
         result, _ = await self.dispatch("stat", scope)
         return result
 
     async def readdir(self, path: str) -> list[str]:
-        scope = PathSpec(original=path, directory=path, resolved=False)
+        scope = PathSpec(virtual=path,
+                         directory=path,
+                         resource_path="",
+                         resolved=False)
         raw, _ = await self.dispatch("readdir", scope)
         return raw
 

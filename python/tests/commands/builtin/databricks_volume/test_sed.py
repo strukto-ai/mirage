@@ -17,6 +17,7 @@ import pytest
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.commands.builtin.databricks_volume import sed as sed_command
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.mark.asyncio
@@ -47,7 +48,10 @@ async def test_databricks_volume_sed_forwards_index(
 ):
     source, _io = await sed_command(
         object(),
-        [PathSpec.from_str_path("/dbx/sample.txt", "/dbx")],
+        [
+            PathSpec.from_str_path("/dbx/sample.txt",
+                                   mount_key("/dbx/sample.txt", "/dbx"))
+        ],
         "s/alpha/ALPHA/g",
         index=expected_index,
     )

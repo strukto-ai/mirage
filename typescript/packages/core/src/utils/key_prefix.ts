@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { lstripSlash } from '../utils/slash.ts'
+import { lstripSlash, rstripSlash, stripSlash } from '../utils/slash.ts'
 
 /** Normalize a key prefix: empty/undefined → '', strip leading /, ensure trailing /. */
 export function normalize(raw: string | undefined): string {
@@ -37,4 +37,71 @@ export function applyDir(prefix: string, path: string): string {
 export function strip(prefix: string, key: string): string {
   if (prefix !== '' && key.startsWith(prefix)) return key.slice(prefix.length)
   return key
+}
+
+/**
+ * Remove a mount prefix from a virtual path at a path boundary.
+ *
+ * A sibling that only shares the prefix as a string (`/database` vs a
+ * `/data` prefix) is left untouched.
+ *
+ * Example:
+ *   stripMount('/data/sub/x.txt', '/data')  -> '/sub/x.txt'
+ *   stripMount('/database/x.txt', '/data')  -> '/database/x.txt'
+ *   stripMount('/data', '/data')            -> '/'
+ *   stripMount('/x.txt', '')                -> '/x.txt'
+ */
+export function stripMount(virtual: string, prefix: string): string {
+  if (prefix !== '' && virtual.startsWith(prefix)) {
+    const rest = virtual.slice(prefix.length)
+    if (prefix.endsWith('/') || rest === '' || rest.startsWith('/')) {
+      return rest === '' ? '/' : rest
+    }
+  }
+  return virtual
+}
+
+/**
+ * Backend key for a virtual path under a mount prefix.
+ *
+ * Example:
+ *   mountKey('/data/sub/x.txt', '/data')  -> 'sub/x.txt'
+ *   mountKey('/data', '/data')            -> ''
+ *   mountKey('/x.txt', '')                -> 'x.txt'
+ */
+export function mountKey(virtual: string, prefix: string): string {
+  return stripSlash(stripMount(virtual, prefix))
+}
+
+/**
+ * Backend key for a child virtual path, derived from its parent.
+ *
+ * A child shares the parent's mount prefix, so its key is the child
+ * virtual path with the same prefix removed. The prefix length is
+ * recovered from the parent's `virtual`/`resourcePath` pair, so no mount
+ * context is needed.
+ *
+ * Example:
+ *   rekey('/data/sub', 'sub', '/data/sub/x.txt')  -> 'sub/x.txt'
+ *   rekey('/data', '', '/data/x.txt')             -> 'x.txt'
+ */
+export function rekey(parentVirtual: string, parentResourcePath: string, child: string): string {
+  const prefixLen = rstripSlash(parentVirtual).length - parentResourcePath.length
+  return stripSlash(child.slice(prefixLen))
+}
+
+/**
+ * Recover a mount prefix from a virtual path and its backend key.
+ *
+ * The inverse of stamping: given a path's virtual form and the key the
+ * mount stamped, return the mount prefix that was stripped off.
+ *
+ * Example:
+ *   mountPrefixOf('/data/sub', 'sub')  -> '/data'
+ *   mountPrefixOf('/data', '')         -> '/data'
+ *   mountPrefixOf('/x.txt', 'x.txt')   -> ''
+ */
+export function mountPrefixOf(virtual: string, resourcePath: string): string {
+  const prefixLen = rstripSlash(virtual).length - resourcePath.length
+  return rstripSlash(virtual.slice(0, prefixLen))
 }

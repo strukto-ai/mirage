@@ -22,4 +22,4 @@ async def test_grep_bytes_matches_streamed_lines_and_records_reads(
                                           ignore_case=True)
 
     assert output == b"/knowledge/guides/quickstart:1:Alpha"
-    assert reads == {guide_path.original: b"Alpha\nbeta"}
+    assert reads == {guide_path.virtual: b"Alpha\nbeta"}

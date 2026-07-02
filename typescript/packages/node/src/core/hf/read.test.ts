@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PathSpec } from '@struktoai/mirage-core'
+import { PathSpec, mountKey } from '@struktoai/mirage-core'
 import { describe, expect, it } from 'vitest'
 import { HfModelsAccessor } from '../../accessor/hf.ts'
 import { fakeHfOperator, installFakeOperator } from './mock.ts'
@@ -33,7 +33,10 @@ describe('hf read', () => {
 
   it('strips the mount prefix from the key', async () => {
     const accessor = accessorWith({ 'sub/file.txt': 'hello' })
-    const data = await read(accessor, PathSpec.fromStrPath('/m/sub/file.txt', '/m'))
+    const data = await read(
+      accessor,
+      PathSpec.fromStrPath('/m/sub/file.txt', mountKey('/m/sub/file.txt', '/m')),
+    )
     expect(Buffer.from(data).toString()).toBe('hello')
   })
 

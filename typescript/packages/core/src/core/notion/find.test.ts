@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
@@ -28,7 +29,7 @@ const CHILDREN: Record<string, string[]> = {
 }
 
 function normalize(p: PathSpec): string {
-  const stripped = stripSlash(p.original)
+  const stripped = stripSlash(p.virtual)
   return stripped !== '' ? `/${stripped}` : '/'
 }
 
@@ -56,7 +57,12 @@ const accessor = {
 } as NotionStatAccessor
 
 function root(): PathSpec {
-  return new PathSpec({ original: '/db', directory: '/db', resolved: false, prefix: '' })
+  return new PathSpec({
+    virtual: '/db',
+    directory: '/db',
+    resolved: false,
+    resourcePath: mountKey('/db', ''),
+  })
 }
 
 describe('notion core find', () => {
@@ -67,10 +73,10 @@ describe('notion core find', () => {
 
   it('matches the mount root by its own basename', async () => {
     const spec = new PathSpec({
-      original: '/db',
+      virtual: '/db',
       directory: '/db',
       resolved: false,
-      prefix: '/db',
+      resourcePath: mountKey('/db', '/db'),
     })
     const out = await find(accessor, spec, { name: 'db' })
     expect(out).toEqual(['/'])

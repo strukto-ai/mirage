@@ -8,6 +8,7 @@ from mirage.core.onedrive.read import read_bytes
 from mirage.observe.context import (RecordingScope, push_revisions,
                                     reset_revisions)
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def _accessor(**kw) -> OneDriveAccessor:
@@ -129,6 +130,8 @@ async def test_read_missing_raises_file_not_found():
                   "message": "no"
               }})
         with pytest.raises(FileNotFoundError) as exc:
-            await read_bytes(_accessor(),
-                             PathSpec.from_str_path("/od/Docs/a.txt", "/od"))
+            await read_bytes(
+                _accessor(),
+                PathSpec.from_str_path("/od/Docs/a.txt",
+                                       mount_key("/od/Docs/a.txt", "/od")))
     assert str(exc.value) == "/od/Docs/a.txt"

@@ -21,6 +21,7 @@ from mirage.commands.spec.types import FlagView
 from mirage.io.stream import exit_on_empty, quiet_match
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import rebase_display
 
 
@@ -126,7 +127,8 @@ async def grep(
     f = parse_flags(fl, never_match)
 
     if paths:
-        mount_prefix = paths[0].prefix
+        mount_prefix = mount_prefix_of(paths[0].virtual,
+                                       paths[0].resource_path)
         rd = partial(call_readdir,
                      readdir,
                      accessor,
@@ -158,7 +160,7 @@ async def grep(
                     rd,
                     st,
                     rb,
-                    p.original,
+                    p.virtual,
                     pattern,
                     recursive=f.recursive,
                     ignore_case=f.ignore_case,
@@ -172,7 +174,7 @@ async def grep(
                     warnings=warnings,
                     read_stream_fn=None,
                 )
-                results.extend(rebase_display(hits, p.original, p.display))
+                results.extend(rebase_display(hits, p.virtual, p.display))
             stderr = format_optional_records(warnings)
             if not results:
                 return b"", IOResult(exit_code=1, stderr=stderr)
@@ -194,13 +196,13 @@ async def grep(
             if scope_warning_str:
                 warnings.append(scope_warning_str)
             for p in paths:
-                s = await st(p.original)
+                s = await st(p.virtual)
                 if s.type == FileType.DIRECTORY:
                     res = await grep_recursive(
                         rd,
                         st,
                         rb,
-                        p.original,
+                        p.virtual,
                         pat,
                         invert=f.invert,
                         line_numbers=f.line_numbers,
@@ -212,10 +214,10 @@ async def grep(
                         read_stream_fn=None,
                     )
                     all_results.extend(
-                        rebase_display(res, p.original, p.display))
+                        rebase_display(res, p.virtual, p.display))
                 else:
                     data = split_lines(
-                        (await rb(p.original)).decode(errors="replace"))
+                        (await rb(p.virtual)).decode(errors="replace"))
                     hits = grep_lines(p.display, data, pat, f.invert,
                                       f.line_numbers, f.count_only,
                                       f.files_only, f.only_matching,
@@ -240,7 +242,7 @@ async def grep(
             multi_warnings: list[str] = []
             for p in paths:
                 try:
-                    s = await st(p.original)
+                    s = await st(p.virtual)
                 except FileNotFoundError:
                     multi_warnings.append(
                         f"grep: {p.display}: No such file or directory")
@@ -249,7 +251,7 @@ async def grep(
                     multi_warnings.append(f"grep: {p.display}: Is a directory")
                     continue
                 data = split_lines((await
-                                    rb(p.original)).decode(errors="replace"))
+                                    rb(p.virtual)).decode(errors="replace"))
                 hits = grep_lines(p.display, data, pat, f.invert,
                                   f.line_numbers, f.count_only, f.files_only,
                                   f.only_matching, f.max_count)
@@ -268,7 +270,7 @@ async def grep(
                                                              stderr=stderr)
             return format_records(all_results), IOResult(stderr=stderr)
 
-        first_stat = await st(paths[0].original)
+        first_stat = await st(paths[0].virtual)
         if first_stat.type == FileType.DIRECTORY:
             stderr = f"grep: {paths[0].display}: Is a directory\n".encode()
             return b"", IOResult(exit_code=1, stderr=stderr)
@@ -276,7 +278,7 @@ async def grep(
         if read_stream is not None:
             source: AsyncIterator[bytes] = read_stream(accessor, paths[0])
         else:
-            data = await rb(paths[0].original)
+            data = await rb(paths[0].virtual)
             source = _wrap_bytes(data)
         stream = grep_stream(
             source,

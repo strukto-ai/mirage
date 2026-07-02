@@ -12,6 +12,7 @@ from mirage.commands.builtin.generic.find import (FindArgs, apply_mount_prefix,
 from mirage.commands.errors import FindParseError
 from mirage.resource.ram import RAMResource
 from mirage.types import FileStat, FileType, FindType, MountMode, PathSpec
+from mirage.utils.key_prefix import mount_key
 from mirage.workspace import Workspace
 
 
@@ -204,7 +205,10 @@ async def _unreached_stat(_spec: PathSpec) -> FileStat:
 
 
 def _root_spec() -> PathSpec:
-    return PathSpec(original="/", directory="/", resolved=False, prefix="")
+    return PathSpec(resource_path=mount_key("/", ""),
+                    virtual="/",
+                    directory="/",
+                    resolved=False)
 
 
 @pytest.mark.asyncio
@@ -269,7 +273,7 @@ async def test_walk_find_empty_matches_empty_files_and_dirs():
             "/empty-dir": [],
             "/full-dir": ["/full-dir/a.txt"],
         }
-        return table[spec.original]
+        return table[spec.virtual]
 
     async def stat(spec: PathSpec, _index):
         stats = {
@@ -284,7 +288,7 @@ async def test_walk_find_empty_matches_empty_files_and_dirs():
                                         size=1,
                                         type=FileType.TEXT),
         }
-        return stats[spec.original]
+        return stats[spec.virtual]
 
     results = await walk_find(_root_spec(),
                               readdir=readdir,
@@ -300,9 +304,9 @@ async def test_walk_find_not_negates_predicate():
     readdir = AsyncMock(return_value=["/a.txt", "/b.md"])
 
     async def stat(spec: PathSpec, _index):
-        if spec.original == "/":
+        if spec.virtual == "/":
             return FileStat(name="/", type=FileType.DIRECTORY)
-        return FileStat(name=spec.original.rsplit("/", 1)[-1],
+        return FileStat(name=spec.virtual.rsplit("/", 1)[-1],
                         size=1,
                         type=FileType.TEXT)
 

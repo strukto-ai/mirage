@@ -64,7 +64,9 @@ async def test_read_database_json():
                return_value=fake_doc):
         out = await read(
             accessor,
-            PathSpec(original="/database.json", directory="/database.json"))
+            PathSpec(resource_path=("/database.json").strip("/"),
+                     virtual="/database.json",
+                     directory="/database.json"))
     parsed = json.loads(out)
     assert parsed == fake_doc
 
@@ -78,8 +80,10 @@ async def test_read_entity_schema_json_table():
                return_value=fake_doc) as mock_fn:
         out = await read(
             accessor,
-            PathSpec(original="/public/tables/users/schema.json",
-                     directory="/public/tables/users/schema.json"))
+            PathSpec(
+                resource_path=("/public/tables/users/schema.json").strip("/"),
+                virtual="/public/tables/users/schema.json",
+                directory="/public/tables/users/schema.json"))
     parsed = json.loads(out)
     assert parsed == fake_doc
     mock_fn.assert_awaited_once_with(accessor, "public", "users", "table")
@@ -94,7 +98,8 @@ async def test_read_entity_schema_json_view_kind():
                return_value=fake_doc) as mock_fn:
         await read(
             accessor,
-            PathSpec(original="/public/views/v1/schema.json",
+            PathSpec(resource_path=("/public/views/v1/schema.json").strip("/"),
+                     virtual="/public/views/v1/schema.json",
                      directory="/public/views/v1/schema.json"))
     mock_fn.assert_awaited_once_with(accessor, "public", "v1", "view")
 
@@ -108,8 +113,10 @@ async def test_read_rows_returns_jsonl():
         mc.fetch_rows = AsyncMock(return_value=rows)
         out = await read(
             accessor,
-            PathSpec(original="/public/tables/users/rows.jsonl",
-                     directory="/public/tables/users/rows.jsonl"))
+            PathSpec(
+                resource_path=("/public/tables/users/rows.jsonl").strip("/"),
+                virtual="/public/tables/users/rows.jsonl",
+                directory="/public/tables/users/rows.jsonl"))
     lines = out.decode().strip().split("\n")
     assert len(lines) == 2
     assert json.loads(lines[0]) == {"id": 1, "name": "a"}
@@ -123,7 +130,9 @@ async def test_read_rows_too_many_rows_raises():
         with pytest.raises(ValueError, match="too large"):
             await read(
                 accessor,
-                PathSpec(original="/public/tables/users/rows.jsonl",
+                PathSpec(resource_path=(
+                    "/public/tables/users/rows.jsonl").strip("/"),
+                         virtual="/public/tables/users/rows.jsonl",
                          directory="/public/tables/users/rows.jsonl"))
 
 
@@ -135,7 +144,9 @@ async def test_read_rows_too_many_bytes_raises():
         with pytest.raises(ValueError, match="too large"):
             await read(
                 accessor,
-                PathSpec(original="/public/tables/users/rows.jsonl",
+                PathSpec(resource_path=(
+                    "/public/tables/users/rows.jsonl").strip("/"),
+                         virtual="/public/tables/users/rows.jsonl",
                          directory="/public/tables/users/rows.jsonl"))
 
 
@@ -145,11 +156,14 @@ async def test_read_rows_with_explicit_limit_bypasses_guard():
     rows = [{"id": i} for i in range(5)]
     with patch("mirage.core.postgres.read._client") as mc:
         mc.fetch_rows = AsyncMock(return_value=rows)
-        out = await read(accessor,
-                         PathSpec(original="/public/tables/users/rows.jsonl",
-                                  directory="/public/tables/users/rows.jsonl"),
-                         limit=5,
-                         offset=0)
+        out = await read(
+            accessor,
+            PathSpec(
+                resource_path=("/public/tables/users/rows.jsonl").strip("/"),
+                virtual="/public/tables/users/rows.jsonl",
+                directory="/public/tables/users/rows.jsonl"),
+            limit=5,
+            offset=0)
         mc.estimate_size.assert_not_called()
     lines = out.decode().strip().split("\n")
     assert len(lines) == 5
@@ -161,10 +175,13 @@ async def test_read_rows_with_only_offset_bypasses_guard():
     rows = [{"id": i} for i in range(3)]
     with patch("mirage.core.postgres.read._client") as mc:
         mc.fetch_rows = AsyncMock(return_value=rows)
-        await read(accessor,
-                   PathSpec(original="/public/tables/users/rows.jsonl",
-                            directory="/public/tables/users/rows.jsonl"),
-                   offset=10)
+        await read(
+            accessor,
+            PathSpec(
+                resource_path=("/public/tables/users/rows.jsonl").strip("/"),
+                virtual="/public/tables/users/rows.jsonl",
+                directory="/public/tables/users/rows.jsonl"),
+            offset=10)
         mc.estimate_size.assert_not_called()
 
 
@@ -176,8 +193,10 @@ async def test_read_rows_empty_returns_empty_bytes():
         mc.fetch_rows = AsyncMock(return_value=[])
         out = await read(
             accessor,
-            PathSpec(original="/public/tables/users/rows.jsonl",
-                     directory="/public/tables/users/rows.jsonl"))
+            PathSpec(
+                resource_path=("/public/tables/users/rows.jsonl").strip("/"),
+                virtual="/public/tables/users/rows.jsonl",
+                directory="/public/tables/users/rows.jsonl"))
     assert out == b""
 
 
@@ -187,7 +206,9 @@ async def test_read_invalid_path_raises():
     with pytest.raises(FileNotFoundError):
         await read(
             accessor,
-            PathSpec(original="/public/tables", directory="/public/tables"))
+            PathSpec(resource_path=("/public/tables").strip("/"),
+                     virtual="/public/tables",
+                     directory="/public/tables"))
 
 
 @pytest.mark.asyncio
@@ -199,5 +220,7 @@ async def test_read_view_rows_uses_view_kind_in_error():
         with pytest.raises(ValueError, match="views/v1"):
             await read(
                 accessor,
-                PathSpec(original="/public/views/v1/rows.jsonl",
-                         directory="/public/views/v1/rows.jsonl"))
+                PathSpec(
+                    resource_path=("/public/views/v1/rows.jsonl").strip("/"),
+                    virtual="/public/views/v1/rows.jsonl",
+                    directory="/public/views/v1/rows.jsonl"))

@@ -14,13 +14,15 @@
 
 import {
   BaseResource,
+  PathSpec,
+  ResourceName,
+  mountKey,
+  mountPrefixOf,
   type FileStat,
   type FindOptions,
-  PathSpec,
   type RegisteredCommand,
   type RegisteredOp,
   type Resource,
-  ResourceName,
 } from '@struktoai/mirage-core'
 import { SSHAccessor } from '../../accessor/ssh.ts'
 import { SSH_COMMANDS } from '../../commands/builtin/ssh/index.ts'
@@ -181,14 +183,14 @@ export class SSHResource extends BaseResource implements Resource {
   glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective = prefix
       ? paths.map((p) =>
-          p.prefix
+          mountPrefixOf(p.virtual, p.resourcePath)
             ? p
             : new PathSpec({
-                original: p.original,
+                virtual: p.virtual,
                 directory: p.directory,
                 ...(p.pattern !== null ? { pattern: p.pattern } : {}),
                 resolved: p.resolved,
-                prefix,
+                resourcePath: mountKey(p.virtual, prefix),
               }),
         )
       : paths

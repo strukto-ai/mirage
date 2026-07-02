@@ -36,7 +36,7 @@ async function resolveSizes(
   const resolved: [string, number][] = []
   let missing = 0
   for (const p of paths) {
-    const pathStr = p.original
+    const pathStr = p.virtual
     let size: number | null = null
     if (index !== undefined) {
       const lookup = await index.get(pathStr)

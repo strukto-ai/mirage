@@ -97,7 +97,7 @@ def tail_multi(
     returned stream is drained later (after that scope is gone).
 
     Args:
-        paths (list[PathSpec]): Resolved paths; only ``.original`` is read.
+        paths (list[PathSpec]): Resolved paths; only ``.virtual`` is read.
         read (Callable[..., Any]): Reader called as ``read(accessor, path,
             index)``; returns bytes, an awaitable of bytes, or an async byte
             iterator.

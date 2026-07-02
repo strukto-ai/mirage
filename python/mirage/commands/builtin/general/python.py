@@ -30,11 +30,14 @@ def _resolve_script(name: str, cwd: PathSpec | None) -> PathSpec:
     if name.startswith("/"):
         path = posixpath.normpath(name)
     else:
-        base = cwd.original.rstrip("/") if cwd is not None else ""
+        base = cwd.virtual.rstrip("/") if cwd is not None else ""
         path = posixpath.normpath((base + "/" + name) if base else "/" + name)
     last_slash = path.rfind("/")
     directory = path[:last_slash + 1] if last_slash >= 0 else "/"
-    return PathSpec(original=path, directory=directory, resolved=True)
+    return PathSpec(resource_path=(path).strip("/"),
+                    virtual=path,
+                    directory=directory,
+                    resolved=True)
 
 
 async def _run_python_subprocess(
@@ -83,10 +86,10 @@ async def _python3(
     script_path: PathSpec | None = None
     arg_strs: list[str]
     if has_code:
-        arg_strs = [p.original for p in paths] + text_list
+        arg_strs = [p.virtual for p in paths] + text_list
     elif paths:
         script_path = paths[0]
-        arg_strs = [p.original for p in paths[1:]] + text_list
+        arg_strs = [p.virtual for p in paths[1:]] + text_list
     elif text_list:
         script_path = _resolve_script(text_list[0], cwd)
         arg_strs = text_list[1:]
@@ -100,7 +103,7 @@ async def _python3(
         try:
             data, _ = await dispatch("read", script_path)
         except FileNotFoundError:
-            err = f"python3: {script_path.original}: No such file\n".encode()
+            err = f"python3: {script_path.virtual}: No such file\n".encode()
             return None, IOResult(exit_code=1, stderr=err)
         code = data.decode(errors="replace") if isinstance(data, bytes) else ""
 

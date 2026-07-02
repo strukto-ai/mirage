@@ -15,7 +15,7 @@
 import type { IndexCacheStore, PathSpec } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../accessor/email.ts'
 import { fetchAttachment, fetchMessage } from './_client.ts'
-import { gnuDirname, stripSlash } from '@struktoai/mirage-core'
+import { gnuDirname, mountPrefixOf, stripSlash } from '@struktoai/mirage-core'
 
 const ENC = new TextEncoder()
 
@@ -36,28 +36,28 @@ export async function read(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<Uint8Array> {
-  const prefix = path.prefix
-  const key = path.key
-  if (index === undefined) throw enoent(path.original)
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const key = path.resourcePath
+  if (index === undefined) throw enoent(path.virtual)
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
   const result = await index.get(virtualKey)
-  if (result.entry === undefined || result.entry === null) throw enoent(path.original)
+  if (result.entry === undefined || result.entry === null) throw enoent(path.virtual)
   const rt = result.entry.resourceType
   if (rt === 'email/folder' || rt === 'email/date' || rt === 'email/attachment_dir') {
-    throw eisdir(path.original)
+    throw eisdir(path.virtual)
   }
   if (rt === 'email/attachment') {
     const parentKey = gnuDirname(virtualKey)
     const parentResult = await index.get(parentKey)
     if (parentResult.entry === undefined || parentResult.entry === null) {
-      throw enoent(path.original)
+      throw enoent(path.virtual)
     }
     const uid = parentResult.entry.id
     const parts = stripSlash(virtualKey).split('/')
     const folder = prefix !== '' ? (parts[1] ?? '') : (parts[0] ?? '')
     const filename = result.entry.vfsName !== '' ? result.entry.vfsName : result.entry.name
     const data = await fetchAttachment(accessor, folder, uid, filename)
-    if (data === null) throw enoent(path.original)
+    if (data === null) throw enoent(path.virtual)
     return data
   }
   const parts = stripSlash(virtualKey).split('/')

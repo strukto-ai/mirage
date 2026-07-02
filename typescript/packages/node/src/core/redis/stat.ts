@@ -28,7 +28,7 @@ export async function stat(
   path: PathSpec,
   _index?: IndexCacheStore,
 ): Promise<FileStat> {
-  const p = norm(path.stripPrefix)
+  const p = norm(path.mountPath)
   const store = accessor.store
   if (await store.hasDir(p)) {
     return new FileStat({

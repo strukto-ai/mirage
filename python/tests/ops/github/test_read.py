@@ -20,12 +20,13 @@ from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexEntry, LookupResult, LookupStatus
 from mirage.ops.github.read import read
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def _scope(path: str, prefix: str = "") -> PathSpec:
-    return PathSpec(original=path,
-                    directory=path.rsplit("/", 1)[0] or "/",
-                    prefix=prefix)
+    return PathSpec(resource_path=mount_key(path, prefix),
+                    virtual=path,
+                    directory=path.rsplit("/", 1)[0] or "/")
 
 
 @pytest.fixture

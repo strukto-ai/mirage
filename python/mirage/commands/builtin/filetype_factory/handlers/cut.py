@@ -46,10 +46,11 @@ async def _ft_cut(resolve_glob,
     try:
         columns = [col.strip() for col in f.split(",")]
         raw = await read(accessor, p, index)
-        return module.cut(raw, columns=columns), IOResult(
-            reads={p.strip_prefix: raw}, cache=[p.strip_prefix])
+        return module.cut(raw,
+                          columns=columns), IOResult(reads={p.mount_path: raw},
+                                                     cache=[p.mount_path])
     except Exception as e:
         return None, IOResult(
             exit_code=1,
-            stderr=f"cut: {p.original}: {e}".encode(),
+            stderr=f"cut: {p.virtual}: {e}".encode(),
         )

@@ -23,7 +23,7 @@ export const VIEW_KEYS = ['', VIEW_NAME]
 
 /** Render the GNU histfile from the recorder's command events. */
 export async function read(accessor: HistoryAccessor, path: PathSpec): Promise<Uint8Array> {
-  const key = path.stripPrefix
+  const key = path.mountPath
   if (!VIEW_KEYS.includes(stripSlash(key))) {
     throw enoent(path)
   }

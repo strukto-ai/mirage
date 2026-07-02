@@ -6,7 +6,7 @@ from mirage.types import PathSpec
 async def create(accessor: NextcloudAccessor, path: PathSpec) -> None:
     if isinstance(path, str):
         path = PathSpec.from_str_path(path)
-    key = path.strip_prefix.lstrip("/")
+    key = path.mount_path.lstrip("/")
     op = accessor.operator()
     await op.write(key, b"")
     await invalidate_after_write(path)

@@ -5,6 +5,7 @@ from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
 from mirage.core.sharepoint._resolver import _drive_cache, _site_cache
 from mirage.core.sharepoint.du import du, du_all
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 _BASE = "https://graph.microsoft.com/v1.0"
 _SITE_ID = "tenant.sharepoint.com,site-guid,web-guid"
@@ -30,9 +31,10 @@ def _reset_caches():
 
 
 def _file_path() -> PathSpec:
-    return PathSpec(original="/sp/Engineering/Documents/a.txt",
-                    directory="/sp/Engineering/Documents",
-                    prefix="/sp")
+    return PathSpec(resource_path=mount_key("/sp/Engineering/Documents/a.txt",
+                                            "/sp"),
+                    virtual="/sp/Engineering/Documents/a.txt",
+                    directory="/sp/Engineering/Documents")
 
 
 @pytest.mark.asyncio

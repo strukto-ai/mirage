@@ -32,8 +32,8 @@ async def unlink(accessor: HfBucketsAccessor,
         path = PathSpec.from_str_path(path)
     file_stat = await stat(accessor, path, index)
     if file_stat.type == FileType.DIRECTORY:
-        raise IsADirectoryError(path.strip_prefix)
-    raw = path.strip_prefix
+        raise IsADirectoryError(path.mount_path)
+    raw = path.mount_path
     key = raw.lstrip("/")
     op = accessor.operator()
     start_ms = int(time.monotonic() * 1000)
@@ -41,5 +41,5 @@ async def unlink(accessor: HfBucketsAccessor,
         await op.delete(key)
     except NotFound as exc:
         raise enoent(path) from exc
-    record("unlink", path.original, accessor.RESOURCE_NAME, 0, start_ms)
+    record("unlink", path.virtual, accessor.RESOURCE_NAME, 0, start_ms)
     await invalidate_after_unlink(path)

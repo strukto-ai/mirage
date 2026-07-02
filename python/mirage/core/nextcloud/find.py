@@ -29,7 +29,7 @@ async def find(
     if isinstance(path, str):
         path = PathSpec.from_str_path(path)
     start_name = start_basename(path)
-    target = path.strip_prefix
+    target = path.mount_path
     pfx = target.strip("/")
     scan_path = pfx + "/" if pfx else "/"
     base = "/" + pfx if pfx else "/"

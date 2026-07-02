@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 import type * as DriveModule from '../google/drive.ts'
 import type * as ClientModule from '../google/_client.ts'
@@ -55,9 +56,9 @@ describe('gsheets read auto-bootstrap', () => {
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
     const path = new PathSpec({
-      original: '/gsheets/owned/2026-04-01_Budget__sheet1.gsheet.json',
+      virtual: '/gsheets/owned/2026-04-01_Budget__sheet1.gsheet.json',
       directory: '/gsheets/owned/2026-04-01_Budget__sheet1.gsheet.json',
-      prefix: '/gsheets',
+      resourcePath: mountKey('/gsheets/owned/2026-04-01_Budget__sheet1.gsheet.json', '/gsheets'),
     })
     const out = await read(accessor, path, index)
     expect(new TextDecoder().decode(out)).toContain('sheet1')
@@ -70,9 +71,9 @@ describe('gsheets read auto-bootstrap', () => {
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
     const path = new PathSpec({
-      original: '/gsheets/owned/Missing__xyz.gsheet.json',
+      virtual: '/gsheets/owned/Missing__xyz.gsheet.json',
       directory: '/gsheets/owned/Missing__xyz.gsheet.json',
-      prefix: '/gsheets',
+      resourcePath: mountKey('/gsheets/owned/Missing__xyz.gsheet.json', '/gsheets'),
     })
     await expect(read(accessor, path, index)).rejects.toMatchObject({ code: 'ENOENT' })
   })

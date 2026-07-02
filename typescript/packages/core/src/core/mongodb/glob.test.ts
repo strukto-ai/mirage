@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../utils/slash.ts'
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('./readdir.ts', () => ({
@@ -37,7 +39,11 @@ describe('resolveGlob', () => {
   })
 
   it('passes through resolved paths unchanged', async () => {
-    const p = new PathSpec({ original: '/mongo/app', directory: '/mongo/' })
+    const p = new PathSpec({
+      resourcePath: stripSlash('/mongo/app'),
+      virtual: '/mongo/app',
+      directory: '/mongo/',
+    })
     expect(await resolveGlob(makeAccessor(), [p])).toEqual([p])
   })
 
@@ -48,14 +54,16 @@ describe('resolveGlob', () => {
       '/mongo/app/usage.jsonl',
     ])
     const p = new PathSpec({
-      original: '/mongo/app/u*.jsonl',
+      virtual: '/mongo/app/u*.jsonl',
       directory: '/mongo/app/',
       pattern: 'u*.jsonl',
       resolved: false,
-      prefix: '/mongo',
+      resourcePath: mountKey('/mongo/app/u*.jsonl', '/mongo'),
     })
     const out = await resolveGlob(makeAccessor(), [p])
-    expect(out.map((x) => x.original)).toEqual(['/mongo/app/users.jsonl', '/mongo/app/usage.jsonl'])
-    expect(out[0]?.prefix).toBe('/mongo')
+    expect(out.map((x) => x.virtual)).toEqual(['/mongo/app/users.jsonl', '/mongo/app/usage.jsonl'])
+    expect(
+      out[0] === undefined ? undefined : mountPrefixOf(out[0].virtual, out[0].resourcePath),
+    ).toBe('/mongo')
   })
 })

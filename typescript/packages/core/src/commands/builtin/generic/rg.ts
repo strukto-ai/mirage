@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { cacheAwareStream } from '../../../cache/read_through.ts'
 import { exitOnEmpty } from '../../../io/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
@@ -83,7 +84,12 @@ function parseRgFlags(flags: Record<string, string | boolean | string[]>): RgFla
 }
 
 function makeSpec(path: string, template: PathSpec): PathSpec {
-  return new PathSpec({ original: path, directory: path, resolved: false, prefix: template.prefix })
+  return new PathSpec({
+    virtual: path,
+    directory: path,
+    resolved: false,
+    resourcePath: mountKey(path, mountPrefixOf(template.virtual, template.resourcePath)),
+  })
 }
 
 export async function rgGeneric(
@@ -190,7 +196,7 @@ export async function rgGeneric(
           readdirFn,
           statFn,
           readBytesFn,
-          p.original,
+          p.virtual,
           exprText,
           folderOpts,
           warnings,
@@ -238,13 +244,13 @@ export async function rgGeneric(
         readdirFn,
         statFn,
         readBytesFn,
-        p.original,
+        p.virtual,
         exprText,
         fullOpts,
         warnings,
         paths.length > 1 ? p.display : null,
       )
-      results.push(...rebaseDisplay(hitsFull, p.original, p.display))
+      results.push(...rebaseDisplay(hitsFull, p.virtual, p.display))
     }
     const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n') + '\n') : undefined
     if (results.length === 0) {

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { SlackApiError, type SlackResponse } from '../../../core/slack/_client.ts'
@@ -105,10 +106,10 @@ describe('slack grep: search push-down fallback', () => {
     const out = await runGrep(
       [
         new PathSpec({
-          original: '/mnt/slack/channels/general__C1',
+          virtual: '/mnt/slack/channels/general__C1',
           directory: '/mnt/slack/channels/general__C1',
           resolved: false,
-          prefix: '/mnt/slack',
+          resourcePath: mountKey('/mnt/slack/channels/general__C1', '/mnt/slack'),
         }),
       ],
       ['hello'],
@@ -137,10 +138,10 @@ describe('slack rg: search push-down fallback', () => {
     const out = await runRg(
       [
         new PathSpec({
-          original: '/mnt/slack/channels/general__C1',
+          virtual: '/mnt/slack/channels/general__C1',
           directory: '/mnt/slack/channels/general__C1',
           resolved: false,
-          prefix: '/mnt/slack',
+          resourcePath: mountKey('/mnt/slack/channels/general__C1', '/mnt/slack'),
         }),
       ],
       ['hi'],

@@ -19,7 +19,7 @@ import { enoent, FileStat, FileType, guessType, type PathSpec } from '@struktoai
 import { resolveSafe } from './utils.ts'
 
 export async function stat(accessor: DiskAccessor, p: PathSpec): Promise<FileStat> {
-  const virtual = p.stripPrefix
+  const virtual = p.mountPath
   const full = resolveSafe(accessor.root, virtual)
   let st
   try {

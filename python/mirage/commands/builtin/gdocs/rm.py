@@ -45,8 +45,8 @@ async def rm(
             if f:
                 continue
             raise
-        removed[p.strip_prefix] = b""
+        removed[p.mount_path] = b""
         if v:
-            verbose_parts.append(f"removed '{p.original}'")
+            verbose_parts.append(f"removed '{p.virtual}'")
     output = format_optional_records(verbose_parts) if v else None
     return output, IOResult(writes=removed)

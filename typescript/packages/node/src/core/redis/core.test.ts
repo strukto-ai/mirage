@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { LookupStatus, PathSpec, RAMIndexCacheStore } from '@struktoai/mirage-core'
+import { LookupStatus, PathSpec, RAMIndexCacheStore, mountKey } from '@struktoai/mirage-core'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { RedisAccessor } from '../../accessor/redis.ts'
 import { RedisStore } from '../../resource/redis/store.ts'
@@ -42,7 +42,7 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 function spec(path: string, prefix = ''): PathSpec {
-  return PathSpec.fromStrPath(path, prefix)
+  return PathSpec.fromStrPath(path, mountKey(path, prefix))
 }
 
 describe.skipIf(skip)('core/redis ops', () => {
@@ -181,7 +181,7 @@ describe.skipIf(skip)('core/redis ops', () => {
     await mkdir(acc, spec('/d'))
     await writeBytes(acc, spec('/d/a'), ENC.encode('.'))
     await writeBytes(acc, spec('/d/b'), ENC.encode('.'))
-    const entries = await readdir(acc, spec('/d', '/mount'))
+    const entries = await readdir(acc, spec('/mount/d', '/mount'))
     expect(entries).toEqual(['/mount/d/a', '/mount/d/b'])
   })
 
@@ -215,7 +215,7 @@ describe.skipIf(skip)('core/redis ops', () => {
     const index = new RAMIndexCacheStore({ ttl: 600 })
     await writeBytes(acc, spec('/a.txt'), ENC.encode('.'))
     await writeBytes(acc, spec('/b.txt'), ENC.encode('.'))
-    const entries = await readdir(acc, spec('/', '/data'), index)
+    const entries = await readdir(acc, spec('/data', '/data'), index)
     expect(entries.sort()).toEqual(['/data/a.txt', '/data/b.txt'])
     const cached = await index.listDir('/data/')
     expect(cached.status).toBeUndefined()
@@ -225,19 +225,19 @@ describe.skipIf(skip)('core/redis ops', () => {
   it('readdir with index returns cached entries when present', async () => {
     const index = new RAMIndexCacheStore({ ttl: 600 })
     await writeBytes(acc, spec('/a.txt'), ENC.encode('.'))
-    await readdir(acc, spec('/', '/data'), index)
+    await readdir(acc, spec('/data', '/data'), index)
     // mutate store but cached result should still return
     await writeBytes(acc, spec('/c.txt'), ENC.encode('.'))
-    const again = await readdir(acc, spec('/', '/data'), index)
+    const again = await readdir(acc, spec('/data', '/data'), index)
     expect(again).not.toContain('/data/c.txt')
   })
 
   it('readdir without index misses stale data (control test)', async () => {
     const index = new RAMIndexCacheStore({ ttl: 600 })
     await writeBytes(acc, spec('/a.txt'), ENC.encode('.'))
-    await readdir(acc, spec('/', '/data'), index)
+    await readdir(acc, spec('/data', '/data'), index)
     await writeBytes(acc, spec('/c.txt'), ENC.encode('.'))
-    const fresh = await readdir(acc, spec('/', '/data'))
+    const fresh = await readdir(acc, spec('/data', '/data'))
     expect(fresh).toContain('/data/c.txt')
     const evicted = await index.listDir('/data/')
     expect(evicted.status !== LookupStatus.NOT_FOUND || evicted.entries === undefined).toBe(true)
@@ -248,14 +248,14 @@ describe.skipIf(skip)('core/redis ops', () => {
     await writeBytes(acc, spec('/b.txt'), ENC.encode('.'))
     await writeBytes(acc, spec('/c.md'), ENC.encode('.'))
     const patternSpec = new PathSpec({
-      original: '/*.txt',
+      virtual: '/*.txt',
       directory: '/',
       pattern: '*.txt',
       resolved: false,
-      prefix: '',
+      resourcePath: mountKey('/*.txt', ''),
     })
     const expanded = await resolveGlob(acc, [patternSpec])
-    const names = expanded.map((p) => p.original).sort()
+    const names = expanded.map((p) => p.virtual).sort()
     expect(names).toEqual(['/a.txt', '/b.txt'])
   })
 })

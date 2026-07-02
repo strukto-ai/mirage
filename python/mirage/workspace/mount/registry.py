@@ -253,7 +253,7 @@ class MountRegistry:
             cwd (str): current working directory.
         """
         if path_scopes:
-            mount_path = path_scopes[0].original
+            mount_path = path_scopes[0].virtual
         else:
             mount_path = cwd
 
@@ -298,7 +298,7 @@ class MountRegistry:
         (no eviction, cache serves whatever it has).
         """
         for scope in path_scopes:
-            key = scope.original
+            key = scope.virtual
             if not await cache.exists(key):
                 continue
             try:

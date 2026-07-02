@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { ChromaAccessor } from '../../../accessor/chroma.ts'
 import { find as chromaFind } from '../../../core/chroma/find.ts'
 import { resolveGlob } from '../../../core/chroma/glob.ts'
@@ -43,7 +44,10 @@ async function normalizeFindOutput(
 ): Promise<ByteSource | null> {
   if (stdout === null) return null
   const data = await materialize(stdout)
-  const root = rstripSlash(searchPath.prefix) !== '' ? rstripSlash(searchPath.prefix) : '/'
+  const root =
+    rstripSlash(mountPrefixOf(searchPath.virtual, searchPath.resourcePath)) !== ''
+      ? rstripSlash(mountPrefixOf(searchPath.virtual, searchPath.resourcePath))
+      : '/'
   const text = DEC.decode(data)
   const lines = text === '' ? [] : text.replace(/\n$/, '').split('\n')
   const normalized = lines.map((line) => (line === root + '/' ? root : line))

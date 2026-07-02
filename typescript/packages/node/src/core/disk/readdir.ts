@@ -15,11 +15,12 @@
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { readdir as fsReaddir } from 'node:fs/promises'
 import {
-  enotdir,
   IndexEntry,
+  ResourceType,
+  enotdir,
+  mountPrefixOf,
   type IndexCacheStore,
   type PathSpec,
-  ResourceType,
 } from '@struktoai/mirage-core'
 import { norm, resolveSafe } from './utils.ts'
 
@@ -28,8 +29,8 @@ export async function readdir(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<string[]> {
-  const virtual = path.pattern !== null ? path.directory : path.stripPrefix
-  const mountPrefix = path.prefix
+  const virtual = path.pattern !== null ? path.directory : path.mountPath
+  const mountPrefix = mountPrefixOf(path.virtual, path.resourcePath)
   const virtualKey = mountPrefix + virtual
   if (index !== undefined) {
     const cached = await index.listDir(virtualKey)

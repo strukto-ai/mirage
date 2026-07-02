@@ -4,6 +4,7 @@ from aioresponses import aioresponses
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
 from mirage.core.onedrive.stream import range_read, read_stream
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def _accessor(**kw) -> OneDriveAccessor:
@@ -37,7 +38,9 @@ async def test_read_stream_missing_raises_file_not_found():
         with pytest.raises(FileNotFoundError) as exc:
             async for _ in read_stream(
                     _accessor(),
-                    PathSpec.from_str_path("/od/Docs/a.txt", "/od")):
+                    PathSpec.from_str_path("/od/Docs/a.txt",
+                                           mount_key("/od/Docs/a.txt",
+                                                     "/od"))):
                 pass
     assert str(exc.value) == "/od/Docs/a.txt"
 

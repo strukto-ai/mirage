@@ -31,9 +31,11 @@ def _resolve(root: Path, path: str) -> Path:
 async def truncate(accessor: DiskAccessor, path: PathSpec,
                    length: int) -> None:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
     if isinstance(path, PathSpec):
-        path = path.strip_prefix
+        path = path.mount_path
     p = _resolve(accessor.root, path)
     try:
         async with aiofiles.open(p, "rb") as f:

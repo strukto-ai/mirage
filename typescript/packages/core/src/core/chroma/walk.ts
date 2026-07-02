@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { rekey } from '../../utils/key_prefix.ts'
 import type { ChromaAccessor } from '../../accessor/chroma.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
@@ -51,7 +52,7 @@ export async function walk(
     throw err
   }
 
-  const current = stripPrefix ? path.stripPrefix : path.original
+  const current = stripPrefix ? path.mountPath : path.virtual
   const results = includeRoot ? [current] : []
   if (!resolved.isDir || (maxDepth !== null && depth >= maxDepth)) {
     return results
@@ -66,7 +67,7 @@ export async function walk(
   }
 
   for (const child of children) {
-    const childPath = PathSpec.fromStrPath(child, path.prefix)
+    const childPath = PathSpec.fromStrPath(child, rekey(path.virtual, path.resourcePath, child))
     results.push(
       ...(await walk(accessor, childPath, index, {
         includeRoot: true,

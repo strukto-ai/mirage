@@ -46,13 +46,14 @@ async def ls(
     if not ops.is_mounted(accessor):
         raise ValueError("ls: no resource")
     if not paths:
-        cwd_str = cwd.original if isinstance(cwd, PathSpec) else cwd
-        cwd_prefix = cwd.prefix if isinstance(cwd, PathSpec) else ""
+        cwd_str = cwd.virtual if isinstance(cwd, PathSpec) else cwd
+        cwd_rp = (cwd.resource_path
+                  if isinstance(cwd, PathSpec) else cwd.strip("/"))
         paths = [
-            PathSpec(original=cwd_str,
+            PathSpec(virtual=cwd_str,
                      directory=cwd_str,
                      resolved=False,
-                     prefix=cwd_prefix)
+                     resource_path=cwd_rp)
         ]
     paths = await ops.resolve_glob(accessor, paths, index)
     sort_by = LsSortBy.TIME if t else LsSortBy.SIZE if S else LsSortBy.NAME

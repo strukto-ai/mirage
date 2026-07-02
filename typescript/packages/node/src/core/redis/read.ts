@@ -23,7 +23,7 @@ export async function read(
   _index?: IndexCacheStore,
 ): Promise<Uint8Array> {
   const start = performance.now()
-  const p = norm(path.stripPrefix)
+  const p = norm(path.mountPath)
   const data = await accessor.store.getFile(p)
   if (data === null) {
     throw enoent(path)

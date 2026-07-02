@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../utils/slash.ts'
 import { describe, expect, it } from 'vitest'
 import { runWithRecording } from '../../observe/context.ts'
 import { RAMAccessor } from '../../accessor/ram.ts'
@@ -23,8 +24,13 @@ function encode(text: string): Uint8Array {
   return new TextEncoder().encode(text)
 }
 
-function mkPath(original: string): PathSpec {
-  return new PathSpec({ original, directory: original, resolved: true })
+function mkPath(virtual: string): PathSpec {
+  return new PathSpec({
+    virtual,
+    directory: virtual,
+    resourcePath: stripSlash(virtual),
+    resolved: true,
+  })
 }
 
 describe('stream (RAM)', () => {

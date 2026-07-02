@@ -40,8 +40,8 @@ export async function ftCat<A extends Accessor>(
     return [
       out,
       new IOResult({
-        reads: { [first.stripPrefix]: raw },
-        cache: [first.stripPrefix],
+        reads: { [first.mountPath]: raw },
+        cache: [first.mountPath],
       }),
     ]
   } catch (err) {
@@ -50,7 +50,7 @@ export async function ftCat<A extends Accessor>(
       null,
       new IOResult({
         exitCode: 1,
-        stderr: ENC.encode(`cat: ${first.original}: failed to read as ${entry.fmt}: ${msg}\n`),
+        stderr: ENC.encode(`cat: ${first.virtual}: failed to read as ${entry.fmt}: ${msg}\n`),
       }),
     ]
   }

@@ -35,6 +35,7 @@ from mirage.core.discord.search import search_guild
 from mirage.core.discord.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_prefix_of
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,8 @@ async def rg(
                     channel_id=scope.channel_id,
                     limit=max_count or 100,
                 )
-                file_prefix = paths[0].prefix or ""
+                file_prefix = mount_prefix_of(paths[0].virtual,
+                                              paths[0].resource_path) or ""
                 resource_first = scope.resource_path.split("/", 1)[0]
                 channels = await list_channels(accessor.config, scope.guild_id)
                 channel_map = {c["id"]: channel_dirname(c) for c in channels}

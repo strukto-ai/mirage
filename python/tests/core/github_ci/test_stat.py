@@ -33,7 +33,9 @@ def index():
 
 
 def _spec(original: str) -> PathSpec:
-    return PathSpec(original=original, directory=original)
+    return PathSpec(virtual=original,
+                    directory=original,
+                    resource_path=original.strip("/"))
 
 
 @pytest.mark.asyncio

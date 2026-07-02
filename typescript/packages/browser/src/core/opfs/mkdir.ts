@@ -22,7 +22,7 @@ export async function mkdir(
   parents = false,
 ): Promise<void> {
   const root = accessor.rootHandle
-  const virtual = path.stripPrefix
+  const virtual = path.mountPath
   const segs = splitSegments(virtual)
   if (segs.length === 0) return
   if (parents) {

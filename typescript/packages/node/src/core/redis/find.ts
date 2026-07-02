@@ -45,8 +45,8 @@ export async function find(
   path: PathSpec,
   options: FindOptions = {},
 ): Promise<string[]> {
-  const p = norm(path.stripPrefix)
-  const startName = startBasename(path.original)
+  const p = norm(path.mountPath)
+  const startName = startBasename(path.virtual)
   const store = accessor.store
   const prefix = rstripSlash(p) + '/'
   const baseDepth = p === '/' ? 0 : (p.match(/\//g) ?? []).length

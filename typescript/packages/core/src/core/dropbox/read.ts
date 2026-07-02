@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
@@ -38,11 +39,11 @@ export async function read(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<Uint8Array> {
-  const prefix = path.prefix
-  let p = path.original
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  let p = path.virtual
   if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
   const key = stripSlash(p)
-  if (key === '') throw eisdir(path.original)
+  if (key === '') throw eisdir(path.virtual)
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
 
   let entry = index !== undefined ? (await index.get(virtualKey)).entry : null
@@ -50,7 +51,7 @@ export async function read(
     if (index !== undefined) {
       const parentKey = rstripSlash(virtualKey).replace(/\/[^/]+$/, '') || '/'
       if (parentKey !== virtualKey) {
-        const parentPath = PathSpec.fromStrPath(parentKey, prefix)
+        const parentPath = PathSpec.fromStrPath(parentKey, mountKey(parentKey, prefix))
         try {
           await readdir(accessor, parentPath, index)
           entry = (await index.get(virtualKey)).entry ?? null
@@ -59,9 +60,9 @@ export async function read(
         }
       }
     }
-    if (entry === undefined || entry === null) throw enoent(path.original)
+    if (entry === undefined || entry === null) throw enoent(path.virtual)
   }
-  if (entry.resourceType === 'dropbox/folder') throw eisdir(path.original)
+  if (entry.resourceType === 'dropbox/folder') throw eisdir(path.virtual)
   const dropboxPath = dropboxPathFromVirtual(virtualKey, prefix)
   return dropboxDownload(accessor.tokenManager, dropboxPath)
 }
@@ -71,11 +72,11 @@ export async function* stream(
   path: PathSpec,
   index?: IndexCacheStore,
 ): AsyncIterable<Uint8Array> {
-  const prefix = path.prefix
-  let p = path.original
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  let p = path.virtual
   if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
   const key = stripSlash(p)
-  if (key === '') throw eisdir(path.original)
+  if (key === '') throw eisdir(path.virtual)
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
 
   let entry = index !== undefined ? (await index.get(virtualKey)).entry : null
@@ -83,7 +84,7 @@ export async function* stream(
     if (index !== undefined) {
       const parentKey = rstripSlash(virtualKey).replace(/\/[^/]+$/, '') || '/'
       if (parentKey !== virtualKey) {
-        const parentPath = PathSpec.fromStrPath(parentKey, prefix)
+        const parentPath = PathSpec.fromStrPath(parentKey, mountKey(parentKey, prefix))
         try {
           await readdir(accessor, parentPath, index)
           entry = (await index.get(virtualKey)).entry ?? null
@@ -92,9 +93,9 @@ export async function* stream(
         }
       }
     }
-    if (entry === undefined || entry === null) throw enoent(path.original)
+    if (entry === undefined || entry === null) throw enoent(path.virtual)
   }
-  if (entry.resourceType === 'dropbox/folder') throw eisdir(path.original)
+  if (entry.resourceType === 'dropbox/folder') throw eisdir(path.virtual)
   const dropboxPath = dropboxPathFromVirtual(virtualKey, prefix)
   for await (const chunk of dropboxDownloadStream(accessor.tokenManager, dropboxPath)) {
     yield chunk

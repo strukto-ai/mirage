@@ -88,7 +88,7 @@ export async function find(
   const scanPath = pfx !== '' ? `${pfx}/` : '/'
   const base = pfx !== '' ? `/${pfx}` : '/'
   const baseDepth = base === '/' ? 0 : (base.match(/\//g) ?? []).length
-  const startName = startBasename(path.original)
+  const startName = startBasename(path.virtual)
   const op = await accessor.operator()
   const results: string[] = []
   const seenDirs = new Set<string>()

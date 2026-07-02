@@ -39,7 +39,7 @@ export async function readBytes(
   _index?: IndexCacheStore,
   options: DbxReadOptions = {},
 ): Promise<Uint8Array> {
-  const virtual = path.original
+  const virtual = path.virtual
   const remotePath = backendPath(accessor.config, path)
   const startMs = performance.now()
   const offset = options.offset ?? 0
@@ -55,7 +55,7 @@ export async function readBytes(
   try {
     r = await dbxFetch(accessor, 'GET', 'files', remotePath, { headers })
   } catch (exc) {
-    if (isNotFound(exc)) throw notFoundError(path.original)
+    if (isNotFound(exc)) throw notFoundError(path.virtual)
     throw exc
   }
   const data = new Uint8Array(await r.arrayBuffer())

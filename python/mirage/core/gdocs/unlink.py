@@ -19,6 +19,7 @@ from mirage.core.gdocs.readdir import readdir
 from mirage.core.google.drive import delete_file
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 VIRTUAL_DIRS = {"", "owned", "shared"}
 
@@ -29,9 +30,11 @@ async def unlink(
     index: IndexCacheStore = None,
 ) -> None:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    prefix = path.prefix
-    raw = path.original
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    raw = path.virtual
     stripped = raw[len(prefix):] if prefix and raw.startswith(prefix) else raw
     key = stripped.strip("/")
     if key in VIRTUAL_DIRS:
@@ -42,7 +45,8 @@ async def unlink(
     result = await index.get(virtual_key)
     if result.entry is None:
         parent = "/" + "/".join(key.split("/")[:-1])
-        parent_path = PathSpec.from_str_path(prefix + parent, prefix=prefix)
+        parent_path = PathSpec.from_str_path(
+            prefix + parent, mount_key(prefix + parent, prefix))
         await readdir(accessor, parent_path, index)
         result = await index.get(virtual_key)
     if result.entry is None:

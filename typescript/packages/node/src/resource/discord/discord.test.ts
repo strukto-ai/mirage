@@ -12,7 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DISCORD_COMMANDS, DISCORD_VFS_OPS, PathSpec, ResourceName } from '@struktoai/mirage-core'
+import {
+  DISCORD_COMMANDS,
+  DISCORD_VFS_OPS,
+  PathSpec,
+  ResourceName,
+  mountKey,
+} from '@struktoai/mirage-core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildResource } from '../registry.ts'
 import { normalizeDiscordConfig, redactDiscordConfig } from './config.ts'
@@ -90,9 +96,9 @@ describe('DiscordResource (node)', () => {
     const r = new DiscordResource({ token: 'bot-test' })
     const out = await r.readdir(
       new PathSpec({
-        original: '/mnt/discord/My Server__G1/channels',
+        virtual: '/mnt/discord/My Server__G1/channels',
         directory: '/mnt/discord/My Server__G1/channels',
-        prefix: '/mnt/discord',
+        resourcePath: mountKey('/mnt/discord/My Server__G1/channels', '/mnt/discord'),
       }),
     )
     expect(out).toEqual([
@@ -111,9 +117,9 @@ describe('DiscordResource (node)', () => {
     const r = new DiscordResource({ token: 'sekret-token' })
     await r.readdir(
       new PathSpec({
-        original: '/mnt/discord',
+        virtual: '/mnt/discord',
         directory: '/mnt/discord',
-        prefix: '/mnt/discord',
+        resourcePath: mountKey('/mnt/discord', '/mnt/discord'),
       }),
     )
     expect(fetchMock).toHaveBeenCalled()

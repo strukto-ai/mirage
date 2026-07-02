@@ -3,10 +3,14 @@ import pytest
 from mirage.commands.builtin.generic.rg import parse_flags, rg
 from mirage.commands.spec.types import FlagView
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def _spec(path: str) -> PathSpec:
-    return PathSpec(original=path, directory=path, resolved=True)
+    return PathSpec(resource_path=(path).strip("/"),
+                    virtual=path,
+                    directory=path,
+                    resolved=True)
 
 
 def _make_backend(files: dict[str, bytes], dirs: set[str] | None = None):
@@ -19,9 +23,9 @@ def _make_backend(files: dict[str, bytes], dirs: set[str] | None = None):
     inferred_dirs.add("/")
 
     async def readdir(accessor, path, index=None):
-        spec = path if isinstance(path, PathSpec) else PathSpec(original=path,
-                                                                directory=path)
-        p = spec.original.rstrip("/") or "/"
+        spec = path if isinstance(path, PathSpec) else PathSpec(
+            resource_path=(path).strip("/"), virtual=path, directory=path)
+        p = spec.virtual.rstrip("/") or "/"
         if p not in inferred_dirs:
             raise FileNotFoundError(p)
         prefix = p + "/" if p != "/" else "/"
@@ -41,9 +45,9 @@ def _make_backend(files: dict[str, bytes], dirs: set[str] | None = None):
         return sorted(children)
 
     async def stat(accessor, path, index=None):
-        spec = path if isinstance(path, PathSpec) else PathSpec(original=path,
-                                                                directory=path)
-        p = spec.original
+        spec = path if isinstance(path, PathSpec) else PathSpec(
+            resource_path=(path).strip("/"), virtual=path, directory=path)
+        p = spec.virtual
         if p in files:
             return FileStat(name=p.rsplit("/", 1)[-1] or p,
                             size=len(files[p]),
@@ -54,11 +58,11 @@ def _make_backend(files: dict[str, bytes], dirs: set[str] | None = None):
         raise FileNotFoundError(p)
 
     async def read_bytes(accessor, path, index=None):
-        spec = path if isinstance(path, PathSpec) else PathSpec(original=path,
-                                                                directory=path)
-        if spec.original not in files:
-            raise FileNotFoundError(spec.original)
-        return files[spec.original]
+        spec = path if isinstance(path, PathSpec) else PathSpec(
+            resource_path=(path).strip("/"), virtual=path, directory=path)
+        if spec.virtual not in files:
+            raise FileNotFoundError(spec.virtual)
+        return files[spec.virtual]
 
     async def read_stream(accessor, path, index=None):
         data = await read_bytes(accessor, path)
@@ -334,9 +338,9 @@ def _make_prefixed_backend(files: dict[str, bytes], mount_prefix: str):
     async def readdir(accessor, path, index=None):
         if index is None:
             raise FileNotFoundError("index required")
-        spec = path if isinstance(path, PathSpec) else PathSpec(original=path,
-                                                                directory=path)
-        p = _full(spec.original).rstrip("/") or "/"
+        spec = path if isinstance(path, PathSpec) else PathSpec(
+            resource_path=(path).strip("/"), virtual=path, directory=path)
+        p = _full(spec.virtual).rstrip("/") or "/"
         if p not in inferred_dirs:
             raise FileNotFoundError(p)
         prefix = p + "/" if p != "/" else "/"
@@ -355,9 +359,9 @@ def _make_prefixed_backend(files: dict[str, bytes], mount_prefix: str):
     async def stat(accessor, path, index=None):
         if index is None:
             raise FileNotFoundError("index required")
-        spec = path if isinstance(path, PathSpec) else PathSpec(original=path,
-                                                                directory=path)
-        p = _full(spec.original)
+        spec = path if isinstance(path, PathSpec) else PathSpec(
+            resource_path=(path).strip("/"), virtual=path, directory=path)
+        p = _full(spec.virtual)
         if p in full_files:
             return FileStat(name=p.rsplit("/", 1)[-1],
                             size=len(full_files[p]),
@@ -370,9 +374,9 @@ def _make_prefixed_backend(files: dict[str, bytes], mount_prefix: str):
     async def read_bytes(accessor, path, index=None):
         if index is None:
             raise FileNotFoundError("index required")
-        spec = path if isinstance(path, PathSpec) else PathSpec(original=path,
-                                                                directory=path)
-        p = _full(spec.original)
+        spec = path if isinstance(path, PathSpec) else PathSpec(
+            resource_path=(path).strip("/"), virtual=path, directory=path)
+        p = _full(spec.virtual)
         if p not in full_files:
             raise FileNotFoundError(p)
         return full_files[p]
@@ -389,9 +393,9 @@ async def test_rg_files_only_mount_prefix_not_doubled():
         },
         mount_prefix="/s3",
     )
-    p = PathSpec(original="/dir",
+    p = PathSpec(resource_path=mount_key("/dir", "/s3"),
+                 virtual="/dir",
                  directory="/dir",
-                 prefix="/s3",
                  resolved=True)
     output, _ = await rg(
         [p],
@@ -414,9 +418,9 @@ async def test_rg_single_file_threads_index():
         {"/dir/a.txt": b"apple\n"},
         mount_prefix="/gd",
     )
-    p = PathSpec(original="/dir/a.txt",
+    p = PathSpec(resource_path=mount_key("/dir/a.txt", "/gd"),
+                 virtual="/dir/a.txt",
                  directory="/dir/a.txt",
-                 prefix="/gd",
                  resolved=True)
     output, _ = await rg(
         [p],

@@ -19,6 +19,7 @@ from mirage.core.timeutil import to_iso_z
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.filetype import guess_type
+from mirage.utils.key_prefix import mount_prefix_of
 
 
 def _is_not_found(exc: Exception) -> bool:
@@ -32,12 +33,14 @@ async def stat(accessor: S3Accessor,
                path: PathSpec,
                index: IndexCacheStore = None) -> FileStat:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    virtual = path.original if isinstance(path, PathSpec) else path
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    virtual = path.virtual if isinstance(path, PathSpec) else path
     original_prefix = ""
     if isinstance(path, PathSpec):
-        original_prefix = path.prefix
-        path = path.original
+        original_prefix = mount_prefix_of(path.virtual, path.resource_path)
+        path = path.virtual
     if original_prefix and path.startswith(original_prefix):
         path = path[len(original_prefix):] or "/"
 

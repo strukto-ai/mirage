@@ -75,7 +75,7 @@ async def gzip(
     writes: dict[str, bytes] = {}
     for p in paths:
         raw = await read_bytes(accessor, p)
-        stripped = p.strip_prefix
+        stripped = p.mount_path
         if decompress:
             out_path = stripped.removesuffix(".gz") if stripped.endswith(
                 ".gz") else stripped + ".out"

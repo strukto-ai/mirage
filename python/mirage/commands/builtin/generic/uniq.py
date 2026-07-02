@@ -99,7 +99,7 @@ async def uniq(
     cache: list[str] = []
     if paths:
         source: AsyncIterator[bytes] = read_stream(accessor, paths[0])
-        cache = [paths[0].strip_prefix]
+        cache = [paths[0].mount_path]
     else:
         source = _resolve_source(stdin, "uniq: missing operand")
 

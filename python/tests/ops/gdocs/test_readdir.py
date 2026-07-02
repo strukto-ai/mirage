@@ -19,12 +19,13 @@ import pytest
 from mirage.accessor.gdocs import GDocsAccessor
 from mirage.ops.gdocs.readdir import readdir
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def _scope(path: str, prefix: str = "/gdocs") -> PathSpec:
-    return PathSpec(original=path,
-                    directory=path.rsplit("/", 1)[0] or "/",
-                    prefix=prefix)
+    return PathSpec(resource_path=mount_key(path, prefix),
+                    virtual=path,
+                    directory=path.rsplit("/", 1)[0] or "/")
 
 
 @pytest.fixture

@@ -22,7 +22,7 @@ export async function appendBytes(
   data: Uint8Array,
 ): Promise<void> {
   const start = performance.now()
-  const p = norm(path.stripPrefix)
+  const p = norm(path.mountPath)
   const store = accessor.store
   const existing = await store.getFile(p)
   if (existing !== null) {

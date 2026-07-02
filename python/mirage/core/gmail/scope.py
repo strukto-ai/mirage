@@ -15,6 +15,7 @@
 from dataclasses import dataclass
 
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_prefix_of
 
 
 @dataclass
@@ -27,8 +28,10 @@ class GmailScope:
 
 def detect_scope(path: PathSpec) -> GmailScope:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    prefix = path.prefix or ""
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
 
     if path.pattern and path.pattern.endswith(".gmail.json"):
         dir_key = path.directory.strip("/")
@@ -43,7 +46,7 @@ def detect_scope(path: PathSpec) -> GmailScope:
                 resource_path=dir_key,
             )
 
-    key = path.key
+    key = path.resource_path
     if not key:
         return GmailScope(use_native=True, resource_path="/")
 

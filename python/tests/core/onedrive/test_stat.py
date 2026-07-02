@@ -6,6 +6,7 @@ from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.onedrive.readdir import readdir
 from mirage.core.onedrive.stat import stat
 from mirage.types import FileType, PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 def _accessor(**kw) -> OneDriveAccessor:
@@ -76,8 +77,11 @@ async def test_stat_missing_raises_file_not_found():
                   "message": "no"
               }})
         with pytest.raises(FileNotFoundError) as exc:
-            await stat(_accessor(),
-                       PathSpec.from_str_path("/od/Docs/report.docx", "/od"))
+            await stat(
+                _accessor(),
+                PathSpec.from_str_path(
+                    "/od/Docs/report.docx",
+                    mount_key("/od/Docs/report.docx", "/od")))
     assert str(exc.value) == "/od/Docs/report.docx"
 
 

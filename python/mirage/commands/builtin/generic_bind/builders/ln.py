@@ -43,9 +43,9 @@ async def ln(
         return None, IOResult()
     data = await ops.read_bytes(accessor, source_path)
     await ops.write(accessor, dest_path, data)
-    output = f"'{source_path.original}' -> '{dest_path.original}'\n".encode(
+    output = f"'{source_path.virtual}' -> '{dest_path.virtual}'\n".encode(
     ) if v else None
-    return output, IOResult(writes={dest_path.strip_prefix: data})
+    return output, IOResult(writes={dest_path.mount_path: data})
 
 
 BUILDER = Builder('ln', ln, None, True, None)

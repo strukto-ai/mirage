@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PathSpec } from '@struktoai/mirage-core'
+import { PathSpec, mountKey } from '@struktoai/mirage-core'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { S3Resource } from './s3.ts'
 import type { S3Config } from './config.ts'
@@ -29,8 +29,8 @@ const config: S3Config = {
   forcePathStyle: true,
 }
 
-function mkPath(original: string, prefix = ''): PathSpec {
-  return new PathSpec({ original, directory: original, prefix })
+function mkPath(virtual: string, prefix = ''): PathSpec {
+  return new PathSpec({ virtual, directory: virtual, resourcePath: mountKey(virtual, prefix) })
 }
 
 const DEC = new TextDecoder()

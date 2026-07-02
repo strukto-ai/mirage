@@ -74,10 +74,10 @@ export function keep(
 
 // Basename of a find start path, as GNU prints and matches it. Single source
 // of truth for the start path's own name across every backend find op; reads
-// `path.original` so the name is correct whether the start is the mount root
+// `path.virtual` so the name is correct whether the start is the mount root
 // or a nested directory. Returns '' for the bare root '/'.
-export function startBasename(original: string): string {
-  return rstripSlash(original).split('/').pop() ?? ''
+export function startBasename(virtual: string): string {
+  return rstripSlash(virtual).split('/').pop() ?? ''
 }
 
 export interface EmitStartPathOptions {

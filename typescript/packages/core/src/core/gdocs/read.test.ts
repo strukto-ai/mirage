@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 import type * as DriveModule from '../google/drive.ts'
 import type * as ClientModule from '../google/_client.ts'
@@ -55,9 +56,9 @@ describe('gdocs read auto-bootstrap', () => {
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
     const path = new PathSpec({
-      original: '/gdocs/owned/2026-04-01_Notes__doc1.gdoc.json',
+      virtual: '/gdocs/owned/2026-04-01_Notes__doc1.gdoc.json',
       directory: '/gdocs/owned/2026-04-01_Notes__doc1.gdoc.json',
-      prefix: '/gdocs',
+      resourcePath: mountKey('/gdocs/owned/2026-04-01_Notes__doc1.gdoc.json', '/gdocs'),
     })
     const out = await read(accessor, path, index)
     expect(new TextDecoder().decode(out)).toContain('doc1')
@@ -70,9 +71,9 @@ describe('gdocs read auto-bootstrap', () => {
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
     const path = new PathSpec({
-      original: '/gdocs/owned/Missing__xyz.gdoc.json',
+      virtual: '/gdocs/owned/Missing__xyz.gdoc.json',
       directory: '/gdocs/owned/Missing__xyz.gdoc.json',
-      prefix: '/gdocs',
+      resourcePath: mountKey('/gdocs/owned/Missing__xyz.gdoc.json', '/gdocs'),
     })
     await expect(read(accessor, path, index)).rejects.toMatchObject({ code: 'ENOENT' })
   })

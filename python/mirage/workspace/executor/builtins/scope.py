@@ -19,11 +19,14 @@ def _to_scope(path: str) -> PathSpec:
     """Wrap a resolved path string as PathSpec."""
     last_slash = path.rfind("/")
     directory = path[:last_slash + 1] if last_slash >= 0 else "/"
-    return PathSpec(original=path, directory=directory, resolved=True)
+    return PathSpec(virtual=path,
+                    directory=directory,
+                    resource_path="",
+                    resolved=True)
 
 
 def _scope_path(val) -> str:
     """Extract path string from str or PathSpec."""
     if isinstance(val, PathSpec):
-        return val.original
+        return val.virtual
     return val

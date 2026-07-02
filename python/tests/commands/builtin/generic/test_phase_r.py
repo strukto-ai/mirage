@@ -7,14 +7,17 @@ from mirage.types import FileStat, FileType, PathSpec
 
 
 def _spec(path: str) -> PathSpec:
-    return PathSpec(original=path, directory=path, resolved=True)
+    return PathSpec(resource_path=(path).strip("/"),
+                    virtual=path,
+                    directory=path,
+                    resolved=True)
 
 
 def _make_cut_backend(files: dict[str, bytes]):
     store = dict(files)
 
     async def read_stream(accessor, path, index=None):
-        key = path.original if isinstance(path, PathSpec) else path
+        key = path.virtual if isinstance(path, PathSpec) else path
         if key not in store:
             raise FileNotFoundError(key)
         yield store[key]
@@ -93,7 +96,7 @@ async def test_cut_missing_operand():
 async def test_stat_default_format():
 
     async def stat_fn(accessor, path, index=None):
-        return FileStat(name=path.original,
+        return FileStat(name=path.virtual,
                         size=42,
                         modified="2026-01-01",
                         type=FileType.TEXT)
@@ -138,7 +141,7 @@ async def test_stat_format_F_regular():
 async def test_stat_multiple_paths():
 
     async def stat_fn(accessor, path, index=None):
-        return FileStat(name=path.original, size=1, type=FileType.TEXT)
+        return FileStat(name=path.virtual, size=1, type=FileType.TEXT)
 
     out, _ = await generic_stat([_spec("a"), _spec("b")],
                                 stat_fn=stat_fn,
@@ -160,7 +163,7 @@ async def test_stat_missing_operand():
 async def test_file_text_default():
 
     async def stat_fn(accessor, path):
-        return FileStat(name=path.original, size=5, type=FileType.TEXT)
+        return FileStat(name=path.virtual, size=5, type=FileType.TEXT)
 
     async def read_bytes(accessor, path):
         return b"hello"
@@ -223,7 +226,7 @@ async def test_file_directory():
 async def test_file_multiple_paths():
 
     async def stat_fn(accessor, path):
-        return FileStat(name=path.original, size=3, type=FileType.TEXT)
+        return FileStat(name=path.virtual, size=3, type=FileType.TEXT)
 
     async def read_bytes(accessor, path):
         return b"abc"

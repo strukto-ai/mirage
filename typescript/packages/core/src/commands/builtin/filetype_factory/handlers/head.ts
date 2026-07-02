@@ -38,14 +38,14 @@ export async function ftHead<A extends Accessor>(
   try {
     const raw = await readBytes(accessor, first, opts.index ?? undefined)
     const out: ByteSource = await entry.module.head(raw, n)
-    return [out, new IOResult({ cache: [first.stripPrefix] })]
+    return [out, new IOResult({ cache: [first.mountPath] })]
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return [
       null,
       new IOResult({
         exitCode: 1,
-        stderr: ENC.encode(`head: ${first.original}: failed to read as ${entry.fmt}: ${msg}\n`),
+        stderr: ENC.encode(`head: ${first.virtual}: failed to read as ${entry.fmt}: ${msg}\n`),
       }),
     ]
   }

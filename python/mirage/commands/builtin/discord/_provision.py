@@ -29,7 +29,7 @@ async def file_read_provision(
     ops = 0
     if index is not None:
         for p in paths:
-            path_str = p.original if isinstance(p, PathSpec) else p
+            path_str = p.virtual if isinstance(p, PathSpec) else p
             lookup = await index.get(path_str)
             if lookup.entry is not None:
                 ops += 1

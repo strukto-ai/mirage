@@ -26,8 +26,10 @@ class EmailScope:
 
 def detect_scope(path: PathSpec) -> EmailScope:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    key = path.strip_prefix.strip("/")
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    key = path.mount_path.strip("/")
     if not key:
         return EmailScope(use_native=False, resource_path="/")
     parts = [x for x in key.split("/") if x]
@@ -56,6 +58,6 @@ def extract_folder(paths: list[PathSpec]) -> str | None:
     if not paths:
         return None
     p = paths[0]
-    key = p.strip_prefix.strip("/")
+    key = p.mount_path.strip("/")
     parts = [x for x in key.split("/") if x]
     return parts[0] if parts else None

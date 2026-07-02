@@ -201,7 +201,7 @@ async def format_multi(
     one path is given; every record ends with a newline per POSIX wc.
 
     Args:
-        paths (list[PathSpec]): Resolved paths; only ``.original`` is read.
+        paths (list[PathSpec]): Resolved paths; only ``.virtual`` is read.
         read (Callable[..., Any]): Reader called as ``read(accessor, path)``;
             returns bytes, an awaitable of bytes, or an async byte iterator.
         accessor (object): Backend accessor passed through to ``read``.

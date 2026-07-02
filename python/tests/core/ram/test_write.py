@@ -31,9 +31,11 @@ def store():
 
 @pytest.mark.asyncio
 async def test_write_bytes(store):
-    await write_bytes(store,
-                      PathSpec(original="/hello.txt", directory="/hello.txt"),
-                      b"hello")
+    await write_bytes(
+        store,
+        PathSpec(resource_path=("/hello.txt").strip("/"),
+                 virtual="/hello.txt",
+                 directory="/hello.txt"), b"hello")
     assert store.store.files["/hello.txt"] == b"hello"
     assert "/hello.txt" in store.store.modified
     assert store.store.modified["/hello.txt"].endswith("Z")
@@ -42,12 +44,16 @@ async def test_write_bytes(store):
 
 @pytest.mark.asyncio
 async def test_write_bytes_overwrite(store):
-    await write_bytes(store,
-                      PathSpec(original="/file.txt", directory="/file.txt"),
-                      b"first")
-    await write_bytes(store,
-                      PathSpec(original="/file.txt", directory="/file.txt"),
-                      b"second")
+    await write_bytes(
+        store,
+        PathSpec(resource_path=("/file.txt").strip("/"),
+                 virtual="/file.txt",
+                 directory="/file.txt"), b"first")
+    await write_bytes(
+        store,
+        PathSpec(resource_path=("/file.txt").strip("/"),
+                 virtual="/file.txt",
+                 directory="/file.txt"), b"second")
     assert store.store.files["/file.txt"] == b"second"
 
 
@@ -60,15 +66,18 @@ async def test_write_bytes_parent_not_found():
                        match="parent directory does not exist"):
         await write_bytes(
             a,
-            PathSpec(original="/no/parent/file.txt",
+            PathSpec(resource_path=("/no/parent/file.txt").strip("/"),
+                     virtual="/no/parent/file.txt",
                      directory="/no/parent/file.txt"), b"data")
 
 
 @pytest.mark.asyncio
 async def test_write_bytes_to_subdir(store):
     await write_bytes(
-        store, PathSpec(original="/sub/file.txt", directory="/sub/file.txt"),
-        b"nested data")
+        store,
+        PathSpec(resource_path=("/sub/file.txt").strip("/"),
+                 virtual="/sub/file.txt",
+                 directory="/sub/file.txt"), b"nested data")
     assert store.store.files["/sub/file.txt"] == b"nested data"
 
 
@@ -78,14 +87,18 @@ async def test_write_bytes_root_parent():
 
     a = RAMAccessor(s)
     await write_bytes(
-        a, PathSpec(original="/root_file.txt", directory="/root_file.txt"),
-        b"root")
+        a,
+        PathSpec(resource_path=("/root_file.txt").strip("/"),
+                 virtual="/root_file.txt",
+                 directory="/root_file.txt"), b"root")
     assert s.files["/root_file.txt"] == b"root"
 
 
 @pytest.mark.asyncio
 async def test_write_bytes_sets_modified(store):
-    await write_bytes(store,
-                      PathSpec(original="/file.txt", directory="/file.txt"),
-                      b"data")
+    await write_bytes(
+        store,
+        PathSpec(resource_path=("/file.txt").strip("/"),
+                 virtual="/file.txt",
+                 directory="/file.txt"), b"data")
     assert store.store.modified["/file.txt"] is not None

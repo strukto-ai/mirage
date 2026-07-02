@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiskAccessor } from '../../accessor/disk.ts'
-import { type IndexCacheStore, PathSpec } from '@struktoai/mirage-core'
+import { PathSpec, mountKey, mountPrefixOf, type IndexCacheStore } from '@struktoai/mirage-core'
 import { SCOPE_ERROR } from './constants.ts'
 import { readdir } from './readdir.ts'
 import { fnmatch } from '@struktoai/mirage-core'
@@ -30,10 +30,10 @@ export async function resolveGlob(
       result.push(p)
     } else if (p.pattern !== null) {
       const dirSpec = new PathSpec({
-        original: p.directory,
+        virtual: p.directory,
         directory: p.directory,
         resolved: true,
-        prefix: p.prefix,
+        resourcePath: mountKey(p.directory, mountPrefixOf(p.virtual, p.resourcePath)),
       })
       const entries = await readdir(accessor, dirSpec, index)
       const matched: PathSpec[] = []
@@ -41,10 +41,10 @@ export async function resolveGlob(
         if (fnmatch(gnuBasename(e), p.pattern)) {
           matched.push(
             new PathSpec({
-              original: e,
+              virtual: e,
               directory: p.directory,
               resolved: true,
-              prefix: p.prefix,
+              resourcePath: mountKey(e, mountPrefixOf(p.virtual, p.resourcePath)),
             }),
           )
         }

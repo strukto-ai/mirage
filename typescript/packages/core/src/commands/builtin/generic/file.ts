@@ -35,7 +35,7 @@ export async function fileGeneric(
   for (const p of paths) {
     const s = await stat(p)
     if (s.type === FileType.DIRECTORY) {
-      lines.push(formatFileResult(p.original, FileType.DIRECTORY, brief, mime))
+      lines.push(formatFileResult(p.virtual, FileType.DIRECTORY, brief, mime))
       continue
     }
     let header: Uint8Array
@@ -46,7 +46,7 @@ export async function fileGeneric(
       header = new Uint8Array(0)
     }
     const result = detectFileType(header, s)
-    lines.push(formatFileResult(p.original, result, brief, mime))
+    lines.push(formatFileResult(p.virtual, result, brief, mime))
   }
   const out: ByteSource = formatRecords(lines)
   return [out, new IOResult()]

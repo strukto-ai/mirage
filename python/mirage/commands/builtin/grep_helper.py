@@ -27,6 +27,7 @@ from mirage.commands.spec.types import FlagView
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import IOResult
 from mirage.types import FileType, PathSpec
+from mirage.utils.key_prefix import mount_prefix_of
 
 BINARY_EXTENSIONS = frozenset({
     ".parquet",
@@ -192,7 +193,9 @@ async def resolve_pattern(
                                               accessor,
                                               pf,
                                               index=index,
-                                              prefix=pf.prefix)
+                                              prefix=mount_prefix_of(
+                                                  pf.virtual,
+                                                  pf.resource_path))
             pattern = merge_pattern_list(pattern, file_data)
         if pattern is None:
             return NEVER_MATCH, True

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { PathSpec } from '../../types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
@@ -22,15 +23,17 @@ export function ensurePathSpec(path: PathSpec | string): PathSpec {
 
 export function parentPath(path: PathSpec | string): PathSpec {
   const p = ensurePathSpec(path)
-  const stripped = rstripSlash(p.stripPrefix)
+  const prefix = mountPrefixOf(p.virtual, p.resourcePath)
+  const stripped = rstripSlash(p.mountPath)
   let parentRelative = stripped.includes('/') ? stripped.slice(0, stripped.lastIndexOf('/')) : '/'
   if (!parentRelative.startsWith('/')) parentRelative = '/' + parentRelative
-  let original: string
-  if (p.prefix !== '') {
-    original = rstripSlash(p.prefix)
-    if (parentRelative !== '/') original += parentRelative
+  let virtual: string
+  if (prefix !== '') {
+    virtual = rstripSlash(prefix)
+    if (parentRelative !== '/') virtual += parentRelative
   } else {
-    original = parentRelative
+    virtual = parentRelative
   }
-  return PathSpec.fromStrPath(original !== '' ? original : '/', p.prefix)
+  const full = virtual !== '' ? virtual : '/'
+  return PathSpec.fromStrPath(full, mountKey(full, prefix))
 }

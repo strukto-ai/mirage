@@ -32,8 +32,7 @@ async def relay(dispatch: Callable,
     # ops as (accessor, path, index); dispatch ignores both and keys off the
     # path. It is also the single place a raw str (the generic's string path
     # arithmetic) is coerced to the PathSpec dispatch needs.
-    spec = path if isinstance(path, PathSpec) else PathSpec.from_str_path(
-        path, "")
+    spec = path if isinstance(path, PathSpec) else PathSpec.from_str_path(path)
     data, _ = await dispatch(name, spec, **kwargs)
     return data
 

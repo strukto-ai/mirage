@@ -21,9 +21,11 @@ from mirage.types import PathSpec
 
 def _resolve_path(path: PathSpec) -> str:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
     if isinstance(path, PathSpec):
-        return path.strip_prefix
+        return path.mount_path
     return path
 
 

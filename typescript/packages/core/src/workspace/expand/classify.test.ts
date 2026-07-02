@@ -95,7 +95,7 @@ describe('classifyWord — absolute paths', () => {
     const r = classifyWord('/ram/x.txt', reg, '/')
     expect(r).toBeInstanceOf(PathSpec)
     if (r instanceof PathSpec) {
-      expect(r.original).toBe('/ram/x.txt')
+      expect(r.virtual).toBe('/ram/x.txt')
       expect(r.resolved).toBe(true)
     }
   })
@@ -132,7 +132,7 @@ describe('classifyWord — relative paths', () => {
     const reg = setup()
     const r = classifyWord('sub/file.txt', reg, '/ram')
     if (!(r instanceof PathSpec)) throw new Error('expected PathSpec')
-    expect(r.original).toBe('/ram/sub/file.txt')
+    expect(r.virtual).toBe('/ram/sub/file.txt')
   })
 
   it('leaves bare glob (like *) as text — could be a command arg', () => {
@@ -146,7 +146,7 @@ describe('classifyBarePath', () => {
     const reg = setup()
     const r = classifyBarePath('file.txt', reg, '/ram')
     if (!(r instanceof PathSpec)) throw new Error('expected PathSpec')
-    expect(r.original).toBe('/ram/file.txt')
+    expect(r.virtual).toBe('/ram/file.txt')
   })
 })
 

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
@@ -92,15 +93,19 @@ describe('readdir on inaccessible channel', () => {
     // Prime parent (mirrors a prior `ls /slack/channels`).
     await readdir(
       accessor,
-      new PathSpec({ original: '/slack/channels', directory: '/slack/channels', prefix: '/slack' }),
+      new PathSpec({
+        virtual: '/slack/channels',
+        directory: '/slack/channels',
+        resourcePath: mountKey('/slack/channels', '/slack'),
+      }),
       idx,
     )
     const dates = await readdir(
       accessor,
       new PathSpec({
-        original: '/slack/channels/private__C_INACCESSIBLE',
+        virtual: '/slack/channels/private__C_INACCESSIBLE',
         directory: '/slack/channels/private__C_INACCESSIBLE',
-        prefix: '/slack',
+        resourcePath: mountKey('/slack/channels/private__C_INACCESSIBLE', '/slack'),
       }),
       idx,
     )

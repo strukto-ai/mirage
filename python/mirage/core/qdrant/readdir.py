@@ -51,10 +51,12 @@ async def readdir(
     index: IndexCacheStore = None,
 ) -> list[str]:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
     config = accessor.config
     scope = detect_scope(path, config)
-    base = path.original.rstrip("/")
+    base = path.virtual.rstrip("/")
 
     if scope.level == ScopeLevel.ROOT:
         names = await list_tables(accessor)
@@ -73,4 +75,4 @@ async def readdir(
             names = _row_files(rows, config)
         return [f"{base}/{name}" for name in names]
 
-    raise FileNotFoundError(path.original)
+    raise FileNotFoundError(path.virtual)

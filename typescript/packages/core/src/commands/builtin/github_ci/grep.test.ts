@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../../core/github_ci/read.ts', () => {
@@ -78,7 +79,7 @@ async function runGrep(
 }
 
 function path(p: string): PathSpec {
-  return new PathSpec({ original: p, directory: p, resolved: true, prefix: '' })
+  return new PathSpec({ virtual: p, directory: p, resolved: true, resourcePath: mountKey(p, '') })
 }
 
 describe('github_ci grep', () => {
@@ -111,19 +112,19 @@ describe('github_ci grep', () => {
 
   it('recursively scans a directory with -r', async () => {
     vi.mocked(statModule.stat).mockImplementation((_a, p) => {
-      if (p.original.endsWith('.json')) {
+      if (p.virtual.endsWith('.json')) {
         return Promise.resolve({ name: 'wf.json', type: FileType.JSON } as FileStat)
       }
       return Promise.resolve({ name: 'workflows', type: FileType.DIRECTORY } as FileStat)
     })
     vi.mocked(readdirModule.readdir).mockImplementation((_a, p) => {
-      if (p.original === '/workflows') {
+      if (p.virtual === '/workflows') {
         return Promise.resolve(['/workflows/ci_1.json', '/workflows/build_2.json'])
       }
       return Promise.resolve([])
     })
     vi.mocked(readModule.read).mockImplementation((_a, p) => {
-      if (p.original.includes('ci_1')) return Promise.resolve(ENC.encode('name: Test\non: push\n'))
+      if (p.virtual.includes('ci_1')) return Promise.resolve(ENC.encode('name: Test\non: push\n'))
       return Promise.resolve(ENC.encode('name: Build\non: push\n'))
     })
     const { stdout, exitCode } = await runGrep([path('/workflows')], ['Test'], { r: true })

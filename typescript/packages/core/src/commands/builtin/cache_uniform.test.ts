@@ -18,6 +18,7 @@
 // still serve from cache. These tests pin that guarantee: with a warm
 // manager active, the consumer must NOT call the backend reader.
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { runWithCacheManager } from '../../cache/context.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
@@ -47,7 +48,11 @@ class CountingStream {
 }
 
 function spec(): PathSpec {
-  return new PathSpec({ original: '/s3/a.txt', directory: '/s3/', prefix: '/s3/' })
+  return new PathSpec({
+    virtual: '/s3/a.txt',
+    directory: '/s3/',
+    resourcePath: mountKey('/s3/a.txt', '/s3/'),
+  })
 }
 
 async function warmManager(): Promise<CacheManager> {

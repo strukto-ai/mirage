@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountPrefixOf, rekey } from '../../utils/key_prefix.ts'
 import type { GitHubCIAccessor } from '../../accessor/github_ci.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
@@ -37,7 +38,7 @@ export async function resolveGlob(
       for (const entry of entries) {
         const base = entry.split('/').pop() ?? entry
         if (!fnmatch(base, p.pattern)) continue
-        matched.push(PathSpec.fromStrPath(entry, p.prefix))
+        matched.push(PathSpec.fromStrPath(entry, rekey(p.virtual, p.resourcePath, entry)))
       }
       const truncated = matched.length > SCOPE_ERROR ? matched.slice(0, SCOPE_ERROR) : matched
       result.push(...truncated)
@@ -49,8 +50,8 @@ export async function resolveGlob(
 }
 
 export function isCrossRunRoot(path: PathSpec): boolean {
-  let original = path.original
-  const prefix = path.prefix
+  let original = path.virtual
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
   if (prefix !== '' && original.startsWith(prefix)) {
     const rest = original.slice(prefix.length)
     if (prefix.endsWith('/') || rest === '' || rest.startsWith('/')) {

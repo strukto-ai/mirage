@@ -19,6 +19,7 @@ import pytest
 from mirage.accessor.gmail import GmailAccessor
 from mirage.ops.gmail.readdir import readdir
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.fixture
@@ -35,9 +36,9 @@ async def test_readdir_calls_core(accessor):
             return_value=["/gmail/inbox/msg.txt"],
     ) as mock:
         scope = PathSpec(
-            original="/gmail/inbox",
+            resource_path=mount_key("/gmail/inbox", "/gmail"),
+            virtual="/gmail/inbox",
             directory="/gmail",
-            prefix="/gmail",
         )
         result = await fn(accessor, scope, index=None)
         mock.assert_called_once_with(accessor, scope, None)

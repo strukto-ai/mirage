@@ -8,7 +8,7 @@ from mirage.utils.errors import enoent
 
 
 async def create(accessor: SharePointAccessor, path: PathSpec) -> None:
-    virtual = path.original if isinstance(path, PathSpec) else path
+    virtual = path.virtual if isinstance(path, PathSpec) else path
     _, stripped = split_path(path)
     resolved = await resolve(accessor, path)
     if resolved.drive_id is None or resolved.item_path is None:

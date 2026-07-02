@@ -16,6 +16,7 @@ import pytest
 
 from mirage.core.chroma.path import resolve_path, virtual_key_for
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.mark.asyncio
@@ -29,7 +30,8 @@ async def test_resolve_file(chroma_accessor, chroma_index, quickstart_path):
 
 @pytest.mark.asyncio
 async def test_resolve_directory(chroma_accessor, chroma_index):
-    path = PathSpec.from_str_path("/knowledge/guides", "/knowledge/")
+    path = PathSpec.from_str_path("/knowledge/guides",
+                                  mount_key("/knowledge/guides", "/knowledge"))
     resolved = await resolve_path(chroma_accessor, path, chroma_index)
     assert resolved.is_dir
 
@@ -44,7 +46,8 @@ async def test_resolve_mount_root(chroma_accessor, chroma_index,
 
 @pytest.mark.asyncio
 async def test_resolve_missing_raises(chroma_accessor, chroma_index):
-    path = PathSpec.from_str_path("/knowledge/missing", "/knowledge/")
+    path = PathSpec.from_str_path(
+        "/knowledge/missing", mount_key("/knowledge/missing", "/knowledge"))
     with pytest.raises(FileNotFoundError):
         await resolve_path(chroma_accessor, path, chroma_index)
 
@@ -57,18 +60,21 @@ async def test_resolve_str_path_coerced(chroma_accessor, chroma_index):
 
 
 def test_virtual_key_for_prefixed():
-    path = PathSpec.from_str_path("/knowledge/guides/quickstart",
-                                  "/knowledge/")
+    path = PathSpec.from_str_path(
+        "/knowledge/guides/quickstart",
+        mount_key("/knowledge/guides/quickstart", "/knowledge"))
     assert virtual_key_for(path) == "/knowledge/guides/quickstart"
 
 
 def test_virtual_key_for_root():
-    path = PathSpec(original="/knowledge",
-                    directory="/knowledge",
-                    prefix="/knowledge/")
+    path = PathSpec(resource_path=mount_key("/knowledge", "/knowledge"),
+                    virtual="/knowledge",
+                    directory="/knowledge")
     assert virtual_key_for(path) == "/knowledge"
 
 
 def test_virtual_key_for_unprefixed():
-    path = PathSpec(original="/guides/quickstart", directory="/guides")
+    path = PathSpec(resource_path=("/guides/quickstart").strip("/"),
+                    virtual="/guides/quickstart",
+                    directory="/guides")
     assert virtual_key_for(path) == "/guides/quickstart"

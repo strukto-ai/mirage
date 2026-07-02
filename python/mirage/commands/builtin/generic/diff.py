@@ -8,6 +8,7 @@ from mirage.commands.builtin.utils.lines import split_lines_keepends
 from mirage.commands.errors import UsageError
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
+from mirage.utils.key_prefix import rekey
 from mirage.utils.path import gnu_basename
 
 
@@ -22,8 +23,11 @@ class _DiffFlags:
 
 
 def _child_spec(parent: PathSpec, name: str) -> PathSpec:
-    child = parent.original.rstrip("/") + "/" + name
-    return PathSpec(original=child, directory=child, prefix=parent.prefix)
+    child = parent.virtual.rstrip("/") + "/" + name
+    return PathSpec(virtual=child,
+                    directory=child,
+                    resource_path=rekey(parent.virtual, parent.resource_path,
+                                        child))
 
 
 async def _diff_pair(
@@ -33,8 +37,8 @@ async def _diff_pair(
     read_bytes: Callable[..., Awaitable[bytes]],
     flags: _DiffFlags,
 ) -> bytes:
-    name1 = path1.original if isinstance(path1, PathSpec) else path1
-    name2 = path2.original if isinstance(path2, PathSpec) else path2
+    name1 = path1.virtual if isinstance(path1, PathSpec) else path1
+    name2 = path2.virtual if isinstance(path2, PathSpec) else path2
     text_a = (await read_bytes(accessor, path1)).decode(errors="replace")
     text_b = (await read_bytes(accessor, path2)).decode(errors="replace")
     if flags.i:
@@ -79,8 +83,8 @@ async def _diff_dirs(
     raw_b = await readdir_fn(accessor, dir_b, index)
     names_a = {gnu_basename(entry) for entry in raw_a}
     names_b = {gnu_basename(entry) for entry in raw_b}
-    left = dir_a.original.rstrip("/")
-    right = dir_b.original.rstrip("/")
+    left = dir_a.virtual.rstrip("/")
+    right = dir_b.virtual.rstrip("/")
     parts: list[bytes] = []
     for name in sorted(names_a | names_b):
         if name not in names_b:
@@ -106,15 +110,15 @@ async def _diff_dirs(
                 if flags.q:
                     parts.append(body)
                 else:
-                    header = f"diff -r {child_a.original} {child_b.original}\n"
+                    header = f"diff -r {child_a.virtual} {child_b.virtual}\n"
                     parts.append(header.encode() + body)
         elif a_dir:
-            parts.append((f"File {child_a.original} is a directory while file "
-                          f"{child_b.original} is a regular file\n").encode())
+            parts.append((f"File {child_a.virtual} is a directory while file "
+                          f"{child_b.virtual} is a regular file\n").encode())
         else:
             parts.append(
-                (f"File {child_a.original} is a regular file while file "
-                 f"{child_b.original} is a directory\n").encode())
+                (f"File {child_a.virtual} is a regular file while file "
+                 f"{child_b.virtual} is a directory\n").encode())
     return b"".join(parts)
 
 
@@ -150,9 +154,8 @@ async def diff(
         output = await _diff_pair(accessor, paths[0], paths[1], read_bytes,
                                   flags)
     exit_code = 1 if output else 0
-    return output, IOResult(
-        exit_code=exit_code,
-        cache=[paths[0].strip_prefix, paths[1].strip_prefix])
+    return output, IOResult(exit_code=exit_code,
+                            cache=[paths[0].mount_path, paths[1].mount_path])
 
 
 __all__ = ["diff"]

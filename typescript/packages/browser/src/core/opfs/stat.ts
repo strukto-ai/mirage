@@ -25,7 +25,7 @@ import {
 
 export async function stat(accessor: OPFSAccessor, p: PathSpec): Promise<FileStat> {
   const root = accessor.rootHandle
-  const virtual = p.stripPrefix
+  const virtual = p.mountPath
   const segs = splitSegments(virtual)
   const last = segs.at(-1)
   if (last === undefined) {

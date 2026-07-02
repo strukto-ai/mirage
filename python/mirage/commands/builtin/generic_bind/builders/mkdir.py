@@ -37,7 +37,7 @@ async def mkdir(
     for path in paths:
         await ops.mkdir(accessor, path, parents=p)
         if v:
-            lines.append(f"mkdir: created directory '{path.original}'")
+            lines.append(f"mkdir: created directory '{path.virtual}'")
     output = ("\n".join(lines) + "\n").encode() if lines else None
     return output, IOResult()
 

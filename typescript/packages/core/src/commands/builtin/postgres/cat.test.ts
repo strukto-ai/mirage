@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../../core/postgres/read.ts', () => ({
@@ -69,10 +70,10 @@ describe('postgres cat size-guard surfacing', () => {
     if (cmd === undefined) throw new Error('cat not registered')
     const accessor = makeAccessor()
     const path = new PathSpec({
-      original: '/pg/public/tables/users/rows.jsonl',
+      virtual: '/pg/public/tables/users/rows.jsonl',
       directory: '/pg/public/tables/users/',
       resolved: true,
-      prefix: '/pg',
+      resourcePath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
     })
     const result = await cmd.fn(accessor, [path], [], {
       stdin: null,

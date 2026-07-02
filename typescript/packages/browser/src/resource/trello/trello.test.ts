@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '@struktoai/mirage-core'
 import { PathSpec, ResourceName, TRELLO_VFS_OPS } from '@struktoai/mirage-core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildResource } from '../registry.ts'
@@ -80,9 +81,9 @@ describe('TrelloResource (browser)', () => {
     const r = new TrelloResource({ apiKey: 'KEY', apiToken: 'TOK' })
     const out = await r.readdir(
       new PathSpec({
-        original: '/mnt/trello/workspaces',
+        virtual: '/mnt/trello/workspaces',
         directory: '/mnt/trello/workspaces',
-        prefix: '/mnt/trello',
+        resourcePath: mountKey('/mnt/trello/workspaces', '/mnt/trello'),
       }),
     )
     expect(out).toEqual(['/mnt/trello/workspaces/Acme__w1', '/mnt/trello/workspaces/Beta__w2'])
@@ -109,9 +110,9 @@ describe('TrelloResource (browser)', () => {
     })
     await r.readdir(
       new PathSpec({
-        original: '/mnt/trello/workspaces',
+        virtual: '/mnt/trello/workspaces',
         directory: '/mnt/trello/workspaces',
-        prefix: '/mnt/trello',
+        resourcePath: mountKey('/mnt/trello/workspaces', '/mnt/trello'),
       }),
     )
     const firstArg = (fetchMock.mock.calls[0] as unknown[])[0]
@@ -137,9 +138,9 @@ describe('TrelloResource (browser)', () => {
     const r = new TrelloResource({ apiKey: 'k', apiToken: 't', workspaceId: 'w2' })
     const out = await r.readdir(
       new PathSpec({
-        original: '/mnt/trello/workspaces',
+        virtual: '/mnt/trello/workspaces',
         directory: '/mnt/trello/workspaces',
-        prefix: '/mnt/trello',
+        resourcePath: mountKey('/mnt/trello/workspaces', '/mnt/trello'),
       }),
     )
     expect(out).toEqual(['/mnt/trello/workspaces/Beta__w2'])

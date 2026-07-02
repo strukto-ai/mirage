@@ -37,8 +37,8 @@ async function mkdirCommand(
   const writes: Record<string, Uint8Array> = {}
   for (const path of resolved) {
     await s3Mkdir(accessor, path)
-    writes[path.stripPrefix] = new Uint8Array()
-    if (verbose) lines.push(`mkdir: created directory '${path.original}'`)
+    writes[path.mountPath] = new Uint8Array()
+    if (verbose) lines.push(`mkdir: created directory '${path.virtual}'`)
   }
   const output: ByteSource | null = lines.length > 0 ? ENC.encode(lines.join('\n') + '\n') : null
   return [output, new IOResult({ writes })]

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { FindOptions } from '../../resource/base.ts'
 import { buildTree, type FindEntry, keep } from '../../commands/builtin/findEval.ts'
@@ -49,7 +50,12 @@ async function statEntry(
   prefix: string,
   index: IndexCacheStore | undefined,
 ): Promise<FileStat | null> {
-  const spec = new PathSpec({ original: path, directory: path, resolved: false, prefix })
+  const spec = new PathSpec({
+    virtual: path,
+    directory: path,
+    resolved: false,
+    resourcePath: mountKey(path, prefix),
+  })
   try {
     return await deps.stat(spec, index)
   } catch (err) {
@@ -81,7 +87,12 @@ async function walk(
     let isFolder: boolean
     if (hint === null) {
       // Warm index-cache entries carry no trailing slash, so fall back to stat.
-      const s = await statEntry(deps, trimmed, spec.prefix, index)
+      const s = await statEntry(
+        deps,
+        trimmed,
+        mountPrefixOf(spec.virtual, spec.resourcePath),
+        index,
+      )
       isFolder = s !== null && s.type === FileType.DIRECTORY
     } else {
       isFolder = hint
@@ -89,10 +100,10 @@ async function walk(
     out.push({ path: trimmed, depth, file: !isFolder })
     if (isFolder) {
       const childSpec = new PathSpec({
-        original: trimmed,
+        virtual: trimmed,
         directory: trimmed,
         resolved: false,
-        prefix: spec.prefix,
+        resourcePath: mountKey(trimmed, mountPrefixOf(spec.virtual, spec.resourcePath)),
       })
       await walk(deps, childSpec, index, maxDepth, depth + 1, out)
     }
@@ -109,7 +120,7 @@ export async function walkFind(
   // GNU depth convention: the search root is depth 0, its children are
   // depth 1, so the walk starts at 1 and -maxdepth 0 lists nothing.
   await walk(deps, path, index, options.maxDepth ?? null, 1, collected)
-  const prefix = path.prefix
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
   const results: string[] = []
   const tree =
     options.tree ??
@@ -121,7 +132,7 @@ export async function walkFind(
       nameExclude: options.nameExclude,
       orNames: options.orNames,
     })
-  const searchKey = stripSlash(path.stripPrefix)
+  const searchKey = stripSlash(path.mountPath)
   if (searchKey !== '' && (options.maxDepth == null || options.maxDepth >= 0)) {
     let rootStat: FileStat | null = null
     try {

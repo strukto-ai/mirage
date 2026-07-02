@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { TrelloAccessor } from '../../accessor/trello.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -63,7 +64,11 @@ async function ensureLookup(
     const parentPath = `${prefix}/${parentKey}`
     await readdir(
       accessor,
-      new PathSpec({ original: parentPath, directory: parentPath, prefix }),
+      new PathSpec({
+        virtual: parentPath,
+        directory: parentPath,
+        resourcePath: mountKey(parentPath, prefix),
+      }),
       index,
       filter,
     )
@@ -81,8 +86,8 @@ export async function readdir(
   index?: IndexCacheStore,
   filter: TrelloReaddirFilter = {},
 ): Promise<string[]> {
-  const prefix = path.prefix
-  let p = path.pattern !== null ? path.directory : path.original
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  let p = path.pattern !== null ? path.directory : path.virtual
   if (prefix !== '' && p.startsWith(prefix)) {
     p = p.slice(prefix.length) || '/'
   }

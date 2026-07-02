@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { S3Client } from '@aws-sdk/client-s3'
 import type { PathSpec } from '../../types.ts'
 import { loadOptionalPeer } from '../../utils/optional_peer.ts'
@@ -31,10 +32,10 @@ export function stripKeyPrefix(key: string, config: S3Config): string {
 }
 
 export function rawPathOf(path: PathSpec): string {
-  const prefix = path.prefix
-  return prefix !== '' && path.original.startsWith(prefix)
-    ? path.original.slice(prefix.length) || '/'
-    : path.original
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  return prefix !== '' && path.virtual.startsWith(prefix)
+    ? path.virtual.slice(prefix.length) || '/'
+    : path.virtual
 }
 
 export interface S3SendClient {

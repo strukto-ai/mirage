@@ -86,7 +86,8 @@ async def test_read_file(accessor, index):
     ):
         result = await read(
             accessor,
-            PathSpec(original="/Team Drive/report.pdf",
+            PathSpec(resource_path=("/Team Drive/report.pdf").strip("/"),
+                     virtual="/Team Drive/report.pdf",
                      directory="/Team Drive/report.pdf"), index)
         assert result == content
 
@@ -109,7 +110,9 @@ async def test_read_shared_drive_raises_is_a_directory(accessor, index):
         with pytest.raises(IsADirectoryError):
             await read(
                 accessor,
-                PathSpec(original="/Team Drive", directory="/Team Drive"),
+                PathSpec(resource_path=("/Team Drive").strip("/"),
+                         virtual="/Team Drive",
+                         directory="/Team Drive"),
                 index,
             )
     mock_download.assert_not_awaited()
@@ -120,7 +123,8 @@ async def test_read_not_found(accessor, index):
     with pytest.raises(FileNotFoundError):
         await read(
             accessor,
-            PathSpec(original="/missing/file.txt",
+            PathSpec(resource_path=("/missing/file.txt").strip("/"),
+                     virtual="/missing/file.txt",
                      directory="/missing/file.txt"), index)
 
 
@@ -152,7 +156,9 @@ async def test_read_auto_bootstraps_from_empty_index(accessor, index):
     ):
         result = await read(
             accessor,
-            PathSpec(original="/report.pdf", directory="/report.pdf"),
+            PathSpec(resource_path=("/report.pdf").strip("/"),
+                     virtual="/report.pdf",
+                     directory="/report.pdf"),
             index,
         )
         assert result == b"pdf-bytes"
@@ -187,6 +193,8 @@ async def test_read_missing_file_raises_after_recursion(accessor, index):
         with pytest.raises(FileNotFoundError):
             await read(
                 accessor,
-                PathSpec(original="/missing.txt", directory="/missing.txt"),
+                PathSpec(resource_path=("/missing.txt").strip("/"),
+                         virtual="/missing.txt",
+                         directory="/missing.txt"),
                 index,
             )

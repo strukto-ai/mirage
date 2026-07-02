@@ -26,9 +26,11 @@ async def rm_r(accessor: S3Accessor, path: PathSpec) -> None:
         path (PathSpec | str): Prefix path.
     """
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
     if isinstance(path, PathSpec):
-        path = path.strip_prefix
+        path = path.mount_path
     config = accessor.config
     pfx = _prefix(path, config)
     session = async_session(config)

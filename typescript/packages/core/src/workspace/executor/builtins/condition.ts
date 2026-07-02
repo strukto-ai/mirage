@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../../utils/slash.ts'
 import { IOResult } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { Session } from '../../session/session.ts'
@@ -49,7 +50,8 @@ async function evalTest(dispatch: DispatchFn, argv: (string | PathSpec)[]): Prom
         val instanceof PathSpec
           ? val
           : new PathSpec({
-              original: scopePath(val),
+              resourcePath: stripSlash(scopePath(val)),
+              virtual: scopePath(val),
               directory: scopePath(val),
               resolved: false,
             })

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { rekey } from '../../../utils/key_prefix.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import type { FindOptions } from '../../../resource/base.ts'
@@ -115,7 +116,7 @@ export function makeResolveGlob<A extends Accessor = Accessor>(
         for (const entry of entries) {
           const base = entry.split('/').pop() ?? ''
           if (fnmatch(base, p.pattern)) {
-            matched.push(PathSpec.fromStrPath(entry, p.prefix))
+            matched.push(PathSpec.fromStrPath(entry, rekey(p.virtual, p.resourcePath, entry)))
           }
         }
         const capped =

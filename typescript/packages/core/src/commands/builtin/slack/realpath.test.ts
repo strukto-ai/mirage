@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -48,10 +49,10 @@ describe('slack realpath', () => {
   it('normalizes redundant separators and dots', async () => {
     const out = await runRealpath([
       new PathSpec({
-        original: '/mnt/slack/./channels//general__C1',
+        virtual: '/mnt/slack/./channels//general__C1',
         directory: '/mnt/slack/./channels//general__C1',
         resolved: false,
-        prefix: '/mnt/slack',
+        resourcePath: mountKey('/mnt/slack/./channels//general__C1', '/mnt/slack'),
       }),
     ])
     expect(out).toBe('/mnt/slack/channels/general__C1\n')
@@ -60,10 +61,10 @@ describe('slack realpath', () => {
   it('collapses .. segments', async () => {
     const out = await runRealpath([
       new PathSpec({
-        original: '/mnt/slack/channels/general__C1/../foo',
+        virtual: '/mnt/slack/channels/general__C1/../foo',
         directory: '/mnt/slack/channels/general__C1/../foo',
         resolved: false,
-        prefix: '/mnt/slack',
+        resourcePath: mountKey('/mnt/slack/channels/general__C1/../foo', '/mnt/slack'),
       }),
     ])
     expect(out).toBe('/mnt/slack/channels/foo\n')

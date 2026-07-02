@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { record, revisionFor } from '../../observe/context.ts'
 import { ResourceName, type PathSpec } from '../../types.ts'
@@ -47,8 +48,8 @@ export async function read(
   _index?: IndexCacheStore,
   options: S3ReadOptions = {},
 ): Promise<Uint8Array> {
-  const virtual = path.original
-  const prefix = path.prefix
+  const virtual = path.virtual
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
   const rawPath =
     prefix !== '' && virtual.startsWith(prefix) ? virtual.slice(prefix.length) || '/' : virtual
   // `virtual` retains the mount prefix (e.g. /s3/foo) for snapshot records;

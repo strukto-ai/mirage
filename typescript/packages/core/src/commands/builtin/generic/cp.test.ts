@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
@@ -21,11 +22,16 @@ import { cpGeneric } from './cp.ts'
 const DEC = new TextDecoder()
 
 function key(p: PathSpec | string): string {
-  return rstripSlash(typeof p === 'string' ? p : p.original)
+  return rstripSlash(typeof p === 'string' ? p : p.virtual)
 }
 
 function spec(path: string): PathSpec {
-  return new PathSpec({ original: path, directory: path, resolved: false, prefix: '' })
+  return new PathSpec({
+    virtual: path,
+    directory: path,
+    resolved: false,
+    resourcePath: mountKey(path, ''),
+  })
 }
 
 function makeBackend(files: Map<string, Uint8Array>, dirs: Set<string>) {

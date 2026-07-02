@@ -39,7 +39,7 @@ async def _resolve_sizes(
     resolved: list[tuple[str, int]] = []
     missing = 0
     for p in paths:
-        path_str = p.original if isinstance(p, PathSpec) else p
+        path_str = p.virtual if isinstance(p, PathSpec) else p
         size = None
         if index is not None:
             lookup = await index.get(path_str)

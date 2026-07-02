@@ -6,6 +6,7 @@ from mirage.commands.builtin.utils.output import (format_optional_records,
                                                   format_records)
 from mirage.io.types import IOResult
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.key_prefix import rekey
 
 _BRANCH = "├── "
 _LAST = "└── "
@@ -38,10 +39,11 @@ async def _walk(
 
     filtered: list[tuple[PathSpec, FileStat]] = []
     for entry in entries:
-        entry_spec = PathSpec(original=entry,
+        entry_spec = PathSpec(virtual=entry,
                               directory=entry,
                               resolved=False,
-                              prefix=path.prefix)
+                              resource_path=rekey(path.virtual,
+                                                  path.resource_path, entry))
         try:
             s = await stat(entry_spec, index)
         except (FileNotFoundError, ValueError) as exc:

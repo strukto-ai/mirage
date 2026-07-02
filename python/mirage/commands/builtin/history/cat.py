@@ -37,7 +37,7 @@ async def cat(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         reads = {
-            p.strip_prefix: await history_read(accessor, p, index)
+            p.mount_path: await history_read(accessor, p, index)
             for p in paths
         }
         merged = b"".join(reads.values())

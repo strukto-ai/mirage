@@ -29,6 +29,7 @@ from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 
 def _positional_as_paths(texts: tuple[str, ...],
@@ -42,8 +43,9 @@ def _positional_as_paths(texts: tuple[str, ...],
         texts (tuple[str, ...]): positional operands that are really files.
         cwd (PathSpec | None): current directory for relative resolution.
     """
-    base = cwd.original if cwd is not None else "/"
-    prefix = cwd.prefix if cwd is not None else ""
+    base = cwd.virtual if cwd is not None else "/"
+    prefix = (mount_prefix_of(cwd.virtual, cwd.resource_path)
+              if cwd is not None else "")
     out: list[PathSpec] = []
     for t in texts:
         resolved = (posixpath.normpath(t) if t.startswith("/") else
@@ -51,10 +53,10 @@ def _positional_as_paths(texts: tuple[str, ...],
         slash = resolved.rfind("/")
         out.append(
             PathSpec(
-                original=resolved,
+                virtual=resolved,
                 directory=resolved[:slash + 1] if slash >= 0 else "/",
                 resolved=True,
-                prefix=prefix,
+                resource_path=mount_key(resolved, prefix),
             ))
     return out
 

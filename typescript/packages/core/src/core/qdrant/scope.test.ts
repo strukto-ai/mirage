@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../utils/slash.ts'
 import { describe, expect, it } from 'vitest'
 
 import { resolveQdrantConfig } from '../../resource/qdrant/config.ts'
@@ -28,7 +29,7 @@ const config = resolveQdrantConfig({
 })
 
 function ps(p: string): PathSpec {
-  return new PathSpec({ original: p, directory: p })
+  return new PathSpec({ resourcePath: stripSlash(p), virtual: p, directory: p })
 }
 
 describe('qdrant scope', () => {

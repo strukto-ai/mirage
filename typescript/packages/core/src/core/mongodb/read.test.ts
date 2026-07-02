@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { resolveMongoDBConfig } from '../../resource/mongodb/config.ts'
@@ -20,7 +21,7 @@ import { read } from './read.ts'
 import { arrayIter, stubMongoDriver } from './_test_util.ts'
 
 function ps(p: string): PathSpec {
-  return new PathSpec({ original: p, directory: p, prefix: '/mongo' })
+  return new PathSpec({ virtual: p, directory: p, resourcePath: mountKey(p, '/mongo') })
 }
 
 function decode(b: Uint8Array): string {

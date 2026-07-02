@@ -14,7 +14,7 @@ async def du(accessor: NextcloudAccessor, path: PathSpec) -> int:
         info = None
     if info is not None and info.type != FileType.DIRECTORY:
         return info.size or 0
-    target = path.strip_prefix
+    target = path.mount_path
     pfx = target.strip("/")
     scan_path = pfx + "/" if pfx else "/"
     op = accessor.operator()
@@ -41,7 +41,7 @@ async def du_all(accessor: NextcloudAccessor,
         info = None
     if info is not None and info.type != FileType.DIRECTORY:
         return []
-    target = path.strip_prefix
+    target = path.mount_path
     pfx = target.strip("/")
     scan_path = pfx + "/" if pfx else "/"
     op = accessor.operator()

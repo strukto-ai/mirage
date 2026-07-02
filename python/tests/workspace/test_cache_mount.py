@@ -37,7 +37,7 @@ async def stat_zzz_disk(
     paths = await resolve_glob(accessor, paths, index)
     raw = await read_bytes(accessor, paths[0])
     return b"CUSTOM DISK STAT %d\n" % len(raw), IOResult(
-        reads={paths[0].strip_prefix: raw}, cache=[paths[0].strip_prefix])
+        reads={paths[0].mount_path: raw}, cache=[paths[0].mount_path])
 
 
 @pytest.mark.asyncio

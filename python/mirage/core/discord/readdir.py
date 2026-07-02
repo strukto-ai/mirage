@@ -29,6 +29,7 @@ from mirage.core.discord.history import list_messages_for_day
 from mirage.core.discord.members import list_members
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +50,11 @@ def _date_range(end_date: str, days: int = 30) -> list[str]:
 def _normalize_path(path: PathSpec | str) -> tuple[str, str, str]:
     """Reduce input to (prefix, key, virtual_key)."""
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    prefix = path.prefix
-    raw = path.directory if path.pattern else path.original
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    raw = path.directory if path.pattern else path.virtual
     if prefix and raw.startswith(prefix):
         raw = raw[len(prefix):] or "/"
     key = raw.strip("/")
@@ -327,7 +330,9 @@ async def _readdir_files_dir(
     # Date dir lookup triggers _fetch_day which populates the files dir
     date_key = "/".join(parts[:4])
     date_vk = f"{prefix}/{date_key}"
-    date_spec = PathSpec(original=date_vk, directory=date_vk, prefix=prefix)
+    date_spec = PathSpec(virtual=date_vk,
+                         directory=date_vk,
+                         resource_path=mount_key(date_vk, prefix))
     await readdir(accessor, date_spec, index)
     cached = await index.list_dir(virtual_key)
     if cached.entries is None:
@@ -348,7 +353,7 @@ async def readdir(
         index (IndexCacheStore | None): index cache.
     """
     prefix, key, virtual_key = _normalize_path(path)
-    raw_path = path.original if isinstance(path, PathSpec) else path
+    raw_path = path.virtual if isinstance(path, PathSpec) else path
 
     if not key:
         return await _readdir_root(accessor, prefix, virtual_key, index)

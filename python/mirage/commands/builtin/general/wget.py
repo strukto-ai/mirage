@@ -51,8 +51,7 @@ async def wget(
         dest_raw = paths[0]
     else:
         dest_raw = url.rsplit("/", 1)[-1]
-    dest_str = dest_raw.original if isinstance(dest_raw,
-                                               PathSpec) else dest_raw
+    dest_str = dest_raw.virtual if isinstance(dest_raw, PathSpec) else dest_raw
     data = _http_get(url)
     if dispatch is not None:
         scope = _resolve_target(dest_raw, cwd)

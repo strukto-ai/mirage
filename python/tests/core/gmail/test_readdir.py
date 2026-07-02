@@ -21,6 +21,7 @@ from mirage.cache.index import IndexEntry, RAMIndexCacheStore
 from mirage.core.gmail.readdir import (_date_from_internal, _msg_filename,
                                        _sanitize, readdir)
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.fixture
@@ -82,7 +83,8 @@ async def test_readdir_root(accessor, index):
          )),
     ])
     result = await readdir(
-        accessor, PathSpec(original="/", directory="/", prefix="/gmail"),
+        accessor,
+        PathSpec(resource_path="", virtual="/gmail", directory="/gmail"),
         index)
     assert "/gmail/INBOX" in result
     assert "/gmail/SENT" in result
@@ -110,9 +112,9 @@ async def test_readdir_label(accessor, index):
     ])
     result = await readdir(
         accessor,
-        PathSpec(original="/gmail/INBOX",
-                 directory="/gmail/INBOX",
-                 prefix="/gmail"), index)
+        PathSpec(resource_path=mount_key("/gmail/INBOX", "/gmail"),
+                 virtual="/gmail/INBOX",
+                 directory="/gmail/INBOX"), index)
     assert "/gmail/INBOX/2026-04-12" in result
 
 
@@ -121,9 +123,9 @@ async def test_readdir_not_found(accessor, index):
     with pytest.raises(FileNotFoundError):
         await readdir(
             accessor,
-            PathSpec(original="/gmail/NONEXISTENT",
-                     directory="/gmail/NONEXISTENT",
-                     prefix="/gmail"), index)
+            PathSpec(resource_path=mount_key("/gmail/NONEXISTENT", "/gmail"),
+                     virtual="/gmail/NONEXISTENT",
+                     directory="/gmail/NONEXISTENT"), index)
 
 
 @pytest.mark.asyncio
@@ -136,8 +138,9 @@ async def test_readdir_date_dir_uses_after_before_query(accessor, index):
                }]):
         await readdir(
             accessor,
-            PathSpec(original="/gmail", directory="/gmail", prefix="/gmail"),
-            index)
+            PathSpec(resource_path=mount_key("/gmail", "/gmail"),
+                     virtual="/gmail",
+                     directory="/gmail"), index)
 
     captured_calls: list[dict] = []
 
@@ -156,9 +159,10 @@ async def test_readdir_date_dir_uses_after_before_query(accessor, index):
                new=fake_list_messages):
         result = await readdir(
             accessor,
-            PathSpec(original="/gmail/INBOX/2026-05-03",
-                     directory="/gmail/INBOX/2026-05-03",
-                     prefix="/gmail"), index)
+            PathSpec(resource_path=mount_key("/gmail/INBOX/2026-05-03",
+                                             "/gmail"),
+                     virtual="/gmail/INBOX/2026-05-03",
+                     directory="/gmail/INBOX/2026-05-03"), index)
 
     assert result == []
     date_calls = [
@@ -215,9 +219,10 @@ async def test_readdir_date_dir_returns_msg_files_not_date_strings(
     ):
         result = await readdir(
             accessor,
-            PathSpec(original="/gmail/INBOX/2026-04-27",
-                     directory="/gmail/INBOX/2026-04-27",
-                     prefix="/gmail"), index)
+            PathSpec(resource_path=mount_key("/gmail/INBOX/2026-04-27",
+                                             "/gmail"),
+                     virtual="/gmail/INBOX/2026-04-27",
+                     directory="/gmail/INBOX/2026-04-27"), index)
 
     assert result == [
         "/gmail/INBOX/2026-04-27/Hi_27__x1.gmail.json",
@@ -263,14 +268,16 @@ async def test_readdir_date_dir_warm_cache_matches_cold(accessor, index):
     ):
         cold = await readdir(
             accessor,
-            PathSpec(original="/gmail/INBOX/2026-04-27",
-                     directory="/gmail/INBOX/2026-04-27",
-                     prefix="/gmail"), index)
+            PathSpec(resource_path=mount_key("/gmail/INBOX/2026-04-27",
+                                             "/gmail"),
+                     virtual="/gmail/INBOX/2026-04-27",
+                     directory="/gmail/INBOX/2026-04-27"), index)
         warm = await readdir(
             accessor,
-            PathSpec(original="/gmail/INBOX/2026-04-27",
-                     directory="/gmail/INBOX/2026-04-27",
-                     prefix="/gmail"), index)
+            PathSpec(resource_path=mount_key("/gmail/INBOX/2026-04-27",
+                                             "/gmail"),
+                     virtual="/gmail/INBOX/2026-04-27",
+                     directory="/gmail/INBOX/2026-04-27"), index)
 
     assert warm == cold
     assert fetch_count["n"] == 1, "warm call should not re-fetch"
@@ -326,15 +333,17 @@ async def test_readdir_date_dir_lists_msg_file_and_attachment_dir(
     ):
         date_listing = await readdir(
             accessor,
-            PathSpec(original="/gmail/INBOX/2026-04-27",
-                     directory="/gmail/INBOX/2026-04-27",
-                     prefix="/gmail"), index)
+            PathSpec(resource_path=mount_key("/gmail/INBOX/2026-04-27",
+                                             "/gmail"),
+                     virtual="/gmail/INBOX/2026-04-27",
+                     directory="/gmail/INBOX/2026-04-27"), index)
         att_listing = await readdir(
             accessor,
             PathSpec(
-                original="/gmail/INBOX/2026-04-27/Quote__m1",
+                resource_path=mount_key("/gmail/INBOX/2026-04-27/Quote__m1",
+                                        "/gmail"),
+                virtual="/gmail/INBOX/2026-04-27/Quote__m1",
                 directory="/gmail/INBOX/2026-04-27/Quote__m1",
-                prefix="/gmail",
             ),
             index,
         )
@@ -384,9 +393,10 @@ async def test_readdir_date_dir_without_attachments_omits_dir(accessor, index):
     ):
         date_listing = await readdir(
             accessor,
-            PathSpec(original="/gmail/INBOX/2026-04-27",
-                     directory="/gmail/INBOX/2026-04-27",
-                     prefix="/gmail"), index)
+            PathSpec(resource_path=mount_key("/gmail/INBOX/2026-04-27",
+                                             "/gmail"),
+                     virtual="/gmail/INBOX/2026-04-27",
+                     directory="/gmail/INBOX/2026-04-27"), index)
 
     assert date_listing == [
         "/gmail/INBOX/2026-04-27/No_Attach__m1.gmail.json",

@@ -18,7 +18,7 @@ import { PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { httpFormRequest, httpRequest } from '../utils/http.ts'
-import { rstripSlash } from '../../../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 
 const ENC = new TextEncoder()
 
@@ -30,7 +30,7 @@ export function resolveTarget(o: string, cwd: string): PathSpec {
   }
   const lastSlash = path.lastIndexOf('/')
   const directory = lastSlash >= 0 ? path.slice(0, lastSlash + 1) : '/'
-  return new PathSpec({ original: path, directory, resolved: true })
+  return new PathSpec({ resourcePath: stripSlash(path), virtual: path, directory, resolved: true })
 }
 
 async function curlCommand(

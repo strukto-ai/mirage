@@ -30,7 +30,7 @@ async def write_bytes(accessor: HfBucketsAccessor,
                       index: IndexCacheStore | None = None) -> None:
     if isinstance(path, str):
         path = PathSpec.from_str_path(path)
-    raw = path.strip_prefix
+    raw = path.mount_path
     key = raw.lstrip("/")
     op = accessor.operator()
     start_ms = int(time.monotonic() * 1000)
@@ -38,5 +38,5 @@ async def write_bytes(accessor: HfBucketsAccessor,
         await op.write(key, data)
     except NotFound as exc:
         raise enoent(path) from exc
-    record("write", path.original, accessor.RESOURCE_NAME, len(data), start_ms)
+    record("write", path.virtual, accessor.RESOURCE_NAME, len(data), start_ms)
     await invalidate_after_write(path)

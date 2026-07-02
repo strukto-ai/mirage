@@ -40,8 +40,10 @@ def index():
 
 @pytest.mark.asyncio
 async def test_readdir_root(accessor, index):
-    result = await readdir(accessor, PathSpec(original="/", directory="/"),
-                           index)
+    result = await readdir(
+        accessor,
+        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"),
+        index)
     assert result == ["/traces", "/sessions", "/prompts", "/datasets"]
 
 
@@ -62,7 +64,10 @@ async def test_readdir_traces(accessor, index):
             ],
     ):
         result = await readdir(
-            accessor, PathSpec(original="/traces", directory="/traces"), index)
+            accessor,
+            PathSpec(resource_path=("/traces").strip("/"),
+                     virtual="/traces",
+                     directory="/traces"), index)
 
     assert "/traces/abc123.json" in result
     assert "/traces/def456.json" in result
@@ -80,8 +85,10 @@ async def test_readdir_sessions(accessor, index):
             }],
     ):
         result = await readdir(
-            accessor, PathSpec(original="/sessions", directory="/sessions"),
-            index)
+            accessor,
+            PathSpec(resource_path=("/sessions").strip("/"),
+                     virtual="/sessions",
+                     directory="/sessions"), index)
 
     assert "/sessions/session-1" in result
     assert "/sessions/session-2" in result
@@ -104,8 +111,10 @@ async def test_readdir_prompts(accessor, index):
             ],
     ):
         result = await readdir(
-            accessor, PathSpec(original="/prompts", directory="/prompts"),
-            index)
+            accessor,
+            PathSpec(resource_path=("/prompts").strip("/"),
+                     virtual="/prompts",
+                     directory="/prompts"), index)
 
     assert "/prompts/summarize" in result
     assert "/prompts/translate" in result
@@ -123,8 +132,10 @@ async def test_readdir_datasets(accessor, index):
             }],
     ):
         result = await readdir(
-            accessor, PathSpec(original="/datasets", directory="/datasets"),
-            index)
+            accessor,
+            PathSpec(resource_path=("/datasets").strip("/"),
+                     virtual="/datasets",
+                     directory="/datasets"), index)
 
     assert "/datasets/qa-eval" in result
     assert "/datasets/chat-eval" in result
@@ -134,8 +145,9 @@ async def test_readdir_datasets(accessor, index):
 async def test_readdir_dataset_contents(accessor, index):
     result = await readdir(
         accessor,
-        PathSpec(original="/datasets/qa-eval", directory="/datasets/qa-eval"),
-        index)
+        PathSpec(resource_path=("/datasets/qa-eval").strip("/"),
+                 virtual="/datasets/qa-eval",
+                 directory="/datasets/qa-eval"), index)
     assert "/datasets/qa-eval/items.jsonl" in result
     assert "/datasets/qa-eval/runs" in result
 
@@ -143,9 +155,11 @@ async def test_readdir_dataset_contents(accessor, index):
 @pytest.mark.asyncio
 async def test_readdir_dotfile_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
-        await readdir(accessor,
-                      PathSpec(original="/.hidden", directory="/.hidden"),
-                      index)
+        await readdir(
+            accessor,
+            PathSpec(resource_path=("/.hidden").strip("/"),
+                     virtual="/.hidden",
+                     directory="/.hidden"), index)
 
 
 @pytest.mark.asyncio
@@ -153,5 +167,6 @@ async def test_readdir_dotfile_nested_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
         await readdir(
             accessor,
-            PathSpec(original="/traces/.DS_Store",
+            PathSpec(resource_path=("/traces/.DS_Store").strip("/"),
+                     virtual="/traces/.DS_Store",
                      directory="/traces/.DS_Store"), index)

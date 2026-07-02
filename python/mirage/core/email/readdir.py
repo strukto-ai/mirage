@@ -21,6 +21,7 @@ from mirage.core.email._client import fetch_headers, list_message_uids
 from mirage.core.email.folders import list_folders
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 TITLE_MAX = 80
 UNSAFE = re.compile(r"[^\w\s\-.]")
@@ -55,10 +56,12 @@ async def readdir(
     index: IndexCacheStore = None,
 ) -> list[str]:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    virtual = path.original
-    prefix = path.prefix
-    path = (path.dir if path.pattern else path).strip_prefix
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    virtual = path.virtual
+    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    path = (path.dir if path.pattern else path).mount_path
     key = path.strip("/")
     virtual_key = prefix + "/" + key if key else prefix or "/"
     parts = key.split("/") if key else []
@@ -156,9 +159,9 @@ async def readdir(
         if cached.entries is not None:
             return cached.entries
         folder_vkey = PathSpec(
-            original=prefix + "/" + parts[0],
+            virtual=prefix + "/" + parts[0],
             directory=prefix + "/" + parts[0],
-            prefix=prefix,
+            resource_path=mount_key(prefix + "/" + parts[0], prefix),
         )
         await readdir(accessor, folder_vkey, index)
         cached = await index.list_dir(virtual_key)
@@ -173,9 +176,9 @@ async def readdir(
         if cached.entries is not None:
             return cached.entries
         folder_vkey = PathSpec(
-            original=prefix + "/" + parts[0],
+            virtual=prefix + "/" + parts[0],
             directory=prefix + "/" + parts[0],
-            prefix=prefix,
+            resource_path=mount_key(prefix + "/" + parts[0], prefix),
         )
         await readdir(accessor, folder_vkey, index)
         cached = await index.list_dir(virtual_key)

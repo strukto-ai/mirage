@@ -37,7 +37,7 @@ async def read_bytes(accessor: OneDriveAccessor,
                      index: IndexCacheStore = None,
                      offset: int = 0,
                      size: int | None = None) -> bytes:
-    virtual = path.original if isinstance(path, PathSpec) else path
+    virtual = path.virtual if isinstance(path, PathSpec) else path
     prefix, stripped = split_path(path)
     config = accessor.config
     pinned = revision_for(virtual)

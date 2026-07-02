@@ -34,7 +34,7 @@ async def test_find_name_matches_mount_root_start_path(monkeypatch,
                               knowledge_root,
                               name="knowledge",
                               index=dify_index)
-    assert results == ["/knowledge"]
+    assert results == ["/"]
 
 
 @pytest.mark.asyncio
@@ -48,25 +48,25 @@ async def test_find_filters_name_type_size_and_depth(monkeypatch,
                             knowledge_root,
                             name="quick*",
                             index=dify_index)
-    assert named == ["guides/quickstart"]
+    assert named == ["/guides/quickstart"]
 
     directories = await find.find(dify_accessor,
                                   knowledge_root,
                                   type=FindType.DIRECTORY,
                                   index=dify_index)
-    assert directories == ["/knowledge", "guides", "guides/deep"]
+    assert directories == ["/", "/guides", "/guides/deep"]
 
     large_files = await find.find(dify_accessor,
                                   knowledge_root,
                                   type=FindType.FILE,
                                   min_size=100,
                                   index=dify_index)
-    assert large_files == ["guides/quickstart"]
+    assert large_files == ["/guides/quickstart"]
 
     deep = await find.find(dify_accessor,
                            knowledge_root,
                            mindepth=2,
                            index=dify_index)
     assert "/" not in deep
-    assert "guides" not in deep
-    assert "guides/deep" in deep
+    assert "/guides" not in deep
+    assert "/guides/deep" in deep

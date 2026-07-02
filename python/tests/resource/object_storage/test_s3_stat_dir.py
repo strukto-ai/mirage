@@ -24,6 +24,7 @@ from mirage.core.s3.readdir import readdir
 from mirage.core.s3.stat import stat
 from mirage.resource.s3 import S3Config
 from mirage.types import FileType, PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.fixture
@@ -61,9 +62,10 @@ class TestStatDirectoryFallback:
             mock_session.return_value.client.return_value = _mock_client_ctx(
                 mock_client)
 
-            path = PathSpec(original="/s3/data/file.txt",
-                            directory="/s3/data/",
-                            prefix="/s3")
+            path = PathSpec(resource_path=mount_key("/s3/data/file.txt",
+                                                    "/s3"),
+                            virtual="/s3/data/file.txt",
+                            directory="/s3/data/")
             result = await stat(s3_accessor, path)
             assert result.name == "file.txt"
             assert result.size == 1024
@@ -84,9 +86,9 @@ class TestStatDirectoryFallback:
             mock_session.return_value.client.return_value = _mock_client_ctx(
                 mock_client)
 
-            path = PathSpec(original="/s3/data",
-                            directory="/s3/",
-                            prefix="/s3")
+            path = PathSpec(resource_path=mount_key("/s3/data", "/s3"),
+                            virtual="/s3/data",
+                            directory="/s3/")
             result = await stat(s3_accessor, path)
             assert result.name == "data"
             assert result.type == FileType.DIRECTORY
@@ -106,9 +108,9 @@ class TestStatDirectoryFallback:
             mock_session.return_value.client.return_value = _mock_client_ctx(
                 mock_client)
 
-            path = PathSpec(original="/s3/data",
-                            directory="/s3/",
-                            prefix="/s3")
+            path = PathSpec(resource_path=mount_key("/s3/data", "/s3"),
+                            virtual="/s3/data",
+                            directory="/s3/")
             result = await stat(s3_accessor, path)
             assert result.name == "data"
             assert result.type == FileType.DIRECTORY
@@ -124,15 +126,17 @@ class TestStatDirectoryFallback:
             mock_session.return_value.client.return_value = _mock_client_ctx(
                 mock_client)
 
-            path = PathSpec(original="/s3/nope",
-                            directory="/s3/",
-                            prefix="/s3")
+            path = PathSpec(resource_path=mount_key("/s3/nope", "/s3"),
+                            virtual="/s3/nope",
+                            directory="/s3/")
             with pytest.raises(FileNotFoundError):
                 await stat(s3_accessor, path)
 
     @pytest.mark.asyncio
     async def test_stat_root_returns_directory(self, s3_accessor):
-        path = PathSpec(original="/s3/", directory="/s3/", prefix="/s3")
+        path = PathSpec(resource_path=mount_key("/s3/", "/s3"),
+                        virtual="/s3/",
+                        directory="/s3/")
         result = await stat(s3_accessor, path)
         assert result.name == "/"
         assert result.type == FileType.DIRECTORY
@@ -146,7 +150,9 @@ class TestStatIndexCache:
             "/s3/data",
             IndexEntry(id="/data", name="data", resource_type="folder"))
 
-        path = PathSpec(original="/s3/data", directory="/s3/", prefix="/s3")
+        path = PathSpec(resource_path=mount_key("/s3/data", "/s3"),
+                        virtual="/s3/data",
+                        directory="/s3/")
         result = await stat(s3_accessor, path, index)
         assert result.name == "data"
         assert result.type == FileType.DIRECTORY
@@ -160,9 +166,9 @@ class TestStatIndexCache:
                        resource_type="file",
                        size=2048))
 
-        path = PathSpec(original="/s3/data/file.txt",
-                        directory="/s3/data/",
-                        prefix="/s3")
+        path = PathSpec(resource_path=mount_key("/s3/data/file.txt", "/s3"),
+                        virtual="/s3/data/file.txt",
+                        directory="/s3/data/")
         result = await stat(s3_accessor, path, index)
         assert result.name == "file.txt"
         assert result.size == 2048
@@ -194,9 +200,9 @@ class TestReaddirIndexEntries:
             mock_session.return_value.client.return_value = _mock_client_ctx(
                 mock_client)
 
-            path = PathSpec(original="/s3/subdir",
-                            directory="/s3/",
-                            prefix="/s3")
+            path = PathSpec(resource_path=mount_key("/s3/subdir", "/s3"),
+                            virtual="/s3/subdir",
+                            directory="/s3/")
             result = await readdir(s3_accessor, path, index)
             assert "/s3/subdir/data" in result
             assert "/s3/subdir/readme.txt" in result
@@ -231,9 +237,9 @@ class TestReaddirIndexEntries:
             mock_session.return_value.client.return_value = _mock_client_ctx(
                 mock_client)
 
-            path = PathSpec(original="/s3/subdir",
-                            directory="/s3/",
-                            prefix="/s3")
+            path = PathSpec(resource_path=mount_key("/s3/subdir", "/s3"),
+                            virtual="/s3/subdir",
+                            directory="/s3/")
             r1 = await readdir(s3_accessor, path, index)
             r2 = await readdir(s3_accessor, path, index)
             assert r1 == r2
@@ -265,23 +271,23 @@ class TestStatAfterReaddir:
             mock_session.return_value.client.return_value = _mock_client_ctx(
                 mock_client)
 
-            path = PathSpec(original="/s3/subdir",
-                            directory="/s3/",
-                            prefix="/s3")
+            path = PathSpec(resource_path=mount_key("/s3/subdir", "/s3"),
+                            virtual="/s3/subdir",
+                            directory="/s3/")
             await readdir(s3_accessor, path, index)
 
         result = await stat(
             s3_accessor,
-            PathSpec(original="/s3/subdir/nested",
-                     directory="/s3/subdir/",
-                     prefix="/s3"), index)
+            PathSpec(resource_path=mount_key("/s3/subdir/nested", "/s3"),
+                     virtual="/s3/subdir/nested",
+                     directory="/s3/subdir/"), index)
         assert result.name == "nested"
         assert result.type == FileType.DIRECTORY
 
         result = await stat(
             s3_accessor,
-            PathSpec(original="/s3/subdir/readme.txt",
-                     directory="/s3/subdir/",
-                     prefix="/s3"), index)
+            PathSpec(resource_path=mount_key("/s3/subdir/readme.txt", "/s3"),
+                     virtual="/s3/subdir/readme.txt",
+                     directory="/s3/subdir/"), index)
         assert result.name == "readme.txt"
         assert result.size == 500

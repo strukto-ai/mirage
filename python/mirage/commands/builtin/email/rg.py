@@ -34,6 +34,7 @@ from mirage.core.email.search import _build_vfs_path, search_messages
 from mirage.core.email.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_prefix_of
 
 
 @command("rg", resource="email", spec=SPECS["rg"])
@@ -75,7 +76,8 @@ async def rg(
 
         all_results: list[str] = []
         any_match = False
-        file_prefix = paths[0].prefix if paths else ""
+        file_prefix = mount_prefix_of(paths[0].virtual,
+                                      paths[0].resource_path) if paths else ""
         for uid in uids:
             msg = await fetch_message(accessor, folder, uid)
             msg_text = json.dumps(msg,

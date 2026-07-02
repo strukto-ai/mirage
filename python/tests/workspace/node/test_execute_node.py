@@ -44,7 +44,7 @@ async def _echo_resolve_glob(scopes, prefix=""):
     # Return resource-relative paths, matching real resolve_glob behavior
     results = []
     for s in scopes:
-        path = s.original
+        path = s.virtual
         if prefix and path.startswith(prefix):
             path = path[len(prefix):] or "/"
         results.append(path)
@@ -243,7 +243,7 @@ def test_redirect_stdout():
     _, io, _, _, _, dispatch = _exec("echo hello > /out.txt")
     write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
     assert len(write_calls) == 1
-    assert write_calls[0][0][1].original == "/out.txt"
+    assert write_calls[0][0][1].virtual == "/out.txt"
     assert io.exit_code == 0
 
 
@@ -703,7 +703,7 @@ def test_redirect_with_pipeline():
     _, io, _, _, _, dispatch = _exec("echo hello | grep hello > /out.txt")
     write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
     assert len(write_calls) == 1
-    assert write_calls[0][0][1].original == "/out.txt"
+    assert write_calls[0][0][1].virtual == "/out.txt"
 
 
 # ── case patterns ──────────────────────────────
@@ -880,7 +880,7 @@ def test_command_file_becomes_globscope():
     assert len(scopes) == 1
     assert isinstance(scopes[0], PathSpec)
     assert scopes[0].resolved is True
-    assert "file.txt" in scopes[0].original
+    assert "file.txt" in scopes[0].virtual
 
 
 def test_command_glob_becomes_globscope():
@@ -931,8 +931,8 @@ def test_command_multiple_paths():
     scopes = mount.execute_cmd.call_args[0][1]
     assert len(scopes) == 2
     assert all(isinstance(s, PathSpec) for s in scopes)
-    assert "a.txt" in scopes[0].original
-    assert "b.txt" in scopes[1].original
+    assert "a.txt" in scopes[0].virtual
+    assert "b.txt" in scopes[1].virtual
 
 
 def test_command_no_paths():
@@ -1003,7 +1003,7 @@ def test_var_expands_to_file():
     assert len(scopes) == 1
     assert isinstance(scopes[0], PathSpec)
     assert scopes[0].resolved is True
-    assert "x.txt" in scopes[0].original
+    assert "x.txt" in scopes[0].virtual
 
 
 def test_var_expands_to_glob():
@@ -1142,7 +1142,7 @@ def test_redirect_static_path():
     _, _, _, _, _, dispatch = _exec("echo hello > /data/out.txt")
     write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
     assert len(write_calls) > 0
-    assert write_calls[0][0][1].original == "/data/out.txt"
+    assert write_calls[0][0][1].virtual == "/data/out.txt"
 
 
 def test_redirect_var_target():
@@ -1151,7 +1151,7 @@ def test_redirect_var_target():
                                     env={"OUT": "/data/out.txt"})
     write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
     assert len(write_calls) > 0
-    assert write_calls[0][0][1].original == "/data/out.txt"
+    assert write_calls[0][0][1].virtual == "/data/out.txt"
 
 
 def test_redirect_concat_target():
@@ -1160,7 +1160,7 @@ def test_redirect_concat_target():
                                     env={"DIR": "/data"})
     write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
     assert len(write_calls) > 0
-    assert write_calls[0][0][1].original == "/data/out.txt"
+    assert write_calls[0][0][1].virtual == "/data/out.txt"
 
 
 def test_redirect_append():
@@ -1175,7 +1175,7 @@ def test_redirect_stdin():
     _, _, _, _, _, dispatch = _exec("sort < /data/input.txt")
     read_calls = [c for c in dispatch.call_args_list if c[0][0] == "read"]
     assert len(read_calls) > 0
-    assert read_calls[0][0][1].original == "/data/input.txt"
+    assert read_calls[0][0][1].virtual == "/data/input.txt"
 
 
 # ── cd expansion ───────────────────────────────
@@ -1223,7 +1223,7 @@ def test_source_var_expansion():
                       session))
     read_calls = [c for c in dispatch.call_args_list if c[0][0] == "read"]
     assert len(read_calls) > 0
-    assert read_calls[0][0][1].original == "/data/init.sh"
+    assert read_calls[0][0][1].virtual == "/data/init.sh"
 
 
 # ── test command expansion ─────────────────────
@@ -1299,7 +1299,7 @@ def test_pipeline_redirect_expansion():
                                     env={"F": "/data/input.txt"})
     write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
     assert len(write_calls) == 1
-    assert write_calls[0][0][1].original == "/data/out"
+    assert write_calls[0][0][1].virtual == "/data/out"
 
 
 def test_for_with_command_expansion():
@@ -1440,7 +1440,7 @@ def test_cmd_concat_var_file():
     assert len(scopes) == 1
     assert isinstance(scopes[0], PathSpec)
     assert scopes[0].resolved is True
-    assert "file.txt" in scopes[0].original
+    assert "file.txt" in scopes[0].virtual
 
 
 def test_cmd_cmd_sub_as_arg():
@@ -1460,7 +1460,7 @@ def test_cmd_cmd_sub_as_arg():
     scopes = mount.execute_cmd.call_args[0][1]
     assert len(scopes) == 1
     assert isinstance(scopes[0], PathSpec)
-    assert "file.txt" in scopes[0].original
+    assert "file.txt" in scopes[0].virtual
 
 
 def test_cmd_multiple_concat_paths():
@@ -1523,7 +1523,7 @@ def test_redirect_concat_var_target():
                                     env={"DIR": "/data"})
     write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
     assert len(write_calls) == 1
-    assert write_calls[0][0][1].original == "/data/out.txt"
+    assert write_calls[0][0][1].virtual == "/data/out.txt"
 
 
 def test_redirect_cmd_sub_target():
@@ -1542,7 +1542,7 @@ def test_redirect_cmd_sub_target():
                       session))
     write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
     assert len(write_calls) == 1
-    assert write_calls[0][0][1].original == "/data/out.txt"
+    assert write_calls[0][0][1].virtual == "/data/out.txt"
 
 
 def test_redirect_stderr_path():
@@ -1558,7 +1558,7 @@ def test_redirect_stderr_path():
         registry=(reg, mount))
     write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
     assert len(write_calls) == 1
-    assert write_calls[0][0][1].original == "/data/err.log"
+    assert write_calls[0][0][1].virtual == "/data/err.log"
     assert io.stderr is None
 
 
@@ -1570,7 +1570,7 @@ def test_redirect_append_var():
     assert "read" in ops
     assert "write" in ops
     write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
-    assert write_calls[0][0][1].original == "/data/app.log"
+    assert write_calls[0][0][1].virtual == "/data/app.log"
 
 
 def test_redirect_stdin_var():
@@ -1579,7 +1579,7 @@ def test_redirect_stdin_var():
                                     env={"INPUT": "/data/in.txt"})
     read_calls = [c for c in dispatch.call_args_list if c[0][0] == "read"]
     assert len(read_calls) == 1
-    assert read_calls[0][0][1].original == "/data/in.txt"
+    assert read_calls[0][0][1].virtual == "/data/in.txt"
 
 
 # ── heredoc: no target expansion ───────────────
@@ -1608,7 +1608,7 @@ def test_full_pipeline_with_expansion():
     # redirect should tee to /data/out.txt
     write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
     assert len(write_calls) == 1
-    assert write_calls[0][0][1].original == "/data/out.txt"
+    assert write_calls[0][0][1].virtual == "/data/out.txt"
 
 
 def test_for_with_redirect_expansion():
@@ -1617,7 +1617,7 @@ def test_for_with_redirect_expansion():
         "for f in a b; do echo $f > /data/$f.txt; done")
     write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
     assert len(write_calls) == 2
-    targets = {c[0][1].original for c in write_calls}
+    targets = {c[0][1].virtual for c in write_calls}
     assert "/data/a.txt" in targets
     assert "/data/b.txt" in targets
 
@@ -1876,7 +1876,7 @@ def test_redirect_stdin_from_file():
         execute_node(dispatch, reg, job_table, execute_fn, "a", node, session))
     read_calls = [c for c in dispatch.call_args_list if c[0][0] == "read"]
     assert len(read_calls) == 1
-    assert read_calls[0][0][1].original == "/data/input.txt"
+    assert read_calls[0][0][1].virtual == "/data/input.txt"
     assert io.exit_code == 0
     assert stdout == b"line1\nline2\n"
 
@@ -2421,7 +2421,7 @@ def test_redirect_in_for_with_expansion():
                                     "done")
     write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
     assert len(write_calls) == 2
-    targets = {c[0][1].original for c in write_calls}
+    targets = {c[0][1].virtual for c in write_calls}
     assert "/data/alpha.txt" in targets
     assert "/data/beta.txt" in targets
 
@@ -2433,7 +2433,7 @@ def test_function_calling_function_with_redirect():
                                     "outer")
     write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
     assert len(write_calls) == 1
-    assert write_calls[0][0][1].original == "/data/out.txt"
+    assert write_calls[0][0][1].virtual == "/data/out.txt"
 
 
 def test_while_read_with_case():
@@ -2519,7 +2519,7 @@ def test_python3_with_redirect():
     _, _, _, _, _, dispatch = _exec("python3 /data/script.py > /data/out.txt")
     write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
     assert len(write_calls) == 1
-    assert write_calls[0][0][1].original == "/data/out.txt"
+    assert write_calls[0][0][1].virtual == "/data/out.txt"
 
 
 # ═══════════════════════════════════════════════
@@ -2582,7 +2582,7 @@ def test_echo_redirect():
     _, _, _, _, _, dispatch = _exec("echo hello > /data/out.txt")
     write_calls = [c for c in dispatch.call_args_list if c[0][0] == "write"]
     assert len(write_calls) == 1
-    assert write_calls[0][0][1].original == "/data/out.txt"
+    assert write_calls[0][0][1].virtual == "/data/out.txt"
 
 
 # ── printf ─────────────────────────────────────

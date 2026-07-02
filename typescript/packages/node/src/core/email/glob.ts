@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IndexCacheStore, PathSpec } from '@struktoai/mirage-core'
-import { PathSpec as PathSpecCtor, rstripSlash } from '@struktoai/mirage-core'
+import { PathSpec as PathSpecCtor, rekey, rstripSlash } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../accessor/email.ts'
 import { readdir } from './readdir.ts'
 import { fnmatch } from '@struktoai/mirage-core'
@@ -38,7 +38,7 @@ export async function resolveGlob(
         const trimmed = rstripSlash(entry)
         const base = trimmed.split('/').pop() ?? trimmed
         if (!fnmatch(base, p.pattern)) continue
-        matched.push(PathSpecCtor.fromStrPath(trimmed, p.prefix))
+        matched.push(PathSpecCtor.fromStrPath(trimmed, rekey(p.virtual, p.resourcePath, trimmed)))
       }
       const truncated = matched.length > SCOPE_ERROR ? matched.slice(0, SCOPE_ERROR) : matched
       result.push(...truncated)

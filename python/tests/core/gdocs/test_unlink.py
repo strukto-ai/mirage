@@ -21,6 +21,7 @@ from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.gdocs.unlink import unlink
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.fixture
@@ -46,9 +47,10 @@ async def test_unlink_calls_delete_with_doc_id(accessor, index):
                new_callable=AsyncMock) as mock_delete:
         await unlink(
             accessor,
-            PathSpec(original="/gdocs/owned/foo.gdoc.json",
-                     directory="/gdocs/owned/foo.gdoc.json",
-                     prefix="/gdocs"), index)
+            PathSpec(resource_path=mount_key("/gdocs/owned/foo.gdoc.json",
+                                             "/gdocs"),
+                     virtual="/gdocs/owned/foo.gdoc.json",
+                     directory="/gdocs/owned/foo.gdoc.json"), index)
         mock_delete.assert_awaited_once()
         assert mock_delete.await_args.args[1] == "doc1"
     listing = await index.list_dir("/gdocs/owned")
@@ -60,9 +62,9 @@ async def test_unlink_virtual_dir_raises(accessor, index):
     with pytest.raises(IsADirectoryError):
         await unlink(
             accessor,
-            PathSpec(original="/gdocs/owned",
-                     directory="/gdocs/owned",
-                     prefix="/gdocs"), index)
+            PathSpec(resource_path=mount_key("/gdocs/owned", "/gdocs"),
+                     virtual="/gdocs/owned",
+                     directory="/gdocs/owned"), index)
 
 
 @pytest.mark.asyncio
@@ -74,6 +76,7 @@ async def test_unlink_missing_raises(accessor, index):
         with pytest.raises(FileNotFoundError):
             await unlink(
                 accessor,
-                PathSpec(original="/gdocs/owned/nope.gdoc.json",
-                         directory="/gdocs/owned/nope.gdoc.json",
-                         prefix="/gdocs"), index)
+                PathSpec(resource_path=mount_key("/gdocs/owned/nope.gdoc.json",
+                                                 "/gdocs"),
+                         virtual="/gdocs/owned/nope.gdoc.json",
+                         directory="/gdocs/owned/nope.gdoc.json"), index)

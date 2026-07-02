@@ -22,7 +22,9 @@ from mirage.types import PathSpec
 
 
 def _scope(path: str) -> PathSpec:
-    return PathSpec(original=path, directory=path.rsplit("/", 1)[0] or "/")
+    return PathSpec(resource_path=(path).strip("/"),
+                    virtual=path,
+                    directory=path.rsplit("/", 1)[0] or "/")
 
 
 @pytest.fixture

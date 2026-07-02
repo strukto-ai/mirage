@@ -40,6 +40,6 @@ export async function unlink(
     if (isNotFound(err)) throw enoent(path)
     throw err
   }
-  record('unlink', path.original, accessor.resourceName, 0, startMs)
+  record('unlink', path.virtual, accessor.resourceName, 0, startMs)
   await invalidateAfterUnlink(path)
 }

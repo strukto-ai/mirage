@@ -49,9 +49,9 @@ async def sed(
                                             extended=extended)
                 new_data = new_text.encode()
                 await write_bytes(accessor, p, new_data)
-                writes[p.strip_prefix] = new_data
+                writes[p.mount_path] = new_data
             return None, IOResult(writes=writes,
-                                  cache=[p.strip_prefix for p in paths])
+                                  cache=[p.mount_path for p in paths])
 
         outputs: list[str] = []
         for p in paths:
@@ -63,7 +63,7 @@ async def sed(
                                         extended=extended)
             outputs.append(new_text)
         return "".join(outputs).encode(), IOResult(
-            cache=[p.strip_prefix for p in paths])
+            cache=[p.mount_path for p in paths])
 
     if paths:
         modifying = in_place and any(c["cmd"] in ("s", "d") for c in commands)
@@ -79,12 +79,12 @@ async def sed(
             if modifying:
                 new_data = result.encode()
                 await write_bytes(accessor, p, new_data)
-                writes[p.strip_prefix] = new_data
+                writes[p.mount_path] = new_data
             else:
                 all_outputs.append(result)
         if modifying:
             return None, IOResult(writes=writes,
-                                  cache=[p.strip_prefix for p in paths])
+                                  cache=[p.mount_path for p in paths])
         return "\n".join(all_outputs).encode(), IOResult()
 
     raw = await _read_stdin_async(stdin)

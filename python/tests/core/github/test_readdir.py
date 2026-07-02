@@ -77,15 +77,21 @@ def tree():
 @pytest.mark.asyncio
 async def test_readdir_root(tree):
     index = _index_from_tree(tree)
-    result = await readdir(None, PathSpec(original="/", directory="/"), index)
+    result = await readdir(
+        None,
+        PathSpec(resource_path=("/").strip("/"), virtual="/", directory="/"),
+        index)
     assert result == ["/README.md", "/src"]
 
 
 @pytest.mark.asyncio
 async def test_readdir_subdirectory(tree):
     index = _index_from_tree(tree)
-    result = await readdir(None, PathSpec(original="/src", directory="/src"),
-                           index)
+    result = await readdir(
+        None,
+        PathSpec(resource_path=("/src").strip("/"),
+                 virtual="/src",
+                 directory="/src"), index)
     assert result == ["/src/main.py", "/src/utils"]
 
 
@@ -93,7 +99,10 @@ async def test_readdir_subdirectory(tree):
 async def test_readdir_nested(tree):
     index = _index_from_tree(tree)
     result = await readdir(
-        None, PathSpec(original="/src/utils", directory="/src/utils"), index)
+        None,
+        PathSpec(resource_path=("/src/utils").strip("/"),
+                 virtual="/src/utils",
+                 directory="/src/utils"), index)
     assert result == ["/src/utils/helpers.py"]
 
 
@@ -105,4 +114,6 @@ async def test_readdir_missing_directory(tree):
     with pytest.raises(FileNotFoundError):
         await readdir(
             accessor,
-            PathSpec(original="/nonexistent", directory="/nonexistent"), index)
+            PathSpec(resource_path=("/nonexistent").strip("/"),
+                     virtual="/nonexistent",
+                     directory="/nonexistent"), index)

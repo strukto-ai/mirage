@@ -20,7 +20,7 @@ import { isNotFound, resolveFileHandle } from './utils.ts'
 export async function read(accessor: OPFSAccessor, path: PathSpec): Promise<Uint8Array> {
   const root = accessor.rootHandle
   const start = performance.now()
-  const virtual = path.stripPrefix
+  const virtual = path.mountPath
   let handle: FileSystemFileHandle
   try {
     handle = await resolveFileHandle(root, virtual, { create: false })

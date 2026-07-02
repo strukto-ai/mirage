@@ -58,7 +58,9 @@ async def test_read_jsonl(accessor, index):
         path = "/My Server/channels/general/2024-01-15/chat.jsonl"
         result = await read(
             accessor,
-            PathSpec(original=path, directory=path),
+            PathSpec(virtual=path,
+                     directory=path,
+                     resource_path=path.strip("/")),
             index,
         )
 
@@ -71,5 +73,6 @@ async def test_read_not_found(accessor, index):
     with pytest.raises(FileNotFoundError):
         await read(
             accessor,
-            PathSpec(original="/no/such/path", directory="/no/such/path"),
-            index)
+            PathSpec(resource_path=("/no/such/path").strip("/"),
+                     virtual="/no/such/path",
+                     directory="/no/such/path"), index)

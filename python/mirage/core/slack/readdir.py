@@ -27,6 +27,7 @@ from mirage.core.slack.scope import SlackScope, detect_scope
 from mirage.core.slack.users import list_users
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 logger = logging.getLogger(__name__)
 
@@ -79,9 +80,11 @@ async def _latest_message_ts(config, channel_id: str) -> float | None:
 
 def _normalize_path(path: PathSpec | str) -> tuple[PathSpec, str, str, str]:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
-    prefix = path.prefix or ""
-    raw = path.directory if path.pattern else path.original
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
+    prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
+    raw = path.directory if path.pattern else path.virtual
     if prefix and raw.startswith(prefix):
         raw = raw[len(prefix):] or "/"
     key = raw.strip("/")
@@ -196,9 +199,9 @@ async def _readdir_channel_dates(
     lookup = await index.get(virtual_key)
     if lookup.entry is None:
         parent_str = prefix + "/" + container
-        parent = PathSpec(original=parent_str,
+        parent = PathSpec(virtual=parent_str,
                           directory=parent_str,
-                          prefix=prefix)
+                          resource_path=mount_key(parent_str, prefix))
         await readdir(accessor, parent, index)
         lookup = await index.get(virtual_key)
     if lookup.entry is None:
@@ -249,9 +252,9 @@ async def _readdir_date_contents(
     parent_lookup = await index.get(parent_vk)
     if parent_lookup.entry is None:
         parent_str = f"{prefix}/{container}/{chan_seg}"
-        parent = PathSpec(original=parent_str,
+        parent = PathSpec(virtual=parent_str,
                           directory=parent_str,
-                          prefix=prefix)
+                          resource_path=mount_key(parent_str, prefix))
         await readdir(accessor, parent, index)
         parent_lookup = await index.get(parent_vk)
     if parent_lookup.entry is None:
@@ -281,9 +284,9 @@ async def _readdir_files_dir(
     if cached.entries is not None:
         return cached.entries
     date_str_path = f"{prefix}/{container}/{chan_seg}/{date_str}"
-    date_path = PathSpec(original=date_str_path,
+    date_path = PathSpec(virtual=date_str_path,
                          directory=date_str_path,
-                         prefix=prefix)
+                         resource_path=mount_key(date_str_path, prefix))
     await readdir(accessor, date_path, index)
     cached = await index.list_dir(virtual_key)
     if cached.entries is not None:

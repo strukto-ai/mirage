@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../../utils/slash.ts'
 import { describe, expect, it, vi } from 'vitest'
 import type * as DriveModule from '../../../core/google/drive.ts'
 
@@ -78,7 +79,13 @@ describe('gdrive cut', () => {
     if (cmd === undefined) throw new Error('cut not registered')
     const result = await cmd.fn(
       makeAccessor() as never,
-      [new PathSpec({ original: '/test/file.csv', directory: '/test' })],
+      [
+        new PathSpec({
+          resourcePath: stripSlash('/test/file.csv'),
+          virtual: '/test/file.csv',
+          directory: '/test',
+        }),
+      ],
       [],
       makeOpts({ flags: { d: ',', f: '2' }, index }),
     )
@@ -103,7 +110,13 @@ describe('gdrive cut', () => {
     if (cmd === undefined) throw new Error('cut not registered')
     const result = await cmd.fn(
       makeAccessor() as never,
-      [new PathSpec({ original: '/test/file.txt', directory: '/test' })],
+      [
+        new PathSpec({
+          resourcePath: stripSlash('/test/file.txt'),
+          virtual: '/test/file.txt',
+          directory: '/test',
+        }),
+      ],
       [],
       makeOpts({ flags: { c: '1-3' }, index }),
     )

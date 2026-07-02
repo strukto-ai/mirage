@@ -131,7 +131,7 @@ describe('Workspace custom cache option', () => {
       return Promise.resolve()
     }
     exists(key: string | PathSpec): Promise<boolean> {
-      const k = typeof key === 'string' ? key : key.stripPrefix
+      const k = typeof key === 'string' ? key : key.mountPath
       return Promise.resolve(this.store.has(k))
     }
     isFresh(): Promise<boolean> {

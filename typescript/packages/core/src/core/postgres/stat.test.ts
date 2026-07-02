@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('./_client.ts', () => ({
@@ -45,7 +46,7 @@ describe('stat', () => {
   it('marks root as DIRECTORY', async () => {
     const r = await stat(
       makeAccessor(),
-      new PathSpec({ original: '/pg/', directory: '/pg/', prefix: '/pg' }),
+      new PathSpec({ virtual: '/pg/', directory: '/pg/', resourcePath: mountKey('/pg/', '/pg') }),
     )
     expect(r.name).toBe('/')
     expect(r.type).toBe(FileType.DIRECTORY)
@@ -54,7 +55,11 @@ describe('stat', () => {
   it('marks database.json as JSON', async () => {
     const r = await stat(
       makeAccessor(),
-      new PathSpec({ original: '/pg/database.json', directory: '/pg/', prefix: '/pg' }),
+      new PathSpec({
+        virtual: '/pg/database.json',
+        directory: '/pg/',
+        resourcePath: mountKey('/pg/database.json', '/pg'),
+      }),
     )
     expect(r.type).toBe(FileType.JSON)
     expect(r.name).toBe('database.json')
@@ -64,9 +69,9 @@ describe('stat', () => {
     const r = await stat(
       makeAccessor(),
       new PathSpec({
-        original: '/pg/public/tables/users',
+        virtual: '/pg/public/tables/users',
         directory: '/pg/public/tables/',
-        prefix: '/pg',
+        resourcePath: mountKey('/pg/public/tables/users', '/pg'),
       }),
     )
     expect(r.type).toBe(FileType.DIRECTORY)
@@ -82,9 +87,9 @@ describe('stat', () => {
     const r = await stat(
       makeAccessor(),
       new PathSpec({
-        original: '/pg/public/tables/users/rows.jsonl',
+        virtual: '/pg/public/tables/users/rows.jsonl',
         directory: '/pg/public/tables/users/',
-        prefix: '/pg',
+        resourcePath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
       }),
     )
     expect(r.type).toBe(FileType.TEXT)
@@ -98,9 +103,9 @@ describe('stat', () => {
       stat(
         makeAccessor(),
         new PathSpec({
-          original: '/pg/public/sequences',
+          virtual: '/pg/public/sequences',
           directory: '/pg/public/',
-          prefix: '/pg',
+          resourcePath: mountKey('/pg/public/sequences', '/pg'),
         }),
       ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
@@ -111,9 +116,9 @@ describe('stat', () => {
       stat(
         makeAccessor(),
         new PathSpec({
-          original: '/pg/__nf_missing__.txt',
+          virtual: '/pg/__nf_missing__.txt',
           directory: '/pg/',
-          prefix: '/pg',
+          resourcePath: mountKey('/pg/__nf_missing__.txt', '/pg'),
         }),
       ),
     ).rejects.toMatchObject({ code: 'ENOENT' })

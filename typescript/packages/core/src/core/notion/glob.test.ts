@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import type { NotionTransport } from './_client.ts'
@@ -67,10 +68,10 @@ describe('resolveNotionGlob', () => {
   it('passes a resolved PathSpec through unchanged', async () => {
     const transport = new FakeTransport()
     const resolved = new PathSpec({
-      original: `/pages/Page__${TOP1_ID}/`,
+      virtual: `/pages/Page__${TOP1_ID}/`,
       directory: `/pages/Page__${TOP1_ID}/`,
       resolved: true,
-      prefix: '',
+      resourcePath: mountKey(`/pages/Page__${TOP1_ID}/`, ''),
     })
     const out = await resolveNotionGlob(makeAccessor(transport), [resolved])
     expect(out).toHaveLength(1)
@@ -81,11 +82,11 @@ describe('resolveNotionGlob', () => {
   it('passes an unresolved PathSpec without a pattern through unchanged', async () => {
     const transport = new FakeTransport()
     const spec = new PathSpec({
-      original: `/pages/Page__${TOP1_ID}/`,
+      virtual: `/pages/Page__${TOP1_ID}/`,
       directory: `/pages/Page__${TOP1_ID}/`,
       pattern: null,
       resolved: false,
-      prefix: '',
+      resourcePath: mountKey(`/pages/Page__${TOP1_ID}/`, ''),
     })
     const out = await resolveNotionGlob(makeAccessor(transport), [spec])
     expect(out).toHaveLength(1)
@@ -101,16 +102,16 @@ describe('resolveNotionGlob', () => {
       next_cursor: null,
     })
     const spec = new PathSpec({
-      original: '/pages/Top*',
+      virtual: '/pages/Top*',
       directory: '/pages',
       pattern: 'Top*',
       resolved: false,
-      prefix: '',
+      resourcePath: mountKey('/pages/Top*', ''),
     })
     const out = await resolveNotionGlob(makeAccessor(transport), [spec])
-    const originals = out.map((p) => p.original).sort()
+    const originals = out.map((p) => p.virtual).sort()
     expect(originals).toEqual([`/pages/Top1__${TOP1_ID}`, `/pages/Top2__${TOP2_ID}`])
-    for (const p of out) expect(p.prefix).toBe('')
+    for (const p of out) expect(mountPrefixOf(p.virtual, p.resourcePath)).toBe('')
   })
 
   it('matches subtree segments by glob pattern', async () => {
@@ -126,14 +127,14 @@ describe('resolveNotionGlob', () => {
     })
     const dir = `/pages/Top1__${PARENT_ID}/`
     const spec = new PathSpec({
-      original: `${dir}Sub*`,
+      virtual: `${dir}Sub*`,
       directory: dir,
       pattern: 'Sub*',
       resolved: false,
-      prefix: '',
+      resourcePath: mountKey(`${dir}Sub*`, ''),
     })
     const out = await resolveNotionGlob(makeAccessor(transport), [spec])
-    const originals = out.map((p) => p.original).sort()
+    const originals = out.map((p) => p.virtual).sort()
     expect(originals).toEqual([
       `/pages/Top1__${PARENT_ID}/SubA__${SUB1_ID}`,
       `/pages/Top1__${PARENT_ID}/SubB__${SUB2_ID}`,
@@ -148,11 +149,11 @@ describe('resolveNotionGlob', () => {
       next_cursor: null,
     })
     const spec = new PathSpec({
-      original: '/NoSuchPrefix*',
+      virtual: '/NoSuchPrefix*',
       directory: '/pages',
       pattern: 'NoSuchPrefix*',
       resolved: false,
-      prefix: '',
+      resourcePath: mountKey('/NoSuchPrefix*', ''),
     })
     const out = await resolveNotionGlob(makeAccessor(transport), [spec])
     expect(out).toEqual([])

@@ -50,14 +50,14 @@ export async function rmRecursive(
   const fileStat = await stat(accessor, p, index)
   if (fileStat.type !== FileType.DIRECTORY) {
     await unlink(accessor, p, index)
-    return [p.stripPrefix]
+    return [p.mountPath]
   }
   const remoteRoot = backendPath(accessor.config, p)
   const removed: string[] = []
   try {
     await removeTreeRecurse(accessor, remoteRoot, removed)
   } catch (exc) {
-    if (isNotFound(exc)) throw notFoundError(p.original)
+    if (isNotFound(exc)) throw notFoundError(p.virtual)
     throw exc
   }
   await invalidateAfterUnlink(p)

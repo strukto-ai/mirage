@@ -24,7 +24,7 @@ export async function writeBytes(
   data: Uint8Array,
 ): Promise<void> {
   const start = performance.now()
-  const virtual = p.stripPrefix
+  const virtual = p.mountPath
   const full = resolveSafe(accessor.root, virtual)
   await mkdir(path.dirname(full), { recursive: true })
   await writeFile(full, data)

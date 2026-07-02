@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import type { NotionTransport } from './_client.ts'
@@ -44,8 +45,8 @@ function makeAccessor(transport: NotionTransport): NotionReadAccessor {
   return { transport }
 }
 
-function spec(original: string, prefix = ''): PathSpec {
-  return new PathSpec({ original, directory: original, prefix })
+function spec(virtual: string, prefix = ''): PathSpec {
+  return new PathSpec({ virtual, directory: virtual, resourcePath: mountKey(virtual, prefix) })
 }
 
 const PAGE_ID_DASHED = 'aaaa1111-2222-3333-4444-555566667777'
@@ -143,10 +144,10 @@ describe('notion read', () => {
       has_more: false,
       next_cursor: null,
     })
-    const original = `/notion/pages/Prefixed__${PAGE_ID_DASHED}/page.json`
+    const virtual = `/notion/pages/Prefixed__${PAGE_ID_DASHED}/page.json`
     const bytes = await read(
       makeAccessor(transport),
-      new PathSpec({ original, directory: original, prefix: '/notion' }),
+      new PathSpec({ virtual, directory: virtual, resourcePath: mountKey(virtual, '/notion') }),
       undefined,
     )
     const decoded = decodeJson(bytes) as Record<string, unknown>

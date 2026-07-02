@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../utils/slash.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from './_client.ts'
 import type * as ApiModule from './api.ts'
@@ -57,7 +59,11 @@ describe('dropbox read', () => {
     const index = new RAMIndexCacheStore()
     const data = await read(
       accessor,
-      new PathSpec({ original: '/dropbox/note.txt', directory: '/dropbox', prefix: '/dropbox' }),
+      new PathSpec({
+        virtual: '/dropbox/note.txt',
+        directory: '/dropbox',
+        resourcePath: mountKey('/dropbox/note.txt', '/dropbox'),
+      }),
       index,
     )
     expect(data).toEqual(new Uint8Array([104, 105, 33]))
@@ -72,7 +78,11 @@ describe('dropbox read', () => {
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
     await expect(
-      read(accessor, new PathSpec({ original: '/docs', directory: '/docs' }), index),
+      read(
+        accessor,
+        new PathSpec({ resourcePath: stripSlash('/docs'), virtual: '/docs', directory: '/docs' }),
+        index,
+      ),
     ).rejects.toThrow(/EISDIR/)
   })
 })

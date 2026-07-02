@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../utils/slash.ts'
 import type { ByteSource, IOResult } from '../../io/types.ts'
 import { materialize } from '../../io/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
@@ -106,7 +107,7 @@ export async function handleRedirect(
     }
 
     const scope = ensureScope(r.target)
-    const path = scope.original
+    const path = scope.virtual
 
     if (fd === -1) {
       let combined = concat([resultStdout ?? new Uint8Array(), resultStderr ?? new Uint8Array()])
@@ -191,7 +192,7 @@ function ensureScope(target: unknown): PathSpec {
 function toScope(path: string): PathSpec {
   const lastSlash = path.lastIndexOf('/')
   const directory = lastSlash >= 0 ? path.slice(0, lastSlash + 1) : '/'
-  return new PathSpec({ original: path, directory, resolved: true })
+  return new PathSpec({ resourcePath: stripSlash(path), virtual: path, directory, resolved: true })
 }
 
 function concat(chunks: Uint8Array[]): Uint8Array {

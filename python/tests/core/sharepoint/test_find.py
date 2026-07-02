@@ -5,6 +5,7 @@ import pytest
 from mirage.core.sharepoint import find as find_mod
 from mirage.core.sharepoint._resolver import ResolvedPath
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 
 _TREE = [
     ("reports/a.txt", {
@@ -48,9 +49,9 @@ def _patched(monkeypatch):
 
 
 def _spec() -> PathSpec:
-    return PathSpec(original="/sp/reports",
-                    directory="/sp/reports",
-                    prefix="/sp")
+    return PathSpec(resource_path=mount_key("/sp/reports", "/sp"),
+                    virtual="/sp/reports",
+                    directory="/sp/reports")
 
 
 @pytest.mark.asyncio

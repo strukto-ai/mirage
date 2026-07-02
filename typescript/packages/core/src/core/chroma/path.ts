@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { ChromaAccessor } from '../../accessor/chroma.ts'
 import type { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -36,7 +37,7 @@ export async function resolvePath(
   if (index === undefined) {
     throw new Error('chroma: missing index')
   }
-  const mountPrefix = spec.prefix
+  const mountPrefix = mountPrefixOf(spec.virtual, spec.resourcePath)
   await ensureTree(accessor, index, mountPrefix)
   const virtualKey = virtualKeyFor(spec)
   const result = await index.get(virtualKey)
@@ -52,12 +53,12 @@ export async function resolvePath(
   if (listing.entries !== undefined && listing.entries !== null) {
     return { virtualKey, mountPrefix, isDir: true, entry: null }
   }
-  throw enoent(spec.original)
+  throw enoent(spec.virtual)
 }
 
 export function virtualKeyFor(path: PathSpec): string {
-  const raw = path.pattern !== null ? path.directory : path.original
-  const prefix = path.prefix
+  const raw = path.pattern !== null ? path.directory : path.virtual
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
   if (prefix !== '') {
     const root = rstripSlash(prefix) !== '' ? rstripSlash(prefix) : '/'
     if (raw === root || raw.startsWith(root + '/')) {

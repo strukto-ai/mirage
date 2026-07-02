@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize, type IOResult } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
@@ -30,7 +31,12 @@ const FILES: Record<string, string> = {
 }
 
 function spec(path: string): PathSpec {
-  return new PathSpec({ original: path, directory: path, resolved: true, prefix: '' })
+  return new PathSpec({
+    virtual: path,
+    directory: path,
+    resolved: true,
+    resourcePath: mountKey(path, ''),
+  })
 }
 
 function opts(
@@ -49,16 +55,16 @@ function opts(
 const stat = (p: PathSpec): Promise<FileStat> =>
   Promise.resolve(
     new FileStat({
-      name: p.original.split('/').pop() ?? '',
-      type: p.original in FILES ? FileType.TEXT : FileType.DIRECTORY,
+      name: p.virtual.split('/').pop() ?? '',
+      type: p.virtual in FILES ? FileType.TEXT : FileType.DIRECTORY,
     }),
   )
 const readdir = (p: PathSpec): Promise<string[]> =>
-  Promise.resolve(p.original.replace(/\/+$/, '') === '/d' ? ['/d/a.txt'] : [])
+  Promise.resolve(p.virtual.replace(/\/+$/, '') === '/d' ? ['/d/a.txt'] : [])
 
 async function* fileStream(p: PathSpec): AsyncIterable<Uint8Array> {
   await Promise.resolve()
-  yield ENC.encode(FILES[p.original] ?? '')
+  yield ENC.encode(FILES[p.virtual] ?? '')
 }
 
 async function decode(out: GrepOut): Promise<string> {

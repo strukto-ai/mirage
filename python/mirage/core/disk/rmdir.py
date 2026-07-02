@@ -30,9 +30,11 @@ def _resolve(root: Path, path: str) -> Path:
 
 async def rmdir(accessor: DiskAccessor, path: PathSpec) -> None:
     if isinstance(path, str):
-        path = PathSpec(original=path, directory=path)
+        path = PathSpec(virtual=path,
+                        directory=path,
+                        resource_path=path.strip("/"))
     if isinstance(path, PathSpec):
-        path = path.strip_prefix
+        path = path.mount_path
     p = _resolve(accessor.root, path)
     await aiofiles.os.rmdir(p)
     await invalidate_after_unlink(path)

@@ -14,21 +14,23 @@
 
 import {
   BaseResource,
-  type FileStat,
   HttpLangfuseTransport,
   LANGFUSE_COMMANDS,
   LANGFUSE_PROMPT,
   LANGFUSE_VFS_OPS,
   LangfuseAccessor,
+  PathSpec,
+  ResourceName,
   langfuseRead,
   langfuseReaddir,
   langfuseStat,
-  PathSpec,
+  mountKey,
+  mountPrefixOf,
+  resolveLangfuseGlob,
+  type FileStat,
   type RegisteredCommand,
   type RegisteredOp,
   type Resource,
-  ResourceName,
-  resolveLangfuseGlob,
 } from '@struktoai/mirage-core'
 import { redactLangfuseConfig, type LangfuseConfig, type LangfuseConfigRedacted } from './config.ts'
 
@@ -106,14 +108,14 @@ export class LangfuseResource extends BaseResource implements Resource {
     const effective =
       prefix !== ''
         ? paths.map((p) =>
-            p.prefix !== ''
+            mountPrefixOf(p.virtual, p.resourcePath) !== ''
               ? p
               : new PathSpec({
-                  original: p.original,
+                  virtual: p.virtual,
                   directory: p.directory,
                   ...(p.pattern !== null ? { pattern: p.pattern } : {}),
                   resolved: p.resolved,
-                  prefix,
+                  resourcePath: mountKey(p.virtual, prefix),
                 }),
           )
         : paths

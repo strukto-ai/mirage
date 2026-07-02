@@ -17,7 +17,7 @@ async def rename(accessor: SharePointAccessor, src: PathSpec,
     if (src_resolved.drive_id is None or src_resolved.item_path is None
             or dst_resolved.drive_id is None
             or dst_resolved.item_path is None):
-        raise enoent(src.original if isinstance(src, PathSpec) else src)
+        raise enoent(src.virtual if isinstance(src, PathSpec) else src)
     src_parent = posixpath.dirname("/" + src_resolved.item_path).strip("/")
     dst_parent = posixpath.dirname("/" + dst_resolved.item_path).strip("/")
     name = posixpath.basename(dst_resolved.item_path)

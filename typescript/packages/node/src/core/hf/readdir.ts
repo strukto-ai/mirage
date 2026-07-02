@@ -14,11 +14,12 @@
 
 import {
   IndexEntry,
-  type IndexCacheStore,
-  type PathSpec,
   ResourceType,
+  mountPrefixOf,
   rstripSlash,
   stripSlash,
+  type IndexCacheStore,
+  type PathSpec,
 } from '@struktoai/mirage-core'
 import type { HfAccessor } from '../../accessor/hf.ts'
 import { SCOPE_ERROR } from './constants.ts'
@@ -30,8 +31,8 @@ export async function readdir(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<string[]> {
-  const prefix = path.prefix
-  let target = path.pattern !== null ? path.directory : path.original
+  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  let target = path.pattern !== null ? path.directory : path.virtual
   if (prefix !== '' && target.startsWith(prefix)) {
     const rest = target.slice(prefix.length)
     if (prefix.endsWith('/') || rest === '' || rest.startsWith('/')) {

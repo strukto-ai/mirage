@@ -14,35 +14,37 @@
 
 import {
   BaseResource,
+  PathSpec,
+  ResourceName,
+  S3Accessor,
+  S3_COMMANDS,
+  S3_OPS,
+  S3_PROMPT,
   copy as copyCore,
   create as createCore,
   du as duCore,
   duAll as duAllCore,
   exists as existsCore,
-  type FileStat,
-  type FindOptions,
   find as findCore,
   mkdir as mkdirCore,
+  mountKey,
+  mountPrefixOf,
   normalizeKeyPrefix,
-  PathSpec,
   rangeRead as rangeReadCore,
-  S3_COMMANDS,
   read as readCore,
   readdir as readdirCore,
-  type RegisteredCommand,
-  type RegisteredOp,
   rename as renameCore,
-  type Resource,
-  ResourceName,
   resolveS3Glob as globCore,
   rmR as rmRCore,
   rmdir as rmdirCore,
-  S3_OPS,
-  S3_PROMPT,
-  S3Accessor,
   stat as statCore,
   stream as streamCore,
   truncate as truncateCore,
+  type FileStat,
+  type FindOptions,
+  type RegisteredCommand,
+  type RegisteredOp,
+  type Resource,
   unlink as unlinkCore,
   write as writeCore,
 } from '@struktoai/mirage-core'
@@ -191,14 +193,14 @@ export class S3Resource extends BaseResource implements Resource {
   glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective = prefix
       ? paths.map((p) =>
-          p.prefix
+          mountPrefixOf(p.virtual, p.resourcePath)
             ? p
             : new PathSpec({
-                original: p.original,
+                virtual: p.virtual,
                 directory: p.directory,
                 ...(p.pattern !== null ? { pattern: p.pattern } : {}),
                 resolved: p.resolved,
-                prefix,
+                resourcePath: mountKey(p.virtual, prefix),
               }),
         )
       : paths

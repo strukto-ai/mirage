@@ -17,6 +17,7 @@ import pytest
 from mirage.commands.builtin.github.grep import grep
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_key
 from tests.fixtures.github_mock import MOCK_BLOBS
 
 
@@ -32,7 +33,10 @@ def _patch_read(monkeypatch):
 def _scope(path: str, resolved: bool = True) -> PathSpec:
     norm = "/" + path.lstrip("/")
     directory = norm.rsplit("/", 1)[0] + "/"
-    return PathSpec(original=norm, directory=directory, resolved=resolved)
+    return PathSpec(resource_path=(norm).strip("/"),
+                    virtual=norm,
+                    directory=directory,
+                    resolved=resolved)
 
 
 async def _run(accessor, index, paths, pattern, **kwargs):
@@ -144,10 +148,10 @@ async def test_grep_stdin(github_env):
 async def test_grep_files_only_with_prefix(mock_github_api, github_env):
     accessor, index = github_env
     scopes = [
-        PathSpec(original="/gh/src",
+        PathSpec(resource_path=mount_key("/gh/src", "/gh"),
+                 virtual="/gh/src",
                  directory="/gh/src/",
-                 resolved=False,
-                 prefix="/gh")
+                 resolved=False)
     ]
     stdout, io = await grep(accessor,
                             scopes,

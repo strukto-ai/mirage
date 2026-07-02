@@ -31,6 +31,7 @@ from mirage.core.gmail.search import format_grep_results, search_messages
 from mirage.core.gmail.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_prefix_of
 
 
 @command("rg", resource="gmail", spec=SPECS["rg"])
@@ -52,7 +53,8 @@ async def rg(
     if paths and "\n" not in pattern_str:
         scope = detect_scope(paths[0])
         if scope.use_native:
-            file_prefix = paths[0].prefix or ""
+            file_prefix = mount_prefix_of(paths[0].virtual,
+                                          paths[0].resource_path) or ""
             rows = await search_messages(
                 accessor.token_manager,
                 pattern_str,

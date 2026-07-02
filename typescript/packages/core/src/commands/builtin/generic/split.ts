@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../../utils/slash.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { IOResult } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -33,8 +34,13 @@ function numericSuffix(index: number, length: number): string {
   return s.length >= length ? s : '0'.repeat(length - s.length) + s
 }
 
-function makePathSpec(original: string): PathSpec {
-  return new PathSpec({ original, directory: original, resolved: true })
+function makePathSpec(virtual: string): PathSpec {
+  return new PathSpec({
+    virtual,
+    directory: virtual,
+    resourcePath: stripSlash(virtual),
+    resolved: true,
+  })
 }
 
 function joinLines(lines: readonly Uint8Array[]): Uint8Array {
@@ -57,7 +63,7 @@ export async function splitGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<CommandFnResult> {
-  const prefixPath = paths.length >= 2 && paths[1] !== undefined ? paths[1].stripPrefix : 'x'
+  const prefixPath = paths.length >= 2 && paths[1] !== undefined ? paths[1].mountPath : 'x'
   const linesFlag = typeof opts.flags.l === 'string' ? opts.flags.l : null
   const bFlag = typeof opts.flags.b === 'string' ? opts.flags.b : null
   const nFlag = typeof opts.flags.n === 'string' ? opts.flags.n : null

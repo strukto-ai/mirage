@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stripSlash } from '../../utils/slash.ts'
 import { type ByteSource, materialize } from '../../io/types.ts'
 import { PathSpec } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -51,7 +52,8 @@ export async function applyFindActions(
       }
       const slash = path.lastIndexOf('/')
       const ps = new PathSpec({
-        original: path,
+        resourcePath: stripSlash(path),
+        virtual: path,
         directory: slash >= 0 ? path.slice(0, slash + 1) : '/',
         resolved: true,
       })
@@ -78,7 +80,8 @@ export async function applyFindActions(
       }
       const slash = path.lastIndexOf('/')
       const ps = new PathSpec({
-        original: path,
+        resourcePath: stripSlash(path),
+        virtual: path,
         directory: slash >= 0 ? path.slice(0, slash + 1) : '/',
         resolved: true,
       })

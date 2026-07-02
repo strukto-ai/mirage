@@ -22,6 +22,7 @@ from mirage.commands.builtin.slack.rg import rg
 from mirage.io.stream import materialize
 from mirage.resource.slack.config import SlackConfig
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.key_prefix import mount_key
 
 
 @pytest.fixture
@@ -48,9 +49,10 @@ async def test_rg_messages_only_when_chat_jsonl(accessor, index):
             accessor,
             [
                 PathSpec(
-                    original="/channels/general__C001/2026-04-10/chat.jsonl",
+                    resource_path=mount_key(
+                        "/channels/general__C001/2026-04-10/chat.jsonl", ""),
+                    virtual="/channels/general__C001/2026-04-10/chat.jsonl",
                     directory="/channels/general__C001/2026-04-10/chat.jsonl",
-                    prefix="",
                 )
             ],
             "foo",
@@ -75,9 +77,10 @@ async def test_rg_files_dir_redirects_to_generic_scan(accessor, index):
             accessor,
             [
                 PathSpec(
-                    original="/channels/general__C001/2026-04-10/files",
+                    resource_path=mount_key(
+                        "/channels/general__C001/2026-04-10/files", ""),
+                    virtual="/channels/general__C001/2026-04-10/files",
                     directory="/channels/general__C001/2026-04-10/files",
-                    prefix="",
                 )
             ],
             "foo",
@@ -104,9 +107,10 @@ async def test_rg_both_when_channel_or_day_root(accessor, index):
             accessor,
             [
                 PathSpec(
-                    original="/channels/general__C001/2026-04-10",
+                    resource_path=mount_key(
+                        "/channels/general__C001/2026-04-10", ""),
+                    virtual="/channels/general__C001/2026-04-10",
                     directory="/channels/general__C001/2026-04-10",
-                    prefix="",
                 )
             ],
             "foo",
@@ -131,9 +135,10 @@ async def test_grep_messages_only_when_chat_jsonl(accessor, index):
             accessor,
             [
                 PathSpec(
-                    original="/channels/general__C001/2026-04-10/chat.jsonl",
+                    resource_path=mount_key(
+                        "/channels/general__C001/2026-04-10/chat.jsonl", ""),
+                    virtual="/channels/general__C001/2026-04-10/chat.jsonl",
                     directory="/channels/general__C001/2026-04-10/chat.jsonl",
-                    prefix="",
                 )
             ],
             "foo",
@@ -146,9 +151,10 @@ async def test_grep_messages_only_when_chat_jsonl(accessor, index):
 @pytest.mark.asyncio
 async def test_grep_files_dir_redirects_to_per_file_scan(accessor, index):
     blob = PathSpec(
-        original="/channels/general__C001/2026-04-10/files/report.txt",
+        resource_path=mount_key(
+            "/channels/general__C001/2026-04-10/files/report.txt", ""),
+        virtual="/channels/general__C001/2026-04-10/files/report.txt",
         directory="/channels/general__C001/2026-04-10/files/report.txt",
-        prefix="",
     )
     with (
             patch("mirage.commands.builtin.slack.grep.search_messages",
@@ -171,9 +177,10 @@ async def test_grep_files_dir_redirects_to_per_file_scan(accessor, index):
             accessor,
             [
                 PathSpec(
-                    original="/channels/general__C001/2026-04-10/files",
+                    resource_path=mount_key(
+                        "/channels/general__C001/2026-04-10/files", ""),
+                    virtual="/channels/general__C001/2026-04-10/files",
                     directory="/channels/general__C001/2026-04-10/files",
-                    prefix="",
                 )
             ],
             "foo",

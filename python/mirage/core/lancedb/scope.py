@@ -48,7 +48,7 @@ def _parse_row_file(name: str,
 
 
 def detect_scope(path, config: LanceDBConfig) -> LanceDBScope:
-    raw = path.strip_prefix if isinstance(path, PathSpec) else path
+    raw = path.mount_path if isinstance(path, PathSpec) else path
     key = raw.strip("/")
     segs = key.split("/") if key else []
 
