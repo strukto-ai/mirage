@@ -33,8 +33,8 @@ export interface SessionSummary {
 }
 
 export interface WorkspaceInternals {
-  cacheBytes: number
-  cacheEntries: number
+  cacheBytes: number | null
+  cacheEntries: number | null
   historyLength: number
   inFlightJobs: number
 }

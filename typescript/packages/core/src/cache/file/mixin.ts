@@ -32,7 +32,10 @@ export interface FileCache {
   clear(): Promise<void>
   allCached(keys: readonly string[]): Promise<boolean>
   multiGet(keys: readonly string[]): Promise<(Uint8Array | null)[]>
-  readonly cacheSize: number
+  // Cached bytes / entry count; null (or absent) for stores that don't
+  // track them client-side (e.g. redis owns its own keyspace).
+  readonly cacheSize: number | null
+  readonly cacheEntries?: number | null
   readonly cacheLimit: number
   maxDrainBytes: number | null
   // Present only on stores that support background drains (mirrors the

@@ -63,8 +63,8 @@ interface SessionSummary {
 }
 
 interface Internals {
-  cacheBytes: number
-  cacheEntries: number
+  cacheBytes: number | null
+  cacheEntries: number | null
   historyLength: number
   inFlightJobs: number
 }
@@ -113,7 +113,8 @@ function formatWorkspaceDetail(d: WorkspaceDetail): string {
   if (d.internals != null) {
     lines.push('', 'Internals:')
     for (const k of ['cacheBytes', 'cacheEntries', 'historyLength', 'inFlightJobs'] as const) {
-      lines.push(`  ${k.padEnd(16)} ${String(d.internals[k])}`)
+      const value = d.internals[k]
+      lines.push(`  ${k.padEnd(16)} ${value === null ? 'n/a (not tracked)' : String(value)}`)
     }
   }
   return lines.join('\n')

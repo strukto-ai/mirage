@@ -45,10 +45,10 @@ function describeResource(resource: Resource): string {
 }
 
 async function buildInternals(ws: Workspace): Promise<WorkspaceInternals> {
-  const cache = ws.cache as typeof ws.cache & { snapshotEntries?: () => unknown[] }
+  const cache = ws.cache
   return {
     cacheBytes: cache.cacheSize,
-    cacheEntries: cache.snapshotEntries?.().length ?? 0,
+    cacheEntries: cache.cacheEntries ?? null,
     historyLength: (await ws.history()).length,
     inFlightJobs: ws.jobTable.listJobs().length,
   }

@@ -43,7 +43,9 @@ export class RedisFileCacheStore extends RedisResource implements FileCache {
     this.maxDrainBytes = options.maxDrainBytes ?? null
   }
 
-  readonly cacheSize = 0
+  // Size lives in the redis server and is not tracked client-side.
+  readonly cacheSize: number | null = null
+  readonly cacheEntries: number | null = null
 
   get cacheLimit(): number {
     return this.limit

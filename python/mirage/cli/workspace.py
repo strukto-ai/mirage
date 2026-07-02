@@ -97,7 +97,9 @@ def _format_workspace_detail(detail: dict[str, Any]) -> str:
         lines.append("Internals:")
         for key in ("cache_bytes", "cache_entries", "history_length",
                     "in_flight_jobs"):
-            lines.append(f"  {key:<16} {internals[key]}")
+            value = internals[key]
+            shown = "n/a (not tracked)" if value is None else value
+            lines.append(f"  {key:<16} {shown}")
     return "\n".join(lines)
 
 

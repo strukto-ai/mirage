@@ -143,9 +143,10 @@ async def test_get_verbose_internals_with_redis_cache():
         internals = r.json()["internals"]
         assert internals is not None
         # Redis cache does not track size or entries; the summary must
-        # still build instead of reaching into RAM-store internals.
-        assert internals["cache_bytes"] == 0
-        assert internals["cache_entries"] == 0
+        # report them as untracked instead of reaching into RAM-store
+        # internals or conflating "not tracked" with an empty cache.
+        assert internals["cache_bytes"] is None
+        assert internals["cache_entries"] is None
 
         await client.delete(f"/v1/workspaces/{wid}")
 

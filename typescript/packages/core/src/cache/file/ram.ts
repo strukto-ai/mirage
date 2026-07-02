@@ -39,6 +39,10 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
     return this.size
   }
 
+  get cacheEntries(): number {
+    return this.entries.size
+  }
+
   get cacheLimit(): number {
     return this.limit
   }
