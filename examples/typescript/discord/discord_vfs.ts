@@ -35,6 +35,12 @@ function buildConfig(): DiscordConfig {
   return { token }
 }
 
+const exists = (p: string): Promise<boolean> =>
+  fs.promises.stat(p).then(
+    () => true,
+    () => false,
+  )
+
 async function main(): Promise<void> {
   const resource = new DiscordResource(buildConfig())
   const ws = new Workspace({ '/discord': resource }, { mode: MountMode.READ })
@@ -123,9 +129,9 @@ async function main(): Promise<void> {
             console.log('\n  (no messages found in recent dates)')
           }
 
-          console.log('\n--- existsSync() ---')
-          console.log(`  exists: ${String(fs.existsSync(path))}`)
-          console.log(`  nonexistent: ${String(fs.existsSync('/discord/nope'))}`)
+          console.log('\n--- exists via fs.promises.stat() ---')
+          console.log(`  exists: ${String(await exists(path))}`)
+          console.log(`  nonexistent: ${String(await exists('/discord/nope'))}`)
         }
       }
 
@@ -136,21 +142,11 @@ async function main(): Promise<void> {
       }
     }
 
-    console.log('\n--- session observer ---')
-    const dayFolders = await fs.promises.readdir('/.sessions')
-    const dayFolder = dayFolders[0]
-    const logEntries = dayFolder !== undefined
-      ? await fs.promises.readdir(`/.sessions/${dayFolder}`)
-      : []
-    for (const e of logEntries) {
-      console.log(`  ${e}`)
-    }
-    if (dayFolder !== undefined && logEntries.length > 0) {
-      const text = await fs.promises.readFile(`/.sessions/${dayFolder}/${logEntries[0]!}`, 'utf-8')
-      const lines = text.split('\n').filter((line) => line.trim() !== '')
-      for (let i = 0; i < Math.min(3, lines.length); i++) {
-        console.log(`  [${String(i)}] ${lines[i]!.slice(0, 120)}`)
-      }
+    console.log('\n--- bash history ---')
+    const history = await fs.promises.readFile('/.bash_history', 'utf-8')
+    const histLines = history.split('\n').filter((line) => line.trim() !== '')
+    for (let i = 0; i < Math.min(6, histLines.length); i++) {
+      console.log(`  ${histLines[i]!.slice(0, 120)}`)
     }
 
     const records = ws.records

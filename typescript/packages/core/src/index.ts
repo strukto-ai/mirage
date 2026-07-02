@@ -128,7 +128,6 @@ export {
   drain,
   exitOnEmpty,
   mergeStdoutStderr,
-  peekExitCode,
   quietMatch,
   wrapCachableStreams,
   yieldBytes,
@@ -486,7 +485,6 @@ export {
   COMPOUND_EXTENSIONS,
   getExtension,
   materializeStdout,
-  resolveFirstPath,
   stripPrefixFromPathKwargs,
 } from './commands/resolve.ts'
 export {
@@ -746,7 +744,6 @@ export {
   type DriveOwner,
   downloadFile as googleDriveDownloadFile,
   downloadFileStream as googleDriveDownloadFileStream,
-  getFileMetadata as googleDriveGetFileMetadata,
   listAllFiles as googleDriveListAllFiles,
   listFiles as googleDriveListFiles,
 } from './core/google/drive.ts'
@@ -778,16 +775,11 @@ export {
   stream as gsheetsStream,
   readSpreadsheet as gsheetsReadSpreadsheet,
   readValues as gsheetsReadValues,
-  fetchSheetNames as gsheetsFetchSheetNames,
 } from './core/gsheets/read.ts'
 export { readdir as gsheetsReaddir } from './core/gsheets/readdir.ts'
 export { stat as gsheetsStat } from './core/gsheets/stat.ts'
 export { resolveGlob as gsheetsResolveGlob } from './core/gsheets/glob.ts'
-export {
-  writeValues as gsheetsWriteValues,
-  appendValues as gsheetsAppendValues,
-  SheetsApiError,
-} from './core/gsheets/write.ts'
+export { appendValues as gsheetsAppendValues, SheetsApiError } from './core/gsheets/write.ts'
 export { batchUpdate as gsheetsBatchUpdate } from './core/gsheets/update.ts'
 export { createSpreadsheet as gsheetsCreateSpreadsheet } from './core/gsheets/create.ts'
 export { GSHEETS_PROMPT, GSHEETS_WRITE_PROMPT } from './resource/gsheets/prompt.ts'
@@ -873,8 +865,6 @@ export {
   type BoxItemType,
   downloadFile as boxDownloadFile,
   downloadFileStream as boxDownloadFileStream,
-  getFileMetadata as boxGetFileMetadata,
-  getFolderMetadata as boxGetFolderMetadata,
   listFolderItems as boxListFolderItems,
   searchItems as boxSearchItems,
   getExtractedText as boxGetExtractedText,

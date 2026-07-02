@@ -115,22 +115,6 @@ export class RedisStore {
     return c.strLen(this.fk(path))
   }
 
-  async getRange(path: string, start: number, end: number): Promise<Uint8Array> {
-    const c = await this.client()
-    const typed = c as unknown as {
-      withTypeMapping: (m: Record<number, unknown>) => {
-        getRange: (k: string, s: number, e: number) => Promise<Buffer>
-      }
-    }
-    const mod = (await import('redis')) as unknown as {
-      RESP_TYPES: { readonly BLOB_STRING: number }
-    }
-    const blob = mod.RESP_TYPES.BLOB_STRING
-    const mapping: Record<number, unknown> = { [blob]: Buffer }
-    const raw = await typed.withTypeMapping(mapping).getRange(this.fk(path), start, end)
-    return new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength)
-  }
-
   async hasDir(path: string): Promise<boolean> {
     const c = await this.client()
     return (await c.sIsMember(this.dk(), path)) === 1

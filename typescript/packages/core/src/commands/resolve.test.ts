@@ -17,10 +17,9 @@ import {
   COMPOUND_EXTENSIONS,
   getExtension,
   materializeStdout,
-  resolveFirstPath,
   stripPrefixFromPathKwargs,
 } from './resolve.ts'
-import { CommandSpec, Operand, OperandKind, Option } from './spec/types.ts'
+import { CommandSpec, OperandKind, Option } from './spec/types.ts'
 
 describe('getExtension', () => {
   it('returns the dotted extension for simple paths', () => {
@@ -48,18 +47,6 @@ describe('getExtension', () => {
   it('COMPOUND_EXTENSIONS contains the known google-doc extensions', () => {
     expect(COMPOUND_EXTENSIONS.has('.gdoc.json')).toBe(true)
     expect(COMPOUND_EXTENSIONS.has('.gsheet.json')).toBe(true)
-  })
-})
-
-describe('resolveFirstPath', () => {
-  const spec = new CommandSpec({ rest: new Operand({ kind: OperandKind.PATH }) })
-
-  it('resolves the first positional path', () => {
-    expect(resolveFirstPath(['/ram/x', '/ram/y'], '/', spec)).toBe('/ram/x')
-  })
-
-  it('falls back to cwd when argv has no paths', () => {
-    expect(resolveFirstPath([], '/cwd', spec)).toBe('/cwd')
   })
 })
 

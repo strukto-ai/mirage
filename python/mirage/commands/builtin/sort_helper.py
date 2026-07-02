@@ -14,8 +14,6 @@
 
 import re
 
-from mirage.commands.builtin.utils.types import _ReadBytes
-
 _HUMAN_SUFFIXES = {"K": 1e3, "M": 1e6, "G": 1e9, "T": 1e12, "P": 1e15}
 _VERSION_RE = re.compile(r"(\d+)|(\D+)")
 _MONTHS = {
@@ -109,37 +107,3 @@ def _unique_key(key: object) -> object:
     if isinstance(key, list):
         return tuple(key)
     return key
-
-
-def sort_lines(
-    read_bytes: _ReadBytes,
-    path: str,
-    reverse: bool = False,
-    numeric: bool = False,
-    key_field: int | None = None,
-    field_sep: str | None = None,
-    unique: bool = False,
-    ignore_case: bool = False,
-    human_numeric: bool = False,
-    version: bool = False,
-    month: bool = False,
-) -> list[str]:
-    data = read_bytes(path).decode(errors="replace").splitlines()
-    result = sorted(
-        data,
-        key=lambda line: _sort_key(line, key_field, field_sep, ignore_case,
-                                   numeric, human_numeric, version, month),
-        reverse=reverse,
-    )
-    if unique:
-        seen: set[object] = set()
-        deduped: list[str] = []
-        for line in result:
-            k = _sort_key(line, key_field, field_sep, ignore_case, numeric,
-                          human_numeric, version, month)
-            dedup_k = k[0] if isinstance(k, tuple) else k
-            if dedup_k not in seen:
-                seen.add(dedup_k)
-                deduped.append(line)
-        return deduped
-    return result

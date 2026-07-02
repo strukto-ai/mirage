@@ -82,8 +82,6 @@ async def grep(
     read_stream: Callable[..., AsyncIterator[bytes]] | None,
     accessor: object = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
-    scope_check: Callable[..., Awaitable[str | None]] | None = None,
-    show_filename: bool = False,
     index: IndexCacheStore | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run grep-style fallback search over backend paths or stdin.
@@ -107,10 +105,6 @@ async def grep(
         accessor (object): Backend accessor passed through wrapper helpers.
         stdin (AsyncIterator[bytes] | bytes | None): Input used when paths is
             empty.
-        scope_check (Callable[..., Awaitable[str | None]] | None): Optional
-            backend warning hook.
-        show_filename (bool): Force filename prefixes on a single path,
-            for callers that pre-expanded a multi-file scope.
         index (IndexCacheStore | None): Optional cache index for wrapped
             backend calls.
 
@@ -145,15 +139,8 @@ async def grep(
                      index=index,
                      prefix=mount_prefix)
 
-        scope_warning_str: str | None = None
-        if scope_check is not None and not paths[0].resolved:
-            scope_warning_str = await scope_check(rd, st, paths[0],
-                                                  f.recursive)
-
         if f.files_only:
             warnings: list[str] = []
-            if scope_warning_str:
-                warnings.append(scope_warning_str)
             results: list[str] = []
             for p in paths:
                 hits = await grep_files_only(
@@ -193,8 +180,6 @@ async def grep(
             # (head, grep -m, grep -q) abort the walk after enough matches.
             all_results: list[str] = []
             warnings = []
-            if scope_warning_str:
-                warnings.append(scope_warning_str)
             for p in paths:
                 s = await st(p.virtual)
                 if s.type == FileType.DIRECTORY:
@@ -237,7 +222,7 @@ async def grep(
         pat = compile_pattern(pattern, f.ignore_case, f.fixed_string,
                               f.whole_word)
 
-        if len(paths) > 1 or show_filename:
+        if len(paths) > 1:
             all_results = []
             multi_warnings: list[str] = []
             for p in paths:

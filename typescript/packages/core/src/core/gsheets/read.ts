@@ -42,19 +42,6 @@ export async function readValues(
   return ENC.encode(JSON.stringify(data))
 }
 
-export async function fetchSheetNames(tm: TokenManager, spreadsheetId: string): Promise<string[]> {
-  const fields = 'sheets.properties.title'
-  const url = `${SHEETS_API_BASE}/spreadsheets/${spreadsheetId}?fields=${fields}`
-  const data = (await googleGet(tm, url)) as {
-    sheets?: { properties?: { title?: string } }[]
-  }
-  const out: string[] = []
-  for (const s of data.sheets ?? []) {
-    if (s.properties?.title !== undefined) out.push(s.properties.title)
-  }
-  return out
-}
-
 export async function read(
   accessor: GSheetsAccessor,
   path: PathSpec,

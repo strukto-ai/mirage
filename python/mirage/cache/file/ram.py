@@ -160,5 +160,9 @@ class RAMFileCacheStore(RAMResource, FileCacheMixin, KeyLockMixin):
         return self._cache_size
 
     @property
+    def cache_entries(self) -> int:
+        return len(self._entries)
+
+    @property
     def cache_limit(self) -> int:
         return self._cache_limit

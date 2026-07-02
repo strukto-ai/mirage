@@ -20,7 +20,6 @@ import {
   drain,
   exitOnEmpty,
   mergeStdoutStderr,
-  peekExitCode,
   quietMatch,
   wrapCachableStreams,
   yieldBytes,
@@ -142,19 +141,6 @@ describe('closeQuietly', () => {
 
   it('is a no-op on bytes', async () => {
     await closeQuietly(encode('x'))
-  })
-})
-
-describe('peekExitCode', () => {
-  it('returns null for an empty stream', async () => {
-    const result = await peekExitCode(fromChunks([]))
-    expect(result).toBeNull()
-  })
-
-  it('returns a stream equivalent to the original for non-empty', async () => {
-    const result = await peekExitCode(fromChunks([encode('a'), encode('b')]))
-    if (result === null || result instanceof Uint8Array) throw new Error('expected stream')
-    expect(await collect(result)).toBe('ab')
   })
 })
 

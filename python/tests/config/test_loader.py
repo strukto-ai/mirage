@@ -19,7 +19,7 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.config import (RamCacheBlock, RedisCacheBlock, WorkspaceConfig,
-                           load_config, merge_override)
+                           load_config)
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Resource
 from mirage.types import ConsistencyPolicy
@@ -127,84 +127,6 @@ def test_workspace_built_from_config_executes_command():
     result = asyncio.run(ws.execute("echo hello"))
     assert result.exit_code == 0
     assert (result.stdout or b"").startswith(b"hello")
-
-
-def test_merge_override_replaces_single_field():
-    base = load_config({
-        "mounts": {
-            "/s3": {
-                "resource": "s3",
-                "config": {
-                    "bucket": "old",
-                    "region": "us-east-1",
-                    "aws_access_key_id": "k",
-                    "aws_secret_access_key": "s",
-                },
-            },
-        },
-    })
-    override = {"mounts": {"/s3": {"config": {"bucket": "new"}}}}
-    merged = merge_override(base, override)
-    assert merged.mounts["/s3"].config["bucket"] == "new"
-    assert merged.mounts["/s3"].config["region"] == "us-east-1"
-    assert merged.mounts["/s3"].config["aws_access_key_id"] == "k"
-
-
-def test_merge_override_from_yaml_file(tmp_path):
-    base = load_config({
-        "mounts": {
-            "/s3": {
-                "resource": "s3",
-                "config": {
-                    "bucket": "old",
-                    "region": "us-east-1",
-                    "aws_access_key_id": "k",
-                    "aws_secret_access_key": "s",
-                },
-            },
-        },
-    })
-    override_path = tmp_path / "override.yaml"
-    override_path.write_text(
-        "mounts:\n"
-        "  /s3:\n"
-        "    config:\n"
-        "      bucket: ${NEW_BUCKET}\n",
-        encoding="utf-8",
-    )
-    merged = merge_override(base, override_path, env={"NEW_BUCKET": "fresh"})
-    assert merged.mounts["/s3"].config["bucket"] == "fresh"
-    assert merged.mounts["/s3"].config["region"] == "us-east-1"
-
-
-def test_merge_override_adds_new_mount():
-    base = load_config({"mounts": {"/": {"resource": "ram"}}})
-    override = {
-        "mounts": {
-            "/disk": {
-                "resource": "disk",
-                "config": {
-                    "root": "/tmp/x"
-                }
-            }
-        }
-    }
-    merged = merge_override(base, override)
-    assert "/" in merged.mounts
-    assert "/disk" in merged.mounts
-
-
-def test_merge_override_preserves_unrelated_fields():
-    base = load_config({
-        "default_session_id": "keepme",
-        "mounts": {
-            "/": {
-                "resource": "ram"
-            }
-        },
-    })
-    merged = merge_override(base, {"mounts": {"/disk": {"resource": "disk"}}})
-    assert merged.default_session_id == "keepme"
 
 
 def test_round_trip_dict_source_matches_yaml(tmp_path):

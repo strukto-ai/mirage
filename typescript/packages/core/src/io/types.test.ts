@@ -145,22 +145,6 @@ describe('IOResult.merge', () => {
   })
 })
 
-describe('IOResult.mergeAggregate', () => {
-  it('uses max of exit codes', async () => {
-    const a = new IOResult({ exitCode: 2 })
-    const b = new IOResult({ exitCode: 5 })
-    const merged = await a.mergeAggregate(b)
-    expect(merged.exitCode).toBe(5)
-  })
-
-  it('aggregation respects the higher code from left', async () => {
-    const a = new IOResult({ exitCode: 9 })
-    const b = new IOResult({ exitCode: 0 })
-    const merged = await a.mergeAggregate(b)
-    expect(merged.exitCode).toBe(9)
-  })
-})
-
 describe('IOResult.syncExitCode', () => {
   it('pulls exit_code from the streamSource chain', async () => {
     const inner = new IOResult({ exitCode: 0 })

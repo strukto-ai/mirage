@@ -115,11 +115,10 @@ async function main(): Promise<void> {
   await runLabeled(ws, 'head -c 8 /dev/zero | xxd', 'head -c 8 /dev/zero | xxd')
 
   console.log('')
-  console.log('=== OBSERVER (.sessions) ===')
-  console.log('  every op + execute() is logged to /.sessions/<utc-date>/<sessionId>.jsonl')
+  console.log('=== HISTORY (/.bash_history) ===')
+  console.log('  every executed command is recorded in GNU bash histfile format')
   console.log('')
-  const day = new Date().toISOString().slice(0, 10)
-  const log = await ws.execute(`tail -n 5 /.sessions/${day}/*.jsonl`)
+  const log = await ws.execute('tail -n 5 /.bash_history')
   process.stdout.write(log.stdoutText + '\n')
 
   console.log('')

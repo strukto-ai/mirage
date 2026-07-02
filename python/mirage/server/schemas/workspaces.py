@@ -21,8 +21,8 @@ from mirage.server.schemas.common import MountSummary, SessionSummary
 
 
 class WorkspaceInternals(BaseModel):
-    cache_bytes: int
-    cache_entries: int
+    cache_bytes: int | None
+    cache_entries: int | None
     history_length: int
     in_flight_jobs: int
 

@@ -58,25 +58,6 @@ async def read_values(token_manager: TokenManager, spreadsheet_id: str,
     return json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode()
 
 
-async def fetch_sheet_names(
-    token_manager: TokenManager,
-    spreadsheet_id: str,
-) -> list[str]:
-    """Fetch sheet tab names for a spreadsheet.
-
-    Args:
-        token_manager (TokenManager): manages OAuth2 tokens.
-        spreadsheet_id (str): Google Sheets spreadsheet ID.
-
-    Returns:
-        list[str]: list of sheet tab names.
-    """
-    fields = "sheets.properties.title"
-    url = f"{SHEETS_API_BASE}/spreadsheets/{spreadsheet_id}?fields={fields}"
-    data = await google_get(token_manager, url)
-    return [s["properties"]["title"] for s in data.get("sheets", [])]
-
-
 async def read(
     accessor: GSheetsAccessor,
     path: PathSpec,

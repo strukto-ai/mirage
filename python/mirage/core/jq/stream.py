@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator
 
 import orjson
 
+from mirage.core.jq.eval import jq_eval
 from mirage.core.jq.format import JQ_EMPTY
 from mirage.io.async_line_iterator import AsyncLineIterator
 
@@ -60,8 +61,6 @@ async def eval_jsonl_stream(
     expression: str,
     raw: bool = False,
 ) -> AsyncIterator[bytes]:
-    from mirage.core.jq.eval import jq_eval
-
     expr = expression.strip()
     if expr == ".[]":
         per_item = "."

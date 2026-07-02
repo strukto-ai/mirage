@@ -55,8 +55,8 @@ async function main(): Promise<void> {
     if (entries.length > 0) {
       const first = entries[0]!
       const path = `/gdrive/${first}`
-      console.log(`\n--- fs.statSync(${path}) ---`)
-      const stat = fs.statSync(path)
+      console.log(`\n--- fs.promises.stat(${path}) ---`)
+      const stat = await fs.promises.stat(path)
       console.log(`  isDirectory: ${String(stat.isDirectory())}`)
       console.log(`  isFile: ${String(stat.isFile())}`)
       console.log(`  size: ${String(stat.size)}`)

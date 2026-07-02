@@ -32,7 +32,6 @@ import {
   deleteFile,
   downloadFile,
   downloadFileStream,
-  getFileMetadata,
   listFiles,
   listSharedDrives,
 } from './drive.ts'
@@ -101,12 +100,5 @@ describe('shared-drive support flags', () => {
     vi.mocked(client.googleDelete).mockResolvedValue(undefined)
     await deleteFile(STUB_TOKEN_MANAGER, 'file123')
     expect(vi.mocked(client.googleDelete).mock.calls[0][1]).toContain('supportsAllDrives=true')
-  })
-
-  it('getFileMetadata requests supportsAllDrives', async () => {
-    vi.mocked(client.googleGet).mockResolvedValue({ id: 'file123', name: 'report.pdf' })
-    await getFileMetadata(STUB_TOKEN_MANAGER, 'file123')
-    const params = vi.mocked(client.googleGet).mock.calls[0][2] as Record<string, unknown>
-    expect(params.supportsAllDrives).toBe('true')
   })
 })

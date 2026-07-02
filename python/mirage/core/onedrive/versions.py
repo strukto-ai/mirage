@@ -12,11 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from urllib.parse import quote
-
 from mirage.accessor.onedrive import OneDriveAccessor
-from mirage.core.onedrive._client import (graph_get, graph_list, graph_post,
-                                          item_url, split_path)
+from mirage.core.onedrive._client import (graph_get, graph_list, item_url,
+                                          split_path)
 from mirage.types import PathSpec
 
 
@@ -34,12 +32,6 @@ async def list_versions(accessor: OneDriveAccessor,
     return await graph_list(accessor.config, url)
 
 
-async def current_version_id(accessor: OneDriveAccessor,
-                             path: PathSpec) -> str | None:
-    versions = await list_versions(accessor, path)
-    return _current_version_id(versions)
-
-
 async def capture_metadata(
         accessor: OneDriveAccessor,
         path: PathSpec) -> tuple[str | None, str | None, str | None]:
@@ -52,11 +44,3 @@ async def capture_metadata(
     revision = _current_version_id(item.get("versions", []))
     download_url = item.get("@microsoft.graph.downloadUrl")
     return fingerprint, revision, download_url
-
-
-async def restore_version(accessor: OneDriveAccessor, path: PathSpec,
-                          version_id: str) -> None:
-    _, stripped = split_path(path)
-    action = f"/versions/{quote(version_id, safe='')}/restoreVersion"
-    url = item_url(accessor.config, "/" + stripped, action=action)
-    await graph_post(accessor.config, url)

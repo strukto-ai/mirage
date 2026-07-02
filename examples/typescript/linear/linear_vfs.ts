@@ -101,9 +101,12 @@ async function main(): Promise<void> {
     const projects = await fs.promises.readdir(`${teamBase}/projects`)
     for (const p of projects.slice(0, 5)) console.log(`  ${p}`)
 
-    console.log('\n--- session observer ---')
-    const logEntries = await fs.promises.readdir('/.sessions')
-    for (const e of logEntries) console.log(`  ${e}`)
+    console.log('\n--- bash history ---')
+    const history = await fs.promises.readFile('/.bash_history', 'utf-8')
+    const histLines = history.split('\n').filter((line) => line.trim() !== '')
+    for (let i = 0; i < Math.min(6, histLines.length); i++) {
+      console.log(`  ${histLines[i]!.slice(0, 120)}`)
+    }
 
     const records = ws.records
     const total = records.reduce((acc, r) => acc + (r.bytes ?? 0), 0)

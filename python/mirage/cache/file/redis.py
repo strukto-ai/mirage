@@ -109,8 +109,9 @@ class RedisFileCacheStore(RedisResource, FileCacheMixin):
         pass
 
     @property
-    def cache_size(self) -> int:
-        return 0
+    def cache_size(self) -> int | None:
+        # Size lives in the redis server and is not tracked client-side.
+        return None
 
     @property
     def cache_limit(self) -> int:

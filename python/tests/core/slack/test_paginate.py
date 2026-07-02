@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 import pytest
 
-from mirage.core.slack.paginate import cursor_pages, offset_pages
+from mirage.core.slack.paginate import cursor_pages
 from mirage.resource.slack.config import SlackConfig
 
 
@@ -96,55 +96,3 @@ async def test_cursor_pages_propagates_cancellation():
         await gen.aclose()
     assert first == [1]
     assert len(calls) == 1
-
-
-@pytest.mark.asyncio
-async def test_offset_pages_walks_search_messages_pagination():
-    cfg = SlackConfig(token="xoxp-t")
-    pages = [
-        {
-            "messages": {
-                "matches": [{
-                    "text": "a"
-                }],
-                "pagination": {
-                    "page": 1,
-                    "page_count": 2
-                }
-            }
-        },
-        {
-            "messages": {
-                "matches": [{
-                    "text": "b"
-                }],
-                "pagination": {
-                    "page": 2,
-                    "page_count": 2
-                }
-            }
-        },
-    ]
-    calls = []
-
-    async def fake_get(_cfg, _method, params=None, token=None):
-        calls.append(dict(params or {}))
-        return pages[len(calls) - 1]
-
-    with patch("mirage.core.slack.paginate.slack_get", new=fake_get):
-        result = []
-        async for page in offset_pages(cfg,
-                                       "search.messages",
-                                       base_params={
-                                           "query": "x",
-                                           "count": "100"
-                                       },
-                                       pages_path=("messages", "pagination",
-                                                   "page_count"),
-                                       items_path=("messages", "matches"),
-                                       start_page=1,
-                                       max_pages=None):
-            result.append(page)
-    assert result == [[{"text": "a"}], [{"text": "b"}]]
-    assert calls[0]["page"] == "1"
-    assert calls[1]["page"] == "2"

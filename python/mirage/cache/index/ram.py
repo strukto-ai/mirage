@@ -14,8 +14,8 @@
 
 from datetime import datetime, timedelta, timezone
 
-from mirage.cache.index.config import (IndexConfig, IndexEntry, ListResult,
-                                       LookupResult, LookupStatus)
+from mirage.cache.index.config import (IndexEntry, ListResult, LookupResult,
+                                       LookupStatus)
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.lock import KeyLockMixin
 from mirage.core.timeutil import to_iso_z
@@ -30,10 +30,6 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         self._entries: dict[str, IndexEntry] = {}
         self._children: dict[str, list[str]] = {}
         self._expiry: dict[str, datetime] = {}
-
-    @classmethod
-    def from_config(cls, config: IndexConfig) -> "RAMIndexCacheStore":
-        return cls(ttl=config.ttl)
 
     async def get(self, resource_path: str) -> LookupResult:
         entry = self._entries.get(resource_path)

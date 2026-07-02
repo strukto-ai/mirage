@@ -206,31 +206,6 @@ async def delete_file(
     await google_delete(token_manager, url)
 
 
-async def get_file_metadata(
-    token_manager: TokenManager,
-    file_id: str,
-) -> dict:
-    """Get metadata for a single file.
-
-    Args:
-        token_manager (TokenManager): OAuth2 token manager.
-        file_id (str): file ID.
-
-    Returns:
-        dict: file metadata.
-    """
-    url = f"{DRIVE_API_BASE}/files/{file_id}"
-    fields = ("id,name,mimeType,size,"
-              "createdTime,modifiedTime,"
-              "owners,capabilities/canEdit,parents")
-    return await google_get(token_manager,
-                            url,
-                            params={
-                                "fields": fields,
-                                "supportsAllDrives": "true",
-                            })
-
-
 async def download_file(
     token_manager: TokenManager,
     file_id: str,

@@ -272,7 +272,14 @@ export class Workspace {
         mount.commandSafeguards.set(cmd, sg)
       }
     }
-    this.fs = new WorkspaceFS((path) => this.resolve(path), this.opsRegistry)
+    this.fs = new WorkspaceFS(
+      (path) => this.resolve(path),
+      this.opsRegistry,
+      async (rec) => {
+        this.records.push(rec)
+        await this.observer.logOp(rec, this.agentId, this.sessionManager.defaultId)
+      },
+    )
     for (const m of this.registry.allMounts()) {
       if (m.prefix === HISTORY_PREFIX || m.prefix === HISTORY_PREFIX + '/') continue
       if (this.syntheticRootAnchor && m.prefix === '/') continue
@@ -484,6 +491,30 @@ export class Workspace {
 
   set maxDrainBytes(value: number | null) {
     this.cache.maxDrainBytes = value
+  }
+
+  /** Records that hit a remote resource (not cache). */
+  get networkRecords(): OpRecord[] {
+    return this.records.filter((r) => !r.isCache)
+  }
+
+  /** Total bytes transferred over the network. */
+  get networkBytes(): number {
+    let total = 0
+    for (const r of this.records) if (!r.isCache) total += r.bytes
+    return total
+  }
+
+  /** Records served from in-memory cache. */
+  get cacheRecords(): OpRecord[] {
+    return this.records.filter((r) => r.isCache)
+  }
+
+  /** Total bytes served from cache. */
+  get cacheBytes(): number {
+    let total = 0
+    for (const r of this.records) if (r.isCache) total += r.bytes
+    return total
   }
 
   get filePrompt(): string {

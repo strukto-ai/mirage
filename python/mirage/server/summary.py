@@ -40,12 +40,11 @@ def _user_mounts(ws: Workspace):
 
 
 async def _build_internals(ws: Workspace) -> WorkspaceInternals:
-    cache = ws._cache
-    cache_bytes = sum(len(v) for v in cache._store.files.values())
+    cache = ws.cache
     history_len = len(await ws.history())
     return WorkspaceInternals(
-        cache_bytes=cache_bytes,
-        cache_entries=len(cache._entries),
+        cache_bytes=cache.cache_size,
+        cache_entries=cache.cache_entries,
         history_length=history_len,
         in_flight_jobs=len(ws.job_table.list_jobs()),
     )

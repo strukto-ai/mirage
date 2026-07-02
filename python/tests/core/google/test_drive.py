@@ -19,9 +19,8 @@ import pytest
 from mirage.core.google._client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.core.google.drive import (delete_file, download_file,
-                                      download_file_stream, get_file_metadata,
-                                      list_all_files, list_files,
-                                      list_shared_drives)
+                                      download_file_stream, list_all_files,
+                                      list_files, list_shared_drives)
 
 
 @pytest.fixture
@@ -203,27 +202,6 @@ async def test_download_file_stream_empty(token_manager):
         async for chunk in download_file_stream(token_manager, "file123"):
             result += chunk
         assert result == b""
-
-
-@pytest.mark.asyncio
-async def test_get_file_metadata(token_manager):
-    metadata = {
-        "id": "file123",
-        "name": "report.pdf",
-        "mimeType": "application/pdf",
-        "modifiedTime": "2026-04-01T00:00:00.000Z",
-    }
-    with patch(
-            "mirage.core.google.drive.google_get",
-            new_callable=AsyncMock,
-            return_value=metadata,
-    ) as mock_get:
-        result = await get_file_metadata(token_manager, "file123")
-        assert result["id"] == "file123"
-        assert result["name"] == "report.pdf"
-        call_kwargs = mock_get.call_args
-        assert "fields" in call_kwargs.kwargs["params"]
-        assert call_kwargs.kwargs["params"]["supportsAllDrives"] == "true"
 
 
 @pytest.mark.asyncio

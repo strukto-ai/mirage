@@ -47,8 +47,4 @@ export class MongoDBAccessor extends Accessor {
     this.cache.set(key, { value, expires: now + this.listingCacheTtlMs })
     return value
   }
-
-  invalidateListings(): void {
-    this.cache.clear()
-  }
 }

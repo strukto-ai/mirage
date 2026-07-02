@@ -14,6 +14,7 @@
 
 import { NOOPAccessor } from '../accessor/base.ts'
 import { getExtension } from '../commands/resolve.ts'
+import { OpRecord } from '../observe/record.ts'
 import type { OpKwargs, OpsRegistry } from '../ops/registry.ts'
 import type { Resource } from '../resource/base.ts'
 import type { FileStat, MountMode, PathSpec } from '../types.ts'
@@ -23,22 +24,47 @@ const NOOP_ACCESSOR_INSTANCE = new NOOPAccessor()
 
 export type Resolver = (path: string) => Promise<[Resource, PathSpec, MountMode]>
 
+export type OpSink = (rec: OpRecord) => Promise<void>
+
 export class WorkspaceFS {
   private readonly resolver: Resolver
   private readonly ops: OpsRegistry
+  private readonly sink: OpSink | null
 
-  constructor(resolver: Resolver, ops: OpsRegistry) {
+  constructor(resolver: Resolver, ops: OpsRegistry, sink: OpSink | null = null) {
     this.resolver = resolver
     this.ops = ops
+    this.sink = sink
+  }
+
+  private async record(
+    op: string,
+    path: string,
+    source: string,
+    bytes: number,
+    startMs: number,
+  ): Promise<void> {
+    if (this.sink === null) return
+    await this.sink(
+      new OpRecord({
+        op,
+        path,
+        source,
+        bytes,
+        timestamp: Date.now(),
+        durationMs: Date.now() - startMs,
+      }),
+    )
   }
 
   async readFile(path: string, options: { raw?: boolean } = {}): Promise<Uint8Array> {
+    const start = Date.now()
     const [resource, pathSpec] = await this.resolver(path)
     const filetype = options.raw === true ? null : getExtension(path)
     const kwargs: OpKwargs = {}
     if (filetype !== null) kwargs.filetype = filetype
     if (resource.index !== undefined) kwargs.index = resource.index
-    return (await this.ops.call(
+    const result = (await this.ops.call(
       'read',
       resource.kind,
       resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
@@ -46,6 +72,8 @@ export class WorkspaceFS {
       [],
       kwargs,
     )) as Uint8Array
+    await this.record('read', path, resource.kind, result.byteLength, start)
+    return result
   }
 
   async readFileText(path: string, encoding = 'utf-8'): Promise<string> {
@@ -54,6 +82,7 @@ export class WorkspaceFS {
   }
 
   async writeFile(path: string, data: Uint8Array | string): Promise<void> {
+    const start = Date.now()
     const [resource, pathSpec] = await this.resolver(path)
     const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
     const kwargs = resource.index !== undefined ? { index: resource.index } : {}
@@ -65,9 +94,11 @@ export class WorkspaceFS {
       [bytes],
       kwargs,
     )
+    await this.record('write', path, resource.kind, bytes.byteLength, start)
   }
 
   async readdir(path: string): Promise<string[]> {
+    const start = Date.now()
     const [resource, pathSpec] = await this.resolver(path)
     const kwargs = resource.index !== undefined ? { index: resource.index } : {}
     const result = (await this.ops.call(
@@ -78,13 +109,15 @@ export class WorkspaceFS {
       [],
       kwargs,
     )) as string[] | null
+    await this.record('readdir', path, resource.kind, 0, start)
     return result ?? []
   }
 
   async stat(path: string): Promise<FileStat> {
+    const start = Date.now()
     const [resource, pathSpec] = await this.resolver(path)
     const kwargs = resource.index !== undefined ? { index: resource.index } : {}
-    return (await this.ops.call(
+    const result = (await this.ops.call(
       'stat',
       resource.kind,
       resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
@@ -92,6 +125,8 @@ export class WorkspaceFS {
       [],
       kwargs,
     )) as FileStat
+    await this.record('stat', path, resource.kind, 0, start)
+    return result
   }
 
   async exists(path: string): Promise<boolean> {
@@ -122,6 +157,7 @@ export class WorkspaceFS {
   }
 
   async mkdir(path: string): Promise<void> {
+    const start = Date.now()
     const [resource, pathSpec] = await this.resolver(path)
     await this.ops.call(
       'mkdir',
@@ -129,9 +165,11 @@ export class WorkspaceFS {
       resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
       pathSpec,
     )
+    await this.record('mkdir', path, resource.kind, 0, start)
   }
 
   async unlink(path: string): Promise<void> {
+    const start = Date.now()
     const [resource, pathSpec] = await this.resolver(path)
     await this.ops.call(
       'unlink',
@@ -139,9 +177,11 @@ export class WorkspaceFS {
       resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
       pathSpec,
     )
+    await this.record('unlink', path, resource.kind, 0, start)
   }
 
   async rmdir(path: string): Promise<void> {
+    const start = Date.now()
     const [resource, pathSpec] = await this.resolver(path)
     await this.ops.call(
       'rmdir',
@@ -149,9 +189,11 @@ export class WorkspaceFS {
       resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
       pathSpec,
     )
+    await this.record('rmdir', path, resource.kind, 0, start)
   }
 
   async rename(src: string, dst: string): Promise<void> {
+    const start = Date.now()
     const [resource, srcSpec] = await this.resolver(src)
     const [, dstSpec] = await this.resolver(dst)
     await this.ops.call(
@@ -161,6 +203,7 @@ export class WorkspaceFS {
       srcSpec,
       [dstSpec],
     )
+    await this.record('rename', src, resource.kind, 0, start)
   }
 
   async cat(path: string): Promise<string> {

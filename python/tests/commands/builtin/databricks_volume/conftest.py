@@ -91,7 +91,6 @@ def expected_index() -> RAMIndexCacheStore:
 def index_tracker(monkeypatch) -> IndexTrackingReader:
     tracker = IndexTrackingReader()
     monkeypatch.setattr(_helpers, "_read_bytes", tracker.read_bytes)
-    monkeypatch.setattr(_helpers, "_read_stream", tracker.read_stream)
     return tracker
 
 

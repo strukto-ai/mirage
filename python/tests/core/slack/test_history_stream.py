@@ -17,8 +17,7 @@ from unittest.mock import patch
 import pytest
 
 from mirage.core.slack.history import (fetch_messages_for_day,
-                                       stream_messages_for_day,
-                                       stream_thread_replies)
+                                       stream_messages_for_day)
 from mirage.resource.slack.config import SlackConfig
 
 
@@ -100,21 +99,3 @@ async def test_fetch_messages_for_day_collects_and_sorts_across_pages():
         result = await fetch_messages_for_day(cfg, "C1", "2026-05-10")
 
     assert [m["ts"] for m in result] == ["1.0", "2.0", "3.0"]
-
-
-@pytest.mark.asyncio
-async def test_stream_thread_replies_uses_replies_endpoint_with_ts():
-    cfg = SlackConfig(token="xoxb-t")
-    calls = []
-
-    async def fake_get(_cfg, method, params=None, token=None):
-        assert method == "conversations.replies"
-        calls.append(dict(params or {}))
-        return {"messages": [], "response_metadata": {"next_cursor": ""}}
-
-    with patch("mirage.core.slack.paginate.slack_get", new=fake_get):
-        async for _ in stream_thread_replies(cfg, "C1", "1700000000.0"):
-            pass
-
-    assert calls[0]["channel"] == "C1"
-    assert calls[0]["ts"] == "1700000000.0"

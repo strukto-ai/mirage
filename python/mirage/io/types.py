@@ -142,8 +142,3 @@ class IOResult:
         )
         result._stream_source = other
         return result
-
-    async def merge_aggregate(self, other: "IOResult") -> "IOResult":
-        result = await self.merge(other)
-        result.exit_code = max(self.exit_code, other.exit_code)
-        return result

@@ -89,24 +89,3 @@ async def test_early_termination():
             break
     assert len(lines) == 3
     assert pull_count < 10
-
-
-@pytest.mark.asyncio
-async def test_remaining_bytes_after_partial_read():
-    """remaining_bytes drains the tail (incl. any partial line in buffer)."""
-    source = _chunks([b"first\nsec", b"ond\nthird\n"])
-    buf = AsyncLineIterator(source)
-    line = await buf.readline()
-    assert line == b"first"
-    rest = await buf.remaining_bytes()
-    assert rest == b"second\nthird\n"
-
-
-@pytest.mark.asyncio
-async def test_remaining_bytes_at_eof():
-    """remaining_bytes returns b'' once source is fully consumed."""
-    source = _chunks([b"only\n"])
-    buf = AsyncLineIterator(source)
-    assert await buf.readline() == b"only"
-    assert await buf.readline() is None
-    assert await buf.remaining_bytes() == b""

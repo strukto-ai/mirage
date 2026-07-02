@@ -13,8 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from collections.abc import AsyncIterator, Callable, Iterator
-from concurrent.futures import Executor
+from collections.abc import AsyncIterator, Iterator
 
 
 def async_to_sync_iter(
@@ -33,27 +32,3 @@ def async_to_sync_iter(
         except StopAsyncIteration:
             break
         yield chunk
-
-
-async def sync_to_async_iter(
-    fn: Callable[..., None],
-    *args: object,
-    pool: Executor | None = None,
-) -> AsyncIterator[bytes]:
-    """Run a sync function in a thread and yield its results asynchronously.
-
-    Args:
-        fn (Callable[..., None]): Sync function that receives
-            a queue as first arg. Calls queue.put_nowait(item)
-            for results, queue.put_nowait(None) when done.
-        *args (object): Additional arguments passed to fn after the queue.
-        pool (Executor | None): Optional executor for run_in_executor.
-    """
-    queue: asyncio.Queue[bytes | None] = asyncio.Queue()
-    loop = asyncio.get_running_loop()
-    loop.run_in_executor(pool, fn, queue, *args)
-    while True:
-        item = await queue.get()
-        if item is None:
-            break
-        yield item

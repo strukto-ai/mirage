@@ -5,7 +5,6 @@ import pytest
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import RAMIndexCacheStore
-from mirage.commands.builtin.databricks_volume._helpers import is_dir_name
 from mirage.commands.builtin.generic.find import parse_find_args, walk_find
 from mirage.commands.builtin.generic.ls import ls as generic_ls
 from mirage.commands.builtin.generic.tree import tree as generic_tree
@@ -19,6 +18,14 @@ from tests.core.databricks_volume.conftest import (FakeClient, FakeFiles,
                                                    directory_entry, file_entry)
 
 MODIFIED_MS = 1_700_000_000_000
+
+
+def is_dir_name(_child: str) -> bool | None:
+    # Databricks readdir returns slash-less paths, so classification always
+    # falls back to stat.
+    return None
+
+
 FROZEN_NOW_S = 1_700_000_000
 DAY_S = 86_400
 AGES_DAYS = (1, 2, 3, 10, 20)

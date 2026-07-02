@@ -80,13 +80,6 @@ class JobTable:
             j for j in self._jobs.values() if j.workspace_id == workspace_id
         ]
 
-    def remove_for_workspace(self, workspace_id: str) -> None:
-        ids = [
-            j.id for j in self._jobs.values() if j.workspace_id == workspace_id
-        ]
-        for jid in ids:
-            self._jobs.pop(jid, None)
-
     def submit(self, workspace_id: str, command: str,
                schedule: Callable[[Awaitable], concurrent.futures.Future],
                coro_factory: Callable[[], Awaitable]) -> JobEntry:

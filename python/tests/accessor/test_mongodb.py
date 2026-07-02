@@ -61,15 +61,3 @@ def test_client_built_outside_event_loop_uses_loopless_key(accessor):
     assert first is second
     ctor.assert_called_once()
     assert 0 in accessor._clients
-
-
-@pytest.mark.asyncio
-async def test_invalidate_listings_clears_cache(accessor):
-
-    async def fetch():
-        return ["db1"]
-
-    await accessor.cached_list("k", fetch)
-    assert accessor._cache
-    accessor.invalidate_listings()
-    assert accessor._cache == {}

@@ -78,6 +78,3 @@ class MongoDBAccessor(Accessor):
         value = await fetch()
         self._cache[key] = (now + self.listing_cache_ttl, value)
         return value
-
-    def invalidate_listings(self) -> None:
-        self._cache.clear()

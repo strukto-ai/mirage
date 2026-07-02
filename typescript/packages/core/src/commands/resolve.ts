@@ -16,7 +16,6 @@ import { materialize as ioMaterialize } from '../io/types.ts'
 import type { ByteSource } from '../io/types.ts'
 import { OperandKind } from './spec/types.ts'
 import type { CommandSpec } from './spec/types.ts'
-import { parseCommand } from './spec/parser.ts'
 import { lstripSlash } from '../utils/slash.ts'
 
 export const COMPOUND_EXTENSIONS: ReadonlySet<string> = new Set([
@@ -35,12 +34,6 @@ export function getExtension(path: string | null): string | null {
   const dot = path.lastIndexOf('.')
   if (dot === -1 || path.slice(dot).includes('/')) return null
   return path.slice(dot)
-}
-
-export function resolveFirstPath(argv: string[], cwd: string, spec: CommandSpec): string {
-  const parsed = parseCommand(spec, argv, cwd)
-  const paths = parsed.routingPaths()
-  return paths[0] ?? cwd
 }
 
 export async function materializeStdout(stdout: ByteSource | null): Promise<Uint8Array> {

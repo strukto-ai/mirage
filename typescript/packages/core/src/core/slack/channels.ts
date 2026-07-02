@@ -58,13 +58,6 @@ export async function listChannels(
   return out
 }
 
-export function listDmsStream(
-  accessor: SlackAccessor,
-  options: { limit?: number } = {},
-): AsyncIterableIterator<SlackChannel[]> {
-  return listChannelsStream(accessor, { types: 'im,mpim', limit: options.limit ?? 200 })
-}
-
 export function listDms(
   accessor: SlackAccessor,
   options: { limit?: number } = {},

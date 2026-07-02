@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import os
 import time
 
 import pytest
@@ -108,6 +109,46 @@ async def test_get_verbose_includes_internals():
         assert internals is not None
         assert "cache_bytes" in internals
         assert "cache_entries" in internals
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not os.environ.get("REDIS_URL"),
+                    reason="REDIS_URL not set")
+async def test_get_verbose_internals_with_redis_cache():
+    body = {
+        "config": {
+            "mounts": {
+                "/": {
+                    "resource": "ram",
+                    "mode": "WRITE"
+                }
+            },
+            "cache": {
+                "type": "redis",
+                "url": os.environ["REDIS_URL"],
+                "key_prefix": "test:summary:",
+            },
+        },
+    }
+    app, _ = _make_app_with_short_grace(grace=10.0)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport,
+                           base_url="http://test") as client:
+        r = await client.post("/v1/workspaces", json=body)
+        assert r.status_code == 201, r.text
+        wid = r.json()["id"]
+
+        r = await client.get(f"/v1/workspaces/{wid}?verbose=true")
+        assert r.status_code == 200, r.text
+        internals = r.json()["internals"]
+        assert internals is not None
+        # Redis cache does not track size or entries; the summary must
+        # report them as untracked instead of reaching into RAM-store
+        # internals or conflating "not tracked" with an empty cache.
+        assert internals["cache_bytes"] is None
+        assert internals["cache_entries"] is None
+
+        await client.delete(f"/v1/workspaces/{wid}")
 
 
 @pytest.mark.asyncio

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { getHistoryJsonl, getThreadJsonl } from './history.ts'
+import { getHistoryJsonl } from './history.ts'
 import { SlackAccessor } from '../../accessor/slack.ts'
 import type { SlackResponse, SlackTransport } from './_client.ts'
 
@@ -115,39 +115,5 @@ describe('getHistoryJsonl', () => {
     })
     await getHistoryJsonl(new SlackAccessor(t), 'C1', '2026-04-24')
     expect(calls).toBe(1)
-  })
-})
-
-describe('getThreadJsonl', () => {
-  it('returns reply messages from conversations.replies', async () => {
-    const t = new FakeTransport(() => ({
-      ok: true,
-      messages: [
-        { ts: '1.0', text: 'parent' },
-        { ts: '2.0', text: 'reply' },
-      ],
-      has_more: false,
-    }))
-    const out = await getThreadJsonl(new SlackAccessor(t), 'C1', '1.0')
-    expect(out).toHaveLength(2)
-    expect(t.calls[0]?.endpoint).toBe('conversations.replies')
-    expect(t.calls[0]?.params).toMatchObject({ channel: 'C1', ts: '1.0', limit: '200' })
-  })
-
-  it('paginates when has_more', async () => {
-    const t = new FakeTransport((n) => {
-      if (n === 1) {
-        return {
-          ok: true,
-          messages: [{ ts: '1.0' }],
-          has_more: true,
-          response_metadata: { next_cursor: 'cx' },
-        }
-      }
-      return { ok: true, messages: [{ ts: '2.0' }], has_more: false }
-    })
-    const out = await getThreadJsonl(new SlackAccessor(t), 'C1', '1.0')
-    expect(out).toHaveLength(2)
-    expect(t.calls[1]?.params?.cursor).toBe('cx')
   })
 })

@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 from collections.abc import AsyncIterator
 
 
@@ -29,7 +28,6 @@ class CachableAsyncIterator:
         self._source = source
         self._buffer: list[bytes] = []
         self._exhausted = False
-        self.drain_event: asyncio.Event = asyncio.Event()
 
     @property
     def exhausted(self) -> bool:
@@ -49,25 +47,17 @@ class CachableAsyncIterator:
             chunk = await self._source.__anext__()
         except StopAsyncIteration:
             self._exhausted = True
-            # Signal drain_event so wait_for_drain() callers don't hang
-            # when the iterator is exhausted via normal iteration
-            # instead of drain(). (Scenario A fix)
-            self.drain_event.set()
             raise
         self._buffer.append(chunk)
         return chunk
 
     async def drain(self) -> bytes:
         """Consume remaining chunks and return all accumulated bytes."""
-        # Use try/finally to guarantee drain_event is set even when the
-        # source raises an exception (Scenario B) or the task is cancelled
-        # (Scenario C). Without this, wait_for_drain() hangs forever.
         try:
             async for chunk in self._source:
                 self._buffer.append(chunk)
         finally:
             self._exhausted = True
-            self.drain_event.set()
         return b"".join(self._buffer)
 
     async def drain_bounded(self, max_bytes: int) -> tuple[bytes, bool]:
@@ -87,14 +77,4 @@ class CachableAsyncIterator:
                     return b"".join(self._buffer), False
         finally:
             self._exhausted = True
-            self.drain_event.set()
         return b"".join(self._buffer), True
-
-    async def wait_for_drain(self) -> bytes:
-        """Wait for a background drain to complete, then return the full data.
-
-        Returns:
-            bytes: All accumulated bytes after drain completes.
-        """
-        await self.drain_event.wait()
-        return b"".join(self._buffer)

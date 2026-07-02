@@ -48,15 +48,3 @@ class AsyncLineIterator:
             self._buf += chunk
         line, self._buf = self._buf.split(b"\n", 1)
         return line
-
-    async def remaining_bytes(self) -> bytes:
-        """Drain source and return unconsumed bytes (incl. partial line)."""
-        chunks: list[bytes] = []
-        if self._buf:
-            chunks.append(self._buf)
-            self._buf = b""
-        if not self._exhausted:
-            async for chunk in self._source:
-                chunks.append(chunk)
-            self._exhausted = True
-        return b"".join(chunks)

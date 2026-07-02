@@ -100,12 +100,6 @@ describe('RAMIndexCacheStore', () => {
     expect((await store.listDir('/dir')).status).toBe(LookupStatus.NOT_FOUND)
   })
 
-  it('fromConfig constructs with ttl', async () => {
-    const store = RAMIndexCacheStore.fromConfig({ ttl: 30 })
-    await store.put('/a', mkEntry('1', 'a'))
-    expect((await store.get('/a')).entry?.id).toBe('1')
-  })
-
   it('handles root directory path', async () => {
     const store = new RAMIndexCacheStore()
     await store.setDir('/', [['a', mkEntry('1', 'a')]])

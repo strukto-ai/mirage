@@ -13,13 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { loadOptionalPeer } from '../../utils/optional_peer.ts'
-import {
-  IndexEntry,
-  LookupStatus,
-  type IndexConfig,
-  type ListResult,
-  type LookupResult,
-} from './config.ts'
+import { IndexEntry, LookupStatus, type ListResult, type LookupResult } from './config.ts'
 import { IndexCacheStore } from './store.ts'
 
 const ENTRY_PREFIX = 'mirage:idx:entry:'
@@ -71,13 +65,6 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     const prefix = options.keyPrefix ?? DEFAULT_KEY_PREFIX
     this.entryPrefix = `${prefix}${ENTRY_PREFIX}`
     this.childrenPrefix = `${prefix}${CHILDREN_PREFIX}`
-  }
-
-  static fromConfig(
-    config: IndexConfig,
-    extra: Omit<RedisIndexCacheOptions, 'ttl'> = {},
-  ): RedisIndexCacheStore {
-    return new RedisIndexCacheStore({ ttl: config.ttl ?? 600, ...extra })
   }
 
   private entryKey(path: string): string {

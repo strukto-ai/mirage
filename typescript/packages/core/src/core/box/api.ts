@@ -67,18 +67,6 @@ export async function listFolderItems(
   return out
 }
 
-export async function getFileMetadata(tm: BoxTokenManager, fileId: string): Promise<BoxItem> {
-  return (await boxGet(tm, `${BOX_API_BASE}/files/${fileId}`, {
-    fields: LIST_FIELDS,
-  })) as BoxItem
-}
-
-export async function getFolderMetadata(tm: BoxTokenManager, folderId: string): Promise<BoxItem> {
-  return (await boxGet(tm, `${BOX_API_BASE}/folders/${folderId}`, {
-    fields: LIST_FIELDS,
-  })) as BoxItem
-}
-
 export async function downloadFile(tm: BoxTokenManager, fileId: string): Promise<Uint8Array> {
   return boxGetBytes(tm, `${BOX_API_BASE}/files/${fileId}/content`)
 }

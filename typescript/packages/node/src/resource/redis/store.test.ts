@@ -80,11 +80,6 @@ describe.skipIf(skip)('RedisStore', () => {
     expect(await store.fileLen('/x')).toBe(5)
   })
 
-  it('getRange slices bytes', async () => {
-    await store.setFile('/x', new Uint8Array([10, 20, 30, 40, 50]))
-    expect(await store.getRange('/x', 1, 3)).toEqual(new Uint8Array([20, 30, 40]))
-  })
-
   it('addDir / hasDir / removeDir / listDirs', async () => {
     await store.addDir('/')
     await store.addDir('/foo')

@@ -78,8 +78,14 @@ class FileCacheMixin:
             await self.set(key, data, fingerprint=fingerprint, ttl=ttl)
 
     @property
-    def cache_size(self) -> int:
+    def cache_size(self) -> int | None:
+        """Cached bytes; None for stores that don't track them."""
         raise NotImplementedError
+
+    @property
+    def cache_entries(self) -> int | None:
+        """Number of cached entries; None for stores that don't track them."""
+        return None
 
     @property
     def cache_limit(self) -> int:
