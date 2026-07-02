@@ -34,7 +34,7 @@ from mirage.workspace.types import ExecutionNode
 
 from mirage.shell.helpers import (  # isort: skip
     ProcessSubDirection, get_command_name, get_parts,
-    get_process_sub_direction, get_text)
+    get_process_sub_direction, get_text, split_env_prefix)
 from mirage.workspace.executor.builtins import (  # isort: skip
     NO_FOLLOW_COMMANDS, follow_paths, handle_bash, handle_cd, handle_echo,
     handle_eval, handle_export, handle_history, handle_ln, handle_local,
@@ -110,30 +110,21 @@ async def execute_command(
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Dispatch a command node by name."""
     name = get_command_name(node)
-    parts = get_parts(node)
+    assignment_nodes, parts = split_env_prefix(get_parts(node))
 
     prefix_assignments: list[tuple[str, str]] = []
-    non_prefix_parts = []
-    saw_command_name = False
-    for p in parts:
-        if not saw_command_name and p.type == NT.VARIABLE_ASSIGNMENT:
-            atext = get_text(p)
-            if "=" in atext:
-                key, _, raw_val = atext.partition("=")
-                val_nodes = [
-                    c for c in p.named_children if c.type != NT.VARIABLE_NAME
-                ]
-                if val_nodes:
-                    v = await expand_node(val_nodes[0], session, execute_fn,
-                                          call_stack)
-                else:
-                    v = raw_val
-                prefix_assignments.append((key, v))
+    for p in assignment_nodes:
+        atext = get_text(p)
+        if "=" not in atext:
             continue
-        if p.type == NT.COMMAND_NAME:
-            saw_command_name = True
-        non_prefix_parts.append(p)
-    parts = non_prefix_parts
+        key, _, raw_val = atext.partition("=")
+        val_nodes = [c for c in p.named_children if c.type != NT.VARIABLE_NAME]
+        if val_nodes:
+            v = await expand_node(val_nodes[0], session, execute_fn,
+                                  call_stack)
+        else:
+            v = raw_val
+        prefix_assignments.append((key, v))
 
     for k, _ in prefix_assignments:
         if k in session.readonly_vars:

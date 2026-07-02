@@ -22,6 +22,7 @@ import {
   getParts,
   getProcessSubDirection,
   getText,
+  splitEnvPrefix,
 } from '../../shell/helpers.ts'
 import type { PyodideRuntime } from '../executor/python/runtime.ts'
 import type { JobTable } from '../../shell/job_table.ts'
@@ -146,30 +147,20 @@ export async function executeCommand(
   signal?: AbortSignal,
 ): Promise<Result> {
   const name = getCommandName(node)
-  const rawParts = getParts(node)
+  const [assignmentNodes, nonPrefixParts] = splitEnvPrefix(getParts(node))
 
   const prefixAssignments: [string, string][] = []
-  const nonPrefixParts: TSNodeLike[] = []
-  let sawCommandName = false
-  for (const p of rawParts) {
-    if (!sawCommandName && p.type === NT.VARIABLE_ASSIGNMENT) {
-      const atext = getText(p)
-      const eq = atext.indexOf('=')
-      if (eq >= 0) {
-        const key = atext.slice(0, eq)
-        const rawVal = atext.slice(eq + 1)
-        const valNodes = p.namedChildren.filter((c) => c.type !== NT.VARIABLE_NAME)
-        const firstVal = valNodes[0]
-        const v =
-          firstVal !== undefined
-            ? await expandNode(firstVal, session, executeFn, callStack)
-            : rawVal
-        prefixAssignments.push([key, v])
-      }
-      continue
-    }
-    if (p.type === NT.COMMAND_NAME) sawCommandName = true
-    nonPrefixParts.push(p)
+  for (const p of assignmentNodes) {
+    const atext = getText(p)
+    const eq = atext.indexOf('=')
+    if (eq < 0) continue
+    const key = atext.slice(0, eq)
+    const rawVal = atext.slice(eq + 1)
+    const valNodes = p.namedChildren.filter((c) => c.type !== NT.VARIABLE_NAME)
+    const firstVal = valNodes[0]
+    const v =
+      firstVal !== undefined ? await expandNode(firstVal, session, executeFn, callStack) : rawVal
+    prefixAssignments.push([key, v])
   }
 
   for (const [k] of prefixAssignments) {

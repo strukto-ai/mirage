@@ -20,9 +20,9 @@ from mirage.io import IOResult
 from mirage.io.stream import async_chain
 from mirage.shell.call_stack import CallStack
 from mirage.shell.job_table import JobTable
+from mirage.shell.node_kind import NodeKind, node_kind
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
 from mirage.shell.types import NodeType as NT
-from mirage.shell.types import Redirect, RedirectKind
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.executor.control import (handle_case, handle_for,
                                                handle_if, handle_select,
@@ -30,8 +30,8 @@ from mirage.workspace.executor.control import (handle_case, handle_for,
 from mirage.workspace.executor.pipes import (handle_connection, handle_pipe,
                                              handle_subshell)
 from mirage.workspace.executor.redirect import handle_redirect
-from mirage.workspace.expand import (classify_word, expand_and_classify,
-                                     expand_node)
+from mirage.workspace.expand import (expand_and_classify, expand_node,
+                                     expand_redirects)
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.command_dispatch import execute_command
@@ -91,18 +91,18 @@ async def execute_node(
                       agent_id,
                       cancel=cancel)
 
-    ntype = node.type
+    kind = node_kind(node)
 
-    if ntype == NT.COMMENT:
+    if kind == NodeKind.COMMENT:
         return None, IOResult(), ExecutionNode(command="", exit_code=0)
 
     # ── program (root / semicolons) ─────────────
-    if ntype == NT.PROGRAM:
+    if kind == NodeKind.PROGRAM:
         return await execute_program(recurse, node, session, stdin, cs,
                                      job_table, agent_id)
 
     # ── command ─────────────────────────────────
-    if ntype == NT.COMMAND:
+    if kind == NodeKind.COMMAND:
         return await execute_command(recurse,
                                      dispatch,
                                      registry,
@@ -116,59 +116,22 @@ async def execute_node(
                                      cancel=cancel)
 
     # ── pipeline ────────────────────────────────
-    if ntype == NT.PIPELINE:
+    if kind == NodeKind.PIPELINE:
         commands, stderr_flags = get_pipeline_commands(node)
         return await handle_pipe(recurse, commands, stderr_flags, session,
                                  stdin, cs)
 
     # ── list (&&, ||) ───────────────────────────
-    if ntype == NT.LIST:
+    if kind == NodeKind.LIST:
         left, op, right = get_list_parts(node)
         return await handle_connection(recurse, left, op, right, session,
                                        stdin, cs)
 
     # ── redirected statement ────────────────────
-    if ntype == NT.REDIRECTED_STATEMENT:
+    if kind == NodeKind.REDIRECT:
         command, redirects = get_redirects(node)
-        expanded_redirects = []
-        for r in redirects:
-            if r.kind in (RedirectKind.HEREDOC, RedirectKind.HERESTRING):
-                body = r.target
-                if isinstance(body, str) and r.expand_vars:
-                    for var, val in session.env.items():
-                        body = body.replace("$" + var, val)
-                expanded_redirects.append(
-                    Redirect(fd=r.fd,
-                             target=body,
-                             target_node=r.target_node,
-                             kind=r.kind,
-                             append=r.append,
-                             pipeline=r.pipeline,
-                             expand_vars=r.expand_vars))
-                continue
-            if isinstance(r.target, int):
-                expanded_redirects.append(r)
-                continue
-            target_node = r.target_node
-            if target_node is not None:
-                target_str = await expand_node(target_node, session,
-                                               execute_fn, cs)
-                target_scope = classify_word(target_str, registry, session.cwd)
-            else:
-                target_scope = r.target
-            expanded_redirects.append(
-                Redirect(fd=r.fd,
-                         target=target_scope,
-                         target_node=r.target_node,
-                         kind=r.kind,
-                         append=r.append,
-                         pipeline=r.pipeline))
-        pipe_node = None
-        for r in expanded_redirects:
-            if r.pipeline is not None:
-                pipe_node = r.pipeline
-                r.pipeline = None
-                break
+        expanded_redirects, pipe_node = await expand_redirects(
+            redirects, session, execute_fn, registry, cs)
         stdout, io, exec_node = await handle_redirect(recurse, dispatch,
                                                       command,
                                                       expanded_redirects,
@@ -181,12 +144,12 @@ async def execute_node(
         return stdout, io, exec_node
 
     # ── subshell ────────────────────────────────
-    if ntype == NT.SUBSHELL:
+    if kind == NodeKind.SUBSHELL:
         body = get_subshell_body(node)
         return await handle_subshell(recurse, body, session, stdin, cs)
 
     # ── compound statement ({ ... }) ───────────
-    if ntype == NT.COMPOUND_STATEMENT:
+    if kind == NodeKind.COMPOUND:
         all_stdout: list = []
         merged_io = IOResult()
         last_exec = ExecutionNode(command="{}", exit_code=0)
@@ -207,40 +170,40 @@ async def execute_node(
         return combined, merged_io, last_exec
 
     # ── if ──────────────────────────────────────
-    if ntype == NT.IF_STATEMENT:
+    if kind == NodeKind.IF:
         branches, else_body = get_if_branches(node)
         return await handle_if(recurse, branches, else_body, session, stdin,
                                cs)
 
     # ── for / select ────────────────────────────
-    if ntype == NT.FOR_STATEMENT:
+    if kind in (NodeKind.FOR, NodeKind.SELECT):
         var, values, body = get_for_parts(node)
         classified = await expand_and_classify(values, session, execute_fn,
                                                registry, session.cwd, cs)
         classified = await resolve_globs(classified, registry)
-        if node.children[0].type == NT.SELECT:
+        if kind == NodeKind.SELECT:
             return await handle_select(recurse, var, classified, body, session,
                                        stdin, cs)
         return await handle_for(recurse, var, classified, body, session, stdin,
                                 cs)
 
     # ── while / until ───────────────────────────
-    if ntype == NT.WHILE_STATEMENT:
+    if kind in (NodeKind.WHILE, NodeKind.UNTIL):
         condition, body = get_while_parts(node)
-        if node.children[0].type == NT.UNTIL:
+        if kind == NodeKind.UNTIL:
             return await handle_until(recurse, condition, body, session, stdin,
                                       cs)
         return await handle_while(recurse, condition, body, session, stdin, cs)
 
     # ── case ────────────────────────────────────
-    if ntype == NT.CASE_STATEMENT:
+    if kind == NodeKind.CASE:
         word_node = get_case_word(node)
         word = await expand_node(word_node, session, execute_fn, cs)
         items = get_case_items(node)
         return await handle_case(recurse, word, items, session, stdin, cs)
 
     # ── function definition ─────────────────────
-    if ntype == NT.FUNCTION_DEFINITION:
+    if kind == NodeKind.FUNCTION_DEF:
         name = get_function_name(node)
         body = get_function_body(node)
         session.functions[name] = body
@@ -248,7 +211,7 @@ async def execute_node(
                                                exit_code=0)
 
     # ── declaration (export/local/declare/readonly) ──
-    if ntype == NT.DECLARATION_COMMAND:
+    if kind == NodeKind.DECLARATION:
         keyword = get_declaration_keyword(node)
         assignments = []
         flag_chars: set[str] = set()
@@ -284,18 +247,18 @@ async def execute_node(
         return await handle_export(assignments, session)
 
     # ── unset ───────────────────────────────────
-    if ntype == NT.UNSET_COMMAND:
+    if kind == NodeKind.UNSET:
         names = get_unset_names(node)
         return await handle_unset(names, session)
 
     # ── test ([ ] or [[ ]]) ─────────────────────
-    if ntype == NT.TEST_COMMAND:
+    if kind == NodeKind.TEST:
         expanded = await expand_test_expr(node, session, execute_fn, cs,
                                           registry)
         return await handle_test(dispatch, expanded, session)
 
     # ── negated command ─────────────────────────
-    if ntype == NT.NEGATED_COMMAND:
+    if kind == NodeKind.NEGATED:
         inner = get_negated_command(node)
         stdout, io, exec_node = await recurse(inner, session, stdin, cs)
         io = IOResult(
@@ -309,7 +272,7 @@ async def execute_node(
         return stdout, io, exec_node
 
     # ── variable assignment at top level ────────
-    if ntype == NT.VARIABLE_ASSIGNMENT:
+    if kind == NodeKind.VAR_ASSIGN:
         text = get_text(node)
         if "=" in text:
             key, _, val = text.partition("=")
@@ -337,4 +300,4 @@ async def execute_node(
             session.arrays.pop(key, None)
         return None, IOResult(), ExecutionNode(command=text, exit_code=0)
 
-    raise TypeError(f"unsupported tree-sitter node type: {ntype}")
+    raise TypeError(f"unsupported tree-sitter node type: {node.type}")

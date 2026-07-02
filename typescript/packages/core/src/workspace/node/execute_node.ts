@@ -36,13 +36,9 @@ import {
 } from '../../shell/helpers.ts'
 import type { PyodideRuntime } from '../executor/python/runtime.ts'
 import type { JobTable } from '../../shell/job_table.ts'
-import {
-  ERREXIT_EXEMPT_TYPES,
-  NodeType as NT,
-  Redirect,
-  RedirectKind as Redirect_,
-} from '../../shell/types.ts'
-import { classifyBarePath } from '../expand/classify.ts'
+import { ERREXIT_EXEMPT_TYPES, NodeType as NT } from '../../shell/types.ts'
+import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
+import { expandRedirects } from '../expand/redirects.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import { expandAndClassify } from '../expand/parts.ts'
 import type { TSNodeLike } from '../expand/variable.ts'
@@ -105,21 +101,21 @@ export async function executeNode(
   ): Promise<Result> => executeNode(deps, n, s, i, cs)
 
   const { dispatch, registry, jobTable, executeFn, agentId } = deps
-  const ntype = node.type
+  const kind = nodeKind(node)
 
   if (deps.signal?.aborted === true) {
     throw makeAbortError()
   }
 
-  if (ntype === NT.COMMENT) {
+  if (kind === NodeKind.COMMENT) {
     return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
   }
 
-  if (ntype === NT.PROGRAM) {
+  if (kind === NodeKind.PROGRAM) {
     return executeProgram(recurse, node, session, stdin, callStack, jobTable, agentId)
   }
 
-  if (ntype === NT.COMMAND) {
+  if (kind === NodeKind.COMMAND) {
     return executeCommand(
       recurse,
       dispatch,
@@ -138,72 +134,25 @@ export async function executeNode(
     )
   }
 
-  if (ntype === NT.PIPELINE) {
+  if (kind === NodeKind.PIPELINE) {
     const [commands, stderrFlags] = getPipelineCommands(node)
     return handlePipe(recurse, commands, stderrFlags, session, stdin, callStack)
   }
 
-  if (ntype === NT.LIST) {
+  if (kind === NodeKind.LIST) {
     const [left, op, right] = getListParts(node)
     return handleConnection(recurse, left, op, right, session, stdin, callStack)
   }
 
-  if (ntype === NT.REDIRECTED_STATEMENT) {
+  if (kind === NodeKind.REDIRECT) {
     const [command, redirects] = getRedirects(node)
-    const expandedRedirects: Redirect[] = []
-    for (const r of redirects) {
-      if (r.kind === Redirect_.HEREDOC || r.kind === Redirect_.HERESTRING) {
-        let body: unknown = r.target
-        if (typeof body === 'string' && r.expandVars) {
-          let s: string = body
-          for (const [k, v] of Object.entries(session.env)) {
-            s = s.replaceAll('$' + k, v)
-          }
-          body = s
-        }
-        expandedRedirects.push(
-          new Redirect({
-            fd: r.fd,
-            target: body,
-            targetNode: r.targetNode,
-            kind: r.kind,
-            append: r.append,
-            pipeline: r.pipeline,
-            expandVars: r.expandVars,
-          }),
-        )
-        continue
-      }
-      if (typeof r.target === 'number') {
-        expandedRedirects.push(r)
-        continue
-      }
-      const targetNode = r.targetNode as TSNodeLike | null
-      let targetScope: unknown = r.target
-      if (targetNode !== null) {
-        const targetStr = await expandNode(targetNode, session, executeFn, callStack)
-        targetScope = classifyBarePath(targetStr, registry, session.cwd)
-      }
-      expandedRedirects.push(
-        new Redirect({
-          fd: r.fd,
-          target: targetScope,
-          targetNode: r.targetNode,
-          kind: r.kind,
-          append: r.append,
-          pipeline: r.pipeline,
-          expandVars: r.expandVars,
-        }),
-      )
-    }
-    let pipeNode: TSNodeLike | null = null
-    for (const r of expandedRedirects) {
-      if (r.pipeline !== null && r.pipeline !== undefined) {
-        pipeNode = r.pipeline as TSNodeLike
-        r.pipeline = null
-        break
-      }
-    }
+    const [expandedRedirects, pipeNode] = await expandRedirects(
+      redirects,
+      session,
+      executeFn,
+      registry,
+      callStack,
+    )
     let [stdout, io, execNode] = await handleRedirect(
       recurse,
       dispatch,
@@ -222,11 +171,11 @@ export async function executeNode(
     return [stdout, io, execNode]
   }
 
-  if (ntype === NT.SUBSHELL) {
+  if (kind === NodeKind.SUBSHELL) {
     return handleSubshell(recurse, getSubshellBody(node), session, stdin, callStack)
   }
 
-  if (ntype === NT.COMPOUND_STATEMENT) {
+  if (kind === NodeKind.COMPOUND) {
     const allStdout: ByteSource[] = []
     let mergedIo = new IOResult()
     let lastExec = new ExecutionNode({ command: '{}', exitCode: 0 })
@@ -252,12 +201,12 @@ export async function executeNode(
     return [combined, mergedIo, lastExec]
   }
 
-  if (ntype === NT.IF_STATEMENT) {
+  if (kind === NodeKind.IF) {
     const [branches, elseBody] = getIfBranches(node)
     return handleIf(recurse, branches, elseBody, session, stdin, callStack)
   }
 
-  if (ntype === NT.FOR_STATEMENT) {
+  if (kind === NodeKind.FOR || kind === NodeKind.SELECT) {
     const [variable, values, body] = getForParts(node)
     const classified = await expandAndClassify(
       values,
@@ -268,35 +217,35 @@ export async function executeNode(
       callStack,
     )
     const resolved = await resolveGlobs(classified, registry)
-    if (node.children[0]?.type === NT.SELECT) {
+    if (kind === NodeKind.SELECT) {
       return handleSelect(recurse, variable, resolved, body, session, stdin, callStack)
     }
     return handleFor(recurse, variable, resolved, body, session, stdin, callStack)
   }
 
-  if (ntype === NT.WHILE_STATEMENT) {
+  if (kind === NodeKind.WHILE || kind === NodeKind.UNTIL) {
     const [condition, body] = getWhileParts(node)
-    if (node.children[0]?.type === NT.UNTIL) {
+    if (kind === NodeKind.UNTIL) {
       return handleUntil(recurse, condition, body, session, stdin, callStack)
     }
     return handleWhile(recurse, condition, body, session, stdin, callStack)
   }
 
-  if (ntype === NT.CASE_STATEMENT) {
+  if (kind === NodeKind.CASE) {
     const wordNode = getCaseWord(node)
     const word = await expandNode(wordNode, session, executeFn, callStack)
     const items = getCaseItems(node)
     return handleCase(recurse, word, items, session, stdin, callStack)
   }
 
-  if (ntype === NT.FUNCTION_DEFINITION) {
+  if (kind === NodeKind.FUNCTION_DEF) {
     const name = getFunctionName(node)
     const body = getFunctionBody(node)
     session.functions[name] = body
     return [null, new IOResult(), new ExecutionNode({ command: `function ${name}`, exitCode: 0 })]
   }
 
-  if (ntype === NT.DECLARATION_COMMAND) {
+  if (kind === NodeKind.DECLARATION) {
     const keyword = getDeclarationKeyword(node)
     const assignments: string[] = []
     const flagChars = new Set<string>()
@@ -338,16 +287,16 @@ export async function executeNode(
     return handleExport(assignments, session)
   }
 
-  if (ntype === NT.UNSET_COMMAND) {
+  if (kind === NodeKind.UNSET) {
     return handleUnset(getUnsetNames(node), session)
   }
 
-  if (ntype === NT.TEST_COMMAND) {
+  if (kind === NodeKind.TEST) {
     const expanded = await expandTestExpr(node, session, executeFn, callStack)
     return handleTest(dispatch, expanded, session)
   }
 
-  if (ntype === NT.NEGATED_COMMAND) {
+  if (kind === NodeKind.NEGATED) {
     const inner = getNegatedCommand(node)
     const [stdout, io, execNode] = await recurse(inner, session, stdin, callStack)
     const flipped = new IOResult({
@@ -361,7 +310,7 @@ export async function executeNode(
     return [stdout, flipped, execNode]
   }
 
-  if (ntype === NT.VARIABLE_ASSIGNMENT) {
+  if (kind === NodeKind.VAR_ASSIGN) {
     const text = getText(node)
     if (text.includes('=')) {
       const eq = text.indexOf('=')
@@ -397,5 +346,5 @@ export async function executeNode(
     return [null, new IOResult(), new ExecutionNode({ command: text, exitCode: 0 })]
   }
 
-  throw new TypeError(`unsupported tree-sitter node type: ${ntype}`)
+  throw new TypeError(`unsupported tree-sitter node type: ${node.type}`)
 }

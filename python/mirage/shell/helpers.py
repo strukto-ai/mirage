@@ -47,6 +47,28 @@ def get_parts(node: tree_sitter.Node) -> list[tree_sitter.Node]:
     return [c for c in node.named_children if c.type not in _SKIP]
 
 
+def split_env_prefix(
+    parts: list[tree_sitter.Node],
+) -> tuple[list[tree_sitter.Node], list[tree_sitter.Node]]:
+    """Split FOO=1 BAR=2 cmd parts into (assignments, remaining).
+
+    The single structural rule for env-prefixed commands, shared by the
+    executor (which expands and applies the assignments) and the
+    provision planner (which only needs the command parts).
+    """
+    assignments: list[tree_sitter.Node] = []
+    remaining: list[tree_sitter.Node] = []
+    saw_command_name = False
+    for p in parts:
+        if not saw_command_name and p.type == NT.VARIABLE_ASSIGNMENT:
+            assignments.append(p)
+            continue
+        if p.type == NT.COMMAND_NAME:
+            saw_command_name = True
+        remaining.append(p)
+    return assignments, remaining
+
+
 def get_pipeline_commands(
     node: tree_sitter.Node,
 ) -> tuple[list[tree_sitter.Node], list[bool]]:  # noqa: E125,E501

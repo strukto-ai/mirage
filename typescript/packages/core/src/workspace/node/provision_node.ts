@@ -16,6 +16,8 @@ import {
   getCaseItems,
   getCommandName,
   getForParts,
+  getFunctionBody,
+  getFunctionName,
   getIfBranches,
   getListParts,
   getNegatedCommand,
@@ -25,18 +27,23 @@ import {
   getSubshellBody,
   getText,
   getWhileParts,
+  splitEnvPrefix,
 } from '../../shell/helpers.ts'
-import { NodeType as NT, ShellBuiltin as SB } from '../../shell/types.ts'
+import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
+import { NodeType as NT, RedirectKind, ShellBuiltin as SB } from '../../shell/types.ts'
 import { Precision, ProvisionResult } from '../../provision/types.ts'
-import { rollupList } from '../../provision/rollup.ts'
+import { rollupList, rollupPipe } from '../../provision/rollup.ts'
+import { PathSpec } from '../../types.ts'
 import type { TSNodeLike } from '../expand/variable.ts'
 import { classifyParts } from '../expand/classify.ts'
-import { expandAndClassify, expandParts } from '../expand/parts.ts'
 import type { ExecuteFn } from '../expand/node.ts'
+import { expandAndClassify, expandParts } from '../expand/parts.ts'
+import { expandRedirects } from '../expand/redirects.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { handleCommandProvision } from '../provision/command.ts'
 import {
   handleForProvision,
+  handleFunctionProvision,
   handleIfProvision,
   handleWhileProvision,
 } from '../provision/control.ts'
@@ -44,13 +51,13 @@ import { handleConnectionProvision, handlePipeProvision } from '../provision/pip
 import { handleRedirectProvision } from '../provision/redirect.ts'
 import type { Session } from '../session/session.ts'
 
+// eval / source execute their payload, so they are NOT free builtins:
+// leaving them out lets them fall through to command resolution, which
+// honestly reports UNKNOWN instead of a zero-cost EXACT.
 const BUILTIN_NAMES: ReadonlySet<string> = new Set([
   SB.CD,
   SB.TRUE,
   SB.FALSE,
-  SB.SOURCE,
-  SB.DOT,
-  SB.EVAL,
   SB.EXPORT,
   SB.UNSET,
   SB.LOCAL,
@@ -84,81 +91,115 @@ interface ProvisionContext {
   executeFn: ExecuteFn
 }
 
+/**
+ * Walk-local planner state. Function definitions seen during this
+ * plan are recorded here (not on the session: planning must not
+ * mutate shell state), and `planning` guards recursive functions
+ * from looping the planner.
+ */
+interface PlanScope {
+  functions: Map<string, TSNodeLike[]>
+  planning: Set<string>
+}
+
+/**
+ * Walk tree-sitter AST and estimate execution cost.
+ *
+ * Dispatches on the same NodeKind classification as the executor
+ * (`shell/node_kind.ts`), so every construct the executor runs has a
+ * planner branch; kinds neither walker supports fall through to an
+ * honest UNKNOWN.
+ */
 export async function provisionNode(
   ctx: ProvisionContext,
   node: TSNodeLike | null | undefined,
   session: Session,
+  scope?: PlanScope,
 ): Promise<ProvisionResult> {
-  const recurse = (n: TSNodeLike, s: Session): Promise<ProvisionResult> => provisionNode(ctx, n, s)
+  const planScope: PlanScope = scope ?? { functions: new Map(), planning: new Set() }
+  const recurse = (n: TSNodeLike, s: Session): Promise<ProvisionResult> =>
+    provisionNode(ctx, n, s, planScope)
+  const recurseUnknown = (n: unknown, s: Session): Promise<ProvisionResult> =>
+    recurse(n as TSNodeLike, s)
   if (node === null || node === undefined) {
     return new ProvisionResult({ precision: Precision.EXACT })
   }
-  const ntype = node.type
+  const kind = nodeKind(node)
 
-  if (ntype === NT.PROGRAM) {
-    const children: ProvisionResult[] = []
-    for (const c of node.namedChildren) children.push(await recurse(c, session))
-    if (children.length === 0) return new ProvisionResult({ precision: Precision.EXACT })
-    return rollupList(';', children)
+  if (kind === NodeKind.COMMENT) {
+    return new ProvisionResult({ precision: Precision.EXACT })
   }
 
-  if (ntype === NT.COMMAND) {
-    const name = getCommandName(node)
-    if (BUILTIN_NAMES.has(name)) return handleBuiltinProvision()
-    const parts = getParts(node)
-    const expanded = await expandParts(parts, session, ctx.executeFn)
-    const classified = classifyParts(expanded, ctx.registry, session.cwd)
-    return handleCommandProvision(ctx.registry, classified, session)
-  }
-
-  if (ntype === NT.PIPELINE) {
-    const [commands] = getPipelineCommands(node)
-    return handlePipeProvision(
-      (n: unknown, s: Session) => recurse(n as TSNodeLike, s),
-      commands,
-      session,
-    )
-  }
-
-  if (ntype === NT.LIST) {
-    const [left, op, right] = getListParts(node)
-    return handleConnectionProvision(
-      (n: unknown, s: Session) => recurse(n as TSNodeLike, s),
-      left,
-      op ?? '&&',
-      right,
-      session,
-    )
-  }
-
-  if (ntype === NT.REDIRECTED_STATEMENT) {
-    const [command] = getRedirects(node)
-    return handleRedirectProvision(
-      (n: unknown, s: Session) => recurse(n as TSNodeLike, s),
-      command,
-      session,
-    )
-  }
-
-  if (ntype === NT.SUBSHELL) {
-    const body = getSubshellBody(node)
+  if (kind === NodeKind.PROGRAM || kind === NodeKind.SUBSHELL || kind === NodeKind.COMPOUND) {
+    const body =
+      kind === NodeKind.SUBSHELL
+        ? getSubshellBody(node)
+        : node.namedChildren.filter((c) => c.type !== NT.COMMENT)
     const children: ProvisionResult[] = []
     for (const c of body) children.push(await recurse(c, session))
     if (children.length === 0) return new ProvisionResult({ precision: Precision.EXACT })
     return rollupList(';', children)
   }
 
-  if (ntype === NT.IF_STATEMENT) {
-    const [branches, elseBody] = getIfBranches(node)
-    return handleIfProvision(
-      (n: unknown, s: Session) => recurse(n as TSNodeLike, s),
-      branches,
-      elseBody,
-      session,
-    )
+  if (kind === NodeKind.COMMAND) {
+    const name = getCommandName(node)
+    const funcBody =
+      planScope.functions.get(name) ?? (session.functions[name] as TSNodeLike[] | undefined)
+    if (funcBody !== undefined) {
+      return handleFunctionProvision(recurseUnknown, name, funcBody, planScope.planning, session)
+    }
+    if (BUILTIN_NAMES.has(name)) return handleBuiltinProvision()
+    const [, parts] = splitEnvPrefix(getParts(node))
+    if (parts.length === 0) return new ProvisionResult({ precision: Precision.EXACT })
+    const expanded = await expandParts(parts, session, ctx.executeFn)
+    const classified = classifyParts(expanded, ctx.registry, session.cwd)
+    return handleCommandProvision(ctx.registry, classified, session)
   }
 
-  if (ntype === NT.FOR_STATEMENT) {
+  if (kind === NodeKind.PIPELINE) {
+    const [commands] = getPipelineCommands(node)
+    return handlePipeProvision(recurseUnknown, commands, session)
+  }
+
+  if (kind === NodeKind.LIST) {
+    const [left, op, right] = getListParts(node)
+    return handleConnectionProvision(recurseUnknown, left, op ?? '&&', right, session)
+  }
+
+  if (kind === NodeKind.REDIRECT) {
+    const [command, redirects] = getRedirects(node)
+    const [expanded, pipeNode] = await expandRedirects(
+      redirects,
+      session,
+      ctx.executeFn,
+      ctx.registry,
+    )
+    const targets: [RedirectKind, PathSpec][] = []
+    for (const r of expanded) {
+      if (r.kind !== RedirectKind.STDIN && r.kind !== RedirectKind.STDOUT) continue
+      if (!(r.target instanceof PathSpec)) continue
+      if (r.target.virtual.startsWith('/dev/')) continue
+      targets.push([r.kind, r.target])
+    }
+    const result = await handleRedirectProvision(
+      recurseUnknown,
+      ctx.registry,
+      command,
+      targets,
+      session,
+    )
+    if (pipeNode !== null) {
+      return rollupPipe([result, await recurse(pipeNode, session)])
+    }
+    return result
+  }
+
+  if (kind === NodeKind.IF) {
+    const [branches, elseBody] = getIfBranches(node)
+    return handleIfProvision(recurseUnknown, branches, elseBody, session)
+  }
+
+  if (kind === NodeKind.FOR) {
     const [, values, body] = getForParts(node)
     const classified = await expandAndClassify(
       values,
@@ -168,24 +209,21 @@ export async function provisionNode(
       session.cwd,
     )
     const n = classified.length || 1
-    return handleForProvision(
-      (nn: unknown, s: Session) => recurse(nn as TSNodeLike, s),
-      body,
-      n,
-      session,
-    )
+    return handleForProvision(recurseUnknown, body, n, session)
   }
 
-  if (ntype === NT.WHILE_STATEMENT) {
+  if (kind === NodeKind.SELECT) {
+    // select re-prompts until break: unbounded like while.
+    const [, , body] = getForParts(node)
+    return handleWhileProvision(recurseUnknown, body, session)
+  }
+
+  if (kind === NodeKind.WHILE || kind === NodeKind.UNTIL) {
     const [, body] = getWhileParts(node)
-    return handleWhileProvision(
-      (n: unknown, s: Session) => recurse(n as TSNodeLike, s),
-      body,
-      session,
-    )
+    return handleWhileProvision(recurseUnknown, body, session)
   }
 
-  if (ntype === NT.CASE_STATEMENT) {
+  if (kind === NodeKind.CASE) {
     const items = getCaseItems(node)
     const children: ProvisionResult[] = []
     for (const [, body] of items) {
@@ -195,26 +233,25 @@ export async function provisionNode(
     return new ProvisionResult({ precision: Precision.EXACT })
   }
 
+  if (kind === NodeKind.FUNCTION_DEF) {
+    const name = getFunctionName(node)
+    const body = getFunctionBody(node)
+    if (name !== '' && body !== null) planScope.functions.set(name, body)
+    return handleBuiltinProvision()
+  }
+
   if (
-    ntype === NT.FUNCTION_DEFINITION ||
-    ntype === NT.DECLARATION_COMMAND ||
-    ntype === NT.UNSET_COMMAND ||
-    ntype === NT.TEST_COMMAND ||
-    ntype === NT.VARIABLE_ASSIGNMENT
+    kind === NodeKind.DECLARATION ||
+    kind === NodeKind.UNSET ||
+    kind === NodeKind.TEST ||
+    kind === NodeKind.VAR_ASSIGN
   ) {
     return handleBuiltinProvision()
   }
 
-  if (ntype === NT.NEGATED_COMMAND) {
+  if (kind === NodeKind.NEGATED) {
     const inner = getNegatedCommand(node)
     return recurse(inner, session)
-  }
-
-  if (ntype === NT.COMPOUND_STATEMENT) {
-    const children: ProvisionResult[] = []
-    for (const c of node.namedChildren) children.push(await recurse(c, session))
-    if (children.length === 0) return new ProvisionResult({ precision: Precision.EXACT })
-    return rollupList(';', children)
   }
 
   return new ProvisionResult({ command: getText(node), precision: Precision.UNKNOWN })

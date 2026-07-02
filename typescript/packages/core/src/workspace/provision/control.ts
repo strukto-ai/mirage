@@ -34,6 +34,32 @@ async function planBody(
 }
 
 /**
+ * Plan a shell function call: the body's cost. Recursive functions
+ * would loop the planner, so a function already being planned reports
+ * UNKNOWN instead of recursing again.
+ */
+export async function handleFunctionProvision(
+  provisionNode: ProvisionNodeFn,
+  name: string,
+  body: readonly unknown[],
+  planning: Set<string>,
+  session: Session,
+): Promise<ProvisionResult> {
+  if (planning.has(name)) {
+    return new ProvisionResult({ command: name, precision: Precision.UNKNOWN })
+  }
+  planning.add(name)
+  let result: ProvisionResult
+  try {
+    result = await planBody(provisionNode, body, session)
+  } finally {
+    planning.delete(name)
+  }
+  if (result.command === null || result.command === '') result.command = name
+  return result
+}
+
+/**
  * Plan an if: branches bracket as alternatives. Taking branch i
  * evaluates conditions 1..i plus body i, so each alternative sums its
  * condition ladder with its body. The else (or, without one, the

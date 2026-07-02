@@ -15,6 +15,7 @@
 from mirage.workspace.expand.classify import classify_parts, classify_word
 from mirage.workspace.expand.node import expand_node
 from mirage.workspace.expand.parts import expand_and_classify, expand_parts
+from mirage.workspace.expand.redirects import expand_redirects
 
 __all__ = [
     "classify_parts",
@@ -22,4 +23,5 @@ __all__ = [
     "expand_and_classify",
     "expand_node",
     "expand_parts",
+    "expand_redirects",
 ]

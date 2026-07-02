@@ -978,6 +978,16 @@ PROVISION_CASES: list[tuple[str, str]] = [
     ("prov_cmdsub", "cat $(echo /data/a.txt)"),
     ("prov_deep_mix",
      "for i in 1 2; do cat /data/a.txt | wc -l && cat /data/b.txt; done"),
+    # ----- planner/executor drift fixes (env prefix, functions, eval,
+    # select/until, redirect costing) -----
+    ("prov_env_prefix", "FOO=1 cat /data/a.txt"),
+    ("prov_func_call", "pfn() { cat /data/b.txt; }; pfn; pfn"),
+    ("prov_func_recursive", "prec() { prec; }; prec"),
+    ("prov_eval", "eval 'cat /data/a.txt'"),
+    ("prov_select", "select x in a b; do cat /data/a.txt; done"),
+    ("prov_until", "until false; do cat /data/a.txt; done"),
+    ("prov_redirect_in", "wc -l < /data/a.txt"),
+    ("prov_redirect_devnull", "cat /data/a.txt > /dev/null"),
 ]
 
 

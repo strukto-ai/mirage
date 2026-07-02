@@ -32,6 +32,28 @@ export function getParts(node: TSNodeLike): TSNodeLike[] {
   return node.namedChildren.filter((c) => !SKIP_PARTS.has(c.type))
 }
 
+/**
+ * Split FOO=1 BAR=2 cmd parts into [assignments, remaining].
+ *
+ * The single structural rule for env-prefixed commands, shared by the
+ * executor (which expands and applies the assignments) and the
+ * provision planner (which only needs the command parts).
+ */
+export function splitEnvPrefix(parts: TSNodeLike[]): [TSNodeLike[], TSNodeLike[]] {
+  const assignments: TSNodeLike[] = []
+  const remaining: TSNodeLike[] = []
+  let sawCommandName = false
+  for (const p of parts) {
+    if (!sawCommandName && p.type === NT.VARIABLE_ASSIGNMENT) {
+      assignments.push(p)
+      continue
+    }
+    if (p.type === NT.COMMAND_NAME) sawCommandName = true
+    remaining.push(p)
+  }
+  return [assignments, remaining]
+}
+
 export function getPipelineCommands(node: TSNodeLike): [TSNodeLike[], boolean[]] {
   const commands: TSNodeLike[] = []
   const stderrFlags: boolean[] = []

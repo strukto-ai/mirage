@@ -2330,7 +2330,7 @@ net=30 write=0 cache=0 ops=2 hits=0 precision=exact
 === prov_negate ===
 net=24 write=0 cache=0 ops=1 hits=0 precision=exact
 === prov_redirect_out ===
-net=24 write=0 cache=0 ops=1 hits=0 precision=exact
+net=24 write=0-24 cache=0 ops=1 hits=0 precision=range
 === prov_or_unknown_branch ===
 net=0-24 write=0 cache=0 ops=0 hits=0 precision=unknown
 === prov_for_pipe ===
@@ -2341,3 +2341,19 @@ net=24 write=0 cache=0 ops=4 hits=0 precision=exact
 net=24 write=0 cache=0 ops=1 hits=0 precision=exact
 === prov_deep_mix ===
 net=60 write=0 cache=0 ops=4 hits=0 precision=unknown
+=== prov_env_prefix ===
+net=24 write=0 cache=0 ops=1 hits=0 precision=exact
+=== prov_func_call ===
+net=12 write=0 cache=0 ops=2 hits=0 precision=exact
+=== prov_func_recursive ===
+net=0 write=0 cache=0 ops=0 hits=0 precision=unknown
+=== prov_eval ===
+net=0 write=0 cache=0 ops=0 hits=0 precision=unknown
+=== prov_select ===
+net=24 write=0 cache=0 ops=1 hits=0 precision=unknown
+=== prov_until ===
+net=24 write=0 cache=0 ops=1 hits=0 precision=unknown
+=== prov_redirect_in ===
+net=24 write=0 cache=0 ops=1 hits=0 precision=unknown
+=== prov_redirect_devnull ===
+net=24 write=0 cache=0 ops=1 hits=0 precision=exact
