@@ -24,16 +24,20 @@ async function main(): Promise<void> {
   const region = process.env.S3_REGION ?? 'us-east-1'
   const accessKeyId = process.env.AWS_ACCESS_KEY_ID
   const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY
-  const keyPrefix = `mirage-integ-${String(process.pid)}-${String(Date.now())}/`
-  const resource = new S3Resource({
+  const runId = `${String(process.pid)}-${String(Date.now())}`
+  const common = {
     bucket,
     region,
-    keyPrefix,
     ...(endpoint !== undefined && endpoint !== '' ? { endpoint, forcePathStyle: true } : {}),
     ...(accessKeyId !== undefined && accessKeyId !== '' ? { accessKeyId } : {}),
     ...(secretAccessKey !== undefined && secretAccessKey !== '' ? { secretAccessKey } : {}),
-  })
-  const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE })
+  }
+  const resource = new S3Resource({ ...common, keyPrefix: `mirage-integ-${runId}/` })
+  const resource2 = new S3Resource({ ...common, keyPrefix: `mirage-integ-xm-${runId}/` })
+  const ws = new Workspace(
+    { '/data': resource, '/data2': resource2 },
+    { mode: MountMode.WRITE },
+  )
   try {
     await runCases(ws)
   } finally {
