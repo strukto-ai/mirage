@@ -230,7 +230,11 @@ export async function provisionNode(
     const items = getCaseItems(node)
     const children: ProvisionResult[] = []
     for (const [, body] of items) {
-      if (body !== null) children.push(await recurse(body, session))
+      if (body.length === 0) continue
+      const stmts: ProvisionResult[] = []
+      for (const stmt of body) stmts.push(await recurse(stmt, session))
+      const first = stmts[0]
+      children.push(stmts.length === 1 && first !== undefined ? first : rollupList(';', stmts))
     }
     if (children.length > 0) return rollupList('||', children)
     return new ProvisionResult({ precision: Precision.EXACT })

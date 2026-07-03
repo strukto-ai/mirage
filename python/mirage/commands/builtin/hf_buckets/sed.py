@@ -16,9 +16,11 @@ from mirage.accessor._hf import HF_RESOURCES
 from mirage.commands.builtin.generic.sed_command import make_sed
 from mirage.core.hf_buckets.glob import resolve_glob
 from mirage.core.hf_buckets.read import read_bytes
+from mirage.core.hf_buckets.stat import stat as _stat
 from mirage.core.hf_buckets.write import write_bytes
 
 sed = make_sed(
+    stat_fn=_stat,
     resource=HF_RESOURCES,
     glob_fn=resolve_glob,
     make_read=lambda accessor, index, paths: read_bytes,

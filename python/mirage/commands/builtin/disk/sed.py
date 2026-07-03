@@ -15,9 +15,11 @@
 from mirage.commands.builtin.generic.sed_command import make_sed
 from mirage.core.disk.glob import resolve_glob
 from mirage.core.disk.read import read_bytes
+from mirage.core.disk.stat import stat as _stat
 from mirage.core.disk.write import write_bytes
 
 sed = make_sed(
+    stat_fn=_stat,
     resource="disk",
     glob_fn=resolve_glob,
     glob_when=lambda accessor, index: accessor.root is not None,

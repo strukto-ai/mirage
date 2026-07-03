@@ -213,8 +213,14 @@ def test_get_if_multiple_elif():
 def test_get_case_empty_body():
     items = get_case_items(_first("case x in a) ;; b) echo b;; esac"))
     assert len(items) == 2
-    assert items[0][1] is None
-    assert items[1][1] is not None
+    assert items[0][1] == []
+    assert len(items[1][1]) == 1
+
+
+def test_get_case_multi_statement_body():
+    items = get_case_items(_first("case x in a) echo 1; echo 2;; esac"))
+    assert len(items) == 1
+    assert len(items[0][1]) == 2
 
 
 def test_get_redirect_stderr():

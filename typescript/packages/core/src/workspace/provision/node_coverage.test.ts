@@ -159,4 +159,35 @@ describe('planner covers every statement kind', () => {
       await ws.close()
     }
   })
+
+  it('is dry, runs case arms fully, and prices sed reads', async () => {
+    const ws = buildWorkspace()
+    try {
+      await ws.execute('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
+      // a dry run must not execute command substitutions
+      let result = await ws.execute('cat $(tee /data/leak.txt > /dev/null; echo /data/a.txt)', {
+        provision: true,
+      })
+      expect(result.precision).toBe('unknown')
+      const listing = new TextDecoder().decode((await ws.execute('ls /data')).stdout)
+      expect(listing).not.toContain('leak.txt')
+      // a case arm runs every statement up to its ;; terminator
+      const out = new TextDecoder().decode(
+        (await ws.execute('case x in x) echo one; echo two;; esac')).stdout,
+      )
+      expect(out).toBe('one\ntwo\n')
+      result = await ws.execute('case x in x) cat /data/a.txt; cat /data/a.txt;; esac', {
+        provision: true,
+      })
+      expect(result.networkRead).toBe('48')
+      // sed reads its operands; -i degrades to a floor
+      result = await ws.execute('sed s/x/y/ /data/a.txt', { provision: true })
+      expect(result.networkRead).toBe('24')
+      expect(result.precision).toBe('exact')
+      result = await ws.execute('sed -i s/x/y/ /data/a.txt', { provision: true })
+      expect(result.precision).toBe('unknown')
+    } finally {
+      await ws.close()
+    }
+  })
 })

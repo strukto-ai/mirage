@@ -14,6 +14,7 @@
 
 import asyncio
 import copy as _copy
+import dataclasses
 import json
 import os
 import tempfile
@@ -60,6 +61,41 @@ def ops_summary() -> str:
     cache = ops.cache_bytes
     return (f"{len(ops.records)} ops, "
             f"{net} net, {cache} cache")
+
+
+S3_GET_PER_1K_USD = 0.0004
+S3_EGRESS_PER_GB_USD = 0.09
+
+
+def _price_wrap(original):
+    """Wrap a registered estimator so its bytes/ops become dollars."""
+
+    async def priced(accessor, paths, *texts, **kwargs):
+        result = await original(accessor, paths, *texts, **kwargs)
+        egress = result.network_read_high * S3_EGRESS_PER_GB_USD / 1e9
+        requests = result.read_ops * S3_GET_PER_1K_USD / 1000
+        result.estimated_cost_usd = egress + requests
+        return result
+
+    return priced
+
+
+def price_cat_reads(workspace: Workspace, mount_path: str) -> None:
+    """Attach an S3 price model to cat on one mount.
+
+    The shared estimator already computes bytes and request counts;
+    re-registering cat with a wrapped estimator converts them into
+    estimated_cost_usd, which the planner then combines across pipes,
+    branches, and loops like any other field (all-or-nothing: a stage
+    without a cost drops the total).
+    """
+    mount = workspace._registry.mount_for(mount_path)
+    cmd = mount.resolve_command("cat", None)
+    if cmd is not None and cmd.provision_fn is not None:
+        priced = dataclasses.replace(cmd,
+                                     provision_fn=_price_wrap(
+                                         cmd.provision_fn))
+        mount.register(priced)
 
 
 async def main():
@@ -216,6 +252,25 @@ async def main():
     print("\n--- plan after cache: grep mirage ... ---")
     print(f"  network_read: {dr.network_read}, cache_read: {dr.cache_read}")
     print(f"  cache_hits: {dr.cache_hits}, read_ops: {dr.read_ops}")
+
+    # ── cost model: attach dollars to the byte estimates ──
+    print("\n=== PROVISION COST MODEL ===\n")
+    price_cat_reads(ws, "/s3/data")
+    dr = await ws.execute("cat /s3/data/example.jsonl", provision=True)
+    print("--- priced plan: cat /s3/data/example.jsonl ---")
+    print(f"  network_read: {dr.network_read}, read_ops: {dr.read_ops}")
+    print(f"  estimated_cost_usd: {dr.estimated_cost_usd:.10f}")
+
+    dr = await ws.execute(
+        "for i in 1 2 3; do cat /s3/data/example.jsonl; done", provision=True)
+    print("--- priced plan: for-loop x3 ---")
+    print(f"  network_read: {dr.network_read}, "
+          f"estimated_cost_usd: {dr.estimated_cost_usd:.10f}")
+
+    dr = await ws.execute("cat /s3/data/example.jsonl | wc -l", provision=True)
+    print("--- priced plan: cat | wc (wc has no cost model) ---")
+    print(f"  estimated_cost_usd: {dr.estimated_cost_usd} "
+          "(all-or-nothing: an unpriced stage drops the total)")
 
     print("\n=== ACTUAL EXECUTION ===\n")
 

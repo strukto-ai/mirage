@@ -290,15 +290,28 @@ export function handleUntil(
 export async function handleCase(
   executeNode: ExecuteNodeFn,
   word: string,
-  items: readonly [readonly string[], TSNodeLike | null][],
+  items: readonly [readonly string[], readonly TSNodeLike[]][],
   session: Session,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
 ): Promise<Result> {
   for (const [patterns, body] of items) {
     if (patterns.some((p) => fnmatch(word, p.trim()))) {
-      if (body !== null) return executeNode(body, session, stdin, callStack)
-      return [null, new IOResult(), new ExecutionNode({ command: 'case', exitCode: 0 })]
+      const allStdout: ByteSource[] = []
+      let mergedIo = new IOResult()
+      let lastExec = new ExecutionNode({ command: 'case', exitCode: 0 })
+      let stageStdin = stdin
+      for (const stmt of body) {
+        const [stdout, io, execNode] = await executeNode(stmt, session, stageStdin, callStack)
+        stageStdin = null
+        lastExec = execNode
+        if (stdout !== null) allStdout.push(stdout)
+        mergedIo = await mergedIo.merge(io)
+      }
+      const first = allStdout[0]
+      if (allStdout.length === 1 && first !== undefined) return [first, mergedIo, lastExec]
+      const combined = allStdout.length > 0 ? asyncChain(...allStdout) : null
+      return [combined, mergedIo, lastExec]
     }
   }
   return [null, new IOResult(), new ExecutionNode({ command: 'case', exitCode: 0 })]

@@ -14,12 +14,14 @@
 
 import type { S3Accessor } from '../../../accessor/s3.ts'
 import { resolveGlob } from '../../../core/s3/glob.ts'
+import { stat as s3ProvStat } from '../../../core/s3/stat.ts'
 import { stream as s3Stream } from '../../../core/s3/stream.ts'
 import { write as s3Write } from '../../../core/s3/write.ts'
 import { ResourceName } from '../../../types.ts'
 import { makeSed } from '../generic/sed_command.ts'
 
 export const S3_SED = makeSed<S3Accessor>({
+  stat: (a, p) => s3ProvStat(a, p),
   resource: ResourceName.S3,
   stream: (a, p) => s3Stream(a, p),
   write: (a, p, d) => s3Write(a, p, d),

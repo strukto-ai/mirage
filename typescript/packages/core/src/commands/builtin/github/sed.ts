@@ -14,11 +14,13 @@
 
 import type { GitHubAccessor } from '../../../accessor/github.ts'
 import { resolveGlob } from '../../../core/github/glob.ts'
+import { stat as githubProvStat } from '../../../core/github/stat.ts'
 import { stream as githubStream } from '../../../core/github/read.ts'
 import { ResourceName } from '../../../types.ts'
 import { makeSed } from '../generic/sed_command.ts'
 
 export const GITHUB_SED = makeSed<GitHubAccessor>({
+  stat: (a, p) => githubProvStat(a, p),
   resource: ResourceName.GITHUB,
   stream: (a, p, opts) => githubStream(a, p, opts.index ?? undefined),
   glob: (a, paths, opts) => resolveGlob(a, paths, opts.index ?? undefined),

@@ -16,9 +16,11 @@ import { makeSed } from '@struktoai/mirage-core'
 import type { HfAccessor } from '../../../accessor/hf.ts'
 import { HF_RESOURCES } from '../../../accessor/hf.ts'
 import { stream as hfStream } from '../../../core/hf/stream.ts'
+import { stat as hfProvStat } from '../../../core/hf/stat.ts'
 import { write as hfWrite } from '../../../core/hf/write.ts'
 
 export const HF_SED = makeSed<HfAccessor>({
+  stat: (a, p) => hfProvStat(a, p),
   resource: [...HF_RESOURCES],
   stream: (a, p) => hfStream(a, p),
   write: (a, p, d) => hfWrite(a, p, d),

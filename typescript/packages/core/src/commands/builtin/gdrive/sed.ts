@@ -14,11 +14,13 @@
 
 import type { GDriveAccessor } from '../../../accessor/gdrive.ts'
 import { resolveGlob } from '../../../core/gdrive/glob.ts'
+import { stat as gdriveProvStat } from '../../../core/gdrive/stat.ts'
 import { stream as gdriveStream } from '../../../core/gdrive/read.ts'
 import { ResourceName } from '../../../types.ts'
 import { makeSed } from '../generic/sed_command.ts'
 
 export const GDRIVE_SED = makeSed<GDriveAccessor>({
+  stat: (a, p) => gdriveProvStat(a, p),
   resource: ResourceName.GDRIVE,
   stream: (a, p, opts) => gdriveStream(a, p, opts.index ?? undefined),
   glob: (a, paths, opts) => resolveGlob(a, paths, opts.index ?? undefined),

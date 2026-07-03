@@ -15,9 +15,11 @@
 from mirage.commands.builtin.generic.sed_command import make_sed
 from mirage.core.sharepoint.glob import resolve_glob
 from mirage.core.sharepoint.read import read_bytes
+from mirage.core.sharepoint.stat import stat as _stat
 from mirage.core.sharepoint.write import write_bytes
 
 sed = make_sed(
+    stat_fn=_stat,
     resource="sharepoint",
     glob_fn=resolve_glob,
     make_read=lambda accessor, index, paths: read_bytes,

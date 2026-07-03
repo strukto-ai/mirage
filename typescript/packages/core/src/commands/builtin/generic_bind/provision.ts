@@ -263,6 +263,19 @@ export function pureProvision(
   )
 }
 
+/**
+ * Provision for sed: operands are read fully; -i writes back, so the
+ * output keeps the read total as a floor with UNKNOWN.
+ */
+export function makeSedProvision<A extends Accessor>(stat: StatOp<A>): ProvisionFn<A> {
+  const base = makeFileReadProvision(stat)
+  return async (accessor: A, paths: PathSpec[], texts: string[], opts: CommandOpts) => {
+    const result = (await base(accessor, paths, texts, opts)) as ProvisionResult
+    if (opts.flags.i === true) result.precision = Precision.UNKNOWN
+    return result
+  }
+}
+
 /** Provision for grep/rg: render the pattern then delegate to file_read. */
 export function makeSearchProvision<A extends Accessor>(stat: StatOp<A>): ProvisionFn<A> {
   const base = makeFileReadProvision(stat)

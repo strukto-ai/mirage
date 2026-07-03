@@ -206,6 +206,28 @@ def make_jq_provision(stat: Callable) -> Callable:
     return jq_provision
 
 
+def make_sed_provision(stat: Callable) -> Callable:
+    """Provision for sed: operands are read fully; -i writes back, so
+    the output keeps the read total as a floor with UNKNOWN."""
+    base = make_file_read_provision(stat)
+
+    async def sed_provision(
+        accessor: Accessor,
+        paths: list[PathSpec],
+        *_args: str,
+        command: str = "",
+        i: bool = False,
+        index: IndexCacheStore | None = None,
+        **kwargs,
+    ) -> ProvisionResult:
+        result = await base(accessor, paths, command=command, index=index)
+        if i:
+            result.precision = Precision.UNKNOWN
+        return result
+
+    return sed_provision
+
+
 def make_search_provision(stat: Callable) -> Callable:
     """Provision for grep/rg/jq: render pattern then delegate to file_read."""
     base = make_file_read_provision(stat)
