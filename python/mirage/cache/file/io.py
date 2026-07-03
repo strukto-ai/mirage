@@ -18,14 +18,54 @@ from typing import Callable
 
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.io import CachableAsyncIterator, IOResult
+from mirage.observe.record import OpRecord
 
 logger = logging.getLogger(__name__)
+
+
+def read_fingerprint(records: list[OpRecord] | None, path: str) -> str | None:
+    """Latest backend fingerprint recorded for a read of ``path``.
+
+    Backends stamp read records with the content identifier they
+    returned (S3 ETag, OneDrive cTag, Postgres sha256). Threading it
+    into the cache entry lets ALWAYS-mode ``is_fresh`` compare like
+    with like; the MD5-of-content default only matches simple-PUT S3
+    objects.
+
+    Args:
+        records (list[OpRecord] | None): Op records emitted by the
+            command that produced the IOResult being applied.
+        path (str): Virtual path used as the cache key.
+    """
+    if records is None:
+        return None
+    for rec in reversed(records):
+        if rec.op == "read" and rec.path == path and rec.fingerprint:
+            return rec.fingerprint
+    return None
+
+
+async def _set_cached(
+    cache: FileCacheMixin,
+    path: str,
+    data: bytes,
+    records: list[OpRecord] | None,
+) -> None:
+    fingerprint = read_fingerprint(records, path)
+    if fingerprint is None and await cache.get(path) == data:
+        # Warm read: the bytes were served from this cache, so there is
+        # no backend read record. Re-setting would replace the backend
+        # fingerprint stamped on the cold read with the MD5 default and
+        # force ALWAYS mode to evict and refetch on every read.
+        return
+    await cache.set(path, data, fingerprint=fingerprint)
 
 
 async def apply_io(
     cache: FileCacheMixin,
     io: IOResult,
     is_cacheable: Callable[[str], bool] | None = None,
+    records: list[OpRecord] | None = None,
 ) -> None:
     cache_set = set(io.cache)
     max_bytes = getattr(cache, "max_drain_bytes", None)
@@ -38,16 +78,18 @@ async def apply_io(
         if data is None:
             continue
         if isinstance(data, bytes):
-            await cache.set(path, data)
+            await _set_cached(cache, path, data, records)
         elif isinstance(data, CachableAsyncIterator):
             if data.exhausted:
-                await cache.set(path, b"".join(data.buffered_chunks))
+                await _set_cached(cache, path, b"".join(data.buffered_chunks),
+                                  records)
             else:
                 if (hasattr(cache, "_drain_tasks")
                         and path not in cache._drain_tasks
                         and not await cache.exists(path)):
                     task = asyncio.create_task(
-                        _background_drain(cache, path, data, max_bytes))
+                        _background_drain(cache, path, data, max_bytes,
+                                          records))
                     cache._drain_tasks[path] = task
                     task.add_done_callback(
                         lambda t, p=path: cache._drain_tasks.pop(p, None))
@@ -64,6 +106,7 @@ async def _background_drain(
     path: str,
     it: CachableAsyncIterator,
     max_bytes: int | None = None,
+    records: list[OpRecord] | None = None,
 ) -> None:
     """Drain an unconsumed stream and write to cache.
 
@@ -71,15 +114,21 @@ async def _background_drain(
     shutdown. If max_bytes is set and the drain exceeds it without
     exhausting the source, the partial buffer is discarded and the path
     is not cached (next read will fetch fresh from the resource).
+    The fingerprint is looked up after the drain: streaming backends
+    stamp their read record lazily, once the GET response arrives.
     """
     try:
         if max_bytes is None:
             materialized = await it.drain()
-            await cache.add(path, materialized)
+            await cache.add(path,
+                            materialized,
+                            fingerprint=read_fingerprint(records, path))
             return
         materialized, fully_drained = await it.drain_bounded(max_bytes)
         if fully_drained:
-            await cache.add(path, materialized)
+            await cache.add(path,
+                            materialized,
+                            fingerprint=read_fingerprint(records, path))
         else:
             logger.info(
                 "cache drain budget exceeded for %s "
