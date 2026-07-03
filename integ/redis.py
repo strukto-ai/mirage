@@ -37,9 +37,16 @@ async def main() -> None:
     run_id = uuid.uuid4().hex[:8]
     prefix = f"mirage-integ-{run_id}/"
     resource = RedisResource(url=REDIS_URL, key_prefix=prefix)
+    resource2 = RedisResource(url=REDIS_URL,
+                              key_prefix=f"mirage-integ-xm-{run_id}/")
     observe = RedisObserverStore(url=REDIS_URL,
                                  key_prefix=f"mirage-integ-observer-{run_id}:")
-    ws = Workspace({"/data": resource}, mode=MountMode.WRITE, observe=observe)
+    ws = Workspace({
+        "/data": resource,
+        "/data2": resource2
+    },
+                   mode=MountMode.WRITE,
+                   observe=observe)
     await run_cases(ws)
     await assert_real_mtime(ws)
     await observe.clear()

@@ -25,6 +25,7 @@ from mirage.types import PathSpec
 from mirage.workspace.expand import (classify_parts, expand_and_classify,
                                      expand_parts, expand_redirects)
 from mirage.workspace.mount import MountRegistry
+from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.provision.builtins import handle_builtin_provision
 from mirage.workspace.provision.command import handle_command_provision
 from mirage.workspace.provision.control import (handle_for_provision,
@@ -91,6 +92,7 @@ async def provision_node(
     registry: MountRegistry,
     dispatch: Callable,
     execute_fn: Callable,
+    namespace: Namespace | None,
     node: Any,
     session: Session,
     scope: PlanScope | None = None,
@@ -116,6 +118,7 @@ async def provision_node(
                       registry,
                       dispatch,
                       execute_fn,
+                      namespace,
                       scope=plan_scope)
     kind = node_kind(node)
 
@@ -150,7 +153,8 @@ async def provision_node(
             return ProvisionResult(precision=Precision.EXACT)
         expanded = await expand_parts(parts, session, execute_fn)
         classified = classify_parts(expanded, registry, session.cwd)
-        return await handle_command_provision(registry, classified, session)
+        return await handle_command_provision(registry, classified, session,
+                                              namespace)
 
     if kind == NodeKind.PIPELINE:
         commands, _ = get_pipeline_commands(node)
@@ -170,7 +174,7 @@ async def provision_node(
                    and isinstance(r.target, PathSpec)
                    and not r.target.virtual.startswith("/dev/")]
         result = await handle_redirect_provision(recurse, registry, command,
-                                                 targets, session)
+                                                 targets, session, namespace)
         if pipe_node is not None:
             return rollup_pipe([result, await recurse(pipe_node, session)])
         return result

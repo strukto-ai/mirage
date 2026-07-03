@@ -18,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from cases import run_cache_verify_cases  # noqa: E402
 from cases import run_not_found, run_provision_cache_cases  # noqa: E402
 from onedrive_server import start_fake_graph  # noqa: E402
 
@@ -258,6 +259,7 @@ async def main() -> None:
             },
             mode=MountMode.WRITE)
         await run_provision_cache_cases(ws_write, MOUNT)
+        await run_cache_verify_cases(ws_write, MOUNT)
         await _run_consistency(state)
     finally:
         await runner.cleanup()

@@ -28,7 +28,7 @@ import {
   Workspace,
 } from "@struktoai/mirage-node";
 import { ConsistencyPolicy } from "@struktoai/mirage-core";
-import { runNotFound, runProvisionCacheCases } from "./cases.ts";
+import { runCacheVerifyCases, runNotFound, runProvisionCacheCases } from "./cases.ts";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -456,11 +456,19 @@ async function main(): Promise<void> {
           secretAccessKey: SECRET,
           forcePathStyle: true,
         }),
+        "/gcs": new GCSResource({
+          bucket: GCS_BUCKET,
+          endpoint: ENDPOINT,
+          accessKeyId: ACCESS,
+          secretAccessKey: SECRET,
+          forcePathStyle: true,
+        }),
       },
       { mode: MountMode.WRITE },
     );
     try {
       await runProvisionCacheCases(wsWrite, "/s3");
+      await runCacheVerifyCases(wsWrite, "/s3", "/gcs");
     } finally {
       await wsWrite.close();
     }

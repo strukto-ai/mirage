@@ -2237,6 +2237,60 @@ sleep_zero ok
 sleep_fraction ok
 === sleep_one ===
 sleep_one ok
+=== xm_seed ===
+cross
+=== xm_ls ===
+xm.txt
+=== xm_cat_concat ===
+hello
+world
+foo
+bar
+baz
+cross
+=== xm_cp_over ===
+hello
+world
+foo
+bar
+baz
+=== xm_cp_back ===
+cross
+=== xm_mv_over ===
+cross
+xm.txt
+xm_copy.txt
+xm_moved.txt
+=== xm_grep_multi ===
+/data/a.txt:0
+/data2/xm.txt:1
+=== xm_wc_multi ===
+5 /data/a.txt
+1 /data2/xm.txt
+6 total
+=== xm_du_multi_rejected ===
+du: paths span multiple mounts (/data/, /data2/), cross-mount not supported
+=== xm_find ===
+/data2/xm.txt
+/data2/xm_copy.txt
+/data2/xm_moved.txt
+=== xm_pipe ===
+CROSS
+=== xm_ln_over ===
+hello
+world
+foo
+bar
+baz
+=== xm_ln_readlink ===
+/data/a.txt
+=== xm_ln_back ===
+cross
+=== xm_link_grep ===
+1
+=== xm_cd_across ===
+cross
+b.txt
 === prov_cat ===
 net=24 write=0 cache=0 ops=1 hits=0 precision=exact
 === prov_cat_multi ===
@@ -2357,3 +2411,15 @@ net=24 write=0 cache=0 ops=1 hits=0 precision=unknown
 net=24 write=0 cache=0 ops=1 hits=0 precision=unknown
 === prov_redirect_devnull ===
 net=24 write=0 cache=0 ops=1 hits=0 precision=exact
+=== prov_symlink ===
+net=24 write=0 cache=0 ops=1 hits=0 precision=exact
+=== prov_symlink_grep ===
+net=6 write=0 cache=0 ops=1 hits=0 precision=exact
+=== prov_xmount_concat ===
+net=30 write=0 cache=0 ops=2 hits=0 precision=exact
+=== prov_xmount_grep ===
+net=30 write=0 cache=0 ops=2 hits=0 precision=exact
+=== prov_xmount_pipe ===
+net=30 write=0 cache=0 ops=2 hits=0 precision=unknown
+=== prov_xmount_rejected ===
+net=0 write=0 cache=0 ops=0 hits=0 precision=unknown

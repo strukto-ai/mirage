@@ -703,7 +703,11 @@ export class Workspace {
     const provResolved = provName !== '' ? resolveSafeguard(provName) : null
     const provTimeout = provResolved !== null ? provResolved.timeoutSeconds : null
     return runWithTimeout(
-      provisionNode({ registry: this.registry, executeFn }, rootNode, session),
+      provisionNode(
+        { registry: this.registry, executeFn, namespace: this.namespace },
+        rootNode,
+        session,
+      ),
       provTimeout,
       provName !== '' ? provName : '?',
     )

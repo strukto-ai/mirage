@@ -21,7 +21,8 @@ from pathlib import Path
 import aiobotocore.client
 import boto3
 import moto.s3.models as _s3_models
-from cases import run_not_found, run_provision_cache_cases
+from cases import (run_cache_verify_cases, run_not_found,
+                   run_provision_cache_cases)
 from moto.server import ThreadedMotoServer
 
 from mirage import MountMode, Workspace
@@ -390,6 +391,14 @@ async def main() -> None:
         await run_not_found(ws, MOUNTS[0])
         # The suite workspace is read-only; the cache-flip probe seeds its
         # own files, so it gets a write-mode mount on the same bucket.
+        gcs_write = GCSResource(
+            GCSConfig(bucket=GCS_BUCKET,
+                      endpoint_url=endpoint,
+                      access_key_id="testing",
+                      secret_access_key="testing"))
+        gcs_write.config = gcs_write.config.model_copy(
+            update={"path_style": True})
+        gcs_write.accessor = S3Accessor(gcs_write.config)
         ws_write = Workspace(
             {
                 "/s3":
@@ -399,10 +408,13 @@ async def main() -> None:
                              endpoint_url=endpoint,
                              aws_access_key_id="testing",
                              aws_secret_access_key="testing",
-                             path_style=True))
+                             path_style=True)),
+                "/gcs":
+                gcs_write,
             },
             mode=MountMode.WRITE)
         await run_provision_cache_cases(ws_write, "/s3")
+        await run_cache_verify_cases(ws_write, "/s3", "/gcs")
         await _run_consistency(endpoint)
         await _run_coherence(endpoint)
     finally:

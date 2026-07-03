@@ -94,3 +94,25 @@ async def test_function_call_and_env_prefix_plan():
     assert result.network_write == "0"
     assert result.precision.value == "exact"
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_provision_follows_symlinks_and_spans_mounts():
+    ws = Workspace({
+        "/data": RAMResource(),
+        "/data2": RAMResource()
+    },
+                   mode=MountMode.WRITE)
+    await ws.execute("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
+    await ws.execute("tee /data2/b.txt > /dev/null", stdin=b"y" * 6)
+    await ws.execute("ln -s /data/a.txt /data2/lnk.txt")
+    result = await ws.execute("cat /data2/lnk.txt", provision=True)
+    assert result.network_read == "24"
+    assert result.precision.value == "exact"
+    result = await ws.execute("cat /data/a.txt /data2/b.txt", provision=True)
+    assert result.network_read == "30"
+    assert result.read_ops == 2
+    assert result.precision.value == "exact"
+    result = await ws.execute("cat /data2/b.txt /data/a.txt", provision=True)
+    assert result.network_read == "30"
+    await ws.close()

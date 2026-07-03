@@ -28,6 +28,7 @@ from mirage import MountMode, Workspace  # noqa: E402
 from mirage.resource.s3 import S3Config, S3Resource  # noqa: E402
 
 BUCKET = "mirage-integ-s3-cases"
+BUCKET2 = "mirage-integ-s3-cases-xm"
 CREDS = dict(aws_access_key_id="testing",
              aws_secret_access_key="testing",
              region_name="us-east-1")
@@ -40,8 +41,9 @@ async def main() -> None:
     host, port = server.get_host_and_port()
     endpoint = f"http://{host}:{port}"
     try:
-        boto3.client("s3", endpoint_url=endpoint,
-                     **CREDS).create_bucket(Bucket=BUCKET)
+        client = boto3.client("s3", endpoint_url=endpoint, **CREDS)
+        client.create_bucket(Bucket=BUCKET)
+        client.create_bucket(Bucket=BUCKET2)
         s3 = S3Resource(
             S3Config(bucket=BUCKET,
                      region="us-east-1",
@@ -49,7 +51,14 @@ async def main() -> None:
                      aws_access_key_id="testing",
                      aws_secret_access_key="testing",
                      path_style=True))
-        ws = Workspace({"/data": s3}, mode=MountMode.WRITE)
+        s3b = S3Resource(
+            S3Config(bucket=BUCKET2,
+                     region="us-east-1",
+                     endpoint_url=endpoint,
+                     aws_access_key_id="testing",
+                     aws_secret_access_key="testing",
+                     path_style=True))
+        ws = Workspace({"/data": s3, "/data2": s3b}, mode=MountMode.WRITE)
         await run_cases(ws)
     finally:
         server.stop()

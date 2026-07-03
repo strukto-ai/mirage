@@ -36,6 +36,7 @@ PASSWORD = os.environ.get("NEXTCLOUD_PASSWORD", "admin123")
 # empty folder rather than the account root, which holds Nextcloud's default
 # skeleton files.
 SUBDIR = "integ-cases"
+SUBDIR2 = "integ-cases-xm"
 
 
 async def main() -> None:
@@ -44,10 +45,19 @@ async def main() -> None:
     boot = Workspace({"/root": root}, mode=MountMode.WRITE)
     await boot.execute(f"rm -rf /root/{SUBDIR}")
     await boot.execute(f"mkdir -p /root/{SUBDIR}")
+    await boot.execute(f"rm -rf /root/{SUBDIR2}")
+    await boot.execute(f"mkdir -p /root/{SUBDIR2}")
     cases_url = URL.rstrip("/") + f"/{SUBDIR}/"
+    cases_url2 = URL.rstrip("/") + f"/{SUBDIR2}/"
     resource = NextcloudResource(
         NextcloudConfig(url=cases_url, username=USERNAME, password=PASSWORD))
-    ws = Workspace({"/data": resource}, mode=MountMode.WRITE)
+    resource2 = NextcloudResource(
+        NextcloudConfig(url=cases_url2, username=USERNAME, password=PASSWORD))
+    ws = Workspace({
+        "/data": resource,
+        "/data2": resource2
+    },
+                   mode=MountMode.WRITE)
     await run_cases(ws)
 
 

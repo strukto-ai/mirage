@@ -17,6 +17,7 @@ import { Precision, ProvisionResult } from '../../provision/types.ts'
 import { RedirectKind } from '../../shell/types.ts'
 import type { PathSpec } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import type { Namespace } from '../mount/namespace.ts'
 import { handleCommandProvision } from './command.ts'
 import type { Session } from '../session/session.ts'
 import type { ProvisionNodeFn } from './pipes.ts'
@@ -38,13 +39,14 @@ export async function handleRedirectProvision(
   command: unknown,
   targets: readonly [RedirectKind, PathSpec][],
   session: Session,
+  namespace: Namespace | null = null,
 ): Promise<ProvisionResult> {
   const inner = await provisionNode(command, session)
   if (targets.length === 0) return inner
   const children: ProvisionResult[] = [inner]
   for (const [kind, target] of targets) {
     if (kind === RedirectKind.STDIN) {
-      children.push(await handleCommandProvision(registry, ['cat', target], session))
+      children.push(await handleCommandProvision(registry, ['cat', target], session, namespace))
       continue
     }
     if (inner.networkReadHigh > 0) {

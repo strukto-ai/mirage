@@ -152,13 +152,18 @@ export async function handleCommand(
   }
 
   if (isCrossMount(cmdName, pathScopes, registry)) {
+    // Parse against the mount spec so flags and text operands split like
+    // the single-mount path: raw argv would hand flag tokens ("-c") to
+    // the generic as the search pattern.
     const srcMount = registry.mountFor(pathScopes[0]?.virtual ?? session.cwd)
-    const csFlags =
-      srcMount !== null ? parseFlags(parts.slice(1), srcMount, cmdName, session.cwd)[2] : {}
+    const csParsed =
+      srcMount !== null ? parseFlags(parts.slice(1), srcMount, cmdName, session.cwd) : null
+    const csFlags = csParsed !== null ? csParsed[2] : {}
+    const csTexts = csParsed !== null ? csParsed[1] : textOnly
     const [csStdout, csIo, csExec] = await handleCrossMount(
       cmdName,
       pathScopes,
-      textOnly,
+      csTexts,
       csFlags,
       dispatch,
       cmdStr,

@@ -40,6 +40,7 @@ import type { ExecuteFn } from '../expand/node.ts'
 import { expandAndClassify, expandParts } from '../expand/parts.ts'
 import { expandRedirects } from '../expand/redirects.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import type { Namespace } from '../mount/namespace.ts'
 import { handleCommandProvision } from '../provision/command.ts'
 import {
   handleForProvision,
@@ -89,6 +90,7 @@ function handleBuiltinProvision(): ProvisionResult {
 interface ProvisionContext {
   registry: MountRegistry
   executeFn: ExecuteFn
+  namespace?: Namespace | null
 }
 
 /**
@@ -153,7 +155,7 @@ export async function provisionNode(
     if (parts.length === 0) return new ProvisionResult({ precision: Precision.EXACT })
     const expanded = await expandParts(parts, session, ctx.executeFn)
     const classified = classifyParts(expanded, ctx.registry, session.cwd)
-    return handleCommandProvision(ctx.registry, classified, session)
+    return handleCommandProvision(ctx.registry, classified, session, ctx.namespace ?? null)
   }
 
   if (kind === NodeKind.PIPELINE) {
@@ -187,6 +189,7 @@ export async function provisionNode(
       command,
       targets,
       session,
+      ctx.namespace ?? null,
     )
     if (pipeNode !== null) {
       return rollupPipe([result, await recurse(pipeNode, session)])

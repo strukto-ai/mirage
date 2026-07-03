@@ -781,6 +781,31 @@ export const SLEEP_CASES: ReadonlyArray<readonly [string, string, number]> = [
   ["sleep_one", "sleep 1", 1],
 ];
 
+// Cross-mount coverage: every runner mounts a second resource of its own
+// backend at /data2, so reads, writes, links, and provision spanning two
+// mounts behave identically on every backend. Seeds happen inside the
+// section (tee), so the /data listings earlier in the battery stay
+// untouched.
+export const CROSS_MOUNT_CASES: ReadonlyArray<readonly [string, string]> = [
+  ["xm_seed", "echo cross | tee /data2/xm.txt"],
+  ["xm_ls", "ls /data2"],
+  ["xm_cat_concat", "cat /data/a.txt /data2/xm.txt"],
+  ["xm_cp_over", "cp /data/a.txt /data2/xm_copy.txt && cat /data2/xm_copy.txt"],
+  ["xm_cp_back", "cp /data2/xm.txt /data/xm_back.txt && cat /data/xm_back.txt"],
+  ["xm_mv_over", "mv /data/xm_back.txt /data2/xm_moved.txt && cat /data2/xm_moved.txt && ls /data2"],
+  ["xm_grep_multi", "grep -c s /data/a.txt /data2/xm.txt"],
+  ["xm_wc_multi", "wc -l /data/a.txt /data2/xm.txt"],
+  // du/md5/file reject multi-mount operands explicitly; pin the error
+  ["xm_du_multi_rejected", "du /data/b.txt /data2/xm.txt 2>&1"],
+  ["xm_find", "find /data2 -type f | sort"],
+  ["xm_pipe", "cat /data2/xm.txt | tr a-z A-Z"],
+  ["xm_ln_over", "ln -s /data/a.txt /data2/xm_link.txt && cat /data2/xm_link.txt"],
+  ["xm_ln_readlink", "readlink /data2/xm_link.txt"],
+  ["xm_ln_back", "ln -s /data2/xm.txt /data/xm_rlink.txt && cat /data/xm_rlink.txt"],
+  ["xm_link_grep", "grep -c cross /data/xm_rlink.txt"],
+  ["xm_cd_across", "(cd /data2 && cat xm.txt && cd /data && ls b.txt)"],
+];
+
 // Provision (dry-run cost estimates) must print identical numbers on every
 // backend: sizes come from seeded files, and the file cache is cleared first
 // so read-caching backends (s3, onedrive, nextcloud) report the same cold
@@ -858,6 +883,14 @@ export const PROVISION_CASES: ReadonlyArray<readonly [string, string]> = [
   ["prov_until", "until false; do cat /data/a.txt; done"],
   ["prov_redirect_in", "wc -l < /data/a.txt"],
   ["prov_redirect_devnull", "cat /data/a.txt > /dev/null"],
+  // ----- namespace links and cross-mount commands -----
+  ["prov_symlink", "cat /data2/xm_link.txt"],
+  ["prov_symlink_grep", "grep x /data/xm_rlink.txt"],
+  ["prov_xmount_concat", "cat /data/a.txt /data2/xm.txt"],
+  ["prov_xmount_grep", "grep s /data/a.txt /data2/xm.txt"],
+  ["prov_xmount_pipe", "cat /data/a.txt /data2/xm.txt | wc -c"],
+  // md5 rejects cross-mount operands, so its plan is honest unknown
+  ["prov_xmount_rejected", "md5 /data/a.txt /data2/xm.txt"],
 ];
 
 // Not-found errors must always show the full virtual path the user typed
@@ -971,6 +1004,13 @@ export async function runCases(ws: Workspace): Promise<void> {
     }
   }
 
+  for (const [name, cmd] of CROSS_MOUNT_CASES) {
+    const result = await ws.execute(cmd);
+    const out = new TextDecoder().decode(result.stdout);
+    process.stdout.write(`=== ${name} ===\n`);
+    emitBody(out);
+  }
+
   await runProvisionCases(ws);
 }
 
@@ -1006,6 +1046,60 @@ export async function runProvisionProbe(ws: Workspace, filePath: string): Promis
     process.stdout.write(`=== ${name} ===\n`);
     process.stdout.write(provisionLine(result) + "\n");
   }
+}
+
+async function backendBytes(ws: Workspace, cmd: string): Promise<number> {
+  const before = ws.records.reduce((sum, r) => sum + r.bytes, 0);
+  await ws.execute(cmd);
+  return ws.records.reduce((sum, r) => sum + r.bytes, 0) - before;
+}
+
+// Byte-accounted cache verification for read-caching backends. A second
+// read of the same file pulls zero backend bytes, whether it goes through
+// the file's own path or a symlink (the link and its target share one
+// cache entry), and provision reports the hit. With a second mount, the
+// same holds for a cross-mount link, and the cross-mount cp is pinned
+// as-is (it does not read through the cache today).
+export async function runCacheVerifyCases(
+  ws: Workspace,
+  mount = "/data",
+  mount2: string | null = null,
+): Promise<void> {
+  const m = mount.replace(/\/+$/, "");
+  const target = `${m}/cachev.txt`;
+  const link = `${m}/cachev_link.txt`;
+  await ws.execute(`tee ${target} > /dev/null`, { stdin: ENC.encode("cache verify\n") });
+  await ws.execute(`ln -s ${target} ${link}`);
+  await ws.cache.clear();
+  process.stdout.write("=== cachev_link_cold ===\n");
+  process.stdout.write(`bytes=${String(await backendBytes(ws, `cat ${link}`))}\n`);
+  process.stdout.write("=== cachev_link_warm ===\n");
+  process.stdout.write(`bytes=${String(await backendBytes(ws, `cat ${link}`))}\n`);
+  process.stdout.write("=== cachev_target_shares_entry ===\n");
+  process.stdout.write(`bytes=${String(await backendBytes(ws, `cat ${target}`))}\n`);
+  process.stdout.write("=== cachev_warm_grep ===\n");
+  process.stdout.write(`bytes=${String(await backendBytes(ws, `grep cache ${target}`))}\n`);
+  process.stdout.write("=== cachev_prov_link ===\n");
+  let result = await ws.execute(`cat ${link}`, { provision: true });
+  process.stdout.write(provisionLine(result) + "\n");
+  if (mount2 !== null) {
+    const m2 = mount2.replace(/\/+$/, "");
+    const xlink = `${m2}/cachev_xlink.txt`;
+    await ws.execute(`ln -s ${target} ${xlink}`);
+    await ws.cache.clear();
+    process.stdout.write("=== cachev_xmount_cold ===\n");
+    process.stdout.write(`bytes=${String(await backendBytes(ws, `cat ${xlink}`))}\n`);
+    process.stdout.write("=== cachev_xmount_warm ===\n");
+    process.stdout.write(`bytes=${String(await backendBytes(ws, `cat ${xlink}`))}\n`);
+    process.stdout.write("=== cachev_xmount_prov ===\n");
+    result = await ws.execute(`cat ${xlink}`, { provision: true });
+    process.stdout.write(provisionLine(result) + "\n");
+    process.stdout.write("=== cachev_xmount_cp_warm_source ===\n");
+    process.stdout.write(
+      `bytes=${String(await backendBytes(ws, `cp ${target} ${m2}/cachev_cp.txt`))}\n`,
+    );
+  }
+  await ws.execute(`rm ${link} ${target}`);
 }
 
 // Cache-hit flipping for read-caching backends (cachesReads=true). Once a

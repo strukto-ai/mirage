@@ -19,8 +19,12 @@ async function main(): Promise<void> {
   const url = process.env.REDIS_URL ?? 'redis://localhost:6379/0'
   const runId = `${String(process.pid)}-${String(Date.now())}`
   const resource = new RedisResource({ url, keyPrefix: `mirage-integ-${runId}` })
+  const resource2 = new RedisResource({ url, keyPrefix: `mirage-integ-xm-${runId}` })
   const observe = new RedisObserverStore({ url, keyPrefix: `mirage-integ-observer-${runId}:` })
-  const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE, observe })
+  const ws = new Workspace(
+    { '/data': resource, '/data2': resource2 },
+    { mode: MountMode.WRITE, observe },
+  )
   try {
     await runCases(ws)
     await assertRealMtime(ws)

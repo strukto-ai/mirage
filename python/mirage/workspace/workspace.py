@@ -707,8 +707,8 @@ class Workspace:
                                 if prov_resolved is not None else None)
                 return await run_with_timeout(
                     provision_node(self._registry, self.dispatch,
-                                   exec_recursion, ast, effective_session),
-                    prov_timeout, prov_name)
+                                   exec_recursion, self._namespace, ast,
+                                   effective_session), prov_timeout, prov_name)
             io, _ = await run_command_tree(
                 self.dispatch,
                 self._registry,

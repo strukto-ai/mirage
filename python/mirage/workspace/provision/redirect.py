@@ -18,6 +18,7 @@ from mirage.provision import Precision, ProvisionResult
 from mirage.shell.types import RedirectKind
 from mirage.types import PathSpec
 from mirage.workspace.mount import MountRegistry
+from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.provision.command import handle_command_provision
 from mirage.workspace.provision.rollup import rollup_list
 from mirage.workspace.session import Session
@@ -29,6 +30,7 @@ async def handle_redirect_provision(
     command: Any,
     targets: list[tuple[RedirectKind, PathSpec]],
     session: Session,
+    namespace: Namespace | None = None,
 ) -> ProvisionResult:
     """Plan a redirect: the inner command plus the redirect I/O.
 
@@ -56,7 +58,7 @@ async def handle_redirect_provision(
         if kind == RedirectKind.STDIN:
             children.append(await
                             handle_command_provision(registry, ["cat", target],
-                                                     session))
+                                                     session, namespace))
             continue
         if inner.network_read_high > 0:
             children.append(

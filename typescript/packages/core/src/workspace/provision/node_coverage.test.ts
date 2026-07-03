@@ -112,4 +112,51 @@ describe('planner covers every statement kind', () => {
       await ws.close()
     }
   })
+
+  it('follows symlinks and spans mounts', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMResource(), '/data2': new RAMResource() },
+      {
+        mode: MountMode.WRITE,
+        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
+      },
+    )
+    try {
+      await ws.execute('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
+      await ws.execute('tee /data2/b.txt > /dev/null', { stdin: ENC.encode('y'.repeat(6)) })
+      await ws.execute('ln -s /data/a.txt /data2/lnk.txt')
+      let result = await ws.execute('cat /data2/lnk.txt', { provision: true })
+      expect(result.networkRead).toBe('24')
+      expect(result.precision).toBe('exact')
+      result = await ws.execute('cat /data/a.txt /data2/b.txt', { provision: true })
+      expect(result.networkRead).toBe('30')
+      expect(result.readOps).toBe(2)
+      expect(result.precision).toBe('exact')
+      result = await ws.execute('cat /data2/b.txt /data/a.txt', { provision: true })
+      expect(result.networkRead).toBe('30')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('cross-mount grep keeps parsed flags and pattern', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMResource(), '/data2': new RAMResource() },
+      {
+        mode: MountMode.WRITE,
+        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
+      },
+    )
+    try {
+      await ws.execute('tee /data/a.txt > /dev/null', { stdin: ENC.encode('sun\nmoon\n') })
+      await ws.execute('tee /data2/b.txt > /dev/null', { stdin: ENC.encode('cross\n') })
+      const count = await ws.execute('grep -c s /data/a.txt /data2/b.txt')
+      expect(new TextDecoder().decode(count.stdout)).toBe('/data/a.txt:1\n/data2/b.txt:1\n')
+      expect(count.exitCode).toBe(0)
+      const numbered = await ws.execute('grep -n cross /data/a.txt /data2/b.txt')
+      expect(new TextDecoder().decode(numbered.stdout)).toBe('/data2/b.txt:1:cross\n')
+    } finally {
+      await ws.close()
+    }
+  })
 })
