@@ -27,10 +27,15 @@ export interface RedisFileCacheOptions extends RedisResourceOptions {
 }
 
 export class RedisFileCacheStore extends RedisResource implements FileCache {
+  // Advisory only: unlike the RAM store there is no client-side LRU, so
+  // nothing evicts on overflow. Cap memory on the Redis server instead
+  // (maxmemory + maxmemory-policy allkeys-lru) to approximate the RAM
+  // store's eviction behavior.
   private readonly limit: number
   private readonly dataPrefix: string
   private readonly metaPrefix: string
   maxDrainBytes: number | null
+  readonly drainTasks = new Map<string, Promise<void>>()
 
   constructor(options: RedisFileCacheOptions = {}) {
     super({
@@ -102,6 +107,10 @@ export class RedisFileCacheStore extends RedisResource implements FileCache {
   }
 
   async remove(key: string): Promise<void> {
+    // Promises cannot be cancelled: dropping the map entry makes the
+    // pending backgroundDrain skip its cache fill, mirroring the RAM
+    // store's task cancel.
+    this.drainTasks.delete(key)
     const c = await this.cacheClient()
     const pipe = c.multi()
     pipe.del(`${this.dataPrefix}${key}`)
@@ -123,6 +132,7 @@ export class RedisFileCacheStore extends RedisResource implements FileCache {
   }
 
   async clear(): Promise<void> {
+    this.drainTasks.clear()
     const c = await this.cacheClient()
     for (const pattern of [`${this.dataPrefix}*`, `${this.metaPrefix}*`]) {
       const batch: string[] = []

@@ -12,12 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import os
 
 import pytest
 import pytest_asyncio
 
+from mirage.cache.file import io as cache_io
 from mirage.cache.file.redis import RedisFileCacheStore
+from mirage.io import CachableAsyncIterator, IOResult
+from mirage.observe.record import OpRecord
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
 pytestmark = pytest.mark.skipif(not REDIS_URL, reason="REDIS_URL not set")
@@ -123,3 +127,50 @@ async def test_key_prefix_isolation():
     await c2.clear()
     await c1._store.close()
     await c2._store.close()
+
+
+@pytest.mark.asyncio
+async def test_apply_io_drains_stream_into_cache(cache):
+    """An unexhausted stream must background-drain into the Redis cache
+    like the RAM store does, carrying the record fingerprint."""
+
+    async def _gen():
+        yield b"drained"
+
+    stream = CachableAsyncIterator(_gen())
+    io = IOResult(reads={"/file.txt": stream}, cache=["/file.txt"])
+    records = [
+        OpRecord(op="read",
+                 path="/file.txt",
+                 source="s3",
+                 bytes=0,
+                 timestamp=0,
+                 duration_ms=0,
+                 fingerprint="etag-9")
+    ]
+    await cache_io.apply_io(cache, io, records=records)
+    tasks = list(cache._drain_tasks.values())
+    assert tasks, "drain task must be registered"
+    await asyncio.gather(*tasks)
+    assert await cache.get("/file.txt") == b"drained"
+    assert await cache.is_fresh("/file.txt", "etag-9") is True
+
+
+@pytest.mark.asyncio
+async def test_remove_cancels_pending_drain(cache):
+    started = asyncio.Event()
+
+    async def _gen():
+        started.set()
+        await asyncio.sleep(1)
+        yield b"slow"
+
+    stream = CachableAsyncIterator(_gen())
+    io = IOResult(reads={"/slow.txt": stream}, cache=["/slow.txt"])
+    await cache_io.apply_io(cache, io)
+    assert "/slow.txt" in cache._drain_tasks
+    await started.wait()
+    await cache.remove("/slow.txt")
+    assert "/slow.txt" not in cache._drain_tasks
+    await asyncio.sleep(0.05)
+    assert await cache.get("/slow.txt") is None
