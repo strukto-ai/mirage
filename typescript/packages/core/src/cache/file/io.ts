@@ -14,12 +14,61 @@
 
 import { CachableAsyncIterator, concat } from '../../io/cachable_iterator.ts'
 import { materialize, type IOResult } from '../../io/types.ts'
+import type { OpRecord } from '../../observe/record.ts'
 import type { FileCache } from './mixin.ts'
+
+/**
+ * Latest backend fingerprint recorded for a read of `path`.
+ *
+ * Backends stamp read records with the content identifier they returned
+ * (S3 ETag, OneDrive cTag, Postgres sha256). Threading it into the cache
+ * entry lets ALWAYS-mode `isFresh` compare like with like; the
+ * MD5-of-content default only matches simple-PUT S3 objects.
+ */
+export function readFingerprint(
+  records: readonly OpRecord[] | undefined,
+  path: string,
+): string | null {
+  if (records === undefined) return null
+  for (let i = records.length - 1; i >= 0; i--) {
+    const rec = records[i]
+    if (rec?.op === 'read' && rec.path === path && rec.fingerprint) {
+      return rec.fingerprint
+    }
+  }
+  return null
+}
+
+function bytesEqual(a: Uint8Array | null, b: Uint8Array): boolean {
+  if (a?.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
+async function setCached(
+  cache: FileCache,
+  path: string,
+  data: Uint8Array,
+  records: readonly OpRecord[] | undefined,
+): Promise<void> {
+  const fingerprint = readFingerprint(records, path)
+  if (fingerprint === null && bytesEqual(await cache.get(path), data)) {
+    // Warm read: the bytes were served from this cache, so there is no
+    // backend read record. Re-setting would replace the backend
+    // fingerprint stamped on the cold read with the MD5 default and
+    // force ALWAYS mode to evict and refetch on every read.
+    return
+  }
+  await cache.set(path, data, { fingerprint })
+}
 
 export async function applyIo(
   cache: FileCache,
   io: IOResult,
   isCacheable?: (path: string) => boolean,
+  records?: readonly OpRecord[],
 ): Promise<void> {
   const cacheSet = new Set(io.cache)
   const maxBytes = cache.maxDrainBytes
@@ -28,14 +77,14 @@ export async function applyIo(
     const source = io.reads[path] ?? io.writes[path]
     if (source === undefined) continue
     if (source instanceof Uint8Array) {
-      await cache.set(path, source)
+      await setCached(cache, path, source, records)
     } else if (source instanceof CachableAsyncIterator) {
       if (source.exhausted) {
-        await cache.set(path, concat(source.bufferedChunks))
+        await setCached(cache, path, concat(source.bufferedChunks), records)
       } else {
         const tasks = cache.drainTasks
         if (tasks !== undefined && !tasks.has(path) && !(await cache.exists(path))) {
-          const task = backgroundDrain(cache, tasks, path, source, maxBytes)
+          const task = backgroundDrain(cache, tasks, path, source, maxBytes, records)
           tasks.set(path, task)
           void task.finally(() => {
             if (tasks.get(path) === task) tasks.delete(path)
@@ -44,7 +93,7 @@ export async function applyIo(
       }
     } else {
       const data = await materialize(source)
-      await cache.set(path, data)
+      await setCached(cache, path, data, records)
     }
   }
   for (const path of Object.keys(io.writes)) {
@@ -56,13 +105,16 @@ export async function applyIo(
 
 // Drains an unconsumed stream and fills the cache, mirroring the Python
 // _background_drain. Promises cannot be cancelled, so remove()/clear()
-// delete the map entry and the result is discarded here instead.
+// delete the map entry and the result is discarded here instead. The
+// fingerprint is looked up after the drain: streaming backends stamp
+// their read record lazily, once the GET response arrives.
 async function backgroundDrain(
   cache: FileCache,
   tasks: Map<string, Promise<void>>,
   path: string,
   it: CachableAsyncIterator,
   maxBytes: number | null,
+  records?: readonly OpRecord[],
 ): Promise<void> {
   try {
     let materialized: Uint8Array
@@ -73,7 +125,9 @@ async function backgroundDrain(
       if (!fullyDrained) return
       materialized = data
     }
-    if (tasks.has(path)) await cache.add(path, materialized)
+    if (tasks.has(path)) {
+      await cache.add(path, materialized, { fingerprint: readFingerprint(records, path) })
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.warn(`background drain failed for ${path}: ${msg}`)

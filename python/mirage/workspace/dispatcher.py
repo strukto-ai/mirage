@@ -17,6 +17,7 @@ from typing import Any
 from mirage.cache.file import io as cache_io
 from mirage.cache.manager import CacheManager
 from mirage.io import IOResult
+from mirage.observe.record import OpRecord
 from mirage.types import ConsistencyPolicy, FileStat, PathSpec
 from mirage.workspace.mount import MountEntry
 from mirage.workspace.mount.namespace import Namespace
@@ -101,8 +102,13 @@ class Dispatcher:
         raw, _ = await self.dispatch("readdir", scope)
         return raw
 
-    async def apply_io(self, io: IOResult) -> None:
-        await cache_io.apply_io(self._cache, io, self.is_cacheable_path)
+    async def apply_io(self,
+                       io: IOResult,
+                       records: list[OpRecord] | None = None) -> None:
+        await cache_io.apply_io(self._cache,
+                                io,
+                                self.is_cacheable_path,
+                                records=records)
 
     def is_cacheable_path(self, path: str) -> bool:
         try:

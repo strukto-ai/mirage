@@ -17,6 +17,7 @@ import { applyIo } from '../cache/file/io.ts'
 import type { FileCache } from '../cache/file/mixin.ts'
 import { IOResult } from '../io/types.ts'
 import { runWithRevisions } from '../observe/context.ts'
+import type { OpRecord } from '../observe/record.ts'
 import type { OpsRegistry } from '../ops/registry.ts'
 import { type OpKwargs } from '../ops/registry.ts'
 import { cachesReads, type Resource } from '../resource/base.ts'
@@ -139,7 +140,7 @@ export class Dispatcher {
     return cachesReads(mount.resource)
   }
 
-  async applyIo(io: IOResult): Promise<void> {
-    await applyIo(this.cache, io, this.isCacheablePath)
+  async applyIo(io: IOResult, records?: readonly OpRecord[]): Promise<void> {
+    await applyIo(this.cache, io, this.isCacheablePath, records)
   }
 }
