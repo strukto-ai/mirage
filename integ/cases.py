@@ -12,9 +12,25 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import sys
 import time
+from pathlib import Path
 
-from mirage.types import PathSpec
+# Importing mirage while this directory is on sys.path resolves the
+# `redis` package to integ/redis.py (mirage swallows the resulting
+# ImportError as "redis extra not installed", and the half-executed
+# shadow module strips this directory from sys.path, breaking the
+# caller's next sibling import). Import mirage with the directory off
+# the path, mirroring integ/redis.py's own guard.
+_INTEG_DIR = str(Path(__file__).resolve().parent)
+_INTEG_ALIASES = {_INTEG_DIR, str(Path(__file__).parent), ""}
+_ON_PATH = any(p in _INTEG_ALIASES for p in sys.path)
+sys.path[:] = [p for p in sys.path if p not in _INTEG_ALIASES]
+
+from mirage.types import PathSpec  # noqa: E402
+
+if _ON_PATH:
+    sys.path.insert(0, _INTEG_DIR)
 
 SEED_FILES = {
     "/data/a.txt":
