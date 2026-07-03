@@ -72,7 +72,31 @@ def test_session_create_passes_mount_flags():
     assert result.exit_code == 0, result.output
     assert fake.last_body == {
         "session_id": "agent",
-        "allowed_mounts": ["/s3", "/slack"],
+        "mounts": {
+            "/s3": "exec",
+            "/slack": "exec"
+        },
+    }
+
+
+def test_session_create_parses_role_suffix():
+    fake = _FakeClient()
+    with _patched_client(fake):
+        result = CliRunner().invoke(
+            session_cli.app,
+            [
+                "create", "demo", "--id", "agent", "-m", "/data:read", "-m",
+                "/scratch:write", "-m", "/tools"
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    assert fake.last_body == {
+        "session_id": "agent",
+        "mounts": {
+            "/data": "read",
+            "/scratch": "write",
+            "/tools": "exec"
+        },
     }
 
 

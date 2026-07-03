@@ -165,6 +165,11 @@ jobs:
           ./python/.venv/bin/python integ/safeguard.py > /tmp/safeguard.out
           diff integ/truth_safeguard.txt /tmp/safeguard.out
 
+      - name: Run session mount-grant scenarios and diff against truth
+        run: |
+          ./python/.venv/bin/python integ/grants.py > /tmp/grants.out
+          diff integ/truth_grants.txt /tmp/grants.out
+
       - name: Run History scenarios and diff against truth
         run: |
           ./python/.venv/bin/python integ/history.py > /tmp/history.out
@@ -315,6 +320,12 @@ jobs:
         run: |
           pnpm exec tsx safeguard.ts > /tmp/ts-safeguard.out
           diff truth_safeguard.txt /tmp/ts-safeguard.out
+
+      - name: Run session mount-grant scenarios and diff against truth
+        working-directory: integ
+        run: |
+          pnpm exec tsx grants.ts > /tmp/ts-grants.out
+          diff truth_grants.txt /tmp/ts-grants.out
 
       - name: Run shared command suite on S3 (MinIO) and diff against truth
         working-directory: integ

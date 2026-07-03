@@ -37,6 +37,7 @@ import type { Resource } from '../../resource/base.ts'
 import { type CommandSafeguard, ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
 import type { PyodideRuntime } from '../executor/python/runtime.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { effectiveMountMode } from '../../context/session_context.ts'
 
 type CmdKey = string
 type OpKey = string
@@ -104,6 +105,14 @@ export class MountEntry {
     this.resource = init.resource
     this.mode = init.mode ?? MountMode.READ
     this.consistency = init.consistency ?? ConsistencyPolicy.LAZY
+  }
+
+  /**
+   * This mount's mode narrowed by the current session's grant. The
+   * configured mode is the ceiling; a session grant can only weaken it.
+   */
+  effectiveMode(): MountMode {
+    return effectiveMountMode(this.prefix, this.mode)
   }
 
   // ── command registration ──────────────────────────
@@ -389,7 +398,7 @@ export class MountEntry {
           this.revisions.size > 0 ? this.revisions : null,
           async (): Promise<[ByteSource | null, IOResult]> => {
             for (const cmd of handlers) {
-              if (cmd.write && this.mode === MountMode.READ) {
+              if (cmd.write && this.effectiveMode() === MountMode.READ) {
                 return [
                   null,
                   new IOResult({
@@ -434,7 +443,7 @@ export class MountEntry {
     if (levels.length === 0) {
       throw new Error(`${this.resource.kind}: no op ${opName}`)
     }
-    if (this.mode === MountMode.READ && levels.some((o) => o.write)) {
+    if (this.effectiveMode() === MountMode.READ && levels.some((o) => o.write)) {
       throw new Error(`mount ${this.prefix} is read-only`)
     }
     const mountPrefix = rstripSlash(this.prefix)

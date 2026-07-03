@@ -90,6 +90,23 @@ class MountMode(str, Enum):
     EXEC = "exec"
 
 
+MOUNT_MODE_RANK: dict[MountMode, int] = {
+    MountMode.READ: 1,
+    MountMode.WRITE: 2,
+    MountMode.EXEC: 3,
+}
+
+
+def weaker_mode(a: MountMode, b: MountMode) -> MountMode:
+    """The weaker of two mount modes on the READ < WRITE < EXEC lattice.
+
+    Args:
+        a (MountMode): first mode.
+        b (MountMode): second mode.
+    """
+    return a if MOUNT_MODE_RANK[a] <= MOUNT_MODE_RANK[b] else b
+
+
 class ConsistencyPolicy(str, Enum):
     LAZY = "lazy"
     ALWAYS = "always"

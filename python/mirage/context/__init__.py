@@ -12,13 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.runtime.session_context import (assert_mount_allowed,
+from mirage.context.session_context import (assert_mount_allowed,
+                                            effective_mount_mode,
                                             get_current_session,
                                             reset_current_session,
                                             set_current_session)
 
 __all__ = [
     "assert_mount_allowed",
+    "effective_mount_mode",
     "get_current_session",
     "reset_current_session",
     "set_current_session",

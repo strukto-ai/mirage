@@ -24,6 +24,7 @@ from mirage.commands.config import RegisteredCommand
 from mirage.commands.resolve import get_extension
 from mirage.commands.safeguard import CommandSafeguard, resolve_safeguard
 from mirage.commands.spec import CommandSpec
+from mirage.context import effective_mount_mode
 from mirage.io.types import ByteSource, IOResult
 from mirage.observe.context import (push_mount_prefix, push_revisions,
                                     reset_revisions, with_mount_prefix,
@@ -124,6 +125,14 @@ class MountEntry:
         self._general_ops: dict[str, RegisteredOp] = {}
         # key: (cmd_name, target_resource_type)
         self._cross_cmds: dict[tuple, RegisteredCommand] = {}
+
+    def effective_mode(self) -> MountMode:
+        """This mount's mode narrowed by the current session's grant.
+
+        The configured mode is the ceiling; a session grant can only
+        weaken it.
+        """
+        return effective_mount_mode(self.prefix, self.mode)
 
     # ── command registration ──────────────────────────
 
@@ -461,7 +470,7 @@ class MountEntry:
         prev_manager = push_cache_manager(self.cache_manager)
         try:
             for cmd in handlers:
-                if cmd.write and self.mode == MountMode.READ:
+                if cmd.write and self.effective_mode() == MountMode.READ:
                     return None, IOResult(
                         exit_code=1,
                         stderr=(f"{cmd_name}: read-only mount "
@@ -506,7 +515,8 @@ class MountEntry:
             raise AttributeError(f"{self.resource.name}: "
                                  f"no op {op_name!r}")
 
-        if self.mode == MountMode.READ and any(o.write for o in levels):
+        if (self.effective_mode() == MountMode.READ
+                and any(o.write for o in levels)):
             raise PermissionError(f"mount {self.prefix!r} is read-only")
 
         mount_prefix = self.prefix.rstrip("/")

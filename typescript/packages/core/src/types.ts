@@ -22,6 +22,17 @@ export const MountMode = Object.freeze({
 
 export type MountMode = (typeof MountMode)[keyof typeof MountMode]
 
+export const MOUNT_MODE_RANK: Readonly<Record<MountMode, number>> = Object.freeze({
+  [MountMode.READ]: 1,
+  [MountMode.WRITE]: 2,
+  [MountMode.EXEC]: 3,
+})
+
+/** The weaker of two mount modes on the READ < WRITE < EXEC lattice. */
+export function weakerMode(a: MountMode, b: MountMode): MountMode {
+  return MOUNT_MODE_RANK[a] <= MOUNT_MODE_RANK[b] ? a : b
+}
+
 export const ConsistencyPolicy = Object.freeze({
   LAZY: 'lazy',
   ALWAYS: 'always',
