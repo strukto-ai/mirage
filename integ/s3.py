@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import dataclasses
 import logging
 from collections import Counter
 from datetime import datetime, timezone
@@ -29,6 +28,10 @@ from moto.server import ThreadedMotoServer
 from mirage import MountMode, Workspace
 from mirage.accessor.s3 import S3Accessor
 from mirage.commands import safeguard as _safeguard
+from mirage.commands.builtin.generic_bind import make_file_read_provision
+from mirage.commands.config import command
+from mirage.commands.spec import SPECS
+from mirage.core.s3.stat import stat as _s3_stat
 from mirage.resource.gcs import GCSConfig, GCSResource
 from mirage.resource.minio import MinIOConfig, MinIOResource
 from mirage.resource.s3 import S3Config, S3Resource
@@ -359,12 +362,23 @@ def _price_wrap(original):
     return priced
 
 
+_PRICED_CAT_BASE: dict = {}
+
+
+@command("cat",
+         resource="s3",
+         spec=SPECS["cat"],
+         provision=_price_wrap(make_file_read_provision(_s3_stat)))
+async def _priced_cat(accessor, paths, *texts, **kwargs):
+    return await _PRICED_CAT_BASE["fn"](accessor, paths, *texts, **kwargs)
+
+
 def _price_cat(ws: Workspace, mount_path: str) -> None:
-    mount = ws._registry.mount_for(mount_path)
-    cmd = mount.resolve_command("cat", None)
-    assert cmd is not None and cmd.provision_fn is not None
-    mount.register(
-        dataclasses.replace(cmd, provision_fn=_price_wrap(cmd.provision_fn)))
+    mount = ws.mount(mount_path)
+    base = mount.resolve_command("cat", None)
+    assert base is not None and base.provision_fn is not None
+    _PRICED_CAT_BASE["fn"] = base.fn
+    mount.register_fns([_priced_cat])
 
 
 async def main() -> None:

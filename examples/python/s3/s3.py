@@ -14,7 +14,6 @@
 
 import asyncio
 import copy as _copy
-import dataclasses
 import json
 import os
 import tempfile
@@ -23,6 +22,7 @@ import uuid
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.commands.config import command
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Config, S3Resource
 from mirage.workspace.snapshot import ContentDriftError
@@ -80,22 +80,28 @@ def _price_wrap(original):
     return priced
 
 
+_BUILTIN_CAT = ws.mount("/s3/").resolve_command("cat", None)
+
+
+@command("cat",
+         resource="s3",
+         spec=_BUILTIN_CAT.spec,
+         provision=_price_wrap(_BUILTIN_CAT.provision_fn))
+async def priced_cat(accessor, paths, *texts, **kwargs):
+    return await _BUILTIN_CAT.fn(accessor, paths, *texts, **kwargs)
+
+
 def price_cat_reads(workspace: Workspace, mount_path: str) -> None:
     """Attach an S3 price model to cat on one mount.
 
-    The shared estimator already computes bytes and request counts;
-    re-registering cat with a wrapped estimator converts them into
+    The builtin estimator already computes bytes and request counts;
+    the @command decorator registers a cat that keeps the builtin
+    execution fn but carries a wrapped estimator converting them into
     estimated_cost_usd, which the planner then combines across pipes,
     branches, and loops like any other field (all-or-nothing: a stage
     without a cost drops the total).
     """
-    mount = workspace._registry.mount_for(mount_path)
-    cmd = mount.resolve_command("cat", None)
-    if cmd is not None and cmd.provision_fn is not None:
-        priced = dataclasses.replace(cmd,
-                                     provision_fn=_price_wrap(
-                                         cmd.provision_fn))
-        mount.register(priced)
+    workspace.mount(mount_path).register_fns([priced_cat])
 
 
 async def main():
