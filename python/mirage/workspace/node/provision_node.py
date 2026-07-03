@@ -203,8 +203,11 @@ async def provision_node(
         items = get_case_items(node)
         children = []
         for _, body in items:
-            if body is not None:
-                children.append(await recurse(body, session))
+            if not body:
+                continue
+            stmts = [await recurse(stmt, session) for stmt in body]
+            children.append(stmts[0] if len(stmts) ==
+                            1 else rollup_list(";", stmts))
         if children:
             return rollup_list("||", children)
         return ProvisionResult(precision=Precision.EXACT)

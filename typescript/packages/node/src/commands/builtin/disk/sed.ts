@@ -15,9 +15,11 @@
 import { ResourceName, makeSed } from '@struktoai/mirage-core'
 import type { DiskAccessor } from '../../../accessor/disk.ts'
 import { stream as diskStream } from '../../../core/disk/stream.ts'
+import { stat as diskProvStat } from '../../../core/disk/stat.ts'
 import { writeBytes as diskWrite } from '../../../core/disk/write.ts'
 
 export const DISK_SED = makeSed<DiskAccessor>({
+  stat: (a, p) => diskProvStat(a, p),
   resource: ResourceName.DISK,
   stream: (a, p) => diskStream(a, p),
   write: (a, p, d) => diskWrite(a, p, d),

@@ -41,3 +41,19 @@ describe('Precision enum', () => {
     expect(Precision.UNKNOWN).toBe('unknown')
   })
 })
+
+describe('scaled cost', () => {
+  it('multiplies estimatedCostUsd and keeps null costs null', () => {
+    const priced = new ProvisionResult({
+      networkReadLow: 10,
+      networkReadHigh: 10,
+      readOps: 1,
+      estimatedCostUsd: 0.5,
+    })
+    const tripled = priced.scaled(3)
+    expect(tripled.networkReadLow).toBe(30)
+    expect(tripled.estimatedCostUsd).toBe(1.5)
+    const free = new ProvisionResult({ networkReadLow: 10, networkReadHigh: 10 })
+    expect(free.scaled(3).estimatedCostUsd).toBeNull()
+  })
+})

@@ -27,6 +27,7 @@ export {
   makeHeadTailProvision,
   makeJqProvision,
   makeSearchProvision,
+  makeSedProvision,
   makeTransformProvision,
   metadataProvision,
   pureProvision,

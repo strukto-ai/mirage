@@ -25,6 +25,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.sed import sed as generic_sed
+from mirage.commands.builtin.generic_bind.provision import make_sed_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
@@ -100,9 +101,14 @@ def make_sed(
     glob_when: GlobWhen | None = None,
     write_bytes: Callable[..., Awaitable[None]] | None = None,
     inplace_error: tuple[type[Exception], str] | None = None,
+    stat_fn: Callable | None = None,
 ) -> Callable:
 
-    @command("sed", resource=resource, spec=SPECS["sed"])
+    @command(
+        "sed",
+        resource=resource,
+        spec=SPECS["sed"],
+        provision=make_sed_provision(stat_fn) if stat_fn is not None else None)
     async def sed(
         accessor: object,
         paths: list[PathSpec],

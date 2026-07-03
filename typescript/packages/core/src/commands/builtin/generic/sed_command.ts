@@ -19,6 +19,8 @@ import { PathSpec, type ResourceName } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { resolvePath } from '../../spec/parser.ts'
+import type { StatOp } from '../generic_bind/adapter.ts'
+import { makeSedProvision } from '../generic_bind/provision.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { sedGeneric } from './sed.ts'
 
@@ -60,14 +62,17 @@ export interface SedBackend<A extends Accessor> {
   glob?: (accessor: A, paths: PathSpec[], opts: CommandOpts) => Promise<PathSpec[]>
   /** Human-readable mount name used in the read-only `-i` rejection message. */
   readOnlyMount?: string
+  /** Backend stat for the provision estimator. Omit to plan as unknown. */
+  stat?: StatOp<A>
 }
 
 export function makeSed<A extends Accessor>(backend: SedBackend<A>) {
-  const { resource, stream, write, glob, readOnlyMount } = backend
+  const { resource, stream, write, glob, readOnlyMount, stat } = backend
   return command<A>({
     name: 'sed',
     resource,
     spec: specOf('sed'),
+    provision: stat !== undefined ? makeSedProvision(stat) : null,
     fn: async (
       accessor: A,
       paths: PathSpec[],

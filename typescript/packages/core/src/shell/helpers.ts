@@ -272,23 +272,28 @@ export function getCaseWord(node: TSNodeLike): TSNodeLike {
   return first
 }
 
-export function getCaseItems(node: TSNodeLike): [string[], TSNodeLike | null][] {
-  const items: [string[], TSNodeLike | null][] = []
+/**
+ * Get (patterns, bodyStatements) pairs from case. An arm's body is
+ * every statement up to its ;; terminator, so multi-statement arms
+ * (x) cmd1; cmd2;;) keep all commands.
+ */
+export function getCaseItems(node: TSNodeLike): [string[], TSNodeLike[]][] {
+  const items: [string[], TSNodeLike[]][] = []
   for (const c of node.namedChildren) {
     if (c.type !== NT.CASE_ITEM) continue
     const patterns: string[] = []
-    let body: TSNodeLike | null = null
+    const body: TSNodeLike[] = []
     for (const child of c.children) {
       if (
-        child.type === NT.EXTGLOB_PATTERN ||
-        child.type === NT.WORD ||
-        child.type === NT.CONCATENATION ||
-        child.type === NT.STRING
+        body.length === 0 &&
+        (child.type === NT.EXTGLOB_PATTERN ||
+          child.type === NT.WORD ||
+          child.type === NT.CONCATENATION ||
+          child.type === NT.STRING)
       ) {
         patterns.push(getText(child))
       } else if (child.isNamed === true && child.type !== '|') {
-        body = child
-        break
+        body.push(child)
       }
     }
     if (patterns.length === 0) {

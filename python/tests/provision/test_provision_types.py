@@ -36,3 +36,15 @@ def test_precision_values():
     assert Precision.EXACT == "exact"
     assert Precision.RANGE == "range"
     assert Precision.UNKNOWN == "unknown"
+
+
+def test_scaled_multiplies_cost():
+    result = ProvisionResult(network_read_low=10,
+                             network_read_high=10,
+                             read_ops=1,
+                             estimated_cost_usd=0.5)
+    tripled = result.scaled(3)
+    assert tripled.network_read_low == 30
+    assert tripled.estimated_cost_usd == 1.5
+    free = ProvisionResult(network_read_low=10, network_read_high=10)
+    assert free.scaled(3).estimated_cost_usd is None

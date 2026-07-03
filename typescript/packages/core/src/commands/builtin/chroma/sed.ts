@@ -14,11 +14,13 @@
 
 import type { ChromaAccessor } from '../../../accessor/chroma.ts'
 import { resolveGlob } from '../../../core/chroma/glob.ts'
+import { stat as chromaProvStat } from '../../../core/chroma/stat.ts'
 import { readStream } from '../../../core/chroma/read.ts'
 import { ResourceName } from '../../../types.ts'
 import { makeSed } from '../generic/sed_command.ts'
 
 export const CHROMA_SED = makeSed<ChromaAccessor>({
+  stat: (a, p) => chromaProvStat(a, p),
   resource: ResourceName.CHROMA,
   stream: (a, p, opts) => readStream(a, p, opts.index ?? undefined),
   glob: (a, paths, opts) => resolveGlob(a, paths, opts.index ?? undefined),

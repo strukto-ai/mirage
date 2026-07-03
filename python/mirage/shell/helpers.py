@@ -327,22 +327,23 @@ def get_case_word(node: tree_sitter.Node) -> tree_sitter.Node:
 
 def get_case_items(
     node: tree_sitter.Node,
-) -> list[tuple[str, tree_sitter.Node | None]]:  # noqa: E125,E501
-    """Get (pattern, body) pairs from case."""
-    items: list[tuple[list[str], tree_sitter.Node | None]] = []
+) -> list[tuple[list[str], list[tree_sitter.Node]]]:  # noqa: E125,E501
+    """Get (patterns, body_statements) pairs from case.
+
+    An arm's body is every statement up to its ;; terminator, so
+    multi-statement arms (x) cmd1; cmd2;;) keep all commands.
+    """
+    items: list[tuple[list[str], list[tree_sitter.Node]]] = []
     for c in node.named_children:
         if c.type == NT.CASE_ITEM:
             patterns = []
-            body = None
+            body: list[tree_sitter.Node] = []
             for child in c.children:
-                if child.type in (NT.EXTGLOB_PATTERN, NT.WORD,
-                                  NT.CONCATENATION, NT.STRING):
+                if not body and child.type in (NT.EXTGLOB_PATTERN, NT.WORD,
+                                               NT.CONCATENATION, NT.STRING):
                     patterns.append(get_text(child))
-                elif child.is_named and child.type not in (
-                        NT.EXTGLOB_PATTERN, NT.WORD, NT.CONCATENATION,
-                        NT.STRING) and child.type != "|":
-                    body = child
-                    break
+                elif child.is_named and child.type != "|":
+                    body.append(child)
             if not patterns:
                 patterns = [get_text(c.named_children[0])]
             items.append((patterns, body))

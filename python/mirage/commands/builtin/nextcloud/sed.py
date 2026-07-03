@@ -15,9 +15,11 @@
 from mirage.commands.builtin.generic.sed_command import make_sed
 from mirage.core.nextcloud.glob import resolve_glob
 from mirage.core.nextcloud.read import read_bytes
+from mirage.core.nextcloud.stat import stat as _stat
 from mirage.core.nextcloud.write import write_bytes
 
 sed = make_sed(
+    stat_fn=_stat,
     resource="nextcloud",
     glob_fn=resolve_glob,
     make_read=lambda accessor, index, paths: read_bytes,
