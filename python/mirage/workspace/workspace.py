@@ -35,6 +35,7 @@ except ImportError:
 from mirage.io import IOResult
 from mirage.observe.context import RecordingScope
 from mirage.observe.observer import Observer
+from mirage.observe.record import OpRecord
 from mirage.observe.store import ObserverStore
 from mirage.ops import Ops
 from mirage.ops.open import make_open
@@ -602,8 +603,10 @@ class Workspace:
 
     # ── execution ────────────────────────────────────────────────────────────
 
-    async def apply_io(self, io: IOResult) -> None:
-        await self._dispatcher.apply_io(io)
+    async def apply_io(self,
+                       io: IOResult,
+                       records: list[OpRecord] | None = None) -> None:
+        await self._dispatcher.apply_io(io, records=records)
 
     async def _invalidate_after_write_by_path(self, path: str) -> None:
         await self._dispatcher.invalidate_after_write_by_path(path)
@@ -722,7 +725,7 @@ class Workspace:
                 cancel,
             )
             session.last_exit_code = io.exit_code
-            await self.apply_io(io)
+            await self.apply_io(io, records=scope.records)
             return io
         except CommandTimeoutError as exc:
             logger.debug("command %r timed out after %ss", exc.command,

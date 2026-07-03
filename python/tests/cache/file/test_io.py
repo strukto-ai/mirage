@@ -19,6 +19,17 @@ import pytest
 from mirage.cache.file import io as cache_io
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.io import CachableAsyncIterator, IOResult
+from mirage.observe.record import OpRecord
+
+
+def _read_record(path: str, fingerprint: str | None) -> OpRecord:
+    return OpRecord(op="read",
+                    path=path,
+                    source="s3",
+                    bytes=0,
+                    timestamp=0,
+                    duration_ms=0,
+                    fingerprint=fingerprint)
 
 
 @pytest.fixture
@@ -76,6 +87,78 @@ async def test_apply_io_multiple_paths(cache):
     await cache_io.apply_io(cache, io)
     assert await cache.get("/a.txt") == b"aaa"
     assert await cache.get("/b.txt") == b"bbb"
+
+
+# ── backend fingerprint threading ───────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_apply_io_sets_backend_fingerprint_from_records(cache):
+    """A read record with a backend fingerprint (ETag, cTag, sha256)
+    stamps the cache entry, so ALWAYS-mode is_fresh can match it."""
+    io = IOResult(reads={"/s3/f.txt": b"hello"}, cache=["/s3/f.txt"])
+    records = [_read_record("/s3/f.txt", "etag-multipart-2")]
+    await cache_io.apply_io(cache, io, records=records)
+    assert await cache.get("/s3/f.txt") == b"hello"
+    assert await cache.is_fresh("/s3/f.txt", "etag-multipart-2")
+
+
+@pytest.mark.asyncio
+async def test_apply_io_exhausted_stream_uses_record_fingerprint(cache):
+    """An exhausted stream read carries its record fingerprint too."""
+    stream = _make_stream(b"hello")
+    assert await stream.drain() == b"hello"
+    io = IOResult(reads={"/s3/f.txt": stream}, cache=["/s3/f.txt"])
+    records = [_read_record("/s3/f.txt", "etag-multipart-2")]
+    await cache_io.apply_io(cache, io, records=records)
+    assert await cache.is_fresh("/s3/f.txt", "etag-multipart-2")
+
+
+@pytest.mark.asyncio
+async def test_apply_io_warm_reapply_preserves_fingerprint(cache):
+    """A warm read re-applies cache-served bytes with no backend read
+    record; the entry's backend fingerprint must survive, not be
+    replaced by the MD5-of-content default."""
+    cold = IOResult(reads={"/s3/f.txt": b"hello"}, cache=["/s3/f.txt"])
+    await cache_io.apply_io(cache,
+                            cold,
+                            records=[_read_record("/s3/f.txt", "etag-3")])
+    warm = IOResult(reads={"/s3/f.txt": b"hello"}, cache=["/s3/f.txt"])
+    await cache_io.apply_io(cache, warm, records=[])
+    assert await cache.is_fresh("/s3/f.txt", "etag-3")
+
+
+@pytest.mark.asyncio
+async def test_apply_io_changed_data_without_record_resets_entry(cache):
+    """New bytes with no backend fingerprint still replace the entry."""
+    cold = IOResult(reads={"/s3/f.txt": b"old"}, cache=["/s3/f.txt"])
+    await cache_io.apply_io(cache,
+                            cold,
+                            records=[_read_record("/s3/f.txt", "etag-3")])
+    fresh = IOResult(writes={"/s3/f.txt": b"new"}, cache=["/s3/f.txt"])
+    await cache_io.apply_io(cache, fresh, records=[])
+    assert await cache.get("/s3/f.txt") == b"new"
+    assert not await cache.is_fresh("/s3/f.txt", "etag-3")
+
+
+@pytest.mark.asyncio
+async def test_apply_io_drain_uses_fingerprint_recorded_during_drain():
+    """Streaming backends set the record fingerprint lazily when the GET
+    response arrives, i.e. during the background drain. The drained
+    entry must pick it up."""
+    cache = RAMFileCacheStore()
+    records: list[OpRecord] = []
+
+    async def _gen():
+        records.append(_read_record("/s3/f.txt", "etag-multipart-2"))
+        yield b"hello"
+
+    stream = CachableAsyncIterator(_gen())
+    io = IOResult(reads={"/s3/f.txt": stream}, cache=["/s3/f.txt"])
+    await cache_io.apply_io(cache, io, records=records)
+    await asyncio.sleep(0.05)
+    assert await cache.get("/s3/f.txt") == b"hello"
+    assert await cache.is_fresh("/s3/f.txt", "etag-multipart-2")
 
 
 # ── cache invalidation ──────────────────────────────────────────────────

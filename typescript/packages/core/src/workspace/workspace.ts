@@ -831,7 +831,7 @@ export class Workspace {
     targetSession.lastExitCode = io.exitCode
     let stdoutBytes: Uint8Array
     try {
-      await this.dispatcher.applyIo(io)
+      await this.dispatcher.applyIo(io, opRecords)
       stdoutBytes = materialized === null ? new Uint8Array() : await materialize(materialized)
     } catch (err) {
       // Lazy reads can fail while draining (e.g. head/tail that open the

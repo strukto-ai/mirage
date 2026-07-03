@@ -13,17 +13,18 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { MountMode, RAMResource, type IOResult } from '@struktoai/mirage-core'
+import { MountMode, RAMResource, type IOResult, type OpRecord } from '@struktoai/mirage-core'
 import { Workspace } from '../workspace.ts'
+
+type ApplyIoFn = (io: IOResult, records?: readonly OpRecord[]) => Promise<void>
 
 function captureIo(ws: Workspace): IOResult[] {
   const captured: IOResult[] = []
-  const dispatcher = (ws as unknown as { dispatcher: { applyIo: (io: IOResult) => Promise<void> } })
-    .dispatcher
+  const dispatcher = (ws as unknown as { dispatcher: { applyIo: ApplyIoFn } }).dispatcher
   const orig = dispatcher.applyIo.bind(dispatcher)
-  dispatcher.applyIo = async (io: IOResult) => {
+  dispatcher.applyIo = async (io: IOResult, records?: readonly OpRecord[]) => {
     captured.push(io)
-    return orig(io)
+    return orig(io, records)
   }
   return captured
 }
