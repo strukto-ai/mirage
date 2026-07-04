@@ -19,7 +19,7 @@ import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { FileStat, type PathSpec } from '../../../types.ts'
 import { type CommandFn, type ProvisionFn, type RegisteredCommand, command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import type { CommandIO, StatOp } from './adapter.ts'
+import { type CommandIO, type StatOp, resolveGlobOf } from './adapter.ts'
 import { BUILDERS } from './builders/index.ts'
 import { defaultProvision } from './provision.ts'
 
@@ -85,7 +85,7 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
         ? ((provOver[b.name] ?? null) as ProvisionFn | null)
         : b.provision !== undefined
           ? b.provision(opsBase.stat)
-          : defaultProvision(b.name, opsBase.stat)
+          : defaultProvision(b.name, opsBase.stat, resolveGlobOf(opsBase), opsBase.readdir)
     const aggregate = ops.local !== false ? (b.aggregate ?? null) : null
     commands.push(
       ...command({

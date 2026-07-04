@@ -27,6 +27,7 @@ import {
   getSubshellBody,
   getText,
   getWhileParts,
+  hasCommandSubstitution,
   splitEnvPrefix,
 } from '../../shell/helpers.ts'
 import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
@@ -155,7 +156,18 @@ export async function provisionNode(
     if (parts.length === 0) return new ProvisionResult({ precision: Precision.EXACT })
     const expanded = await expandParts(parts, session, ctx.executeFn)
     const classified = classifyParts(expanded, ctx.registry, session.cwd)
-    return handleCommandProvision(ctx.registry, classified, session, ctx.namespace ?? null)
+    const result = await handleCommandProvision(
+      ctx.registry,
+      classified,
+      session,
+      ctx.namespace ?? null,
+    )
+    if (parts.some((p) => hasCommandSubstitution(p))) {
+      // The plan walk suppressed the substitution, so the operand list
+      // is incomplete: the totals are floors, not answers.
+      result.precision = Precision.UNKNOWN
+    }
+    return result
   }
 
   if (kind === NodeKind.PIPELINE) {
@@ -181,6 +193,12 @@ export async function provisionNode(
       if (r.kind !== RedirectKind.STDIN && r.kind !== RedirectKind.STDOUT) continue
       if (!(r.target instanceof PathSpec)) continue
       if (r.target.virtual.startsWith('/dev/')) continue
+      if (r.targetNode !== null && hasCommandSubstitution(r.targetNode as TSNodeLike)) {
+        // The suppressed substitution expanded to empty, so this
+        // target classification is garbage; the degrade below keeps
+        // the plan honest without costing a phantom write.
+        continue
+      }
       targets.push([r.kind, r.target])
     }
     const result = await handleRedirectProvision(
@@ -191,6 +209,14 @@ export async function provisionNode(
       session,
       ctx.namespace ?? null,
     )
+    if (
+      redirects.some(
+        (r) => r.targetNode !== null && hasCommandSubstitution(r.targetNode as TSNodeLike),
+      )
+    ) {
+      // A suppressed substitution hid the real redirect target.
+      result.precision = Precision.UNKNOWN
+    }
     if (pipeNode !== null) {
       return rollupPipe([result, await recurse(pipeNode, session)])
     }
@@ -204,6 +230,13 @@ export async function provisionNode(
 
   if (kind === NodeKind.FOR) {
     const [, values, body] = getForParts(node)
+    if (values.some((v) => hasCommandSubstitution(v))) {
+      // The iteration count comes from a suppressed substitution: plan
+      // one pass as a floor and degrade.
+      const result = await handleForProvision(recurseUnknown, body, 1, session)
+      result.precision = Precision.UNKNOWN
+      return result
+    }
     const classified = await expandAndClassify(
       values,
       session,

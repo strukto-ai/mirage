@@ -2340,9 +2340,9 @@ net=24 write=0 cache=0 ops=1 hits=0 precision=unknown
 === prov_write ===
 net=0 write=0 cache=0 ops=0 hits=0 precision=unknown
 === prov_pipe ===
-net=24 write=0 cache=0 ops=1 hits=0 precision=unknown
+net=24 write=0 cache=0 ops=1 hits=0 precision=exact
 === prov_pipe_floor ===
-net=24 write=0 cache=0 ops=1 hits=0 precision=unknown
+net=24 write=0 cache=0 ops=1 hits=0 precision=exact
 === prov_and ===
 net=30 write=0 cache=0 ops=2 hits=0 precision=exact
 === prov_seq ===
@@ -2374,7 +2374,7 @@ net=0 write=0 cache=0 ops=0 hits=0 precision=exact
 === prov_date ===
 net=0 write=0 cache=0 ops=0 hits=0 precision=exact
 === prov_pipe3 ===
-net=24 write=0 cache=0 ops=1 hits=0 precision=unknown
+net=24 write=0 cache=0 ops=1 hits=0 precision=exact
 === prov_and_or ===
 net=12-30 write=0 cache=0 ops=1 hits=0 precision=range
 === prov_or_and ===
@@ -2396,13 +2396,13 @@ net=24 write=0-24 cache=0 ops=1 hits=0 precision=range
 === prov_or_unknown_branch ===
 net=0-24 write=0 cache=0 ops=0 hits=0 precision=unknown
 === prov_for_pipe ===
-net=48 write=0 cache=0 ops=2 hits=0 precision=unknown
+net=48 write=0 cache=0 ops=2 hits=0 precision=exact
 === prov_for_nested ===
 net=24 write=0 cache=0 ops=4 hits=0 precision=exact
 === prov_cmdsub ===
 net=0 write=0 cache=0 ops=0 hits=0 precision=unknown
 === prov_deep_mix ===
-net=60 write=0 cache=0 ops=4 hits=0 precision=unknown
+net=60 write=0 cache=0 ops=4 hits=0 precision=exact
 === prov_env_prefix ===
 net=24 write=0 cache=0 ops=1 hits=0 precision=exact
 === prov_func_call ===
@@ -2416,7 +2416,7 @@ net=24 write=0 cache=0 ops=1 hits=0 precision=unknown
 === prov_until ===
 net=24 write=0 cache=0 ops=1 hits=0 precision=unknown
 === prov_redirect_in ===
-net=24 write=0 cache=0 ops=1 hits=0 precision=unknown
+net=24 write=0 cache=0 ops=1 hits=0 precision=exact
 === prov_redirect_devnull ===
 net=24 write=0 cache=0 ops=1 hits=0 precision=exact
 === prov_symlink ===
@@ -2428,6 +2428,20 @@ net=30 write=0 cache=0 ops=2 hits=0 precision=exact
 === prov_xmount_grep ===
 net=30 write=0 cache=0 ops=2 hits=0 precision=exact
 === prov_xmount_pipe ===
-net=30 write=0 cache=0 ops=2 hits=0 precision=unknown
+net=30 write=0 cache=0 ops=2 hits=0 precision=exact
 === prov_xmount_rejected ===
 net=0 write=0 cache=0 ops=0 hits=0 precision=unknown
+=== prov_glob ===
+net=24 write=0 cache=0 ops=1 hits=0 precision=exact
+=== prov_glob_unmatched ===
+net=0 write=0 cache=0 ops=0 hits=0 precision=unknown
+=== prov_grep_r ===
+net=60 write=0 cache=0 ops=2 hits=0 precision=exact
+=== prov_pathless ===
+net=0 write=0 cache=0 ops=0 hits=0 precision=exact
+=== prov_heredoc ===
+net=0 write=0 cache=0 ops=0 hits=0 precision=exact
+=== prov_for_cmdsub ===
+net=24 write=0 cache=0 ops=1 hits=0 precision=unknown
+=== prov_redirect_cmdsub ===
+net=24 write=0 cache=0 ops=1 hits=0 precision=unknown

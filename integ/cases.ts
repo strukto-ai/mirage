@@ -895,6 +895,16 @@ export const PROVISION_CASES: ReadonlyArray<readonly [string, string]> = [
   ["prov_xmount_pipe", "cat /data/a.txt /data2/xm.txt | wc -c"],
   // md5 rejects cross-mount operands, so its plan is honest unknown
   ["prov_xmount_rejected", "md5 /data/a.txt /data2/xm.txt"],
+  // ----- glob + recursive expansion (readdir/index-driven) -----
+  ["prov_glob", "cat /data/rgm/d1/*.txt"],
+  ["prov_glob_unmatched", "cat /data/rgm/d1/*.nope"],
+  ["prov_grep_r", "grep -r hello /data/rgm"],
+  // ----- stdin-driven stages cost zero backend bytes -----
+  ["prov_pathless", "wc -l"],
+  ["prov_heredoc", "wc -c <<EOF\nhello\nEOF"],
+  // ----- suppressed substitutions stay honest floors -----
+  ["prov_for_cmdsub", "for i in $(echo 1 2); do cat /data/a.txt; done"],
+  ["prov_redirect_cmdsub", "cat /data/a.txt > $(echo /data/prov_out.txt)"],
 ];
 
 // Not-found errors must always show the full virtual path the user typed

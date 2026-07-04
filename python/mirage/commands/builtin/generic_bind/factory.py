@@ -128,7 +128,10 @@ def make_generic_commands(
         elif b.provision is not None:
             provision = b.provision(ops.stat)
         else:
-            provision = default_provision(b.name, ops.stat)
+            provision = default_provision(b.name,
+                                          ops.stat,
+                                          resolve_glob=ops.resolve_glob,
+                                          readdir=ops.readdir)
         agg = b.aggregate if ops.local else None
         commands.append(
             command(b.name,

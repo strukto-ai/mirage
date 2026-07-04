@@ -39,6 +39,15 @@ export function getParts(node: TSNodeLike): TSNodeLike[] {
  * executor (which expands and applies the assignments) and the
  * provision planner (which only needs the command parts).
  */
+export function hasCommandSubstitution(node: TSNodeLike): boolean {
+  // The provision planner suppresses substitution execution, so any
+  // word carrying one expands to empty during a plan walk and the
+  // affected estimate must degrade to UNKNOWN instead of trusting the
+  // incomplete expansion.
+  if (node.type === NT.COMMAND_SUBSTITUTION || node.type === NT.PROCESS_SUBSTITUTION) return true
+  return node.namedChildren.some((c) => hasCommandSubstitution(c))
+}
+
 export function splitEnvPrefix(parts: TSNodeLike[]): [TSNodeLike[], TSNodeLike[]] {
   const assignments: TSNodeLike[] = []
   const remaining: TSNodeLike[] = []

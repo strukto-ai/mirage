@@ -42,7 +42,7 @@ from mirage.shell.helpers import (  # isort: skip
     get_case_items, get_command_name, get_for_parts, get_function_body,
     get_function_name, get_if_branches, get_list_parts, get_negated_command,
     get_parts, get_pipeline_commands, get_redirects, get_subshell_body,
-    get_text, get_while_parts, split_env_prefix)
+    get_text, get_while_parts, has_command_substitution, split_env_prefix)
 
 # eval / source execute their payload, so they are NOT free builtins:
 # leaving them out lets them fall through to command resolution, which
@@ -153,8 +153,13 @@ async def provision_node(
             return ProvisionResult(precision=Precision.EXACT)
         expanded = await expand_parts(parts, session, execute_fn)
         classified = classify_parts(expanded, registry, session.cwd)
-        return await handle_command_provision(registry, classified, session,
-                                              namespace)
+        result = await handle_command_provision(registry, classified, session,
+                                                namespace)
+        if any(has_command_substitution(p) for p in parts):
+            # The plan walk suppressed the substitution, so the operand
+            # list is incomplete: the totals are floors, not answers.
+            result.precision = Precision.UNKNOWN
+        return result
 
     if kind == NodeKind.PIPELINE:
         commands, _ = get_pipeline_commands(node)
@@ -175,6 +180,10 @@ async def provision_node(
                    and not r.target.virtual.startswith("/dev/")]
         result = await handle_redirect_provision(recurse, registry, command,
                                                  targets, session, namespace)
+        if any(r.target_node is not None
+               and has_command_substitution(r.target_node) for r in redirects):
+            # A suppressed substitution hid the real redirect target.
+            result.precision = Precision.UNKNOWN
         if pipe_node is not None:
             return rollup_pipe([result, await recurse(pipe_node, session)])
         return result
@@ -185,6 +194,12 @@ async def provision_node(
 
     if kind == NodeKind.FOR:
         _, values, body = get_for_parts(node)
+        if any(has_command_substitution(v) for v in values):
+            # The iteration count comes from a suppressed substitution:
+            # plan one pass as a floor and degrade.
+            result = await handle_for_provision(recurse, body, 1, session)
+            result.precision = Precision.UNKNOWN
+            return result
         classified = await expand_and_classify(values, session, execute_fn,
                                                registry, session.cwd)
         n = len(classified) or 1

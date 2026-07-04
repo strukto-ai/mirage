@@ -21,17 +21,30 @@ import { mountKey } from '../../../utils/key_prefix.ts'
 import type { CommandOpts } from '../../config.ts'
 import { RAM_COMMANDS } from '../ram/index.ts'
 import {
+  MAX_PLAN_WALK,
   defaultProvision,
   makeCopyProvision,
   makeFileReadProvision,
   makeHeadTailProvision,
+  makeSearchProvision,
   makeTransformProvision,
   metadataProvision,
   pureProvision,
   writeMetadataProvision,
 } from './provision.ts'
 
-const SIZES: Record<string, number> = { '/data/known.txt': 5, '/data/big.txt': 100 }
+const SIZES: Record<string, number> = {
+  '/data/known.txt': 5,
+  '/data/big.txt': 100,
+  '/data/tree/a.txt': 7,
+  '/data/tree/skip.parquet': 900,
+  '/data/tree/sub/b.txt': 11,
+}
+const DIRS = new Set(['/data/tree', '/data/tree/sub'])
+const TREE: Record<string, string[]> = {
+  '/data/tree': ['/data/tree/a.txt', '/data/tree/skip.parquet', '/data/tree/sub'],
+  '/data/tree/sub': ['/data/tree/sub/b.txt'],
+}
 
 function spec(path: string): PathSpec {
   return new PathSpec({
@@ -43,12 +56,54 @@ function spec(path: string): PathSpec {
 
 const stat = (_accessor: Accessor, p: PathSpec): Promise<FileStat> =>
   Promise.resolve(
-    new FileStat({
-      name: p.virtual.split('/').pop() ?? '',
-      size: SIZES[p.virtual] ?? null,
-      type: FileType.TEXT,
-    }),
+    DIRS.has(p.virtual)
+      ? new FileStat({ name: p.virtual.split('/').pop() ?? '', type: FileType.DIRECTORY })
+      : new FileStat({
+          name: p.virtual.split('/').pop() ?? '',
+          size: SIZES[p.virtual] ?? null,
+          type: FileType.TEXT,
+        }),
   )
+
+// Backend ops follow the executor contract: specs arrive in the
+// resource view (virtual == mountPath) and entries come back the same
+// way. The fakes translate to the '/data'-prefixed fixture keys.
+const readdir = (_accessor: Accessor, p: PathSpec): Promise<string[]> =>
+  Promise.resolve((TREE[`/data${p.virtual}`] ?? []).map((e) => e.slice('/data'.length)))
+
+const resolveGlob = (_accessor: Accessor, paths: readonly PathSpec[]): Promise<PathSpec[]> => {
+  const out: PathSpec[] = []
+  for (const p of paths) {
+    if (p.pattern !== null && p.pattern !== '') {
+      const suffix = p.pattern.replace(/^\*+/, '')
+      for (const e of TREE[`/data${p.directory}`.replace(/\/$/, '')] ?? []) {
+        if (e.endsWith(suffix)) {
+          const rel = e.slice('/data'.length)
+          out.push(
+            new PathSpec({
+              virtual: rel,
+              directory: rel.slice(0, rel.lastIndexOf('/') + 1),
+              resourcePath: mountKey(e, '/data'),
+              resolved: true,
+            }),
+          )
+        }
+      }
+    } else {
+      out.push(p)
+    }
+  }
+  return Promise.resolve(out)
+}
+
+function pattern(virtual: string, dir: string, glob: string): PathSpec {
+  return new PathSpec({
+    virtual,
+    directory: dir,
+    pattern: glob,
+    resourcePath: mountKey(virtual, '/data'),
+  })
+}
 
 function opts(command: string): CommandOpts {
   return { command, flags: {} } as unknown as CommandOpts
@@ -185,5 +240,56 @@ describe('size-aware estimators', () => {
     expect(result.precision).toBe(Precision.EXACT)
     expect(result.networkReadHigh).toBe(0)
     expect(result.readOps).toBe(0)
+  })
+})
+
+describe('glob and recursive estimates', () => {
+  it('file read expands globs to exact totals', async () => {
+    const provision = makeFileReadProvision(stat, resolveGlob)
+    const result = (await provision(
+      {} as Accessor,
+      [pattern('/data/tree/*.txt', '/data/tree/', '*.txt')],
+      [],
+      opts('cat'),
+    )) as ProvisionResult
+    expect(result.precision).toBe(Precision.EXACT)
+    expect(result.networkReadHigh).toBe(7)
+    expect(result.readOps).toBe(1)
+  })
+
+  it('unmatched glob stays unknown', async () => {
+    const provision = makeFileReadProvision(stat, resolveGlob)
+    const result = (await provision(
+      {} as Accessor,
+      [pattern('/data/tree/*.nope', '/data/tree/', '*.nope')],
+      [],
+      opts('cat'),
+    )) as ProvisionResult
+    expect(result.precision).toBe(Precision.UNKNOWN)
+    expect(result.networkReadHigh).toBe(0)
+  })
+
+  it('recursive search walks the tree exactly, skipping columnar', async () => {
+    const provision = makeSearchProvision(stat, resolveGlob, readdir)
+    const result = (await provision({} as Accessor, [spec('/data/tree')], ['x'], {
+      command: 'grep',
+      flags: { r: true },
+    } as unknown as CommandOpts)) as ProvisionResult
+    expect(result.precision).toBe(Precision.EXACT)
+    expect(result.networkReadHigh).toBe(18)
+    expect(result.readOps).toBe(2)
+  })
+
+  it('recursive search without readdir keeps the floor', async () => {
+    const provision = makeSearchProvision(stat, resolveGlob)
+    const result = (await provision({} as Accessor, [spec('/data/tree')], ['x'], {
+      command: 'grep',
+      flags: { r: true },
+    } as unknown as CommandOpts)) as ProvisionResult
+    expect(result.precision).toBe(Precision.UNKNOWN)
+  })
+
+  it('exports a walk cap', () => {
+    expect(MAX_PLAN_WALK).toBeGreaterThan(0)
   })
 })

@@ -30,7 +30,7 @@ PLANS = {
     NodeKind.COMMENT: ("# a comment", "0", "0", "exact"),
     NodeKind.PROGRAM: ("cat /data/a.txt; cat /data/a.txt", "48", "0", "exact"),
     NodeKind.COMMAND: ("cat /data/a.txt", "24", "0", "exact"),
-    NodeKind.PIPELINE: ("cat /data/a.txt | wc -l", "24", "0", "unknown"),
+    NodeKind.PIPELINE: ("cat /data/a.txt | wc -l", "24", "0", "exact"),
     NodeKind.LIST: ("cat /data/a.txt && cat /data/a.txt", "48", "0", "exact"),
     NodeKind.REDIRECT:
     ("cat /data/a.txt > /data/out.txt", "24", "0-24", "range"),
@@ -142,5 +142,35 @@ async def test_provision_is_dry_and_case_arms_run_fully():
     assert result.network_read == "24"
     assert result.precision.value == "exact"
     result = await ws.execute("sed -i s/x/y/ /data/a.txt", provision=True)
+    assert result.precision.value == "unknown"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_stdin_driven_and_expanded_estimates():
+    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+    await ws.execute("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
+    await ws.execute("mkdir /data/tree")
+    await ws.execute("tee /data/tree/b.txt > /dev/null", stdin=b"y" * 10)
+    # heredoc-fed stdin is local bytes: exact zero backend I/O
+    result = await ws.execute("wc -l <<EOF\nabc\nEOF", provision=True)
+    assert result.network_read == "0"
+    assert result.precision.value == "exact"
+    # globs expand during planning
+    result = await ws.execute("cat /data/tree/*.txt", provision=True)
+    assert result.network_read == "10"
+    assert result.precision.value == "exact"
+    # recursive search walks the tree
+    result = await ws.execute("grep -r y /data/tree", provision=True)
+    assert result.network_read == "10"
+    assert result.precision.value == "exact"
+    # a suppressed substitution degrades the loop count to a floor
+    result = await ws.execute("for i in $(echo 1 2); do cat /data/a.txt; done",
+                              provision=True)
+    assert result.network_read == "24"
+    assert result.precision.value == "unknown"
+    # a suppressed substitution hides the redirect target
+    result = await ws.execute("cat /data/a.txt > $(echo /data/out.txt)",
+                              provision=True)
     assert result.precision.value == "unknown"
     await ws.close()

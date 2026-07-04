@@ -47,6 +47,19 @@ def get_parts(node: tree_sitter.Node) -> list[tree_sitter.Node]:
     return [c for c in node.named_children if c.type not in _SKIP]
 
 
+def has_command_substitution(node: tree_sitter.Node) -> bool:
+    """Whether the node contains a command or process substitution.
+
+    The provision planner suppresses substitution execution, so any
+    word carrying one expands to empty during a plan walk and the
+    affected estimate must degrade to UNKNOWN instead of trusting the
+    incomplete expansion.
+    """
+    if node.type in (NT.COMMAND_SUBSTITUTION, NT.PROCESS_SUBSTITUTION):
+        return True
+    return any(has_command_substitution(c) for c in node.named_children)
+
+
 def split_env_prefix(
     parts: list[tree_sitter.Node],
 ) -> tuple[list[tree_sitter.Node], list[tree_sitter.Node]]:

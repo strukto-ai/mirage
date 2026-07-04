@@ -16,14 +16,26 @@ import pytest
 
 from mirage.commands.builtin.generic_bind.provision import (
     default_provision, make_copy_provision, make_file_read_provision,
-    make_head_tail_provision, make_transform_provision, metadata_provision,
-    pure_provision, write_metadata_provision)
+    make_head_tail_provision, make_search_provision, make_transform_provision,
+    metadata_provision, pure_provision, write_metadata_provision)
 from mirage.commands.builtin.ram import COMMANDS as RAM_COMMANDS
 from mirage.provision import Precision
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 
-SIZES = {"/data/known.txt": 5, "/data/big.txt": 100}
+SIZES = {
+    "/data/known.txt": 5,
+    "/data/big.txt": 100,
+    "/data/tree/a.txt": 7,
+    "/data/tree/skip.parquet": 900,
+    "/data/tree/sub/b.txt": 11,
+}
+DIRS = {"/data/tree", "/data/tree/sub"}
+TREE = {
+    "/data/tree":
+    ["/data/tree/a.txt", "/data/tree/skip.parquet", "/data/tree/sub"],
+    "/data/tree/sub": ["/data/tree/sub/b.txt"],
+}
 
 
 def _spec(path: str) -> PathSpec:
@@ -34,9 +46,29 @@ def _spec(path: str) -> PathSpec:
 
 async def _stat(accessor, path, index=None) -> FileStat:
     virtual = path.virtual if isinstance(path, PathSpec) else path
+    if virtual in DIRS:
+        return FileStat(name=virtual.rsplit("/", 1)[-1],
+                        type=FileType.DIRECTORY)
     return FileStat(name=virtual.rsplit("/", 1)[-1],
                     size=SIZES.get(virtual),
                     type=FileType.TEXT)
+
+
+async def _readdir(accessor, path, index=None) -> list[str]:
+    virtual = path.virtual if isinstance(path, PathSpec) else path
+    return TREE[virtual]
+
+
+async def _resolve_glob(accessor, paths, index=None) -> list[PathSpec]:
+    out = []
+    for p in paths:
+        if p.pattern:
+            out.extend(
+                _spec(e) for e in TREE.get(p.directory.rstrip("/"), [])
+                if e.endswith(p.pattern.lstrip("*")))
+        else:
+            out.append(p)
+    return out
 
 
 def _registered(name: str):
@@ -156,3 +188,72 @@ async def test_pure_provision_zero_exact():
     assert result.precision == Precision.EXACT
     assert result.network_read_high == 0
     assert result.read_ops == 0
+
+
+@pytest.mark.asyncio
+async def test_file_read_expands_globs():
+    provision = make_file_read_provision(_stat, _resolve_glob)
+    pattern = PathSpec(virtual="/data/tree/*.txt",
+                       directory="/data/tree/",
+                       pattern="*.txt",
+                       resource_path="tree/*.txt")
+    result = await provision(None, [pattern], command="cat")
+    assert result.precision == Precision.EXACT
+    assert result.network_read_high == 7
+    assert result.read_ops == 1
+
+
+@pytest.mark.asyncio
+async def test_file_read_unmatched_glob_unknown():
+    provision = make_file_read_provision(_stat, _resolve_glob)
+    pattern = PathSpec(virtual="/data/tree/*.nope",
+                       directory="/data/tree/",
+                       pattern="*.nope",
+                       resource_path="tree/*.nope")
+    result = await provision(None, [pattern], command="cat")
+    assert result.precision == Precision.UNKNOWN
+    assert result.network_read_high == 0
+
+
+@pytest.mark.asyncio
+async def test_search_recursive_walks_tree_exact():
+    provision = make_search_provision(_stat, _resolve_glob, _readdir)
+    result = await provision(None, [_spec("/data/tree")],
+                             "x",
+                             command="grep",
+                             r=True)
+    assert result.precision == Precision.EXACT
+    assert result.network_read_high == 18
+    assert result.read_ops == 2
+
+
+@pytest.mark.asyncio
+async def test_search_recursive_skips_columnar():
+    provision = make_search_provision(_stat, _resolve_glob, _readdir)
+    result = await provision(None, [_spec("/data/tree")],
+                             "x",
+                             command="grep",
+                             r=True)
+    assert result.network_read_high != 918
+
+
+@pytest.mark.asyncio
+async def test_search_without_readdir_keeps_floor():
+    provision = make_search_provision(_stat, _resolve_glob)
+    result = await provision(None, [_spec("/data/tree")],
+                             "x",
+                             command="grep",
+                             r=True)
+    assert result.precision == Precision.UNKNOWN
+
+
+@pytest.mark.asyncio
+async def test_search_recursive_cap_degrades(monkeypatch):
+    monkeypatch.setattr(
+        "mirage.commands.builtin.generic_bind.provision.MAX_PLAN_WALK", 2)
+    provision = make_search_provision(_stat, _resolve_glob, _readdir)
+    result = await provision(None, [_spec("/data/tree")],
+                             "x",
+                             command="grep",
+                             r=True)
+    assert result.precision == Precision.UNKNOWN

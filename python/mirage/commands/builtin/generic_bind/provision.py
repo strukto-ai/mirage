@@ -17,11 +17,93 @@ from collections.abc import Callable
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.grep_helper import BINARY_EXTENSIONS
+from mirage.commands.resolve import get_extension
 from mirage.core.jq import is_jsonl_path, is_streamable_jsonl_expr
 from mirage.provision.types import Precision, ProvisionResult
-from mirage.types import PathSpec
+from mirage.types import FileType, PathSpec
+from mirage.utils.key_prefix import rekey
 
 logger = logging.getLogger(__name__)
+
+# Cap on entries visited by a planning walk (grep -r): beyond it the
+# estimate degrades to an UNKNOWN floor instead of walking forever.
+MAX_PLAN_WALK = 1000
+
+
+async def _expand_globs(
+    resolve_glob: Callable | None,
+    accessor: Accessor,
+    paths: list[PathSpec],
+    index: IndexCacheStore | None,
+) -> list[PathSpec]:
+    """Expand glob operands the way the executor would.
+
+    Without a resolver (or on any backend error) the original paths are
+    returned, whose pattern entries then stat-fail into UNKNOWN floors,
+    which is the pre-expansion behavior.
+    """
+    if resolve_glob is None:
+        return paths
+    if not any(isinstance(p, PathSpec) and p.pattern for p in paths):
+        return paths
+    try:
+        return await resolve_glob(accessor, paths, index)
+    except Exception as exc:
+        logger.debug("provision glob expansion failed: %s", exc)
+        return paths
+
+
+async def _walk_files(
+    readdir: Callable,
+    stat: Callable,
+    accessor: Accessor,
+    roots: list[PathSpec],
+    index: IndexCacheStore | None,
+) -> tuple[list[tuple[str, int]], bool]:
+    """Walk directories the way grep -r does, collecting file sizes.
+
+    Directories recurse; files skipped by the executor (columnar
+    BINARY_EXTENSIONS) are skipped here too so the estimate matches
+    what the run would read. Returns (sized files, complete): complete
+    is False when the walk was capped or any entry failed to resolve,
+    in which case the totals are only floors.
+    """
+    sized: list[tuple[str, int]] = []
+    complete = True
+    visited = 0
+    queue: list[PathSpec] = list(roots)
+    while queue:
+        p = queue.pop(0)
+        visited += 1
+        if visited > MAX_PLAN_WALK:
+            return sized, False
+        try:
+            s = await stat(accessor, p, index)
+        except Exception as exc:
+            logger.debug("provision walk stat failed for %s: %s", p.virtual,
+                         exc)
+            complete = False
+            continue
+        if s.type == FileType.DIRECTORY:
+            try:
+                entries = await readdir(accessor, p, index)
+            except Exception as exc:
+                logger.debug("provision walk readdir failed for %s: %s",
+                             p.virtual, exc)
+                complete = False
+                continue
+            queue.extend(
+                PathSpec.from_str_path(e, rekey(p.virtual, p.resource_path, e))
+                for e in entries)
+            continue
+        if get_extension(p.virtual) in BINARY_EXTENSIONS:
+            continue
+        if s.size is None:
+            complete = False
+            continue
+        sized.append((p.virtual, s.size))
+    return sized, complete
 
 
 async def _resolve_sizes(
@@ -55,7 +137,8 @@ async def _resolve_sizes(
     return resolved, missing
 
 
-def make_file_read_provision(stat: Callable) -> Callable:
+def make_file_read_provision(stat: Callable,
+                             resolve_glob: Callable | None = None) -> Callable:
     """Cost estimate for full file reads (cat, wc), generic over stat."""
 
     async def file_read_provision(
@@ -66,6 +149,11 @@ def make_file_read_provision(stat: Callable) -> Callable:
         index: IndexCacheStore | None = None,
         **kwargs,
     ) -> ProvisionResult:
+        if not paths:
+            # Pathless invocations are stdin-driven (pipe stage, heredoc,
+            # or an immediate missing-operand error): zero backend bytes.
+            return ProvisionResult(command=command, precision=Precision.EXACT)
+        paths = await _expand_globs(resolve_glob, accessor, paths, index)
         if not paths:
             return ProvisionResult(command=command,
                                    precision=Precision.UNKNOWN)
@@ -92,7 +180,8 @@ def make_file_read_provision(stat: Callable) -> Callable:
     return file_read_provision
 
 
-def make_head_tail_provision(stat: Callable) -> Callable:
+def make_head_tail_provision(stat: Callable,
+                             resolve_glob: Callable | None = None) -> Callable:
     """Cost estimate for partial reads (head, tail), generic over stat."""
 
     async def head_tail_provision(
@@ -105,6 +194,11 @@ def make_head_tail_provision(stat: Callable) -> Callable:
         index: IndexCacheStore | None = None,
         **kwargs,
     ) -> ProvisionResult:
+        if not paths:
+            # Pathless invocations are stdin-driven (pipe stage, heredoc,
+            # or an immediate missing-operand error): zero backend bytes.
+            return ProvisionResult(command=command, precision=Precision.EXACT)
+        paths = await _expand_globs(resolve_glob, accessor, paths, index)
         if not paths:
             return ProvisionResult(command=command,
                                    precision=Precision.UNKNOWN)
@@ -170,7 +264,11 @@ def make_jq_provision(stat: Callable) -> Callable:
         index: IndexCacheStore | None = None,
         **kwargs,
     ) -> ProvisionResult:
-        if not paths or not texts:
+        if not paths:
+            # A pathless jq filters stdin (or errors without an expr):
+            # zero backend bytes either way.
+            return ProvisionResult(command="jq", precision=Precision.EXACT)
+        if not texts:
             return ProvisionResult(command="jq", precision=Precision.UNKNOWN)
         p = paths[0]
         key = p.mount_path if isinstance(p, PathSpec) else p
@@ -228,9 +326,16 @@ def make_sed_provision(stat: Callable) -> Callable:
     return sed_provision
 
 
-def make_search_provision(stat: Callable) -> Callable:
-    """Provision for grep/rg/jq: render pattern then delegate to file_read."""
-    base = make_file_read_provision(stat)
+def make_search_provision(stat: Callable,
+                          resolve_glob: Callable | None = None,
+                          readdir: Callable | None = None) -> Callable:
+    """Provision for grep/rg/jq: render pattern then delegate to file_read.
+
+    With -r/-R and a readdir, directory operands are walked the way the
+    executor walks them (recursing subdirectories, skipping columnar
+    files), so a recursive search over an indexed tree prices exactly.
+    """
+    base = make_file_read_provision(stat, resolve_glob)
 
     async def search_provision(
         accessor: Accessor,
@@ -238,23 +343,46 @@ def make_search_provision(stat: Callable) -> Callable:
         *texts: str,
         command: str = "",
         index: IndexCacheStore | None = None,
+        r: bool = False,
+        R: bool = False,
         **kwargs,
     ) -> ProvisionResult:
         rendered = (command or ""
                     ) + " " + " ".join(list(texts) + [str(p) for p in paths])
+        if (r or R) and readdir is not None and paths:
+            roots = await _expand_globs(resolve_glob, accessor, paths, index)
+            sized, complete = await _walk_files(readdir, stat, accessor, roots,
+                                                index)
+            total = sum(size for _, size in sized)
+            if not complete or not sized:
+                return ProvisionResult(
+                    command=rendered,
+                    network_read_low=total,
+                    network_read_high=total,
+                    read_ops=max(len(sized), len(paths)),
+                    precision=Precision.UNKNOWN,
+                )
+            return ProvisionResult(
+                command=rendered,
+                network_read_low=total,
+                network_read_high=total,
+                read_ops=len(sized),
+                precision=Precision.EXACT,
+            )
         return await base(accessor, paths, command=rendered, index=index)
 
     return search_provision
 
 
-def make_transform_provision(stat: Callable) -> Callable:
+def make_transform_provision(stat: Callable,
+                             resolve_glob: Callable | None = None) -> Callable:
     """Provision for read-transform-write commands (gzip, tar, split).
 
     The operands are read fully, so the read side is a known floor, but
     the output size (compression ratio, piece count) is unknowable
     before running, so precision stays UNKNOWN.
     """
-    base = make_file_read_provision(stat)
+    base = make_file_read_provision(stat, resolve_glob)
 
     async def transform_provision(
         accessor: Accessor,
@@ -265,13 +393,17 @@ def make_transform_provision(stat: Callable) -> Callable:
         **kwargs,
     ) -> ProvisionResult:
         result = await base(accessor, paths, command=command, index=index)
-        result.precision = Precision.UNKNOWN
+        if paths:
+            # Output size (compression ratio, piece count) is unknowable.
+            # A pathless transform filters stdin to stdout: exact zero.
+            result.precision = Precision.UNKNOWN
         return result
 
     return transform_provision
 
 
-def make_copy_provision(stat: Callable) -> Callable:
+def make_copy_provision(stat: Callable,
+                        resolve_glob: Callable | None = None) -> Callable:
     """Provision for cp: bytes bracket 0 (server-side copy) to the total.
 
     Reads the source sizes and reports both network_read and
@@ -288,6 +420,7 @@ def make_copy_provision(stat: Callable) -> Callable:
         index: IndexCacheStore | None = None,
         **kwargs,
     ) -> ProvisionResult:
+        paths = await _expand_globs(resolve_glob, accessor, paths, index)
         sources = paths[:-1] if len(paths) > 1 else paths
         if not sources:
             return ProvisionResult(command=command,
@@ -367,7 +500,10 @@ TRANSFORM_COMMANDS = frozenset(
 WRITE_METADATA_COMMANDS = frozenset({"ln", "mkdir", "mktemp", "rm", "touch"})
 
 
-def default_provision(name: str, stat: Callable) -> Callable | None:
+def default_provision(name: str,
+                      stat: Callable,
+                      resolve_glob: Callable | None = None,
+                      readdir: Callable | None = None) -> Callable | None:
     """Default cost estimator for a factory-built command, by family.
 
     Whole-file readers stat their operands and charge the byte total;
@@ -383,25 +519,30 @@ def default_provision(name: str, stat: Callable) -> Callable | None:
     Args:
         name (str): Builder/command name.
         stat (Callable): Backend stat used to resolve operand sizes.
+        resolve_glob (Callable | None): Backend glob resolver; byte
+            estimators expand pattern operands with it instead of
+            flooring them to UNKNOWN.
+        readdir (Callable | None): Backend readdir; recursive searches
+            walk directories with it for exact totals.
 
     Returns:
         Callable | None: Provision function, or None when the family has
         no sensible generic estimate.
     """
     if name in FILE_READ_COMMANDS:
-        return make_file_read_provision(stat)
+        return make_file_read_provision(stat, resolve_glob)
     if name in HEAD_TAIL_COMMANDS:
-        return make_head_tail_provision(stat)
+        return make_head_tail_provision(stat, resolve_glob)
     if name in SEARCH_COMMANDS:
-        return make_search_provision(stat)
+        return make_search_provision(stat, resolve_glob, readdir)
     if name in METADATA_COMMANDS:
         return metadata_provision
     if name in TRANSFORM_COMMANDS:
-        return make_transform_provision(stat)
+        return make_transform_provision(stat, resolve_glob)
     if name in WRITE_METADATA_COMMANDS:
         return write_metadata_provision
     if name == "cp":
-        return make_copy_provision(stat)
+        return make_copy_provision(stat, resolve_glob)
     if name == "jq":
         return make_jq_provision(stat)
     return None
