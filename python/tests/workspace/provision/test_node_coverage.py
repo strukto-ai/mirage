@@ -116,3 +116,31 @@ async def test_provision_follows_symlinks_and_spans_mounts():
     result = await ws.execute("cat /data2/b.txt /data/a.txt", provision=True)
     assert result.network_read == "30"
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_provision_is_dry_and_case_arms_run_fully():
+    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+    await ws.execute("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
+    # a dry run must not execute command substitutions
+    result = await ws.execute(
+        "cat $(tee /data/leak.txt > /dev/null; echo /data/a.txt)",
+        provision=True)
+    assert result.precision.value == "unknown"
+    listing = await (await ws.execute("ls /data")).stdout_str()
+    assert "leak.txt" not in listing
+    # a case arm runs every statement up to its ;; terminator
+    out = await (
+        await
+        ws.execute("case x in x) echo one; echo two;; esac")).stdout_str()
+    assert out == "one\ntwo\n"
+    result = await ws.execute(
+        "case x in x) cat /data/a.txt; cat /data/a.txt;; esac", provision=True)
+    assert result.network_read == "48"
+    # sed reads its operands; -i degrades to a floor
+    result = await ws.execute("sed s/x/y/ /data/a.txt", provision=True)
+    assert result.network_read == "24"
+    assert result.precision.value == "exact"
+    result = await ws.execute("sed -i s/x/y/ /data/a.txt", provision=True)
+    assert result.precision.value == "unknown"
+    await ws.close()

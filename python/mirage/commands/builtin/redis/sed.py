@@ -15,9 +15,11 @@
 from mirage.commands.builtin.generic.sed_command import make_sed
 from mirage.core.redis.glob import resolve_glob
 from mirage.core.redis.read import read_bytes
+from mirage.core.redis.stat import stat as _stat
 from mirage.core.redis.write import write_bytes
 
 sed = make_sed(
+    stat_fn=_stat,
     resource="redis",
     glob_fn=resolve_glob,
     glob_when=lambda accessor, index: accessor.store is not None,

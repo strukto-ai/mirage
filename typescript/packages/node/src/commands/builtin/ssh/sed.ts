@@ -15,9 +15,11 @@
 import { ResourceName, makeSed } from '@struktoai/mirage-core'
 import type { SSHAccessor } from '../../../accessor/ssh.ts'
 import { stream as sshStream } from '../../../core/ssh/stream.ts'
+import { stat as sshProvStat } from '../../../core/ssh/stat.ts'
 import { writeBytes as sshWrite } from '../../../core/ssh/write.ts'
 
 export const SSH_SED = makeSed<SSHAccessor>({
+  stat: (a, p) => sshProvStat(a, p),
   resource: ResourceName.SSH,
   stream: (a, p) => sshStream(a, p),
   write: (a, p, d) => sshWrite(a, p, d),

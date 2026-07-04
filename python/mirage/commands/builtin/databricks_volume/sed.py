@@ -16,8 +16,10 @@ from mirage.commands.builtin.databricks_volume._helpers import (
     path_prefix, read_bytes_with_index)
 from mirage.commands.builtin.generic.sed_command import make_sed
 from mirage.core.databricks_volume.glob import resolve_glob
+from mirage.core.databricks_volume.stat import stat as _stat
 
 sed = make_sed(
+    stat_fn=_stat,
     resource="databricks_volume",
     glob_fn=resolve_glob,
     make_read=lambda accessor, index, paths: read_bytes_with_index(

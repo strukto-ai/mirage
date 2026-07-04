@@ -1162,6 +1162,12 @@ c
 === sed_no_final_nl ===
 NO trailing newline
 \ No newline at end of output
+=== case_multi_arm ===
+one
+two
+=== case_multi_arm_default ===
+fall
+through
 === tr_squeeze ===
 abc
 === tr_complement ===
@@ -1881,8 +1887,8 @@ disptree/d
 disptree/d/y.txt
 disptree/x.txt
 === history_last_two ===
-489  (cd /data && ls -R disptree)
-490  (cd /data && find disptree)
+491  (cd /data && ls -R disptree)
+492  (cd /data && find disptree)
 === bash_history_tail ===
 (cd /data && ls -R disptree)
 (cd /data && find disptree)
@@ -2327,8 +2333,10 @@ net=29 write=0 cache=0 ops=1 hits=0 precision=exact
 net=27 write=0 cache=0 ops=1 hits=0 precision=exact
 === prov_missing ===
 net=0 write=0 cache=0 ops=1 hits=0 precision=unknown
-=== prov_unprovisioned ===
-net=0 write=0 cache=0 ops=0 hits=0 precision=unknown
+=== prov_sed ===
+net=24 write=0 cache=0 ops=1 hits=0 precision=exact
+=== prov_sed_inplace ===
+net=24 write=0 cache=0 ops=1 hits=0 precision=unknown
 === prov_write ===
 net=0 write=0 cache=0 ops=0 hits=0 precision=unknown
 === prov_pipe ===
@@ -2392,7 +2400,7 @@ net=48 write=0 cache=0 ops=2 hits=0 precision=unknown
 === prov_for_nested ===
 net=24 write=0 cache=0 ops=4 hits=0 precision=exact
 === prov_cmdsub ===
-net=24 write=0 cache=0 ops=1 hits=0 precision=exact
+net=0 write=0 cache=0 ops=0 hits=0 precision=unknown
 === prov_deep_mix ===
 net=60 write=0 cache=0 ops=4 hits=0 precision=unknown
 === prov_env_prefix ===

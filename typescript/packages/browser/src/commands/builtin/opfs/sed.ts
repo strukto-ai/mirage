@@ -15,9 +15,11 @@
 import { ResourceName, makeSed } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../../accessor/opfs.ts'
 import { stream as opfsStream } from '../../../core/opfs/stream.ts'
+import { stat as opfsProvStat } from '../../../core/opfs/stat.ts'
 import { writeBytes as opfsWrite } from '../../../core/opfs/write.ts'
 
 export const OPFS_SED = makeSed<OPFSAccessor>({
+  stat: (a, p) => opfsProvStat(a, p),
   resource: ResourceName.OPFS,
   stream: (a, p) => opfsStream(a, p),
   write: (a, p, d) => opfsWrite(a, p, d),

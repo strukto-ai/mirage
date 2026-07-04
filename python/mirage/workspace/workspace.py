@@ -617,6 +617,16 @@ class Workspace:
         except KeyError:
             return None
 
+    async def _plan_eval_stub(self, cmd: str, **opts: Any) -> IOResult:
+        """Inert evaluator for provision walks.
+
+        A dry run must never execute: a command substitution with side
+        effects ($(tee ...)) would otherwise run while "estimating".
+        Substitutions expand to empty, so affected words degrade the
+        plan to honest UNKNOWN instead of resolving via execution.
+        """
+        return IOResult()
+
     async def _exec_recursion(self, cancel: asyncio.Event | None, cmd: str,
                               **opts: Any) -> Any:
         # The executor's internal eval ($(), source, eval, xargs, ...):
@@ -710,7 +720,7 @@ class Workspace:
                                 if prov_resolved is not None else None)
                 return await run_with_timeout(
                     provision_node(self._registry, self.dispatch,
-                                   exec_recursion, self._namespace, ast,
+                                   self._plan_eval_stub, self._namespace, ast,
                                    effective_session), prov_timeout, prov_name)
             io, _ = await run_command_tree(
                 self.dispatch,

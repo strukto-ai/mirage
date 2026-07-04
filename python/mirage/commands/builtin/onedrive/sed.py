@@ -15,9 +15,11 @@
 from mirage.commands.builtin.generic.sed_command import make_sed
 from mirage.core.onedrive.glob import resolve_glob
 from mirage.core.onedrive.read import read_bytes
+from mirage.core.onedrive.stat import stat as _stat
 from mirage.core.onedrive.write import write_bytes
 
 sed = make_sed(
+    stat_fn=_stat,
     resource="onedrive",
     glob_fn=resolve_glob,
     make_read=lambda accessor, index, paths: read_bytes,

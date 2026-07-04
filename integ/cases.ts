@@ -356,6 +356,9 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ['sed_hold_accum', "sed -n 'H;${x;p}' /data/a.txt"],
   ['sed_escaped_delim', "echo 'a/b' | sed 's/a\\/b/c/'"],
   ['sed_no_final_nl', "sed 's/no/NO/' /data/no_nl.txt"],
+  // a case arm runs every statement up to its ;; terminator
+  ['case_multi_arm', 'case x in x) echo one; echo two;; esac'],
+  ['case_multi_arm_default', 'case y in x) echo one;; *) echo fall; echo through;; esac'],
 
   ["tr_squeeze", "echo aaabbbccc | tr -s a-z"],
   ["tr_complement", "cat /data/a.txt | tr -c 'a-z\\n' '*'"],
@@ -836,7 +839,8 @@ export const PROVISION_CASES: ReadonlyArray<readonly [string, string]> = [
   ["prov_jq_jsonl", 'jq ".id" /data/data.jsonl'],
   // ----- honest degradation -----
   ["prov_missing", "cat /data/missing.txt"],
-  ["prov_unprovisioned", "sed s/a/b/ /data/a.txt"],
+  ["prov_sed", "sed s/a/b/ /data/a.txt"],
+  ["prov_sed_inplace", "sed -i s/a/b/ /data/a.txt"],
   ["prov_write", "tee /data/prov_out.txt"],
   // ----- combinators -----
   ["prov_pipe", "cat /data/a.txt | head -c 4"],

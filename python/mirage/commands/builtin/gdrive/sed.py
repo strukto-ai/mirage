@@ -17,8 +17,10 @@ from functools import partial
 from mirage.commands.builtin.generic.sed_command import make_sed
 from mirage.core.gdrive.glob import resolve_glob
 from mirage.core.gdrive.read import read as gdrive_read
+from mirage.core.gdrive.stat import stat as _stat
 
 sed = make_sed(
+    stat_fn=_stat,
     resource="gdrive",
     glob_fn=resolve_glob,
     make_read=lambda accessor, index, paths: partial(gdrive_read, index=index),

@@ -167,6 +167,7 @@ export {
   makeJqProvision,
   makeResolveGlob,
   makeSearchProvision,
+  makeSedProvision,
   makeTransformProvision,
   metadataProvision,
   pureProvision,

@@ -15,9 +15,11 @@
 from mirage.commands.builtin.generic.sed_command import make_sed
 from mirage.core.s3.glob import resolve_glob
 from mirage.core.s3.read import read_bytes
+from mirage.core.s3.stat import stat as _stat
 from mirage.core.s3.write import write_bytes
 
 sed = make_sed(
+    stat_fn=_stat,
     resource="s3",
     glob_fn=resolve_glob,
     make_read=lambda accessor, index, paths: read_bytes,

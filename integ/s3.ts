@@ -26,6 +26,8 @@ import {
   S3Resource,
   SeaweedFSResource,
   Workspace,
+  RegisteredCommand,
+  ProvisionResult,
 } from "@struktoai/mirage-node";
 import { ConsistencyPolicy } from "@struktoai/mirage-core";
 import { runCacheVerifyCases, runNotFound, runProvisionCacheCases } from "./cases.ts";
@@ -391,6 +393,39 @@ async function runCoherence(): Promise<void> {
   }
 }
 
+const S3_GET_PER_1K_USD = 0.0004;
+const S3_EGRESS_PER_GB_USD = 0.09;
+
+function priceCat(ws: Workspace, mountPath: string): void {
+  const mount = ws.registry.mountFor(mountPath);
+  if (mount === null) throw new Error(`no mount for ${mountPath}`);
+  const cmd = mount.resolveCommand("cat", null);
+  if (cmd === null || cmd.provisionFn === null) throw new Error("cat has no estimator");
+  const original = cmd.provisionFn;
+  const priced: typeof original = async (accessor, paths, texts, opts) => {
+    const result = (await original(accessor, paths, texts, opts)) as ProvisionResult;
+    const egress = (result.networkReadHigh * S3_EGRESS_PER_GB_USD) / 1e9;
+    const requests = (result.readOps * S3_GET_PER_1K_USD) / 1000;
+    result.estimatedCostUsd = egress + requests;
+    return result;
+  };
+  mount.register(
+    new RegisteredCommand({
+      name: cmd.name,
+      spec: cmd.spec,
+      resource: cmd.resource,
+      filetype: cmd.filetype,
+      fn: cmd.fn,
+      provisionFn: priced,
+      aggregate: cmd.aggregate,
+      src: cmd.src,
+      dst: cmd.dst,
+      write: cmd.write,
+      safeguard: cmd.safeguard,
+    }),
+  );
+}
+
 async function main(): Promise<void> {
   await seed();
   const ws = buildWorkspace();
@@ -469,6 +504,27 @@ async function main(): Promise<void> {
     try {
       await runProvisionCacheCases(wsWrite, "/s3");
       await runCacheVerifyCases(wsWrite, "/s3", "/gcs");
+      // user cost model: wrap cat's registered estimator so bytes and
+      // request counts become estimatedCostUsd, combined by the
+      // planner like any other field
+      priceCat(wsWrite, "/s3/data");
+      await wsWrite.cache.clear();
+      let priced = await wsWrite.execute("cat /s3/data/example.jsonl", { provision: true });
+      process.stdout.write("=== prov_cost_cat ===\n");
+      process.stdout.write(
+        `net=${priced.networkRead} ops=${String(priced.readOps)} ` +
+          `cost=${(priced.estimatedCostUsd ?? 0).toFixed(10)} precision=${priced.precision}\n`,
+      );
+      priced = await wsWrite.execute("for i in 1 2; do cat /s3/data/example.jsonl; done", {
+        provision: true,
+      });
+      process.stdout.write("=== prov_cost_for ===\n");
+      process.stdout.write(
+        `net=${priced.networkRead} cost=${(priced.estimatedCostUsd ?? 0).toFixed(10)}\n`,
+      );
+      priced = await wsWrite.execute("cat /s3/data/example.jsonl | wc -l", { provision: true });
+      process.stdout.write("=== prov_cost_unpriced_stage ===\n");
+      process.stdout.write(`cost=${String(priced.estimatedCostUsd)}\n`);
     } finally {
       await wsWrite.close();
     }

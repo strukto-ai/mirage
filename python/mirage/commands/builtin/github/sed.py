@@ -17,8 +17,10 @@ from functools import partial
 from mirage.commands.builtin.generic.sed_command import make_sed
 from mirage.core.github.glob import resolve_glob
 from mirage.core.github.read import read as github_read
+from mirage.core.github.stat import stat as _stat
 
 sed = make_sed(
+    stat_fn=_stat,
     resource="github",
     glob_fn=resolve_glob,
     glob_when=lambda accessor, index: index is not None,

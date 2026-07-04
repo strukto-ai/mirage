@@ -285,16 +285,27 @@ async def handle_until(
 async def handle_case(
     execute_node: Callable,
     word: str,
-    items: list[tuple[list[str], tree_sitter.Node | None]],
+    items: list[tuple[list[str], list[tree_sitter.Node]]],
     session: Session,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     for patterns, body in items:
         if any(fnmatch.fnmatch(word, p.strip()) for p in patterns):
-            if body is not None:
-                return await execute_node(body, session, stdin, call_stack)
-            return None, IOResult(), ExecutionNode(command="case", exit_code=0)
+            all_stdout: list[ByteSource] = []
+            merged_io = IOResult()
+            last_exec = ExecutionNode(command="case", exit_code=0)
+            for stmt in body:
+                stdout, io, last_exec = await execute_node(
+                    stmt, session, stdin, call_stack)
+                stdin = None
+                if stdout is not None:
+                    all_stdout.append(stdout)
+                merged_io = await merged_io.merge(io)
+            if len(all_stdout) == 1:
+                return all_stdout[0], merged_io, last_exec
+            combined = async_chain(*all_stdout) if all_stdout else None
+            return combined, merged_io, last_exec
     return None, IOResult(), ExecutionNode(command="case", exit_code=0)
 
 

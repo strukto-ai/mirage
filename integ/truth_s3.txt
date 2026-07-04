@@ -685,6 +685,12 @@ bytes=0
 net=0 write=0 cache=13 ops=1 hits=1 precision=exact
 === cachev_xmount_cp_warm_source ===
 bytes=13
+=== prov_cost_cat ===
+net=10414430 ops=1 cost=0.0009376987 precision=exact
+=== prov_cost_for ===
+net=20828860 cost=0.0018753974
+=== prov_cost_unpriced_stage ===
+cost=None
 === consistency:always:first ===
 v1
 === consistency:always:second ===

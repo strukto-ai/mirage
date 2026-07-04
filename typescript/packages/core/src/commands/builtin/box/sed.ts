@@ -15,10 +15,12 @@
 import type { BoxAccessor } from '../../../accessor/box.ts'
 import { resolveGlob } from '../../../core/box/glob.ts'
 import { stream as boxStream } from '../../../core/box/read.ts'
+import { stat as boxStat } from '../../../core/box/stat.ts'
 import { ResourceName } from '../../../types.ts'
 import { makeSed } from '../generic/sed_command.ts'
 
 export const BOX_SED = makeSed<BoxAccessor>({
+  stat: (a, p) => boxStat(a, p),
   resource: ResourceName.BOX,
   stream: (a, p, opts) => boxStream(a, p, opts.index ?? undefined),
   glob: (a, paths, opts) => resolveGlob(a, paths, opts.index ?? undefined),

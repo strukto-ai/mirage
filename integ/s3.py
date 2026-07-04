@@ -28,6 +28,10 @@ from moto.server import ThreadedMotoServer
 from mirage import MountMode, Workspace
 from mirage.accessor.s3 import S3Accessor
 from mirage.commands import safeguard as _safeguard
+from mirage.commands.builtin.generic_bind import make_file_read_provision
+from mirage.commands.config import command
+from mirage.commands.spec import SPECS
+from mirage.core.s3.stat import stat as _s3_stat
 from mirage.resource.gcs import GCSConfig, GCSResource
 from mirage.resource.minio import MinIOConfig, MinIOResource
 from mirage.resource.s3 import S3Config, S3Resource
@@ -342,6 +346,41 @@ async def _run_coherence(endpoint: str) -> None:
     await _run(ws, "coherence:after_rmr_ls", "ls /s3/coh")
 
 
+S3_GET_PER_1K_USD = 0.0004
+S3_EGRESS_PER_GB_USD = 0.09
+
+
+def _price_wrap(original):
+
+    async def priced(accessor, paths, *texts, **kwargs):
+        result = await original(accessor, paths, *texts, **kwargs)
+        egress = result.network_read_high * S3_EGRESS_PER_GB_USD / 1e9
+        requests = result.read_ops * S3_GET_PER_1K_USD / 1000
+        result.estimated_cost_usd = egress + requests
+        return result
+
+    return priced
+
+
+_PRICED_CAT_BASE: dict = {}
+
+
+@command("cat",
+         resource="s3",
+         spec=SPECS["cat"],
+         provision=_price_wrap(make_file_read_provision(_s3_stat)))
+async def _priced_cat(accessor, paths, *texts, **kwargs):
+    return await _PRICED_CAT_BASE["fn"](accessor, paths, *texts, **kwargs)
+
+
+def _price_cat(ws: Workspace, mount_path: str) -> None:
+    mount = ws.mount(mount_path)
+    base = mount.resolve_command("cat", None)
+    assert base is not None and base.provision_fn is not None
+    _PRICED_CAT_BASE["fn"] = base.fn
+    mount.register_fns([_priced_cat])
+
+
 async def main() -> None:
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
     server = ThreadedMotoServer(ip_address="127.0.0.1", port=0, verbose=False)
@@ -415,6 +454,27 @@ async def main() -> None:
             mode=MountMode.WRITE)
         await run_provision_cache_cases(ws_write, "/s3")
         await run_cache_verify_cases(ws_write, "/s3", "/gcs")
+        # user cost model: wrap cat's registered estimator so bytes and
+        # request counts become estimated_cost_usd, combined by the
+        # planner like any other field
+        _price_cat(ws_write, "/s3/data")
+        await ws_write.cache.clear()
+        result = await ws_write.execute("cat /s3/data/example.jsonl",
+                                        provision=True)
+        print("=== prov_cost_cat ===")
+        print(f"net={result.network_read} ops={result.read_ops} "
+              f"cost={result.estimated_cost_usd:.10f} "
+              f"precision={result.precision.value}")
+        result = await ws_write.execute(
+            "for i in 1 2; do cat /s3/data/example.jsonl; done",
+            provision=True)
+        print("=== prov_cost_for ===")
+        print(f"net={result.network_read} "
+              f"cost={result.estimated_cost_usd:.10f}")
+        result = await ws_write.execute("cat /s3/data/example.jsonl | wc -l",
+                                        provision=True)
+        print("=== prov_cost_unpriced_stage ===")
+        print(f"cost={result.estimated_cost_usd}")
         await _run_consistency(endpoint)
         await _run_coherence(endpoint)
     finally:
