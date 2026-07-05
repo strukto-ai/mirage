@@ -12,10 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { command, findGeneric, specOf } from '@struktoai/mirage-core'
+import { command, findGeneric, metadataProvision, specOf } from '@struktoai/mirage-core'
 import { HF_RESOURCES, type HfAccessor } from '../../../accessor/hf.ts'
 import { find as hfFind } from '../../../core/hf/find.ts'
-import { metadataProvision } from './provision.ts'
 
 export const HF_FIND = command({
   name: 'find',

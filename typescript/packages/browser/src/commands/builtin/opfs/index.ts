@@ -19,7 +19,9 @@ import {
   type RegisteredCommand,
 } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../../accessor/opfs.ts'
+import { resolveGlob as opfsResolveGlob } from '../../../core/opfs/glob.ts'
 import { read as opfsRead } from '../../../core/opfs/read.ts'
+import { readdir as opfsReaddir } from '../../../core/opfs/readdir.ts'
 import { stat as opfsStat } from '../../../core/opfs/stat.ts'
 import { OPFS_AWK } from './awk.ts'
 import { OPFS_BASE64 } from './base64_cmd.ts'
@@ -159,4 +161,6 @@ export const OPFS_COMMANDS: readonly RegisteredCommand[] = withDefaultProvisions
     ...OPFS_ZIP,
   ],
   opfsStat,
+  opfsResolveGlob,
+  opfsReaddir,
 )

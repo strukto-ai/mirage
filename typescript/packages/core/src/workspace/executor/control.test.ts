@@ -234,7 +234,7 @@ describe('handleCase', () => {
   it('matches nothing when no pattern fits', async () => {
     const execute: ExecuteNodeFn = () =>
       Promise.resolve([null, new IOResult(), new ExecutionNode()])
-    const items: [string[], TSNodeLike | null][] = [[['z*'], node('body')]]
+    const items: [string[], TSNodeLike[]][] = [[['z*'], [node('body')]]]
     const [, io] = await handleCase(execute, 'abc', items, new Session({ sessionId: 'test' }))
     expect(io.exitCode).toBe(0)
   })

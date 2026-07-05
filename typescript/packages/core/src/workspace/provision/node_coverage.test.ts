@@ -38,7 +38,7 @@ const PLANS: Record<NodeKind, [string, string, string, string]> = {
   [NodeKind.COMMENT]: ['# a comment', '0', '0', 'exact'],
   [NodeKind.PROGRAM]: ['cat /data/a.txt; cat /data/a.txt', '48', '0', 'exact'],
   [NodeKind.COMMAND]: ['cat /data/a.txt', '24', '0', 'exact'],
-  [NodeKind.PIPELINE]: ['cat /data/a.txt | wc -l', '24', '0', 'unknown'],
+  [NodeKind.PIPELINE]: ['cat /data/a.txt | wc -l', '24', '0', 'exact'],
   [NodeKind.LIST]: ['cat /data/a.txt && cat /data/a.txt', '48', '0', 'exact'],
   [NodeKind.REDIRECT]: ['cat /data/a.txt > /data/out.txt', '24', '0-24', 'range'],
   [NodeKind.SUBSHELL]: ['(cat /data/a.txt)', '24', '0', 'exact'],

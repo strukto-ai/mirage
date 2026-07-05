@@ -16,14 +16,13 @@ import type { GDriveAccessor } from '../../../accessor/gdrive.ts'
 import { read as gdriveRead } from '../../../core/gdrive/read.ts'
 import { stat as gdriveStat } from '../../../core/gdrive/stat.ts'
 import { ResourceName } from '../../../types.ts'
-import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
+import type { RegisteredCommand } from '../../config.ts'
 import { makeFiletypeCommands } from '../filetype_factory/factory.ts'
 import { GDOCS_COMMANDS } from '../gdocs/index.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { GSHEETS_COMMANDS } from '../gsheets/index.ts'
 import { GSLIDES_COMMANDS } from '../gslides/index.ts'
 import { GDRIVE_CMD_OPS } from './ops.ts'
-import { fileReadProvision, metadataProvision } from './provision.ts'
 import { GDRIVE_SED } from './sed.ts'
 
 const GWS_FOR_GDRIVE: readonly RegisteredCommand[] = [
@@ -38,14 +37,7 @@ export const GDRIVE_COMMANDS: readonly RegisteredCommand[] = [
     readBytes: gdriveRead,
     statEntry: gdriveStat,
   }),
-  ...makeGenericCommands<GDriveAccessor>(ResourceName.GDRIVE, GDRIVE_CMD_OPS, {
-    provisionOverrides: {
-      grep: fileReadProvision as ProvisionFn,
-      rg: fileReadProvision as ProvisionFn,
-      ls: metadataProvision as ProvisionFn,
-      find: metadataProvision as ProvisionFn,
-    },
-  }),
+  ...makeGenericCommands<GDriveAccessor>(ResourceName.GDRIVE, GDRIVE_CMD_OPS, {}),
   ...GDRIVE_SED,
   ...GWS_FOR_GDRIVE,
 ]

@@ -12,18 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  type ProvisionFn,
-  type RegisteredCommand,
-  ResourceName,
-  makeGenericCommands,
-} from '@struktoai/mirage-core'
+import { type RegisteredCommand, ResourceName, makeGenericCommands } from '@struktoai/mirage-core'
 import type { EmailAccessor } from '../../../accessor/email.ts'
 import { EMAIL_FIND } from './find.ts'
 import { EMAIL_FORWARD } from './email_forward.ts'
 import { EMAIL_GREP } from './grep.ts'
 import { EMAIL_CMD_OPS } from './ops.ts'
-import { metadataProvision } from './provision.ts'
 import { EMAIL_READ } from './email_read.ts'
 import { EMAIL_REPLY } from './email_reply.ts'
 import { EMAIL_REPLY_ALL } from './email_reply_all.ts'
@@ -36,9 +30,6 @@ const EMAIL_OVERRIDES = new Set(['find', 'grep', 'rg'])
 export const EMAIL_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<EmailAccessor>(ResourceName.EMAIL, EMAIL_CMD_OPS, {
     overrides: EMAIL_OVERRIDES,
-    provisionOverrides: {
-      ls: metadataProvision as ProvisionFn,
-    },
   }),
   ...EMAIL_FIND,
   ...EMAIL_GREP,

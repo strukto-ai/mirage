@@ -14,8 +14,7 @@
 
 import type { LangfuseAccessor } from '../../../accessor/langfuse.ts'
 import { ResourceName } from '../../../types.ts'
-import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
-import { metadataProvision } from './_provision.ts'
+import type { RegisteredCommand } from '../../config.ts'
 import { LANGFUSE_FIND } from './find.ts'
 import { LANGFUSE_GREP } from './grep.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
@@ -27,9 +26,6 @@ const LANGFUSE_OVERRIDES = new Set(['find', 'grep', 'rg'])
 export const LANGFUSE_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<LangfuseAccessor>(ResourceName.LANGFUSE, LANGFUSE_CMD_OPS, {
     overrides: LANGFUSE_OVERRIDES,
-    provisionOverrides: {
-      ls: metadataProvision as ProvisionFn,
-    },
   }),
   ...LANGFUSE_FIND,
   ...LANGFUSE_GREP,

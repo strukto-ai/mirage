@@ -13,63 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../../accessor/base.ts'
-import type { BoxAccessor } from '../../../accessor/box.ts'
-import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import { stat as boxStat } from '../../../core/box/stat.ts'
 import { Precision, ProvisionResult } from '../../../provision/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
-
-async function resolveSizes(
-  accessor: BoxAccessor,
-  paths: readonly PathSpec[],
-  index: IndexCacheStore | undefined,
-): Promise<{ resolved: [string, number][]; missing: number }> {
-  const resolved: [string, number][] = []
-  let missing = 0
-  for (const p of paths) {
-    let size: number | null = null
-    if (index !== undefined) {
-      const lookup = await index.get(p.virtual)
-      if (lookup.entry !== undefined && lookup.entry !== null) size = lookup.entry.size
-    }
-    if (size === null) {
-      try {
-        const fileStat = await boxStat(accessor, p, index)
-        size = fileStat.size
-      } catch {
-        // ignore — counted as missing below
-      }
-    }
-    if (size !== null) resolved.push([p.virtual, size])
-    else missing += 1
-  }
-  return { resolved, missing }
-}
-
-export async function fileReadProvision(
-  accessor: Accessor,
-  paths: PathSpec[],
-  _texts: string[],
-  opts: CommandOpts,
-): Promise<ProvisionResult> {
-  if (paths.length === 0) {
-    return new ProvisionResult({ precision: Precision.UNKNOWN })
-  }
-  const index: IndexCacheStore | undefined = opts.index ?? undefined
-  const { resolved, missing } = await resolveSizes(accessor as BoxAccessor, paths, index)
-  if (missing > 0 || resolved.length === 0) {
-    return new ProvisionResult({ precision: Precision.UNKNOWN })
-  }
-  let total = 0
-  for (const [, size] of resolved) total += size
-  return new ProvisionResult({
-    networkReadLow: total,
-    networkReadHigh: total,
-    readOps: resolved.length,
-    precision: Precision.EXACT,
-  })
-}
 
 export function metadataProvision(
   _accessor: Accessor,
