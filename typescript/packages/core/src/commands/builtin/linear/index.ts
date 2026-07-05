@@ -14,8 +14,7 @@
 
 import type { LinearAccessor } from '../../../accessor/linear.ts'
 import { ResourceName } from '../../../types.ts'
-import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
-import { fileReadProvision, metadataProvision } from './_provision.ts'
+import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { LINEAR_FIND } from './find.ts'
 import { LINEAR_ISSUE_ADD_LABEL } from './linear_issue_add_label.ts'
@@ -35,11 +34,6 @@ const LINEAR_OVERRIDES = new Set(['find'])
 export const LINEAR_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<LinearAccessor>(ResourceName.LINEAR, LINEAR_CMD_OPS, {
     overrides: LINEAR_OVERRIDES,
-    provisionOverrides: {
-      grep: fileReadProvision as ProvisionFn,
-      rg: fileReadProvision as ProvisionFn,
-      ls: metadataProvision as ProvisionFn,
-    },
   }),
   ...LINEAR_FIND,
   ...LINEAR_ISSUE_ADD_LABEL,

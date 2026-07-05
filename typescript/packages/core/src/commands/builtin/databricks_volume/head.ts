@@ -22,7 +22,7 @@ import { IOResult } from '../../../io/types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { headGeneric } from '../generic/head.ts'
-import { headTailProvision } from './provision.ts'
+import { makeHeadTailProvision } from '../generic_bind/provision.ts'
 
 async function headCommand(
   accessor: DatabricksVolumeAccessor,
@@ -52,5 +52,5 @@ export const DATABRICKS_VOLUME_HEAD = command({
   resource: ResourceName.DATABRICKS_VOLUME,
   spec: specOf('head'),
   fn: headCommand,
-  provision: headTailProvision,
+  provision: makeHeadTailProvision(dbxStat),
 })

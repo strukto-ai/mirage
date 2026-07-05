@@ -18,7 +18,7 @@ import { ResourceName } from '../../../types.ts'
 import { command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { findGeneric } from '../generic/find.ts'
-import { metadataProvision } from './provision.ts'
+import { metadataProvision } from '../generic_bind/provision.ts'
 
 export const DATABRICKS_VOLUME_FIND = command({
   name: 'find',
