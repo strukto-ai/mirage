@@ -12,7 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { defaultFingerprint } from '@struktoai/mirage-core'
+import {
+  CachableAsyncIterator,
+  IOResult,
+  OpRecord,
+  applyIo,
+  defaultFingerprint,
+} from '@struktoai/mirage-core'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { RedisFileCacheStore } from './file.ts'
 
@@ -98,5 +104,52 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
     await cache.clear()
     expect(await cache.exists('a')).toBe(false)
     expect(await cache.exists('b')).toBe(false)
+  })
+
+  it('background-drains an unexhausted stream, carrying the record fingerprint', async () => {
+    async function* gen(): AsyncGenerator<Uint8Array> {
+      await Promise.resolve()
+      yield new TextEncoder().encode('drained')
+    }
+    const stream = new CachableAsyncIterator(gen())
+    const io = new IOResult({ reads: { '/file.txt': stream }, cache: ['/file.txt'] })
+    const records = [
+      new OpRecord({
+        op: 'read',
+        path: '/file.txt',
+        source: 's3',
+        bytes: 0,
+        timestamp: 0,
+        durationMs: 0,
+        fingerprint: 'etag-9',
+      }),
+    ]
+    await applyIo(cache, io, undefined, records)
+    expect(cache.drainTasks.has('/file.txt')).toBe(true)
+    await Promise.all([...cache.drainTasks.values()])
+    expect(new TextDecoder().decode((await cache.get('/file.txt')) ?? undefined)).toBe('drained')
+    expect(await cache.isFresh('/file.txt', 'etag-9')).toBe(true)
+  })
+
+  it('remove aborts a pending drain fill', async () => {
+    let started!: () => void
+    const gate = new Promise<void>((r) => {
+      started = r
+    })
+    async function* gen(): AsyncGenerator<Uint8Array> {
+      started()
+      await new Promise((r) => setTimeout(r, 200))
+      yield new TextEncoder().encode('slow')
+    }
+    const stream = new CachableAsyncIterator(gen())
+    const io = new IOResult({ reads: { '/slow.txt': stream }, cache: ['/slow.txt'] })
+    await applyIo(cache, io)
+    const task = cache.drainTasks.get('/slow.txt')
+    expect(task).toBeDefined()
+    await gate
+    await cache.remove('/slow.txt')
+    expect(cache.drainTasks.has('/slow.txt')).toBe(false)
+    await task
+    expect(await cache.get('/slow.txt')).toBeNull()
   })
 })
