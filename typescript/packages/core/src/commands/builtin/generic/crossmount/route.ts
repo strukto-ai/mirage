@@ -14,8 +14,9 @@
 
 import { IOResult } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
+import { runAggregate } from './aggregate.ts'
 import { runCompare } from './compare.ts'
-import { COMPARE_COMMANDS, READ_COMMANDS, TRANSFER_COMMANDS } from './detect.ts'
+import { AGGREGATE_COMMANDS, COMPARE_COMMANDS, READ_COMMANDS, TRANSFER_COMMANDS } from './detect.ts'
 import { type CrossResult, type DispatchFn } from './primitives.ts'
 import { runRead } from './read.ts'
 import { runTransfer } from './transfer.ts'
@@ -41,6 +42,9 @@ export async function handleCrossMount(
     }
     if (READ_COMMANDS.has(cmdName)) {
       return await runRead(cmdName, scopes, textArgs, flagKwargs, dispatch)
+    }
+    if (AGGREGATE_COMMANDS.has(cmdName)) {
+      return await runAggregate(cmdName, scopes, flagKwargs, dispatch)
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

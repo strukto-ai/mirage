@@ -178,3 +178,34 @@ async def test_recursive_into_nested_subtree_refused():
     assert io.exit_code == 1
     assert b"into itself" in io.stderr
     assert set(files) == {"/d/a.txt"}
+
+
+@pytest.mark.asyncio
+async def test_primitive_copy_records_source_reads():
+    files = {"/a.txt": b"AAA"}
+    stat, _, _ = _make_backend(files, set())
+
+    async def read_bytes(p) -> bytes:
+        return files[_key(p)]
+
+    async def write(p, data: bytes) -> None:
+        files[_key(p)] = data
+
+    _, io = await cp([_spec("/a.txt"), _spec("/copy.txt")],
+                     stat=stat,
+                     read_bytes=read_bytes,
+                     write=write,
+                     recursive=False,
+                     n=False,
+                     v=False)
+    assert files["/copy.txt"] == b"AAA"
+    assert io.reads == {"/a.txt": b"AAA"}
+    assert io.cache == ["/a.txt"]
+
+
+@pytest.mark.asyncio
+async def test_native_copy_records_no_reads():
+    files = {"/a.txt": b"AAA"}
+    _, io = await _run(files, set(), ["/a.txt", "/copy.txt"])
+    assert io.reads == {}
+    assert io.cache == []

@@ -2274,8 +2274,19 @@ xm_moved.txt
 5 /data/a.txt
 1 /data2/xm.txt
 6 total
-=== xm_du_multi_rejected ===
-du: paths span multiple mounts (/data/, /data2/), cross-mount not supported
+=== xm_du_multi ===
+6	/data/b.txt
+6	/data2/xm.txt
+=== xm_du_multi_total ===
+6	/data/b.txt
+6	/data2/xm.txt
+12	total
+=== xm_md5_multi ===
+c0710d6b4f15dfa88f600b0e6b624077  /data/b.txt
+8aef595260cf440c67da223d5a9b3e74  /data2/xm.txt
+=== xm_file_multi ===
+/data/a.txt: text
+/data2/xm.txt: text
 === xm_find ===
 /data2/xm.txt
 /data2/xm_copy.txt
@@ -2429,8 +2440,10 @@ net=30 write=0 cache=0 ops=2 hits=0 precision=exact
 net=30 write=0 cache=0 ops=2 hits=0 precision=exact
 === prov_xmount_pipe ===
 net=30 write=0 cache=0 ops=2 hits=0 precision=exact
-=== prov_xmount_rejected ===
-net=0 write=0 cache=0 ops=0 hits=0 precision=unknown
+=== prov_xmount_md5 ===
+net=30 write=0 cache=0 ops=2 hits=0 precision=exact
+=== prov_xmount_du ===
+net=0 write=0 cache=0 ops=2 hits=0 precision=exact
 === prov_glob ===
 net=24 write=0 cache=0 ops=1 hits=0 precision=exact
 === prov_glob_unmatched ===

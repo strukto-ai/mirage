@@ -798,8 +798,11 @@ export const CROSS_MOUNT_CASES: ReadonlyArray<readonly [string, string]> = [
   ["xm_mv_over", "mv /data/xm_back.txt /data2/xm_moved.txt && cat /data2/xm_moved.txt && ls /data2"],
   ["xm_grep_multi", "grep -c s /data/a.txt /data2/xm.txt"],
   ["xm_wc_multi", "wc -l /data/a.txt /data2/xm.txt"],
-  // du/md5/file reject multi-mount operands explicitly; pin the error
-  ["xm_du_multi_rejected", "du /data/b.txt /data2/xm.txt 2>&1"],
+  // du/md5/file fan out per mount and aggregate like the other readers
+  ["xm_du_multi", "du /data/b.txt /data2/xm.txt"],
+  ["xm_du_multi_total", "du -c /data/b.txt /data2/xm.txt"],
+  ["xm_md5_multi", "md5 /data/b.txt /data2/xm.txt"],
+  ["xm_file_multi", "file /data/a.txt /data2/xm.txt"],
   ["xm_find", "find /data2 -type f | sort"],
   ["xm_pipe", "cat /data2/xm.txt | tr a-z A-Z"],
   ["xm_ln_over", "ln -s /data/a.txt /data2/xm_link.txt && cat /data2/xm_link.txt"],
@@ -893,8 +896,9 @@ export const PROVISION_CASES: ReadonlyArray<readonly [string, string]> = [
   ["prov_xmount_concat", "cat /data/a.txt /data2/xm.txt"],
   ["prov_xmount_grep", "grep s /data/a.txt /data2/xm.txt"],
   ["prov_xmount_pipe", "cat /data/a.txt /data2/xm.txt | wc -c"],
-  // md5 rejects cross-mount operands, so its plan is honest unknown
-  ["prov_xmount_rejected", "md5 /data/a.txt /data2/xm.txt"],
+  // md5 fans out per mount, so its plan sums per-mount estimates
+  ["prov_xmount_md5", "md5 /data/a.txt /data2/xm.txt"],
+  ["prov_xmount_du", "du /data/a.txt /data2/xm.txt"],
   // ----- glob + recursive expansion (readdir/index-driven) -----
   ["prov_glob", "cat /data/rgm/d1/*.txt"],
   ["prov_glob_unmatched", "cat /data/rgm/d1/*.nope"],
@@ -1112,6 +1116,13 @@ export async function runCacheVerifyCases(
     process.stdout.write(
       `bytes=${String(await backendBytes(ws, `cp ${target} ${m2}/cachev_cp.txt`))}\n`,
     );
+    await ws.cache.clear();
+    process.stdout.write("=== cachev_xmount_cp_cold_populates ===\n");
+    process.stdout.write(
+      `bytes=${String(await backendBytes(ws, `cp ${target} ${m2}/cachev_cp2.txt`))}\n`,
+    );
+    process.stdout.write("=== cachev_cat_after_cp ===\n");
+    process.stdout.write(`bytes=${String(await backendBytes(ws, `cat ${target}`))}\n`);
   }
   await ws.execute(`rm ${link} ${target}`);
 }
