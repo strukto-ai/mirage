@@ -18,7 +18,10 @@ import { runCases } from './cases.ts'
 
 async function main(): Promise<void> {
   const restoreNav = installFakeNavigator(() => makeMockRoot())
-  const ws = new Workspace({ '/data': new OPFSResource() }, { mode: MountMode.WRITE })
+  const ws = new Workspace(
+    { '/data': new OPFSResource(), '/data2': new OPFSResource({ root: 'xm2' }) },
+    { mode: MountMode.WRITE },
+  )
   try {
     await runCases(ws as unknown as Parameters<typeof runCases>[0])
   } finally {

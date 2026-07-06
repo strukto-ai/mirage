@@ -105,6 +105,7 @@ async def cp(
     *sources, dst = paths
     dst_is_dir = await is_directory(stat, dst, index)
     writes: dict[str, bytes] = {}
+    reads: dict[str, bytes] = {}
     lines: list[str] = []
     errors: list[str] = []
     for src, target in copy_targets(sources, dst, dst_is_dir):
@@ -140,7 +141,9 @@ async def cp(
                         continue
                     if n and await path_exists(stat, entry_dst):
                         continue
-                    await write(entry_dst, data=await read_bytes(entry))
+                    data = await read_bytes(entry)
+                    await write(entry_dst, data=data)
+                    reads[entry] = data
                     writes[entry_dst] = b""
                     if v:
                         lines.append(f"'{entry}' -> '{entry_dst}'")
@@ -168,7 +171,9 @@ async def cp(
             continue
         if copy is None:
             # write takes bytes, not a stream: the file is materialized here.
-            await write(target, data=await read_bytes(src))
+            data = await read_bytes(src)
+            await write(target, data=data)
+            reads[src.virtual] = data
         else:
             await copy(src, target)
         writes[target.mount_path] = b""
@@ -176,8 +181,12 @@ async def cp(
             lines.append(f"'{src.virtual}' -> '{target.virtual}'")
     output = "\n".join(lines) + "\n" if lines else None
     stderr = ("\n".join(errors) + "\n").encode() if errors else None
+    # Sources that streamed through the client are recorded as reads so
+    # apply_io can populate the file cache: a cp is also a full read.
     return output.encode() if output else None, IOResult(
         writes=writes,
+        reads=dict(reads),
+        cache=list(reads),
         stderr=stderr,
         exit_code=1 if errors else 0,
     )

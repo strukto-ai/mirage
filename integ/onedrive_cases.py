@@ -30,7 +30,13 @@ async def main() -> None:
     _state, _server, runner = await start_fake_graph()
     try:
         resource = OneDriveResource(OneDriveConfig(access_token="integ-token"))
-        ws = Workspace({"/data": resource}, mode=MountMode.WRITE)
+        resource2 = OneDriveResource(
+            OneDriveConfig(access_token="integ-token", key_prefix="xm2"))
+        ws = Workspace({
+            "/data": resource,
+            "/data2": resource2
+        },
+                       mode=MountMode.WRITE)
         await run_cases(ws)
     finally:
         await runner.cleanup()

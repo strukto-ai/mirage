@@ -17,6 +17,7 @@ import type { PathSpec } from '../../../../types.ts'
 
 export const TRANSFER_COMMANDS: ReadonlySet<string> = new Set(['cp', 'mv'])
 export const COMPARE_COMMANDS: ReadonlySet<string> = new Set(['diff', 'cmp'])
+export const AGGREGATE_COMMANDS: ReadonlySet<string> = new Set(['du', 'file', 'md5'])
 export const READ_COMMANDS: ReadonlySet<string> = new Set([
   'cat',
   'head',
@@ -32,7 +33,10 @@ export function isCrossMount(
   registry: MountRegistry,
 ): boolean {
   const allowed =
-    TRANSFER_COMMANDS.has(cmdName) || COMPARE_COMMANDS.has(cmdName) || READ_COMMANDS.has(cmdName)
+    TRANSFER_COMMANDS.has(cmdName) ||
+    COMPARE_COMMANDS.has(cmdName) ||
+    READ_COMMANDS.has(cmdName) ||
+    AGGREGATE_COMMANDS.has(cmdName)
   if (!allowed || scopes.length < 2) return false
   const mounts = new Set<string>()
   for (const s of scopes) {

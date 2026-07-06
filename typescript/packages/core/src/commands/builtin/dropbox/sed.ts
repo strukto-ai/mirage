@@ -14,11 +14,13 @@
 
 import type { DropboxAccessor } from '../../../accessor/dropbox.ts'
 import { resolveGlob } from '../../../core/dropbox/glob.ts'
+import { stat as dropboxProvStat } from '../../../core/dropbox/stat.ts'
 import { stream as dropboxStream } from '../../../core/dropbox/read.ts'
 import { ResourceName } from '../../../types.ts'
 import { makeSed } from '../generic/sed_command.ts'
 
 export const DROPBOX_SED = makeSed<DropboxAccessor>({
+  stat: (a, p) => dropboxProvStat(a, p),
   resource: ResourceName.DROPBOX,
   stream: (a, p, opts) => dropboxStream(a, p, opts.index ?? undefined),
   glob: (a, paths, opts) => resolveGlob(a, paths, opts.index ?? undefined),

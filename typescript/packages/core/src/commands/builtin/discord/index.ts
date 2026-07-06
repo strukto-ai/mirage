@@ -14,9 +14,8 @@
 
 import type { DiscordAccessor } from '../../../accessor/discord.ts'
 import { ResourceName } from '../../../types.ts'
-import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
+import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { metadataProvision } from './_provision.ts'
 import { DISCORD_ADD_REACTION } from './discord_add_reaction.ts'
 import { DISCORD_GET_SERVER_INFO } from './discord_get_server_info.ts'
 import { DISCORD_LIST_MEMBERS } from './discord_list_members.ts'
@@ -32,9 +31,6 @@ const DISCORD_OVERRIDES = new Set(['grep', 'rg', 'find', 'head'])
 export const DISCORD_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<DiscordAccessor>(ResourceName.DISCORD, DISCORD_CMD_OPS, {
     overrides: DISCORD_OVERRIDES,
-    provisionOverrides: {
-      ls: metadataProvision as ProvisionFn,
-    },
   }),
   ...DISCORD_FIND,
   ...DISCORD_GREP,

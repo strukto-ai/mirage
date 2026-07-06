@@ -14,9 +14,10 @@
 
 from typing import Callable
 
+from mirage.commands.builtin.generic.crossmount.aggregate import run_aggregate
 from mirage.commands.builtin.generic.crossmount.compare import run_compare
 from mirage.commands.builtin.generic.crossmount.detect import (
-    COMPARE_COMMANDS, READ_COMMANDS, TRANSFER_COMMANDS)
+    AGGREGATE_COMMANDS, COMPARE_COMMANDS, READ_COMMANDS, TRANSFER_COMMANDS)
 from mirage.commands.builtin.generic.crossmount.primitives import CrossResult
 from mirage.commands.builtin.generic.crossmount.read import run_read
 from mirage.commands.builtin.generic.crossmount.transfer import run_transfer
@@ -55,6 +56,8 @@ async def handle_cross_mount(
         if cmd_name in READ_COMMANDS:
             return await run_read(cmd_name, scopes, text_args, flag_kwargs,
                                   dispatch)
+        if cmd_name in AGGREGATE_COMMANDS:
+            return await run_aggregate(cmd_name, scopes, flag_kwargs, dispatch)
     except (FileNotFoundError, NotADirectoryError, IsADirectoryError,
             PermissionError) as exc:
         return None, IOResult(exit_code=1,

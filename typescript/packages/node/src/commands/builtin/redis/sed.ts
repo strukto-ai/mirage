@@ -15,9 +15,11 @@
 import { ResourceName, makeSed } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../../accessor/redis.ts'
 import { stream as redisStream } from '../../../core/redis/stream.ts'
+import { stat as redisProvStat } from '../../../core/redis/stat.ts'
 import { writeBytes as redisWrite } from '../../../core/redis/write.ts'
 
 export const REDIS_SED = makeSed<RedisAccessor>({
+  stat: (a, p) => redisProvStat(a, p),
   resource: ResourceName.REDIS,
   stream: (a, p) => redisStream(a, p),
   write: (a, p, d) => redisWrite(a, p, d),

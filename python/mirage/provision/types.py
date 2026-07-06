@@ -90,12 +90,15 @@ class ProvisionResult(BaseModel):
             command (str | None): Command label for the scaled result.
 
         Returns:
-            ProvisionResult: New result with byte and op counters scaled;
-            precision is carried over and estimated_cost_usd is dropped.
+            ProvisionResult: New result with byte, op, and cost fields
+            scaled; precision is carried over.
         """
         fields = {f: getattr(self, f) * n for f in COMBINE_FIELDS}
+        cost = (self.estimated_cost_usd *
+                n if self.estimated_cost_usd is not None else None)
         return ProvisionResult(command=command,
                                precision=self.precision,
+                               estimated_cost_usd=cost,
                                **fields)
 
 

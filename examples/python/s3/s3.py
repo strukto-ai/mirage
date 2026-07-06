@@ -22,6 +22,7 @@ import uuid
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.commands.config import command
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Config, S3Resource
 from mirage.types import PathSpec
@@ -61,6 +62,47 @@ def ops_summary() -> str:
     cache = ops.cache_bytes
     return (f"{len(ops.records)} ops, "
             f"{net} net, {cache} cache")
+
+
+S3_GET_PER_1K_USD = 0.0004
+S3_EGRESS_PER_GB_USD = 0.09
+
+
+def _price_wrap(original):
+    """Wrap a registered estimator so its bytes/ops become dollars."""
+
+    async def priced(accessor, paths, *texts, **kwargs):
+        result = await original(accessor, paths, *texts, **kwargs)
+        egress = result.network_read_high * S3_EGRESS_PER_GB_USD / 1e9
+        requests = result.read_ops * S3_GET_PER_1K_USD / 1000
+        result.estimated_cost_usd = egress + requests
+        return result
+
+    return priced
+
+
+_BUILTIN_CAT = ws.mount("/s3/").resolve_command("cat", None)
+
+
+@command("cat",
+         resource="s3",
+         spec=_BUILTIN_CAT.spec,
+         provision=_price_wrap(_BUILTIN_CAT.provision_fn))
+async def priced_cat(accessor, paths, *texts, **kwargs):
+    return await _BUILTIN_CAT.fn(accessor, paths, *texts, **kwargs)
+
+
+def price_cat_reads(workspace: Workspace, mount_path: str) -> None:
+    """Attach an S3 price model to cat on one mount.
+
+    The builtin estimator already computes bytes and request counts;
+    the @command decorator registers a cat that keeps the builtin
+    execution fn but carries a wrapped estimator converting them into
+    estimated_cost_usd, which the planner then combines across pipes,
+    branches, and loops like any other field (all-or-nothing: a stage
+    without a cost drops the total).
+    """
+    workspace.mount(mount_path).register_fns([priced_cat])
 
 
 async def main():
@@ -217,6 +259,25 @@ async def main():
     print("\n--- plan after cache: grep mirage ... ---")
     print(f"  network_read: {dr.network_read}, cache_read: {dr.cache_read}")
     print(f"  cache_hits: {dr.cache_hits}, read_ops: {dr.read_ops}")
+
+    # ── cost model: attach dollars to the byte estimates ──
+    print("\n=== PROVISION COST MODEL ===\n")
+    price_cat_reads(ws, "/s3/data")
+    dr = await ws.execute("cat /s3/data/example.jsonl", provision=True)
+    print("--- priced plan: cat /s3/data/example.jsonl ---")
+    print(f"  network_read: {dr.network_read}, read_ops: {dr.read_ops}")
+    print(f"  estimated_cost_usd: {dr.estimated_cost_usd:.10f}")
+
+    dr = await ws.execute(
+        "for i in 1 2 3; do cat /s3/data/example.jsonl; done", provision=True)
+    print("--- priced plan: for-loop x3 ---")
+    print(f"  network_read: {dr.network_read}, "
+          f"estimated_cost_usd: {dr.estimated_cost_usd:.10f}")
+
+    dr = await ws.execute("cat /s3/data/example.jsonl | wc -l", provision=True)
+    print("--- priced plan: cat | wc (wc has no cost model) ---")
+    print(f"  estimated_cost_usd: {dr.estimated_cost_usd} "
+          "(all-or-nothing: an unpriced stage drops the total)")
 
     print("\n=== ACTUAL EXECUTION ===\n")
 

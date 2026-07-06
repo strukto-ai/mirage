@@ -208,10 +208,10 @@ describe('handleCase', () => {
       which = n.text
       return Promise.resolve([null, new IOResult(), new ExecutionNode()])
     }
-    const items: [string[], TSNodeLike | null][] = [
-      [['a*'], node('A')],
-      [['b*'], node('B')],
-      [['*'], node('catchall')],
+    const items: [string[], TSNodeLike[]][] = [
+      [['a*'], [node('A')]],
+      [['b*'], [node('B')]],
+      [['*'], [node('catchall')]],
     ]
     await handleCase(execute, 'banana', items, new Session({ sessionId: 'test' }))
     expect(which).toBe('B')
@@ -223,9 +223,9 @@ describe('handleCase', () => {
       which = n.text
       return Promise.resolve([null, new IOResult(), new ExecutionNode()])
     }
-    const items: [string[], TSNodeLike | null][] = [
-      [['a*'], node('A')],
-      [['*'], node('catchall')],
+    const items: [string[], TSNodeLike[]][] = [
+      [['a*'], [node('A')]],
+      [['*'], [node('catchall')]],
     ]
     await handleCase(execute, 'xyz', items, new Session({ sessionId: 'test' }))
     expect(which).toBe('catchall')
@@ -234,7 +234,7 @@ describe('handleCase', () => {
   it('matches nothing when no pattern fits', async () => {
     const execute: ExecuteNodeFn = () =>
       Promise.resolve([null, new IOResult(), new ExecutionNode()])
-    const items: [string[], TSNodeLike | null][] = [[['z*'], node('body')]]
+    const items: [string[], TSNodeLike[]][] = [[['z*'], [node('body')]]]
     const [, io] = await handleCase(execute, 'abc', items, new Session({ sessionId: 'test' }))
     expect(io.exitCode).toBe(0)
   })

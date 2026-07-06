@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest'
 
 import { CachableAsyncIterator } from '../../io/cachable_iterator.ts'
 import { IOResult } from '../../io/types.ts'
+import { OpRecord } from '../../observe/record.ts'
 import { applyIo } from './io.ts'
 import { RAMFileCacheStore } from './ram.ts'
 
@@ -83,6 +84,87 @@ describe('cache population via applyIo', () => {
     await applyIo(cache, io)
     expect(DEC.decode((await cache.get('/a.txt')) ?? undefined)).toBe('aaa')
     expect(DEC.decode((await cache.get('/b.txt')) ?? undefined)).toBe('bbb')
+  })
+})
+
+function readRecord(path: string, fingerprint: string | null): OpRecord {
+  return new OpRecord({
+    op: 'read',
+    path,
+    source: 's3',
+    bytes: 0,
+    timestamp: 0,
+    durationMs: 0,
+    fingerprint,
+  })
+}
+
+describe('backend fingerprint threading', () => {
+  it('stamps the cache entry with the record fingerprint', async () => {
+    const cache = new RAMFileCacheStore()
+    const io = new IOResult({
+      reads: { '/s3/f.txt': ENC.encode('hello') },
+      cache: ['/s3/f.txt'],
+    })
+    await applyIo(cache, io, undefined, [readRecord('/s3/f.txt', 'etag-multipart-2')])
+    expect(DEC.decode((await cache.get('/s3/f.txt')) ?? undefined)).toBe('hello')
+    expect(await cache.isFresh('/s3/f.txt', 'etag-multipart-2')).toBe(true)
+  })
+
+  it('uses the record fingerprint for an exhausted stream', async () => {
+    const cache = new RAMFileCacheStore()
+    const stream = makeStream('hello')
+    expect(DEC.decode(await stream.drain())).toBe('hello')
+    const io = new IOResult({ reads: { '/s3/f.txt': stream }, cache: ['/s3/f.txt'] })
+    await applyIo(cache, io, undefined, [readRecord('/s3/f.txt', 'etag-multipart-2')])
+    expect(await cache.isFresh('/s3/f.txt', 'etag-multipart-2')).toBe(true)
+  })
+
+  it('preserves the entry fingerprint on a warm re-apply', async () => {
+    const cache = new RAMFileCacheStore()
+    const cold = new IOResult({
+      reads: { '/s3/f.txt': ENC.encode('hello') },
+      cache: ['/s3/f.txt'],
+    })
+    await applyIo(cache, cold, undefined, [readRecord('/s3/f.txt', 'etag-3')])
+    const warm = new IOResult({
+      reads: { '/s3/f.txt': ENC.encode('hello') },
+      cache: ['/s3/f.txt'],
+    })
+    await applyIo(cache, warm, undefined, [])
+    expect(await cache.isFresh('/s3/f.txt', 'etag-3')).toBe(true)
+  })
+
+  it('replaces the entry when data changed without a record', async () => {
+    const cache = new RAMFileCacheStore()
+    const cold = new IOResult({
+      reads: { '/s3/f.txt': ENC.encode('old') },
+      cache: ['/s3/f.txt'],
+    })
+    await applyIo(cache, cold, undefined, [readRecord('/s3/f.txt', 'etag-3')])
+    const fresh = new IOResult({
+      writes: { '/s3/f.txt': ENC.encode('new') },
+      cache: ['/s3/f.txt'],
+    })
+    await applyIo(cache, fresh, undefined, [])
+    expect(DEC.decode((await cache.get('/s3/f.txt')) ?? undefined)).toBe('new')
+    expect(await cache.isFresh('/s3/f.txt', 'etag-3')).toBe(false)
+  })
+
+  it('picks up a fingerprint recorded during the background drain', async () => {
+    const cache = new RAMFileCacheStore()
+    const records: OpRecord[] = []
+    async function* gen(): AsyncGenerator<Uint8Array> {
+      await Promise.resolve()
+      records.push(readRecord('/s3/f.txt', 'etag-multipart-2'))
+      yield ENC.encode('hello')
+    }
+    const stream = new CachableAsyncIterator(gen())
+    const io = new IOResult({ reads: { '/s3/f.txt': stream }, cache: ['/s3/f.txt'] })
+    await applyIo(cache, io, undefined, records)
+    await sleep(50)
+    expect(DEC.decode((await cache.get('/s3/f.txt')) ?? undefined)).toBe('hello')
+    expect(await cache.isFresh('/s3/f.txt', 'etag-multipart-2')).toBe(true)
   })
 })
 

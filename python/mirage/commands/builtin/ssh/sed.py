@@ -15,9 +15,11 @@
 from mirage.commands.builtin.generic.sed_command import make_sed
 from mirage.core.ssh.glob import resolve_glob
 from mirage.core.ssh.read import read_bytes
+from mirage.core.ssh.stat import stat as _stat
 from mirage.core.ssh.write import write_bytes
 
 sed = make_sed(
+    stat_fn=_stat,
     resource="ssh",
     glob_fn=resolve_glob,
     glob_when=lambda accessor, index: accessor.root is not None,

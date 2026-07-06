@@ -167,6 +167,7 @@ export {
   makeJqProvision,
   makeResolveGlob,
   makeSearchProvision,
+  makeSedProvision,
   makeTransformProvision,
   metadataProvision,
   pureProvision,
@@ -371,6 +372,7 @@ export { type FileCache } from './cache/file/mixin.ts'
 export { CacheEntry, type CacheEntryInit } from './cache/file/entry.ts'
 export { defaultFingerprint, parseLimit } from './cache/file/utils.ts'
 export { RAMFileCacheStore } from './cache/file/ram.ts'
+export { applyIo, readFingerprint } from './cache/file/io.ts'
 export {
   LookupStatus,
   type IndexConfig,

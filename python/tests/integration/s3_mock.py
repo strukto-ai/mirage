@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import hashlib
+from collections import Counter
 from contextlib import ExitStack
 from datetime import datetime, timezone
 from unittest.mock import patch
@@ -127,10 +128,18 @@ class MultiBucketS3Client:
 
     def __init__(self,
                  buckets: dict[str, dict[str, bytes]],
-                 versioned: set[str] | None = None) -> None:
+                 versioned: set[str] | None = None,
+                 etag_suffix: str = "") -> None:
         self.buckets = buckets
         self.versioned = versioned or set()
         self._versions: dict[tuple[str, str], list[tuple[str, bytes]]] = {}
+        # Non-empty simulates multipart-upload ETags ("<md5>-2"), which are
+        # NOT the MD5 of the content.
+        self.etag_suffix = etag_suffix
+        self.calls: Counter[str] = Counter()
+
+    def _etag(self, data: bytes) -> str:
+        return hashlib.md5(data).hexdigest() + self.etag_suffix
 
     def _objects(self, bucket: str) -> dict[str, bytes]:
         if bucket not in self.buckets:
@@ -154,6 +163,7 @@ class MultiBucketS3Client:
                          Key: str,
                          Range: str | None = None,
                          VersionId: str | None = None) -> dict:
+        self.calls["get_object"] += 1
         vid_for_resp = self._track(Bucket, Key)
         if VersionId is not None:
             history = self._versions.get((Bucket, Key), [])
@@ -168,7 +178,7 @@ class MultiBucketS3Client:
             if Key not in objects:
                 raise _mock_s3_error("NoSuchKey")
             data = objects[Key]
-        etag = hashlib.md5(data).hexdigest()
+        etag = self._etag(data)
         if Range is not None:
             data = _slice_range(data, Range)
         resp: dict = {"Body": _AsyncMockBody(data), "ETag": f'"{etag}"'}
@@ -177,11 +187,12 @@ class MultiBucketS3Client:
         return resp
 
     async def head_object(self, Bucket: str, Key: str) -> dict:
+        self.calls["head_object"] += 1
         objects = self._objects(Bucket)
         if Key not in objects:
             raise _mock_s3_error("NoSuchKey")
         data = objects[Key]
-        etag = hashlib.md5(data).hexdigest()
+        etag = self._etag(data)
         vid = self._track(Bucket, Key)
         resp: dict = {
             "ContentLength": len(data),
@@ -238,18 +249,24 @@ class MultiBucketSession:
 
     def __init__(self,
                  buckets: dict[str, dict[str, bytes]],
-                 versioned: set[str] | None = None) -> None:
-        self._client = MultiBucketS3Client(buckets, versioned=versioned)
+                 versioned: set[str] | None = None,
+                 etag_suffix: str = "") -> None:
+        self._client = MultiBucketS3Client(buckets,
+                                           versioned=versioned,
+                                           etag_suffix=etag_suffix)
 
     def client(self, **kwargs):
         return self._client
 
 
-def patch_s3_multi(buckets: dict[str, dict[str, bytes]],
-                   versioned: set[str] | None = None) -> ExitStack:
-    session = MultiBucketSession(buckets, versioned=versioned)
+def patch_s3_session(session: MultiBucketSession) -> ExitStack:
     stack = ExitStack()
     for mod in _CORE_MODULES:
         stack.enter_context(patch(f"{mod}.async_session",
                                   return_value=session))
     return stack
+
+
+def patch_s3_multi(buckets: dict[str, dict[str, bytes]],
+                   versioned: set[str] | None = None) -> ExitStack:
+    return patch_s3_session(MultiBucketSession(buckets, versioned=versioned))

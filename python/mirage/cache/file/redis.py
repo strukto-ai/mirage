@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from collections.abc import Iterable
 
 from mirage.cache.file.mixin import FileCacheMixin
@@ -29,11 +30,16 @@ class RedisFileCacheStore(RedisResource, FileCacheMixin):
         max_drain_bytes: int | None = None,
     ) -> None:
         super().__init__(url=url, key_prefix=key_prefix)
+        # Advisory only: unlike the RAM store there is no client-side
+        # LRU, so nothing evicts on overflow. Cap memory on the Redis
+        # server instead (maxmemory + maxmemory-policy allkeys-lru) to
+        # approximate the RAM store's eviction behavior.
         self._cache_limit: int = parse_limit(cache_limit)
         self._cache_client = self._store._client
         self._data_prefix = f"{key_prefix}data:"
         self._meta_prefix = f"{key_prefix}meta:"
         self.max_drain_bytes: int | None = max_drain_bytes
+        self._drain_tasks: dict[str, asyncio.Task] = {}
 
     async def get(self, key: str) -> bytes | None:
         return await self._cache_client.get(f"{self._data_prefix}{key}")
@@ -72,6 +78,9 @@ class RedisFileCacheStore(RedisResource, FileCacheMixin):
         return True
 
     async def remove(self, key: str) -> None:
+        task = self._drain_tasks.pop(key, None)
+        if task:
+            task.cancel()
         pipe = self._cache_client.pipeline()
         pipe.delete(f"{self._data_prefix}{key}")
         pipe.delete(f"{self._meta_prefix}{key}")
@@ -90,6 +99,9 @@ class RedisFileCacheStore(RedisResource, FileCacheMixin):
         return fp == remote_fingerprint
 
     async def clear(self) -> None:
+        for task in self._drain_tasks.values():
+            task.cancel()
+        self._drain_tasks.clear()
         for pattern in (
                 f"{self._data_prefix}*",
                 f"{self._meta_prefix}*",

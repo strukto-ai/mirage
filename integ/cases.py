@@ -437,6 +437,10 @@ CASES: list[tuple[str, str]] = [
     ("sed_hold_accum", "sed -n 'H;${x;p}' /data/a.txt"),
     ("sed_escaped_delim", r"echo 'a/b' | sed 's/a\/b/c/'"),
     ("sed_no_final_nl", "sed 's/no/NO/' /data/no_nl.txt"),
+    # a case arm runs every statement up to its ;; terminator
+    ("case_multi_arm", "case x in x) echo one; echo two;; esac"),
+    ("case_multi_arm_default",
+     "case y in x) echo one;; *) echo fall; echo through;; esac"),
 
     # ----- tr advanced -----
     ("tr_squeeze", "echo aaabbbccc | tr -s a-z"),
@@ -1038,6 +1042,39 @@ SLEEP_CASES: list[tuple[str, str, float]] = [
     ("sleep_one", "sleep 1", 1.0),
 ]
 
+# Cross-mount coverage: every runner mounts a second resource of its own
+# backend at /data2, so reads, writes, links, and provision spanning two
+# mounts behave identically on every backend. Seeds happen inside the
+# section (tee), so the /data listings earlier in the battery stay
+# untouched.
+CROSS_MOUNT_CASES: list[tuple[str, str]] = [
+    ("xm_seed", "echo cross | tee /data2/xm.txt"),
+    ("xm_ls", "ls /data2"),
+    ("xm_cat_concat", "cat /data/a.txt /data2/xm.txt"),
+    ("xm_cp_over", "cp /data/a.txt /data2/xm_copy.txt"
+     " && cat /data2/xm_copy.txt"),
+    ("xm_cp_back", "cp /data2/xm.txt /data/xm_back.txt"
+     " && cat /data/xm_back.txt"),
+    ("xm_mv_over", "mv /data/xm_back.txt /data2/xm_moved.txt"
+     " && cat /data2/xm_moved.txt && ls /data2"),
+    ("xm_grep_multi", "grep -c s /data/a.txt /data2/xm.txt"),
+    ("xm_wc_multi", "wc -l /data/a.txt /data2/xm.txt"),
+    # du/md5/file fan out per mount and aggregate like the other readers
+    ("xm_du_multi", "du /data/b.txt /data2/xm.txt"),
+    ("xm_du_multi_total", "du -c /data/b.txt /data2/xm.txt"),
+    ("xm_md5_multi", "md5 /data/b.txt /data2/xm.txt"),
+    ("xm_file_multi", "file /data/a.txt /data2/xm.txt"),
+    ("xm_find", "find /data2 -type f | sort"),
+    ("xm_pipe", "cat /data2/xm.txt | tr a-z A-Z"),
+    ("xm_ln_over", "ln -s /data/a.txt /data2/xm_link.txt"
+     " && cat /data2/xm_link.txt"),
+    ("xm_ln_readlink", "readlink /data2/xm_link.txt"),
+    ("xm_ln_back", "ln -s /data2/xm.txt /data/xm_rlink.txt"
+     " && cat /data/xm_rlink.txt"),
+    ("xm_link_grep", "grep -c cross /data/xm_rlink.txt"),
+    ("xm_cd_across", "(cd /data2 && cat xm.txt && cd /data && ls b.txt)"),
+]
+
 # Provision (dry-run cost estimates) must print identical numbers on every
 # backend: sizes come from seeded files, and the file cache is cleared first
 # so read-caching backends (s3, onedrive, nextcloud) report the same cold
@@ -1068,7 +1105,8 @@ PROVISION_CASES: list[tuple[str, str]] = [
     ("prov_jq_jsonl", 'jq ".id" /data/data.jsonl'),
     # ----- honest degradation -----
     ("prov_missing", "cat /data/missing.txt"),
-    ("prov_unprovisioned", "sed s/a/b/ /data/a.txt"),
+    ("prov_sed", "sed s/a/b/ /data/a.txt"),
+    ("prov_sed_inplace", "sed -i s/a/b/ /data/a.txt"),
     ("prov_write", "tee /data/prov_out.txt"),
     # ----- combinators -----
     ("prov_pipe", "cat /data/a.txt | head -c 4"),
@@ -1111,6 +1149,35 @@ PROVISION_CASES: list[tuple[str, str]] = [
     ("prov_cmdsub", "cat $(echo /data/a.txt)"),
     ("prov_deep_mix",
      "for i in 1 2; do cat /data/a.txt | wc -l && cat /data/b.txt; done"),
+    # ----- planner/executor drift fixes (env prefix, functions, eval,
+    # select/until, redirect costing) -----
+    ("prov_env_prefix", "FOO=1 cat /data/a.txt"),
+    ("prov_func_call", "pfn() { cat /data/b.txt; }; pfn; pfn"),
+    ("prov_func_recursive", "prec() { prec; }; prec"),
+    ("prov_eval", "eval 'cat /data/a.txt'"),
+    ("prov_select", "select x in a b; do cat /data/a.txt; done"),
+    ("prov_until", "until false; do cat /data/a.txt; done"),
+    ("prov_redirect_in", "wc -l < /data/a.txt"),
+    ("prov_redirect_devnull", "cat /data/a.txt > /dev/null"),
+    # ----- namespace links and cross-mount commands -----
+    ("prov_symlink", "cat /data2/xm_link.txt"),
+    ("prov_symlink_grep", "grep x /data/xm_rlink.txt"),
+    ("prov_xmount_concat", "cat /data/a.txt /data2/xm.txt"),
+    ("prov_xmount_grep", "grep s /data/a.txt /data2/xm.txt"),
+    ("prov_xmount_pipe", "cat /data/a.txt /data2/xm.txt | wc -c"),
+    # md5 fans out per mount, so its plan sums per-mount estimates
+    ("prov_xmount_md5", "md5 /data/a.txt /data2/xm.txt"),
+    ("prov_xmount_du", "du /data/a.txt /data2/xm.txt"),
+    # ----- glob + recursive expansion (readdir/index-driven) -----
+    ("prov_glob", "cat /data/rgm/d1/*.txt"),
+    ("prov_glob_unmatched", "cat /data/rgm/d1/*.nope"),
+    ("prov_grep_r", "grep -r hello /data/rgm"),
+    # ----- stdin-driven stages cost zero backend bytes -----
+    ("prov_pathless", "wc -l"),
+    ("prov_heredoc", "wc -c <<EOF\nhello\nEOF"),
+    # ----- suppressed substitutions stay honest floors -----
+    ("prov_for_cmdsub", "for i in $(echo 1 2); do cat /data/a.txt; done"),
+    ("prov_redirect_cmdsub", "cat /data/a.txt > $(echo /data/prov_out.txt)"),
 ]
 
 
@@ -1139,6 +1206,67 @@ async def run_provision_probe(ws, file_path: str) -> None:
         result = await ws.execute(cmd, provision=True)
         print(f"=== {name} ===")
         print(provision_line(result))
+
+
+async def _backend_bytes(ws, cmd: str) -> int:
+    before = sum(rec.bytes for rec in ws.ops.records)
+    result = await ws.execute(cmd)
+    await result.stdout_str()
+    return sum(rec.bytes for rec in ws.ops.records) - before
+
+
+async def run_cache_verify_cases(ws,
+                                 mount: str = "/data",
+                                 mount2: str | None = None) -> None:
+    """Byte-accounted cache verification for read-caching backends.
+
+    A second read of the same file pulls zero backend bytes, whether it
+    goes through the file's own path or a symlink (the link and its
+    target share one cache entry), and provision reports the hit. With
+    a second mount, the same holds for a cross-mount link, and the
+    cross-mount cp is pinned as-is (it does not read through the
+    cache today).
+    """
+    m = mount.rstrip("/")
+    target = f"{m}/cachev.txt"
+    link = f"{m}/cachev_link.txt"
+    await ws.execute(f"tee {target} > /dev/null", stdin=b"cache verify\n")
+    await ws.execute(f"ln -s {target} {link}")
+    await ws.cache.clear()
+    print("=== cachev_link_cold ===")
+    print(f"bytes={await _backend_bytes(ws, f'cat {link}')}")
+    print("=== cachev_link_warm ===")
+    print(f"bytes={await _backend_bytes(ws, f'cat {link}')}")
+    print("=== cachev_target_shares_entry ===")
+    print(f"bytes={await _backend_bytes(ws, f'cat {target}')}")
+    print("=== cachev_warm_grep ===")
+    print(f"bytes={await _backend_bytes(ws, f'grep cache {target}')}")
+    print("=== cachev_prov_link ===")
+    result = await ws.execute(f"cat {link}", provision=True)
+    print(provision_line(result))
+    if mount2 is not None:
+        m2 = mount2.rstrip("/")
+        xlink = f"{m2}/cachev_xlink.txt"
+        await ws.execute(f"ln -s {target} {xlink}")
+        await ws.cache.clear()
+        print("=== cachev_xmount_cold ===")
+        print(f"bytes={await _backend_bytes(ws, f'cat {xlink}')}")
+        print("=== cachev_xmount_warm ===")
+        print(f"bytes={await _backend_bytes(ws, f'cat {xlink}')}")
+        print("=== cachev_xmount_prov ===")
+        result = await ws.execute(f"cat {xlink}", provision=True)
+        print(provision_line(result))
+        print("=== cachev_xmount_cp_warm_source ===")
+        print(f"bytes="
+              f"{await _backend_bytes(ws, f'cp {target} {m2}/cachev_cp.txt')}")
+        await ws.cache.clear()
+        print("=== cachev_xmount_cp_cold_populates ===")
+        print(
+            f"bytes="
+            f"{await _backend_bytes(ws, f'cp {target} {m2}/cachev_cp2.txt')}")
+        print("=== cachev_cat_after_cp ===")
+        print(f"bytes={await _backend_bytes(ws, f'cat {target}')}")
+    await ws.execute(f"rm {link} {target}")
 
 
 async def run_provision_cache_cases(ws, mount: str = "/data") -> None:
@@ -1233,6 +1361,12 @@ async def run_cases(ws) -> None:
         else:
             print(f"{name} FAIL exit={result.exit_code} "
                   f"elapsed={elapsed:.3f}")
+
+    for name, cmd in CROSS_MOUNT_CASES:
+        result = await ws.execute(cmd)
+        out = await result.stdout_str()
+        print(f"=== {name} ===")
+        _emit_body(out)
 
     await run_provision_cases(ws)
 

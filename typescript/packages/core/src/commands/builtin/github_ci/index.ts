@@ -14,12 +14,11 @@
 
 import type { GitHubCIAccessor } from '../../../accessor/github_ci.ts'
 import { ResourceName } from '../../../types.ts'
-import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
+import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { GITHUB_CI_FIND } from './find.ts'
 import { GITHUB_CI_GREP } from './grep.ts'
 import { GITHUB_CI_CMD_OPS } from './ops.ts'
-import { metadataProvision } from './provision.ts'
 import { GITHUB_CI_RG } from './rg.ts'
 
 const GITHUB_CI_OVERRIDES = new Set(['find', 'grep', 'rg'])
@@ -27,9 +26,6 @@ const GITHUB_CI_OVERRIDES = new Set(['find', 'grep', 'rg'])
 export const GITHUB_CI_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<GitHubCIAccessor>(ResourceName.GITHUB_CI, GITHUB_CI_CMD_OPS, {
     overrides: GITHUB_CI_OVERRIDES,
-    provisionOverrides: {
-      ls: metadataProvision as ProvisionFn,
-    },
   }),
   ...GITHUB_CI_FIND,
   ...GITHUB_CI_GREP,

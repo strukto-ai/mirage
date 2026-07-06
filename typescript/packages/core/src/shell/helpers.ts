@@ -32,6 +32,37 @@ export function getParts(node: TSNodeLike): TSNodeLike[] {
   return node.namedChildren.filter((c) => !SKIP_PARTS.has(c.type))
 }
 
+/**
+ * Split FOO=1 BAR=2 cmd parts into [assignments, remaining].
+ *
+ * The single structural rule for env-prefixed commands, shared by the
+ * executor (which expands and applies the assignments) and the
+ * provision planner (which only needs the command parts).
+ */
+export function hasCommandSubstitution(node: TSNodeLike): boolean {
+  // The provision planner suppresses substitution execution, so any
+  // word carrying one expands to empty during a plan walk and the
+  // affected estimate must degrade to UNKNOWN instead of trusting the
+  // incomplete expansion.
+  if (node.type === NT.COMMAND_SUBSTITUTION || node.type === NT.PROCESS_SUBSTITUTION) return true
+  return node.namedChildren.some((c) => hasCommandSubstitution(c))
+}
+
+export function splitEnvPrefix(parts: TSNodeLike[]): [TSNodeLike[], TSNodeLike[]] {
+  const assignments: TSNodeLike[] = []
+  const remaining: TSNodeLike[] = []
+  let sawCommandName = false
+  for (const p of parts) {
+    if (!sawCommandName && p.type === NT.VARIABLE_ASSIGNMENT) {
+      assignments.push(p)
+      continue
+    }
+    if (p.type === NT.COMMAND_NAME) sawCommandName = true
+    remaining.push(p)
+  }
+  return [assignments, remaining]
+}
+
 export function getPipelineCommands(node: TSNodeLike): [TSNodeLike[], boolean[]] {
   const commands: TSNodeLike[] = []
   const stderrFlags: boolean[] = []
@@ -250,23 +281,28 @@ export function getCaseWord(node: TSNodeLike): TSNodeLike {
   return first
 }
 
-export function getCaseItems(node: TSNodeLike): [string[], TSNodeLike | null][] {
-  const items: [string[], TSNodeLike | null][] = []
+/**
+ * Get (patterns, bodyStatements) pairs from case. An arm's body is
+ * every statement up to its ;; terminator, so multi-statement arms
+ * (x) cmd1; cmd2;;) keep all commands.
+ */
+export function getCaseItems(node: TSNodeLike): [string[], TSNodeLike[]][] {
+  const items: [string[], TSNodeLike[]][] = []
   for (const c of node.namedChildren) {
     if (c.type !== NT.CASE_ITEM) continue
     const patterns: string[] = []
-    let body: TSNodeLike | null = null
+    const body: TSNodeLike[] = []
     for (const child of c.children) {
       if (
-        child.type === NT.EXTGLOB_PATTERN ||
-        child.type === NT.WORD ||
-        child.type === NT.CONCATENATION ||
-        child.type === NT.STRING
+        body.length === 0 &&
+        (child.type === NT.EXTGLOB_PATTERN ||
+          child.type === NT.WORD ||
+          child.type === NT.CONCATENATION ||
+          child.type === NT.STRING)
       ) {
         patterns.push(getText(child))
       } else if (child.isNamed === true && child.type !== '|') {
-        body = child
-        break
+        body.push(child)
       }
     }
     if (patterns.length === 0) {

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import os
 import shutil
 import sys
 import tempfile
@@ -53,9 +54,25 @@ async def main() -> None:
     )
     try:
         port = server.get_port()
+        # Sibling subroots: /data must not see /data2's directory in
+        # its own listings, so neither mount roots at the chroot root.
+        os.makedirs(os.path.join(ROOT_DIR, "xm1"), exist_ok=True)
+        os.makedirs(os.path.join(ROOT_DIR, "xm2"), exist_ok=True)
         resource = SSHResource(
-            SSHConfig(host="127.0.0.1", port=port, username="integ", root="/"))
-        ws = Workspace({"/data": resource}, mode=MountMode.WRITE)
+            SSHConfig(host="127.0.0.1",
+                      port=port,
+                      username="integ",
+                      root="/xm1"))
+        resource2 = SSHResource(
+            SSHConfig(host="127.0.0.1",
+                      port=port,
+                      username="integ",
+                      root="/xm2"))
+        ws = Workspace({
+            "/data": resource,
+            "/data2": resource2
+        },
+                       mode=MountMode.WRITE)
         await run_cases(ws)
         await assert_real_mtime(ws)
         await resource.accessor.close()

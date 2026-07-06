@@ -25,7 +25,11 @@ from mirage.resource.ram import RAMResource  # noqa: E402
 
 
 async def main() -> None:
-    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({
+        "/data": RAMResource(),
+        "/data2": RAMResource()
+    },
+                   mode=MountMode.WRITE)
     await run_cases(ws)
     await assert_real_mtime(ws)
 

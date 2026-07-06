@@ -696,19 +696,20 @@ export class Workspace {
     const root = parser.parse(command)
     const rootNode = root as unknown as TSNodeLike
     const session = this.sessionManager.get(this.sessionManager.defaultId)
-    const executeFn: ExecuteFn = async (cmd) => {
-      const res = await this.execute(cmd)
-      return new IOResult({
-        stdout: res.stdout,
-        stderr: res.stderr,
-        exitCode: res.exitCode,
-      })
-    }
+    // A dry run must never execute: a command substitution with side
+    // effects ($(tee ...)) would otherwise run while "estimating".
+    // Substitutions expand to empty, so affected words degrade the
+    // plan to honest UNKNOWN instead of resolving via execution.
+    const executeFn: ExecuteFn = () => Promise.resolve(new IOResult())
     const provName = command.trim().split(/\s+/)[0] ?? ''
     const provResolved = provName !== '' ? resolveSafeguard(provName) : null
     const provTimeout = provResolved !== null ? provResolved.timeoutSeconds : null
     return runWithTimeout(
-      provisionNode({ registry: this.registry, executeFn }, rootNode, session),
+      provisionNode(
+        { registry: this.registry, executeFn, namespace: this.namespace },
+        rootNode,
+        session,
+      ),
       provTimeout,
       provName !== '' ? provName : '?',
     )
@@ -832,7 +833,7 @@ export class Workspace {
     targetSession.lastExitCode = io.exitCode
     let stdoutBytes: Uint8Array
     try {
-      await this.dispatcher.applyIo(io)
+      await this.dispatcher.applyIo(io, opRecords)
       stdoutBytes = materialized === null ? new Uint8Array() : await materialize(materialized)
     } catch (err) {
       // Lazy reads can fail while draining (e.g. head/tail that open the

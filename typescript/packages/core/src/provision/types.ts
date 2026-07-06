@@ -93,11 +93,12 @@ export class ProvisionResult {
 
   /**
    * Multiply every combinable field by an iteration count (for-loops).
-   * Precision is carried over and estimatedCostUsd is dropped.
+   * Precision is carried over; estimatedCostUsd scales with the count.
    */
   scaled(n: number, command: string | null = null): ProvisionResult {
     const init: ProvisionResultInit = { command, precision: this.precision }
     for (const f of COMBINE_FIELDS) init[f] = this[f] * n
+    if (this.estimatedCostUsd !== null) init.estimatedCostUsd = this.estimatedCostUsd * n
     return new ProvisionResult(init)
   }
 }

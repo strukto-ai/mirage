@@ -32,6 +32,37 @@ async def _plan_body(provision_node_fn, body: list,
     return rollup_list(";", children)
 
 
+async def handle_function_provision(
+    provision_node_fn,
+    name: str,
+    body: list,
+    planning: set[str],
+    session: Session,
+) -> ProvisionResult:
+    """Plan a shell function call: the body's cost.
+
+    Recursive functions would loop the planner, so a function already
+    being planned reports UNKNOWN instead of recursing again.
+
+    Args:
+        provision_node_fn: recursive planner.
+        name (str): function name.
+        body (list): function body statement nodes.
+        planning (set[str]): names currently being planned (guard).
+        session (Session): shell session state.
+    """
+    if name in planning:
+        return ProvisionResult(command=name, precision=Precision.UNKNOWN)
+    planning.add(name)
+    try:
+        result = await _plan_body(provision_node_fn, body, session)
+    finally:
+        planning.discard(name)
+    if not result.command:
+        result.command = name
+    return result
+
+
 async def handle_if_provision(
     provision_node_fn,
     branches: list[tuple[Any, Any]],

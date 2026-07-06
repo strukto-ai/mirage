@@ -12,14 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { isCrossMount } from '../../commands/builtin/generic/crossmount/index.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import type { IndexCacheStore } from '../../cache/index/index.ts'
 import { parseCommand, parseToKwargs } from '../../commands/spec/parser.ts'
 import { getExtension } from '../../commands/resolve.ts'
-import { Precision, ProvisionResult } from '../../provision/types.ts'
+import { Precision, ProvisionResult, combineSum } from '../../provision/types.ts'
 import { PathSpec } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import type { Namespace } from '../mount/namespace.ts'
 import type { Session } from '../session/session.ts'
 import type { Accessor } from '../../accessor/base.ts'
 import type { Resource } from '../../resource/base.ts'
@@ -39,20 +41,100 @@ async function checkCacheHits(
   return hits
 }
 
+/**
+ * Group path args by their own mount, in first-appearance order. Args
+ * that resolve to no mount (glob patterns, expression operands) ride
+ * with the first group: they scoped to the primary mount before and
+ * must not fabricate a cross-mount split.
+ */
+function mountGroups(registry: MountRegistry, parts: readonly (string | PathSpec)[]): PathSpec[][] {
+  const groups: PathSpec[][] = []
+  const seen = new Map<string, number>()
+  const unresolved: PathSpec[] = []
+  for (let i = 1; i < parts.length; i++) {
+    const p = parts[i]
+    if (!(p instanceof PathSpec)) continue
+    if (p.pattern !== null && p.pattern !== '') {
+      // Globs are not expanded during planning; a pattern operand
+      // (find -name, ls *.txt) must not fabricate a mount group.
+      unresolved.push(p)
+      continue
+    }
+    const mount = registry.mountFor(p.virtual)
+    if (mount === null) {
+      unresolved.push(p)
+      continue
+    }
+    const idx = seen.get(mount.prefix)
+    if (idx === undefined) {
+      seen.set(mount.prefix, groups.length)
+      groups.push([p])
+    } else {
+      groups[idx]?.push(p)
+    }
+  }
+  if (unresolved.length > 0) {
+    const first = groups[0]
+    if (first !== undefined) first.push(...unresolved)
+    else groups.push(unresolved)
+  }
+  return groups
+}
+
+/**
+ * Estimate cost of a simple command.
+ *
+ * Paths are namespace-followed first (a symlinked read costs its
+ * target, and the cache-hit check sees the entry the executor would
+ * actually serve), then grouped by mount: a command spanning mounts
+ * is estimated per mount against each mount's own backend and the
+ * results summed, instead of statting foreign paths against the
+ * first path's backend.
+ */
 export async function handleCommandProvision(
   registry: MountRegistry,
   parts: readonly (string | PathSpec)[],
   session: Session,
+  namespace: Namespace | null = null,
 ): Promise<ProvisionResult> {
   if (parts.length === 0) return new ProvisionResult({ precision: Precision.EXACT })
   const head = parts[0]
   if (head === undefined) return new ProvisionResult({ precision: Precision.EXACT })
+
+  let followedParts: (string | PathSpec)[] = [...parts]
+  if (namespace !== null) {
+    followedParts = followedParts.map((p) => {
+      if (!(p instanceof PathSpec)) return p
+      const followed = namespace.follow(p.virtual)
+      return followed !== p.virtual ? PathSpec.fromStrPath(followed) : p
+    })
+  }
   const cmdName = typeof head === 'string' ? head : head.virtual
-  const cmdStr = parts.map((p) => (typeof p === 'string' ? p : p.virtual)).join(' ')
+  const cmdStr = followedParts.map((p) => (typeof p === 'string' ? p : p.virtual)).join(' ')
+
+  const groups = mountGroups(registry, followedParts)
+  if (groups.length > 1) {
+    const pathParts = followedParts.slice(1).filter((p): p is PathSpec => p instanceof PathSpec)
+    if (!isCrossMount(cmdName, pathParts, registry)) {
+      // The executor rejects this command across mounts, so an
+      // aggregated byte estimate would cost a run that errors.
+      return new ProvisionResult({ command: cmdStr, precision: Precision.UNKNOWN })
+    }
+    const texts = followedParts.slice(1).filter((p): p is string => typeof p === 'string')
+    const children: ProvisionResult[] = []
+    for (const group of groups) {
+      const sub: (string | PathSpec)[] = [cmdName, ...texts, ...group]
+      children.push(await handleCommandProvision(registry, sub, session))
+    }
+    const combined = combineSum(';', children)
+    combined.command = cmdStr
+    return combined
+  }
+  const parts2 = followedParts
 
   let firstScope: PathSpec | null = null
-  for (let i = 1; i < parts.length; i++) {
-    const p = parts[i]
+  for (let i = 1; i < parts2.length; i++) {
+    const p = parts2[i]
     if (p instanceof PathSpec) {
       firstScope = p
       break
@@ -74,10 +156,10 @@ export async function handleCommandProvision(
   }
 
   const mountPrefix = rstripSlash(mount.prefix)
-  const scopedParts: (string | PathSpec)[] = [parts[0] ?? '']
+  const scopedParts: (string | PathSpec)[] = [parts2[0] ?? '']
   const resourceScopes: PathSpec[] = []
-  for (let i = 1; i < parts.length; i++) {
-    const p = parts[i]
+  for (let i = 1; i < parts2.length; i++) {
+    const p = parts2[i]
     if (p instanceof PathSpec) {
       const scoped = new PathSpec({
         virtual: p.virtual,

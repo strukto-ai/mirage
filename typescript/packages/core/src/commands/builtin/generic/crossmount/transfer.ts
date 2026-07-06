@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { IOResult } from '../../../../io/types.ts'
 import type { FindOptions } from '../../../../resource/base.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { cpGeneric, cpWalk } from '../cp.ts'
@@ -50,14 +51,22 @@ export async function runTransfer(
 
   if (cmdName === 'cp') {
     const recursive = flagKwargs.r === true || flagKwargs.R === true || flagKwargs.a === true
+    // Sources stream through the client here, so record them as reads:
+    // apply_io then populates the file cache (a cp is also a full read).
+    const reads: Record<string, Uint8Array> = {}
+    const recordingRead = async (p: PathSpec): Promise<Uint8Array> => {
+      const data = await readBytes(p)
+      reads[p.virtual] = data
+      return data
+    }
     const copy = async (src: PathSpec, target: PathSpec): Promise<void> => {
-      await write(target, await readBytes(src))
+      await write(target, await recordingRead(src))
     }
     const find = async (src: PathSpec, _options: FindOptions): Promise<string[]> => {
       const tree = await cpWalk(readdir, stat, src)
       return tree.filter((e) => !e.isDir).map((e) => e.path)
     }
-    const [out, io] = await cpGeneric(
+    const result = await cpGeneric(
       flat,
       copy,
       find,
@@ -68,8 +77,11 @@ export async function runTransfer(
       undefined,
       undefined,
       undefined,
-      { readBytes, write, mkdir, readdir },
+      { readBytes: recordingRead, write, mkdir, readdir },
     )
+    const [out, io] = result ?? [null, new IOResult()]
+    io.reads = { ...io.reads, ...reads }
+    io.cache = [...io.cache, ...Object.keys(reads)]
     return [out, io]
   }
 

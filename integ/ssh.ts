@@ -291,14 +291,28 @@ function startMockServer(root: string): Promise<{ server: Server; port: number }
 async function main(): Promise<void> {
   const root = fs.mkdtempSync(join(tmpdir(), "mirage-integ-ssh-"));
   const { server, port } = await startMockServer(root);
+  // Sibling subroots: /data must not see /data2's directory in its
+  // own listings, so neither mount roots at the chroot root.
+  fs.mkdirSync(join(root, "xm1"), { recursive: true });
+  fs.mkdirSync(join(root, "xm2"), { recursive: true });
   const resource = new SSHResource({
     host: "127.0.0.1",
     port,
     username: "integ",
     password: "integ",
-    root: "/",
+    root: "/xm1",
   });
-  const ws = new Workspace({ "/data": resource }, { mode: MountMode.WRITE });
+  const resource2 = new SSHResource({
+    host: "127.0.0.1",
+    port,
+    username: "integ",
+    password: "integ",
+    root: "/xm2",
+  });
+  const ws = new Workspace(
+    { "/data": resource, "/data2": resource2 },
+    { mode: MountMode.WRITE },
+  );
   try {
     await runCases(ws);
     await assertRealMtime(ws);

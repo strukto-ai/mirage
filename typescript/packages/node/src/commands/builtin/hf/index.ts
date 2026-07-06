@@ -12,16 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  type ProvisionFn,
-  type RegisteredCommand,
-  makeGenericCommands,
-} from '@struktoai/mirage-core'
+import { type RegisteredCommand, makeGenericCommands } from '@struktoai/mirage-core'
 import { HF_RESOURCES, type HfAccessor } from '../../../accessor/hf.ts'
 import { HF_DU } from './du.ts'
 import { HF_FIND } from './find.ts'
 import { HF_CMD_OPS } from './ops.ts'
-import { fileReadProvision, metadataProvision } from './provision.ts'
 import { HF_RM } from './rm.ts'
 import { HF_SED } from './sed.ts'
 
@@ -31,11 +26,6 @@ export const HF_COMMANDS: readonly RegisteredCommand[] = [
   ...HF_RESOURCES.flatMap((resource) =>
     makeGenericCommands<HfAccessor>(resource, HF_CMD_OPS, {
       overrides: HF_OVERRIDES,
-      provisionOverrides: {
-        grep: fileReadProvision as ProvisionFn,
-        rg: fileReadProvision as ProvisionFn,
-        ls: metadataProvision as ProvisionFn,
-      },
     }),
   ),
   ...HF_DU,

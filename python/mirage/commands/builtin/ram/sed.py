@@ -15,9 +15,11 @@
 from mirage.commands.builtin.generic.sed_command import make_sed
 from mirage.core.ram.glob import resolve_glob
 from mirage.core.ram.read import read_bytes
+from mirage.core.ram.stat import stat as _stat
 from mirage.core.ram.write import write_bytes
 
 sed = make_sed(
+    stat_fn=_stat,
     resource="ram",
     glob_fn=resolve_glob,
     glob_when=lambda accessor, index: accessor.store is not None,

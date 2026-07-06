@@ -17,8 +17,10 @@ import time
 
 from mirage.resource.disk import DiskResource
 from mirage.resource.ram import RAMResource
+from mirage.resource.s3 import S3Config, S3Resource
 from mirage.types import ConsistencyPolicy, MountMode
 from mirage.workspace import Workspace
+from tests.integration.s3_mock import MultiBucketSession, patch_s3_session
 
 
 def test_disk_always_refetches_after_external_mutation(tmp_path):
@@ -73,6 +75,43 @@ def test_disk_lazy_keeps_stale_cache_after_external_mutation(tmp_path):
     assert first == b"v1"
     assert second in (b"v1", b"v2"), (
         "LAZY allowed to serve cached bytes; this test just confirms no crash")
+
+
+def test_s3_always_warm_read_serves_cache_for_non_md5_fingerprint():
+    """Multipart-style ETags are not the MD5 of the content. The cold
+    read must stamp the cache entry with the backend ETag so a warm read
+    under ALWAYS passes the freshness check and serves from cache
+    instead of evicting and refetching on every read."""
+    store = {"data.txt": b"name,age\nalice,30\n"}
+    session = MultiBucketSession({"test-bucket": store}, etag_suffix="-2")
+    client = session._client
+    with patch_s3_session(session):
+        config = S3Config(
+            bucket="test-bucket",
+            region="us-east-1",
+            aws_access_key_id="fake",
+            aws_secret_access_key="fake",
+        )
+        ws = Workspace(
+            {"/s3": (S3Resource(config), MountMode.WRITE)},
+            mode=MountMode.WRITE,
+            consistency=ConsistencyPolicy.ALWAYS,
+        )
+
+        async def run() -> tuple[bytes, bytes]:
+            io1 = await ws.execute("cat /s3/data.txt | wc -c")
+            first = await io1.materialize_stdout()
+            io2 = await ws.execute("cat /s3/data.txt | wc -c")
+            second = await io2.materialize_stdout()
+            return first, second
+
+        first, second = asyncio.run(run())
+    assert first == second == b"18\n"
+    assert client.calls["head_object"] >= 1, (
+        "ALWAYS must consult the remote fingerprint on the warm read")
+    assert client.calls["get_object"] == 1, (
+        "warm read with an unchanged remote fingerprint must serve from "
+        "cache; a second get_object means the entry was evicted")
 
 
 def test_ram_falls_back_to_lazy_when_fingerprint_absent():

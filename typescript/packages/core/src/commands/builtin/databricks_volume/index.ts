@@ -14,13 +14,12 @@
 
 import type { DatabricksVolumeAccessor } from '../../../accessor/databricks_volume.ts'
 import { ResourceName } from '../../../types.ts'
-import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
+import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { DATABRICKS_VOLUME_FIND } from './find.ts'
 import { DATABRICKS_VOLUME_HEAD } from './head.ts'
 import { DATABRICKS_VOLUME_MKDIR } from './mkdir.ts'
 import { DATABRICKS_VOLUME_CMD_OPS } from './ops.ts'
-import { fileReadProvision, metadataProvision } from './provision.ts'
 import { DATABRICKS_VOLUME_RM } from './rm.ts'
 import { DATABRICKS_VOLUME_SED } from './sed.ts'
 import { DATABRICKS_VOLUME_TOUCH } from './touch.ts'
@@ -33,11 +32,6 @@ export const DATABRICKS_VOLUME_COMMANDS: readonly RegisteredCommand[] = [
     DATABRICKS_VOLUME_CMD_OPS,
     {
       overrides: DATABRICKS_VOLUME_OVERRIDES,
-      provisionOverrides: {
-        grep: fileReadProvision as ProvisionFn,
-        rg: fileReadProvision as ProvisionFn,
-        ls: metadataProvision as ProvisionFn,
-      },
     },
   ),
   ...DATABRICKS_VOLUME_FIND,
