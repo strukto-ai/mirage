@@ -12,14 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { resolvePath } from '../../../commands/spec/parser.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { FileStat } from '../../../types.ts'
-import { PathSpec } from '../../../types.ts'
+import { FileType, PathSpec } from '../../../types.ts'
 import { CycleError } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import type { DispatchFn } from '../cross_mount.ts'
 import type { Namespace } from '../../mount/namespace.ts'
+import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import type { Result } from './scope.ts'
 
@@ -275,8 +277,8 @@ interface SetAttrFields {
   mtime?: string
 }
 
-function isMissingSetattrOp(err: unknown): boolean {
-  return err instanceof Error && err.message.startsWith('no op registered: setattr')
+function isMissingOp(err: unknown, op: string): boolean {
+  return err instanceof Error && err.message.startsWith(`no op registered: ${op}`)
 }
 
 // Apply attributes natively when the mount supports setattr, else into the
@@ -294,7 +296,7 @@ async function setattrVia(
     await dispatch('setattr', path, [], fields as Record<string, unknown>)
     return
   } catch (err) {
-    if (!isMissingSetattrOp(err)) throw err
+    if (!isMissingOp(err, 'setattr')) throw err
   }
   const { mtime, ...rest } = fields
   namespace.setAttrs(path.virtual, {
@@ -358,7 +360,9 @@ export async function handleChmod(
       }
       throw err
     }
-    const current = stat.mode ?? 0o644
+    // Backends without a mode default to what ls renders: 755 for
+    // directories, 644 for files (symbolic clauses build on this).
+    const current = stat.mode ?? (stat.type === FileType.DIRECTORY ? 0o755 : 0o644)
     const newMode = parseMode(modeText, current)
     if (newMode === null) {
       return errorResult('chmod', `chmod: invalid mode: '${modeText}'\n`, 1)
@@ -450,6 +454,7 @@ export async function handleChown(
 export async function handleTouch(
   namespace: Namespace,
   dispatch: DispatchFn,
+  session: Session,
   args: readonly (string | PathSpec)[],
 ): Promise<Result> {
   const { flags, values, operands, bad } = splitValueFlags(args, 'acmh', 'tdr')
@@ -465,7 +470,7 @@ export async function handleTouch(
   }
   const refText = values.get('r')
   if (stamp === null && refText !== undefined) {
-    const ref = PathSpec.fromStrPath(refText)
+    const ref = PathSpec.fromStrPath(resolvePath(session.cwd, refText))
     try {
       const [refStat] = await dispatch('stat', ref)
       stamp = (refStat as FileStat).modified
@@ -515,7 +520,16 @@ export async function handleTouch(
       } catch (err) {
         if (!isEnoent(err)) throw err
         if (flags.has('c')) continue
-        await dispatch('write', resolved, [new Uint8Array(0)])
+        try {
+          await dispatch('write', resolved, [new Uint8Array(0)])
+        } catch (werr) {
+          // Stat-only backend (e.g. an API surface): creation is
+          // impossible, which GNU reports as EROFS.
+          if (!isMissingOp(werr, 'write')) throw werr
+          errors.push(`touch: cannot touch '${target.display}': Read-only file system\n`)
+          exitCode = 1
+          continue
+        }
         writes[resolved.virtual] = new Uint8Array(0)
       }
       const fields: SetAttrFields = {}

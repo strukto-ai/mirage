@@ -89,6 +89,42 @@ async function makeWs(mode: MountMode = MountMode.WRITE): Promise<[Workspace, RA
   return [ws, resource]
 }
 
+// Ops resolve by resource kind in the workspace registry, so overlay- and
+// stat-only-backend simulations block registration itself.
+class NoSetattrRegistry extends OpsRegistry {
+  override register(ro: RegisteredOp): void {
+    if (ro.name === 'setattr') return
+    super.register(ro)
+  }
+}
+
+class StatOnlyRegistry extends OpsRegistry {
+  override register(ro: RegisteredOp): void {
+    if (ro.name === 'setattr' || ro.name === 'write') return
+    super.register(ro)
+  }
+}
+
+async function makeOverlayWs(
+  files: Record<string, string>,
+  registry: OpsRegistry = new NoSetattrRegistry(),
+): Promise<[Workspace, RAMResource]> {
+  const parser = await getTestParser()
+  const resource = new RAMResource()
+  for (const [p, data] of Object.entries(files)) {
+    resource.store.files.set(p, new TextEncoder().encode(data))
+  }
+  const ws = new Workspace(
+    { '/data': resource },
+    { mode: MountMode.WRITE, shellParser: parser, ops: registry },
+  )
+  return [ws, resource]
+}
+
+async function statOf(ws: Workspace, path: string): Promise<FileStat> {
+  return (await ws.dispatch('stat', path)) as FileStat
+}
+
 async function run(ws: Workspace, cmd: string): Promise<[number, string, string]> {
   const r: IOResult = await ws.execute(cmd)
   return [r.exitCode, r.stdoutText, r.stderrText]
@@ -178,33 +214,107 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('falls back to the namespace overlay when the mount has no setattr', async () => {
-    // Ops resolve by resource kind in the workspace registry, so the
-    // overlay-backend simulation blocks setattr registration itself.
-    class NoSetattrRegistry extends OpsRegistry {
-      override register(ro: RegisteredOp): void {
-        if (ro.name === 'setattr') return
-        super.register(ro)
-      }
-    }
-    const resource = new RAMResource()
-    resource.store.files.set('/f.txt', new TextEncoder().encode('hello'))
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/data': resource },
-      { mode: MountMode.WRITE, shellParser: parser, ops: new NoSetattrRegistry() },
-    )
+    const [ws, resource] = await makeOverlayWs({ '/f.txt': 'hello' })
     const [code] = await run(
       ws,
       'chmod 601 /data/f.txt && chown 500:dev /data/f.txt && touch -t 202603041200 /data/f.txt',
     )
     expect(code).toBe(0)
     expect(resource.store.attrs.size).toBe(0)
-    const st = await ws.dispatch('stat', '/data/f.txt')
-    const stat = st as FileStat
+    const stat = await statOf(ws, '/data/f.txt')
     expect(stat.mode).toBe(0o601)
     expect(stat.uid).toBe(500)
     expect(stat.gid).toBe('dev')
     expect(stat.modified).toBe('2026-03-04T12:00:00Z')
+    await ws.close()
+  })
+
+  it('touch cannot create on a stat-only mount', async () => {
+    const [ws] = await makeOverlayWs({ '/f.txt': 'hello' }, new StatOnlyRegistry())
+    const [code, , err] = await run(ws, 'touch /data/new.txt')
+    expect(code).toBe(1)
+    expect(err).toContain("cannot touch '/data/new.txt': Read-only file system")
+    const [, out] = await run(ws, 'ls /data')
+    expect(out).not.toContain('new.txt')
+    await ws.close()
+  })
+
+  it('touch on a stat-only mount still stamps existing files via the overlay', async () => {
+    const [ws] = await makeOverlayWs({ '/f.txt': 'hello' }, new StatOnlyRegistry())
+    const [code] = await run(ws, 'touch -t 202603041200 /data/f.txt')
+    expect(code).toBe(0)
+    expect((await statOf(ws, '/data/f.txt')).modified).toBe('2026-03-04T12:00:00Z')
+    await ws.close()
+  })
+
+  it('symbolic chmod on a directory builds on 755', async () => {
+    const [ws] = await makeOverlayWs({})
+    await run(ws, 'mkdir /data/sub')
+    const [code, , err] = await run(ws, 'chmod g+w /data/sub')
+    expect(code, err).toBe(0)
+    expect((await statOf(ws, '/data/sub')).mode).toBe(0o775)
+    await ws.close()
+  })
+
+  it('touch -r resolves a relative reference against cwd', async () => {
+    const [ws] = await makeWs()
+    await run(ws, 'touch -t 202603041200 /data/f.txt')
+    const [code, , err] = await run(ws, 'cd /data && touch -r f.txt new.txt')
+    expect(code, err).toBe(0)
+    const [, out] = await run(ws, 'ls -l /data')
+    expect(out.split('Mar  4 12:00').length - 1).toBe(2)
+    await ws.close()
+  })
+
+  it('a content write clears overlay times but keeps the mode', async () => {
+    const [ws] = await makeOverlayWs({ '/f.txt': 'hello' })
+    await run(ws, 'chmod 601 /data/f.txt')
+    await run(ws, 'touch -t 202603041200 /data/f.txt')
+    const [code] = await run(ws, 'echo more >> /data/f.txt')
+    expect(code).toBe(0)
+    const stat = await statOf(ws, '/data/f.txt')
+    expect(stat.modified).not.toBe('2026-03-04T12:00:00Z')
+    expect(stat.mode).toBe(0o601)
+    await ws.close()
+  })
+
+  it('mv replacing a file drops the destination meta', async () => {
+    const [ws] = await makeOverlayWs({ '/src.txt': 'new', '/dst.txt': 'old' })
+    await run(ws, 'chmod 601 /data/dst.txt')
+    const [code, , err] = await run(ws, 'mv /data/src.txt /data/dst.txt')
+    expect(code, err).toBe(0)
+    expect((await statOf(ws, '/data/dst.txt')).mode).toBeNull()
+    await ws.close()
+  })
+
+  it('mv carries the source meta over the destination meta', async () => {
+    const [ws] = await makeOverlayWs({ '/src.txt': 'new', '/dst.txt': 'old' })
+    await run(ws, 'chmod 601 /data/dst.txt')
+    await run(ws, 'chmod 640 /data/src.txt')
+    const [code, , err] = await run(ws, 'mv /data/src.txt /data/dst.txt')
+    expect(code, err).toBe(0)
+    expect((await statOf(ws, '/data/dst.txt')).mode).toBe(0o640)
+    await ws.close()
+  })
+
+  it('mv into a symlinked directory keys meta under the real path', async () => {
+    const [ws] = await makeOverlayWs({ '/f.txt': 'hi' })
+    await run(ws, 'mkdir /data/sub')
+    await run(ws, 'chmod 601 /data/f.txt')
+    await run(ws, 'ln -s /data/sub /data/lnk')
+    const [code, , err] = await run(ws, 'mv /data/f.txt /data/lnk')
+    expect(code, err).toBe(0)
+    expect((await statOf(ws, '/data/sub/f.txt')).mode).toBe(0o601)
+    await ws.close()
+  })
+
+  it('glob rm drops the meta of expanded files', async () => {
+    const [ws] = await makeOverlayWs({ '/f.txt': 'hello' })
+    await run(ws, 'chmod 601 /data/f.txt')
+    const [code, , err] = await run(ws, 'rm /data/*.txt')
+    expect(code, err).toBe(0)
+    await run(ws, 'echo hi > /data/f.txt')
+    expect((await statOf(ws, '/data/f.txt')).mode).toBeNull()
     await ws.close()
   })
 })

@@ -16,7 +16,7 @@ from dataclasses import dataclass, fields
 
 from mirage.resource.base import BaseResource
 from mirage.types import MountMode
-from mirage.utils.path import resolve_symlinks
+from mirage.utils.path import glob_prefix_match, resolve_symlinks
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.registry import MountRegistry
 
@@ -140,11 +140,49 @@ class Namespace:
         if mtime is not None:
             meta.mtime = mtime
 
+    def clear_times(self, path: str) -> None:
+        """Drop overlay times after a content write.
+
+        write(2) refreshes mtime, so a stored overlay time would
+        otherwise shadow the backend's fresh one forever. Permission and
+        ownership survive writes; a symlink entry keeps its own times.
+
+        Args:
+            path (str): absolute virtual path that was written.
+        """
+        meta = self._nodes.get(path)
+        if meta is None or meta.target is not None:
+            return
+        meta.mtime = None
+        meta.atime = None
+        if meta.is_empty():
+            del self._nodes[path]
+
     def unlink(self, path: str) -> bool:
         if path in self._nodes:
             del self._nodes[path]
             return True
         return False
+
+    def unlink_glob(self, pattern: str) -> int:
+        """Drop node entries matching an unexpanded glob operand.
+
+        ``rm`` receives the pattern verbatim (backend wrappers expand
+        globs themselves), so the node table must match it here. Drops
+        matched entries and everything under a matched directory.
+
+        Args:
+            pattern (str): absolute virtual glob pattern.
+
+        Returns:
+            int: number of entries dropped.
+        """
+        doomed = [
+            path for path in self._nodes if glob_prefix_match(path, pattern)
+        ]
+        for path in doomed:
+            del self._nodes[path]
+        return len(doomed)
 
     def rename(self, src: str, dst: str) -> bool:
         meta = self._nodes.pop(src, None)

@@ -41,8 +41,10 @@ async def set_attrs(
     ``mode`` is applied to the real inode and recorded in the sidecar so
     stat output stays deterministic across host umasks; times go to the
     real inode; ownership is sidecar-only (chown to arbitrary ids needs
-    privileges the process does not have). Stored, not enforced beyond
-    the inode bits: mount mode does real access control.
+    privileges the process does not have). Stored, not enforced: mount
+    mode does real access control, so the inode keeps owner access
+    (``chmod 000`` must not lock mirage itself out of reads, cp, or
+    snapshot capture; the sidecar still reports the requested bits).
 
     Args:
         accessor (DiskAccessor): backend handle.
@@ -59,7 +61,8 @@ async def set_attrs(
     key = norm(path.mount_path)
     entry = accessor.attrs.setdefault(key, {})
     if mode is not None:
-        await aio_chmod(p, mode)
+        keep = 0o700 if await aiofiles.os.path.isdir(p) else 0o600
+        await aio_chmod(p, mode | keep)
         entry["mode"] = mode
     if uid is not None:
         entry["uid"] = uid

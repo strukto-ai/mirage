@@ -439,7 +439,7 @@ async def _dispatch_command_body(
     if name == "chown":
         return await handle_chown(namespace, dispatch, classified[1:])
     if name == "touch":
-        return await handle_touch(namespace, dispatch, classified[1:])
+        return await handle_touch(namespace, dispatch, session, classified[1:])
 
     # ── symlink-aware dispatch: reads follow links (open(2)); rm/mv act
     #    on the link entry itself (lstat semantics) ──
@@ -484,9 +484,15 @@ async def _dispatch_command_body(
     if io.exit_code == 0 and namespace.nodes:
         if name == "rm":
             # A removed path takes its node meta (overlay attrs) with it;
-            # a removed dir purges everything underneath.
+            # a removed dir purges everything underneath. Glob operands
+            # reach here unexpanded (backend wrappers expand them), so
+            # the node table matches the pattern itself.
             for item in classified[1:]:
-                if isinstance(item, PathSpec):
+                if not isinstance(item, PathSpec):
+                    continue
+                if item.pattern:
+                    namespace.unlink_glob(item.virtual)
+                else:
                     namespace.unlink(item.virtual)
                     namespace.purge_under(item.virtual)
         if post_unlink is not None:

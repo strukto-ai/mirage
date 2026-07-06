@@ -164,3 +164,47 @@ def test_rename_moves_overlay_node(namespace):
     namespace.rename("/data/f.txt", "/data/g.txt")
     assert namespace.meta_for("/data/f.txt") is None
     assert namespace.meta_for("/data/g.txt").mode == 0o600
+
+
+def test_clear_times_keeps_mode_and_ownership(namespace):
+    namespace.set_attrs("/data/f.txt",
+                        mode=0o601,
+                        uid=500,
+                        mtime=1.0,
+                        atime="2026-03-04T12:00:00+00:00")
+    namespace.clear_times("/data/f.txt")
+    meta = namespace.meta_for("/data/f.txt")
+    assert meta.mtime is None
+    assert meta.atime is None
+    assert meta.mode == 0o601
+    assert meta.uid == 500
+
+
+def test_clear_times_drops_time_only_node(namespace):
+    namespace.set_attrs("/data/f.txt", mtime=1.0)
+    namespace.clear_times("/data/f.txt")
+    assert namespace.meta_for("/data/f.txt") is None
+
+
+def test_clear_times_leaves_links_alone(namespace):
+    namespace.symlink("/data/link", "/t1", 1.0)
+    namespace.clear_times("/data/link")
+    assert namespace.meta_for("/data/link").mtime == 1.0
+
+
+def test_unlink_glob_matches_segment_wise(namespace):
+    namespace.set_attrs("/data/a.log", mode=0o600)
+    namespace.set_attrs("/data/sub/b.log", mode=0o600)
+    namespace.set_attrs("/data/keep.txt", mode=0o600)
+    assert namespace.unlink_glob("/data/*.log") == 1
+    assert namespace.meta_for("/data/a.log") is None
+    assert namespace.meta_for("/data/sub/b.log") is not None
+    assert namespace.meta_for("/data/keep.txt") is not None
+
+
+def test_unlink_glob_purges_under_matched_dirs(namespace):
+    namespace.set_attrs("/data/sub/deep/a.txt", mode=0o600)
+    namespace.set_attrs("/data/other.txt", mode=0o600)
+    assert namespace.unlink_glob("/data/s*") == 1
+    assert namespace.meta_for("/data/sub/deep/a.txt") is None
+    assert namespace.meta_for("/data/other.txt") is not None

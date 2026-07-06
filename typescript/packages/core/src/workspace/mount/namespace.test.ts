@@ -192,4 +192,48 @@ describe('Namespace node metadata overlay', () => {
     expect(ws.namespace.metaFor('/data/g.txt')).toBeNull()
     await ws.close()
   })
+
+  it('clearTimes keeps mode and ownership, drops time-only nodes', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    ws.namespace.setAttrs('/data/f.txt', {
+      mode: 0o601,
+      uid: 500,
+      mtime: 1,
+      atime: '2026-03-04T12:00:00+00:00',
+    })
+    ws.namespace.clearTimes('/data/f.txt')
+    const meta = ws.namespace.metaFor('/data/f.txt')
+    expect(meta?.mtime).toBeUndefined()
+    expect(meta?.atime).toBeUndefined()
+    expect(meta?.mode).toBe(0o601)
+    expect(meta?.uid).toBe(500)
+    ws.namespace.setAttrs('/data/g.txt', { mtime: 1 })
+    ws.namespace.clearTimes('/data/g.txt')
+    expect(ws.namespace.metaFor('/data/g.txt')).toBeNull()
+    await ws.close()
+  })
+
+  it('clearTimes leaves links alone', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    ws.namespace.symlink('/data/link', '/t1', 1)
+    ws.namespace.clearTimes('/data/link')
+    expect(ws.namespace.metaFor('/data/link')?.mtime).toBe(1)
+    await ws.close()
+  })
+
+  it('unlinkGlob matches segment-wise and purges under matched dirs', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    ws.namespace.setAttrs('/data/a.log', { mode: 0o600 })
+    ws.namespace.setAttrs('/data/sub/b.log', { mode: 0o600 })
+    ws.namespace.setAttrs('/data/keep.txt', { mode: 0o600 })
+    expect(ws.namespace.unlinkGlob('/data/*.log')).toBe(1)
+    expect(ws.namespace.metaFor('/data/a.log')).toBeNull()
+    expect(ws.namespace.metaFor('/data/sub/b.log')).not.toBeNull()
+    expect(ws.namespace.metaFor('/data/keep.txt')).not.toBeNull()
+    ws.namespace.setAttrs('/data/sub/deep/a.txt', { mode: 0o600 })
+    expect(ws.namespace.unlinkGlob('/data/s*')).toBe(2)
+    expect(ws.namespace.metaFor('/data/sub/deep/a.txt')).toBeNull()
+    expect(ws.namespace.metaFor('/data/keep.txt')).not.toBeNull()
+    await ws.close()
+  })
 })

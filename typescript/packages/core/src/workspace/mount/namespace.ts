@@ -14,7 +14,7 @@
 
 import type { Resource } from '../../resource/base.ts'
 import type { MountMode, PathSpec } from '../../types.ts'
-import { resolveSymlinks } from '../../utils/path.ts'
+import { globPrefixMatch, resolveSymlinks } from '../../utils/path.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import type { ResolveFn } from '../dispatcher.ts'
 import type { MountEntry } from './mount.ts'
@@ -122,8 +122,33 @@ export class Namespace {
     this.nodeTable.set(path, meta)
   }
 
+  // Drop overlay times after a content write. write(2) refreshes mtime,
+  // so a stored overlay time would otherwise shadow the backend's fresh
+  // one forever. Permission and ownership survive writes; a symlink entry
+  // keeps its own times.
+  clearTimes(path: string): void {
+    const meta = this.nodeTable.get(path)
+    if (meta === undefined || meta.target !== undefined) return
+    delete meta.mtime
+    delete meta.atime
+    if (Object.keys(meta).length === 0) this.nodeTable.delete(path)
+  }
+
   unlink(path: string): boolean {
     return this.nodeTable.delete(path)
+  }
+
+  // Drop node entries matching an unexpanded glob operand. `rm` receives
+  // the pattern verbatim (backend wrappers expand globs themselves), so
+  // the node table must match it here. Drops matched entries and
+  // everything under a matched directory.
+  unlinkGlob(pattern: string): number {
+    const doomed: string[] = []
+    for (const path of this.nodeTable.keys()) {
+      if (globPrefixMatch(path, pattern)) doomed.push(path)
+    }
+    for (const path of doomed) this.nodeTable.delete(path)
+    return doomed.length
   }
 
   rename(src: string, dst: string): boolean {

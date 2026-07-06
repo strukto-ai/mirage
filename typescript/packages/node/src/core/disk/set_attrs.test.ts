@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { statSync } from 'node:fs'
-import { writeFile } from 'node:fs/promises'
+import { readFileSync, statSync } from 'node:fs'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DiskAccessor } from '../../accessor/disk.ts'
@@ -41,6 +41,24 @@ describe('core/disk setAttrs', () => {
     expect(statSync(join(root, 'f.txt')).mode & 0o777).toBe(0o601)
     const s = await stat(accessor, spec('/f.txt'))
     expect(s.mode).toBe(0o601)
+  })
+
+  it('mode 000 keeps owner access on the inode', async () => {
+    await setAttrs(accessor, spec('/f.txt'), { mode: 0 })
+    expect(statSync(join(root, 'f.txt')).mode & 0o777).toBe(0o600)
+    const s = await stat(accessor, spec('/f.txt'))
+    expect(s.mode).toBe(0)
+    expect(readFileSync(join(root, 'f.txt'), 'utf8')).toBe('hello')
+  })
+
+  it('dir mode keeps owner traversal on the inode', async () => {
+    await mkdir(join(root, 'sub'))
+    await writeFile(join(root, 'sub', 'x.txt'), 'x')
+    await setAttrs(accessor, spec('/sub'), { mode: 0o050 })
+    expect(statSync(join(root, 'sub')).mode & 0o777).toBe(0o750)
+    expect(readFileSync(join(root, 'sub', 'x.txt'), 'utf8')).toBe('x')
+    const s = await stat(accessor, spec('/sub'))
+    expect(s.mode).toBe(0o050)
   })
 
   it('ownership is sidecar-only', async () => {

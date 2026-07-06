@@ -29,8 +29,9 @@ export interface SetAttrsFields {
 // real inode and recorded in the sidecar so stat output stays deterministic
 // across host umasks; times go to the real inode; ownership is sidecar-only
 // (chown to arbitrary ids needs privileges the process does not have).
-// Stored, not enforced beyond the inode bits: mount mode does real access
-// control.
+// Stored, not enforced: mount mode does real access control, so the inode
+// keeps owner access (`chmod 000` must not lock mirage itself out of reads,
+// cp, or snapshot capture; the sidecar still reports the requested bits).
 export async function setAttrs(
   accessor: DiskAccessor,
   path: PathSpec,
@@ -47,7 +48,8 @@ export async function setAttrs(
   const key = norm(path.mountPath)
   const entry = accessor.attrs.get(key) ?? {}
   if (fields.mode !== undefined) {
-    await chmod(full, fields.mode)
+    const keep = st.isDirectory() ? 0o700 : 0o600
+    await chmod(full, fields.mode | keep)
     entry.mode = fields.mode
   }
   if (fields.uid !== undefined) entry.uid = fields.uid

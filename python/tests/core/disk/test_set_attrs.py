@@ -47,6 +47,28 @@ async def test_set_attrs_mode_hits_inode_and_sidecar(accessor, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_set_attrs_mode_000_keeps_owner_access(accessor, tmp_path):
+    await set_attrs(accessor, _spec("/f.txt"), mode=0)
+    real = os.stat(tmp_path / "f.txt")
+    assert real.st_mode & 0o777 == 0o600
+    result = await stat(accessor, _spec("/f.txt"))
+    assert result.mode == 0
+    assert (tmp_path / "f.txt").read_bytes() == b"hello"
+
+
+@pytest.mark.asyncio
+async def test_set_attrs_dir_mode_keeps_owner_traversal(accessor, tmp_path):
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "x.txt").write_text("x")
+    await set_attrs(accessor, _spec("/sub"), mode=0o050)
+    real = os.stat(tmp_path / "sub")
+    assert real.st_mode & 0o777 == 0o750
+    assert (tmp_path / "sub" / "x.txt").read_text() == "x"
+    result = await stat(accessor, _spec("/sub"))
+    assert result.mode == 0o050
+
+
+@pytest.mark.asyncio
 async def test_set_attrs_ownership_is_sidecar_only(accessor, tmp_path):
     before = os.stat(tmp_path / "f.txt")
     await set_attrs(accessor, _spec("/f.txt"), uid=500, gid="dev")

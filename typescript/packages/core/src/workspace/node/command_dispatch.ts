@@ -526,7 +526,7 @@ async function runCommandBody(
     return handleChown(namespace, dispatch, classified.slice(1))
   }
   if (name === 'touch') {
-    return handleTouch(namespace, dispatch, classified.slice(1))
+    return handleTouch(namespace, dispatch, session, classified.slice(1))
   }
 
   // Symlink-aware dispatch: reads follow links (open(2)); rm/mv act on
@@ -584,9 +584,14 @@ async function runCommandBody(
   if (io.exitCode === 0 && namespace.nodes.size > 0) {
     if (name === 'rm') {
       // A removed path takes its node meta (overlay attrs) with it; a
-      // removed dir purges everything underneath.
+      // removed dir purges everything underneath. Glob operands reach
+      // here unexpanded (backend wrappers expand them), so the node
+      // table matches the pattern itself.
       for (const item of classified.slice(1)) {
-        if (item instanceof PathSpec) {
+        if (!(item instanceof PathSpec)) continue
+        if (item.pattern !== null) {
+          namespace.unlinkGlob(item.virtual)
+        } else {
           namespace.unlink(item.virtual)
           namespace.purgeUnder(item.virtual)
         }

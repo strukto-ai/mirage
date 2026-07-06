@@ -12,33 +12,25 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import time
+import re
 from collections.abc import Callable
 from datetime import datetime, timezone
 
 from mirage.io import IOResult
-from mirage.io.types import ByteSource
-from mirage.types import PathSpec
-from mirage.utils.path import CycleError
+from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.path import CycleError, resolve_path
+from mirage.workspace.executor.builtins.shared import (Result, expand_operands,
+                                                       fail, finish,
+                                                       operand_text,
+                                                       split_value_flags)
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.types import ExecutionNode
-
-_Result = tuple[ByteSource | None, IOResult, ExecutionNode]
+from mirage.workspace.session import Session
 
 _MODE_CLASS_BITS = {"u": 0o700, "g": 0o070, "o": 0o007, "a": 0o777}
 _MODE_PERM_BITS = {"r": 0o444, "w": 0o222, "x": 0o111}
-
-
-def _error(cmd: str, message: str, exit_code: int = 1) -> _Result:
-    err = message.encode()
-    return None, IOResult(exit_code=exit_code,
-                          stderr=err), ExecutionNode(command=cmd,
-                                                     exit_code=exit_code,
-                                                     stderr=err)
-
-
-def _ok(cmd: str) -> _Result:
-    return None, IOResult(), ExecutionNode(command=cmd, exit_code=0)
+_MODE_CLAUSE_RE = re.compile(r"([ugoa]*)([+\-=])([rwx]*)")
+_TOUCH_STAMP_RE = re.compile(r"(\d{8}|\d{10}|\d{12})(\.\d{2})?")
+_TOUCH_STAMP_FMT = {10: "%y%m%d%H%M", 12: "%Y%m%d%H%M"}
 
 
 def parse_mode(text: str, current: int) -> int | None:
@@ -62,26 +54,15 @@ def parse_mode(text: str, current: int) -> int | None:
         parse_mode("a=r", 0o777)      -> 0o444
     """
     if text and all(c in "01234567" for c in text):
-        try:
-            value = int(text, 8)
-        except ValueError:
-            return None
+        value = int(text, 8)
         return value if value <= 0o7777 else None
 
     mode = current
     for clause in text.split(","):
-        i = 0
-        classes = ""
-        while i < len(clause) and clause[i] in "ugoa":
-            classes += clause[i]
-            i += 1
-        if i >= len(clause) or clause[i] not in "+-=":
+        match = _MODE_CLAUSE_RE.fullmatch(clause)
+        if match is None:
             return None
-        action = clause[i]
-        i += 1
-        perms = clause[i:]
-        if not all(c in "rwx" for c in perms):
-            return None
+        classes, action, perms = match.groups()
         class_mask = 0
         for c in classes or "a":
             class_mask |= _MODE_CLASS_BITS[c]
@@ -125,6 +106,10 @@ def parse_owner(text: str) -> tuple[int | str | None, int | str | None]:
 def parse_touch_stamp(t: str | None, d: str | None) -> str | None:
     """Resolve touch -t/-d into an ISO timestamp.
 
+    The -t stamp is the POSIX ``[[CC]YY]MMDDhhmm[.ss]`` form; strptime
+    does the field validation, and its ``%y`` rule (00-68 is 2000s,
+    69-99 is 1900s) is exactly the POSIX century inference.
+
     Args:
         t (str | None): POSIX ``[[CC]YY]MMDDhhmm[.ss]`` stamp.
         d (str | None): date string (ISO 8601 or ``YYYY-MM-DD hh:mm:ss``).
@@ -141,29 +126,17 @@ def parse_touch_stamp(t: str | None, d: str | None) -> str | None:
         parse_touch_stamp(None, "2026-01-02")   -> "2026-01-02T00:00:00+00:00"
     """
     if t is not None:
-        raw = t
-        seconds = 0
-        if "." in raw:
-            raw, _, sec_text = raw.partition(".")
-            if len(sec_text) != 2 or not sec_text.isdigit():
-                raise ValueError(t)
-            seconds = int(sec_text)
-        if not raw.isdigit():
+        if _TOUCH_STAMP_RE.fullmatch(t) is None:
             raise ValueError(t)
+        raw, _, seconds = t.partition(".")
         if len(raw) == 8:
-            raw = f"{time.gmtime().tm_year:04d}" + raw
-        elif len(raw) == 10:
-            century = "20" if int(raw[:2]) < 69 else "19"
-            raw = century + raw
-        if len(raw) != 12:
-            raise ValueError(t)
-        dt = datetime(int(raw[0:4]),
-                      int(raw[4:6]),
-                      int(raw[6:8]),
-                      int(raw[8:10]),
-                      int(raw[10:12]),
-                      seconds,
-                      tzinfo=timezone.utc)
+            raw = f"{datetime.now(timezone.utc).year:04d}{raw}"
+        try:
+            dt = datetime.strptime(raw, _TOUCH_STAMP_FMT[len(raw)])
+            dt = dt.replace(second=int(seconds) if seconds else 0,
+                            tzinfo=timezone.utc)
+        except ValueError:
+            raise ValueError(t) from None
         return dt.isoformat()
     if d is not None:
         dt = datetime.fromisoformat(d.replace("Z", "+00:00"))
@@ -175,84 +148,6 @@ def parse_touch_stamp(t: str | None, d: str | None) -> str | None:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _split_value_flags(
-    args: list[str | PathSpec],
-    boolean: str,
-    valued: str,
-) -> tuple[set[str], dict[str, str], list[str | PathSpec], str | None]:
-    """Split leading flags where some take a value (``-t STAMP``).
-
-    Args:
-        args (list[str | PathSpec]): args after the command name.
-        boolean (str): single-letter flags with no value.
-        valued (str): single-letter flags that consume the next arg.
-
-    Returns:
-        tuple: (bool flags, valued flags, operands, bad option or None).
-    """
-    flags: set[str] = set()
-    values: dict[str, str] = {}
-    operands: list[str | PathSpec] = []
-    parsing = True
-    i = 0
-    while i < len(args):
-        arg = args[i]
-        s = arg.virtual if isinstance(arg, PathSpec) else str(arg)
-        if parsing and s == "--":
-            parsing = False
-            i += 1
-            continue
-        if parsing and s != "-" and len(s) >= 2 and s.startswith(
-                "-") and not s.startswith("--"):
-            body = s[1:]
-            bad = next((c for c in body if c not in boolean + valued), None)
-            if bad is not None:
-                return flags, values, operands, bad
-            for j, c in enumerate(body):
-                if c in boolean:
-                    flags.add(c)
-                    continue
-                rest = body[j + 1:]
-                if rest:
-                    values[c] = rest
-                elif i + 1 < len(args):
-                    i += 1
-                    nxt = args[i]
-                    values[c] = (nxt.raw_path or nxt.virtual) if isinstance(
-                        nxt, PathSpec) else str(nxt)
-                break
-            i += 1
-            continue
-        parsing = False
-        operands.append(arg)
-        i += 1
-    return flags, values, operands, None
-
-
-async def _expand_operands(
-    namespace: Namespace,
-    operands: list[str | PathSpec],
-) -> list[PathSpec]:
-    """Coerce operands to PathSpec and expand glob patterns per mount.
-
-    Args:
-        namespace (Namespace): addressing authority (mount lookup).
-        operands (list[str | PathSpec]): positional operands.
-    """
-    out: list[PathSpec] = []
-    for item in operands:
-        spec = item if isinstance(item, PathSpec) else PathSpec.from_str_path(
-            str(item))
-        if spec.pattern:
-            mount = namespace.mount_for(spec.virtual)
-            expanded = await mount.resource.resolve_glob(
-                [spec], mount.prefix.rstrip("/"))
-            out.extend(p for p in expanded if isinstance(p, PathSpec))
-            continue
-        out.append(spec)
-    return out
 
 
 def _read_only_error(cmd: str, namespace: Namespace, path: PathSpec) -> str:
@@ -294,11 +189,87 @@ async def _setattr_via(
     namespace.set_attrs(path.virtual, mtime=epoch, **fields)
 
 
+def _follow_operand(
+    namespace: Namespace,
+    cmd: str,
+    action: str,
+    target: PathSpec,
+    errors: list[str],
+) -> PathSpec | None:
+    """Follow symlinks for one operand, collecting the ELOOP error.
+
+    Args:
+        namespace (Namespace): addressing authority.
+        cmd (str): command name for the error message.
+        action (str): GNU verb in the message ("access", "touch").
+        target (PathSpec): the operand as typed.
+        errors (list[str]): per-operand error accumulator.
+    """
+    try:
+        virtual = namespace.follow(target.virtual)
+    except CycleError:
+        errors.append(f"{cmd}: cannot {action} '{target.display}': "
+                      f"Too many levels of symbolic links\n")
+        return None
+    return PathSpec.from_str_path(virtual)
+
+
+async def _resolve_operand(
+    namespace: Namespace,
+    dispatch: Callable,
+    cmd: str,
+    target: PathSpec,
+    errors: list[str],
+) -> tuple[PathSpec, FileStat] | None:
+    """Follow symlinks and stat one operand, collecting GNU errors.
+
+    Args:
+        namespace (Namespace): addressing authority.
+        dispatch (Callable): op dispatcher.
+        cmd (str): command name for the error messages.
+        target (PathSpec): the operand as typed.
+        errors (list[str]): per-operand error accumulator.
+    """
+    resolved = _follow_operand(namespace, cmd, "access", target, errors)
+    if resolved is None:
+        return None
+    try:
+        stat, _ = await dispatch("stat", resolved)
+    except FileNotFoundError:
+        errors.append(f"{cmd}: cannot access '{target.display}': "
+                      f"No such file or directory\n")
+        return None
+    return resolved, stat
+
+
+async def _apply_attrs(
+    namespace: Namespace,
+    dispatch: Callable,
+    cmd: str,
+    resolved: PathSpec,
+    errors: list[str],
+    **fields: object,
+) -> None:
+    """Setattr one operand, collecting the read-only refusal.
+
+    Args:
+        namespace (Namespace): addressing authority.
+        dispatch (Callable): op dispatcher.
+        cmd (str): command name for the error message.
+        resolved (PathSpec): link-resolved target path.
+        errors (list[str]): per-operand error accumulator.
+    """
+    try:
+        await _setattr_via(namespace, dispatch, resolved, **fields)
+    except PermissionError:
+        errors.append(_read_only_error(cmd, namespace, resolved))
+
+
 async def handle_chmod(
     namespace: Namespace,
     dispatch: Callable,
     args: list[str | PathSpec],
-) -> _Result:
+) -> Result:
     """chmod MODE FILE...: set permission bits via setattr.
 
     Follows symlinks (GNU chmod always dereferences). Stored, not
@@ -309,60 +280,47 @@ async def handle_chmod(
         dispatch (Callable): op dispatcher.
         args (list[str | PathSpec]): args after the command name.
     """
-    flags, _values, operands, bad = _split_value_flags(args, "Rvf", "")
+    flags, _values, operands, bad = split_value_flags(args, "Rvf", "")
     if bad is not None:
-        return _error("chmod", f"chmod: invalid option -- '{bad}'\n", 2)
+        return fail("chmod", f"chmod: invalid option -- '{bad}'\n", 2)
     if len(operands) < 2:
-        return _error("chmod", "chmod: missing operand\n", 2)
-    mode_text = operands[0]
-    mode_text = mode_text.virtual if isinstance(mode_text,
-                                                PathSpec) else str(mode_text)
+        return fail("chmod", "chmod: missing operand\n", 2)
     if "R" in flags:
-        return _error("chmod", "chmod: -R is not supported\n", 2)
+        return fail("chmod", "chmod: -R is not supported\n", 2)
+    mode_text = operand_text(operands[0])
     if parse_mode(mode_text, 0) is None:
-        return _error("chmod", f"chmod: invalid mode: '{mode_text}'\n", 1)
+        return fail("chmod", f"chmod: invalid mode: '{mode_text}'\n", 1)
 
-    exit_code = 0
     errors: list[str] = []
-    for target in await _expand_operands(namespace, operands[1:]):
-        try:
-            virtual = namespace.follow(target.virtual)
-        except CycleError:
-            errors.append(f"chmod: cannot access '{target.display}': "
-                          f"Too many levels of symbolic links\n")
-            exit_code = 1
+    for target in await expand_operands(namespace, operands[1:]):
+        found = await _resolve_operand(namespace, dispatch, "chmod", target,
+                                       errors)
+        if found is None:
             continue
-        resolved = PathSpec.from_str_path(virtual)
-        try:
-            stat, _ = await dispatch("stat", resolved)
-        except FileNotFoundError:
-            errors.append(f"chmod: cannot access '{target.display}': "
-                          f"No such file or directory\n")
-            exit_code = 1
-            continue
-        current = stat.mode if stat.mode is not None else 0o644
+        resolved, stat = found
+        # Backends without a mode default to what ls renders: 755 for
+        # directories, 644 for files (symbolic clauses build on this).
+        if stat.mode is not None:
+            current = stat.mode
+        else:
+            current = 0o755 if stat.type == FileType.DIRECTORY else 0o644
         new_mode = parse_mode(mode_text, current)
         if new_mode is None:
-            return _error("chmod", f"chmod: invalid mode: '{mode_text}'\n", 1)
-        try:
-            await _setattr_via(namespace, dispatch, resolved, mode=new_mode)
-        except PermissionError:
-            errors.append(_read_only_error("chmod", namespace, resolved))
-            exit_code = 1
-    if errors:
-        err = "".join(errors).encode()
-        return None, IOResult(exit_code=exit_code,
-                              stderr=err), ExecutionNode(command="chmod",
-                                                         exit_code=exit_code,
-                                                         stderr=err)
-    return _ok("chmod")
+            return fail("chmod", f"chmod: invalid mode: '{mode_text}'\n", 1)
+        await _apply_attrs(namespace,
+                           dispatch,
+                           "chmod",
+                           resolved,
+                           errors,
+                           mode=new_mode)
+    return finish("chmod", errors)
 
 
 async def handle_chown(
     namespace: Namespace,
     dispatch: Callable,
     args: list[str | PathSpec],
-) -> _Result:
+) -> Result:
     """chown OWNER[:GROUP] FILE...: set ownership via setattr.
 
     Ownership is stored, not enforced (mirage has no user model); names
@@ -373,61 +331,45 @@ async def handle_chown(
         dispatch (Callable): op dispatcher.
         args (list[str | PathSpec]): args after the command name.
     """
-    flags, _values, operands, bad = _split_value_flags(args, "Rvfh", "")
+    flags, _values, operands, bad = split_value_flags(args, "Rvfh", "")
     if bad is not None:
-        return _error("chown", f"chown: invalid option -- '{bad}'\n", 2)
+        return fail("chown", f"chown: invalid option -- '{bad}'\n", 2)
     if len(operands) < 2:
-        return _error("chown", "chown: missing operand\n", 2)
+        return fail("chown", "chown: missing operand\n", 2)
     if "R" in flags:
-        return _error("chown", "chown: -R is not supported\n", 2)
-    owner_text = operands[0]
-    owner_text = owner_text.virtual if isinstance(
-        owner_text, PathSpec) else str(owner_text)
+        return fail("chown", "chown: -R is not supported\n", 2)
+    owner_text = operand_text(operands[0])
     uid, gid = parse_owner(owner_text)
     if uid is None and gid is None:
-        return _error("chown", f"chown: invalid spec: '{owner_text}'\n", 1)
+        return fail("chown", f"chown: invalid spec: '{owner_text}'\n", 1)
 
     no_deref = "h" in flags
-    exit_code = 0
     errors: list[str] = []
-    for target in await _expand_operands(namespace, operands[1:]):
+    for target in await expand_operands(namespace, operands[1:]):
         if no_deref and namespace.is_link(target.virtual):
             namespace.set_attrs(target.virtual, uid=uid, gid=gid)
             continue
-        try:
-            virtual = namespace.follow(target.virtual)
-        except CycleError:
-            errors.append(f"chown: cannot access '{target.display}': "
-                          f"Too many levels of symbolic links\n")
-            exit_code = 1
+        found = await _resolve_operand(namespace, dispatch, "chown", target,
+                                       errors)
+        if found is None:
             continue
-        resolved = PathSpec.from_str_path(virtual)
-        try:
-            await dispatch("stat", resolved)
-        except FileNotFoundError:
-            errors.append(f"chown: cannot access '{target.display}': "
-                          f"No such file or directory\n")
-            exit_code = 1
-            continue
-        try:
-            await _setattr_via(namespace, dispatch, resolved, uid=uid, gid=gid)
-        except PermissionError:
-            errors.append(_read_only_error("chown", namespace, resolved))
-            exit_code = 1
-    if errors:
-        err = "".join(errors).encode()
-        return None, IOResult(exit_code=exit_code,
-                              stderr=err), ExecutionNode(command="chown",
-                                                         exit_code=exit_code,
-                                                         stderr=err)
-    return _ok("chown")
+        resolved, _stat = found
+        await _apply_attrs(namespace,
+                           dispatch,
+                           "chown",
+                           resolved,
+                           errors,
+                           uid=uid,
+                           gid=gid)
+    return finish("chown", errors)
 
 
 async def handle_touch(
     namespace: Namespace,
     dispatch: Callable,
+    session: Session,
     args: list[str | PathSpec],
-) -> _Result:
+) -> Result:
     """touch: set access/modification times, creating missing files.
 
     GNU flags: -a/-m select which times, -c no-create, -h no-dereference
@@ -437,74 +379,77 @@ async def handle_touch(
     Args:
         namespace (Namespace): addressing authority.
         dispatch (Callable): op dispatcher.
+        session (Session): session whose cwd resolves relative -r paths.
         args (list[str | PathSpec]): args after the command name.
     """
-    flags, values, operands, bad = _split_value_flags(args, "acmh", "tdr")
+    flags, values, operands, bad = split_value_flags(args, "acmh", "tdr")
     if bad is not None:
-        return _error("touch", f"touch: invalid option -- '{bad}'\n", 2)
+        return fail("touch", f"touch: invalid option -- '{bad}'\n", 2)
     if not operands:
-        return _error("touch", "touch: missing file operand\n", 1)
+        return fail("touch", "touch: missing file operand\n", 1)
 
     try:
         stamp = parse_touch_stamp(values.get("t"), values.get("d"))
     except ValueError as exc:
-        return _error("touch", f"touch: invalid date format '{exc}'\n", 1)
+        return fail("touch", f"touch: invalid date format '{exc}'\n", 1)
     if stamp is None and "r" in values:
-        ref = PathSpec.from_str_path(values["r"])
+        ref = PathSpec.from_str_path(resolve_path(values["r"], session.cwd))
         try:
             ref_stat, _ = await dispatch("stat", ref)
         except FileNotFoundError:
-            return _error(
+            return fail(
                 "touch", f"touch: failed to get attributes of "
                 f"'{values['r']}': No such file or directory\n")
         stamp = ref_stat.modified
     if stamp is None:
         stamp = _now_iso()
 
-    set_atime = "a" in flags or "m" not in flags
-    set_mtime = "m" in flags or "a" not in flags
+    fields: dict[str, object] = {}
+    if "a" in flags or "m" not in flags:
+        fields["atime"] = stamp
+    if "m" in flags or "a" not in flags:
+        fields["mtime"] = stamp
 
-    exit_code = 0
     errors: list[str] = []
     writes: dict[str, bytes] = {}
-    for target in await _expand_operands(namespace, operands):
+    for target in await expand_operands(namespace, operands):
         if namespace.is_mount_root(target.virtual):
             errors.append(f"touch: cannot touch '{target.display}': "
                           f"Is a directory\n")
-            exit_code = 1
             continue
         if "h" in flags and namespace.is_link(target.virtual):
             epoch = datetime.fromisoformat(stamp).timestamp()
             namespace.set_attrs(target.virtual, mtime=epoch)
             continue
-        try:
-            virtual = namespace.follow(target.virtual)
-        except CycleError:
-            errors.append(f"touch: cannot touch '{target.display}': "
-                          f"Too many levels of symbolic links\n")
-            exit_code = 1
+        resolved = _follow_operand(namespace, "touch", "touch", target, errors)
+        if resolved is None:
             continue
-        resolved = PathSpec.from_str_path(virtual)
         try:
             try:
                 await dispatch("stat", resolved)
             except FileNotFoundError:
                 if "c" in flags:
                     continue
+                mount = namespace.mount_for(resolved.virtual)
+                if not mount.supports_op("write", resolved.virtual):
+                    # Stat-only backend (e.g. an API surface): creation is
+                    # impossible, which GNU reports as EROFS.
+                    errors.append(f"touch: cannot touch '{target.display}': "
+                                  f"Read-only file system\n")
+                    continue
                 await dispatch("write", resolved, data=b"")
                 writes[resolved.virtual] = b""
-            fields: dict[str, object] = {}
-            if set_atime:
-                fields["atime"] = stamp
-            if set_mtime:
-                fields["mtime"] = stamp
             await _setattr_via(namespace, dispatch, resolved, **fields)
         except PermissionError:
             errors.append(_read_only_error("touch", namespace, resolved))
-            exit_code = 1
-    io = IOResult(exit_code=exit_code, writes=writes)
-    if errors:
-        io.stderr = "".join(errors).encode()
-    return None, io, ExecutionNode(command="touch",
-                                   exit_code=exit_code,
-                                   stderr=io.stderr if errors else None)
+    return finish("touch", errors, io=IOResult(writes=writes))
+
+
+__all__ = [
+    "handle_chmod",
+    "handle_chown",
+    "handle_touch",
+    "parse_mode",
+    "parse_owner",
+    "parse_touch_stamp",
+]

@@ -98,6 +98,31 @@ class _OverlayRAMResource(RAMResource):
         self._ops_list = [ro for ro in self._ops_list if ro.name != "setattr"]
 
 
+class _StatOnlyRAMResource(RAMResource):
+    """RAM resource stripped of write-shaped ops, standing in for an API
+    backend that can stat but never create files."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._ops_list = [
+            ro for ro in self._ops_list if ro.name not in {"setattr", "write"}
+        ]
+
+
+def _make_overlay_ws(
+        files: dict[str, bytes]) -> tuple[Workspace, _OverlayRAMResource]:
+    resource = _OverlayRAMResource()
+    resource._store.files.update(files)
+    ws = Workspace({"/data/": (resource, MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    return ws, resource
+
+
+async def _stat_mode(ws: Workspace, path: str) -> int | None:
+    st, _ = await ws.dispatch("stat", PathSpec.from_str_path(path))
+    return st.mode
+
+
 def _make_ws(mode: MountMode = MountMode.WRITE) -> Workspace:
     resource = RAMResource()
     resource._store.files["/f.txt"] = b"hello"
@@ -196,6 +221,102 @@ async def test_metadata_commands_respect_read_only_mount():
         code, _, err = await _run(ws, cmd)
         assert code == 1
         assert "read-only mount" in err
+
+
+@pytest.mark.asyncio
+async def test_touch_cannot_create_on_stat_only_mount():
+    resource = _StatOnlyRAMResource()
+    resource._store.files["/f.txt"] = b"hello"
+    ws = Workspace({"/data/": (resource, MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    code, _, err = await _run(ws, "touch /data/new.txt")
+    assert code == 1
+    assert "cannot touch '/data/new.txt': Read-only file system" in err
+    _, out, _ = await _run(ws, "ls /data")
+    assert "new.txt" not in out
+
+
+@pytest.mark.asyncio
+async def test_touch_stat_only_mount_existing_file_uses_overlay():
+    resource = _StatOnlyRAMResource()
+    resource._store.files["/f.txt"] = b"hello"
+    ws = Workspace({"/data/": (resource, MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    code, _, _ = await _run(ws, "touch -t 202603041200 /data/f.txt")
+    assert code == 0
+    st, _ = await ws.dispatch("stat", PathSpec.from_str_path("/data/f.txt"))
+    assert st.modified == "2026-03-04T12:00:00Z"
+
+
+@pytest.mark.asyncio
+async def test_chmod_symbolic_directory_base_is_755():
+    ws, _ = _make_overlay_ws({})
+    await _run(ws, "mkdir /data/sub")
+    code, _, err = await _run(ws, "chmod g+w /data/sub")
+    assert code == 0, err
+    assert await _stat_mode(ws, "/data/sub") == 0o775
+
+
+@pytest.mark.asyncio
+async def test_touch_r_relative_reference_resolves_against_cwd():
+    ws = _make_ws()
+    await _run(ws, "touch -t 202603041200 /data/f.txt")
+    code, _, err = await _run(ws, "cd /data && touch -r f.txt new.txt")
+    assert code == 0, err
+    _, out, _ = await _run(ws, "ls -l /data")
+    assert out.count("Mar  4 12:00") == 2
+
+
+@pytest.mark.asyncio
+async def test_write_clears_overlay_times_but_keeps_mode():
+    ws, _ = _make_overlay_ws({"/f.txt": b"hello"})
+    await _run(ws, "chmod 601 /data/f.txt")
+    await _run(ws, "touch -t 202603041200 /data/f.txt")
+    code, _, _ = await _run(ws, "echo more >> /data/f.txt")
+    assert code == 0
+    st, _ = await ws.dispatch("stat", PathSpec.from_str_path("/data/f.txt"))
+    assert st.modified != "2026-03-04T12:00:00Z"
+    assert st.mode == 0o601
+
+
+@pytest.mark.asyncio
+async def test_mv_replacing_file_drops_destination_meta():
+    ws, _ = _make_overlay_ws({"/src.txt": b"new", "/dst.txt": b"old"})
+    await _run(ws, "chmod 601 /data/dst.txt")
+    code, _, err = await _run(ws, "mv /data/src.txt /data/dst.txt")
+    assert code == 0, err
+    assert await _stat_mode(ws, "/data/dst.txt") is None
+
+
+@pytest.mark.asyncio
+async def test_mv_carries_source_meta_over_destination_meta():
+    ws, _ = _make_overlay_ws({"/src.txt": b"new", "/dst.txt": b"old"})
+    await _run(ws, "chmod 601 /data/dst.txt")
+    await _run(ws, "chmod 640 /data/src.txt")
+    code, _, err = await _run(ws, "mv /data/src.txt /data/dst.txt")
+    assert code == 0, err
+    assert await _stat_mode(ws, "/data/dst.txt") == 0o640
+
+
+@pytest.mark.asyncio
+async def test_mv_into_linked_dir_keys_meta_under_real_path():
+    ws, _ = _make_overlay_ws({"/f.txt": b"hi"})
+    await _run(ws, "mkdir /data/sub")
+    await _run(ws, "chmod 601 /data/f.txt")
+    await _run(ws, "ln -s /data/sub /data/lnk")
+    code, _, err = await _run(ws, "mv /data/f.txt /data/lnk")
+    assert code == 0, err
+    assert await _stat_mode(ws, "/data/sub/f.txt") == 0o601
+
+
+@pytest.mark.asyncio
+async def test_glob_rm_drops_meta_of_expanded_files():
+    ws, _ = _make_overlay_ws({"/f.txt": b"hello"})
+    await _run(ws, "chmod 601 /data/f.txt")
+    code, _, err = await _run(ws, "rm /data/*.txt")
+    assert code == 0, err
+    await _run(ws, "echo hi > /data/f.txt")
+    assert await _stat_mode(ws, "/data/f.txt") is None
 
 
 @pytest.mark.asyncio
