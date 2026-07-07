@@ -68,7 +68,6 @@ async def apply_io(
     records: list[OpRecord] | None = None,
 ) -> None:
     cache_set = set(io.cache)
-    max_bytes = getattr(cache, "max_drain_bytes", None)
     for path in io.cache:
         if is_cacheable is not None and not is_cacheable(path):
             continue
@@ -88,8 +87,8 @@ async def apply_io(
                         and path not in cache._drain_tasks
                         and not await cache.exists(path)):
                     task = asyncio.create_task(
-                        _background_drain(cache, path, data, max_bytes,
-                                          records))
+                        _background_drain(cache, path, data,
+                                          cache.drain_budget, records))
                     cache._drain_tasks[path] = task
                     task.add_done_callback(
                         lambda t, p=path: cache._drain_tasks.pop(p, None))
@@ -105,25 +104,20 @@ async def _background_drain(
     cache: FileCacheMixin,
     path: str,
     it: CachableAsyncIterator,
-    max_bytes: int | None = None,
+    max_bytes: int,
     records: list[OpRecord] | None = None,
 ) -> None:
     """Drain an unconsumed stream and write to cache.
 
     Cancelled by workspace.close() if the stream is still draining at
-    shutdown. If max_bytes is set and the drain exceeds it without
-    exhausting the source, the partial buffer is discarded and the path
-    is not cached (next read will fetch fresh from the resource).
-    The fingerprint is looked up after the drain: streaming backends
-    stamp their read record lazily, once the GET response arrives.
+    shutdown. If the drain exceeds max_bytes (the cache's drain_budget)
+    without exhausting the source, the partial buffer is discarded and
+    the path is not cached (next read will fetch fresh from the
+    resource). The fingerprint is looked up after the drain: streaming
+    backends stamp their read record lazily, once the GET response
+    arrives.
     """
     try:
-        if max_bytes is None:
-            materialized = await it.drain()
-            await cache.add(path,
-                            materialized,
-                            fingerprint=read_fingerprint(records, path))
-            return
         materialized, fully_drained = await it.drain_bounded(max_bytes)
         if fully_drained:
             await cache.add(path,

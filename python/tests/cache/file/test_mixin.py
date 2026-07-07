@@ -210,6 +210,22 @@ class TestFingerprint:
         assert await cache.is_fresh("/missing", "etag-1") is False
 
 
+class TestDrainBudget:
+
+    def test_defaults_to_cache_limit(self):
+        cache = RAMFileCacheStore(cache_limit="1KB")
+        assert cache.max_drain_bytes is None
+        assert cache.drain_budget == 1024
+
+    def test_below_limit_kept(self):
+        cache = RAMFileCacheStore(cache_limit="1KB", max_drain_bytes=100)
+        assert cache.drain_budget == 100
+
+    def test_above_limit_clamped(self):
+        cache = RAMFileCacheStore(cache_limit="1KB", max_drain_bytes=4096)
+        assert cache.drain_budget == 1024
+
+
 class TestEviction:
 
     @pytest.mark.asyncio

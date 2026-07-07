@@ -23,6 +23,8 @@ class FileCacheMixin:
     subclass implements the cache methods using resource's store.
     """
 
+    max_drain_bytes: int | None = None
+
     async def get(self, key: str) -> bytes | None:
         raise NotImplementedError
 
@@ -90,3 +92,16 @@ class FileCacheMixin:
     @property
     def cache_limit(self) -> int:
         raise NotImplementedError
+
+    @property
+    def drain_budget(self) -> int:
+        """Max bytes a background drain may buffer to fill this cache.
+
+        An entry larger than ``cache_limit`` is evicted straight after
+        the add, so draining past the limit is provably wasted work:
+        ``max_drain_bytes`` is clamped to ``cache_limit``, and ``None``
+        (the default) means the full limit.
+        """
+        if self.max_drain_bytes is None:
+            return self.cache_limit
+        return min(self.max_drain_bytes, self.cache_limit)

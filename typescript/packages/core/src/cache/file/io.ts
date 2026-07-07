@@ -15,7 +15,7 @@
 import { CachableAsyncIterator, concat } from '../../io/cachable_iterator.ts'
 import { materialize, type IOResult } from '../../io/types.ts'
 import type { OpRecord } from '../../observe/record.ts'
-import type { FileCache } from './mixin.ts'
+import { drainBudget, type FileCache } from './mixin.ts'
 
 /**
  * Latest backend fingerprint recorded for a read of `path`.
@@ -71,7 +71,6 @@ export async function applyIo(
   records?: readonly OpRecord[],
 ): Promise<void> {
   const cacheSet = new Set(io.cache)
-  const maxBytes = cache.maxDrainBytes
   for (const path of io.cache) {
     if (isCacheable !== undefined && !isCacheable(path)) continue
     const source = io.reads[path] ?? io.writes[path]
@@ -84,7 +83,7 @@ export async function applyIo(
       } else {
         const tasks = cache.drainTasks
         if (tasks !== undefined && !tasks.has(path) && !(await cache.exists(path))) {
-          const task = backgroundDrain(cache, tasks, path, source, maxBytes, records)
+          const task = backgroundDrain(cache, tasks, path, source, drainBudget(cache), records)
           tasks.set(path, task)
           void task.finally(() => {
             if (tasks.get(path) === task) tasks.delete(path)
@@ -113,17 +112,16 @@ async function backgroundDrain(
   tasks: Map<string, Promise<void>>,
   path: string,
   it: CachableAsyncIterator,
-  maxBytes: number | null,
+  maxBytes: number,
   records?: readonly OpRecord[],
 ): Promise<void> {
   try {
-    let materialized: Uint8Array
-    if (maxBytes === null) {
-      materialized = await it.drain()
-    } else {
-      const [data, fullyDrained] = await it.drainBounded(maxBytes)
-      if (!fullyDrained) return
-      materialized = data
+    const [materialized, fullyDrained] = await it.drainBounded(maxBytes)
+    if (!fullyDrained) {
+      console.info(
+        `cache drain budget exceeded for ${path} (>${String(maxBytes)} bytes), skipping fill`,
+      )
+      return
     }
     if (tasks.has(path)) {
       await cache.add(path, materialized, { fingerprint: readFingerprint(records, path) })

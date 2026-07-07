@@ -216,18 +216,27 @@ describe('background drain', () => {
 })
 
 describe('maxDrainBytes (cancellable cache drain)', () => {
-  it('drains unbounded when threshold is null', async () => {
-    const cache = new RAMFileCacheStore()
-    const chunks = Array.from({ length: 10 }, () => new Uint8Array(100).fill(97))
+  it('defaults the budget to cacheLimit, never unbounded', async () => {
+    const cache = new RAMFileCacheStore({ limit: 500 })
+    const small = makeChunkedStream(Array.from({ length: 3 }, () => new Uint8Array(100).fill(97)))
+    const huge = makeChunkedStream(Array.from({ length: 10 }, () => new Uint8Array(100).fill(98)))
+    await applyIo(cache, new IOResult({ reads: { '/small.txt': small }, cache: ['/small.txt'] }))
+    await applyIo(cache, new IOResult({ reads: { '/huge.txt': huge }, cache: ['/huge.txt'] }))
+    await sleep(50)
+    expect((await cache.get('/small.txt'))?.byteLength).toBe(300)
+    expect(await cache.get('/huge.txt')).toBeNull()
+  })
+
+  it('clamps maxDrainBytes above cacheLimit to the limit', async () => {
+    const cache = new RAMFileCacheStore({ limit: 500, maxDrainBytes: 100_000 })
+    const chunks = Array.from({ length: 10 }, () => new Uint8Array(100).fill(99))
     const io = new IOResult({
       reads: { '/big.txt': makeChunkedStream(chunks) },
       cache: ['/big.txt'],
     })
     await applyIo(cache, io)
     await sleep(50)
-    const cached = await cache.get('/big.txt')
-    expect(cached).not.toBeNull()
-    expect(cached?.byteLength).toBe(1000)
+    expect(await cache.get('/big.txt')).toBeNull()
   })
 
   it('drain completes below threshold', async () => {
