@@ -61,4 +61,23 @@ describe('CachableAsyncIterator', () => {
     expect(full).toBe(true)
     expect(new TextDecoder().decode(bytes)).toBe('ab')
   })
+
+  it('drainBounded closes the source when the budget is exceeded', async () => {
+    let closed = false
+    async function* chunks(): AsyncIterable<Uint8Array> {
+      try {
+        await Promise.resolve()
+        yield new Uint8Array(100)
+        yield new Uint8Array(100)
+        yield new Uint8Array(100)
+      } finally {
+        closed = true
+      }
+    }
+    const ci = new CachableAsyncIterator(chunks())
+    const [bytes, full] = await ci.drainBounded(150)
+    expect(full).toBe(false)
+    expect(bytes.byteLength).toBe(200)
+    expect(closed).toBe(true)
+  })
 })

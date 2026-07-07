@@ -117,3 +117,37 @@ def test_cachable_async_iterator_drain_includes_already_consumed():
 async def _failing_source():
     yield b"aaa"
     raise RuntimeError("source failed")
+
+
+async def _closable_source(events: list[str]):
+    try:
+        yield b"x" * 100
+        yield b"y" * 100
+        yield b"z" * 100
+    finally:
+        events.append("closed")
+
+
+async def _run_drain_bounded_closes_source_on_exceed():
+    events: list[str] = []
+    ci = CachableAsyncIterator(_closable_source(events))
+    data, fully_drained = await ci.drain_bounded(150)
+    assert fully_drained is False
+    assert data == b"x" * 100 + b"y" * 100
+    assert events == ["closed"]
+
+
+async def _run_drain_bounded_within_budget_drains_fully():
+    events: list[str] = []
+    ci = CachableAsyncIterator(_closable_source(events))
+    data, fully_drained = await ci.drain_bounded(1000)
+    assert fully_drained is True
+    assert data == b"x" * 100 + b"y" * 100 + b"z" * 100
+
+
+def test_cachable_async_iterator_drain_bounded_closes_source_on_exceed():
+    asyncio.run(_run_drain_bounded_closes_source_on_exceed())
+
+
+def test_cachable_async_iterator_drain_bounded_within_budget():
+    asyncio.run(_run_drain_bounded_within_budget_drains_fully())

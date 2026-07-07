@@ -117,12 +117,7 @@ async function backgroundDrain(
 ): Promise<void> {
   try {
     const [materialized, fullyDrained] = await it.drainBounded(maxBytes)
-    if (!fullyDrained) {
-      console.info(
-        `cache drain budget exceeded for ${path} (>${String(maxBytes)} bytes), skipping fill`,
-      )
-      return
-    }
+    if (!fullyDrained) return
     if (tasks.has(path)) {
       await cache.add(path, materialized, { fingerprint: readFingerprint(records, path) })
     }

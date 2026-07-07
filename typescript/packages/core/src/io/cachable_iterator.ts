@@ -70,7 +70,10 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
         if (result.done === true) break
         this.buffer.push(result.value)
         total += result.value.byteLength
-        if (total > maxBytes) return [concat(this.buffer), false]
+        if (total > maxBytes) {
+          await this.source.return?.(undefined)
+          return [concat(this.buffer), false]
+        }
       }
     } finally {
       this.exhaustedFlag = true
