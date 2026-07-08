@@ -115,6 +115,11 @@ async def check_read_family(ws: Workspace, dst: str, label: str) -> None:
     check(f"{label}: head invalid -n", code == 1 and "abc" in err)
     _, err, code = await run(ws, f"tail -n abc {src} {copied}")
     check(f"{label}: tail invalid -n", code == 1 and "abc" in err)
+    # A missing operand carries the GNU strerror suffix, like single-mount cat.
+    miss = f"{dst}/copied/missing.txt"
+    _, err, code = await run(ws, f"cat {src} {miss}")
+    check(f"{label}: cat missing strerror", code == 1
+          and err == f"cat: {miss}: No such file or directory\n")
 
 
 async def check_compare(ws: Workspace, dst: str, label: str) -> None:

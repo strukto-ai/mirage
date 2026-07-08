@@ -171,6 +171,13 @@ async function checkReadFamily(
   check(`${label}: head invalid -n`, hbad[2] === 1 && hbad[1].includes("abc"));
   const tbad = await run(ws, `tail -n abc ${src} ${copied}`);
   check(`${label}: tail invalid -n`, tbad[2] === 1 && tbad[1].includes("abc"));
+  // A missing operand carries the GNU strerror suffix, like single-mount cat.
+  const miss = `${dst}/copied/missing.txt`;
+  const cmiss = await run(ws, `cat ${src} ${miss}`);
+  check(
+    `${label}: cat missing strerror`,
+    cmiss[2] === 1 && cmiss[1] === `cat: ${miss}: No such file or directory\n`,
+  );
 }
 
 // diff/cmp two files that live on different mounts: identical operands exit 0

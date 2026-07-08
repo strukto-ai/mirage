@@ -107,3 +107,10 @@ def test_cross_mount_wc_total():
     assert "5" in out
     assert "3" in out
     assert "8" in out
+
+
+def test_cross_mount_cat_missing_has_strerror():
+    ws = _make_ws()
+    out, err, code = _run(ws, "cat /a/file.txt /b/missing.txt")
+    assert code == 1
+    assert err == "cat: /b/missing.txt: No such file or directory\n"
