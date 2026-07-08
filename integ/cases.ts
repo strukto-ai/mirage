@@ -507,6 +507,17 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ["rev_stdin", "echo hello | rev"],
   ["base64_stdin_d", "echo aGVsbG8= | base64 -d"],
 
+  // ----- argv dispatch: expanded names, xargs/timeout token safety -----
+  ["var_command_name", "E=echo; $E hi"],
+  ["var_command_mount", "C=cat; $C /data/a.txt"],
+  ["quoted_command_name", '"cat" /data/a.txt'],
+  ["xargs_initial_args", "echo c | xargs echo a b"],
+  ["xargs_wc_initial_args", "echo /data/a.txt | xargs wc -l"],
+  ["xargs_literal_input", "echo '$(echo pwned)' | xargs echo"],
+  ["xargs_quote_char_input", 'echo "don\'t" | xargs echo'],
+  ["timeout_basic", "timeout 5 echo hello"],
+  ["timeout_quoted_arg", "timeout 5 echo 'a  b'"],
+
   // ----- cp / mv multi-source into a directory (last; these mutate) -----
   ["cp_multi_into_dir", "cp /data/a.txt /data/b.txt /data/sub"],
   ["cp_multi_verify_a", "cat /data/sub/a.txt"],

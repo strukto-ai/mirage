@@ -1680,6 +1680,32 @@ olleh
 === base64_stdin_d ===
 hello
 \ No newline at end of output
+=== var_command_name ===
+hi
+=== var_command_mount ===
+hello
+world
+foo
+bar
+baz
+=== quoted_command_name ===
+hello
+world
+foo
+bar
+baz
+=== xargs_initial_args ===
+a b c
+=== xargs_wc_initial_args ===
+5 /data/a.txt
+=== xargs_literal_input ===
+$(echo pwned)
+=== xargs_quote_char_input ===
+don't
+=== timeout_basic ===
+hello
+=== timeout_quoted_arg ===
+a  b
 === cp_multi_into_dir ===
 
 === cp_multi_verify_a ===
@@ -1887,8 +1913,8 @@ disptree/d
 disptree/d/y.txt
 disptree/x.txt
 === history_last_two ===
-491  (cd /data && ls -R disptree)
-492  (cd /data && find disptree)
+499  (cd /data && ls -R disptree)
+500  (cd /data && find disptree)
 === bash_history_tail ===
 (cd /data && ls -R disptree)
 (cd /data && find disptree)
