@@ -19,6 +19,7 @@ import {
   ResourceType,
   enotdir,
   mountPrefixOf,
+  rstripSlash,
   type IndexCacheStore,
   type PathSpec,
 } from '@struktoai/mirage-core'
@@ -31,7 +32,9 @@ export async function readdir(
 ): Promise<string[]> {
   const virtual = path.pattern !== null ? path.directory : path.mountPath
   const mountPrefix = mountPrefixOf(path.virtual, path.resourcePath)
-  const virtualKey = mountPrefix + virtual
+  // Canonical key: no trailing slash (except root), or the same dir
+  // indexes under two keys and cache hits return doubled-slash entries.
+  const virtualKey = rstripSlash(mountPrefix + virtual) || '/'
   if (index !== undefined) {
     const cached = await index.listDir(virtualKey)
     if (cached.entries !== undefined && cached.entries !== null) {

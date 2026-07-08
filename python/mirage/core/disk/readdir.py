@@ -44,7 +44,10 @@ async def readdir(accessor: DiskAccessor, path: PathSpec,
         if prefix.endswith("/") or rest == "" or rest.startswith("/"):
             path = rest or "/"
     root = accessor.root
+    # Canonical key: no trailing slash (except root), or the same dir
+    # indexes under two keys and cache hits return doubled-slash entries.
     virtual_key = prefix + path if prefix else path
+    virtual_key = virtual_key.rstrip("/") or "/"
     listing = await index.list_dir(virtual_key)
     if listing.entries is not None:
         return listing.entries

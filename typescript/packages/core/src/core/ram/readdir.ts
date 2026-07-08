@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import { IndexEntry, type IndexCacheStore } from '../../cache/index/index.ts'
 import { ResourceType } from '../../cache/index/config.ts'
@@ -27,7 +28,9 @@ export async function readdir(
 ): Promise<string[]> {
   const virtual = path.pattern !== null ? path.directory : path.mountPath
   const mountPrefix = mountPrefixOf(path.virtual, path.resourcePath)
-  const virtualKey = mountPrefix + virtual
+  // Canonical key: no trailing slash (except root), or the same dir
+  // indexes under two keys and cache hits return doubled-slash entries.
+  const virtualKey = rstripSlash(mountPrefix + virtual) || '/'
   if (index !== undefined) {
     const cached = await index.listDir(virtualKey)
     if (cached.entries !== undefined && cached.entries !== null) {

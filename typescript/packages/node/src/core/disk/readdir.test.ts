@@ -16,6 +16,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DiskAccessor } from '../../accessor/disk.ts'
+import { PathSpec, RAMIndexCacheStore, mountKey } from '@struktoai/mirage-core'
 import { spec, tmpRoot } from '../../test-utils.ts'
 import { readdir } from './readdir.ts'
 
@@ -45,5 +46,38 @@ describe('core/disk/readdir', () => {
 
   it('throws "not a directory" on missing path', async () => {
     await expect(readdir(accessor, spec('/missing'))).rejects.toMatchObject({ code: 'ENOTDIR' })
+  })
+
+  it('cache-hit entries stay clean under a prefixed mount', async () => {
+    await writeFile(join(root, 'a.txt'), 'a')
+    const index = new RAMIndexCacheStore({ ttl: 600 })
+    const prefixed = new PathSpec({
+      virtual: '/data/',
+      directory: '/data/',
+      resourcePath: mountKey('/data/', '/data'),
+    })
+    const cold = await readdir(accessor, prefixed, index)
+    const warm = await readdir(accessor, prefixed, index)
+    expect(cold).toEqual(['/data/a.txt'])
+    expect(warm).toEqual(cold)
+  })
+
+  it('cache key ignores a trailing slash', async () => {
+    await writeFile(join(root, 'a.txt'), 'a')
+    const index = new RAMIndexCacheStore({ ttl: 600 })
+    const slashed = new PathSpec({
+      virtual: '/data/',
+      directory: '/data/',
+      resourcePath: mountKey('/data/', '/data'),
+    })
+    const bare = new PathSpec({
+      virtual: '/data',
+      directory: '/data',
+      resourcePath: mountKey('/data', '/data'),
+    })
+    const first = await readdir(accessor, slashed, index)
+    const second = await readdir(accessor, bare, index)
+    expect(first).toEqual(['/data/a.txt'])
+    expect(second).toEqual(first)
   })
 })

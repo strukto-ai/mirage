@@ -27,7 +27,9 @@ async def readdir(accessor: RAMAccessor, path: PathSpec,
                         resource_path=path.strip("/"))
     target = path.dir if path.pattern else path
     prefix = mount_prefix_of(target.virtual, target.resource_path)
-    virtual_key = target.virtual
+    # Canonical key: no trailing slash (except root), or the same dir
+    # indexes under two keys and cache hits return doubled-slash entries.
+    virtual_key = target.virtual.rstrip("/") or "/"
     store = accessor.store
     listing = await index.list_dir(virtual_key)
     if listing.entries is not None:

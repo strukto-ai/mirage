@@ -35,7 +35,9 @@ export async function readdir(
   const scope = detectScope(
     new PathSpec({ virtual: raw, directory: raw, resourcePath: mountKey(raw, prefix) }),
   )
-  const virtualKey = (prefix !== '' ? prefix : '') + raw
+  // Canonical key: no trailing slash (except root), or the same dir
+  // indexes under two keys and cache hits return doubled-slash entries.
+  const virtualKey = rstripSlash((prefix !== '' ? prefix : '') + raw) || '/'
 
   if (scope.level === 'root') {
     return listRoot(accessor, virtualKey, index, prefix)
