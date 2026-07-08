@@ -80,6 +80,16 @@ def handle_ln(
                               stderr=err), ExecutionNode(command="ln",
                                                          exit_code=1,
                                                          stderr=err)
+    # GNU: with more than two operands the last must be a directory;
+    # namespace links never name directories, so this is always an error
+    # (an expanded multi-match glob source lands here).
+    if len(operands) > 2:
+        err = (f"ln: target '{_typed(operands[-1])}' "
+               f"is not a directory\n").encode()
+        return None, IOResult(exit_code=1,
+                              stderr=err), ExecutionNode(command="ln",
+                                                         exit_code=1,
+                                                         stderr=err)
     link_abs = _abs(operands[1], session.cwd)
     target_typed = _typed(operands[0])
     exists = namespace.is_link(link_abs) and "f" not in flags

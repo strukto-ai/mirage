@@ -36,11 +36,11 @@ describe('Argv', () => {
     expect(new Argv('', [], []).words).toEqual([])
   })
 
-  it('views may differ in length', () => {
+  it('views differ only in type', () => {
     const pattern = ps('/ram/*.txt')
-    const argv = new Argv('ls', ['a.txt', 'b.txt'], [pattern])
-    expect(argv.args).toHaveLength(2)
-    expect(argv.operands).toEqual([pattern])
+    const argv = new Argv('ls', ['/ram/*.txt'], [pattern])
+    expect(argv.args).toHaveLength(argv.operands.length)
+    expect(argv.args[0]).toBe((argv.operands[0] as PathSpec).virtual)
   })
 
   it('withOperands replaces only operands', () => {

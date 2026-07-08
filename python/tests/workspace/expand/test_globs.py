@@ -131,7 +131,7 @@ def test_glob_string_result_wrapped_in_pathspec():
     assert result[1].virtual == "/data/a.txt"
 
 
-def test_glob_no_match_returns_original_pathspec():
+def test_glob_no_match_keeps_literal_word():
     reg = _mock_registry(resolve_result=[])
     glob_ps = PathSpec(
         resource_path="data/*.xyz",
@@ -142,8 +142,11 @@ def test_glob_no_match_returns_original_pathspec():
     )
     classified = ["cat", glob_ps]
     result = _run(resolve_globs(classified, reg))
-    assert len(result) == 1
+    assert len(result) == 2
     assert result[0] == "cat"
+    assert isinstance(result[1], PathSpec)
+    assert result[1].virtual == "/data/*.xyz"
+    assert result[1].pattern
 
 
 def test_text_args_skip_glob_resolution():

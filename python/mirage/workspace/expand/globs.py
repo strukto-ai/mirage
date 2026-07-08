@@ -52,6 +52,11 @@ async def resolve_globs(
                                                item.virtual, prefix))
                 resolved = await mount.resource.resolve_glob([item],
                                                              prefix=prefix)
+                # bash with nullglob off: a zero-match glob stays the
+                # literal word instead of vanishing.
+                if not resolved:
+                    result.append(item)
+                    continue
                 for p in resolved:
                     if isinstance(p, PathSpec):
                         result.append(p)

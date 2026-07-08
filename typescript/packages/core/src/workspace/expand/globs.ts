@@ -53,7 +53,13 @@ export async function resolveGlobs(
       })
       try {
         const resolved = await mount.resource.glob([withPrefix], prefix)
-        for (const p of resolved) result.push(p)
+        // bash with nullglob off: a zero-match glob stays the literal
+        // word instead of vanishing.
+        if (resolved.length === 0) {
+          result.push(withPrefix)
+        } else {
+          for (const p of resolved) result.push(p)
+        }
       } catch {
         result.push(withPrefix)
       }

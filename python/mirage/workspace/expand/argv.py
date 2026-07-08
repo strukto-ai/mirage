@@ -25,6 +25,7 @@ from mirage.workspace.expand.globs import resolve_globs
 from mirage.workspace.expand.parts import expand_parts
 from mirage.workspace.expand.spec_hints import spec_word_kinds
 from mirage.workspace.mount import MountRegistry
+from mirage.workspace.route import SHELL_CONSUMERS, route
 from mirage.workspace.session import Session
 
 
@@ -36,16 +37,17 @@ class Argv:
     an expanded command is its name; every consumer reads named views
     instead of slicing word lists.
 
-    `args` and `operands` are two views of the words after the name and
-    may differ in length: a glob expands to many words in `args` but
-    stays one pattern PathSpec in `operands` for mount pushdown.
+    `args` and `operands` are two views of the same final word list and
+    always have equal length; they differ only in element type. Glob
+    words are resolved by whoever consumes them, exactly once: shell
+    consumers get shell-resolved words in both views, mount commands
+    keep pattern PathSpecs for backend pushdown.
 
     Args:
         name (str): expanded command name.
-        args (tuple[str, ...]): text view, shell-level globs resolved
-            (what builtins consume).
-        operands (tuple[str | PathSpec, ...]): classified view, globs
-            left unresolved (what mount dispatch, test, and ln consume).
+        args (tuple[str, ...]): text view (what builtins consume).
+        operands (tuple[str | PathSpec, ...]): classified view (what
+            mount dispatch, test, and ln consume).
     """
 
     name: str
@@ -112,10 +114,14 @@ async def expand_argv(
                                 session.cwd,
                                 text_args=text_args,
                                 path_args=path_args)
-    resolved = await resolve_globs(classified, registry, text_args=text_args)
-    resolved_text = [
-        p.virtual if isinstance(p, PathSpec) else p for p in resolved
-    ]
+    # A glob word is resolved by whoever consumes it, exactly once:
+    # shell consumers get matches here; mount commands keep patterns for
+    # backend pushdown; unknown names fail without touching backends.
+    if route(name, session, registry) in SHELL_CONSUMERS:
+        words = await resolve_globs(classified, registry, text_args=text_args)
+    else:
+        words = classified
+    text_view = [p.virtual if isinstance(p, PathSpec) else p for p in words]
     return Argv(name=name,
-                args=tuple(resolved_text[1:]),
-                operands=tuple(classified[1:]))
+                args=tuple(text_view[1:]),
+                operands=tuple(words[1:]))

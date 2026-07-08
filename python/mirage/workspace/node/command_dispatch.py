@@ -27,6 +27,7 @@ from mirage.workspace.executor.control import BreakSignal, ContinueSignal
 from mirage.workspace.expand import expand_node
 from mirage.workspace.expand.argv import Argv, expand_argv
 from mirage.workspace.expand.classify import classify_bare_path
+from mirage.workspace.route import UNSUPPORTED_BUILTINS
 from mirage.workspace.session.shell_dirs import home_dir
 from mirage.workspace.types import ExecutionNode
 
@@ -40,15 +41,6 @@ from mirage.workspace.executor.builtins import (  # isort: skip
     handle_return, handle_set, handle_shift, handle_sleep, handle_source,
     handle_test, handle_timeout, handle_trap, handle_unset, handle_whoami,
     handle_xargs, link_flags, prepare_mv, strip_link_operands)
-
-_UNSUPPORTED_BUILTINS = frozenset({
-    "bg",
-    "disown",
-    "exec",
-    "complete",
-    "compgen",
-    "ulimit",
-})
 
 _CdArgs = list[str | PathSpec]
 
@@ -237,7 +229,7 @@ async def _run_argv(
     # Constructs the parser accepts but the executor cannot honor.
     # Returning a clear error lets LLMs detect a capability gap instead
     # of treating it as a missing binary or a silent no-op.
-    if name in _UNSUPPORTED_BUILTINS:
+    if name in UNSUPPORTED_BUILTINS:
         err = f"mirage: unsupported builtin: {name}\n".encode()
         return None, IOResult(exit_code=2,
                               stderr=err), ExecutionNode(command=name,

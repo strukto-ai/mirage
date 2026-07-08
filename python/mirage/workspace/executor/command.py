@@ -39,6 +39,7 @@ from mirage.workspace.executor.jobs import (handle_jobs, handle_kill,
                                             handle_ps, handle_wait)
 from mirage.workspace.mount import MountCommandUnsupported, MountRegistry
 from mirage.workspace.mount.namespace import Namespace
+from mirage.workspace.route import Consumer, route
 from mirage.workspace.session import Session, assert_mount_allowed
 from mirage.workspace.types import ExecutionNode
 
@@ -87,11 +88,15 @@ def _check_mount_root_guard_raw(
     def _is_root(p: PathSpec) -> bool:
         return registry.is_mount_root(p.virtual)
 
-    if cmd_name == "rm":
+    if cmd_name in ("rm", "rmdir"):
         for p in paths:
             if _is_root(p):
-                msg = (f"rm: cannot remove '{p.virtual}': "
-                       f"Device or resource busy\n")
+                if cmd_name == "rmdir":
+                    msg = (f"rmdir: failed to remove '{p.virtual}': "
+                           f"Device or resource busy\n")
+                else:
+                    msg = (f"rm: cannot remove '{p.virtual}': "
+                           f"Device or resource busy\n")
                 return msg, 1
     elif cmd_name == "mv":
         if _is_root(paths[0]):
@@ -322,6 +327,16 @@ async def handle_command(
                                   command=cmd_str,
                                   exit_code=code,
                                   stderr=msg.encode())
+
+    # Unknown name: nobody registers it; fail like bash before any
+    # backend work. The mount-root guard stays ahead of this so
+    # protective refusals keep their specific messages.
+    if route(cmd_name, session, registry) is Consumer.UNKNOWN:
+        err = f"{cmd_name}: command not found\n".encode()
+        return None, IOResult(exit_code=127,
+                              stderr=err), ExecutionNode(command=cmd_str,
+                                                         exit_code=127,
+                                                         stderr=err)
 
     find_expr_tokens: list[str] | None = None
     if cmd_name == "find":

@@ -71,20 +71,12 @@ import {
 import { CycleError } from '../../utils/path.ts'
 import type { Namespace } from '../mount/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import { UNSUPPORTED_BUILTINS } from '../route.ts'
 import type { Session } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { ExecutionNode } from '../types.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
-
-const UNSUPPORTED_BUILTINS: ReadonlySet<string> = new Set([
-  'bg',
-  'disown',
-  'exec',
-  'complete',
-  'compgen',
-  'ulimit',
-])
 
 // Split leading `cd` option flags (-L -P -e -@, clusters like -LP, and a
 // `--` terminator) from the directory operand. A bare `-` is the OLDPWD

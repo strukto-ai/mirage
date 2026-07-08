@@ -36,11 +36,11 @@ def test_words_empty_command():
     assert Argv(name="", args=(), operands=()).words == []
 
 
-def test_views_may_differ_in_length():
+def test_views_differ_only_in_type():
     pattern = _ps("/ram/*.txt")
-    argv = Argv(name="ls", args=("a.txt", "b.txt"), operands=(pattern, ))
-    assert len(argv.args) == 2
-    assert argv.operands == (pattern, )
+    argv = Argv(name="ls", args=("/ram/*.txt", ), operands=(pattern, ))
+    assert len(argv.args) == len(argv.operands)
+    assert argv.args[0] == argv.operands[0].virtual
 
 
 def test_with_operands_replaces_only_operands():

@@ -133,10 +133,10 @@ async def test_gcs_grep_match_exit_code(gcs_ws):
 
 
 @pytest.mark.asyncio
-async def test_s3_glob_no_match_expands_empty(s3_ws):
+async def test_s3_glob_no_match_keeps_literal(s3_ws):
     with patch_async_session(S3_OBJECTS):
         out, io = await _run(s3_ws, "echo /data/data/*.xyz")
-    assert out.strip() == ""
+    assert out.strip() == "/data/data/*.xyz"
 
 
 @pytest.mark.asyncio

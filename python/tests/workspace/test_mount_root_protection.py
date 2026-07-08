@@ -79,6 +79,18 @@ def test_rm_refuses_mount_root():
     _run(go())
 
 
+def test_rmdir_refuses_mount_root():
+
+    async def go():
+        ws = _ws_two_mounts()
+        r = await _exec(ws, "rmdir /r2")
+        assert r.exit_code == 1
+        assert b"Device or resource busy" in (r.stderr or b"")
+        assert b"/r2" in (r.stderr or b"")
+
+    _run(go())
+
+
 def test_rm_rf_refuses_mount_root():
 
     async def go():

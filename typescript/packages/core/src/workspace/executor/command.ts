@@ -26,6 +26,7 @@ import { PathSpec } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { Namespace } from '../mount/namespace.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
+import { Consumer, route } from '../route.ts'
 import type { PyodideRuntime } from './python/runtime.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
@@ -124,6 +125,18 @@ export async function handleCommand(
         stderr: errBytes,
         exitCode: guardResult.exitCode,
       }),
+    ]
+  }
+
+  // Unknown name: nobody registers it; fail like bash before any
+  // backend work. The mount-root guard stays ahead of this so
+  // protective refusals keep their specific messages.
+  if (route(cmdName, session, registry) === Consumer.UNKNOWN) {
+    const errBytes = new TextEncoder().encode(`${cmdName}: command not found\n`)
+    return [
+      null,
+      new IOResult({ exitCode: 127, stderr: errBytes }),
+      new ExecutionNode({ command: cmdStr, exitCode: 127, stderr: errBytes }),
     ]
   }
 

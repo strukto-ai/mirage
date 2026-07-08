@@ -91,6 +91,13 @@ export function handleLn(
   if (targetArg === undefined || linkArg === undefined) {
     return errorResult('ln', 'ln: missing file operand\n')
   }
+  // GNU: with more than two operands the last must be a directory;
+  // namespace links never name directories, so this is always an error
+  // (an expanded multi-match glob source lands here).
+  if (operands.length > 2) {
+    const last = operands[operands.length - 1]
+    return errorResult('ln', `ln: target '${typed(last ?? '')}' is not a directory\n`)
+  }
   const linkAbs = abs(linkArg, session.cwd)
   const targetTyped = typed(targetArg)
   const exists = namespace.isLink(linkAbs) && !flags.has('f')

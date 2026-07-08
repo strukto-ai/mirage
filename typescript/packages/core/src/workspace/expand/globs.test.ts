@@ -90,6 +90,24 @@ describe('resolveGlobs', () => {
     ])
   })
 
+  it('keeps the literal word on zero matches (bash nullglob off)', async () => {
+    const res = new GlobResource([])
+    const reg = new MountRegistry({ '/ram': res }, MountMode.WRITE)
+    const p = new PathSpec({
+      resourcePath: 'ram/*.nope',
+      virtual: '/ram/*.nope',
+      directory: '/ram/',
+      pattern: '*.nope',
+      resolved: false,
+    })
+    const out = await resolveGlobs([p], reg)
+    expect(out).toHaveLength(1)
+    const kept = out[0]
+    expect(kept).toBeInstanceOf(PathSpec)
+    expect((kept as PathSpec).virtual).toBe('/ram/*.nope')
+    expect((kept as PathSpec).pattern).toBe('*.nope')
+  })
+
   it('skips glob expansion for args in textArgs', async () => {
     const reg = new MountRegistry({ '/ram': new PlainResource() }, MountMode.WRITE)
     const p = new PathSpec({

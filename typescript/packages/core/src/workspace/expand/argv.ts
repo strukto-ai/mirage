@@ -15,6 +15,7 @@
 import type { CallStack } from '../../shell/call_stack.ts'
 import { PathSpec } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import { SHELL_CONSUMERS, route } from '../route.ts'
 import type { Session } from '../session/session.ts'
 import { classifyParts } from './classify.ts'
 import { resolveGlobs } from './globs.ts'
@@ -30,16 +31,18 @@ import type { TSNodeLike } from './variable.ts'
  * expanded command is its name; every consumer reads named views
  * instead of slicing word lists.
  *
- * `args` and `operands` are two views of the words after the name and
- * may differ in length: a glob expands to many words in `args` but
- * stays one pattern PathSpec in `operands` for mount pushdown.
+ * `args` and `operands` are two views of the same final word list and
+ * always have equal length; they differ only in element type. Glob
+ * words are resolved by whoever consumes them, exactly once: shell
+ * consumers get shell-resolved words in both views, mount commands
+ * keep pattern PathSpecs for backend pushdown.
  */
 export class Argv {
   /** Expanded command name. */
   readonly name: string
-  /** Text view, shell-level globs resolved (what builtins consume). */
+  /** Text view (what builtins consume). */
   readonly args: readonly string[]
-  /** Classified view, globs left unresolved (mounts, test, ln). */
+  /** Classified view (what mount dispatch, test, and ln consume). */
   readonly operands: readonly (string | PathSpec)[]
 
   constructor(name: string, args: readonly string[], operands: readonly (string | PathSpec)[]) {
@@ -90,7 +93,12 @@ export async function expandArgv(
   }
 
   const classified = classifyParts(expanded, registry, session.cwd, textArgs, pathArgs)
-  const resolved = await resolveGlobs(classified, registry, textArgs)
-  const resolvedText = resolved.map((p) => (p instanceof PathSpec ? p.virtual : p))
-  return new Argv(name, resolvedText.slice(1), classified.slice(1))
+  // A glob word is resolved by whoever consumes it, exactly once: shell
+  // consumers get matches here; mount commands keep patterns for
+  // backend pushdown; unknown names fail without touching backends.
+  const words = SHELL_CONSUMERS.has(route(name, session, registry))
+    ? await resolveGlobs(classified, registry, textArgs)
+    : classified
+  const textView = words.map((p) => (p instanceof PathSpec ? p.virtual : p))
+  return new Argv(name, textView.slice(1), words.slice(1))
 }
