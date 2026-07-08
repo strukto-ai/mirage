@@ -13,12 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpsRegistry } from '../ops/registry.ts'
-import { RAMResource } from '../resource/ram/ram.ts'
-import { MountMode } from '../types.ts'
-import { Consumer, SHELL_CONSUMERS, route } from './route.ts'
-import { Session } from './session/session.ts'
-import { Workspace } from './workspace.ts'
+import { OpsRegistry } from '../../ops/registry.ts'
+import { RAMResource } from '../../resource/ram/ram.ts'
+import { MountMode } from '../../types.ts'
+import { Consumer, SHELL_CONSUMERS, route } from './index.ts'
+import { Session } from '../session/session.ts'
+import { Workspace } from '../workspace.ts'
 
 function fixture(): { session: Session; ws: Workspace } {
   const ram = new RAMResource()

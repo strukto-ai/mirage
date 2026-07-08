@@ -38,7 +38,6 @@ import { resolveSafeguard } from '../../commands/safeguard.ts'
 import { BreakSignal, ContinueSignal } from '../executor/control.ts'
 import type { DispatchFn } from '../executor/cross_mount.ts'
 import {
-  NO_FOLLOW_COMMANDS,
   followPaths,
   handleBash,
   handleCd,
@@ -71,7 +70,7 @@ import {
 import { CycleError } from '../../utils/path.ts'
 import type { Namespace } from '../mount/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { UNSUPPORTED_BUILTINS } from '../route.ts'
+import { NO_FOLLOW_COMMANDS, UNSUPPORTED_BUILTINS } from '../route/index.ts'
 import type { Session } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { ExecutionNode } from '../types.ts'

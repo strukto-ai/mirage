@@ -27,7 +27,7 @@ from mirage.workspace.executor.control import BreakSignal, ContinueSignal
 from mirage.workspace.expand import expand_node
 from mirage.workspace.expand.argv import Argv, expand_argv
 from mirage.workspace.expand.classify import classify_bare_path
-from mirage.workspace.route import UNSUPPORTED_BUILTINS
+from mirage.workspace.route import NO_FOLLOW_COMMANDS, UNSUPPORTED_BUILTINS
 from mirage.workspace.session.shell_dirs import home_dir
 from mirage.workspace.types import ExecutionNode
 
@@ -35,9 +35,9 @@ from mirage.shell.helpers import (  # isort: skip
     ProcessSubDirection, get_command_name, get_parts,
     get_process_sub_direction, get_text, split_env_prefix)
 from mirage.workspace.executor.builtins import (  # isort: skip
-    NO_FOLLOW_COMMANDS, follow_paths, handle_bash, handle_cd, handle_echo,
-    handle_eval, handle_export, handle_history, handle_ln, handle_local,
-    handle_man, handle_printenv, handle_printf, handle_read, handle_readlink,
+    follow_paths, handle_bash, handle_cd, handle_echo, handle_eval,
+    handle_export, handle_history, handle_ln, handle_local, handle_man,
+    handle_printenv, handle_printf, handle_read, handle_readlink,
     handle_return, handle_set, handle_shift, handle_sleep, handle_source,
     handle_test, handle_timeout, handle_trap, handle_unset, handle_whoami,
     handle_xargs, link_flags, prepare_mv, strip_link_operands)

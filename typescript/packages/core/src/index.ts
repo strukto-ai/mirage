@@ -525,7 +525,7 @@ export {
   SHELL_CONSUMERS,
   UNSUPPORTED_BUILTINS,
   route,
-} from './workspace/route.ts'
+} from './workspace/route/index.ts'
 export { expandTestExpr } from './workspace/node/test_expr.ts'
 export { executeNode, type ExecuteNodeDeps } from './workspace/node/execute_node.ts'
 export { S3Accessor, type S3ResourceLike } from './accessor/s3.ts'

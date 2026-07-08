@@ -39,11 +39,9 @@ from mirage.workspace.executor.jobs import (handle_jobs, handle_kill,
                                             handle_ps, handle_wait)
 from mirage.workspace.mount import MountCommandUnsupported, MountRegistry
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.route import Consumer, route
+from mirage.workspace.route import JOB_BUILTINS, Consumer, route
 from mirage.workspace.session import Session, assert_mount_allowed
 from mirage.workspace.types import ExecutionNode
-
-_JOB_BUILTINS = frozenset({"wait", "fg", "kill", "jobs", "ps"})
 
 _FIND_ACTION_FLAGS = frozenset({"delete", "print0", "ls"})
 
@@ -261,7 +259,7 @@ async def handle_command(
                        for p in parts)
 
     # Job builtins
-    if cmd_name in _JOB_BUILTINS and job_table is not None:
+    if cmd_name in JOB_BUILTINS and job_table is not None:
         text_parts = [
             p.virtual if isinstance(p, PathSpec) else p for p in parts
         ]

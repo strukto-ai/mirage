@@ -12,28 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ShellBuiltin } from '../shell/types.ts'
-import type { MountRegistry } from './mount/registry.ts'
-import type { Session } from './session/session.ts'
-
-// Bash builtins the parser accepts but the executor cannot honor; they
-// still route to the shell layer so the error names a capability gap.
-export const UNSUPPORTED_BUILTINS: ReadonlySet<string> = new Set([
-  'bg',
-  'disown',
-  'exec',
-  'complete',
-  'compgen',
-  'ulimit',
-])
-
-export const NAMESPACE_COMMANDS: ReadonlySet<string> = new Set(['ln', 'readlink'])
-
-const SHELL_NAMES: ReadonlySet<string> = new Set([
-  ...Object.values(ShellBuiltin),
-  ...UNSUPPORTED_BUILTINS,
-])
-
 /**
  * The layer that consumes a command: a command belongs to the layer
  * whose state it mutates.
@@ -59,18 +37,3 @@ export const SHELL_CONSUMERS: ReadonlySet<Consumer> = new Set([
   Consumer.NAMESPACE,
   Consumer.FUNCTION,
 ])
-
-/**
- * Route a command name to the layer that consumes it.
- *
- * Order mirrors dispatch precedence: shell builtins shadow functions,
- * functions shadow mount commands, and a name nobody registers is
- * UNKNOWN (command not found).
- */
-export function route(name: string, session: Session, registry: MountRegistry): Consumer {
-  if (SHELL_NAMES.has(name)) return Consumer.SESSION
-  if (NAMESPACE_COMMANDS.has(name)) return Consumer.NAMESPACE
-  if (name in session.functions) return Consumer.FUNCTION
-  if (registry.mountForCommand(name) !== null) return Consumer.MOUNT
-  return Consumer.UNKNOWN
-}

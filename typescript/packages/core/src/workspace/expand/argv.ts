@@ -15,7 +15,7 @@
 import type { CallStack } from '../../shell/call_stack.ts'
 import { PathSpec } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { SHELL_CONSUMERS, route } from '../route.ts'
+import { SHELL_CONSUMERS, route } from '../route/index.ts'
 import type { Session } from '../session/session.ts'
 import { classifyParts } from './classify.ts'
 import { resolveGlobs } from './globs.ts'

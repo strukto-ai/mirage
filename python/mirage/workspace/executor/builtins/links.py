@@ -23,12 +23,6 @@ from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
-# Commands whose path operands name the link itself (lstat semantics):
-# rm/mv mutate the link entry, ln/readlink inspect it, rmdir must not
-# descend through it. Everything else follows links before dispatch,
-# mirroring open(2).
-NO_FOLLOW_COMMANDS = frozenset({"rm", "mv", "ln", "readlink", "rmdir"})
-
 
 def _typed(arg: str | PathSpec) -> str:
     if isinstance(arg, PathSpec):

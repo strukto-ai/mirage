@@ -26,7 +26,7 @@ import { PathSpec } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { Namespace } from '../mount/namespace.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
-import { Consumer, route } from '../route.ts'
+import { Consumer, JOB_BUILTINS, route } from '../route/index.ts'
 import type { PyodideRuntime } from './python/runtime.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
@@ -46,8 +46,6 @@ import type { ExecuteNodeFn } from './jobs.ts'
 import { handleJobs, handleKill, handlePs, handleWait } from './jobs.ts'
 import { errorVirtualPath, gnuStrerror } from '../../utils/errors.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
-
-const JOB_BUILTINS: ReadonlySet<string> = new Set(['wait', 'fg', 'kill', 'jobs', 'ps'])
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 

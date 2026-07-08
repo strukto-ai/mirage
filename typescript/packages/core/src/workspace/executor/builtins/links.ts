@@ -27,7 +27,6 @@ import type { Result } from './scope.ts'
 // rm/mv mutate the link entry, ln/readlink inspect it, rmdir must not
 // descend through it. Everything else follows links before dispatch,
 // mirroring open(2).
-export const NO_FOLLOW_COMMANDS = new Set(['rm', 'mv', 'ln', 'readlink', 'rmdir'])
 
 function typed(arg: string | PathSpec): string {
   if (arg instanceof PathSpec) return arg.rawPath ?? arg.virtual
