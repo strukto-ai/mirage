@@ -1250,8 +1250,8 @@ z
 === grep_m1 ===
 hello
 === grep_h ===
-/data/mixed.txt:hello WORLD
-/data/a.txt:hello
+hello WORLD
+hello
 === grep_only_match_multi ===
 o
 o
@@ -1535,7 +1535,11 @@ a	1
 b	2
 c	3
 === nl_d_pipe ===
-
+     1	hello
+     2	world
+     3	foo
+     4	bar
+     5	baz
 === nl_w3 ===
   1	hello
   2	world
@@ -2346,6 +2350,163 @@ cross
 === xm_cd_across ===
 cross
 b.txt
+=== xm_sort_stream ===
+10
+2
+30
+4
+5
+cross
+=== xm_cat_n ===
+     1	1
+     2	2
+     3	3
+     4	cross
+=== xm_cat_glob ===
+apple
+banana
+cherry
+banana
+date
+elder
+apple
+cherry
+elder
+fig
+cross
+=== xm_nl ===
+     1	1
+     2	2
+     3	3
+     4	cross
+=== xm_cut ===
+h
+w
+f
+b
+b
+c
+=== xm_sed_stream ===
+heLlo
+worLd
+foo
+bar
+baz
+cross
+=== xm_rev ===
+1
+2
+3
+ssorc
+=== xm_tac ===
+3
+2
+1
+cross
+=== xm_grep_names ===
+/data/a.txt:1:hello
+/data/a.txt:2:world
+/data/a.txt:3:foo
+/data2/xm.txt:1:cross
+=== xm_grep_h ===
+hello
+world
+foo
+cross
+=== xm_head ===
+==> /data/a.txt <==
+hello
+world
+
+==> /data2/xm.txt <==
+cross
+=== xm_tail ===
+==> /data/a.txt <==
+baz
+
+==> /data2/xm.txt <==
+cross
+=== xm_tail_q ===
+baz
+cross
+=== xm_wc_full ===
+ 3  3  6 /data/b.txt
+ 1  1  6 /data2/xm.txt
+ 4  4 12 total
+=== xm_wc_glob ===
+ 3 /data/sorted_a.txt
+ 3 /data/sorted_b.txt
+ 4 /data/sorted_c.txt
+ 1 /data2/xm.txt
+11 total
+=== xm_sha256 ===
+14c5e74c4b96ccef41cd94db73a9ec3348038ac094feca4fd897cecffa07cdae  /data/b.txt
+987921fe3926a34efd850ba3eed9ba30b12253def14c6ed02b51c1638f972cc4  /data2/xm.txt
+=== xm_strings ===
+hello
+cross
+=== xm_ls_files ===
+b.txt
+xm.txt
+=== xm_find_roots ===
+/data/sub/deep/a.txt
+/data/sub/deep/b.txt
+/data/sub/deep/deeper.txt
+/data/sub/nested.txt
+/data2/xm.txt
+/data2/xm_copy.txt
+/data2/xm_moved.txt
+=== xm_touch_rm ===
+xt.txt
+xt.txt
+xm.txt
+xm_copy.txt
+xm_moved.txt
+xm_link.txt
+=== xm_mkdir_multi ===
+xd
+xm.txt
+xm_copy.txt
+xm_moved.txt
+xm_link.txt
+=== xm_tee_multi ===
+dual
+dual
+dual
+=== xm_sed_inplace ===
+aBc
+aBc
+=== xm_rg_count ===
+/data/a.txt:3
+/data2/xm.txt:1
+=== xm_head_q ===
+hello
+cross
+=== xm_ls_multi ===
+arch.zip
+deep
+nested.txt
+link.txt
+xm.txt
+xm_copy.txt
+xm_moved.txt
+xm_link.txt
+=== xm_grep_nomatch ===
+exit=1
+=== xm_diff_differ ===
+exit=1
+2c2
+< old
+---
+> new
+=== xm_cmp_differ ===
+exit=1
+/data/xdiff.txt /data2/xdiff.txt differ: char 6, line 2
+=== xm_cmp_equal ===
+exit=0
+=== xm_refuse_paste ===
+exit=1
+paste: paths span multiple mounts (/data/, /data2/), cross-mount not supported
 === prov_cat ===
 net=24 write=0 cache=0 ops=1 hits=0 precision=exact
 === prov_cat_multi ===

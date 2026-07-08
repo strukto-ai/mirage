@@ -826,6 +826,76 @@ export const CROSS_MOUNT_CASES: ReadonlyArray<readonly [string, string]> = [
   ["xm_ln_back", "ln -s /data2/xm.txt /data/xm_rlink.txt && cat /data/xm_rlink.txt"],
   ["xm_link_grep", "grep -c cross /data/xm_rlink.txt"],
   ["xm_cd_across", "(cd /data2 && cat xm.txt && cd /data && ls b.txt)"],
+  // ----- STREAM strategy: cmd files == cat files | cmd -----
+  ["xm_sort_stream", "sort /data/numbers.txt /data2/xm.txt"],
+  ["xm_cat_n", "cat -n /data/b.txt /data2/xm.txt"],
+  ["xm_cat_glob", "cat /data/sorted_*.txt /data2/xm.txt"],
+  ["xm_nl", "nl /data/b.txt /data2/xm.txt"],
+  ["xm_cut", "cut -c1 /data/a.txt /data2/xm.txt"],
+  ["xm_sed_stream", "sed s/l/L/ /data/a.txt /data2/xm.txt"],
+  ["xm_rev", "rev /data/b.txt /data2/xm.txt"],
+  // ----- FANOUT strategy: one native run per operand -----
+  ["xm_tac", "tac /data/b.txt /data2/xm.txt"],
+  ["xm_grep_names", "grep -n o /data/a.txt /data2/xm.txt"],
+  ["xm_grep_h", "grep -h o /data/a.txt /data2/xm.txt"],
+  ["xm_head", "head -n 2 /data/a.txt /data2/xm.txt"],
+  ["xm_tail", "tail -n 1 /data/a.txt /data2/xm.txt"],
+  ["xm_tail_q", "tail -q -n 1 /data/a.txt /data2/xm.txt"],
+  ["xm_wc_full", "wc /data/b.txt /data2/xm.txt"],
+  ["xm_wc_glob", "wc -l /data/sorted_*.txt /data2/xm.txt"],
+  ["xm_sha256", "sha256sum /data/b.txt /data2/xm.txt"],
+  ["xm_strings", "strings /data/binary.bin /data2/xm.txt"],
+  ["xm_ls_files", "ls /data/b.txt /data2/xm.txt"],
+  ["xm_find_roots", "find /data/sub /data2 -name '*.txt'"],
+  // ----- FANOUT writes: per-operand mutations on both mounts -----
+  [
+    "xm_touch_rm",
+    "touch /data/xt.txt /data2/xt.txt" +
+      " && ls /data/xt.txt /data2/xt.txt" +
+      " && rm /data/xt.txt /data2/xt.txt && ls /data2",
+  ],
+  ["xm_mkdir_multi", "mkdir /data/xd /data2/xd && ls /data2 && rm -r /data/xd /data2/xd"],
+  [
+    "xm_tee_multi",
+    "echo dual | tee /data/xdual.txt /data2/xdual.txt" +
+      " && cat /data/xdual.txt /data2/xdual.txt" +
+      " && rm /data/xdual.txt /data2/xdual.txt",
+  ],
+  [
+    "xm_sed_inplace",
+    "echo abc | tee /data/xi.txt /data2/xi.txt > /dev/null" +
+      " && sed -i s/b/B/ /data/xi.txt /data2/xi.txt" +
+      " && cat /data/xi.txt /data2/xi.txt" +
+      " && rm /data/xi.txt /data2/xi.txt",
+  ],
+  ["xm_rg_count", "rg -c o /data/a.txt /data2/xm.txt"],
+  ["xm_head_q", "head -q -n 1 /data/a.txt /data2/xm.txt"],
+  ["xm_ls_multi", "ls /data/sub /data2"],
+];
+
+// Exit codes matter here (grep no-match merge, diff/cmp differ), so these
+// print like EXIT_CODE_CASES.
+export const CROSS_MOUNT_EXIT_CASES: ReadonlyArray<readonly [string, string]> = [
+  ["xm_grep_nomatch", "grep zzz /data/a.txt /data2/xm.txt"],
+  [
+    "xm_diff_differ",
+    "printf 'same\\nold\\n' | tee /data/xdiff.txt > /dev/null" +
+      " && printf 'same\\nnew\\n' | tee /data2/xdiff.txt > /dev/null" +
+      " && diff /data/xdiff.txt /data2/xdiff.txt",
+  ],
+  ["xm_cmp_differ", "cmp /data/xdiff.txt /data2/xdiff.txt"],
+  [
+    "xm_cmp_equal",
+    "cp /data/xdiff.txt /data2/xsame.txt" +
+      " && cmp /data/xdiff.txt /data2/xsame.txt" +
+      " && rm /data/xdiff.txt /data2/xdiff.txt /data2/xsame.txt",
+  ],
+];
+
+// Non-whitelisted commands spanning mounts must refuse with the shared
+// message, pinning the whitelist boundary; printed like NOT_FOUND_CASES.
+export const CROSS_MOUNT_ERR_CASES: ReadonlyArray<readonly [string, string]> = [
+  ["xm_refuse_paste", "paste /data/a.txt /data2/xm.txt"],
 ];
 
 // Provision (dry-run cost estimates) must print identical numbers on every
@@ -1047,6 +1117,22 @@ export async function runCases(ws: Workspace): Promise<void> {
     const out = new TextDecoder().decode(result.stdout);
     process.stdout.write(`=== ${name} ===\n`);
     emitBody(out);
+  }
+
+  for (const [name, cmd] of CROSS_MOUNT_EXIT_CASES) {
+    const result = await ws.execute(cmd);
+    const out = new TextDecoder().decode(result.stdout);
+    process.stdout.write(`=== ${name} ===\n`);
+    process.stdout.write(`exit=${result.exitCode}\n`);
+    if (out) emitBody(out);
+  }
+
+  for (const [name, cmd] of CROSS_MOUNT_ERR_CASES) {
+    const result = await ws.execute(cmd);
+    const err = new TextDecoder().decode(result.stderr).trim();
+    process.stdout.write(`=== ${name} ===\n`);
+    process.stdout.write(`exit=${result.exitCode}\n`);
+    if (err) process.stdout.write(err + "\n");
   }
 
   await runProvisionCases(ws);
