@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
-import { classifyArgvBySpec } from './classify_argv.ts'
 import type { Resource } from '../../resource/base.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import {
@@ -28,9 +27,10 @@ import type { PyodideRuntime } from '../executor/python/runtime.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { NodeType as NT, ShellBuiltin as SB } from '../../shell/types.ts'
 import { PathSpec } from '../../types.ts'
-import { classifyBarePath, classifyParts } from '../expand/classify.ts'
+import { classifyBarePath } from '../expand/classify.ts'
+import type { Argv } from '../expand/argv.ts'
+import { expandArgv } from '../expand/argv.ts'
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
-import { expandParts } from '../expand/parts.ts'
 import type { TSNodeLike } from '../expand/variable.ts'
 import { handleCommand } from '../executor/command.ts'
 import { runWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
@@ -59,9 +59,11 @@ import {
   handleSleep,
   handleSource,
   handleTest,
+  handleTimeout,
   handleTrap,
   handleUnset,
   handleWhoami,
+  handleXargs,
   linkFlags,
   prepareMv,
   stripLinkOperands,
@@ -72,7 +74,6 @@ import type { MountRegistry } from '../mount/registry.ts'
 import type { Session } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { ExecutionNode } from '../types.ts'
-import { resolveGlobs } from './resolve_globs.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -187,30 +188,24 @@ export async function executeCommand(
     session.env[k] = v
   }
 
-  const resolved = name !== '' ? resolveSafeguard(name) : null
-  const timeout = resolved !== null ? resolved.timeoutSeconds : null
   try {
-    return await runWithTimeout(
-      runCommandBody(
-        recurse,
-        dispatch,
-        registry,
-        namespace,
-        executeFn,
-        node,
-        nonPrefixParts,
-        name,
-        session,
-        stdinIn,
-        callStack,
-        jobTable,
-        ensureOpen,
-        unmount,
-        pythonRuntime,
-        signal,
-      ),
-      timeout,
-      name !== '' ? name : '?',
+    return await runCommandBody(
+      recurse,
+      dispatch,
+      registry,
+      namespace,
+      executeFn,
+      node,
+      nonPrefixParts,
+      name,
+      session,
+      stdinIn,
+      callStack,
+      jobTable,
+      ensureOpen,
+      unmount,
+      pythonRuntime,
+      signal,
     )
   } finally {
     for (const [k, prev] of Object.entries(savedEnvOverrides)) {
@@ -297,21 +292,58 @@ async function runCommandBody(
     stdin = merged
   }
 
-  const expanded = await expandParts(cleanParts, session, executeFn, callStack)
+  const argv = await expandArgv(cleanParts, session, executeFn, callStack, registry)
 
-  let textArgs: ReadonlySet<string> | null = null
-  let pathArgs: ReadonlySet<string> | null = null
-  const cwdMount = registry.mountFor(session.cwd)
-  const spec = cwdMount !== null ? cwdMount.specFor(name) : null
-  if (spec !== null) {
-    const [textSet, pathSet] = classifyArgvBySpec(spec, expanded.slice(1))
-    textArgs = textSet.size > 0 ? textSet : null
-    pathArgs = pathSet.size > 0 ? pathSet : null
-  }
+  // Safeguards resolve against the expanded name, so `$CMD`-style
+  // invocations get their real command's policy.
+  const resolved = argv.name !== '' ? resolveSafeguard(argv.name) : null
+  const timeout = resolved !== null ? resolved.timeoutSeconds : null
+  return runWithTimeout(
+    runArgv(
+      recurse,
+      dispatch,
+      registry,
+      namespace,
+      executeFn,
+      argv,
+      session,
+      stdin,
+      callStack,
+      jobTable,
+      ensureOpen,
+      unmount,
+      pythonRuntime,
+      signal,
+    ),
+    timeout,
+    argv.name !== '' ? argv.name : '?',
+  )
+}
 
-  let classified = classifyParts(expanded, registry, session.cwd, textArgs, pathArgs)
-  const resolved = await resolveGlobs(classified, registry, textArgs)
-  const finalExpanded = resolved.map((p) => (p instanceof PathSpec ? p.virtual : p))
+async function runArgv(
+  recurse: (
+    n: TSNodeLike,
+    s: Session,
+    i: ByteSource | null,
+    cs: CallStack | null,
+  ) => Promise<Result>,
+  dispatch: DispatchFn,
+  registry: MountRegistry,
+  namespace: Namespace,
+  executeFn: ExecuteFn,
+  argv: Argv,
+  session: Session,
+  stdin: ByteSource | null,
+  callStack: CallStack | null,
+  jobTable: JobTable | null,
+  ensureOpen?: (resource: Resource) => Promise<void>,
+  unmount?: (prefix: string) => Promise<void>,
+  pythonRuntime?: PyodideRuntime,
+  signal?: AbortSignal,
+): Promise<Result> {
+  const name = argv.name
+  const args = [...argv.args]
+  let operands = [...argv.operands]
 
   // Unsupported bash builtins. Constructs the parser accepts but the
   // executor cannot honor. Returning a clear error lets LLMs detect a
@@ -332,7 +364,7 @@ async function runCommandBody(
   }
 
   if (name === SB.CD) {
-    const { operands, bad, physical } = splitCdOptions(classified.slice(1))
+    const { operands: cdOperands, bad, physical } = splitCdOptions(operands)
     const links = namespace.symlinkTargets()
     if (bad !== null) {
       const err = new TextEncoder().encode(
@@ -344,7 +376,7 @@ async function runCommandBody(
         new ExecutionNode({ command: 'cd', exitCode: 2, stderr: err }),
       ]
     }
-    if (operands.length > 1) {
+    if (cdOperands.length > 1) {
       const err = new TextEncoder().encode('cd: too many arguments\n')
       return [
         null,
@@ -352,7 +384,7 @@ async function runCommandBody(
         new ExecutionNode({ command: 'cd', exitCode: 1, stderr: err }),
       ]
     }
-    if (operands.length === 0) {
+    if (cdOperands.length === 0) {
       const home = homeDir(session)
       if (home === null) {
         const err = new TextEncoder().encode('cd: HOME not set\n')
@@ -373,7 +405,7 @@ async function runCommandBody(
         physical,
       )
     }
-    const raw = operands[0]
+    const raw = cdOperands[0]
     const rawStr = raw instanceof PathSpec ? raw.virtual : String(raw)
     if (rawStr === '-') {
       const old = session.env.OLDPWD
@@ -432,30 +464,29 @@ async function runCommandBody(
     ]
   }
 
-  if (name === SB.EVAL) return handleEval(executeFn, finalExpanded.slice(1), session)
+  if (name === SB.EVAL) return handleEval(executeFn, args, session)
   if (name === SB.BASH || name === SB.SH) {
-    return handleBash(executeFn, finalExpanded.slice(1), session, stdin)
+    return handleBash(executeFn, args, session, stdin)
   }
-  if (name === SB.EXPORT) return handleExport(finalExpanded.slice(1), session)
-  if (name === SB.UNSET) return handleUnset(finalExpanded.slice(1), session)
-  if (name === SB.LOCAL) return handleLocal(finalExpanded.slice(1), session)
+  if (name === SB.EXPORT) return handleExport(args, session)
+  if (name === SB.UNSET) return handleUnset(args, session)
+  if (name === SB.LOCAL) return handleLocal(args, session)
   if (name === SB.PRINTENV) {
-    return handlePrintenv(finalExpanded.length > 1 ? (finalExpanded[1] ?? null) : null, session)
+    return handlePrintenv(args.length > 0 ? (args[0] ?? null) : null, session)
   }
   if (name === SB.WHOAMI) return handleWhoami(session)
-  if (name === SB.MAN) return handleMan(finalExpanded.slice(1), session, registry)
-  if (name === SB.HISTORY) return handleHistory(registry, finalExpanded.slice(1), session)
-  if (name === SB.SET) return handleSet(finalExpanded.slice(1), session, callStack)
+  if (name === SB.MAN) return handleMan(args, session, registry)
+  if (name === SB.HISTORY) return handleHistory(registry, args, session)
+  if (name === SB.SET) return handleSet(args, session, callStack)
   if (name === SB.SHIFT) {
-    const n = finalExpanded.length > 1 ? Number(finalExpanded[1]) : 1
+    const n = args.length > 0 ? Number(args[0]) : 1
     return handleShift(Number.isFinite(n) ? n : 1, callStack, session)
   }
   if (name === SB.TRAP) return handleTrap(session)
   if (name === SB.TEST || name === SB.BRACKET || name === SB.DOUBLE_BRACKET) {
-    return handleTest(dispatch, classified.slice(1), session)
+    return handleTest(dispatch, operands, session)
   }
   if (name === SB.ECHO) {
-    const args = finalExpanded.slice(1)
     const nFlag = args.includes('-n')
     const eFlag = args.includes('-e')
     return handleEcho(
@@ -464,74 +495,62 @@ async function runCommandBody(
       eFlag,
     )
   }
-  if (name === SB.PRINTF) return handlePrintf(finalExpanded.slice(1))
-  if (name === SB.SLEEP) return handleSleep(finalExpanded.slice(1), signal)
+  if (name === SB.PRINTF) return handlePrintf(args)
+  if (name === SB.SLEEP) return handleSleep(args, signal)
   if (name === SB.READ) {
-    return handleRead(finalExpanded.slice(1), session, stdin)
+    return handleRead(args, session, stdin)
   }
   if (name === SB.SOURCE || name === SB.DOT) {
-    const target = classified.length > 1 ? (classified[1] ?? '') : ''
+    const target = operands[0] ?? ''
     return handleSource(dispatch, executeFn, target, session)
   }
   if (name === SB.RETURN) {
-    const n = finalExpanded.length > 1 ? Number(finalExpanded[1]) : 0
+    const n = args.length > 0 ? Number(args[0]) : 0
     return handleReturn(Number.isFinite(n) ? n : 0)
   }
   if (name === SB.BREAK) throw new BreakSignal()
   if (name === SB.CONTINUE) throw new ContinueSignal()
 
   if (name === SB.XARGS) {
-    const stdinBytes = await materialize(stdin)
-    const inputArgs = new TextDecoder()
-      .decode(stdinBytes)
-      .split(/\s+/)
-      .filter((s) => s !== '')
-    const xargsCmd = finalExpanded[1] ?? 'echo'
-    const inner = `${xargsCmd} ${inputArgs.join(' ')}`
-    const io = await executeFn(inner, { sessionId: session.sessionId })
-    return [io.stdout, io, new ExecutionNode({ command: 'xargs', exitCode: io.exitCode })]
+    return handleXargs(executeFn, args, session, stdin)
   }
 
   if (name === SB.TIMEOUT) {
-    if (finalExpanded.length >= 3) {
-      const innerCmd = finalExpanded.slice(2).join(' ')
-      const io = await executeFn(innerCmd, { sessionId: session.sessionId })
-      return [io.stdout, io, new ExecutionNode({ command: 'timeout', exitCode: io.exitCode })]
-    }
-    return [null, new IOResult(), new ExecutionNode({ command: 'timeout', exitCode: 0 })]
+    return handleTimeout(executeFn, args, session)
   }
 
   // Symlinks are namespace-backed: not bash builtins, not mount commands.
   // They mutate the addressing layer. `readlink -f/-e/-m` is canonicalization,
   // which falls through to the mount command.
-  if (name === 'ln' && linkFlags(classified.slice(1), 'sfnv').has('s')) {
-    return handleLn(namespace, session, classified.slice(1))
+  if (name === 'ln' && linkFlags(operands, 'sfnv').has('s')) {
+    return handleLn(namespace, session, operands)
   }
   if (name === 'readlink') {
-    const flags = linkFlags(classified.slice(1), 'fenm')
+    const flags = linkFlags(operands, 'fenm')
     if (!(flags.has('f') || flags.has('e') || flags.has('m'))) {
-      return handleReadlink(namespace, session, classified.slice(1))
+      return handleReadlink(namespace, session, operands)
     }
   }
 
   // Symlink-aware dispatch: reads follow links (open(2)); rm/mv act on
   // the link entry itself (lstat semantics).
   let postUnlink: string | null = null
+  let dispatchArgv = argv
   if (namespace.symlinks.size > 0) {
     try {
       if (name === 'rm') {
-        const [rest, removed] = stripLinkOperands(namespace, classified.slice(1))
-        classified = [...classified.slice(0, 1), ...rest]
+        const [rest, removed] = stripLinkOperands(namespace, operands)
+        operands = rest
         if (removed > 0 && !rest.some((a) => a instanceof PathSpec)) {
           return [null, new IOResult(), new ExecutionNode({ command: name, exitCode: 0 })]
         }
       } else if (name === 'mv') {
-        const prepared = await prepareMv(namespace, dispatch, classified.slice(1))
-        classified = [...classified.slice(0, 1), ...prepared.items]
+        const prepared = await prepareMv(namespace, dispatch, operands)
+        operands = prepared.items
         postUnlink = prepared.postUnlink
         if (prepared.early !== null) return prepared.early
       } else if (!NO_FOLLOW_COMMANDS.has(name)) {
-        classified = [...classified.slice(0, 1), ...followPaths(namespace, classified.slice(1))]
+        operands = followPaths(namespace, operands)
       }
     } catch (err) {
       if (err instanceof CycleError) {
@@ -546,6 +565,7 @@ async function runCommandBody(
       }
       throw err
     }
+    dispatchArgv = argv.withOperands(operands)
   }
 
   // Default: mount-dispatched command
@@ -553,7 +573,7 @@ async function runCommandBody(
     recurse,
     dispatch,
     registry,
-    classified,
+    dispatchArgv.words,
     session,
     stdin,
     callStack,
@@ -566,7 +586,7 @@ async function runCommandBody(
 
   if (io.exitCode === 0 && namespace.symlinks.size > 0) {
     if (name === 'rm') {
-      for (const item of classified.slice(1)) {
+      for (const item of operands) {
         if (item instanceof PathSpec) namespace.purgeUnder(item.virtual)
       }
     }

@@ -14,47 +14,47 @@
 
 import { describe, expect, it } from 'vitest'
 import { specOf } from '../../commands/spec/builtins.ts'
-import { classifyArgvBySpec } from './classify_argv.ts'
+import { specWordKinds } from './spec_hints.ts'
 
-describe('classifyArgvBySpec', () => {
+describe('specWordKinds', () => {
   it('basic grep pattern and path', () => {
-    const [text, path] = classifyArgvBySpec(specOf('grep'), ['pattern', 'file.txt'])
+    const [text, path] = specWordKinds(specOf('grep'), ['pattern', 'file.txt'])
     expect(text).toEqual(new Set(['pattern']))
     expect(path).toEqual(new Set(['file.txt']))
   })
 
   it('collects TEXT flag values', () => {
-    const [text, path] = classifyArgvBySpec(specOf('find'), ['/data', '-name', '*.txt'])
+    const [text, path] = specWordKinds(specOf('find'), ['/data', '-name', '*.txt'])
     expect(text.has('*.txt')).toBe(true)
     expect(path).toEqual(new Set(['/data']))
   })
 
   it('--flag=value is not a path', () => {
-    const [text, path] = classifyArgvBySpec(specOf('du'), ['--max-depth=1', '/data'])
+    const [text, path] = specWordKinds(specOf('du'), ['--max-depth=1', '/data'])
     expect(text.has('--max-depth=1')).toBe(false)
     expect(path).toEqual(new Set(['/data']))
   })
 
   it('mixed cluster value is text, not path', () => {
-    const [text, path] = classifyArgvBySpec(specOf('grep'), ['-ne', 'pat', '/a.txt'])
+    const [text, path] = specWordKinds(specOf('grep'), ['-ne', 'pat', '/a.txt'])
     expect(text).toEqual(new Set(['pat']))
     expect(path).toEqual(new Set(['/a.txt']))
   })
 
   it('repeated -e values are text', () => {
-    const [text, path] = classifyArgvBySpec(specOf('grep'), ['-e', 'foo', '-e', 'bar', '/a.txt'])
+    const [text, path] = specWordKinds(specOf('grep'), ['-e', 'foo', '-e', 'bar', '/a.txt'])
     expect(text.has('foo')).toBe(true)
     expect(text.has('bar')).toBe(true)
     expect(path).toEqual(new Set(['/a.txt']))
   })
 
   it('numeric shorthand is not a path', () => {
-    const [, path] = classifyArgvBySpec(specOf('head'), ['-5', 'file.txt'])
+    const [, path] = specWordKinds(specOf('head'), ['-5', 'file.txt'])
     expect(path).toEqual(new Set(['file.txt']))
   })
 
   it('find ignore tokens are not classified', () => {
-    const [text, path] = classifyArgvBySpec(specOf('find'), ['/data', '(', '-name', '*.txt', ')'])
+    const [text, path] = specWordKinds(specOf('find'), ['/data', '(', '-name', '*.txt', ')'])
     expect(text.has('(')).toBe(false)
     expect(path.has('(')).toBe(false)
     expect(path.has(')')).toBe(false)

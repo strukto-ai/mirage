@@ -2190,6 +2190,13 @@ def test_timeout_runs_command():
     assert _stdout(io) == b"hello\n"
 
 
+def test_timeout_preserves_quoted_arg():
+    """timeout N cmd 'a  b' keeps the quoted word as one argument."""
+    ws = _ws()
+    io = _exec(ws, "timeout 5 echo 'a  b'")
+    assert _stdout(io) == b"a  b\n"
+
+
 # ── xargs ───────────────────────────────────────────────────────────────
 
 
@@ -2198,6 +2205,41 @@ def test_xargs_basic():
     ws = _ws()
     io = _exec(ws, 'echo "a b c" | xargs echo')
     assert _stdout(io) == b"a b c\n"
+
+
+def test_xargs_keeps_initial_args():
+    """xargs cmd initial-args appends stdin words after them (GNU)."""
+    ws = _ws()
+    io = _exec(ws, "echo c | xargs echo a b")
+    assert _stdout(io) == b"a b c\n"
+
+
+def test_xargs_input_words_stay_literal():
+    """Input words are argv tokens, not shell source (GNU execs argv)."""
+    ws = _ws()
+    io = _exec(ws, "echo '$(echo pwned)' | xargs echo")
+    assert _stdout(io) == b"$(echo pwned)\n"
+
+
+def test_xargs_input_quote_char():
+    """A quote character in input does not break the inner command."""
+    ws = _ws()
+    io = _exec(ws, 'echo "don\'t" | xargs echo')
+    assert _stdout(io) == b"don't\n"
+
+
+def test_variable_command_name():
+    """$E hi runs the expanded command name (bash expands, then runs)."""
+    ws = _ws()
+    io = _exec(ws, "E=echo; $E hi")
+    assert _stdout(io) == b"hi\n"
+
+
+def test_quoted_command_name():
+    """A quoted command name expands like any other word."""
+    ws = _ws()
+    io = _exec(ws, '"echo" hi')
+    assert _stdout(io) == b"hi\n"
 
 
 # ── additional fixes ────────────────────────────────────────────────────

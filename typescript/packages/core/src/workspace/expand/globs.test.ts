@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import type { Resource } from '../../resource/base.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { MountRegistry } from '../mount/registry.ts'
-import { resolveGlobs, type ResourceWithGlob } from './resolve_globs.ts'
+import { resolveGlobs, type ResourceWithGlob } from './globs.ts'
 
 class PlainResource implements Resource {
   readonly kind = 'plain'

@@ -178,3 +178,48 @@ describe('Workspace.execute', () => {
     await ws.close()
   })
 })
+
+describe('argv dispatch regressions', () => {
+  it('timeout keeps a quoted word as one argument', async () => {
+    const { ws } = buildWorkspace()
+    const res = await ws.execute("timeout 5 echo 'a  b'")
+    expect(new TextDecoder().decode(res.stdout)).toBe('a  b\n')
+    await ws.close()
+  })
+
+  it('xargs keeps initial args before stdin words (GNU)', async () => {
+    const { ws } = buildWorkspace()
+    const res = await ws.execute('echo c | xargs echo a b')
+    expect(new TextDecoder().decode(res.stdout)).toBe('a b c\n')
+    await ws.close()
+  })
+
+  it('xargs input words stay literal argv tokens', async () => {
+    const { ws } = buildWorkspace()
+    const res = await ws.execute("echo '$(echo pwned)' | xargs echo")
+    expect(new TextDecoder().decode(res.stdout)).toBe('$(echo pwned)\n')
+    await ws.close()
+  })
+
+  it('xargs survives a quote character in input', async () => {
+    const { ws } = buildWorkspace()
+    const res = await ws.execute('echo "don\'t" | xargs echo')
+    expect(new TextDecoder().decode(res.stdout)).toBe("don't\n")
+    await ws.close()
+  })
+
+  it('runs a command named by a variable', async () => {
+    const { ws } = buildWorkspace()
+    const res = await ws.execute('E=echo; $E hi')
+    expect(new TextDecoder().decode(res.stdout)).toBe('hi\n')
+    expect(res.exitCode).toBe(0)
+    await ws.close()
+  })
+
+  it('runs a quoted command name', async () => {
+    const { ws } = buildWorkspace()
+    const res = await ws.execute('"echo" hi')
+    expect(new TextDecoder().decode(res.stdout)).toBe('hi\n')
+    await ws.close()
+  })
+})

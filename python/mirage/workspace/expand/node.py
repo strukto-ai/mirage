@@ -109,6 +109,11 @@ async def expand_node(
         return ts_node.text.decode()
 
     if ntype == NT.COMMAND_NAME:
+        # The name is a word like any other: $CMD, "quoted", $(sub) all
+        # expand. A bare word has one named child (or none) and falls
+        # through to its own expansion rule.
+        for child in ts_node.named_children:
+            return await expand_node(child, session, execute_fn, call_stack)
         return ts_node.text.decode()
 
     if ntype == NT.SIMPLE_EXPANSION:

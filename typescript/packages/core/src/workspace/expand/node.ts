@@ -85,7 +85,14 @@ export async function expandNode(
 
   if (ntype === NT.WORD) return expandTilde(unescapeUnquoted(tsNode.text), homeDir(session))
   if (ntype === NT.NUMBER) return tsNode.text
-  if (ntype === NT.COMMAND_NAME) return tsNode.text
+  if (ntype === NT.COMMAND_NAME) {
+    // The name is a word like any other: $CMD, "quoted", $(sub) all
+    // expand. A bare word has one named child (or none) and falls
+    // through to its own expansion rule.
+    const child = tsNode.namedChildren[0]
+    if (child !== undefined) return expandNode(child, session, executeFn, callStack)
+    return tsNode.text
+  }
 
   if (ntype === NT.SIMPLE_EXPANSION) {
     const raw = tsNode.text

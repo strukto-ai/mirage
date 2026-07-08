@@ -19,7 +19,7 @@ from mirage.cache.index import RAMIndexCacheStore
 from mirage.resource.ram import RAMResource
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
-from mirage.workspace.node.resolve_globs import resolve_globs
+from mirage.workspace.expand.globs import resolve_globs
 
 
 def _mock_registry(resolve_result=None):

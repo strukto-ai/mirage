@@ -16,7 +16,7 @@ from mirage.commands.spec.parser import parse_command
 from mirage.commands.spec.types import CommandSpec, OperandKind
 
 
-def classify_argv_by_spec(
+def spec_word_kinds(
     spec: CommandSpec,
     argv: list[str],
 ) -> tuple[set[str], set[str]]:

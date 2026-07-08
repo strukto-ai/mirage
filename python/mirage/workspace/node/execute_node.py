@@ -32,11 +32,11 @@ from mirage.workspace.executor.pipes import (handle_connection, handle_pipe,
 from mirage.workspace.executor.redirect import handle_redirect
 from mirage.workspace.expand import (expand_and_classify, expand_node,
                                      expand_redirects)
+from mirage.workspace.expand.globs import resolve_globs
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.command_dispatch import execute_command
 from mirage.workspace.node.program import execute_program
-from mirage.workspace.node.resolve_globs import resolve_globs
 from mirage.workspace.node.test_expr import expand_test_expr
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode

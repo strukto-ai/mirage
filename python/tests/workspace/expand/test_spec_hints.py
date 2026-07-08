@@ -16,56 +16,55 @@ import pytest
 
 from mirage import MountMode, RAMResource, Workspace
 from mirage.commands.spec import SPECS
-from mirage.workspace.node.classify_argv import classify_argv_by_spec
+from mirage.workspace.expand.spec_hints import spec_word_kinds
 
 
 def test_basic_grep_pattern_and_path():
-    text_set, path_set = classify_argv_by_spec(SPECS["grep"],
-                                               ["pattern", "file.txt"])
+    text_set, path_set = spec_word_kinds(SPECS["grep"],
+                                         ["pattern", "file.txt"])
     assert text_set == {"pattern"}
     assert path_set == {"file.txt"}
 
 
 def test_text_flag_values_collected():
-    text_set, path_set = classify_argv_by_spec(SPECS["find"],
-                                               ["/data", "-name", "*.txt"])
+    text_set, path_set = spec_word_kinds(SPECS["find"],
+                                         ["/data", "-name", "*.txt"])
     assert "*.txt" in text_set
     assert path_set == {"/data"}
 
 
 def test_long_value_flag_equals_not_a_path():
-    text_set, path_set = classify_argv_by_spec(SPECS["du"],
-                                               ["--max-depth=1", "/data"])
+    text_set, path_set = spec_word_kinds(SPECS["du"],
+                                         ["--max-depth=1", "/data"])
     assert "--max-depth=1" not in path_set
     assert "--max-depth=1" not in text_set
     assert path_set == {"/data"}
 
 
 def test_mixed_cluster_value_not_a_path():
-    text_set, path_set = classify_argv_by_spec(SPECS["grep"],
-                                               ["-ne", "pat", "/a.txt"])
+    text_set, path_set = spec_word_kinds(SPECS["grep"],
+                                         ["-ne", "pat", "/a.txt"])
     assert text_set == {"pat"}
     assert path_set == {"/a.txt"}
 
 
 def test_repeated_dash_e_values_are_text():
-    text_set, path_set = classify_argv_by_spec(
-        SPECS["grep"], ["-e", "foo", "-e", "bar", "/a.txt"])
+    text_set, path_set = spec_word_kinds(SPECS["grep"],
+                                         ["-e", "foo", "-e", "bar", "/a.txt"])
     assert "foo" in text_set
     assert "bar" in text_set
     assert path_set == {"/a.txt"}
 
 
 def test_numeric_shorthand_not_a_path():
-    text_set, path_set = classify_argv_by_spec(SPECS["head"],
-                                               ["-5", "file.txt"])
+    text_set, path_set = spec_word_kinds(SPECS["head"], ["-5", "file.txt"])
     assert "-5" not in path_set
     assert path_set == {"file.txt"}
 
 
 def test_find_ignore_tokens_not_classified():
-    text_set, path_set = classify_argv_by_spec(
-        SPECS["find"], ["/data", "(", "-name", "*.txt", ")"])
+    text_set, path_set = spec_word_kinds(SPECS["find"],
+                                         ["/data", "(", "-name", "*.txt", ")"])
     assert "(" not in path_set and "(" not in text_set
     assert ")" not in path_set and ")" not in text_set
 

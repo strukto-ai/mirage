@@ -26,7 +26,7 @@ import { MountRegistry } from '../mount/registry.ts'
 import { Session } from '../session/session.ts'
 import { CommandSpec, Operand, OperandKind, Option } from '../../commands/spec/types.ts'
 import { executeNode, type ExecuteNodeDeps } from './execute_node.ts'
-import { classifyArgvBySpec } from './classify_argv.ts'
+import { specWordKinds } from '../expand/spec_hints.ts'
 
 function decode(b: Uint8Array | null): string {
   return b === null ? '' : new TextDecoder().decode(b)
@@ -425,14 +425,14 @@ describe('executeNode dispatcher', () => {
   })
 })
 
-describe('classifyArgvBySpec — numericShorthand', () => {
+describe('specWordKinds — numericShorthand', () => {
   const headSpec = new CommandSpec({
     options: [new Option({ short: '-n', valueKind: OperandKind.TEXT, numericShorthand: true })],
     rest: new Operand({ kind: OperandKind.PATH }),
   })
 
   it('treats -3 as a flag value, not a path (head/tail GNU shorthand)', () => {
-    const [textSet, pathSet] = classifyArgvBySpec(headSpec, ['-3', '/ram/file'])
+    const [textSet, pathSet] = specWordKinds(headSpec, ['-3', '/ram/file'])
     expect(pathSet.has('-3')).toBe(false)
     expect(pathSet.has('/ram/file')).toBe(true)
     expect(textSet.has('3')).toBe(true)
@@ -443,7 +443,7 @@ describe('classifyArgvBySpec — numericShorthand', () => {
       options: [new Option({ short: '-n', valueKind: OperandKind.TEXT })],
       rest: new Operand({ kind: OperandKind.PATH }),
     })
-    const [, pathSet] = classifyArgvBySpec(noShortcut, ['-3', '/ram/file'])
+    const [, pathSet] = specWordKinds(noShortcut, ['-3', '/ram/file'])
     expect(pathSet.has('-3')).toBe(true)
   })
 })

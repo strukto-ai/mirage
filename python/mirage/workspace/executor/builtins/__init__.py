@@ -32,6 +32,8 @@ from mirage.workspace.executor.builtins.script import (handle_bash,
 from mirage.workspace.executor.builtins.text import (_interpret_escapes,
                                                      handle_echo,
                                                      handle_printf)
+from mirage.workspace.executor.builtins.timeout import handle_timeout
+from mirage.workspace.executor.builtins.xargs import handle_xargs
 
 from mirage.workspace.executor.builtins.vars import (  # isort: skip
     handle_export, handle_local, handle_printenv, handle_read, handle_readonly,
@@ -70,7 +72,9 @@ __all__ = [
     'handle_sleep',
     'handle_source',
     'handle_test',
+    'handle_timeout',
     'handle_trap',
     'handle_unset',
     'handle_whoami',
+    'handle_xargs',
 ]

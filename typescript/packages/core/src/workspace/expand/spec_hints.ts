@@ -21,7 +21,7 @@ import { type CommandSpec, OperandKind } from '../../commands/spec/types.ts'
 // repeatable flags, providedBy) classifies identically to dispatch, then
 // maps the raw (unresolved) operand words to their kinds. Flag values with
 // TEXT kind are also added to the text set.
-export function classifyArgvBySpec(
+export function specWordKinds(
   spec: CommandSpec,
   argv: readonly string[],
 ): [Set<string>, Set<string>] {

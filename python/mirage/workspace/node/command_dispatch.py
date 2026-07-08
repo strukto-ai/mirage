@@ -18,17 +18,15 @@ from typing import Any
 from mirage.commands.builtin.utils.safeguard import run_with_timeout
 from mirage.commands.safeguard import resolve_safeguard
 from mirage.io import IOResult
-from mirage.io.stream import materialize
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import ShellBuiltin as SB
 from mirage.types import PathSpec
 from mirage.utils.path import CycleError
 from mirage.workspace.executor.command import handle_command
 from mirage.workspace.executor.control import BreakSignal, ContinueSignal
-from mirage.workspace.expand import classify_parts, expand_node, expand_parts
+from mirage.workspace.expand import expand_node
+from mirage.workspace.expand.argv import Argv, expand_argv
 from mirage.workspace.expand.classify import classify_bare_path
-from mirage.workspace.node.classify_argv import classify_argv_by_spec
-from mirage.workspace.node.resolve_globs import resolve_globs
 from mirage.workspace.session.shell_dirs import home_dir
 from mirage.workspace.types import ExecutionNode
 
@@ -40,8 +38,8 @@ from mirage.workspace.executor.builtins import (  # isort: skip
     handle_eval, handle_export, handle_history, handle_ln, handle_local,
     handle_man, handle_printenv, handle_printf, handle_read, handle_readlink,
     handle_return, handle_set, handle_shift, handle_sleep, handle_source,
-    handle_test, handle_trap, handle_unset, handle_whoami, link_flags,
-    prepare_mv, strip_link_operands)
+    handle_test, handle_timeout, handle_trap, handle_unset, handle_whoami,
+    handle_xargs, link_flags, prepare_mv, strip_link_operands)
 
 _UNSUPPORTED_BUILTINS = frozenset({
     "bg",
@@ -148,14 +146,11 @@ async def execute_command(
             saved_env_overrides[k] = session.env.get(k)
         session.env[k] = v
 
-    resolved = resolve_safeguard(name) if name else None
-    timeout = (resolved.timeout_seconds if resolved is not None else None)
-
     try:
-        body = _dispatch_command_body(recurse, dispatch, registry, namespace,
-                                      execute_fn, node, parts, name, session,
-                                      stdin, call_stack, job_table, cancel)
-        return await run_with_timeout(body, timeout, name or "?")
+        return await _dispatch_command_body(recurse, dispatch, registry,
+                                            namespace, execute_fn, node, parts,
+                                            name, session, stdin, call_stack,
+                                            job_table, cancel)
     finally:
         for k, prev in saved_env_overrides.items():
             if prev is None:
@@ -209,33 +204,34 @@ async def _dispatch_command_body(
         stdin = b"".join(proc_sub_parts)
     parts = clean_parts
 
-    # Expand all parts, classify paths, resolve shell-level globs
-    expanded = await expand_parts(parts, session, execute_fn, call_stack)
+    argv = await expand_argv(parts, session, execute_fn, call_stack, registry)
 
-    # Use CommandSpec to decide which args are TEXT (skip classification)
-    # and which are PATH (classify even bare filenames like "file.txt").
-    text_args: set[str] | None = None
-    path_args: set[str] | None = None
-    try:
-        cwd_mount = registry.mount_for(session.cwd)
-    except ValueError:
-        cwd_mount = None
-    spec = cwd_mount.spec_for(name) if cwd_mount else None
-    if spec:
-        text_set, path_set = classify_argv_by_spec(spec, expanded[1:])
-        text_args = text_set or None
-        path_args = path_set or None
+    # Safeguards resolve against the expanded name, so `$CMD`-style
+    # invocations get their real command's policy.
+    resolved = resolve_safeguard(argv.name) if argv.name else None
+    timeout = (resolved.timeout_seconds if resolved is not None else None)
+    body = _run_argv(recurse, dispatch, registry, namespace, execute_fn, argv,
+                     session, stdin, call_stack, job_table, cancel)
+    return await run_with_timeout(body, timeout, argv.name or "?")
 
-    classified = classify_parts(expanded,
-                                registry,
-                                session.cwd,
-                                text_args=text_args,
-                                path_args=path_args)
-    # Resolve globs for shell builtins (echo, for, etc.).
-    # Mount commands receive classified with unresolved globs so
-    # each resource can handle pattern pushdown.
-    resolved = await resolve_globs(classified, registry, text_args=text_args)
-    expanded = [p.virtual if isinstance(p, PathSpec) else p for p in resolved]
+
+async def _run_argv(
+    recurse,
+    dispatch,
+    registry,
+    namespace,
+    execute_fn,
+    argv: Argv,
+    session,
+    stdin,
+    call_stack,
+    job_table,
+    cancel: asyncio.Event | None = None,
+) -> tuple[Any, IOResult, ExecutionNode]:
+    """Route one expanded command to its builtin or mount handler."""
+    name = argv.name
+    args = list(argv.args)
+    operands = list(argv.operands)
 
     # ── unsupported bash builtins ──────────────
     # Constructs the parser accepts but the executor cannot honor.
@@ -254,7 +250,7 @@ async def _dispatch_command_body(
         return out, IOResult(), ExecutionNode(command="pwd", exit_code=0)
 
     if name == SB.CD:
-        operands, bad_opt, physical = _split_cd_options(classified[1:])
+        cd_operands, bad_opt, physical = _split_cd_options(operands)
         if bad_opt is not None:
             err = (f"cd: -{bad_opt}: invalid option\n"
                    f"cd: usage: cd [-L|[-P [-e]] [-@]] [dir]\n").encode()
@@ -262,13 +258,13 @@ async def _dispatch_command_body(
                                   stderr=err), ExecutionNode(command="cd",
                                                              exit_code=2,
                                                              stderr=err)
-        if len(operands) > 1:
+        if len(cd_operands) > 1:
             err = b"cd: too many arguments\n"
             return None, IOResult(exit_code=1,
                                   stderr=err), ExecutionNode(command="cd",
                                                              exit_code=1,
                                                              stderr=err)
-        if not operands:
+        if not cd_operands:
             home = home_dir(session)
             if home is None:
                 err = b"cd: HOME not set\n"
@@ -282,7 +278,7 @@ async def _dispatch_command_body(
                                    session,
                                    links=namespace.symlink_targets(),
                                    physical=physical)
-        raw = operands[0]
+        raw = cd_operands[0]
         raw_str = raw.virtual if isinstance(raw, PathSpec) else str(raw)
         if raw_str == "-":
             old = session.env.get("OLDPWD")
@@ -315,7 +311,7 @@ async def _dispatch_command_body(
                                physical=physical)
 
     if name == SB.HISTORY:
-        return await handle_history(registry, expanded[1:], session)
+        return await handle_history(registry, args, session)
 
     if name == SB.TRUE:
         return None, IOResult(), ExecutionNode(command="true", exit_code=0)
@@ -325,97 +321,72 @@ async def _dispatch_command_body(
                                                           exit_code=1)
 
     if name in (SB.SOURCE, SB.DOT):
-        path = classified[1] if len(classified) > 1 else ""
+        path = operands[0] if operands else ""
         return await handle_source(dispatch, execute_fn, path, session)
 
     if name == SB.EVAL:
-        args = expanded[1:]
         return await handle_eval(execute_fn, args, session)
 
     if name in (SB.BASH, SB.SH):
-        args = expanded[1:]
         return await handle_bash(execute_fn, args, session, stdin)
 
     if name == SB.EXPORT:
-        assignments = expanded[1:]
-        return await handle_export(assignments, session)
+        return await handle_export(args, session)
 
     if name == SB.UNSET:
-        names = expanded[1:]
-        return await handle_unset(names, session)
+        return await handle_unset(args, session)
 
     if name == SB.LOCAL:
-        assignments = expanded[1:]
-        return await handle_local(assignments, session)
+        return await handle_local(args, session)
 
     if name == SB.PRINTENV:
-        var_name = expanded[1] if len(expanded) > 1 else None
+        var_name = args[0] if args else None
         return await handle_printenv(var_name, session)
 
     if name == SB.WHOAMI:
         return await handle_whoami(session)
 
     if name == SB.MAN:
-        return await handle_man(expanded[1:], session, registry)
+        return await handle_man(args, session, registry)
 
     if name == SB.READ:
-        variables = expanded[1:] if len(expanded) > 1 else ["REPLY"]
+        variables = args if args else ["REPLY"]
         return await handle_read(variables, session, stdin)
 
     if name == SB.SET:
-        args = expanded[1:]
         return await handle_set(args, session, call_stack=call_stack)
 
     if name == SB.SHIFT:
-        n = int(expanded[1]) if len(expanded) > 1 else 1
+        n = int(args[0]) if args else 1
         return await handle_shift(n, call_stack, session=session)
 
     if name == SB.TRAP:
         return await handle_trap(session)
 
-    if name == SB.TEST:
-        argv = classified[1:]
-        return await handle_test(dispatch, argv, session)
-
-    if name in (SB.BRACKET, SB.DOUBLE_BRACKET):
-        argv = classified[1:]
-        return await handle_test(dispatch, argv, session)
+    if name in (SB.TEST, SB.BRACKET, SB.DOUBLE_BRACKET):
+        return await handle_test(dispatch, operands, session)
 
     if name == SB.ECHO:
-        args = expanded[1:]
         n_flag = "-n" in args
         e_flag = "-e" in args
-        args = [a for a in args if a not in ("-n", "-e")]
-        return await handle_echo(args, n_flag=n_flag, e_flag=e_flag)
+        echo_args = [a for a in args if a not in ("-n", "-e")]
+        return await handle_echo(echo_args, n_flag=n_flag, e_flag=e_flag)
 
     if name == SB.PRINTF:
-        return await handle_printf(expanded[1:])
+        return await handle_printf(args)
 
     if name == SB.SLEEP:
-        return await handle_sleep(expanded[1:], cancel=cancel)
+        return await handle_sleep(args, cancel=cancel)
 
     if name == SB.RETURN:
-        exit_code = int(expanded[1]) if len(expanded) > 1 else 0
+        exit_code = int(args[0]) if args else 0
         return await handle_return(exit_code)
 
     if name == SB.XARGS:
-        stdin_data = await materialize(stdin)
-        if stdin_data is None:
-            stdin_data = b""
-        input_args = stdin_data.decode(errors="replace").split()
-        xargs_cmd = expanded[1] if len(expanded) > 1 else "echo"
-        inner = xargs_cmd + " " + " ".join(input_args)
-        io = await execute_fn(inner, session_id=session.session_id)
-        return io.stdout, io, ExecutionNode(command="xargs",
-                                            exit_code=io.exit_code)
+        return await handle_xargs(execute_fn, args, session, stdin)
 
     if name == SB.TIMEOUT:
-        if len(expanded) >= 3:
-            inner_cmd = " ".join(expanded[2:])
-            io = await execute_fn(inner_cmd, session_id=session.session_id)
-            return io.stdout, io, ExecutionNode(command="timeout",
-                                                exit_code=io.exit_code)
-        return None, IOResult(), ExecutionNode(command="timeout", exit_code=0)
+        return await handle_timeout(execute_fn, args, session)
 
     if name == SB.BREAK:
         raise BreakSignal()
@@ -425,12 +396,12 @@ async def _dispatch_command_body(
 
     # ── symlinks (namespace-backed; not bash builtins, not mount
     #    commands: they mutate the addressing layer) ──
-    if name == "ln" and "s" in link_flags(classified[1:], "sfnv"):
-        return handle_ln(namespace, session, classified[1:])
+    if name == "ln" and "s" in link_flags(operands, "sfnv"):
+        return handle_ln(namespace, session, operands)
 
-    if name == "readlink" and not (link_flags(classified[1:], "fenm")
+    if name == "readlink" and not (link_flags(operands, "fenm")
                                    & {"f", "e", "m"}):
-        return handle_readlink(namespace, session, classified[1:])
+        return handle_readlink(namespace, session, operands)
 
     # ── symlink-aware dispatch: reads follow links (open(2)); rm/mv act
     #    on the link entry itself (lstat semantics) ──
@@ -438,20 +409,18 @@ async def _dispatch_command_body(
     if namespace.symlinks:
         try:
             if name == "rm":
-                rest, removed = strip_link_operands(namespace, classified[1:])
-                classified = classified[:1] + rest
-                if removed and not any(isinstance(a, PathSpec) for a in rest):
+                operands, removed = strip_link_operands(namespace, operands)
+                if removed and not any(
+                        isinstance(a, PathSpec) for a in operands):
                     return None, IOResult(), ExecutionNode(command=name,
                                                            exit_code=0)
             elif name == "mv":
-                rest, post_unlink, early = await prepare_mv(
-                    namespace, dispatch, classified[1:])
-                classified = classified[:1] + rest
+                operands, post_unlink, early = await prepare_mv(
+                    namespace, dispatch, operands)
                 if early is not None:
                     return early
             elif name not in NO_FOLLOW_COMMANDS:
-                classified = classified[:1] + follow_paths(
-                    namespace, classified[1:])
+                operands = follow_paths(namespace, operands)
         except CycleError as exc:
             err = (f"{name}: {exc}: "
                    f"Too many levels of symbolic links\n").encode()
@@ -459,12 +428,13 @@ async def _dispatch_command_body(
                                   stderr=err), ExecutionNode(command=name,
                                                              exit_code=1,
                                                              stderr=err)
+        argv = argv.with_operands(operands)
 
     # ── mount command (default) ─────────────────
     stdout, io, exec_node = await handle_command(recurse,
                                                  dispatch,
                                                  registry,
-                                                 classified,
+                                                 argv.words,
                                                  session,
                                                  stdin,
                                                  call_stack,
@@ -473,7 +443,7 @@ async def _dispatch_command_body(
 
     if io.exit_code == 0 and namespace.symlinks:
         if name == "rm":
-            for item in classified[1:]:
+            for item in operands:
                 if isinstance(item, PathSpec):
                     namespace.purge_under(item.virtual)
         if post_unlink is not None:
