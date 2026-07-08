@@ -600,6 +600,11 @@ CASES: list[tuple[str, str]] = [
     ("timeout_basic", "timeout 5 echo hello"),
     ("timeout_quoted_arg", "timeout 5 echo 'a  b'"),
 
+    # ----- glob rule: resolved by whoever consumes the word, once -----
+    ("glob_unmatched_echo", "echo /data/*.nope"),
+    ("glob_test_f", "test -f /data/one_b* && echo yes"),
+    ("glob_function_args", "f() { echo $1 $#; }; f /data/sorted_*.txt"),
+
     # ----- cp / mv multi-source into a directory (last; these mutate) -----
     ("cp_multi_into_dir", "cp /data/a.txt /data/b.txt /data/sub"),
     ("cp_multi_verify_a", "cat /data/sub/a.txt"),
@@ -876,6 +881,10 @@ NOT_FOUND_CASES: list[tuple[str, str]] = [
     ("nf_cat_rel", "(cd /data && cat missing.txt)"),
     ("nf_cat_rel_subdir", "(cd /data && cat sub/missing.txt)"),
     ("nf_grep_r_rel", "(cd /data && grep -r x missing)"),
+    # glob rule: unknown names 127 before backend work; GNU ln
+    # multi-source refusal after expansion
+    ("unknown_command", "nosuchcmd /data/a.txt"),
+    ("glob_ln_multi_source", "ln -s /data/sorted_*.txt /data/lnk_multi"),
 ]
 
 # Backend-agnostic not-found probe: every backend (whatever its mount prefix)

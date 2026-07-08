@@ -1706,6 +1706,12 @@ don't
 hello
 === timeout_quoted_arg ===
 a  b
+=== glob_unmatched_echo ===
+/data/*.nope
+=== glob_test_f ===
+yes
+=== glob_function_args ===
+/data/sorted_a.txt 3
 === cp_multi_into_dir ===
 
 === cp_multi_verify_a ===
@@ -2242,6 +2248,12 @@ cat: sub/missing.txt: No such file or directory
 === nf_grep_r_rel ===
 exit=1
 grep: missing: No such file or directory
+=== unknown_command ===
+exit=127
+nosuchcmd: command not found
+=== glob_ln_multi_source ===
+exit=1
+ln: target '/data/lnk_multi' is not a directory
 === find_bad_maxdepth ===
 exit=1
 find: invalid argument 'abc' to '-maxdepth'
