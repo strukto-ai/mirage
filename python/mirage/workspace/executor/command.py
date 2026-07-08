@@ -37,6 +37,7 @@ from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
 from mirage.workspace.executor.fs_error import format_fs_error
 from mirage.workspace.executor.jobs import (handle_jobs, handle_kill,
                                             handle_ps, handle_wait)
+from mirage.workspace.expand.globs import resolve_globs
 from mirage.workspace.mount import MountCommandUnsupported, MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.route import JOB_BUILTINS, Consumer, route
@@ -350,9 +351,15 @@ async def handle_command(
                                       stderr=msg.encode())
 
     if is_cross_mount(cmd_name, path_scopes, registry):
-        # Cross-mount execution bypasses a resource command handler. Parse
-        # against the shared spec so flags and text operands do not depend on
-        # the source mount.
+        # Cross-mount execution bypasses the resource command handlers, so
+        # pattern operands expand here: one backend listing per pattern,
+        # operand order preserved. A zero-match pattern keeps the literal
+        # word so the generic reports it like GNU.
+        if any(s.pattern for s in path_scopes):
+            expanded = await resolve_globs(list(path_scopes), registry)
+            path_scopes = [p for p in expanded if isinstance(p, PathSpec)]
+        # Parse against the shared spec so flags and text operands do not
+        # depend on the source mount.
         parsed = parse_command(SPECS[cmd_name], raw_argv, cwd=session.cwd)
         stdout, io = await handle_cross_mount(cmd_name, path_scopes,
                                               parsed.texts(),

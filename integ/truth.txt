@@ -1712,6 +1712,8 @@ a  b
 yes
 === glob_function_args ===
 /data/sorted_a.txt 3
+=== grep_r_warm_root ===
+/data/guard/g.txt:guard
 === cp_multi_into_dir ===
 
 === cp_multi_verify_a ===
@@ -2346,6 +2348,34 @@ cross
 === xm_cd_across ===
 cross
 b.txt
+=== xm_glob_cat ===
+apple
+banana
+cherry
+banana
+date
+elder
+apple
+cherry
+elder
+fig
+cross
+=== xm_glob_cat_n ===
+     1	apple
+     2	banana
+     3	cherry
+     4	cross
+=== xm_glob_wc ===
+ 3 /data/sorted_a.txt
+ 3 /data/sorted_b.txt
+ 4 /data/sorted_c.txt
+ 1 /data2/xm.txt
+11 total
+=== xm_glob_grep ===
+/data/sorted_a.txt:2
+/data/sorted_b.txt:2
+/data/sorted_c.txt:3
+/data2/xm.txt:0
 === prov_cat ===
 net=24 write=0 cache=0 ops=1 hits=0 precision=exact
 === prov_cat_multi ===

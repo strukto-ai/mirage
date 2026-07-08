@@ -26,6 +26,7 @@ import { PathSpec } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { Namespace } from '../mount/namespace.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
+import { resolveGlobs } from '../expand/globs.ts'
 import { Consumer, JOB_BUILTINS, route } from '../route/index.ts'
 import type { PyodideRuntime } from './python/runtime.ts'
 import type { Session } from '../session/session.ts'
@@ -163,17 +164,26 @@ export async function handleCommand(
   }
 
   if (isCrossMount(cmdName, pathScopes, registry)) {
+    // Cross-mount execution bypasses the resource command handlers, so
+    // pattern operands expand here: one backend listing per pattern,
+    // operand order preserved. A zero-match pattern keeps the literal
+    // word so the generic reports it like GNU.
+    let csScopes = pathScopes
+    if (csScopes.some((s) => s.pattern !== null)) {
+      const expanded = await resolveGlobs(csScopes, registry)
+      csScopes = expanded.filter((p): p is PathSpec => p instanceof PathSpec)
+    }
     // Parse against the mount spec so flags and text operands split like
     // the single-mount path: raw argv would hand flag tokens ("-c") to
     // the generic as the search pattern.
-    const srcMount = registry.mountFor(pathScopes[0]?.virtual ?? session.cwd)
+    const srcMount = registry.mountFor(csScopes[0]?.virtual ?? session.cwd)
     const csParsed =
       srcMount !== null ? parseFlags(parts.slice(1), srcMount, cmdName, session.cwd) : null
     const csFlags = csParsed !== null ? csParsed[2] : {}
     const csTexts = csParsed !== null ? csParsed[1] : textOnly
     const [csStdout, csIo, csExec] = await handleCrossMount(
       cmdName,
-      pathScopes,
+      csScopes,
       csTexts,
       csFlags,
       dispatch,
@@ -181,7 +191,7 @@ export async function handleCommand(
     )
     if (csIo.safeguard === null) {
       const mounts: MountEntry[] = []
-      for (const s of pathScopes) {
+      for (const s of csScopes) {
         const m = registry.mountFor(s.virtual)
         if (m !== null) mounts.push(m)
       }

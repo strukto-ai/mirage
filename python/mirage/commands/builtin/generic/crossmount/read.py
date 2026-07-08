@@ -14,6 +14,7 @@
 
 import functools
 
+from mirage.commands.builtin.generic.cat import cat as generic_cat
 from mirage.commands.builtin.generic.crossmount.primitives import (CrossResult,
                                                                    relay,
                                                                    stream)
@@ -26,6 +27,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
 from mirage.io import IOResult
 from mirage.io.stream import async_chain
+from mirage.io.types import ByteSource
 from mirage.types import PathSpec
 
 
@@ -101,5 +103,10 @@ async def run_read(cmd_name: str, scopes: list[PathSpec], text_args: list[str],
     reads: dict[str, bytes] = {}
     for scope in scopes:
         reads[scope.virtual] = await read_bytes(None, scope)
-    return async_chain(*reads.values()), IOResult(reads=dict(reads),
-                                                  cache=list(reads))
+    body: ByteSource = async_chain(*reads.values())
+    fl = FlagView(flag_kwargs, spec=SPECS["cat"])
+    if fl.bool("n"):
+        # One brain on purpose: numbering is continuous across files,
+        # which per-mount execution cannot reproduce.
+        body = generic_cat(body, number_lines=True)
+    return body, IOResult(reads=dict(reads), cache=list(reads))

@@ -107,3 +107,47 @@ def test_cross_mount_wc_total():
     assert "5" in out
     assert "3" in out
     assert "8" in out
+
+
+def test_cross_mount_glob_expands_in_operand_order():
+    ws = _make_ws()
+    out, err, code = _run(ws, "cat /a/*.txt /b/*.txt")
+    assert code == 0
+    assert out == "line1\nline2\nline3\nline4\nline5\naaa\nbbb\nccc\n"
+
+
+def test_cross_mount_cat_n_numbers_continuously():
+    ws = _make_ws()
+    out, err, code = _run(ws, "cat -n /a/*.txt /b/*.txt")
+    assert code == 0
+    assert "1\tline1" in out
+    assert "6\taaa" in out
+
+
+def test_cross_mount_wc_totals_expanded_globs():
+    ws = _make_ws()
+    out, err, code = _run(ws, "wc -l /a/*.txt /b/*.txt")
+    assert code == 0
+    assert "8 total" in out
+
+
+def test_cross_mount_grep_counts_expanded_globs():
+    ws = _make_ws()
+    out, err, code = _run(ws, "grep -c a /a/*.txt /b/*.txt")
+    assert code == 0
+    assert "/a/file.txt:0" in out
+    assert "/b/file.txt:1" in out
+
+
+def test_cross_mount_zero_match_keeps_literal():
+    ws = _make_ws()
+    out, err, code = _run(ws, "cat /a/*.nope /b/*.txt")
+    assert code != 0
+    assert "/a/*.nope" in err
+
+
+def test_cross_mount_cp_glob_sources():
+    ws = _make_ws()
+    out, err, code = _run(ws, "cp /a/*.txt /b/copied.txt && cat /b/copied.txt")
+    assert code == 0
+    assert "line1" in out

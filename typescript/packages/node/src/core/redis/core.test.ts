@@ -217,7 +217,7 @@ describe.skipIf(skip)('core/redis ops', () => {
     await writeBytes(acc, spec('/b.txt'), ENC.encode('.'))
     const entries = await readdir(acc, spec('/data', '/data'), index)
     expect(entries.sort()).toEqual(['/data/a.txt', '/data/b.txt'])
-    const cached = await index.listDir('/data/')
+    const cached = await index.listDir('/data')
     expect(cached.status).toBeUndefined()
     expect(cached.entries).toBeDefined()
   })

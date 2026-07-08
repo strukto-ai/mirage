@@ -604,6 +604,8 @@ CASES: list[tuple[str, str]] = [
     ("glob_unmatched_echo", "echo /data/*.nope"),
     ("glob_test_f", "test -f /data/one_b* && echo yes"),
     ("glob_function_args", "f() { echo $1 $#; }; f /data/sorted_*.txt"),
+    # warm mount-root listing first: index-hit entries must stay clean
+    ("grep_r_warm_root", "ls /data > /dev/null && grep -r guard /data"),
 
     # ----- cp / mv multi-source into a directory (last; these mutate) -----
     ("cp_multi_into_dir", "cp /data/a.txt /data/b.txt /data/sub"),
@@ -960,6 +962,11 @@ CROSS_MOUNT_CASES: list[tuple[str, str]] = [
      " && cat /data/xm_rlink.txt"),
     ("xm_link_grep", "grep -c cross /data/xm_rlink.txt"),
     ("xm_cd_across", "(cd /data2 && cat xm.txt && cd /data && ls b.txt)"),
+    # glob operands expand per mount, in operand order, one listing each
+    ("xm_glob_cat", "cat /data/sorted_*.txt /data2/xm.tx*"),
+    ("xm_glob_cat_n", "cat -n /data/sorted_a.txt /data2/xm.tx*"),
+    ("xm_glob_wc", "wc -l /data/sorted_*.txt /data2/xm.tx*"),
+    ("xm_glob_grep", "grep -c e /data/sorted_*.txt /data2/xm.tx*"),
 ]
 
 # Provision (dry-run cost estimates) must print identical numbers on every

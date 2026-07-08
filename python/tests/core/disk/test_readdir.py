@@ -108,3 +108,33 @@ async def test_not_a_directory(tmp_path):
             PathSpec(resource_path="file.txt",
                      virtual="/file.txt",
                      directory="/file.txt"), index)
+
+
+@pytest.mark.asyncio
+async def test_cache_hit_entries_stay_clean(tmp_path):
+    (tmp_path / "a.txt").write_text("a")
+    accessor = DiskAccessor(tmp_path)
+    index = RAMIndexCacheStore(ttl=600)
+    spec = PathSpec(resource_path=mount_key("/data/", "/data"),
+                    virtual="/data/",
+                    directory="/data/")
+    cold = await readdir(accessor, spec, index)
+    warm = await readdir(accessor, spec, index)
+    assert cold == ["/data/a.txt"]
+    assert warm == cold
+
+
+@pytest.mark.asyncio
+async def test_cache_key_ignores_trailing_slash(tmp_path):
+    (tmp_path / "a.txt").write_text("a")
+    accessor = DiskAccessor(tmp_path)
+    index = RAMIndexCacheStore(ttl=600)
+    slashed = PathSpec(resource_path=mount_key("/data/", "/data"),
+                       virtual="/data/",
+                       directory="/data/")
+    bare = PathSpec(resource_path=mount_key("/data", "/data"),
+                    virtual="/data",
+                    directory="/data")
+    first = await readdir(accessor, slashed, index)
+    second = await readdir(accessor, bare, index)
+    assert first == second == ["/data/a.txt"]
