@@ -18,7 +18,7 @@ from mirage.commands.builtin.generic.crossmount.relay.cmp import run_cmp
 from mirage.commands.builtin.generic.crossmount.relay.cp import run_cp
 from mirage.commands.builtin.generic.crossmount.relay.diff import run_diff
 from mirage.commands.builtin.generic.crossmount.relay.mv import run_mv
-from mirage.commands.builtin.generic.crossmount.types import CrossResult
+from mirage.commands.builtin.generic.crossmount.types import Cmd, CrossResult
 from mirage.types import PathSpec
 
 
@@ -36,10 +36,10 @@ async def run_relay(cmd_name: str, scopes: list[PathSpec], flag_kwargs: dict,
         flag_kwargs (dict): Flags parsed against the shared command spec.
         dispatch (Callable): Workspace operation dispatcher.
     """
-    if cmd_name == "cp":
+    if cmd_name == Cmd.CP:
         return await run_cp(scopes, flag_kwargs, dispatch)
-    if cmd_name == "mv":
+    if cmd_name == Cmd.MV:
         return await run_mv(scopes, flag_kwargs, dispatch)
-    if cmd_name == "diff":
+    if cmd_name == Cmd.DIFF:
         return await run_diff(scopes, flag_kwargs, dispatch)
     return await run_cmp(scopes, flag_kwargs, dispatch)

@@ -12,11 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.generic.crossmount.types import Cmd
+
 
 def combined_exit(cmd_name: str, codes: list[int]) -> int:
     # grep-style: an error (2) dominates, then any match wins (0), then
     # no-match (1). Everything else: worst operand wins.
-    if cmd_name in ("grep", "rg"):
+    if cmd_name in (Cmd.GREP, Cmd.RG):
         if any(code > 1 for code in codes):
             return max(codes)
         if 0 in codes:

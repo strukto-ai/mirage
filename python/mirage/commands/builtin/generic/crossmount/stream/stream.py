@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic.crossmount.types import (CrossResult,
+from mirage.commands.builtin.generic.crossmount.types import (Cmd, CrossResult,
                                                               RunSingle)
 from mirage.io import IOResult
 from mirage.io.stream import async_chain
@@ -48,7 +48,7 @@ async def run_stream(cmd_name: str, scopes: list[PathSpec],
     sources: list[ByteSource] = []
     failed = False
     for scope in scopes:
-        out, io = await run_single("cat", [scope], [], {})
+        out, io = await run_single(Cmd.CAT, [scope], [], {})
         merged_io = await merged_io.merge(io)
         if io.exit_code != 0:
             failed = True
@@ -57,7 +57,7 @@ async def run_stream(cmd_name: str, scopes: list[PathSpec],
             sources.append(out)
     body: ByteSource = async_chain(*sources)
 
-    if cmd_name == "cat" and not _has_active_flags(flag_kwargs):
+    if cmd_name == Cmd.CAT and not _has_active_flags(flag_kwargs):
         if failed:
             merged_io.exit_code = merged_io.exit_code or 1
         return body, merged_io

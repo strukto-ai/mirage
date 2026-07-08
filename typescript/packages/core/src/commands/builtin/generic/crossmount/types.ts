@@ -32,6 +32,39 @@ export enum Strategy {
   RELAY = 'relay',
 }
 
+// Cross-mount capable command names; members compare as their plain string
+// values, mirroring the Python Cmd StrEnum.
+export enum Cmd {
+  CAT = 'cat',
+  NL = 'nl',
+  SORT = 'sort',
+  CUT = 'cut',
+  SED = 'sed',
+  REV = 'rev',
+  GREP = 'grep',
+  RG = 'rg',
+  HEAD = 'head',
+  TAIL = 'tail',
+  WC = 'wc',
+  DU = 'du',
+  FILE = 'file',
+  MD5 = 'md5',
+  SHA256SUM = 'sha256sum',
+  STAT = 'stat',
+  STRINGS = 'strings',
+  TAC = 'tac',
+  LS = 'ls',
+  FIND = 'find',
+  RM = 'rm',
+  TOUCH = 'touch',
+  MKDIR = 'mkdir',
+  TEE = 'tee',
+  CP = 'cp',
+  MV = 'mv',
+  DIFF = 'diff',
+  CMP = 'cmp',
+}
+
 export type DispatchFn = (
   op: string,
   path: PathSpec,

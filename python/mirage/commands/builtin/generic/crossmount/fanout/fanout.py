@@ -16,7 +16,7 @@ from mirage.commands.builtin.generic.crossmount.fanout.combine import \
     combined_exit
 from mirage.commands.builtin.generic.crossmount.fanout.du import du_total
 from mirage.commands.builtin.generic.crossmount.fanout.wc import combine_wc
-from mirage.commands.builtin.generic.crossmount.types import (CrossResult,
+from mirage.commands.builtin.generic.crossmount.types import (Cmd, CrossResult,
                                                               RunSingle)
 from mirage.commands.builtin.generic.crossmount.utils import (
     merge_operand_ios, run_operands)
@@ -52,15 +52,15 @@ async def run_fanout(cmd_name: str,
     """
     flags = dict(flag_kwargs)
     stdin_bytes: bytes | None = None
-    if cmd_name == "tee":
+    if cmd_name == Cmd.TEE:
         stdin_bytes = await materialize(stdin) if stdin is not None else b""
-    if cmd_name == "grep" and not FlagView(flags,
-                                           spec=SPECS["grep"]).bool("h"):
+    if cmd_name == Cmd.GREP and not FlagView(flags,
+                                             spec=SPECS[Cmd.GREP]).bool("h"):
         flags["H"] = True
-    if cmd_name == "rg" and not FlagView(flags,
-                                         spec=SPECS["rg"]).bool("args_I"):
+    if cmd_name == Cmd.RG and not FlagView(flags,
+                                           spec=SPECS[Cmd.RG]).bool("args_I"):
         flags["H"] = True
-    if cmd_name in ("head", "tail") and not FlagView(
+    if cmd_name in (Cmd.HEAD, Cmd.TAIL) and not FlagView(
             flags, spec=SPECS[cmd_name]).bool("q"):
         flags["v"] = True
 
@@ -72,18 +72,18 @@ async def run_fanout(cmd_name: str,
                                  stdin_bytes=stdin_bytes)
     exit_code = combined_exit(cmd_name, [r.io.exit_code for r in results])
 
-    if cmd_name == "wc":
+    if cmd_name == Cmd.WC:
         body = combine_wc(results, flag_kwargs)
-    elif cmd_name == "du" and FlagView(flag_kwargs,
-                                       spec=SPECS["du"]).bool("c"):
+    elif cmd_name == Cmd.DU and FlagView(flag_kwargs,
+                                         spec=SPECS[Cmd.DU]).bool("c"):
         body = du_total(results,
-                        FlagView(flag_kwargs, spec=SPECS["du"]).bool("h"))
-    elif cmd_name == "tee":
+                        FlagView(flag_kwargs, spec=SPECS[Cmd.DU]).bool("h"))
+    elif cmd_name == Cmd.TEE:
         body = stdin_bytes or b""
-    elif (cmd_name in ("head", "tail")
+    elif (cmd_name in (Cmd.HEAD, Cmd.TAIL)
           and FlagView(flags, spec=SPECS[cmd_name]).bool("v")) or (
-              cmd_name == "ls"
-              and FlagView(flags, spec=SPECS["ls"]).bool("R")):
+              cmd_name == Cmd.LS
+              and FlagView(flags, spec=SPECS[Cmd.LS]).bool("R")):
         # Blank line between per-operand blocks, like one native run
         # separates its own file blocks.
         body = b"\n".join(r.data for r in results if r.data)

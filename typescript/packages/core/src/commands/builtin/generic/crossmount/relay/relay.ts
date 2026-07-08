@@ -17,20 +17,20 @@ import { runCmp } from './cmp.ts'
 import { runCp } from './cp.ts'
 import { runDiff } from './diff.ts'
 import { runMv } from './mv.ts'
-import type { CrossResult, DispatchFn } from '../types.ts'
+import { Cmd, type CrossResult, type DispatchFn } from '../types.ts'
 
 // Run a command whose data must colocate across mounts. Pure wiring: every
 // operand is read or written through dispatch primitives on its owning
 // mount, and the shared generic does the work in its primitive mode, so
 // output matches the single-mount commands.
 export async function runRelay(
-  cmdName: string,
+  cmdName: Cmd,
   scopes: PathSpec[],
   flagKwargs: Record<string, string | boolean | string[]>,
   dispatch: DispatchFn,
 ): Promise<CrossResult> {
-  if (cmdName === 'cp') return runCp(scopes, flagKwargs, dispatch)
-  if (cmdName === 'mv') return runMv(scopes, flagKwargs, dispatch)
-  if (cmdName === 'diff') return runDiff(scopes, flagKwargs, dispatch)
+  if (cmdName === Cmd.CP) return runCp(scopes, flagKwargs, dispatch)
+  if (cmdName === Cmd.MV) return runMv(scopes, flagKwargs, dispatch)
+  if (cmdName === Cmd.DIFF) return runDiff(scopes, flagKwargs, dispatch)
   return runCmp(scopes, flagKwargs, dispatch)
 }

@@ -12,35 +12,37 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { Cmd } from './types.ts'
+
 export const STREAM_COMMANDS: ReadonlySet<string> = new Set([
-  'cat',
-  'nl',
-  'sort',
-  'cut',
-  'sed',
-  'rev',
+  Cmd.CAT,
+  Cmd.NL,
+  Cmd.SORT,
+  Cmd.CUT,
+  Cmd.SED,
+  Cmd.REV,
 ])
 export const FANOUT_COMMANDS: ReadonlySet<string> = new Set([
-  'grep',
-  'rg',
-  'head',
-  'tail',
-  'wc',
-  'du',
-  'file',
-  'md5',
-  'sha256sum',
-  'stat',
-  'strings',
-  'tac',
-  'ls',
-  'find',
-  'rm',
-  'touch',
-  'mkdir',
-  'tee',
+  Cmd.GREP,
+  Cmd.RG,
+  Cmd.HEAD,
+  Cmd.TAIL,
+  Cmd.WC,
+  Cmd.DU,
+  Cmd.FILE,
+  Cmd.MD5,
+  Cmd.SHA256SUM,
+  Cmd.STAT,
+  Cmd.STRINGS,
+  Cmd.TAC,
+  Cmd.LS,
+  Cmd.FIND,
+  Cmd.RM,
+  Cmd.TOUCH,
+  Cmd.MKDIR,
+  Cmd.TEE,
 ])
-export const RELAY_COMMANDS: ReadonlySet<string> = new Set(['cp', 'mv', 'diff', 'cmp'])
+export const RELAY_COMMANDS: ReadonlySet<string> = new Set([Cmd.CP, Cmd.MV, Cmd.DIFF, Cmd.CMP])
 export const CROSS_MOUNT_COMMANDS: ReadonlySet<string> = new Set([
   ...STREAM_COMMANDS,
   ...FANOUT_COMMANDS,

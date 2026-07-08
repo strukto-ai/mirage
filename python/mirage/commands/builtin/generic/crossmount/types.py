@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Awaitable
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Callable, NamedTuple
 
 from mirage.io import IOResult
@@ -38,6 +38,43 @@ class Strategy(Enum):
     STREAM = "stream"
     FANOUT = "fanout"
     RELAY = "relay"
+
+
+class Cmd(StrEnum):
+    """Cross-mount capable command names.
+
+    StrEnum members compare and hash as their plain string values, so
+    ``cmd_name == Cmd.CP`` and ``cmd_name in RELAY_COMMANDS`` accept the
+    raw ``str`` the executor passes.
+    """
+    CAT = "cat"
+    NL = "nl"
+    SORT = "sort"
+    CUT = "cut"
+    SED = "sed"
+    REV = "rev"
+    GREP = "grep"
+    RG = "rg"
+    HEAD = "head"
+    TAIL = "tail"
+    WC = "wc"
+    DU = "du"
+    FILE = "file"
+    MD5 = "md5"
+    SHA256SUM = "sha256sum"
+    STAT = "stat"
+    STRINGS = "strings"
+    TAC = "tac"
+    LS = "ls"
+    FIND = "find"
+    RM = "rm"
+    TOUCH = "touch"
+    MKDIR = "mkdir"
+    TEE = "tee"
+    CP = "cp"
+    MV = "mv"
+    DIFF = "diff"
+    CMP = "cmp"
 
 
 CrossResult = tuple[ByteSource | None, IOResult]

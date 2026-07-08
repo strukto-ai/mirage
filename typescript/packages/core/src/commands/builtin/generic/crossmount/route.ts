@@ -16,7 +16,7 @@ import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { strategyFor } from './detect.ts'
 import { runFanout } from './fanout/index.ts'
-import { Strategy, type CrossResult, type DispatchFn, type RunSingle } from './types.ts'
+import { Strategy, type Cmd, type CrossResult, type DispatchFn, type RunSingle } from './types.ts'
 import { runRelay } from './relay/index.ts'
 import { runStream } from './stream/index.ts'
 
@@ -38,14 +38,17 @@ export async function handleCrossMount(
   stdin: ByteSource | null = null,
 ): Promise<CrossResult> {
   try {
-    const strategy = strategyFor(cmdName, flagKwargs)
+    // isCrossMount gated on CROSS_MOUNT_COMMANDS membership, so the name is
+    // one of the Cmd values by the time it reaches the strategy layer.
+    const cmd = cmdName as Cmd
+    const strategy = strategyFor(cmd, flagKwargs)
     if (strategy === Strategy.RELAY) {
-      return await runRelay(cmdName, scopes, flagKwargs, dispatch)
+      return await runRelay(cmd, scopes, flagKwargs, dispatch)
     }
     if (strategy === Strategy.STREAM) {
-      return await runStream(cmdName, scopes, textArgs, flagKwargs, runSingle)
+      return await runStream(cmd, scopes, textArgs, flagKwargs, runSingle)
     }
-    return await runFanout(cmdName, scopes, textArgs, flagKwargs, runSingle, stdin)
+    return await runFanout(cmd, scopes, textArgs, flagKwargs, runSingle, stdin)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return [

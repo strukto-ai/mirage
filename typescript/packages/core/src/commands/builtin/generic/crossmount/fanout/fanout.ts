@@ -17,7 +17,7 @@ import type { PathSpec } from '../../../../../types.ts'
 import { combinedExit, concatRuns, joinRunsWithBlankLine } from './combine.ts'
 import { duTotal } from './du.ts'
 import { combineWc } from './wc.ts'
-import type { CrossResult, RunSingle } from '../types.ts'
+import { Cmd, type CrossResult, type RunSingle } from '../types.ts'
 import { mergeOperandIos, runOperands } from '../utils.ts'
 
 // Run a per-operand command whose operands span mounts. The command runs
@@ -27,7 +27,7 @@ import { mergeOperandIos, runOperands } from '../utils.ts'
 // name its files (grep `-H`, head/tail `-v`); wc and `du -c` re-total across
 // runs.
 export async function runFanout(
-  cmdName: string,
+  cmdName: Cmd,
   scopes: PathSpec[],
   textArgs: string[],
   flagKwargs: Record<string, string | boolean | string[]>,
@@ -36,16 +36,16 @@ export async function runFanout(
 ): Promise<CrossResult> {
   const flags = { ...flagKwargs }
   let stdinBytes: Uint8Array | null = null
-  if (cmdName === 'tee') {
+  if (cmdName === Cmd.TEE) {
     stdinBytes = stdin !== null ? await materialize(stdin) : new Uint8Array()
   }
-  if (cmdName === 'grep' && flags.h !== true) {
+  if (cmdName === Cmd.GREP && flags.h !== true) {
     flags.H = true
   }
-  if (cmdName === 'rg' && flags.args_I !== true) {
+  if (cmdName === Cmd.RG && flags.args_I !== true) {
     flags.H = true
   }
-  if ((cmdName === 'head' || cmdName === 'tail') && flags.q !== true) {
+  if ((cmdName === Cmd.HEAD || cmdName === Cmd.TAIL) && flags.q !== true) {
     flags.v = true
   }
 
@@ -56,15 +56,15 @@ export async function runFanout(
   )
 
   let body: Uint8Array
-  if (cmdName === 'wc') {
+  if (cmdName === Cmd.WC) {
     body = combineWc(results, flagKwargs)
-  } else if (cmdName === 'du' && flagKwargs.c === true) {
+  } else if (cmdName === Cmd.DU && flagKwargs.c === true) {
     body = duTotal(results, flagKwargs.h === true)
-  } else if (cmdName === 'tee') {
+  } else if (cmdName === Cmd.TEE) {
     body = stdinBytes ?? new Uint8Array()
   } else if (
-    ((cmdName === 'head' || cmdName === 'tail') && flags.v === true) ||
-    (cmdName === 'ls' && flagKwargs.R === true)
+    ((cmdName === Cmd.HEAD || cmdName === Cmd.TAIL) && flags.v === true) ||
+    (cmdName === Cmd.LS && flagKwargs.R === true)
   ) {
     // Blank line between per-operand blocks, like one native run separates
     // its own file blocks.

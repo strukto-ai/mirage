@@ -12,14 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { OperandRun } from '../types.ts'
+import { Cmd, type OperandRun } from '../types.ts'
 
 const ENC = new TextEncoder()
 
 // grep-style: an error (2) dominates, then any match wins (0), then no-match
 // (1). Everything else: worst operand wins.
-export function combinedExit(cmdName: string, codes: number[]): number {
-  if (cmdName === 'grep' || cmdName === 'rg') {
+export function combinedExit(cmdName: Cmd, codes: number[]): number {
+  if (cmdName === Cmd.GREP || cmdName === Cmd.RG) {
     if (codes.some((c) => c > 1)) return Math.max(...codes)
     if (codes.includes(0)) return 0
     return codes.length > 0 ? Math.max(...codes) : 0

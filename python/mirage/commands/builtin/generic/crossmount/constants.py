@@ -12,10 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-STREAM_COMMANDS = frozenset({"cat", "nl", "sort", "cut", "sed", "rev"})
+from mirage.commands.builtin.generic.crossmount.types import Cmd
+
+STREAM_COMMANDS = frozenset(
+    {Cmd.CAT, Cmd.NL, Cmd.SORT, Cmd.CUT, Cmd.SED, Cmd.REV})
 FANOUT_COMMANDS = frozenset({
-    "grep", "rg", "head", "tail", "wc", "du", "file", "md5", "sha256sum",
-    "stat", "strings", "tac", "ls", "find", "rm", "touch", "mkdir", "tee"
+    Cmd.GREP, Cmd.RG, Cmd.HEAD, Cmd.TAIL, Cmd.WC, Cmd.DU, Cmd.FILE, Cmd.MD5,
+    Cmd.SHA256SUM, Cmd.STAT, Cmd.STRINGS, Cmd.TAC, Cmd.LS, Cmd.FIND, Cmd.RM,
+    Cmd.TOUCH, Cmd.MKDIR, Cmd.TEE
 })
-RELAY_COMMANDS = frozenset({"cp", "mv", "diff", "cmp"})
+RELAY_COMMANDS = frozenset({Cmd.CP, Cmd.MV, Cmd.DIFF, Cmd.CMP})
 CROSS_MOUNT_COMMANDS = STREAM_COMMANDS | FANOUT_COMMANDS | RELAY_COMMANDS

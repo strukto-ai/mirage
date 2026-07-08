@@ -14,7 +14,7 @@
 
 from mirage.commands.builtin.generic.crossmount.constants import (
     CROSS_MOUNT_COMMANDS, RELAY_COMMANDS, STREAM_COMMANDS)
-from mirage.commands.builtin.generic.crossmount.types import Strategy
+from mirage.commands.builtin.generic.crossmount.types import Cmd, Strategy
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
 from mirage.types import PathSpec
@@ -32,8 +32,8 @@ def strategy_for(cmd_name: str, flag_kwargs: dict) -> Strategy:
     """
     if cmd_name in RELAY_COMMANDS:
         return Strategy.RELAY
-    if cmd_name == "sed" and FlagView(flag_kwargs,
-                                      spec=SPECS["sed"]).bool("i"):
+    if cmd_name == Cmd.SED and FlagView(flag_kwargs,
+                                        spec=SPECS[Cmd.SED]).bool("i"):
         return Strategy.FANOUT
     if cmd_name in STREAM_COMMANDS:
         return Strategy.STREAM

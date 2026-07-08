@@ -15,7 +15,7 @@
 import { asyncChain } from '../../../../../io/stream.ts'
 import { IOResult, type ByteSource } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
-import { type CrossResult, type RunSingle } from '../types.ts'
+import { Cmd, type CrossResult, type RunSingle } from '../types.ts'
 
 function hasActiveFlags(flagKwargs: Record<string, string | boolean | string[]>): boolean {
   return Object.values(flagKwargs).some((v) => v !== false)
@@ -30,7 +30,7 @@ function hasActiveFlags(flagKwargs: Record<string, string | boolean | string[]>)
 // operand is skipped and reported on stderr, cat-style; the merged exit code
 // is then non-zero.
 export async function runStream(
-  cmdName: string,
+  cmdName: Cmd,
   scopes: PathSpec[],
   textArgs: string[],
   flagKwargs: Record<string, string | boolean | string[]>,
@@ -40,7 +40,7 @@ export async function runStream(
   const sources: ByteSource[] = []
   let failed = false
   for (const scope of scopes) {
-    const [out, io] = await runSingle('cat', [scope], [], {})
+    const [out, io] = await runSingle(Cmd.CAT, [scope], [], {})
     mergedIo = await mergedIo.merge(io)
     if (io.exitCode !== 0) {
       failed = true
@@ -50,7 +50,7 @@ export async function runStream(
   }
   const body: ByteSource = asyncChain(...sources)
 
-  if (cmdName === 'cat' && !hasActiveFlags(flagKwargs)) {
+  if (cmdName === Cmd.CAT && !hasActiveFlags(flagKwargs)) {
     if (failed) mergedIo.exitCode = mergedIo.exitCode || 1
     return [body, mergedIo]
   }
