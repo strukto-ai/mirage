@@ -39,6 +39,8 @@ class RgFlags:
     whole_word: bool
     fixed_string: bool
     only_matching: bool
+    with_filename: bool
+    no_filename: bool
     hidden: bool
     file_type: str | None
     glob_pattern: str | None
@@ -72,6 +74,8 @@ def parse_flags(fl: FlagView, never_match: bool) -> RgFlags:
         whole_word=fl.bool("w"),
         fixed_string=fl.bool("F") and not never_match,
         only_matching=fl.bool("o"),
+        with_filename=fl.bool("H"),
+        no_filename=fl.bool("args_I"),
         hidden=fl.bool("hidden"),
         file_type=fl.str("type"),
         glob_pattern=fl.str("glob"),
@@ -105,7 +109,7 @@ async def rg(
         texts (Sequence[str]): positional TEXT operands (the pattern unless
             -e/-f supplied it).
         flags (Mapping[str, object] | None): raw flag kwargs from the
-            dispatcher (e, f, i, v, n, c, args_l, w, F, o, m, A, B, C,
+            dispatcher (e, f, i, v, n, c, args_l, w, F, o, H, I, m, A, B, C,
             hidden, type, glob).
         readdir (Callable[..., Awaitable[list[str]]]): Directory reader.
         stat (Callable[[PathSpec], Awaitable[FileStat]]): Backend stat reader.
@@ -160,6 +164,10 @@ async def rg(
             except (FileNotFoundError, ValueError):
                 pass
 
+        # ripgrep labels when searching multiple files; -H forces the label
+        # for a single file and -I suppresses it (cross-mount fanout forces
+        # -H so per-operand native runs stay filename-keyed).
+        label = (len(paths) > 1 or f.with_filename) and not f.no_filename
         needs_full = (is_dir or f.files_only or f.context_before
                       or f.context_after or f.file_type or f.glob_pattern)
         if needs_full:
@@ -187,7 +195,7 @@ async def rg(
                     glob_pattern=f.glob_pattern,
                     hidden=f.hidden,
                     warnings=warnings_f,
-                    file_prefix=p.display if len(paths) > 1 else None,
+                    file_prefix=p.display if label else None,
                 )
                 results.extend(rebase_display(hits_full, p.virtual, p.display))
             stderr = format_optional_records(warnings_f)
@@ -198,7 +206,7 @@ async def rg(
         pat = compile_pattern(pattern, f.ignore_case, f.fixed_string,
                               f.whole_word)
 
-        if len(paths) > 1:
+        if len(paths) > 1 or f.with_filename:
             all_results: list[str] = []
             for p in paths:
                 data = split_lines((await
@@ -208,11 +216,14 @@ async def rg(
                                   f.only_matching, f.max_count)
                 if f.count_only:
                     if grep_count_has_matches(hits):
-                        all_results.append(f"{p.display}:{hits[0]}")
+                        all_results.append(
+                            f"{p.display}:{hits[0]}" if label else hits[0])
                 elif f.files_only:
                     all_results.extend(hits)
-                else:
+                elif label:
                     all_results.extend(f"{p.display}:{r}" for r in hits)
+                else:
+                    all_results.extend(hits)
             if not all_results:
                 return b"", IOResult(exit_code=1)
             return format_records(all_results), IOResult()

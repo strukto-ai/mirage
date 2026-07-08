@@ -409,6 +409,8 @@ def test_parse_flags_defaults_and_context_fallback():
                           only_matching=False,
                           quiet=False,
                           recursive=False,
+                          with_filename=False,
+                          no_filename=False,
                           max_count=None,
                           after_context=0,
                           before_context=0)
@@ -524,3 +526,58 @@ async def test_grep_recursive_count_only_no_match_exit_1():
     decoded = (await _drain_async(output)).decode()
     assert decoded.splitlines() == ["/d/a.txt:0"]
     assert io.exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_grep_single_file_dash_h_prefixes_filename():
+    readdir, stat, rb, rs = _make_backend({"/a.txt": b"apple\nbanana\n"})
+    output, io = await grep(
+        [_spec("/a.txt")],
+        ["apple"],
+        {"H": True},
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    decoded = (await _drain_async(output)).decode()
+    assert decoded == "/a.txt:apple\n"
+    assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_grep_single_file_dash_h_count_prefixes_filename():
+    readdir, stat, rb, rs = _make_backend({"/a.txt": b"apple\nbanana\n"})
+    output, io = await grep(
+        [_spec("/a.txt")],
+        ["a"],
+        {
+            "H": True,
+            "c": True
+        },
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    decoded = (await _drain_async(output)).decode()
+    assert decoded == "/a.txt:2\n"
+
+
+@pytest.mark.asyncio
+async def test_grep_multi_file_no_filename_suppresses_prefix():
+    readdir, stat, rb, rs = _make_backend({
+        "/a.txt": b"apple\n",
+        "/b.txt": b"apricot\n",
+    })
+    output, io = await grep(
+        [_spec("/a.txt"), _spec("/b.txt")],
+        ["ap"],
+        {"h": True},
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    decoded = (await _drain_async(output)).decode()
+    assert decoded == "apple\napricot\n"

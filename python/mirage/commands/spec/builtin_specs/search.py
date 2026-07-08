@@ -66,6 +66,8 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-w"),
             Option(short="-F"),
             Option(short="-o"),
+            Option(short="-H"),
+            Option(short="-I"),
             Option(short="-e", value_kind=OperandKind.TEXT, repeatable=True),
             Option(short="-f", value_kind=OperandKind.PATH, repeatable=True),
             Option(short="-m", value_kind=OperandKind.TEXT),

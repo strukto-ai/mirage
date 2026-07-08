@@ -28,6 +28,8 @@ SPECS: dict[str, CommandSpec] = {
                    value_kind=OperandKind.TEXT,
                    numeric_shorthand=True),
             Option(short="-c", value_kind=OperandKind.TEXT),
+            Option(short="-q"),
+            Option(short="-v"),
         ),
         rest=Operand(kind=OperandKind.PATH),
     ),
@@ -48,6 +50,7 @@ SPECS: dict[str, CommandSpec] = {
     CommandSpec(
         options=(
             Option(short="-b", value_kind=OperandKind.TEXT),
+            Option(short="-d", value_kind=OperandKind.TEXT),
             Option(short="-v", value_kind=OperandKind.TEXT),
             Option(short="-i", value_kind=OperandKind.TEXT),
             Option(short="-w", value_kind=OperandKind.TEXT),

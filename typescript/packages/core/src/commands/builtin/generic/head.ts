@@ -116,11 +116,12 @@ async function* headMulti(
   paths: readonly PathSpec[],
   lines: number,
   bytesMode: number | null,
+  showHeaders: boolean,
 ): AsyncIterable<Uint8Array> {
   for (let i = 0; i < paths.length; i++) {
     const p = paths[i]
     if (p === undefined) continue
-    if (paths.length > 1) {
+    if (showHeaders) {
       const prefix = i > 0 ? '\n' : ''
       yield ENC.encode(`${prefix}==> ${p.display} <==\n`)
     }
@@ -145,7 +146,8 @@ export async function headGeneric(
   const byteCount = cRaw !== null ? Number.parseInt(cRaw, 10) : null
   if (paths.length > 0) {
     for (const p of paths) await stat(p)
-    return [headMulti(stream, paths, lineCount, byteCount), new IOResult()]
+    const showHeaders = (opts.flags.v === true || paths.length > 1) && opts.flags.q !== true
+    return [headMulti(stream, paths, lineCount, byteCount, showHeaders), new IOResult()]
   }
   try {
     const source = resolveSource(opts.stdin, 'head: missing operand')

@@ -344,6 +344,20 @@ def grep_count_has_matches(results: list[str]) -> bool:
     return grep_count_value(results) > 0
 
 
+async def prefix_lines(source: AsyncIterator[bytes],
+                       prefix: str) -> AsyncIterator[bytes]:
+    """Prefix every line chunk with a filename label (grep -H).
+
+    Args:
+        source (AsyncIterator[bytes]): grep stream yielding one line per
+            chunk.
+        prefix (str): Label including the separator, e.g. ``file.txt:``.
+    """
+    encoded = prefix.encode()
+    async for chunk in source:
+        yield encoded + chunk
+
+
 async def nonzero_count_stream(
         source: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
     """Drop zero-count chunks for `rg -c` fallback streams.

@@ -102,6 +102,8 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
     options: [
       new Option({ short: '-n', valueKind: OperandKind.TEXT, numericShorthand: true }),
       new Option({ short: '-c', valueKind: OperandKind.TEXT }),
+      new Option({ short: '-q' }),
+      new Option({ short: '-v' }),
     ],
     rest: new Operand({ kind: OperandKind.PATH }),
   }),
@@ -153,6 +155,7 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
   nl: new CommandSpec({
     options: [
       new Option({ short: '-b', valueKind: OperandKind.TEXT }),
+      new Option({ short: '-d', valueKind: OperandKind.TEXT }),
       new Option({ short: '-v', valueKind: OperandKind.TEXT }),
       new Option({ short: '-i', valueKind: OperandKind.TEXT }),
       new Option({ short: '-w', valueKind: OperandKind.TEXT }),
@@ -197,6 +200,8 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ short: '-w' }),
       new Option({ short: '-F' }),
       new Option({ short: '-o' }),
+      new Option({ short: '-H' }),
+      new Option({ short: '-I' }),
       new Option({ short: '-e', valueKind: OperandKind.TEXT, repeatable: true }),
       new Option({ short: '-f', valueKind: OperandKind.PATH, repeatable: true }),
       new Option({ short: '-m', valueKind: OperandKind.TEXT }),

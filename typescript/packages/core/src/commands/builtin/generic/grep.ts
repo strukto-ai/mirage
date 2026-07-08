@@ -28,6 +28,7 @@ import {
   grepLines,
   grepRecursive,
   grepStream,
+  prefixLines,
   resolvePatternFromFlags,
 } from '../grep_helper.ts'
 import { resolveSource } from '../utils/stream.ts'
@@ -50,6 +51,8 @@ interface FlagSet {
   onlyMatching: boolean
   maxCount: number | null
   quiet: boolean
+  withFilename: boolean
+  noFilename: boolean
   afterContext: number
   beforeContext: number
 }
@@ -71,6 +74,8 @@ function parseFlags(flags: Record<string, string | boolean | string[]>): FlagSet
     onlyMatching: flags.o === true,
     maxCount: toInt(flags.m),
     quiet: flags.q === true,
+    withFilename: flags.H === true,
+    noFilename: flags.h === true,
     afterContext: aCtx ?? cCtx ?? 0,
     beforeContext: bCtx ?? cCtx ?? 0,
   }
@@ -201,10 +206,11 @@ export async function grepGeneric(
         } else {
           const data = splitLinesNoTrailing(DEC.decode(await readBytesFn(p.virtual)))
           const hits = grepLines(p.display, data, pat, f)
+          const label = f.noFilename ? '' : `${p.display}:`
           if (f.countOnly) {
-            if (hits.length > 0) allResults.push(`${p.display}:${hits[0] ?? ''}`)
+            if (hits.length > 0) allResults.push(`${label}${hits[0] ?? ''}`)
           } else {
-            for (const rl of hits) allResults.push(`${p.display}:${rl}`)
+            for (const rl of hits) allResults.push(`${label}${rl}`)
           }
         }
       }
@@ -241,10 +247,11 @@ export async function grepGeneric(
         }
         const data = splitLinesNoTrailing(DEC.decode(await materialize(stream(p))))
         const hits = grepLines(p.display, data, pat, f)
+        const label = f.noFilename ? '' : `${p.display}:`
         if (f.countOnly) {
-          if (hits.length > 0) allResults.push(`${p.display}:${hits[0] ?? ''}`)
+          if (hits.length > 0) allResults.push(`${label}${hits[0] ?? ''}`)
         } else {
-          for (const h of hits) allResults.push(`${p.display}:${h}`)
+          for (const h of hits) allResults.push(`${label}${h}`)
         }
       }
       const multiStderr =
@@ -285,8 +292,13 @@ export async function grepGeneric(
       return [quietMatch(matched, io), io]
     }
     const io = new IOResult()
-    if (f.countOnly) return [countExitStream(matched, io), io]
-    return [exitOnEmpty(matched, io), io]
+    let out = f.countOnly ? countExitStream(matched, io) : exitOnEmpty(matched, io)
+    if (f.withFilename && f.afterContext === 0 && f.beforeContext === 0) {
+      // GNU labels context lines with `-` instead of `:`, which the uniform
+      // prefix cannot reproduce, so -H skips context output.
+      out = prefixLines(out, `${first.display}:`)
+    }
+    return [out, io]
   }
 
   let source: AsyncIterable<Uint8Array>

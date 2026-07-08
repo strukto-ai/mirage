@@ -34,6 +34,8 @@ async def head(
     stdin: AsyncIterator[bytes] | bytes | None = None,
     n: str | None = None,
     c: str | None = None,
+    q: bool = False,
+    v: bool = False,
     index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -44,13 +46,14 @@ async def head(
     c_int = int(c) if c is not None else None
     if paths and ops.is_mounted(accessor):
         paths = await ops.resolve_glob(accessor, paths, index)
+        show_headers = (v or len(paths) > 1) and not q
         return head_multi(paths,
                           read=ops.read_stream,
                           accessor=accessor,
                           index=index,
                           n=n_int,
                           c=c_int,
-                          show_headers=len(paths) > 1), IOResult()
+                          show_headers=show_headers), IOResult()
     source = _resolve_source(stdin, "head: missing operand")
     return generic_head(source, n=n_int, c=c_int), IOResult()
 

@@ -510,3 +510,18 @@ export async function grepFilesOnly(
   }
   return []
 }
+
+// Prefix every line chunk with a filename label (grep -H). The grep stream
+// yields one line per chunk, so a per-chunk prefix is a per-line prefix.
+export async function* prefixLines(
+  source: AsyncIterable<Uint8Array>,
+  prefix: string,
+): AsyncIterable<Uint8Array> {
+  const encoded = new TextEncoder().encode(prefix)
+  for await (const chunk of source) {
+    const out = new Uint8Array(encoded.byteLength + chunk.byteLength)
+    out.set(encoded, 0)
+    out.set(chunk, encoded.byteLength)
+    yield out
+  }
+}

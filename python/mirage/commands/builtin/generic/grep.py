@@ -8,7 +8,8 @@ from mirage.cache.read_through import (cache_aware_read_bytes,
                                        cache_aware_read_stream)
 from mirage.commands.builtin.grep_helper import (  # yapf: disable
     compile_pattern, count_exit_stream, count_records_have_matches,
-    grep_files_only, grep_lines, grep_recursive, grep_stream, resolve_pattern)
+    grep_files_only, grep_lines, grep_recursive, grep_stream, prefix_lines,
+    resolve_pattern)
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.output import (format_optional_records,
                                                   format_records)
@@ -38,6 +39,8 @@ class GrepFlags:
     only_matching: bool
     quiet: bool
     recursive: bool
+    with_filename: bool
+    no_filename: bool
     max_count: int | None
     after_context: int
     before_context: int
@@ -65,6 +68,8 @@ def parse_flags(fl: FlagView, never_match: bool) -> GrepFlags:
         only_matching=fl.bool("o"),
         quiet=fl.bool("q"),
         recursive=fl.bool("r") or fl.bool("R"),
+        with_filename=fl.bool("H"),
+        no_filename=fl.bool("h"),
         max_count=fl.int("m"),
         after_context=a_ctx if a_ctx is not None else (c_ctx or 0),
         before_context=b_ctx if b_ctx is not None else (c_ctx or 0),
@@ -207,10 +212,11 @@ async def grep(
                                       f.line_numbers, f.count_only,
                                       f.files_only, f.only_matching,
                                       f.max_count)
+                    label = "" if f.no_filename else f"{p.display}:"
                     if f.count_only and hits:
-                        all_results.append(f"{p.display}:{hits[0]}")
+                        all_results.append(f"{label}{hits[0]}")
                     else:
-                        all_results.extend(f"{p.display}:{rl}" for rl in hits)
+                        all_results.extend(f"{label}{rl}" for rl in hits)
             stderr = format_optional_records(warnings)
             if not all_results:
                 return b"", IOResult(exit_code=1, stderr=stderr)
@@ -240,13 +246,14 @@ async def grep(
                 hits = grep_lines(p.display, data, pat, f.invert,
                                   f.line_numbers, f.count_only, f.files_only,
                                   f.only_matching, f.max_count)
+                label = "" if f.no_filename else f"{p.display}:"
                 if f.count_only:
                     if hits:
-                        all_results.append(f"{p.display}:{hits[0]}")
+                        all_results.append(f"{label}{hits[0]}")
                 elif f.files_only:
                     all_results.extend(hits)
                 else:
-                    all_results.extend(f"{p.display}:{r}" for r in hits)
+                    all_results.extend(f"{label}{r}" for r in hits)
             stderr = format_optional_records(multi_warnings)
             if not all_results:
                 return b"", IOResult(exit_code=1, stderr=stderr)
@@ -280,9 +287,13 @@ async def grep(
             io = IOResult(exit_code=1)
             return quiet_match(stream, io), io
         io = IOResult()
-        if f.count_only:
-            return count_exit_stream(stream, io), io
-        return exit_on_empty(stream, io), io
+        out = (count_exit_stream(stream, io)
+               if f.count_only else exit_on_empty(stream, io))
+        if f.with_filename and not (f.after_context or f.before_context):
+            # GNU labels context lines with `-` instead of `:`, which the
+            # uniform prefix cannot reproduce, so -H skips context output.
+            out = prefix_lines(out, f"{paths[0].display}:")
+        return out, io
 
     source = _resolve_source(stdin,
                              "grep: usage: grep [flags] pattern [path]",

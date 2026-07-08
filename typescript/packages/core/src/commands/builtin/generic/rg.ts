@@ -45,6 +45,8 @@ interface RgFlags {
   wholeWord: boolean
   fixedString: boolean
   onlyMatching: boolean
+  withFilename: boolean
+  noFilename: boolean
   maxCount: number | null
   afterContext: number
   beforeContext: number
@@ -68,6 +70,8 @@ function parseRgFlags(flags: Record<string, string | boolean | string[]>): RgFla
     wholeWord: flags.w === true,
     fixedString: flags.F === true,
     onlyMatching: flags.o === true,
+    withFilename: flags.H === true,
+    noFilename: flags.args_I === true,
     maxCount: toInt(flags.m),
     afterContext: a ?? c ?? 0,
     beforeContext: b ?? c ?? 0,
@@ -115,6 +119,10 @@ export async function rgGeneric(
   }
   const flags = parseRgFlags(opts.flags)
   if (resolution.neverMatch) flags.fixedString = false
+  // ripgrep labels when searching multiple files; -H forces the label for a
+  // single file and -I suppresses it (cross-mount fanout forces -H so
+  // per-operand native runs stay filename-keyed).
+  const label = (paths.length > 1 || flags.withFilename) && !flags.noFilename
   const [first] = paths
 
   if (first === undefined) {
@@ -231,7 +239,7 @@ export async function rgGeneric(
         exprText,
         fullOpts,
         warnings,
-        paths.length > 1 ? p.display : null,
+        label ? p.display : null,
       )
       results.push(...rebaseDisplay(hitsFull, p.virtual, p.display))
     }
@@ -256,12 +264,12 @@ export async function rgGeneric(
       afterContext: 0,
       beforeContext: 0,
     }
-    if (paths.length > 1) {
+    if (paths.length > 1 || flags.withFilename) {
       const results: string[] = []
       for (const p of paths) {
         const counted = await materialize(grepStream(stream(p), pat, streamOpts))
         const n = Number.parseInt(DEC.decode(counted).trim() || '0', 10)
-        if (n > 0) results.push(`${p.display}:${String(n)}`)
+        if (n > 0) results.push(label ? `${p.display}:${String(n)}` : String(n))
       }
       if (results.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
       return [ENC.encode(results.join('\n') + '\n'), new IOResult()]
@@ -271,5 +279,8 @@ export async function rgGeneric(
     return [exitOnEmpty(counted, io), io]
   }
 
-  return grepGeneric('rg', paths, texts, opts, stat, readdir, stream)
+  // grepGeneric reads grep's -H/-h names; translate rg's -I to grep's -h so
+  // suppression carries through the shared body.
+  const fwd = flags.noFilename ? { ...opts, flags: { ...opts.flags, h: true } } : opts
+  return grepGeneric('rg', paths, texts, fwd, stat, readdir, stream)
 }
