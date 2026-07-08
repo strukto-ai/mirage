@@ -12,40 +12,40 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IOResult } from '../../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { runAggregate } from './aggregate.ts'
-import { runCompare } from './compare.ts'
-import { AGGREGATE_COMMANDS, COMPARE_COMMANDS, READ_COMMANDS, TRANSFER_COMMANDS } from './detect.ts'
-import { type CrossResult, type DispatchFn } from './primitives.ts'
-import { runRead } from './read.ts'
-import { runTransfer } from './transfer.ts'
+import { strategyFor } from './detect.ts'
+import { runFanout } from './fanout/index.ts'
+import { Strategy, type CrossResult, type DispatchFn, type RunSingle } from './types.ts'
+import { runRelay } from './relay/index.ts'
+import { runStream } from './stream/index.ts'
 
-// Run a command whose path operands span mounts, via the generics. Cross-mount
-// is pure wiring: every path operand is read or written through `dispatch`
-// (which routes it to its owning mount), and the shared generic command does
-// the work. cp/mv go to runTransfer; diff/cmp to runCompare; the N-ary read
-// commands to runRead. Returns the same (out, IOResult) a generic returns.
+// Run a command whose path operands span mounts. Every command combines
+// per-mount work under one of three strategies (see Strategy): STREAM merges
+// raw per-operand bytes and runs the command once on the merged stream,
+// FANOUT runs the command natively once per operand and combines the
+// outputs, RELAY moves per-file data through the dispatcher into one shared
+// generic. STREAM and FANOUT execute through `runSingle`, so each mount
+// expands its own glob operands and uses its own native command
+// implementation.
 export async function handleCrossMount(
   cmdName: string,
   scopes: PathSpec[],
   textArgs: string[],
   flagKwargs: Record<string, string | boolean | string[]>,
   dispatch: DispatchFn,
+  runSingle: RunSingle,
+  stdin: ByteSource | null = null,
 ): Promise<CrossResult> {
   try {
-    if (TRANSFER_COMMANDS.has(cmdName)) {
-      return await runTransfer(cmdName, scopes, flagKwargs, dispatch)
+    const strategy = strategyFor(cmdName, flagKwargs)
+    if (strategy === Strategy.RELAY) {
+      return await runRelay(cmdName, scopes, flagKwargs, dispatch)
     }
-    if (COMPARE_COMMANDS.has(cmdName)) {
-      return await runCompare(cmdName, scopes, flagKwargs, dispatch)
+    if (strategy === Strategy.STREAM) {
+      return await runStream(cmdName, scopes, textArgs, flagKwargs, runSingle)
     }
-    if (READ_COMMANDS.has(cmdName)) {
-      return await runRead(cmdName, scopes, textArgs, flagKwargs, dispatch)
-    }
-    if (AGGREGATE_COMMANDS.has(cmdName)) {
-      return await runAggregate(cmdName, scopes, flagKwargs, dispatch)
-    }
+    return await runFanout(cmdName, scopes, textArgs, flagKwargs, runSingle, stdin)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return [
@@ -53,6 +53,4 @@ export async function handleCrossMount(
       new IOResult({ exitCode: 1, stderr: new TextEncoder().encode(`${cmdName}: ${msg}\n`) }),
     ]
   }
-  const errBytes = new TextEncoder().encode(`${cmdName}: cross-mount not supported\n`)
-  return [null, new IOResult({ exitCode: 1, stderr: errBytes })]
 }

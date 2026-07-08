@@ -12,7 +12,37 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { isCrossMount, strategyFor } from './detect.ts'
-export { Strategy } from './types.ts'
-export { handleCrossMount } from './route.ts'
-export type { CrossResult, DispatchFn, RunSingle } from './types.ts'
+export const STREAM_COMMANDS: ReadonlySet<string> = new Set([
+  'cat',
+  'nl',
+  'sort',
+  'cut',
+  'sed',
+  'rev',
+])
+export const FANOUT_COMMANDS: ReadonlySet<string> = new Set([
+  'grep',
+  'rg',
+  'head',
+  'tail',
+  'wc',
+  'du',
+  'file',
+  'md5',
+  'sha256sum',
+  'stat',
+  'strings',
+  'tac',
+  'ls',
+  'find',
+  'rm',
+  'touch',
+  'mkdir',
+  'tee',
+])
+export const RELAY_COMMANDS: ReadonlySet<string> = new Set(['cp', 'mv', 'diff', 'cmp'])
+export const CROSS_MOUNT_COMMANDS: ReadonlySet<string> = new Set([
+  ...STREAM_COMMANDS,
+  ...FANOUT_COMMANDS,
+  ...RELAY_COMMANDS,
+])

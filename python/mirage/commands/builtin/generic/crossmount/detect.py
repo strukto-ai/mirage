@@ -12,18 +12,36 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.generic.crossmount.constants import (
+    CROSS_MOUNT_COMMANDS, RELAY_COMMANDS, STREAM_COMMANDS)
+from mirage.commands.builtin.generic.crossmount.types import Strategy
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import FlagView
 from mirage.types import PathSpec
 
-TRANSFER_COMMANDS = frozenset({"cp", "mv"})
-COMPARE_COMMANDS = frozenset({"diff", "cmp"})
-READ_COMMANDS = frozenset({"cat", "head", "tail", "wc", "grep", "rg"})
-AGGREGATE_COMMANDS = frozenset({"du", "file", "md5"})
+
+def strategy_for(cmd_name: str, flag_kwargs: dict) -> Strategy:
+    """Pick the combine strategy for one cross-mount command invocation.
+
+    Flags can flip the strategy: ``sed -i`` edits each operand in place
+    (per-operand independent), so it fans out instead of streaming.
+
+    Args:
+        cmd_name (str): Command name, must be in CROSS_MOUNT_COMMANDS.
+        flag_kwargs (dict): Flags parsed against the shared command spec.
+    """
+    if cmd_name in RELAY_COMMANDS:
+        return Strategy.RELAY
+    if cmd_name == "sed" and FlagView(flag_kwargs,
+                                      spec=SPECS["sed"]).bool("i"):
+        return Strategy.FANOUT
+    if cmd_name in STREAM_COMMANDS:
+        return Strategy.STREAM
+    return Strategy.FANOUT
 
 
 def is_cross_mount(cmd_name: str, scopes: list[PathSpec], registry) -> bool:
-    allowed = (TRANSFER_COMMANDS | COMPARE_COMMANDS | READ_COMMANDS
-               | AGGREGATE_COMMANDS)
-    if cmd_name not in allowed or len(scopes) < 2:
+    if cmd_name not in CROSS_MOUNT_COMMANDS or len(scopes) < 2:
         return False
     mounts = set()
     for s in scopes:

@@ -12,7 +12,4 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { isCrossMount, strategyFor } from './detect.ts'
-export { Strategy } from './types.ts'
-export { handleCrossMount } from './route.ts'
-export type { CrossResult, DispatchFn, RunSingle } from './types.ts'
+export { runFanout } from './fanout.ts'

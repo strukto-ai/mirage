@@ -14,14 +14,15 @@
 
 from typing import Callable
 
-from mirage.commands.builtin.generic.crossmount.aggregate import run_aggregate
-from mirage.commands.builtin.generic.crossmount.compare import run_compare
-from mirage.commands.builtin.generic.crossmount.detect import (
-    AGGREGATE_COMMANDS, COMPARE_COMMANDS, READ_COMMANDS, TRANSFER_COMMANDS)
-from mirage.commands.builtin.generic.crossmount.primitives import CrossResult
-from mirage.commands.builtin.generic.crossmount.read import run_read
-from mirage.commands.builtin.generic.crossmount.transfer import run_transfer
+from mirage.commands.builtin.generic.crossmount.detect import strategy_for
+from mirage.commands.builtin.generic.crossmount.fanout import run_fanout
+from mirage.commands.builtin.generic.crossmount.relay import run_relay
+from mirage.commands.builtin.generic.crossmount.stream import run_stream
+from mirage.commands.builtin.generic.crossmount.types import (CrossResult,
+                                                              RunSingle,
+                                                              Strategy)
 from mirage.io import IOResult
+from mirage.io.types import ByteSource
 from mirage.types import PathSpec
 
 
@@ -31,37 +32,45 @@ async def handle_cross_mount(
     text_args: list[str],
     flag_kwargs: dict,
     dispatch: Callable,
+    run_single: RunSingle,
+    stdin: ByteSource | None = None,
 ) -> CrossResult:
-    """Run a command whose path operands span mounts, via the generics.
+    """Run a command whose path operands span mounts.
 
-    Cross-mount is pure wiring: every path operand is read or written through
-    ``dispatch`` (which routes it to its owning mount), and the shared generic
-    command does the work in its primitive mode. ``cp``/``mv`` go to
-    ``run_transfer``; ``diff``/``cmp`` to ``run_compare``; the N-ary read
-    commands to ``run_read``. Returns the same ``(out, IOResult)`` a generic
-    returns, so the caller builds the execution record uniformly.
+    Every command combines per-mount work under one of three strategies
+    (see ``Strategy``): STREAM merges raw per-operand bytes and runs the
+    command once on the merged stream, FANOUT runs the command natively
+    once per operand and combines the outputs, RELAY moves per-file data
+    through the dispatcher into one shared generic. STREAM and FANOUT
+    execute through ``run_single``, so each mount expands its own glob
+    operands and uses its own native command implementation.
 
     Args:
-        cmd_name (str): Command name, such as ``cp``, ``diff``, or ``cat``.
+        cmd_name (str): Command name, such as ``cp``, ``sort``, or ``grep``.
         scopes (list[PathSpec]): Path operands in command-line order.
-        text_args (list[str]): Positional text operands (e.g. grep pattern).
+        text_args (list[str]): Positional text operands (grep pattern,
+            find expression).
         flag_kwargs (dict): Flags parsed from the shared command spec.
-        dispatch (Callable): Workspace operation dispatcher.
+        dispatch (Callable): Workspace operation dispatcher (RELAY).
+        run_single (RunSingle): Executor-injected single-mount runner
+            (STREAM and FANOUT).
+        stdin (ByteSource | None): Original stdin (tee re-feeds it per
+            operand).
     """
     try:
-        if cmd_name in TRANSFER_COMMANDS:
-            return await run_transfer(cmd_name, scopes, flag_kwargs, dispatch)
-        if cmd_name in COMPARE_COMMANDS:
-            return await run_compare(cmd_name, scopes, flag_kwargs, dispatch)
-        if cmd_name in READ_COMMANDS:
-            return await run_read(cmd_name, scopes, text_args, flag_kwargs,
-                                  dispatch)
-        if cmd_name in AGGREGATE_COMMANDS:
-            return await run_aggregate(cmd_name, scopes, flag_kwargs, dispatch)
+        strategy = strategy_for(cmd_name, flag_kwargs)
+        if strategy is Strategy.RELAY:
+            return await run_relay(cmd_name, scopes, flag_kwargs, dispatch)
+        if strategy is Strategy.STREAM:
+            return await run_stream(cmd_name, scopes, text_args, flag_kwargs,
+                                    run_single)
+        return await run_fanout(cmd_name,
+                                scopes,
+                                text_args,
+                                flag_kwargs,
+                                run_single,
+                                stdin=stdin)
     except (FileNotFoundError, NotADirectoryError, IsADirectoryError,
             PermissionError) as exc:
         return None, IOResult(exit_code=1,
                               stderr=f"{cmd_name}: {exc}\n".encode())
-
-    err = f"{cmd_name}: cross-mount not supported\n".encode()
-    return None, IOResult(exit_code=1, stderr=err)

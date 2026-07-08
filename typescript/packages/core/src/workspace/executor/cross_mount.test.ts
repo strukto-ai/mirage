@@ -18,6 +18,7 @@ import type { Resource } from '../../resource/base.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { handleCrossMount, isCrossMount } from './cross_mount.ts'
+import type { RunSingle } from '../../commands/builtin/generic/crossmount/index.ts'
 
 class Stub implements Resource {
   readonly kind = 'stub'
@@ -44,7 +45,7 @@ describe('isCrossMount', () => {
 
   it('returns false for non-cross-mount commands', () => {
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    expect(isCrossMount('ls', paths, reg)).toBe(false)
+    expect(isCrossMount('paste', paths, reg)).toBe(false)
   })
 
   it('returns false when paths share a mount', () => {
@@ -56,6 +57,8 @@ describe('isCrossMount', () => {
     expect(isCrossMount('cp', [PathSpec.fromStrPath('/ram/a')], reg)).toBe(false)
   })
 })
+
+const runSingleNoop: RunSingle = () => Promise.resolve([null, new IOResult()])
 
 function fileStat(name: string): FileStat {
   return new FileStat({ name, size: 0, type: FileType.TEXT })
@@ -88,7 +91,16 @@ describe('handleCrossMount — cp / mv', () => {
       return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
     })
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    const [, io, tree] = await handleCrossMount('cp', paths, [], {}, dispatch, 'cp /ram/a /disk/b')
+    const [, io, tree] = await handleCrossMount(
+      'cp',
+      paths,
+      [],
+      {},
+      dispatch,
+      runSingleNoop,
+      null,
+      'cp /ram/a /disk/b',
+    )
     expect(io.exitCode).toBe(0)
     expect(tree.exitCode).toBe(0)
     const ops = dispatch.mock.calls.map((c) => c[0])
@@ -113,7 +125,16 @@ describe('handleCrossMount — cp / mv', () => {
       return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
     })
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    const [, io] = await handleCrossMount('cp', paths, [], {}, dispatch, 'cp /ram/a /disk/b')
+    const [, io] = await handleCrossMount(
+      'cp',
+      paths,
+      [],
+      {},
+      dispatch,
+      runSingleNoop,
+      null,
+      'cp /ram/a /disk/b',
+    )
     expect(io.exitCode).toBe(1)
     expect(dispatch.mock.calls.some((c) => c[0] === 'write')).toBe(false)
   })
@@ -147,6 +168,8 @@ describe('handleCrossMount — cp / mv', () => {
       [],
       { r: true },
       dispatch,
+      runSingleNoop,
+      null,
       'cp -r /ram/dir /disk/b',
     )
     expect(io.exitCode).toBe(0)
@@ -176,7 +199,7 @@ describe('handleCrossMount — cp / mv', () => {
       return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
     })
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    await handleCrossMount('mv', paths, [], {}, dispatch, 'mv')
+    await handleCrossMount('mv', paths, [], {}, dispatch, runSingleNoop, null, 'mv')
     const ops = dispatch.mock.calls.map((c) => c[0]).filter((o) => o !== 'stat')
     expect(ops).toEqual(['read', 'write', 'unlink'])
   })
@@ -201,14 +224,14 @@ describe('handleCrossMount — cmp', () => {
   it('identical contents → exit 0 empty stdout', async () => {
     const d = dispatchWithContents(new TextEncoder().encode('abc'), new TextEncoder().encode('abc'))
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    const [, io] = await handleCrossMount('cmp', paths, [], {}, d, 'cmp')
+    const [, io] = await handleCrossMount('cmp', paths, [], {}, d, runSingleNoop, null, 'cmp')
     expect(io.exitCode).toBe(0)
   })
 
   it('differ at a byte → reports byte index', async () => {
     const d = dispatchWithContents(new TextEncoder().encode('abc'), new TextEncoder().encode('aXc'))
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    const [out, io] = await handleCrossMount('cmp', paths, [], {}, d, 'cmp')
+    const [out, io] = await handleCrossMount('cmp', paths, [], {}, d, runSingleNoop, null, 'cmp')
     expect(io.exitCode).toBe(1)
     // The shared generic cmp reports "char N, line M" (matching single-mount).
     expect(decode(out as Uint8Array)).toMatch(/char 2/)
@@ -217,72 +240,141 @@ describe('handleCrossMount — cmp', () => {
   it('EOF on shorter file → exit 1', async () => {
     const d = dispatchWithContents(new TextEncoder().encode('ab'), new TextEncoder().encode('abc'))
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    const [out, io] = await handleCrossMount('cmp', paths, [], {}, d, 'cmp')
+    const [out, io] = await handleCrossMount('cmp', paths, [], {}, d, runSingleNoop, null, 'cmp')
     expect(io.exitCode).toBe(1)
     expect(decode(out as Uint8Array)).toMatch(/EOF on/)
   })
 })
 
-describe('handleCrossMount — multi-read cat/head/tail/grep/wc', () => {
-  const dispatchTwo = (aStr: string, bStr: string) =>
-    vi.fn<
-      (
-        op: string,
-        p: PathSpec,
-        args?: readonly unknown[],
-        kw?: Record<string, unknown>,
-      ) => Promise<[unknown, IOResult]>
-    >((_op, p) => {
-      if (p.virtual.startsWith('/ram'))
-        return Promise.resolve<[unknown, IOResult]>([
-          new TextEncoder().encode(aStr),
-          new IOResult(),
-        ])
-      return Promise.resolve<[unknown, IOResult]>([new TextEncoder().encode(bStr), new IOResult()])
-    })
+describe('handleCrossMount — stream/fanout via runSingle', () => {
+  const noDispatch = vi.fn<
+    (
+      op: string,
+      p: PathSpec,
+      args?: readonly unknown[],
+      kw?: Record<string, unknown>,
+    ) => Promise<[unknown, IOResult]>
+  >(() => Promise.resolve<[unknown, IOResult]>([null, new IOResult()]))
 
-  it('cat concatenates contents', async () => {
-    const d = dispatchTwo('hello\n', 'world\n')
+  const runSingleFrom =
+    (perOperand: Record<string, [string, number]>, calls: Record<string, unknown>[]): RunSingle =>
+    (cmdName, paths, texts, flagKwargs, opts) => {
+      calls.push({
+        cmd: cmdName,
+        paths: paths.map((p) => p.virtual),
+        texts: [...texts],
+        flags: { ...flagKwargs },
+        resolveHint: opts?.resolveHint?.virtual ?? null,
+      })
+      const key = paths[0]?.virtual ?? ''
+      const entry = perOperand[key] ?? ['', 0]
+      const io = new IOResult({ exitCode: entry[1] })
+      if (entry[1] !== 0) io.stderr = new TextEncoder().encode(`${cmdName}: ${key}: error\n`)
+      return Promise.resolve([new TextEncoder().encode(entry[0]), io])
+    }
+
+  it('plain cat concatenates per-operand pushdown reads without a final run', async () => {
+    const calls: Record<string, unknown>[] = []
+    const rs = runSingleFrom({ '/ram/a': ['hello\n', 0], '/disk/b': ['world\n', 0] }, calls)
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    const [out] = await handleCrossMount('cat', paths, [], {}, d, 'cat')
+    const [out, io] = await handleCrossMount('cat', paths, [], {}, noDispatch, rs, null, 'cat')
     expect(decode(await materialize(out))).toBe('hello\nworld\n')
-  })
-
-  it('head -n 2 keeps first N lines per file with headers on multi-file', async () => {
-    const d = dispatchTwo('1\n2\n3\n', 'x\ny\nz\n')
-    const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    // The executor parses flags before routing, so -n arrives as a flag kwarg.
-    const [out] = await handleCrossMount('head', paths, [], { n: '2' }, d, 'head')
-    const text = decode(await materialize(out))
-    expect(text).toMatch(/==> \/ram\/a <==/)
-    expect(text).toMatch(/1\n2/)
-    expect(text).toMatch(/==> \/disk\/b <==/)
-    expect(text).toMatch(/x\ny/)
-  })
-
-  it('grep emits "name:line" for matches', async () => {
-    const d = dispatchTwo('apple\nbanana\n', 'apricot\n')
-    const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    const [out, io] = await handleCrossMount('grep', paths, ['ap'], {}, d, 'grep')
     expect(io.exitCode).toBe(0)
-    const text = decode(out as Uint8Array)
-    expect(text).toMatch(/\/ram\/a:apple/)
-    expect(text).toMatch(/\/disk\/b:apricot/)
+    expect(calls.map((c) => c.cmd)).toEqual(['cat', 'cat'])
   })
 
-  it('grep returns exit 1 and no output when nothing matches', async () => {
-    const d = dispatchTwo('x\n', 'y\n')
+  it('sort runs once on the merged stream with a resolve hint', async () => {
+    const calls: Record<string, unknown>[] = []
+    const perOperand: Record<string, [string, number]> = {
+      '/ram/a': ['b\n', 0],
+      '/disk/b': ['a\n', 0],
+      '': ['a\nb\n', 0],
+    }
+    const rs = runSingleFrom(perOperand, calls)
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    const [, io] = await handleCrossMount('grep', paths, ['zzz'], {}, d, 'grep')
+    const [, io] = await handleCrossMount('sort', paths, [], {}, noDispatch, rs, null, 'sort')
+    expect(io.exitCode).toBe(0)
+    const final = calls.at(-1)
+    expect(final?.cmd).toBe('sort')
+    expect(final?.paths).toEqual([])
+    expect(final?.resolveHint).toBe('/ram/a')
+  })
+
+  it('grep fans out per operand and forces -H', async () => {
+    const calls: Record<string, unknown>[] = []
+    const rs = runSingleFrom(
+      { '/ram/a': ['/ram/a:apple\n', 0], '/disk/b': ['/disk/b:apricot\n', 0] },
+      calls,
+    )
+    const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
+    const [out, io] = await handleCrossMount(
+      'grep',
+      paths,
+      ['ap'],
+      {},
+      noDispatch,
+      rs,
+      null,
+      'grep',
+    )
+    expect(io.exitCode).toBe(0)
+    const text = decode(await materialize(out))
+    expect(text).toBe('/ram/a:apple\n/disk/b:apricot\n')
+    expect(calls.every((c) => (c.flags as Record<string, unknown>).H === true)).toBe(true)
+  })
+
+  it('rg fans out per operand and forces -H unless -I', async () => {
+    const calls: Record<string, unknown>[] = []
+    const rs = runSingleFrom(
+      { '/ram/a': ['/ram/a:apple\n', 0], '/disk/b': ['/disk/b:apricot\n', 0] },
+      calls,
+    )
+    const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
+    const [, io] = await handleCrossMount('rg', paths, ['ap'], {}, noDispatch, rs, null, 'rg')
+    expect(io.exitCode).toBe(0)
+    expect(calls.every((c) => (c.flags as Record<string, unknown>).H === true)).toBe(true)
+
+    const calls2: Record<string, unknown>[] = []
+    const rs2 = runSingleFrom({ '/ram/a': ['apple\n', 0], '/disk/b': ['apricot\n', 0] }, calls2)
+    await handleCrossMount('rg', paths, ['ap'], { args_I: true }, noDispatch, rs2, null, 'rg')
+    expect(calls2.every((c) => !('H' in (c.flags as Record<string, unknown>)))).toBe(true)
+  })
+
+  it('grep any-match wins over no-match in the merged exit code', async () => {
+    const calls: Record<string, unknown>[] = []
+    const rs = runSingleFrom({ '/ram/a': ['', 1], '/disk/b': ['/disk/b:x\n', 0] }, calls)
+    const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
+    const [, io] = await handleCrossMount('grep', paths, ['x'], {}, noDispatch, rs, null, 'grep')
+    expect(io.exitCode).toBe(0)
+  })
+
+  it('wc re-totals per-operand rows with one shared width', async () => {
+    const calls: Record<string, unknown>[] = []
+    const rs = runSingleFrom(
+      { '/ram/a': ['2 3 8 /ram/a\n', 0], '/disk/b': ['1 1 2 /disk/b\n', 0] },
+      calls,
+    )
+    const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
+    const [out] = await handleCrossMount('wc', paths, [], {}, noDispatch, rs, null, 'wc')
+    const text = decode(await materialize(out))
+    expect(text).toBe(' 2  3  8 /ram/a\n 1  1  2 /disk/b\n 3  4 10 total\n')
+  })
+
+  it('sha256sum concatenates per-operand lines and fails on any failure', async () => {
+    const calls: Record<string, unknown>[] = []
+    const rs = runSingleFrom({ '/ram/a': ['', 1], '/disk/b': ['h  /disk/b\n', 0] }, calls)
+    const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
+    const [out, io] = await handleCrossMount(
+      'sha256sum',
+      paths,
+      [],
+      {},
+      noDispatch,
+      rs,
+      null,
+      'sha256sum',
+    )
     expect(io.exitCode).toBe(1)
-  })
-
-  it('wc defaults to lines/words/chars per file', async () => {
-    const d = dispatchTwo('a b\nc\n', 'x\n')
-    const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    const [out] = await handleCrossMount('wc', paths, [], {}, d, 'wc')
-    const text = decode(out as Uint8Array)
-    expect(text).toMatch(/2 3 \d+ \/ram\/a/)
-    expect(text).toMatch(/1 1 \d+ \/disk\/b/)
+    expect(decode(await materialize(out))).toBe('h  /disk/b\n')
   })
 })

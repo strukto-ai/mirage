@@ -12,24 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '../../../../types.ts'
-import { cmpGeneric } from '../cmp.ts'
-import { diffGeneric } from '../diff.ts'
-import {
-  crossOpts,
-  type CrossResult,
-  type DispatchFn,
-  flatten,
-  readdirOp,
-  statOp,
-  streamOp,
-} from './primitives.ts'
+import type { PathSpec } from '../../../../../types.ts'
+import { cmpGeneric } from '../../cmp.ts'
+import type { CrossResult, DispatchFn } from '../types.ts'
+import { crossOpts, flatten, streamOp } from '../utils.ts'
 
-// Compare two files that live on different mounts. Both are read through
-// dispatch-relayed primitives and handed to the shared generic diff/cmp, so
-// output matches the single-mount commands.
-export async function runCompare(
-  cmdName: string,
+// Byte-compare two files on different mounts via the shared generic. Pure
+// wiring: both sides are read through dispatch-relayed primitives.
+export async function runCmp(
   scopes: PathSpec[],
   flagKwargs: Record<string, string | boolean | string[]>,
   dispatch: DispatchFn,
@@ -37,10 +27,6 @@ export async function runCompare(
   const flat = flatten(scopes)
   const opts = crossOpts(flagKwargs)
   const stream = streamOp(dispatch)
-  if (cmdName === 'diff') {
-    const [out, io] = await diffGeneric(flat, opts, stream, readdirOp(dispatch), statOp(dispatch))
-    return [out, io]
-  }
   const [out, io] = await cmpGeneric(flat, opts, stream)
   return [out, io]
 }

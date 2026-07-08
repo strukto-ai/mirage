@@ -14,30 +14,28 @@
 
 import type { MountRegistry } from '../../../../workspace/mount/registry.ts'
 import type { PathSpec } from '../../../../types.ts'
+import { CROSS_MOUNT_COMMANDS, RELAY_COMMANDS, STREAM_COMMANDS } from './constants.ts'
+import { Strategy } from './types.ts'
 
-export const TRANSFER_COMMANDS: ReadonlySet<string> = new Set(['cp', 'mv'])
-export const COMPARE_COMMANDS: ReadonlySet<string> = new Set(['diff', 'cmp'])
-export const AGGREGATE_COMMANDS: ReadonlySet<string> = new Set(['du', 'file', 'md5'])
-export const READ_COMMANDS: ReadonlySet<string> = new Set([
-  'cat',
-  'head',
-  'tail',
-  'wc',
-  'grep',
-  'rg',
-])
+// Pick the combine strategy for one cross-mount command invocation. Flags can
+// flip the strategy: `sed -i` edits each operand in place (per-operand
+// independent), so it fans out instead of streaming.
+export function strategyFor(
+  cmdName: string,
+  flagKwargs: Record<string, string | boolean | string[]>,
+): Strategy {
+  if (RELAY_COMMANDS.has(cmdName)) return Strategy.RELAY
+  if (cmdName === 'sed' && flagKwargs.i === true) return Strategy.FANOUT
+  if (STREAM_COMMANDS.has(cmdName)) return Strategy.STREAM
+  return Strategy.FANOUT
+}
 
 export function isCrossMount(
   cmdName: string,
   scopes: PathSpec[],
   registry: MountRegistry,
 ): boolean {
-  const allowed =
-    TRANSFER_COMMANDS.has(cmdName) ||
-    COMPARE_COMMANDS.has(cmdName) ||
-    READ_COMMANDS.has(cmdName) ||
-    AGGREGATE_COMMANDS.has(cmdName)
-  if (!allowed || scopes.length < 2) return false
+  if (!CROSS_MOUNT_COMMANDS.has(cmdName) || scopes.length < 2) return false
   const mounts = new Set<string>()
   for (const s of scopes) {
     const m = registry.mountFor(s.virtual)

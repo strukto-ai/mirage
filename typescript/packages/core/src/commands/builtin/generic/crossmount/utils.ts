@@ -13,19 +13,46 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountKey } from '../../../../utils/key_prefix.ts'
-import type { ByteSource, IOResult } from '../../../../io/types.ts'
+import { IOResult, materialize } from '../../../../io/types.ts'
 import type { Resource } from '../../../../resource/base.ts'
 import { type FileStat, PathSpec } from '../../../../types.ts'
 import type { CommandOpts } from '../../../config.ts'
+import type { DispatchFn, OperandRun, RunSingle } from './types.ts'
 
-export type DispatchFn = (
-  op: string,
-  path: PathSpec,
-  args?: readonly unknown[],
-  kwargs?: Record<string, unknown>,
-) => Promise<[unknown, IOResult]>
+// Run one native single-mount command per operand, in operand order. Each
+// operand executes on its owning mount through `runSingle` (which also
+// expands the operand's glob natively). Output is materialized and the lazy
+// exit code synced, so combiners see final values.
+export async function runOperands(
+  runSingle: RunSingle,
+  cmdName: string,
+  scopes: PathSpec[],
+  texts: string[],
+  flagKwargs: Record<string, string | boolean | string[]>,
+  stdinBytes: Uint8Array | null = null,
+): Promise<OperandRun[]> {
+  const results: OperandRun[] = []
+  for (const scope of scopes) {
+    const [out, io] = await runSingle(cmdName, [scope], texts, flagKwargs, {
+      stdin: stdinBytes,
+    })
+    const data = out !== null ? await materialize(out) : new Uint8Array()
+    io.syncExitCode()
+    results.push({ scope, data, io })
+  }
+  return results
+}
 
-export type CrossResult = [ByteSource | null, IOResult]
+// Merge per-operand IOResults in operand order under one exit code (each
+// family has its own combine rule).
+export async function mergeOperandIos(results: OperandRun[], exitCode: number): Promise<IOResult> {
+  let io = new IOResult()
+  for (const run of results) {
+    io = await io.merge(run.io)
+  }
+  io.exitCode = exitCode
+  return io
+}
 
 class CrossResourceStub implements Resource {
   readonly kind = 'cross'
