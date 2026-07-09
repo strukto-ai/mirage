@@ -537,6 +537,14 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
     "mkdir -p /data/g10 && cd /data/g10 && printf 'echo sourced-ok\\n' | tee lib.sh > /dev/null",
   ],
   ["source_relative", "source lib.sh && . /data/g10/lib.sh && cd / && rm -r /data/g10"],
+  [
+    "relative_operand_prep",
+    "mkdir -p /data/g11/sub && cd /data/g11 && printf 'one\\ntwo\\n' | tee sub/README > /dev/null",
+  ],
+  ["relative_operand_extensionless", "cat sub/README && wc -l sub/README && head -1 sub/README"],
+  ["redirect_relative_write", "echo one > sub/LOG"],
+  ["redirect_relative_append", "echo two >> sub/LOG && cat sub/LOG"],
+  ["redirect_stdin_relative", "wc -l < sub/LOG && cd / && rm -r /data/g11"],
 
   // ----- cp / mv multi-source into a directory (last; these mutate) -----
   ["cp_multi_into_dir", "cp /data/a.txt /data/b.txt /data/sub"],

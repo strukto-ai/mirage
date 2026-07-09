@@ -1729,6 +1729,20 @@ hi
 === source_relative ===
 sourced-ok
 sourced-ok
+=== relative_operand_prep ===
+
+=== relative_operand_extensionless ===
+one
+two
+2 sub/README
+one
+=== redirect_relative_write ===
+
+=== redirect_relative_append ===
+one
+two
+=== redirect_stdin_relative ===
+2
 === cp_multi_into_dir ===
 
 === cp_multi_verify_a ===
