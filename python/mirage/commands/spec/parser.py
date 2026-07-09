@@ -112,6 +112,7 @@ def parse_command(
 
     cache_paths: list[str] = []
     filtered_argv: list[str] = []
+    # orig_indices[j] = argv position of filtered_argv[j]
     orig_indices: list[int] = []
     i = 0
     while i < len(argv):
@@ -127,10 +128,18 @@ def parse_command(
 
     flags: dict[str, str | bool | list[str]] = {}
     raw_args: list[str] = []
+    # raw_indices[k] = argv position of raw_args[k]
     raw_indices: list[int] = []
-    # Per-position operand kinds aligned with argv (None = flag token or
-    # ignored word); positions disambiguate duplicate words, e.g.
-    # `grep '*.txt' *.txt` where the same word is TEXT then PATH.
+    # Per-position operand kinds aligned with the caller's argv (None =
+    # flag token or ignored word). Positions, not value sets, so the
+    # same word can be TEXT in one slot and PATH in another:
+    #   grep  *.txt  *.txt               -> [TEXT, PATH]
+    #   find  /data  -name  *.txt        -> [PATH, None, TEXT]
+    #   grep  --cache  /c  pat  f.txt    -> [None, None, TEXT, PATH]
+    # orig_indices/raw_indices map the parser's shrunken views back to
+    # argv slots (filtered_argv drops --cache tokens, raw_args keeps
+    # only operands); kinds must be written at the original positions
+    # or one dropped token shifts every later kind onto the wrong word.
     word_kinds: list[OperandKind | None] = [None] * len(argv)
     warnings: list[str] = []
     # Free-text commands (echo/python/bash-style TEXT rest) keep unknown

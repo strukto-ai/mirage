@@ -107,6 +107,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
 
   const cachePaths: string[] = []
   const filteredArgv: string[] = []
+  // origIndices[j] = argv position of filteredArgv[j]
   const origIndices: number[] = []
   let i = 0
   while (i < argv.length) {
@@ -130,10 +131,18 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
 
   const flags: Record<string, string | boolean | string[]> = {}
   const rawArgs: string[] = []
+  // rawIndices[k] = argv position of rawArgs[k]
   const rawIndices: number[] = []
-  // Per-position operand kinds aligned with argv (null = flag token or
-  // ignored word); positions disambiguate duplicate words, e.g.
-  // `grep '*.txt' *.txt` where the same word is TEXT then PATH.
+  // Per-position operand kinds aligned with the caller's argv (null =
+  // flag token or ignored word). Positions, not value sets, so the
+  // same word can be TEXT in one slot and PATH in another:
+  //   grep  *.txt  *.txt               -> [TEXT, PATH]
+  //   find  /data  -name  *.txt        -> [PATH, null, TEXT]
+  //   grep  --cache  /c  pat  f.txt    -> [null, null, TEXT, PATH]
+  // origIndices/rawIndices map the parser's shrunken views back to
+  // argv slots (filteredArgv drops --cache tokens, rawArgs keeps only
+  // operands); kinds must be written at the original positions or one
+  // dropped token shifts every later kind onto the wrong word.
   const wordKinds: (OperandKind | null)[] = new Array<OperandKind | null>(argv.length).fill(null)
   const warnings: string[] = []
   // Free-text commands (echo/python/bash-style TEXT rest) keep unknown dash
