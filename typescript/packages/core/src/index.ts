@@ -116,7 +116,6 @@ export {
   type ParsedArgsInit,
   parseCommand,
   parseToKwargs,
-  resolvePath,
   specOf,
   SPECS,
 } from './commands/spec/index.ts'
@@ -245,7 +244,7 @@ export { fmtGeneric } from './commands/builtin/generic/fmt.ts'
 export { headStream } from './commands/builtin/generic/head.ts'
 export { basenameFn } from './commands/builtin/generic/basename.ts'
 export { dirnameFn } from './commands/builtin/generic/dirname.ts'
-export { gnuBasename, gnuDirname, norm, parent, posixNormpath } from './utils/path.ts'
+export { gnuBasename, gnuDirname, norm, parent, posixNormpath, resolvePath } from './utils/path.ts'
 export { shlexSplit } from './utils/shlex.ts'
 export { detectFileType, FILE_MIME_MAP, formatFileResult } from './commands/builtin/file_helper.ts'
 export {

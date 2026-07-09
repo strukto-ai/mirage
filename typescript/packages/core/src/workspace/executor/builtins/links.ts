@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { resolvePath } from '../../../commands/spec/parser.ts'
+import { resolvePath } from '../../../utils/path.ts'
 import { IOResult } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { CycleError } from '../../../utils/path.ts'
@@ -35,7 +35,7 @@ function typed(arg: string | PathSpec): string {
 
 function abs(arg: string | PathSpec, cwd: string): string {
   if (arg instanceof PathSpec) return arg.virtual
-  return resolvePath(cwd, arg)
+  return resolvePath(arg, cwd)
 }
 
 function allKnown(chars: string, known: string): boolean {

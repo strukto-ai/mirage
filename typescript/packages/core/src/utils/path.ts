@@ -18,6 +18,13 @@ export function norm(path: string): string {
   return `/${stripSlash(path)}`
 }
 
+// Resolve a relative path against cwd; absolute paths are only
+// normalized. Mirrors the Python utils resolve_path.
+export function resolvePath(path: string, cwd: string): string {
+  if (path.startsWith('/')) return posixNormpath(path)
+  return posixNormpath(`${rstripSlash(cwd)}/${path}`)
+}
+
 // Mirror of Python's posixpath.normpath: resolves . and .. segments and
 // collapses redundant slashes without touching the filesystem.
 export function posixNormpath(path: string): string {

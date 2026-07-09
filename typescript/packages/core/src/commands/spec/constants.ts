@@ -18,3 +18,7 @@ export const AMBIGUOUS_NAMES: Readonly<Record<string, string>> = Object.freeze({
   I: 'args_I',
   '1': 'args_1',
 })
+
+// Numeric shorthand token like `-5` (head/tail count), never a flag
+// cluster or a path.
+export const NUMERIC_SHORT = /^-\d+$/

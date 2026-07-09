@@ -532,6 +532,11 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ],
   ["redirect_bare_prep", "mkdir -p /data/g9 && cd /data/g9"],
   ["redirect_bare_target", "echo hi > OUT && cat OUT && cd / && rm -r /data/g9"],
+  [
+    "source_prep",
+    "mkdir -p /data/g10 && cd /data/g10 && printf 'echo sourced-ok\\n' | tee lib.sh > /dev/null",
+  ],
+  ["source_relative", "source lib.sh && . /data/g10/lib.sh && cd / && rm -r /data/g10"],
 
   // ----- cp / mv multi-source into a directory (last; these mutate) -----
   ["cp_multi_into_dir", "cp /data/a.txt /data/b.txt /data/sub"],

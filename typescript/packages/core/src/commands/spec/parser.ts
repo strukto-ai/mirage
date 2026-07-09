@@ -12,15 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { posixNormpath } from '../../utils/path.ts'
-import { AMBIGUOUS_NAMES } from './constants.ts'
+import { resolvePath } from '../../utils/path.ts'
+import { AMBIGUOUS_NAMES, NUMERIC_SHORT } from './constants.ts'
 import { type CommandSpec, OperandKind, ParsedArgs } from './types.ts'
-import { rstripSlash } from '../../utils/slash.ts'
-
-export function resolvePath(cwd: string, path: string): string {
-  if (path.startsWith('/')) return posixNormpath(path)
-  return posixNormpath(`${rstripSlash(cwd)}/${path}`)
-}
 
 function setValueFlag(
   flags: Record<string, string | boolean | string[]>,
@@ -117,7 +111,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
       for (;;) {
         const next = argv[i]
         if (next === undefined || next.startsWith('-')) break
-        cachePaths.push(resolvePath(cwd, next))
+        cachePaths.push(resolvePath(next, cwd))
         i += 1
       }
     } else {
@@ -193,7 +187,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     }
 
     if (tok.startsWith('-') && tok.length > 1) {
-      if (numericShorthandFlag !== null && /^-\d+$/.test(tok)) {
+      if (numericShorthandFlag !== null && NUMERIC_SHORT.test(tok)) {
         flags[numericShorthandFlag] = tok.slice(1)
         i += 1
         continue
@@ -252,7 +246,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
         }
       }
 
-      if (lenientDashOperands || /^-\d+$/.test(tok)) {
+      if (lenientDashOperands || NUMERIC_SHORT.test(tok)) {
         rawArgs.push(tok)
         rawIndices.push(origIndices[i] ?? -1)
       } else {
@@ -285,7 +279,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
       continue
     }
     if (kind === OperandKind.PATH) {
-      classified.push([resolvePath(cwd, arg), OperandKind.PATH])
+      classified.push([resolvePath(arg, cwd), OperandKind.PATH])
       rawOperands.push([arg, OperandKind.PATH])
     } else {
       classified.push([arg, OperandKind.TEXT])
@@ -300,11 +294,11 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     if (kind !== OperandKind.PATH || !(flagName in flags)) continue
     const val = flags[flagName]
     if (Array.isArray(val)) {
-      const resolvedList = val.map((part) => resolvePath(cwd, part))
+      const resolvedList = val.map((part) => resolvePath(part, cwd))
       flags[flagName] = resolvedList
       pathFlagValues.push(...resolvedList)
     } else if (typeof val === 'string') {
-      const resolved = resolvePath(cwd, val)
+      const resolved = resolvePath(val, cwd)
       flags[flagName] = resolved
       pathFlagValues.push(resolved)
     }

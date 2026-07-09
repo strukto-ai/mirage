@@ -12,7 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
+
 AMBIGUOUS_NAMES = {"l": "args_l", "O": "args_O", "I": "args_I", "1": "args_1"}
+
+# Numeric shorthand token like `-5` (head/tail count), never a flag
+# cluster or a path.
+NUMERIC_SHORT = re.compile(r"^-\d+$")
 
 
 def flag_kwarg_name(flag: str) -> str:

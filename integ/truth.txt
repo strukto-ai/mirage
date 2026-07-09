@@ -1724,6 +1724,11 @@ yes
 
 === redirect_bare_target ===
 hi
+=== source_prep ===
+
+=== source_relative ===
+sourced-ok
+sourced-ok
 === cp_multi_into_dir ===
 
 === cp_multi_verify_a ===

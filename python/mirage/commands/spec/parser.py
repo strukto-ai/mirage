@@ -12,19 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
-import re
-
-from mirage.commands.spec.constants import flag_kwarg_name
+from mirage.commands.spec.constants import NUMERIC_SHORT, flag_kwarg_name
 from mirage.commands.spec.types import CommandSpec, OperandKind, ParsedArgs
-
-_NUMERIC_SHORT = re.compile(r"^-\d+$")
-
-
-def _resolve(cwd: str, path: str) -> str:
-    if path.startswith("/"):
-        return posixpath.normpath(path)
-    return posixpath.normpath(posixpath.join(cwd, path))
+from mirage.utils.path import resolve_path
 
 
 def _set_value_flag(
@@ -119,7 +109,7 @@ def parse_command(
         if argv[i] == "--cache":
             i += 1
             while i < len(argv) and not argv[i].startswith("-"):
-                cache_paths.append(_resolve(cwd, argv[i]))
+                cache_paths.append(resolve_path(argv[i], cwd))
                 i += 1
         else:
             filtered_argv.append(argv[i])
@@ -185,8 +175,7 @@ def parse_command(
             continue
 
         if tok.startswith("-") and len(tok) > 1:
-            if numeric_shorthand_flag is not None and _NUMERIC_SHORT.match(
-                    tok):
+            if numeric_shorthand_flag is not None and NUMERIC_SHORT.match(tok):
                 flags[numeric_shorthand_flag] = tok[1:]
                 i += 1
                 continue
@@ -241,7 +230,7 @@ def parse_command(
                     i += 2
                     continue
 
-            if lenient_dash_operands or _NUMERIC_SHORT.match(tok):
+            if lenient_dash_operands or NUMERIC_SHORT.match(tok):
                 raw_args.append(tok)
                 raw_indices.append(orig_indices[i])
             else:
@@ -268,7 +257,7 @@ def parse_command(
         else:
             continue
         if kind == OperandKind.PATH:
-            classified.append((_resolve(cwd, arg), OperandKind.PATH))
+            classified.append((resolve_path(arg, cwd), OperandKind.PATH))
             raw_operands.append((arg, OperandKind.PATH))
         else:
             classified.append((arg, OperandKind.TEXT))
@@ -281,11 +270,11 @@ def parse_command(
             continue
         value = flags[flag_name]
         if isinstance(value, list):
-            resolved_list = [_resolve(cwd, part) for part in value]
+            resolved_list = [resolve_path(part, cwd) for part in value]
             flags[flag_name] = resolved_list
             path_flag_values.extend(resolved_list)
         elif isinstance(value, str):
-            resolved = _resolve(cwd, value)
+            resolved = resolve_path(value, cwd)
             flags[flag_name] = resolved
             path_flag_values.append(resolved)
 

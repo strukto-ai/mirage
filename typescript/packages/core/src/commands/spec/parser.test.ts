@@ -14,22 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { specOf } from './builtins.ts'
-import { parseCommand, parseToKwargs, resolvePath } from './parser.ts'
+import { parseCommand, parseToKwargs } from './parser.ts'
 import { CommandSpec, Operand, OperandKind, Option, ParsedArgs } from './types.ts'
-
-describe('resolvePath', () => {
-  it('passes through absolute paths', () => {
-    expect(resolvePath('/cwd', '/abs/path')).toBe('/abs/path')
-  })
-
-  it('joins relative paths with cwd', () => {
-    expect(resolvePath('/cwd/sub', 'file.txt')).toBe('/cwd/sub/file.txt')
-  })
-
-  it('normalizes .. segments', () => {
-    expect(resolvePath('/cwd/sub', '../file.txt')).toBe('/cwd/file.txt')
-  })
-})
 
 describe('parseCommand — bool short flags', () => {
   const spec = new CommandSpec({

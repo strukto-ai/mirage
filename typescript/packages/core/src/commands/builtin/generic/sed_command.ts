@@ -18,7 +18,7 @@ import { IOResult } from '../../../io/types.ts'
 import { PathSpec, type ResourceName } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
-import { resolvePath } from '../../spec/parser.ts'
+import { resolvePath } from '../../../utils/path.ts'
 import type { StatOp } from '../generic_bind/adapter.ts'
 import { makeSedProvision } from '../generic_bind/provision.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -34,7 +34,7 @@ const ENC = new TextEncoder()
 function positionalAsPaths(texts: string[], opts: CommandOpts): PathSpec[] {
   const prefix = opts.mountPrefix !== undefined ? rstripSlash(opts.mountPrefix) : ''
   return texts.map((t) => {
-    const resolved = resolvePath(opts.cwd, t)
+    const resolved = resolvePath(t, opts.cwd)
     const slash = resolved.lastIndexOf('/')
     return new PathSpec({
       virtual: resolved,

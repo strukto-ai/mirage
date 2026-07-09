@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { resolvePath } from '../../../commands/spec/parser.ts'
+import { resolvePath } from '../../../utils/path.ts'
 import { materialize, IOResult } from '../../../io/types.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
