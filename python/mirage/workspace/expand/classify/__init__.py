@@ -12,21 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.workspace.route.constants import (JOB_BUILTINS, NAMESPACE_COMMANDS,
-                                              NO_FOLLOW_COMMANDS,
-                                              UNSUPPORTED_BUILTINS)
-from mirage.workspace.route.route import route
-from mirage.workspace.route.types import (SHELL_CONSUMERS, Consumer,
-                                          WordPolicy, word_policy)
+from mirage.workspace.expand.classify.heuristic import classify_word
+from mirage.workspace.expand.classify.parts import classify_parts
+from mirage.workspace.expand.classify.path import classify_bare_path
 
 __all__ = [
-    "Consumer",
-    "JOB_BUILTINS",
-    "NAMESPACE_COMMANDS",
-    "NO_FOLLOW_COMMANDS",
-    "SHELL_CONSUMERS",
-    "UNSUPPORTED_BUILTINS",
-    "WordPolicy",
-    "route",
-    "word_policy",
+    "classify_bare_path",
+    "classify_parts",
+    "classify_word",
 ]

@@ -18,7 +18,7 @@ import type { IOResult } from '../../io/types.ts'
 import type { Session } from '../session/session.ts'
 import { expandTilde } from '../../utils/path.ts'
 import { homeDir } from '../session/shell_dirs.ts'
-import { shlexSplit } from './classify.ts'
+import { shlexSplit } from '../../utils/shlex.ts'
 import { ARITH_DELIMITERS, ARITH_OPERATORS } from './constants.ts'
 import { expandBraces, lookupVar, type TSNodeLike } from './variable.ts'
 

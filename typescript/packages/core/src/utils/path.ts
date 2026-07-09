@@ -18,6 +18,29 @@ export function norm(path: string): string {
   return `/${stripSlash(path)}`
 }
 
+// Mirror of Python's posixpath.normpath: resolves . and .. segments and
+// collapses redundant slashes without touching the filesystem.
+export function posixNormpath(path: string): string {
+  if (path === '') return '.'
+  const isAbs = path.startsWith('/')
+  const parts = path.split('/').filter((p) => p !== '' && p !== '.')
+  const stack: string[] = []
+  for (const part of parts) {
+    if (part === '..') {
+      if (stack.length > 0 && stack[stack.length - 1] !== '..') {
+        stack.pop()
+      } else if (!isAbs) {
+        stack.push('..')
+      }
+    } else {
+      stack.push(part)
+    }
+  }
+  const joined = stack.join('/')
+  if (isAbs) return `/${joined}`
+  return joined === '' ? '.' : joined
+}
+
 export function expandTilde(word: string, home: string | null): string {
   if (home === null) return word
   if (word === '~') return home

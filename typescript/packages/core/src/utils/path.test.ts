@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { CycleError, expandTilde, resolveSymlinks } from './path.ts'
+import { CycleError, expandTilde, posixNormpath, resolveSymlinks } from './path.ts'
 
 describe('resolveSymlinks', () => {
   it('substitutes the longest matching link prefix', () => {
@@ -68,5 +68,27 @@ describe('expandTilde', () => {
 
   it('plain word left unchanged', () => {
     expect(expandTilde('file.txt', '/home/u')).toBe('file.txt')
+  })
+})
+
+describe('posixNormpath', () => {
+  it('normalizes ..', () => {
+    expect(posixNormpath('/a/b/../c')).toBe('/a/c')
+  })
+
+  it('collapses redundant slashes', () => {
+    expect(posixNormpath('/a//b')).toBe('/a/b')
+  })
+
+  it('drops trailing slash', () => {
+    expect(posixNormpath('/a/b/')).toBe('/a/b')
+  })
+
+  it('handles relative paths', () => {
+    expect(posixNormpath('a/./b/../c')).toBe('a/c')
+  })
+
+  it('empty string becomes .', () => {
+    expect(posixNormpath('')).toBe('.')
   })
 })

@@ -37,3 +37,28 @@ export const SHELL_CONSUMERS: ReadonlySet<Consumer> = new Set([
   Consumer.NAMESPACE,
   Consumer.FUNCTION,
 ])
+
+/**
+ * How a command's words are resolved, derived from its consumer.
+ *
+ * SHELL: the shell resolves globs before the command runs and spec
+ * hints are ignored; bash expands `echo /data/*.txt` no matter what
+ * echo does with its arguments. NAMESPACE and FUNCTION consumers get
+ * the same treatment (programs receive matches, never patterns).
+ *
+ * MOUNT: the command's spec classifies words (TEXT stays literal,
+ * PATH resolves) and glob PathSpecs stay intact for backend pushdown.
+ * UNKNOWN names also land here: nothing resolves their words, the
+ * command fails before any backend I/O.
+ */
+export const WordPolicy = Object.freeze({
+  SHELL: 'shell',
+  MOUNT: 'mount',
+} as const)
+
+export type WordPolicy = (typeof WordPolicy)[keyof typeof WordPolicy]
+
+/** Map a consumer to its word policy. */
+export function wordPolicy(consumer: Consumer): WordPolicy {
+  return SHELL_CONSUMERS.has(consumer) ? WordPolicy.SHELL : WordPolicy.MOUNT
+}

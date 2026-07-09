@@ -216,6 +216,8 @@ export async function executeNode(
       session.cwd,
       callStack,
     )
+    // The loop word list is consumed by the shell (WordPolicy.SHELL):
+    // globs resolve to matches before iteration starts.
     const resolved = await resolveGlobs(classified, registry)
     if (kind === NodeKind.SELECT) {
       return handleSelect(recurse, variable, resolved, body, session, stdin, callStack)

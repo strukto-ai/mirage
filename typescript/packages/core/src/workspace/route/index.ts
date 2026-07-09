@@ -19,4 +19,4 @@ export {
   UNSUPPORTED_BUILTINS,
 } from './constants.ts'
 export { route } from './route.ts'
-export { Consumer, SHELL_CONSUMERS } from './types.ts'
+export { Consumer, SHELL_CONSUMERS, WordPolicy, wordPolicy } from './types.ts'

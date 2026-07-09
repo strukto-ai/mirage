@@ -15,15 +15,14 @@
 import type { CallStack } from '../../shell/call_stack.ts'
 import { PathSpec } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { SHELL_CONSUMERS, route } from '../route/index.ts'
+import { WordPolicy, route, wordPolicy } from '../route/index.ts'
 import type { Session } from '../session/session.ts'
-import { classifyParts } from './classify.ts'
+import { classifyParts } from './classify/index.ts'
 import { resolveGlobs } from './globs.ts'
 import { type ExecuteFn } from './node.ts'
 import { expandParts } from './parts.ts'
 import type { OperandKind } from '../../commands/spec/types.ts'
-import { BUILTIN_SPECS } from '../../commands/spec/builtins.ts'
-import { specWordKinds } from './spec_hints.ts'
+import { specForCommand, specWordKinds } from './spec_hints.ts'
 import type { TSNodeLike } from './variable.ts'
 
 /**
@@ -84,28 +83,21 @@ export async function expandArgv(
   if (expanded.length === 0) return new Argv('', [], [])
   const name = expanded[0] ?? ''
 
-  // Word policy follows the consumer (route table): shell consumers get
-  // bash semantics, where globs expand no matter what the command does with
-  // its arguments, so spec TEXT kinds must not suppress them. Only mount
-  // commands classify by spec.
-  const isShell = SHELL_CONSUMERS.has(route(name, session, registry))
+  const policy = wordPolicy(route(name, session, registry))
   let wordKinds: (OperandKind | null)[] | null = null
-  if (!isShell) {
-    const cwdMount = registry.mountFor(session.cwd)
-    // The cwd mount may not know the command, or cwd is unmounted; fall
-    // back to the shared specs so classification still gets per-position
-    // kinds instead of shape heuristics.
-    const spec = (cwdMount !== null ? cwdMount.specFor(name) : null) ?? BUILTIN_SPECS[name] ?? null
+  if (policy === WordPolicy.MOUNT) {
+    const spec = specForCommand(name, registry, session.cwd)
     if (spec !== null) {
       wordKinds = specWordKinds(spec, expanded.slice(1))
     }
   }
 
   const classified = classifyParts(expanded, registry, session.cwd, wordKinds)
-  // A glob word is resolved by whoever consumes it, exactly once: shell
-  // consumers get matches here; mount commands keep patterns for
-  // backend pushdown; unknown names fail without touching backends.
-  const words = isShell ? await resolveGlobs(classified, registry) : classified
+  // A glob word is resolved by whoever consumes it, exactly once:
+  // WordPolicy.SHELL words get matches here; mount commands keep
+  // patterns for backend pushdown; unknown names fail without
+  // touching backends.
+  const words = policy === WordPolicy.SHELL ? await resolveGlobs(classified, registry) : classified
   const textView = words.map((p) => (p instanceof PathSpec ? p.virtual : p))
   return new Argv(name, textView.slice(1), words.slice(1))
 }

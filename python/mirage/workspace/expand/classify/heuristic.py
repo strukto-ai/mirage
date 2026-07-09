@@ -16,7 +16,6 @@ import posixpath
 import re
 import shlex
 
-from mirage.commands.spec.types import OperandKind
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.workspace.mount import MountRegistry
@@ -142,67 +141,3 @@ def classify_word(word: str, registry: MountRegistry,
         )
 
     return word
-
-
-def classify_bare_path(word: str, registry: MountRegistry,
-                       cwd: str) -> str | PathSpec:
-    """Classify a bare filename as a path resolved against cwd.
-
-    Used when CommandSpec identifies an arg as PATH but classify_word
-    would not classify it (e.g. bare "file.txt" without "/" prefix).
-    """
-    classified = classify_word(word, registry, cwd)
-    if not isinstance(classified, str):
-        return classified
-    path = posixpath.normpath(cwd.rstrip("/") + "/" + word)
-    try:
-        mount = registry.mount_for(path)
-    except ValueError:
-        return word
-    resource_path = mount_key(path, mount.prefix.rstrip("/"))
-    has_glob = any(ch in word for ch in ("*", "?", "["))
-    if has_glob:
-        last_slash = path.rfind("/")
-        return PathSpec(
-            virtual=path,
-            directory=path[:last_slash + 1],
-            resource_path=resource_path,
-            pattern=path[last_slash + 1:],
-            resolved=False,
-            raw_path=word,
-        )
-    return PathSpec(
-        virtual=path,
-        directory=path[:path.rfind("/") + 1],
-        resource_path=resource_path,
-        resolved=True,
-        raw_path=word,
-    )
-
-
-def classify_parts(
-    parts: list[str],
-    registry: MountRegistry,
-    cwd: str,
-    word_kinds: list[OperandKind | None] | None = None,
-) -> list[str | PathSpec]:
-    """Classify a list of expanded words.
-
-    First element (command name) is never classified as a path.
-    word_kinds (from CommandSpec, aligned with parts[1:]) decides per
-    position: TEXT skips classification, PATH classifies even bare
-    filenames, None falls back to the shape heuristics.
-    """
-    if not parts:
-        return []
-    result: list[str | PathSpec] = [parts[0]]
-    for i, w in enumerate(parts[1:]):
-        kind = (word_kinds[i]
-                if word_kinds is not None and i < len(word_kinds) else None)
-        if kind == OperandKind.TEXT:
-            result.append(w)
-        elif kind == OperandKind.PATH:
-            result.append(classify_bare_path(w, registry, cwd))
-        else:
-            result.append(classify_word(w, registry, cwd))
-    return result

@@ -14,7 +14,8 @@
 
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
-from mirage.workspace.expand.classify import _unescape_path, classify_word
+from mirage.workspace.expand.classify.heuristic import (_unescape_path,
+                                                        classify_word)
 from mirage.workspace.mount import MountRegistry
 
 
@@ -48,3 +49,32 @@ def test_classify_quoted_path():
     result = classify_word("/ram/Zecheng's Server/", registry, "/")
     assert isinstance(result, PathSpec)
     assert result.virtual == "/ram/Zecheng's Server"
+
+
+def test_bare_filename_stays_text():
+    registry = MountRegistry()
+    registry.mount("/ram/", RAMResource(), MountMode.WRITE)
+    assert classify_word("file.txt", registry, "/ram") == "file.txt"
+
+
+def test_relative_subdir_path_resolves():
+    registry = MountRegistry()
+    registry.mount("/ram/", RAMResource(), MountMode.WRITE)
+    result = classify_word("sub/file.txt", registry, "/ram")
+    assert isinstance(result, PathSpec)
+    assert result.virtual == "/ram/sub/file.txt"
+
+
+def test_relative_glob_resolves_against_cwd():
+    registry = MountRegistry()
+    registry.mount("/ram/", RAMResource(), MountMode.WRITE)
+    result = classify_word("*.txt", registry, "/ram")
+    assert isinstance(result, PathSpec)
+    assert result.pattern == "*.txt"
+    assert result.directory == "/ram/"
+
+
+def test_bare_glob_operator_stays_text():
+    registry = MountRegistry()
+    registry.mount("/ram/", RAMResource(), MountMode.WRITE)
+    assert classify_word("*", registry, "/ram") == "*"

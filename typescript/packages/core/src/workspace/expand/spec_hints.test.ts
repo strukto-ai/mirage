@@ -13,9 +13,22 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { specOf } from '../../commands/spec/builtins.ts'
+import { BUILTIN_SPECS, specOf } from '../../commands/spec/builtins.ts'
 import { OperandKind } from '../../commands/spec/types.ts'
-import { specWordKinds } from './spec_hints.ts'
+import type { Resource } from '../../resource/base.ts'
+import { MountMode } from '../../types.ts'
+import { MountRegistry } from '../mount/registry.ts'
+import { specForCommand, specWordKinds } from './spec_hints.ts'
+
+class StubResource implements Resource {
+  readonly kind = 'stub'
+  open(): Promise<void> {
+    return Promise.resolve()
+  }
+  close(): Promise<void> {
+    return Promise.resolve()
+  }
+}
 
 const PATH = OperandKind.PATH
 const TEXT = OperandKind.TEXT
@@ -62,5 +75,17 @@ describe('specWordKinds', () => {
     // F8: the same word is the pattern (TEXT) and a file glob (PATH);
     // value sets could not tell the two slots apart.
     expect(specWordKinds(specOf('grep'), ['*.txt', '*.txt'])).toEqual([TEXT, PATH])
+  })
+})
+
+describe('specForCommand', () => {
+  it('falls back to the shared specs when the mount lacks the command', () => {
+    const reg = new MountRegistry({ '/ram': new StubResource() }, MountMode.WRITE)
+    expect(specForCommand('grep', reg, '/ram')).toBe(BUILTIN_SPECS.grep)
+  })
+
+  it('unknown name is null', () => {
+    const reg = new MountRegistry({ '/ram': new StubResource() }, MountMode.WRITE)
+    expect(specForCommand('no-such-command', reg, '/ram')).toBeNull()
   })
 })

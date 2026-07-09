@@ -12,9 +12,26 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { BUILTIN_SPECS } from '../../commands/spec/builtins.ts'
 import { parseCommand } from '../../commands/spec/parser.ts'
 import type { OperandKind } from '../../commands/spec/types.ts'
 import { type CommandSpec } from '../../commands/spec/types.ts'
+import type { MountRegistry } from '../mount/registry.ts'
+
+// Find the spec that classifies a mount command's words. The cwd
+// mount's spec wins; the shared BUILTIN_SPECS table fills in when that
+// mount does not register the command. Every absolute path has a mount
+// (the workspace roots an implicit RAM mount), so mountFor only
+// returns null on a broken registry; the shared table still applies.
+export function specForCommand(
+  name: string,
+  registry: MountRegistry,
+  cwd: string,
+): CommandSpec | null {
+  const spec = registry.mountFor(cwd)?.specFor(name) ?? null
+  if (spec !== null) return spec
+  return BUILTIN_SPECS[name] ?? null
+}
 
 // Classify argv words into per-position operand kinds.
 //

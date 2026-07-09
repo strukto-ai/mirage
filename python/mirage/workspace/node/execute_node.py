@@ -180,6 +180,8 @@ async def execute_node(
         var, values, body = get_for_parts(node)
         classified = await expand_and_classify(values, session, execute_fn,
                                                registry, session.cwd, cs)
+        # The loop word list is consumed by the shell (WordPolicy.SHELL):
+        # globs resolve to matches before iteration starts.
         classified = await resolve_globs(classified, registry)
         if kind == NodeKind.SELECT:
             return await handle_select(recurse, var, classified, body, session,

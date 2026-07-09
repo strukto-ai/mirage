@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { ARITH_DELIMITERS, ARITH_OPERATORS } from './constants.ts'
-export { classifyBarePath, classifyParts, classifyWord, unescapePath } from './classify/index.ts'
-export { type ExecuteFn, expandNode, safeEval } from './node.ts'
-export { expandAndClassify, expandParts } from './parts.ts'
-export { expandBraces, lookupVar, type TSNodeLike } from './variable.ts'
+export { classifyWord, unescapePath } from './heuristic.ts'
+export { classifyParts } from './parts.ts'
+export { classifyBarePath } from './path.ts'

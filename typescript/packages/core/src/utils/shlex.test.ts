@@ -12,8 +12,27 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { ARITH_DELIMITERS, ARITH_OPERATORS } from './constants.ts'
-export { classifyBarePath, classifyParts, classifyWord, unescapePath } from './classify/index.ts'
-export { type ExecuteFn, expandNode, safeEval } from './node.ts'
-export { expandAndClassify, expandParts } from './parts.ts'
-export { expandBraces, lookupVar, type TSNodeLike } from './variable.ts'
+import { describe, expect, it } from 'vitest'
+import { shlexSplit } from './shlex.ts'
+
+describe('shlexSplit', () => {
+  it('splits whitespace-separated words', () => {
+    expect(shlexSplit('a b c')).toEqual(['a', 'b', 'c'])
+  })
+
+  it('backslash escapes the next char', () => {
+    expect(shlexSplit('hello\\ world')).toEqual(['hello world'])
+  })
+
+  it('single quotes preserve everything', () => {
+    expect(shlexSplit("'a b'")).toEqual(['a b'])
+  })
+
+  it('double quotes support escape sequences', () => {
+    expect(shlexSplit('"a\\"b"')).toEqual(['a"b'])
+  })
+
+  it('throws on unterminated quote', () => {
+    expect(() => shlexSplit("'open")).toThrow('unterminated quote')
+  })
+})

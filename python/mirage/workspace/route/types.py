@@ -38,3 +38,32 @@ SHELL_CONSUMERS = frozenset({
     Consumer.NAMESPACE,
     Consumer.FUNCTION,
 })
+
+
+class WordPolicy(Enum):
+    """How a command's words are resolved, derived from its consumer.
+
+    SHELL: the shell resolves globs before the command runs and spec
+    hints are ignored; bash expands `echo /data/*.txt` no matter what
+    echo does with its arguments. NAMESPACE and FUNCTION consumers get
+    the same treatment (programs receive matches, never patterns).
+
+    MOUNT: the command's spec classifies words (TEXT stays literal,
+    PATH resolves) and glob PathSpecs stay intact for backend pushdown.
+    UNKNOWN names also land here: nothing resolves their words, the
+    command fails before any backend I/O.
+    """
+
+    SHELL = auto()
+    MOUNT = auto()
+
+
+def word_policy(consumer: Consumer) -> WordPolicy:
+    """Map a consumer to its word policy.
+
+    Args:
+        consumer (Consumer): the layer that consumes the command.
+    """
+    if consumer in SHELL_CONSUMERS:
+        return WordPolicy.SHELL
+    return WordPolicy.MOUNT

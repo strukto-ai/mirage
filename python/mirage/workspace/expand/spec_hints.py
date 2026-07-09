@@ -12,8 +12,34 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.spec import SPECS
 from mirage.commands.spec.parser import parse_command
 from mirage.commands.spec.types import CommandSpec, OperandKind
+from mirage.workspace.mount import MountRegistry
+
+
+def spec_for_command(
+    name: str,
+    registry: MountRegistry,
+    cwd: str,
+) -> CommandSpec | None:
+    """Find the spec that classifies a mount command's words.
+
+    The cwd mount's spec wins; the shared SPECS table fills in when
+    that mount does not register the command. Every absolute path has
+    a mount (the workspace roots an implicit RAM mount), so mount_for
+    never fails here; if it ever does, the registry is broken and the
+    error should propagate.
+
+    Args:
+        name (str): expanded command name.
+        registry (MountRegistry): mount registry.
+        cwd (str): current working directory.
+    """
+    spec = registry.mount_for(cwd).spec_for(name)
+    if spec is not None:
+        return spec
+    return SPECS.get(name)
 
 
 def spec_word_kinds(

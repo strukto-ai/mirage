@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { posixNormpath } from '../../workspace/expand/classify.ts'
+import { posixNormpath } from '../../utils/path.ts'
 import { AMBIGUOUS_NAMES } from './constants.ts'
 import { type CommandSpec, OperandKind, ParsedArgs } from './types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
