@@ -389,8 +389,9 @@ async def handle_command(
     if cmd_name in session.functions:
         func_body = session.functions[cmd_name]
         cs = call_stack or CallStack()
+        # Positional args carry the word as typed ($1 stays sub/a.txt).
         text_args = [
-            p.virtual if isinstance(p, PathSpec) else p for p in parts[1:]
+            p.display if isinstance(p, PathSpec) else p for p in parts[1:]
         ]
         cs.push(text_args, function_name=cmd_name)
         saved_locals: dict[str, str | None] = {}

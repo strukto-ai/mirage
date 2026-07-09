@@ -108,3 +108,63 @@ describe('resolveGlobs', () => {
     expect((kept as PathSpec).pattern).toBe('*.nope')
   })
 })
+
+describe('matchDisplay via resolveGlobs', () => {
+  it('relative glob matches display as typed', async () => {
+    const match = new PathSpec({
+      resourcePath: 'ram/sub/a.txt',
+      virtual: '/ram/sub/a.txt',
+      directory: '/ram/sub/',
+      resolved: true,
+    })
+    const res = new GlobResource([match])
+    const reg = new MountRegistry({ '/ram': res }, MountMode.WRITE)
+    const p = new PathSpec({
+      resourcePath: 'ram/sub/*.txt',
+      virtual: '/ram/sub/*.txt',
+      directory: '/ram/sub/',
+      pattern: '*.txt',
+      resolved: false,
+      rawPath: 'sub/*.txt',
+    })
+    const out = await resolveGlobs([p], reg)
+    expect((out[0] as PathSpec).display).toBe('sub/a.txt')
+    expect((out[0] as PathSpec).virtual).toBe('/ram/sub/a.txt')
+  })
+
+  it('absolute glob matches keep the virtual display', async () => {
+    const match = new PathSpec({
+      resourcePath: 'ram/a.txt',
+      virtual: '/ram/a.txt',
+      directory: '/ram/',
+      resolved: true,
+    })
+    const res = new GlobResource([match])
+    const reg = new MountRegistry({ '/ram': res }, MountMode.WRITE)
+    const p = new PathSpec({
+      resourcePath: 'ram/*.txt',
+      virtual: '/ram/*.txt',
+      directory: '/ram/',
+      pattern: '*.txt',
+      resolved: false,
+    })
+    const out = await resolveGlobs([p], reg)
+    expect((out[0] as PathSpec).rawPath).toBeNull()
+    expect((out[0] as PathSpec).display).toBe('/ram/a.txt')
+  })
+
+  it('zero-match relative glob keeps the typed literal', async () => {
+    const res = new GlobResource([])
+    const reg = new MountRegistry({ '/ram': res }, MountMode.WRITE)
+    const p = new PathSpec({
+      resourcePath: 'ram/*.nope',
+      virtual: '/ram/*.nope',
+      directory: '/ram/',
+      pattern: '*.nope',
+      resolved: false,
+      rawPath: '*.nope',
+    })
+    const out = await resolveGlobs([p], reg)
+    expect((out[0] as PathSpec).display).toBe('*.nope')
+  })
+})

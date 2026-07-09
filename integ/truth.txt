@@ -1743,6 +1743,20 @@ one
 two
 === redirect_stdin_relative ===
 2
+=== relword_prep ===
+
+=== test_relative_paths ===
+yes-f
+yes-d
+no-f
+=== glob_relative_display ===
+sub/a.txt sub/b.txt
+*.nope
+=== glob_relative_for ===
+sub/a.txt
+sub/b.txt
+=== glob_relative_func ===
+sub/a.txt 2
 === cp_multi_into_dir ===
 
 === cp_multi_verify_a ===

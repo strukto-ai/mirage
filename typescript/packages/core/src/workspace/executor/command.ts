@@ -718,7 +718,8 @@ async function executeShellFunction(
   callStack: CallStack | null,
 ): Promise<Result> {
   const cs = callStack ?? new CallStack()
-  const textArgs = restParts.map((p) => (typeof p === 'string' ? p : p.virtual))
+  // Positional args carry the word as typed ($1 stays sub/a.txt).
+  const textArgs = restParts.map((p) => (typeof p === 'string' ? p : p.display))
   cs.push(textArgs, cmdName)
   const savedLocals = new Map<string, string | null>()
   session.localVars = savedLocals

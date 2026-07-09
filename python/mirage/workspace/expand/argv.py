@@ -118,7 +118,10 @@ async def expand_argv(
         words = await resolve_globs(classified, registry)
     else:
         words = classified
-    text_view = [p.virtual if isinstance(p, PathSpec) else p for p in words]
+    # The text view renders words as typed (display): bash hands
+    # programs their words unchanged, so `echo sub/file.txt` prints the
+    # relative form, not the resolved absolute path.
+    text_view = [p.display if isinstance(p, PathSpec) else p for p in words]
     return Argv(name=name,
                 args=tuple(text_view[1:]),
                 operands=tuple(words[1:]))

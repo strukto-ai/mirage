@@ -545,6 +545,19 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ["redirect_relative_write", "echo one > sub/LOG"],
   ["redirect_relative_append", "echo two >> sub/LOG && cat sub/LOG"],
   ["redirect_stdin_relative", "wc -l < sub/LOG && cd / && rm -r /data/g11"],
+  [
+    "relword_prep",
+    "mkdir -p /data/g12/sub && cd /data/g12 && printf 'y\n' | tee plain.txt > /dev/null" +
+      " && printf 'x\n' | tee sub/a.txt > /dev/null && printf 'x\n' | tee sub/b.txt > /dev/null",
+  ],
+  [
+    "test_relative_paths",
+    "test -f plain.txt && echo yes-f && test -d sub && echo yes-d" +
+      " && test -f missing.txt || echo no-f",
+  ],
+  ["glob_relative_display", "echo sub/*.txt && echo *.nope"],
+  ["glob_relative_for", "for f in sub/*.txt; do echo $f; done"],
+  ["glob_relative_func", "f() { echo $1 $#; }; f sub/*.txt && cd / && rm -r /data/g12"],
 
   // ----- cp / mv multi-source into a directory (last; these mutate) -----
   ["cp_multi_into_dir", "cp /data/a.txt /data/b.txt /data/sub"],

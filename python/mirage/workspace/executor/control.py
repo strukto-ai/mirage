@@ -161,8 +161,9 @@ async def handle_for(
 
     try:
         for val in values:
-            # env stores strings only; PathSpec → .virtual
-            session.env[variable] = (val.virtual
+            # env stores strings only; PathSpec → .display, the word
+            # as typed (bash keeps `for f in sub/*.txt` matches relative)
+            session.env[variable] = (val.display
                                      if isinstance(val, PathSpec) else val)
             try:
                 stdout, io, _ = await _execute_body(execute_node, body,
@@ -330,8 +331,9 @@ async def handle_select(
 
     try:
         for val in values:
-            # env stores strings only; PathSpec → .virtual
-            session.env[variable] = (val.virtual
+            # env stores strings only; PathSpec → .display, the word
+            # as typed (bash keeps `for f in sub/*.txt` matches relative)
+            session.env[variable] = (val.display
                                      if isinstance(val, PathSpec) else val)
             try:
                 stdout, io, _ = await _execute_body(execute_node, body,

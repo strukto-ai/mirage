@@ -98,6 +98,9 @@ export async function expandArgv(
   // patterns for backend pushdown; unknown names fail without
   // touching backends.
   const words = policy === WordPolicy.SHELL ? await resolveGlobs(classified, registry) : classified
-  const textView = words.map((p) => (p instanceof PathSpec ? p.virtual : p))
+  // The text view renders words as typed (display): bash hands
+  // programs their words unchanged, so `echo sub/file.txt` prints the
+  // relative form, not the resolved absolute path.
+  const textView = words.map((p) => (p instanceof PathSpec ? p.display : p))
   return new Argv(name, textView.slice(1), words.slice(1))
 }

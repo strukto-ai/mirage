@@ -19,6 +19,28 @@ from mirage.utils.key_prefix import mount_key
 from mirage.workspace.mount import MountRegistry
 
 
+def _match_display(item: PathSpec, match: PathSpec) -> PathSpec:
+    """Stamp a glob match with the display form the user's word implies.
+
+    Bash expands `sub/*.txt` to relative matches (`sub/a.txt`), keeping
+    the typed prefix. The glob item's raw_path records the word as
+    typed; matches rebuild it by swapping the resolved directory prefix
+    for the typed one. Absolute words (no raw_path) keep the resolved
+    virtual.
+
+    Args:
+        item (PathSpec): the glob word being resolved.
+        match (PathSpec): one resolved match.
+    """
+    if item.raw_path is None or match.raw_path is not None:
+        return match
+    if not match.virtual.startswith(item.directory):
+        return match
+    raw_dir = item.raw_path[:item.raw_path.rfind("/") + 1]
+    display = raw_dir + match.virtual[len(item.directory):]
+    return dataclasses.replace(match, raw_path=display)
+
+
 async def resolve_globs(
     classified: list[str | PathSpec],
     registry: MountRegistry,
@@ -55,12 +77,15 @@ async def resolve_globs(
                     continue
                 for p in resolved:
                     if isinstance(p, PathSpec):
-                        result.append(p)
+                        result.append(_match_display(item, p))
                     else:
                         full = prefix + p if not p.startswith(prefix) else p
                         result.append(
-                            PathSpec.from_str_path(full,
-                                                   mount_key(full, prefix)))
+                            _match_display(
+                                item,
+                                PathSpec.from_str_path(full,
+                                                       mount_key(full,
+                                                                 prefix))))
             except (ValueError, AttributeError, TypeError):
                 result.append(item)
         elif isinstance(item, PathSpec):

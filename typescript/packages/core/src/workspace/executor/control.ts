@@ -165,7 +165,9 @@ export async function handleFor(
 
   try {
     for (const val of values) {
-      session.env[variable] = val instanceof PathSpec ? val.virtual : val
+      // env stores strings only; PathSpec renders as typed (bash keeps
+      // `for f in sub/*.txt` matches relative)
+      session.env[variable] = val instanceof PathSpec ? val.display : val
       try {
         const [stdout, io] = await executeBody(executeNode, body, session, stdin, callStack)
         allStdout.push(stdout)
