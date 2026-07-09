@@ -14,49 +14,53 @@
 
 import { describe, expect, it } from 'vitest'
 import { specOf } from '../../commands/spec/builtins.ts'
+import { OperandKind } from '../../commands/spec/types.ts'
 import { specWordKinds } from './spec_hints.ts'
+
+const PATH = OperandKind.PATH
+const TEXT = OperandKind.TEXT
 
 describe('specWordKinds', () => {
   it('basic grep pattern and path', () => {
-    const [text, path] = specWordKinds(specOf('grep'), ['pattern', 'file.txt'])
-    expect(text).toEqual(new Set(['pattern']))
-    expect(path).toEqual(new Set(['file.txt']))
+    expect(specWordKinds(specOf('grep'), ['pattern', 'file.txt'])).toEqual([TEXT, PATH])
   })
 
-  it('collects TEXT flag values', () => {
-    const [text, path] = specWordKinds(specOf('find'), ['/data', '-name', '*.txt'])
-    expect(text.has('*.txt')).toBe(true)
-    expect(path).toEqual(new Set(['/data']))
+  it('TEXT flag values are positional', () => {
+    expect(specWordKinds(specOf('find'), ['/data', '-name', '*.txt'])).toEqual([PATH, null, TEXT])
   })
 
-  it('--flag=value is not a path', () => {
-    const [text, path] = specWordKinds(specOf('du'), ['--max-depth=1', '/data'])
-    expect(text.has('--max-depth=1')).toBe(false)
-    expect(path).toEqual(new Set(['/data']))
+  it('--flag=value is not classified', () => {
+    expect(specWordKinds(specOf('du'), ['--max-depth=1', '/data'])).toEqual([null, PATH])
   })
 
   it('mixed cluster value is text, not path', () => {
-    const [text, path] = specWordKinds(specOf('grep'), ['-ne', 'pat', '/a.txt'])
-    expect(text).toEqual(new Set(['pat']))
-    expect(path).toEqual(new Set(['/a.txt']))
+    expect(specWordKinds(specOf('grep'), ['-ne', 'pat', '/a.txt'])).toEqual([null, TEXT, PATH])
   })
 
   it('repeated -e values are text', () => {
-    const [text, path] = specWordKinds(specOf('grep'), ['-e', 'foo', '-e', 'bar', '/a.txt'])
-    expect(text.has('foo')).toBe(true)
-    expect(text.has('bar')).toBe(true)
-    expect(path).toEqual(new Set(['/a.txt']))
+    expect(specWordKinds(specOf('grep'), ['-e', 'foo', '-e', 'bar', '/a.txt'])).toEqual([
+      null,
+      TEXT,
+      null,
+      TEXT,
+      PATH,
+    ])
   })
 
   it('numeric shorthand is not a path', () => {
-    const [, path] = specWordKinds(specOf('head'), ['-5', 'file.txt'])
-    expect(path).toEqual(new Set(['file.txt']))
+    expect(specWordKinds(specOf('head'), ['-5', 'file.txt'])).toEqual([null, PATH])
   })
 
   it('find ignore tokens are not classified', () => {
-    const [text, path] = specWordKinds(specOf('find'), ['/data', '(', '-name', '*.txt', ')'])
-    expect(text.has('(')).toBe(false)
-    expect(path.has('(')).toBe(false)
-    expect(path.has(')')).toBe(false)
+    const kinds = specWordKinds(specOf('find'), ['/data', '(', '-name', '*.txt', ')'])
+    expect(kinds[0]).toBe(PATH)
+    expect(kinds[1]).toBeNull()
+    expect(kinds[4]).toBeNull()
+  })
+
+  it('duplicate word gets TEXT and PATH by slot', () => {
+    // F8: the same word is the pattern (TEXT) and a file glob (PATH);
+    // value sets could not tell the two slots apart.
+    expect(specWordKinds(specOf('grep'), ['*.txt', '*.txt'])).toEqual([TEXT, PATH])
   })
 })

@@ -155,6 +155,7 @@ class ParsedArgs:
     raw_operands: list[tuple[str, OperandKind]] = field(default_factory=list)
     text_flag_values: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    word_kinds: list[OperandKind | None] = field(default_factory=list)
 
     def paths(self) -> list[str]:
         return [v for v, k in self.args if k == OperandKind.PATH]

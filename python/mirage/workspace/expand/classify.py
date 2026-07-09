@@ -16,6 +16,7 @@ import posixpath
 import re
 import shlex
 
+from mirage.commands.spec.types import OperandKind
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.workspace.mount import MountRegistry
@@ -183,22 +184,24 @@ def classify_parts(
     parts: list[str],
     registry: MountRegistry,
     cwd: str,
-    text_args: set[str] | None = None,
-    path_args: set[str] | None = None,
+    word_kinds: list[OperandKind | None] | None = None,
 ) -> list[str | PathSpec]:
     """Classify a list of expanded words.
 
     First element (command name) is never classified as a path.
-    Words in text_args (from CommandSpec) skip classification.
-    Words in path_args get classified even if bare filenames.
+    word_kinds (from CommandSpec, aligned with parts[1:]) decides per
+    position: TEXT skips classification, PATH classifies even bare
+    filenames, None falls back to the shape heuristics.
     """
     if not parts:
         return []
     result: list[str | PathSpec] = [parts[0]]
-    for w in parts[1:]:
-        if text_args and w in text_args:
+    for i, w in enumerate(parts[1:]):
+        kind = (word_kinds[i]
+                if word_kinds is not None and i < len(word_kinds) else None)
+        if kind == OperandKind.TEXT:
             result.append(w)
-        elif path_args and w in path_args:
+        elif kind == OperandKind.PATH:
             result.append(classify_bare_path(w, registry, cwd))
         else:
             result.append(classify_word(w, registry, cwd))

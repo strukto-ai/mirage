@@ -21,6 +21,7 @@ import { classifyParts } from './classify.ts'
 import { resolveGlobs } from './globs.ts'
 import { type ExecuteFn } from './node.ts'
 import { expandParts } from './parts.ts'
+import type { OperandKind } from '../../commands/spec/types.ts'
 import { specWordKinds } from './spec_hints.ts'
 import type { TSNodeLike } from './variable.ts'
 
@@ -82,22 +83,19 @@ export async function expandArgv(
   if (expanded.length === 0) return new Argv('', [], [])
   const name = expanded[0] ?? ''
 
-  let textArgs: ReadonlySet<string> | null = null
-  let pathArgs: ReadonlySet<string> | null = null
+  let wordKinds: (OperandKind | null)[] | null = null
   const cwdMount = registry.mountFor(session.cwd)
   const spec = cwdMount !== null ? cwdMount.specFor(name) : null
   if (spec !== null) {
-    const [textSet, pathSet] = specWordKinds(spec, expanded.slice(1))
-    textArgs = textSet.size > 0 ? textSet : null
-    pathArgs = pathSet.size > 0 ? pathSet : null
+    wordKinds = specWordKinds(spec, expanded.slice(1))
   }
 
-  const classified = classifyParts(expanded, registry, session.cwd, textArgs, pathArgs)
+  const classified = classifyParts(expanded, registry, session.cwd, wordKinds)
   // A glob word is resolved by whoever consumes it, exactly once: shell
   // consumers get matches here; mount commands keep patterns for
   // backend pushdown; unknown names fail without touching backends.
   const words = SHELL_CONSUMERS.has(route(name, session, registry))
-    ? await resolveGlobs(classified, registry, textArgs)
+    ? await resolveGlobs(classified, registry)
     : classified
   const textView = words.map((p) => (p instanceof PathSpec ? p.virtual : p))
   return new Argv(name, textView.slice(1), words.slice(1))

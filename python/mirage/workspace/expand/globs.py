@@ -22,26 +22,22 @@ from mirage.workspace.mount import MountRegistry
 async def resolve_globs(
     classified: list[str | PathSpec],
     registry: MountRegistry,
-    text_args: set[str] | None = None,
 ) -> list[str | PathSpec]:
     """Resolve glob patterns in PathSpec args, preserving PathSpec type.
 
     Globs are resolved via resource.resolve_glob. Non-glob PathSpec
-    and plain str items pass through unchanged.
+    and plain str items pass through unchanged. Spec-TEXT words never
+    arrive here as PathSpec: per-position kinds keep them plain text at
+    classification time.
 
     Args:
         classified (list[str | PathSpec]): text arguments (str) and
             paths (PathSpec).
         registry (MountRegistry): mount registry.
-        text_args (set[str] | None): args that CommandSpec says are TEXT,
-            skip glob expansion for these.
     """
     result: list[str | PathSpec] = []
     for item in classified:
         if isinstance(item, PathSpec) and item.pattern:
-            if text_args and item.virtual in text_args:
-                result.append(item.virtual)
-                continue
             try:
                 mount = registry.mount_for(item.virtual)
                 prefix = mount.prefix.rstrip("/")

@@ -112,6 +112,7 @@ def parse_command(
 
     cache_paths: list[str] = []
     filtered_argv: list[str] = []
+    orig_indices: list[int] = []
     i = 0
     while i < len(argv):
         if argv[i] == "--cache":
@@ -121,10 +122,16 @@ def parse_command(
                 i += 1
         else:
             filtered_argv.append(argv[i])
+            orig_indices.append(i)
             i += 1
 
     flags: dict[str, str | bool | list[str]] = {}
     raw_args: list[str] = []
+    raw_indices: list[int] = []
+    # Per-position operand kinds aligned with argv (None = flag token or
+    # ignored word); positions disambiguate duplicate words, e.g.
+    # `grep '*.txt' *.txt` where the same word is TEXT then PATH.
+    word_kinds: list[OperandKind | None] = [None] * len(argv)
     warnings: list[str] = []
     # Free-text commands (echo/python/bash-style TEXT rest) keep unknown
     # dash tokens verbatim; elsewhere they are dropped with a warning so a
@@ -143,6 +150,7 @@ def parse_command(
 
         if end_of_flags:
             raw_args.append(tok)
+            raw_indices.append(orig_indices[i])
             i += 1
             continue
 
@@ -152,6 +160,7 @@ def parse_command(
                 i += 1
             elif tok in long_value_flags and i + 1 < len(filtered_argv):
                 _set_value_flag(flags, tok, filtered_argv[i + 1], repeat_flags)
+                word_kinds[orig_indices[i + 1]] = value_flag_kinds[tok]
                 i += 2
             else:
                 eq = tok.find("=")
@@ -160,6 +169,7 @@ def parse_command(
                                     repeat_flags)
                 elif lenient_dash_operands:
                     raw_args.append(tok)
+                    raw_indices.append(orig_indices[i])
                 else:
                     warnings.append(f"warning: unknown option '{tok}' ignored")
                 i += 1
@@ -176,6 +186,7 @@ def parse_command(
                 if tok == vf and i + 1 < len(filtered_argv):
                     _set_value_flag(flags, vf, filtered_argv[i + 1],
                                     repeat_flags)
+                    word_kinds[orig_indices[i + 1]] = value_flag_kinds[vf]
                     i += 2
                     matched_value = True
                     break
@@ -217,17 +228,20 @@ def parse_command(
                         flags[name] = True
                     _set_value_flag(flags, vflag, filtered_argv[i + 1],
                                     repeat_flags)
+                    word_kinds[orig_indices[i + 1]] = value_flag_kinds[vflag]
                     i += 2
                     continue
 
             if lenient_dash_operands or _NUMERIC_SHORT.match(tok):
                 raw_args.append(tok)
+                raw_indices.append(orig_indices[i])
             else:
                 warnings.append(f"warning: unknown option '{tok}' ignored")
             i += 1
             continue
 
         raw_args.append(tok)
+        raw_indices.append(orig_indices[i])
         i += 1
 
     positional: tuple[OperandKind,
@@ -250,6 +264,7 @@ def parse_command(
         else:
             classified.append((arg, OperandKind.TEXT))
             raw_operands.append((arg, OperandKind.TEXT))
+        word_kinds[raw_indices[j]] = kind
 
     path_flag_values: list[str] = []
     for flag_name, kind in value_flag_kinds.items():
@@ -283,6 +298,7 @@ def parse_command(
         raw_operands=raw_operands,
         text_flag_values=text_flag_values,
         warnings=warnings,
+        word_kinds=word_kinds,
     )
 
 

@@ -119,6 +119,7 @@ export interface ParsedArgsInit {
   rawOperands?: [string, OperandKind][]
   textFlagValues?: string[]
   warnings?: string[]
+  wordKinds?: (OperandKind | null)[]
 }
 
 export class ParsedArgs {
@@ -129,6 +130,7 @@ export class ParsedArgs {
   readonly rawOperands: [string, OperandKind][]
   readonly textFlagValues: string[]
   readonly warnings: string[]
+  readonly wordKinds: (OperandKind | null)[]
 
   constructor(init: ParsedArgsInit) {
     this.flags = init.flags
@@ -138,6 +140,7 @@ export class ParsedArgs {
     this.rawOperands = init.rawOperands ?? []
     this.textFlagValues = init.textFlagValues ?? []
     this.warnings = init.warnings ?? []
+    this.wordKinds = init.wordKinds ?? []
   }
 
   paths(): string[] {

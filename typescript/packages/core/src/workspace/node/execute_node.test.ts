@@ -432,10 +432,7 @@ describe('specWordKinds — numericShorthand', () => {
   })
 
   it('treats -3 as a flag value, not a path (head/tail GNU shorthand)', () => {
-    const [textSet, pathSet] = specWordKinds(headSpec, ['-3', '/ram/file'])
-    expect(pathSet.has('-3')).toBe(false)
-    expect(pathSet.has('/ram/file')).toBe(true)
-    expect(textSet.has('3')).toBe(true)
+    expect(specWordKinds(headSpec, ['-3', '/ram/file'])).toEqual([null, OperandKind.PATH])
   })
 
   it('falls back to treating -3 as a positional when spec lacks numericShorthand', () => {
@@ -443,7 +440,9 @@ describe('specWordKinds — numericShorthand', () => {
       options: [new Option({ short: '-n', valueKind: OperandKind.TEXT })],
       rest: new Operand({ kind: OperandKind.PATH }),
     })
-    const [, pathSet] = specWordKinds(noShortcut, ['-3', '/ram/file'])
-    expect(pathSet.has('-3')).toBe(true)
+    expect(specWordKinds(noShortcut, ['-3', '/ram/file'])).toEqual([
+      OperandKind.PATH,
+      OperandKind.PATH,
+    ])
   })
 })

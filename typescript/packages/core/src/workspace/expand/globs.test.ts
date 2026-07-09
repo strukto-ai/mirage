@@ -108,16 +108,4 @@ describe('resolveGlobs', () => {
     expect((kept as PathSpec).pattern).toBe('*.nope')
   })
 
-  it('skips glob expansion for args in textArgs', async () => {
-    const reg = new MountRegistry({ '/ram': new PlainResource() }, MountMode.WRITE)
-    const p = new PathSpec({
-      resourcePath: '*.txt',
-      virtual: '*.txt',
-      directory: '',
-      pattern: '*.txt',
-      resolved: false,
-    })
-    const out = await resolveGlobs([p], reg, new Set(['*.txt']))
-    expect(out).toEqual(['*.txt'])
-  })
 })

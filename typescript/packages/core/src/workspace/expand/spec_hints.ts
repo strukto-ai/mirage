@@ -15,27 +15,22 @@
 import { parseCommand } from '../../commands/spec/parser.ts'
 import { type CommandSpec, OperandKind } from '../../commands/spec/types.ts'
 
-// Classify argv into TEXT and PATH sets using a CommandSpec.
+// Classify argv words into per-position operand kinds.
 //
 // Delegates to parseCommand so flag syntax (clusters, --flag=value,
-// repeatable flags, providedBy) classifies identically to dispatch, then
-// maps the raw (unresolved) operand words to their kinds. Flag values with
-// TEXT kind are also added to the text set.
+// repeatable flags, providedBy) classifies identically to dispatch. Kinds
+// are positional, not value sets, so the same word can be TEXT in one slot
+// and PATH in another (`grep '*.txt' *.txt`). Null marks flag tokens and
+// ignored words (default classification applies).
 export function specWordKinds(
   spec: CommandSpec,
   argv: readonly string[],
-): [Set<string>, Set<string>] {
+): (OperandKind | null)[] {
   const parsed = parseCommand(spec, [...argv], '/')
-  const textSet = new Set<string>()
-  const pathSet = new Set<string>()
-  for (const [word, kind] of parsed.rawOperands) {
-    if (kind === OperandKind.TEXT) textSet.add(word)
-    else if (kind === OperandKind.PATH) pathSet.add(word)
+  const kinds: (OperandKind | null)[] = [...parsed.wordKinds]
+  for (let i = 0; i < argv.length; i++) {
+    const word = argv[i]
+    if (word !== undefined && spec.ignoreTokens.has(word)) kinds[i] = null
   }
-  for (const value of parsed.textFlagValues) textSet.add(value)
-  for (const tok of spec.ignoreTokens) {
-    textSet.delete(tok)
-    pathSet.delete(tok)
-  }
-  return [textSet, pathSet]
+  return kinds
 }

@@ -107,6 +107,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
 
   const cachePaths: string[] = []
   const filteredArgv: string[] = []
+  const origIndices: number[] = []
   let i = 0
   while (i < argv.length) {
     const cur = argv[i]
@@ -119,13 +120,21 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
         i += 1
       }
     } else {
-      if (cur !== undefined) filteredArgv.push(cur)
+      if (cur !== undefined) {
+        filteredArgv.push(cur)
+        origIndices.push(i)
+      }
       i += 1
     }
   }
 
   const flags: Record<string, string | boolean | string[]> = {}
   const rawArgs: string[] = []
+  const rawIndices: number[] = []
+  // Per-position operand kinds aligned with argv (null = flag token or
+  // ignored word); positions disambiguate duplicate words, e.g.
+  // `grep '*.txt' *.txt` where the same word is TEXT then PATH.
+  const wordKinds: (OperandKind | null)[] = new Array<OperandKind | null>(argv.length).fill(null)
   const warnings: string[] = []
   // Free-text commands (echo/python/bash-style TEXT rest) keep unknown dash
   // tokens verbatim; elsewhere they are dropped with a warning so a stray
@@ -146,6 +155,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
 
     if (endOfFlags) {
       rawArgs.push(tok)
+      rawIndices.push(origIndices[i] ?? -1)
       i += 1
       continue
     }
@@ -156,6 +166,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
         i += 1
       } else if (longValueFlags.has(tok) && i + 1 < filteredArgv.length) {
         setValueFlag(flags, tok, filteredArgv[i + 1] ?? '', repeatFlags)
+        wordKinds[origIndices[i + 1] ?? -1] = valueFlagKinds.get(tok) ?? null
         i += 2
       } else {
         const eq = tok.indexOf('=')
@@ -163,6 +174,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
           setValueFlag(flags, tok.slice(0, eq), tok.slice(eq + 1), repeatFlags)
         } else if (lenientDashOperands) {
           rawArgs.push(tok)
+          rawIndices.push(origIndices[i] ?? -1)
         } else {
           warnings.push(`warning: unknown option '${tok}' ignored`)
         }
@@ -181,6 +193,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
       for (const vf of valueFlags) {
         if (tok === vf && i + 1 < filteredArgv.length) {
           setValueFlag(flags, vf, filteredArgv[i + 1] ?? '', repeatFlags)
+          wordKinds[origIndices[i + 1] ?? -1] = valueFlagKinds.get(vf) ?? null
           i += 2
           matchedValue = true
           break
@@ -224,6 +237,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
         if (i + 1 < filteredArgv.length) {
           for (const name of mixed.bools) flags[name] = true
           setValueFlag(flags, mixed.valueFlag, filteredArgv[i + 1] ?? '', repeatFlags)
+          wordKinds[origIndices[i + 1] ?? -1] = valueFlagKinds.get(mixed.valueFlag) ?? null
           i += 2
           continue
         }
@@ -231,6 +245,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
 
       if (lenientDashOperands || /^-\d+$/.test(tok)) {
         rawArgs.push(tok)
+        rawIndices.push(origIndices[i] ?? -1)
       } else {
         warnings.push(`warning: unknown option '${tok}' ignored`)
       }
@@ -239,6 +254,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     }
 
     rawArgs.push(tok)
+    rawIndices.push(origIndices[i] ?? -1)
     i += 1
   }
 
@@ -266,6 +282,8 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
       classified.push([arg, OperandKind.TEXT])
       rawOperands.push([arg, OperandKind.TEXT])
     }
+    const origIdx = rawIndices[j]
+    if (origIdx !== undefined && origIdx >= 0) wordKinds[origIdx] = kind
   }
 
   const pathFlagValues: string[] = []
@@ -302,6 +320,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     rawOperands,
     textFlagValues,
     warnings,
+    wordKinds,
   })
 }
 

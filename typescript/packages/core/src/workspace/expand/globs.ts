@@ -29,15 +29,10 @@ function hasGlob(r: Resource): r is ResourceWithGlob {
 export async function resolveGlobs(
   classified: readonly (string | PathSpec)[],
   registry: MountRegistry,
-  textArgs: ReadonlySet<string> | null = null,
 ): Promise<(string | PathSpec)[]> {
   const result: (string | PathSpec)[] = []
   for (const item of classified) {
     if (item instanceof PathSpec && item.pattern !== null) {
-      if (textArgs?.has(item.virtual) === true) {
-        result.push(item.virtual)
-        continue
-      }
       const mount = registry.mountFor(item.virtual)
       if (mount === null || !hasGlob(mount.resource)) {
         result.push(item)

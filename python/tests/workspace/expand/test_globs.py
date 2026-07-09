@@ -149,23 +149,6 @@ def test_glob_no_match_keeps_literal_word():
     assert result[1].pattern
 
 
-def test_text_args_skip_glob_resolution():
-    reg = _mock_registry()
-    glob_ps = PathSpec(
-        resource_path="data/*.txt",
-        virtual="/data/*.txt",
-        directory="/data/",
-        pattern="*.txt",
-        resolved=False,
-    )
-    classified = ["grep", glob_ps]
-    result = _run(resolve_globs(classified, reg, text_args={"/data/*.txt"}))
-    assert len(result) == 2
-    assert result[0] == "grep"
-    assert result[1] == "/data/*.txt"
-    assert isinstance(result[1], str)
-
-
 def test_mixed_text_and_pathspec():
     reg = _mock_registry()
     ps = PathSpec(resource_path="data/file.txt",

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { OperandKind } from '../../commands/spec/types.ts'
 import type { Resource } from '../../resource/base.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { MountRegistry } from '../mount/registry.ts'
@@ -158,15 +159,25 @@ describe('classifyParts', () => {
     expect(out[1]).toBeInstanceOf(PathSpec)
   })
 
-  it('textArgs set forces plain-text classification', () => {
+  it('TEXT kind forces plain-text classification', () => {
     const reg = setup()
-    const out = classifyParts(['cat', '/ram/x'], reg, '/', new Set(['/ram/x']))
+    const out = classifyParts(['cat', '/ram/x'], reg, '/', [OperandKind.TEXT])
     expect(out[1]).toBe('/ram/x')
   })
 
-  it('pathArgs set forces bare-path classification', () => {
+  it('PATH kind forces bare-path classification', () => {
     const reg = setup()
-    const out = classifyParts(['cat', 'file.txt'], reg, '/ram', null, new Set(['file.txt']))
+    const out = classifyParts(['cat', 'file.txt'], reg, '/ram', [OperandKind.PATH])
     expect(out[1]).toBeInstanceOf(PathSpec)
+  })
+
+  it('duplicate word classifies per slot', () => {
+    const reg = setup()
+    const out = classifyParts(['grep', '*.txt', '*.txt'], reg, '/ram', [
+      OperandKind.TEXT,
+      OperandKind.PATH,
+    ])
+    expect(out[1]).toBe('*.txt')
+    expect(out[2]).toBeInstanceOf(PathSpec)
   })
 })
