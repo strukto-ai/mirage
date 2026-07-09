@@ -174,10 +174,15 @@ async def provision_node(
         command, redirects = get_redirects(node)
         expanded, pipe_node = await expand_redirects(redirects, session,
                                                      execute_fn, registry)
+        # A cmdsub target expands empty under provision, so its
+        # classification is garbage; the precision degrade below keeps
+        # the plan honest without costing a phantom write (mirrors TS).
         targets = [(r.kind, r.target) for r in expanded
                    if r.kind in (RedirectKind.STDIN, RedirectKind.STDOUT)
                    and isinstance(r.target, PathSpec)
-                   and not r.target.virtual.startswith("/dev/")]
+                   and not r.target.virtual.startswith("/dev/")
+                   and not (r.target_node is not None
+                            and has_command_substitution(r.target_node))]
         result = await handle_redirect_provision(recurse, registry, command,
                                                  targets, session, namespace)
         if any(r.target_node is not None

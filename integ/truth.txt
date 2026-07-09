@@ -1720,6 +1720,10 @@ yes
 /data/sorted_a.txt /data/sorted_b.txt /data/sorted_c.txt
 === glob_pattern_dup_word ===
 /data/g8/l1.txt:x *.txt y
+=== redirect_bare_prep ===
+
+=== redirect_bare_target ===
+hi
 === cp_multi_into_dir ===
 
 === cp_multi_verify_a ===

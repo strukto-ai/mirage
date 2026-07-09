@@ -530,6 +530,8 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
       " && cd /data/g8 && grep -F '*.txt' *.txt" +
       " && cd / && rm -r /data/g8",
   ],
+  ["redirect_bare_prep", "mkdir -p /data/g9 && cd /data/g9"],
+  ["redirect_bare_target", "echo hi > OUT && cat OUT && cd / && rm -r /data/g9"],
 
   // ----- cp / mv multi-source into a directory (last; these mutate) -----
   ["cp_multi_into_dir", "cp /data/a.txt /data/b.txt /data/sub"],
