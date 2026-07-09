@@ -17,17 +17,18 @@ from collections.abc import Callable
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.types import PathSpec
+from mirage.utils.path import resolve_path
 from mirage.workspace.executor.builtins.scope import _scope_path, _to_scope
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
 
-async def _eval_test(dispatch: Callable, argv: list) -> bool:
+async def _eval_test(dispatch: Callable, argv: list, cwd: str) -> bool:
     if not argv:
         return False
     first = _scope_path(argv[0])
     if first == "!" and len(argv) > 1:
-        return not await _eval_test(dispatch, argv[1:])
+        return not await _eval_test(dispatch, argv[1:], cwd)
     if len(argv) == 1:
         return bool(first)
     if len(argv) == 2:
@@ -38,19 +39,26 @@ async def _eval_test(dispatch: Callable, argv: list) -> bool:
         if op == "-n":
             return _scope_path(val) != ""
         if op == "-f":
+            # A relative string operand resolves against cwd, like bash:
+            # `cd /data && test -f plain.txt` checks /data/plain.txt.
+            path = _scope_path(val)
+            if not isinstance(val, PathSpec) and not path:
+                return False
             scope = val if isinstance(val, PathSpec) else _to_scope(
-                _scope_path(val))
+                resolve_path(path, cwd))
             try:
                 await dispatch("stat", scope)
                 return True
             except (FileNotFoundError, ValueError):
                 return False
         if op == "-d":
+            path = _scope_path(val)
+            if not isinstance(val, PathSpec) and not path:
+                return False
+            if not isinstance(val, PathSpec):
+                path = resolve_path(path, cwd)
             scope = val if isinstance(val, PathSpec) else PathSpec(
-                virtual=_scope_path(val),
-                directory=_scope_path(val),
-                resource_path="",
-                resolved=False)
+                virtual=path, directory=path, resource_path="", resolved=False)
             try:
                 await dispatch("readdir", scope)
                 return True
@@ -88,7 +96,7 @@ async def handle_test(
     argv: list,
     session: Session,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    result = await _eval_test(dispatch, argv)
+    result = await _eval_test(dispatch, argv, session.cwd)
     code = 0 if result else 1
     return None, IOResult(exit_code=code), ExecutionNode(command="test",
                                                          exit_code=code)
