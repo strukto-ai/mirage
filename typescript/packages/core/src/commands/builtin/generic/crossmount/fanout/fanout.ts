@@ -14,11 +14,43 @@
 
 import { materialize, type ByteSource } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
-import { combinedExit, concatRuns, joinRunsWithBlankLine } from './combine.ts'
+import { combinedExit } from './exit.ts'
 import { duTotal } from './du.ts'
 import { combineWc } from './wc.ts'
-import { Cmd, type CrossResult, type RunSingle } from '../types.ts'
+import { Cmd, type CrossResult, type OperandRun, type RunSingle } from '../types.ts'
 import { mergeOperandIos, runOperands } from '../utils.ts'
+
+const ENC = new TextEncoder()
+
+function concatRuns(results: OperandRun[]): Uint8Array {
+  const nonEmpty = results.map((r) => r.data).filter((d) => d.byteLength > 0)
+  const size = nonEmpty.reduce((n, d) => n + d.byteLength, 0)
+  const out = new Uint8Array(size)
+  let offset = 0
+  for (const d of nonEmpty) {
+    out.set(d, offset)
+    offset += d.byteLength
+  }
+  return out
+}
+
+function joinRunsWithBlankLine(results: OperandRun[]): Uint8Array {
+  const parts = results.map((r) => r.data).filter((d) => d.byteLength > 0)
+  const sep = ENC.encode('\n')
+  const size =
+    parts.reduce((n, d) => n + d.byteLength, 0) + sep.byteLength * Math.max(0, parts.length - 1)
+  const out = new Uint8Array(size)
+  let offset = 0
+  parts.forEach((d, i) => {
+    if (i > 0) {
+      out.set(sep, offset)
+      offset += sep.byteLength
+    }
+    out.set(d, offset)
+    offset += d.byteLength
+  })
+  return out
+}
 
 // Run a per-operand command whose operands span mounts. The command runs
 // natively once per operand on the operand's owning mount (globs expand

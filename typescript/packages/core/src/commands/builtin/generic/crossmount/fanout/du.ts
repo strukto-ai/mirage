@@ -12,26 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { humanSize } from '../../../utils/formatting.ts'
+import { humanSize, parseSize } from '../../../utils/formatting.ts'
 import type { OperandRun } from '../types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
-
-const SIZE_UNITS: Record<string, number> = {
-  B: 1,
-  K: 1024,
-  M: 1024 ** 2,
-  G: 1024 ** 3,
-  T: 1024 ** 4,
-}
-
-export function parseSize(text: string): number {
-  const last = text.at(-1) ?? ''
-  const unit = SIZE_UNITS[last]
-  if (unit !== undefined) return Math.round(parseFloat(text.slice(0, -1)) * unit)
-  return parseInt(text, 10)
-}
 
 function formatSize(size: number, human: boolean): string {
   return human ? humanSize(size) : String(size)

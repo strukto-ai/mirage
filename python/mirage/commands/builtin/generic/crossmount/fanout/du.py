@@ -13,21 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.generic.crossmount.types import OperandRun
-from mirage.commands.builtin.utils.formatting import _human_size
-
-_SIZE_UNITS = {
-    "B": 1,
-    "K": 1024,
-    "M": 1024**2,
-    "G": 1024**3,
-    "T": 1024**4,
-}
-
-
-def parse_size(text: str) -> int:
-    if text and text[-1] in _SIZE_UNITS:
-        return round(float(text[:-1]) * _SIZE_UNITS[text[-1]])
-    return int(text)
+from mirage.commands.builtin.utils.formatting import _human_size, parse_size
 
 
 def _format_size(size: int, human: bool) -> str:

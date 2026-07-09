@@ -12,9 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Cmd, type OperandRun } from '../types.ts'
-
-const ENC = new TextEncoder()
+import { Cmd } from '../types.ts'
 
 // grep-style: an error (2) dominates, then any match wins (0), then no-match
 // (1). Everything else: worst operand wins.
@@ -25,34 +23,4 @@ export function combinedExit(cmdName: Cmd, codes: number[]): number {
     return codes.length > 0 ? Math.max(...codes) : 0
   }
   return codes.length > 0 ? Math.max(...codes) : 0
-}
-
-export function concatRuns(results: OperandRun[]): Uint8Array {
-  const nonEmpty = results.map((r) => r.data).filter((d) => d.byteLength > 0)
-  const size = nonEmpty.reduce((n, d) => n + d.byteLength, 0)
-  const out = new Uint8Array(size)
-  let offset = 0
-  for (const d of nonEmpty) {
-    out.set(d, offset)
-    offset += d.byteLength
-  }
-  return out
-}
-
-export function joinRunsWithBlankLine(results: OperandRun[]): Uint8Array {
-  const parts = results.map((r) => r.data).filter((d) => d.byteLength > 0)
-  const sep = ENC.encode('\n')
-  const size =
-    parts.reduce((n, d) => n + d.byteLength, 0) + sep.byteLength * Math.max(0, parts.length - 1)
-  const out = new Uint8Array(size)
-  let offset = 0
-  parts.forEach((d, i) => {
-    if (i > 0) {
-      out.set(sep, offset)
-      offset += sep.byteLength
-    }
-    out.set(d, offset)
-    offset += d.byteLength
-  })
-  return out
 }

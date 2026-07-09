@@ -12,9 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic.crossmount.fanout.combine import \
-    combined_exit
 from mirage.commands.builtin.generic.crossmount.fanout.du import du_total
+from mirage.commands.builtin.generic.crossmount.fanout.exit import \
+    combined_exit
 from mirage.commands.builtin.generic.crossmount.fanout.wc import combine_wc
 from mirage.commands.builtin.generic.crossmount.types import (Cmd, CrossResult,
                                                               RunSingle)

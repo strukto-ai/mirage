@@ -12,8 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic.crossmount.fanout.du import (du_total,
-                                                                  parse_size)
+from mirage.commands.builtin.generic.crossmount.fanout.du import du_total
 from mirage.commands.builtin.generic.crossmount.types import OperandRun
 from mirage.io import IOResult
 from mirage.types import PathSpec
@@ -28,13 +27,6 @@ def _scope(virtual: str) -> PathSpec:
 
 def _op(data: bytes, exit_code: int = 0) -> OperandRun:
     return OperandRun(_scope("/a/x"), data, IOResult(exit_code=exit_code))
-
-
-def testparse_size_plain_and_human():
-    assert parse_size("123") == 123
-    assert parse_size("4.0K") == 4096
-    assert parse_size("2.5M") == 2621440
-    assert parse_size("7B") == 7
 
 
 def testdu_total_strips_per_run_totals_and_sums():

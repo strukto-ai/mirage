@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic.crossmount.fanout.combine import \
+from mirage.commands.builtin.generic.crossmount.fanout.exit import \
     combined_exit
 
 

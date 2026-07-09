@@ -21,6 +21,14 @@ _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
 
 EPOCH_LS_TIME = "Jan  1 00:00"
 
+_SIZE_UNITS = {
+    "B": 1,
+    "K": 1024,
+    "M": 1024**2,
+    "G": 1024**3,
+    "T": 1024**4,
+}
+
 
 def _human_size(n: int) -> str:
     units = ("B", "K", "M", "G", "T")
@@ -31,6 +39,17 @@ def _human_size(n: int) -> str:
         i += 1
     text = str(round(value)) if i == 0 else f"{value:.1f}"
     return f"{text}{units[i]}"
+
+
+def parse_size(text: str) -> int:
+    """Invert ``_human_size``: ``4.0K`` -> 4096, plain digits pass through.
+
+    Args:
+        text (str): size text, optionally suffixed with B/K/M/G/T.
+    """
+    if text and text[-1] in _SIZE_UNITS:
+        return round(float(text[:-1]) * _SIZE_UNITS[text[-1]])
+    return int(text)
 
 
 def _ls_mode_string(s: FileStat) -> str:
