@@ -107,5 +107,4 @@ describe('resolveGlobs', () => {
     expect((kept as PathSpec).virtual).toBe('/ram/*.nope')
     expect((kept as PathSpec).pattern).toBe('*.nope')
   })
-
 })

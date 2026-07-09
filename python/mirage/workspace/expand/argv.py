@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 import tree_sitter
 
+from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import OperandKind
 from mirage.shell.call_stack import CallStack
 from mirage.types import PathSpec
@@ -98,14 +99,25 @@ async def expand_argv(
         return Argv(name="", args=(), operands=())
     name = expanded[0]
 
+    # Word policy follows the consumer (route table): shell consumers get
+    # bash semantics, where globs expand no matter what the command does
+    # with its arguments, so spec TEXT kinds must not suppress them. Only
+    # mount commands classify by spec.
+    is_shell = route(name, session, registry) in SHELL_CONSUMERS
     word_kinds: list[OperandKind | None] | None = None
-    try:
-        cwd_mount = registry.mount_for(session.cwd)
-    except ValueError:
-        cwd_mount = None
-    spec = cwd_mount.spec_for(name) if cwd_mount else None
-    if spec:
-        word_kinds = spec_word_kinds(spec, expanded[1:])
+    if not is_shell:
+        try:
+            cwd_mount = registry.mount_for(session.cwd)
+        except ValueError:
+            cwd_mount = None
+        spec = cwd_mount.spec_for(name) if cwd_mount else None
+        if spec is None:
+            # The cwd mount may not know the command, or cwd is unmounted;
+            # fall back to the shared SPECS so classification still gets
+            # per-position kinds instead of shape heuristics.
+            spec = SPECS.get(name)
+        if spec:
+            word_kinds = spec_word_kinds(spec, expanded[1:])
 
     classified = classify_parts(expanded,
                                 registry,
@@ -114,7 +126,7 @@ async def expand_argv(
     # A glob word is resolved by whoever consumes it, exactly once:
     # shell consumers get matches here; mount commands keep patterns for
     # backend pushdown; unknown names fail without touching backends.
-    if route(name, session, registry) in SHELL_CONSUMERS:
+    if is_shell:
         words = await resolve_globs(classified, registry)
     else:
         words = classified

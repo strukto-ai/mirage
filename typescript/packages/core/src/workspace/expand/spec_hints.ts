@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { parseCommand } from '../../commands/spec/parser.ts'
-import { type CommandSpec, OperandKind } from '../../commands/spec/types.ts'
+import type { OperandKind } from '../../commands/spec/types.ts'
+import { type CommandSpec } from '../../commands/spec/types.ts'
 
 // Classify argv words into per-position operand kinds.
 //
@@ -22,10 +23,7 @@ import { type CommandSpec, OperandKind } from '../../commands/spec/types.ts'
 // are positional, not value sets, so the same word can be TEXT in one slot
 // and PATH in another (`grep '*.txt' *.txt`). Null marks flag tokens and
 // ignored words (default classification applies).
-export function specWordKinds(
-  spec: CommandSpec,
-  argv: readonly string[],
-): (OperandKind | null)[] {
+export function specWordKinds(spec: CommandSpec, argv: readonly string[]): (OperandKind | null)[] {
   const parsed = parseCommand(spec, [...argv], '/')
   const kinds: (OperandKind | null)[] = [...parsed.wordKinds]
   for (let i = 0; i < argv.length; i++) {

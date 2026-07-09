@@ -522,6 +522,14 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ["glob_unmatched_echo", "echo /data/*.nope"],
   ["glob_test_f", "test -f /data/one_b* && echo yes"],
   ["glob_function_args", "f() { echo $1 $#; }; f /data/sorted_*.txt"],
+  ["glob_matched_echo", "echo /data/sorted_*.txt"],
+  [
+    "glob_pattern_dup_word",
+    "mkdir -p /data/g8 && printf 'x *.txt y\\n' | tee /data/g8/l1.txt" +
+      " > /dev/null && printf 'plain\\n' | tee /data/g8/l2.txt > /dev/null" +
+      " && cd /data/g8 && grep -F '*.txt' *.txt" +
+      " && cd / && rm -r /data/g8",
+  ],
 
   // ----- cp / mv multi-source into a directory (last; these mutate) -----
   ["cp_multi_into_dir", "cp /data/a.txt /data/b.txt /data/sub"],
