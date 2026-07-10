@@ -171,6 +171,23 @@ async function checkReadFamily(
   check(`${label}: head invalid -n`, hbad[2] === 1 && hbad[1].includes("abc"));
   const tbad = await run(ws, `tail -n abc ${src} ${copied}`);
   check(`${label}: tail invalid -n`, tbad[2] === 1 && tbad[1].includes("abc"));
+  // A missing operand carries the GNU strerror suffix, like single-mount:
+  // cat exercises the STREAM strategy, grep the FANOUT strategy.
+  const miss = `${dst}/copied/missing.txt`;
+  const cmiss = await run(ws, `cat ${src} ${miss}`);
+  check(
+    `${label}: cat missing strerror`,
+    cmiss[2] === 1 && cmiss[1] === `cat: ${miss}: No such file or directory\n`,
+  );
+  // grep still searches the good operand and exits 0 on a match, with the
+  // missing operand reported on stderr (matching single-mount grep).
+  const gmiss = await run(ws, `grep aaa ${src} ${miss}`);
+  check(
+    `${label}: grep missing strerror`,
+    gmiss[2] === 0 &&
+      gmiss[0].includes(`${src}:aaa`) &&
+      gmiss[1] === `grep: ${miss}: No such file or directory\n`,
+  );
 }
 
 // diff/cmp two files that live on different mounts: identical operands exit 0
@@ -194,6 +211,13 @@ async function checkCompare(
   check(`${label}: cmp identical`, code === 0);
   [out, , code] = await run(ws, `cmp ${src} ${other}`);
   check(`${label}: cmp differing`, code === 1 && out.includes("differ"));
+  // A missing operand carries the GNU strerror suffix, like single-mount.
+  const miss = `${dst}/copied/missing.txt`;
+  const [, err, missCode] = await run(ws, `diff ${src} ${miss}`);
+  check(
+    `${label}: diff missing strerror`,
+    missCode === 1 && err === `diff: ${miss}: No such file or directory\n`,
+  );
 }
 
 // cd must traverse mount boundaries within one session: hop straight from one
