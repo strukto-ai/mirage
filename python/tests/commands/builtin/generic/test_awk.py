@@ -21,7 +21,8 @@ def _make_backend(files: dict[str, bytes]):
         return files[key]
 
     async def read_stream(accessor, path, index=None):
-        key = path.virtual if isinstance(path, PathSpec) else path
+        assert isinstance(path, PathSpec)
+        key = path.virtual
         if key not in files:
             raise FileNotFoundError(key)
         yield files[key]
@@ -316,3 +317,90 @@ async def test_awk_accumulator_non_numeric_coerces():
         stdin=b"3\nabc\n2.5x\n",
     )
     assert (await _drain(output)).decode() == "5.5\n"
+
+
+@pytest.mark.asyncio
+async def test_awk_program_file_missing_raises_usage_error():
+    rb, rs = _make_backend({"/data.txt": b"x\n"})
+    with pytest.raises(UsageError, match="No such file"):
+        await awk(
+            [_spec("/data.txt")],
+            (),
+            {"f": _spec("/missing.awk")},
+            read_bytes=rb,
+            read_stream=rs,
+        )
+
+
+@pytest.mark.asyncio
+async def test_awk_program_file_with_multiple_data_files():
+    rb, rs = _make_backend({
+        "/prog.awk": b"{print NR, $1}\n",
+        "/a.txt": b"one\n",
+        "/b.txt": b"two\n",
+    })
+    output, io = await awk(
+        [_spec("/a.txt"), _spec("/b.txt")],
+        (),
+        {"f": _spec("/prog.awk")},
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    assert (await _drain(output)).decode() == "1 one\n2 two\n"
+    assert io.cache == ["/a.txt", "/b.txt"]
+
+
+@pytest.mark.asyncio
+async def test_awk_begin_end_resolve_v_variables():
+    rb, rs = _make_backend({})
+    output, _ = await awk(
+        [],
+        ("BEGIN {print x} END {print x}", ),
+        {"v": ["x=hi"]},
+        read_bytes=rb,
+        read_stream=rs,
+        stdin=b"line\n",
+    )
+    assert (await _drain(output)).decode() == "hi\nhi\n"
+
+
+@pytest.mark.asyncio
+async def test_awk_duplicate_v_last_wins():
+    rb, rs = _make_backend({})
+    output, _ = await awk(
+        [],
+        ("{print x}", ),
+        {"v": ["x=first", "x=second"]},
+        read_bytes=rb,
+        read_stream=rs,
+        stdin=b"line\n",
+    )
+    assert (await _drain(output)).decode() == "second\n"
+
+
+@pytest.mark.asyncio
+async def test_awk_begin_bare_print_emits_blank_line():
+    rb, rs = _make_backend({})
+    output, _ = await awk(
+        [],
+        ('BEGIN {print} {print $1}', ),
+        None,
+        read_bytes=rb,
+        read_stream=rs,
+        stdin=b"a\n",
+    )
+    assert (await _drain(output)).decode() == "\na\n"
+
+
+@pytest.mark.asyncio
+async def test_awk_brace_literal_with_condition():
+    rb, rs = _make_backend({})
+    output, _ = await awk(
+        [],
+        ('/x/ {print "}"}', ),
+        None,
+        read_bytes=rb,
+        read_stream=rs,
+        stdin=b"x\ny\n",
+    )
+    assert (await _drain(output)).decode() == "}\n"

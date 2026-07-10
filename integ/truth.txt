@@ -2143,6 +2143,10 @@ exit=2
 exit=2
 === zgrep_usage_exit ===
 exit=2
+=== awk_usage_exit ===
+exit=2
+=== awk_f_missing_exit ===
+exit=2
 === grep_usage_no_input ===
 exit=2
 === rg_usage_no_input ===

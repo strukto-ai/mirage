@@ -847,6 +847,8 @@ EXIT_CODE_CASES: list[tuple[str, str]] = [
     ("grep_usage_exit", "grep"),
     ("rg_usage_exit", "rg"),
     ("zgrep_usage_exit", "zgrep"),
+    ("awk_usage_exit", "awk"),
+    ("awk_f_missing_exit", "awk -f /data/nope.awk /data/a.txt"),
     ("grep_usage_no_input", "grep foo"),
     ("rg_usage_no_input", "rg foo"),
     ("grep_usage_stdin_only", "echo hi | grep"),

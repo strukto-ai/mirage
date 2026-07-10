@@ -194,4 +194,44 @@ describe('awkGeneric', () => {
     expect(stdout).toBeNull()
     expect(io.exitCode).toBe(2)
   })
+
+  it('runs the -f program over multiple data files with continuous NR', async () => {
+    const files = { '/prog.awk': '{print NR, $1}\n', '/a.txt': 'one\n', '/b.txt': 'two\n' }
+    const [out, io] = await run(
+      [spec('/a.txt'), spec('/b.txt')],
+      [],
+      opts({ f: '/prog.awk' }),
+      files,
+    )
+    expect(out).toBe('1 one\n2 two\n')
+    expect(io.cache).toEqual(['/a.txt', '/b.txt'])
+  })
+
+  it('resolves -v variables in BEGIN and END blocks', async () => {
+    const [out] = await run(
+      [],
+      ['BEGIN {print x} END {print x}'],
+      opts({ v: 'x=hi' }, ENC.encode('line\n')),
+    )
+    expect(out).toBe('hi\nhi\n')
+  })
+
+  it('lets the last duplicate -v assignment win', async () => {
+    const [out] = await run(
+      [],
+      ['{print x}'],
+      opts({ v: ['x=first', 'x=second'] }, ENC.encode('line\n')),
+    )
+    expect(out).toBe('second\n')
+  })
+
+  it('emits a blank line for a bare print in BEGIN', async () => {
+    const [out] = await run([], ['BEGIN {print} {print $1}'], opts({}, ENC.encode('a\n')))
+    expect(out).toBe('\na\n')
+  })
+
+  it('prints a literal closing brace behind a condition', async () => {
+    const [out] = await run([], ['/x/ {print "}"}'], opts({}, ENC.encode('x\ny\n')))
+    expect(out).toBe('}\n')
+  })
 })

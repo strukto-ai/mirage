@@ -290,7 +290,12 @@ async def awk(
     f = parse_flags(fl)
 
     if f.program_file is not None:
-        raw = await read_bytes(accessor, f.program_file)
+        try:
+            raw = await read_bytes(accessor, f.program_file)
+        except FileNotFoundError as exc:
+            # GNU awk exits 2 when the -f program file cannot be opened.
+            raise UsageError(f"awk: {f.program_file.mount_path}: "
+                             "No such file or directory") from exc
         program = raw.decode(errors="replace").strip()
     elif texts:
         program = texts[0]
