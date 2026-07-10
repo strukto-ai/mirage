@@ -3,6 +3,7 @@ from collections.abc import (AsyncIterator, Awaitable, Callable, Mapping,
 from dataclasses import dataclass
 from functools import partial
 
+from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.cache.read_through import (cache_aware_read_bytes,
                                        cache_aware_read_stream)
@@ -94,7 +95,7 @@ async def rg(
     stat: Callable[[PathSpec], Awaitable[FileStat]],
     read_bytes: Callable[..., Awaitable[bytes]],
     read_stream: Callable[..., AsyncIterator[bytes]] | None,
-    accessor: object = None,
+    accessor: Accessor | None = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     index: IndexCacheStore | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -162,6 +163,8 @@ async def rg(
                 await rd(paths[0].virtual)
                 is_dir = True
             except (FileNotFoundError, ValueError):
+                # Neither statable nor listable: keep is_dir False and let
+                # the plain-file search path report the real read error.
                 pass
 
         # ripgrep labels when searching multiple files; -H forces the label

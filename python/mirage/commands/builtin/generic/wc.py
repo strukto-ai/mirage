@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from mirage.accessor.base import Accessor
 from mirage.cache.read_through import cache_aware_read
 from mirage.commands.builtin.utils.output import format_records
 from mirage.types import PathSpec
@@ -186,7 +187,7 @@ async def format_multi(
     paths: list[PathSpec],
     *,
     read: Callable[..., Any],
-    accessor: object = None,
+    accessor: Accessor | None = None,
     args_l: bool = False,
     w: bool = False,
     c: bool = False,

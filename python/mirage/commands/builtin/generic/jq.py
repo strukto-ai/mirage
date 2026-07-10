@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator, Awaitable, Callable
 
+from mirage.accessor.base import Accessor
 from mirage.core.jq import (eval_jsonl_stream, format_jq_output, is_jsonl_path,
                             is_streamable_jsonl_expr, jq_eval, parse_json_auto,
                             parse_json_path)
@@ -22,7 +23,7 @@ async def jq(
     *texts: str,
     read_bytes: Callable[..., Awaitable[bytes]],
     read_stream: Callable[..., AsyncIterator[bytes]],
-    accessor: object = None,
+    accessor: Accessor | None = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     r: bool = False,
     c: bool = False,

@@ -3,6 +3,7 @@ from collections import deque
 from collections.abc import AsyncIterator
 from typing import Any, Callable
 
+from mirage.accessor.base import Accessor
 from mirage.cache.read_through import cache_aware_read
 from mirage.types import PathSpec
 from mirage.utils.stream import ensure_stream
@@ -77,7 +78,7 @@ def tail_multi(
     paths: list[PathSpec],
     *,
     read: Callable[..., Any],
-    accessor: object = None,
+    accessor: Accessor | None = None,
     index: object = None,
     n: int | None = None,
     c: int | None = None,
@@ -122,7 +123,7 @@ async def _tail_multi(
     paths: list[PathSpec],
     *,
     read: Callable[..., Any],
-    accessor: object = None,
+    accessor: Accessor | None = None,
     index: object = None,
     n: int | None = None,
     c: int | None = None,
