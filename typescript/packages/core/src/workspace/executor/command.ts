@@ -45,7 +45,7 @@ import { maybeWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
 import { resolveAcrossMounts, resolveSafeguard } from '../../commands/safeguard.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
 import { handleJobs, handleKill, handlePs, handleWait } from './jobs.ts'
-import { errorVirtualPath, gnuStrerror } from '../../utils/errors.ts'
+import { formatFsError } from '../../utils/errors.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
@@ -182,15 +182,7 @@ export async function runOnMount(
     }
     return [stdout, io]
   } catch (err) {
-    const strerror = gnuStrerror((err as { code?: string }).code)
-    const vpath = errorVirtualPath(err)
-    const spelled = paths.find((p) => p.virtual === vpath)?.rawPath ?? vpath
-    const line =
-      strerror !== null
-        ? `${cmdName}: ${spelled}: ${strerror}\n`
-        : `${cmdName}: ${err instanceof Error ? err.message : String(err)}\n`
-    const errBytes = new TextEncoder().encode(line)
-    return [null, new IOResult({ exitCode: 1, stderr: errBytes })]
+    return [null, new IOResult({ exitCode: 1, stderr: formatFsError(cmdName, err, paths) })]
   }
 }
 
