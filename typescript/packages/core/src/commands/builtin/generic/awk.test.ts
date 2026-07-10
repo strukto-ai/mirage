@@ -180,7 +180,7 @@ describe('awkGeneric', () => {
     const [stdout, io] = result ?? [null, new IOResult()]
     expect(stdout).toBeNull()
     expect(io.exitCode).toBe(2)
-    expect(DEC.decode(io.stderr)).toContain('usage')
+    expect(DEC.decode(await materialize(io.stderr))).toContain('usage')
   })
 
   it('returns exit 2 when the -f program file is unreadable', async () => {
