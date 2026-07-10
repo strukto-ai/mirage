@@ -26,24 +26,35 @@ import {
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
+const NUMERIC_PREFIX = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?/
+
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-export function splitFields(line: string, fs: string): string[] {
-  if (fs === '') return line.split(/\s+/).filter((s) => s !== '')
+export function toNumber(val: string): number {
+  const m = NUMERIC_PREFIX.exec(val.trim())
+  return m === null ? 0 : Number.parseFloat(m[0])
+}
+
+export function splitFields(line: string, fs: string | null): string[] {
+  if (fs === null || fs === ' ') return line.split(/\s+/).filter((s) => s !== '')
+  if (fs === '') return [...line]
   const re = fs.length === 1 ? new RegExp(escapeRegex(fs)) : new RegExp(fs)
   return line.split(re)
 }
 
 export function parseProgram(program: string): [string, string] {
   const trimmed = program.trim()
-  if (trimmed.startsWith('{')) return ['', trimmed.slice(1).replace(/\}$/, '')]
+  if (trimmed.startsWith('{')) {
+    return ['', trimmed.slice(1).trimEnd().replace(/\}$/, '').trim()]
+  }
   if (trimmed.includes('{')) {
     const idx = trimmed.indexOf('{')
     const condition = trimmed.slice(0, idx).trim()
     const action = trimmed
       .slice(idx + 1)
+      .trimEnd()
       .replace(/\}$/, '')
       .trim()
     return [condition, action]
@@ -110,36 +121,36 @@ export function evalCondition(condition: string, fieldMap: Record<string, string
   return evalSimple(cond, fieldMap)
 }
 
-export function evalAction(action: string, fieldMap: Record<string, string>): string {
+export function evalAction(action: string, fieldMap: Record<string, string>): string | null {
   const parts: string[] = []
+  let printed = false
   for (const rawStmt of action.split(';')) {
     const stmt = rawStmt.trim()
-    if (stmt === '') continue
-    if (stmt.startsWith(PRINT_STMT)) {
-      const args = stmt.slice(PRINT_STMT.length).trim()
-      if (args === '') {
-        parts.push(fieldMap[AwkBuiltin.REC] ?? '')
+    if (!stmt.startsWith(PRINT_STMT)) continue
+    printed = true
+    const args = stmt.slice(PRINT_STMT.length).trim()
+    if (args === '') {
+      parts.push(fieldMap[AwkBuiltin.REC] ?? '')
+      continue
+    }
+    const tokens = args.split(/,\s*/)
+    const vals: string[] = []
+    for (const raw of tokens) {
+      const tok = raw.trim()
+      if (tok.startsWith('"') && tok.endsWith('"')) {
+        vals.push(tok.slice(1, -1))
       } else {
-        const tokens = args.split(/,\s*/)
-        const vals: string[] = []
-        for (const raw of tokens) {
-          const tok = raw.trim()
-          if (tok.startsWith('"') && tok.endsWith('"')) {
-            vals.push(tok.slice(1, -1))
-          } else {
-            vals.push(resolveToken(tok, fieldMap))
-          }
-        }
-        parts.push(vals.join(' '))
+        vals.push(resolveToken(tok, fieldMap))
       }
     }
+    parts.push(vals.join(' '))
   }
-  return parts.join('\n')
+  return printed ? parts.join('\n') : null
 }
 
 export function buildFieldMap(
   line: string,
-  fs: string,
+  fs: string | null,
   nr: number,
   variables: Record<string, string>,
 ): Record<string, string> {
@@ -153,20 +164,6 @@ export function buildFieldMap(
     fieldMap[`${FIELD_PREFIX}${String(i + 1)}`] = fields[i] ?? ''
   for (const [k, v] of Object.entries(variables)) fieldMap[k] = v
   return fieldMap
-}
-
-export function awkEvalLine(
-  line: string,
-  program: string,
-  fs: string,
-  variables: Record<string, string>,
-  nr: number,
-): string | null {
-  const fieldMap = buildFieldMap(line, fs, nr, variables)
-  const [condition, action] = parseProgram(program)
-  if (condition !== '' && !evalCondition(condition, fieldMap)) return null
-  if (action === '') return line
-  return evalAction(action, fieldMap)
 }
 
 export function parseBlocks(program: string): [string, string, string] {
@@ -200,97 +197,56 @@ export function evalAccumulator(
       const variable = m[1] ?? ''
       const expr = (m[2] ?? '').trim()
       const val = fieldMap[expr] ?? expr
-      const n = Number.parseFloat(val)
-      if (!Number.isNaN(n)) accum[variable] = (accum[variable] ?? 0) + n
+      accum[variable] = (accum[variable] ?? 0) + toNumber(val)
     }
   }
-}
-
-export function evalBegin(action: string): string {
-  const parts: string[] = []
-  for (const rawStmt of action.split(';')) {
-    const stmt = rawStmt.trim()
-    if (!stmt.startsWith(PRINT_STMT)) continue
-    const args = stmt.slice(PRINT_STMT.length).trim()
-    if (args === '') {
-      parts.push('')
-      continue
-    }
-    const tokens = args.split(/,\s*/)
-    const vals: string[] = []
-    for (const raw of tokens) {
-      const tok = raw.trim()
-      if (tok.startsWith('"') && tok.endsWith('"')) vals.push(tok.slice(1, -1))
-      else vals.push(tok)
-    }
-    parts.push(vals.join(' '))
-  }
-  return parts.join('\n')
-}
-
-export function evalEndPrint(
-  action: string,
-  accum: Record<string, number>,
-  endMap: Record<string, string>,
-): string {
-  const parts: string[] = []
-  for (const rawStmt of action.split(';')) {
-    const stmt = rawStmt.trim()
-    if (!stmt.startsWith(PRINT_STMT)) continue
-    const args = stmt.slice(PRINT_STMT.length).trim()
-    if (args === '') continue
-    const tokens = args.split(/,\s*/)
-    const vals: string[] = []
-    for (const raw of tokens) {
-      const tok = raw.trim()
-      if (tok.startsWith('"') && tok.endsWith('"')) {
-        vals.push(tok.slice(1, -1))
-      } else if (tok in accum) {
-        const v = accum[tok] ?? 0
-        vals.push(Number.isInteger(v) ? String(v) : String(v))
-      } else if (tok in endMap) {
-        vals.push(endMap[tok] ?? '')
-      } else {
-        vals.push(tok)
-      }
-    }
-    parts.push(vals.join(' '))
-  }
-  return parts.join('\n')
 }
 
 export async function* awkStream(
-  source: AsyncIterable<Uint8Array>,
+  sources: AsyncIterable<Uint8Array>[],
   program: string,
-  fs: string,
+  fs: string | null,
   variables: Record<string, string>,
 ): AsyncIterable<Uint8Array> {
   const [begin, main, end] = parseBlocks(program)
+  const [condition, action] = main !== '' ? parseProgram(main) : ['', '']
   const accum: Record<string, number> = {}
   let nr = 0
+
   if (begin !== '') {
-    const result = evalBegin(begin)
-    if (result !== '') yield ENC.encode(result + '\n')
+    const beginMap: Record<string, string> = {
+      [AwkBuiltin.REC]: '',
+      [AwkBuiltin.NR]: '0',
+      [AwkBuiltin.NF]: '0',
+      ...variables,
+    }
+    const result = evalAction(begin, beginMap)
+    if (result !== null) yield ENC.encode(result + '\n')
   }
-  const iter = new AsyncLineIterator(source)
-  for await (const lineBytes of iter) {
-    nr += 1
-    const line = DEC.decode(lineBytes)
-    if (main !== '') {
+
+  for (const source of sources) {
+    const iter = new AsyncLineIterator(source)
+    for await (const lineBytes of iter) {
+      nr += 1
+      if (main === '') continue
+      const line = DEC.decode(lineBytes)
       const fieldMap = buildFieldMap(line, fs, nr, variables)
-      const [condition, action] = parseProgram(main)
       if (condition !== '' && !evalCondition(condition, fieldMap)) continue
       evalAccumulator(action, fieldMap, accum)
-      const result = awkEvalLine(line, main, fs, variables, nr)
-      if (result !== null && result !== '') yield ENC.encode(result + '\n')
+      const result = action !== '' ? evalAction(action, fieldMap) : line
+      if (result !== null) yield ENC.encode(result + '\n')
     }
   }
+
   if (end !== '') {
     const endMap: Record<string, string> = {
+      [AwkBuiltin.REC]: '',
       [AwkBuiltin.NR]: String(nr),
       [AwkBuiltin.NF]: '0',
+      ...variables,
     }
-    const result = evalEndPrint(end, accum, endMap)
-    if (result !== '') yield ENC.encode(result + '\n')
+    for (const [k, v] of Object.entries(accum)) endMap[k] = String(v)
+    const result = evalAction(end, endMap)
+    if (result !== null) yield ENC.encode(result + '\n')
   }
 }
