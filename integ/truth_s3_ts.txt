@@ -46,7 +46,7 @@ example.jsonl
 /s3/data/example.json:3
 /s3/data/example.jsonl:5678
 === s3:ls_file_json ===
-example.json
+/s3/data/example.json
 === s3:find_json ===
 /s3/data/example.json
 === s3:find_type_f ===
@@ -146,7 +146,7 @@ example.jsonl
 /gcs/data/example.json:3
 /gcs/data/example.jsonl:5678
 === gcs:ls_file_json ===
-example.json
+/gcs/data/example.json
 === gcs:find_json ===
 /gcs/data/example.json
 === gcs:find_type_f ===
@@ -246,7 +246,7 @@ example.jsonl
 /minio/data/example.json:3
 /minio/data/example.jsonl:5678
 === minio:ls_file_json ===
-example.json
+/minio/data/example.json
 === minio:find_json ===
 /minio/data/example.json
 === minio:find_type_f ===
@@ -346,7 +346,7 @@ example.jsonl
 /seaweedfs/data/example.json:3
 /seaweedfs/data/example.jsonl:5678
 === seaweedfs:ls_file_json ===
-example.json
+/seaweedfs/data/example.json
 === seaweedfs:find_json ===
 /seaweedfs/data/example.json
 === seaweedfs:find_type_f ===
