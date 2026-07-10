@@ -426,3 +426,22 @@ describe('parseToKwargs', () => {
     expect(parseToKwargs(parsed)).toEqual({ args_1: true })
   })
 })
+
+describe('parseCommand — awk spec', () => {
+  it('accumulates repeated -v assignments', () => {
+    const p = parseCommand(
+      specOf('awk'),
+      ['-v', 'a=1', '-v', 'b=2', '{print a, b}', '/data/x.txt'],
+      '/',
+    )
+    expect(p.flags['-v']).toEqual(['a=1', 'b=2'])
+    expect(p.texts()).toEqual(['{print a, b}'])
+    expect(p.paths()).toEqual(['/data/x.txt'])
+  })
+
+  it('frees the program slot when -f is present', () => {
+    const p = parseCommand(specOf('awk'), ['-f', '/prog.awk', '/data/a.txt', '/data/b.txt'], '/')
+    expect(p.texts()).toEqual([])
+    expect(p.paths()).toEqual(['/data/a.txt', '/data/b.txt'])
+  })
+})

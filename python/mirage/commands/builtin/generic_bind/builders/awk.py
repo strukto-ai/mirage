@@ -32,7 +32,7 @@ async def awk(
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     F: str | None = None,
-    v: str | None = None,
+    v: str | list[str] | None = None,
     f: PathSpec | None = None,
     index: IndexCacheStore | None = None,
     **kwargs,

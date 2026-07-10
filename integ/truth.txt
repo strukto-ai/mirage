@@ -922,6 +922,14 @@ bob 25
 world
 foo
 bar
+=== awk_v_repeat ===
+va1 vb2
+=== awk_v_equals ===
+eq=val
+=== awk_f_program ===
+engineer alice
+designer bob
+manager carol
 === sed_d_first ===
 world
 foo

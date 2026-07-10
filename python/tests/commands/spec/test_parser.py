@@ -217,3 +217,20 @@ def test_long_equals_and_separate_repeatable_accumulate():
     parsed = parse_command(spec, ["--tag=a", "--tag", "b", "/x"], "/")
     assert parsed.flags["--tag"] == ["a", "b"]
     assert parsed.paths() == ["/x"]
+
+
+def test_awk_repeated_dash_v_accumulates():
+    parsed = parse_command(
+        SPECS["awk"],
+        ["-v", "a=1", "-v", "b=2", "{print a, b}", "/data/x.txt"], "/")
+    assert parsed.flags["-v"] == ["a=1", "b=2"]
+    assert parsed.texts() == ["{print a, b}"]
+    assert parsed.paths() == ["/data/x.txt"]
+
+
+def test_awk_dash_f_frees_positional_slot_for_paths():
+    parsed = parse_command(SPECS["awk"],
+                           ["-f", "/prog.awk", "/data/a.txt", "/data/b.txt"],
+                           "/")
+    assert parsed.texts() == []
+    assert parsed.paths() == ["/data/a.txt", "/data/b.txt"]

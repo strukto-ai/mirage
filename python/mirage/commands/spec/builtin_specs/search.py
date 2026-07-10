@@ -124,10 +124,10 @@ SPECS: dict[str, CommandSpec] = {
     CommandSpec(
         options=(
             Option(short="-F", value_kind=OperandKind.TEXT),
-            Option(short="-v", value_kind=OperandKind.TEXT),
+            Option(short="-v", value_kind=OperandKind.TEXT, repeatable=True),
             Option(short="-f", value_kind=OperandKind.PATH),
         ),
-        positional=(Operand(kind=OperandKind.TEXT), ),
+        positional=(Operand(kind=OperandKind.TEXT, provided_by=("-f", )), ),
         rest=Operand(kind=OperandKind.PATH),
     ),
     'strings':

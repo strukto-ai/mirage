@@ -273,7 +273,7 @@ async def awk(
     accessor: object = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     field_separator: str | None = None,
-    variable_assignment: str | None = None,
+    variable_assignment: str | list[str] | None = None,
     program_file: PathSpec | None = None,
     index: IndexCacheStore | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -296,9 +296,12 @@ async def awk(
 
     fs = field_separator if field_separator else " "
     variables: dict[str, str] = {}
-    if variable_assignment and "=" in variable_assignment:
-        key, val = variable_assignment.split("=", 1)
-        variables[key] = val
+    assignments = ([variable_assignment] if isinstance(
+        variable_assignment, str) else variable_assignment or [])
+    for assignment in assignments:
+        if "=" in assignment:
+            key, val = assignment.split("=", 1)
+            variables[key] = val
 
     cache: list[str] = []
     if data_paths:

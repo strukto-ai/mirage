@@ -63,9 +63,12 @@ export async function awkGeneric(
   }
   const fs = typeof opts.flags.F === 'string' ? opts.flags.F : ' '
   const variables: Record<string, string> = {}
-  if (typeof opts.flags.v === 'string' && opts.flags.v.includes('=')) {
-    const [key, val] = opts.flags.v.split('=', 2)
-    if (key !== undefined && val !== undefined) variables[key] = val
+  const rawV = opts.flags.v
+  const assignments = Array.isArray(rawV) ? rawV : typeof rawV === 'string' ? [rawV] : []
+  for (const assignment of assignments) {
+    if (typeof assignment !== 'string') continue
+    const eq = assignment.indexOf('=')
+    if (eq > 0) variables[assignment.slice(0, eq)] = assignment.slice(eq + 1)
   }
   const cache: string[] = []
   let source: AsyncIterable<Uint8Array>
