@@ -5,30 +5,9 @@
     "has_provision": true,
     "has_write": false,
     "resources": [
-      "box",
-      "chroma",
-      "databricks_volume",
-      "discord",
-      "dropbox",
-      "gdocs",
-      "gdrive",
-      "github",
-      "github_ci",
-      "gmail",
-      "gsheets",
-      "gslides",
+      "dify",
       "lancedb",
-      "langfuse",
-      "linear",
-      "mongodb",
-      "notion",
-      "opfs",
-      "postgres",
-      "qdrant",
-      "ram",
-      "s3",
-      "slack",
-      "trello"
+      "qdrant"
     ]
   },
   "description": null,
@@ -36,34 +15,30 @@
   "options": [
     {
       "description": null,
-      "long": null,
+      "long": "--method",
       "numeric_shorthand": false,
       "repeatable": false,
-      "short": "-d",
-      "value_kind": "none"
+      "short": null,
+      "value_kind": "text"
     },
     {
       "description": null,
-      "long": null,
+      "long": "--top-k",
       "numeric_shorthand": false,
       "repeatable": false,
-      "short": "-s",
-      "value_kind": "none"
+      "short": null,
+      "value_kind": "text"
     },
     {
       "description": null,
-      "long": null,
+      "long": "--threshold",
       "numeric_shorthand": false,
       "repeatable": false,
-      "short": "-c",
-      "value_kind": "none"
+      "short": null,
+      "value_kind": "text"
     }
   ],
   "positional": [
-    {
-      "kind": "text",
-      "provided_by": []
-    },
     {
       "kind": "text",
       "provided_by": []

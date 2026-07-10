@@ -5,6 +5,7 @@
     "has_provision": false,
     "has_write": true,
     "resources": [
+      "databricks_volume",
       "opfs",
       "ram",
       "s3"
@@ -17,12 +18,14 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-a",
       "value_kind": "none"
     }
   ],
   "positional": [],
   "rest": {
-    "kind": "path"
+    "kind": "path",
+    "provided_by": []
   }
 }

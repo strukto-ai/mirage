@@ -2,17 +2,21 @@
   "_meta": {
     "filetypes": [],
     "has_aggregate": false,
-    "has_provision": false,
+    "has_provision": true,
     "has_write": true,
     "resources": [
+      "databricks_volume",
       "disk",
       "gdocs",
-      "gmail",
       "gsheets",
       "gslides",
+      "hf_buckets",
+      "nextcloud",
+      "onedrive",
       "ram",
       "redis",
       "s3",
+      "sharepoint",
       "ssh"
     ]
   },
@@ -23,6 +27,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-r",
       "value_kind": "none"
     },
@@ -30,6 +35,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-R",
       "value_kind": "none"
     },
@@ -37,6 +43,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-f",
       "value_kind": "none"
     },
@@ -44,6 +51,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-v",
       "value_kind": "none"
     },
@@ -51,12 +59,14 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-d",
       "value_kind": "none"
     }
   ],
   "positional": [],
   "rest": {
-    "kind": "path"
+    "kind": "path",
+    "provided_by": []
   }
 }

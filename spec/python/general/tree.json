@@ -2,9 +2,12 @@
   "_meta": {
     "filetypes": [],
     "has_aggregate": false,
-    "has_provision": false,
+    "has_provision": true,
     "has_write": false,
     "resources": [
+      "chroma",
+      "databricks_volume",
+      "dify",
       "discord",
       "disk",
       "email",
@@ -15,14 +18,21 @@
       "gmail",
       "gsheets",
       "gslides",
+      "hf_buckets",
+      "history",
+      "lancedb",
       "langfuse",
       "linear",
       "mongodb",
+      "nextcloud",
       "notion",
+      "onedrive",
       "postgres",
+      "qdrant",
       "ram",
       "redis",
       "s3",
+      "sharepoint",
       "slack",
       "ssh",
       "trello"
@@ -35,6 +45,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-a",
       "value_kind": "none"
     },
@@ -42,6 +53,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-L",
       "value_kind": "text"
     },
@@ -49,6 +61,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-I",
       "value_kind": "text"
     },
@@ -56,6 +69,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-d",
       "value_kind": "none"
     },
@@ -63,12 +77,14 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-P",
       "value_kind": "text"
     }
   ],
   "positional": [],
   "rest": {
-    "kind": "path"
+    "kind": "path",
+    "provided_by": []
   }
 }

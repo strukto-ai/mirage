@@ -2,10 +2,12 @@
   "_meta": {
     "filetypes": [],
     "has_aggregate": false,
-    "has_provision": false,
+    "has_provision": true,
     "has_write": false,
     "resources": [
       "box",
+      "chroma",
+      "databricks_volume",
       "discord",
       "disk",
       "dropbox",
@@ -13,6 +15,7 @@
       "gdocs",
       "gdrive",
       "github",
+      "github_ci",
       "gmail",
       "gsheets",
       "gslides",
@@ -20,8 +23,13 @@
       "hf_datasets",
       "hf_models",
       "hf_spaces",
+      "lancedb",
+      "langfuse",
       "linear",
+      "mongodb",
       "notion",
+      "postgres",
+      "qdrant",
       "ram",
       "redis",
       "s3",
@@ -35,6 +43,7 @@
   "options": [],
   "positional": [],
   "rest": {
-    "kind": "text"
+    "kind": "text",
+    "provided_by": []
   }
 }

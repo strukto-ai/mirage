@@ -2,7 +2,7 @@
   "_meta": {
     "filetypes": [],
     "has_aggregate": false,
-    "has_provision": false,
+    "has_provision": true,
     "has_write": false,
     "resources": [
       "box",
@@ -29,6 +29,7 @@
       "mongodb",
       "notion",
       "postgres",
+      "qdrant",
       "ram",
       "redis",
       "s3",
@@ -44,6 +45,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-a",
       "value_kind": "none"
     },
@@ -51,6 +53,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-L",
       "value_kind": "text"
     },
@@ -58,6 +61,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-I",
       "value_kind": "text"
     },
@@ -65,6 +69,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-d",
       "value_kind": "none"
     },
@@ -72,12 +77,14 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-P",
       "value_kind": "text"
     }
   ],
   "positional": [],
   "rest": {
-    "kind": "path"
+    "kind": "path",
+    "provided_by": []
   }
 }

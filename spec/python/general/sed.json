@@ -2,15 +2,25 @@
   "_meta": {
     "filetypes": [],
     "has_aggregate": false,
-    "has_provision": false,
+    "has_provision": true,
     "has_write": false,
     "resources": [
+      "chroma",
+      "databricks_volume",
+      "dify",
       "disk",
       "gdrive",
       "github",
+      "hf_buckets",
+      "hf_datasets",
+      "hf_models",
+      "hf_spaces",
+      "nextcloud",
+      "onedrive",
       "ram",
       "redis",
       "s3",
+      "sharepoint",
       "ssh"
     ]
   },
@@ -21,6 +31,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-i",
       "value_kind": "none"
     },
@@ -36,6 +47,15 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": true,
+      "short": "-f",
+      "value_kind": "path"
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-n",
       "value_kind": "none"
     },
@@ -43,6 +63,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-E",
       "value_kind": "none"
     },
@@ -50,16 +71,22 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-r",
       "value_kind": "none"
     }
   ],
   "positional": [
     {
-      "kind": "text"
+      "kind": "text",
+      "provided_by": [
+        "-e",
+        "-f"
+      ]
     }
   ],
   "rest": {
-    "kind": "path"
+    "kind": "path",
+    "provided_by": []
   }
 }

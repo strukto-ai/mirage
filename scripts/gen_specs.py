@@ -22,7 +22,6 @@ from pathlib import Path
 from typing import Any
 
 import mirage.commands.builtin
-import mirage.commands.local_audio
 from mirage.commands.config import RegisteredCommand
 from mirage.commands.spec import SPECS
 
@@ -46,7 +45,11 @@ def _collect_registrations() -> dict[str, list[RegisteredCommand]]:
     for mod_name, mod in list(sys.modules.items()):
         if mod is None or not mod_name.startswith("mirage.commands."):
             continue
-        for _attr_name, attr in vars(mod).items():
+        candidates = list(vars(mod).values())
+        commands = getattr(mod, "COMMANDS", None)
+        if isinstance(commands, list):
+            candidates.extend(commands)
+        for attr in candidates:
             if not callable(attr) or id(attr) in seen:
                 continue
             seen.add(id(attr))
@@ -86,7 +89,6 @@ def _emit_one(name: str, spec: Any, rcs: list[RegisteredCommand]) -> None:
 
 def main() -> None:
     _walk_pkg(mirage.commands.builtin)
-    _walk_pkg(mirage.commands.local_audio)
     registry = _collect_registrations()
     OUT.mkdir(parents=True, exist_ok=True)
     for name, spec in sorted(SPECS.items()):

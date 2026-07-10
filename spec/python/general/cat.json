@@ -6,16 +6,16 @@
       ".h5",
       ".hdf5",
       ".ipc",
-      ".mp3",
-      ".ogg",
       ".orc",
-      ".parquet",
-      ".wav"
+      ".parquet"
     ],
     "has_aggregate": true,
     "has_provision": true,
     "has_write": false,
     "resources": [
+      "chroma",
+      "databricks_volume",
+      "dify",
       "discord",
       "disk",
       "email",
@@ -26,14 +26,21 @@
       "gmail",
       "gsheets",
       "gslides",
+      "hf_buckets",
+      "history",
+      "lancedb",
       "langfuse",
       "linear",
       "mongodb",
+      "nextcloud",
       "notion",
+      "onedrive",
       "postgres",
+      "qdrant",
       "ram",
       "redis",
       "s3",
+      "sharepoint",
       "slack",
       "ssh",
       "trello"
@@ -46,12 +53,14 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-n",
       "value_kind": "none"
     }
   ],
   "positional": [],
   "rest": {
-    "kind": "path"
+    "kind": "path",
+    "provided_by": []
   }
 }
