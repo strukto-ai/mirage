@@ -79,7 +79,7 @@ async def _scripts_from_files(
 
     Args:
         make_read (MakeRead): builds the backend read_bytes callable.
-        accessor (object): backend accessor.
+        accessor (Accessor | None): backend accessor.
         index (IndexCacheStore | None): optional cache index.
         f_files (list[PathSpec]): -f script-file paths.
     """

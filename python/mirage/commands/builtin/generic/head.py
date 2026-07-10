@@ -99,7 +99,8 @@ def head_multi(
         read (Callable[..., Any]): Reader called as ``read(accessor, path,
             index)``; returns bytes, an awaitable of bytes, or an async byte
             iterator.
-        accessor (object): Backend accessor passed through to ``read``.
+        accessor (Accessor | None): Backend accessor passed through to
+            ``read``.
         index (object): Index cache store passed through to ``read``.
         n (int | None): Line count (negative = all-but-last-N, per head).
         c (int | None): Byte count.

@@ -108,7 +108,8 @@ async def grep(
         read_bytes (Callable[..., Awaitable[bytes]]): Whole-file reader.
         read_stream (Callable[..., AsyncIterator[bytes]] | None): Optional
             stream reader.
-        accessor (object): Backend accessor passed through wrapper helpers.
+        accessor (Accessor | None): Backend accessor passed through wrapper
+            helpers.
         stdin (AsyncIterator[bytes] | bytes | None): Input used when paths is
             empty.
         index (IndexCacheStore | None): Optional cache index for wrapped

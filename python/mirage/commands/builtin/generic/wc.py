@@ -205,7 +205,8 @@ async def format_multi(
         paths (list[PathSpec]): Resolved paths; only ``.virtual`` is read.
         read (Callable[..., Any]): Reader called as ``read(accessor, path)``;
             returns bytes, an awaitable of bytes, or an async byte iterator.
-        accessor (object): Backend accessor passed through to ``read``.
+        accessor (Accessor | None): Backend accessor passed
+            through to ``read``.
         args_l (bool): Report line count only.
         w (bool): Report word count only.
         c (bool): Report byte count only.
