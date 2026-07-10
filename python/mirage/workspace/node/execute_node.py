@@ -50,6 +50,52 @@ from mirage.workspace.executor.builtins import (  # isort: skip
     handle_export, handle_local, handle_readonly, handle_test, handle_unset)
 
 
+async def _recurse_reassociated(
+    recurse: Callable,
+    dispatch: Callable,
+    execute_fn: Callable,
+    registry: MountRegistry,
+    redirects: list,
+    right: Any,
+    node: Any,
+    session: Session,
+    stdin: Any = None,
+    call_stack: CallStack | None = None,
+) -> tuple[Any, IOResult, ExecutionNode]:
+    """Recurse wrapper for a re-associated trailing redirect.
+
+    Executes the list's last command with the hoisted redirects,
+    expanding targets only at that point (after the left side ran, so
+    cwd changes apply); every other node recurses normally.
+
+    Args:
+        recurse (Callable): the plain execute_node recursion.
+        dispatch (Callable): VFS op dispatcher.
+        execute_fn (Callable): recursive execute (for expansions).
+        registry (MountRegistry): mount registry.
+        redirects (list): parsed redirects hoisted off the list.
+        right (Any): the list's last command node.
+        node (Any): node being executed by handle_connection.
+        session (Session): shell session state.
+        stdin (Any): input stream.
+        call_stack (CallStack | None): shell call stack.
+    """
+    if node is not right:
+        return await recurse(node, session, stdin, call_stack)
+    expanded, pipe_node = await expand_redirects(redirects, session,
+                                                 execute_fn, registry,
+                                                 call_stack)
+    stdout, io, exec_node = await handle_redirect(recurse, dispatch, right,
+                                                  expanded, session, stdin,
+                                                  call_stack)
+    if pipe_node is not None and stdout is not None:
+        stdout, io2, exec_node2 = await recurse(pipe_node, session, stdout,
+                                                call_stack)
+        io = await io.merge(io2)
+        exec_node = exec_node2
+    return stdout, io, exec_node
+
+
 async def execute_node(
     dispatch: Callable,
     registry: MountRegistry,
@@ -130,6 +176,19 @@ async def execute_node(
     # ── redirected statement ────────────────────
     if kind == NodeKind.REDIRECT:
         command, redirects = get_redirects(node)
+        if command.type == NT.LIST:
+            # tree-sitter hoists a trailing redirect over the whole
+            # &&/|| list; bash binds it to the last command:
+            #   redirected(list(L, op, R), r) == list(L, op, redirected(R, r))
+            # Re-associate and defer target expansion until R runs, so
+            # `cd /x && echo hi > f` writes under /x. Compound and
+            # subshell bodies keep the whole-body redirect (bash group
+            # semantics).
+            left, op, right = get_list_parts(command)
+            wrapped = partial(_recurse_reassociated, recurse, dispatch,
+                              execute_fn, registry, redirects, right)
+            return await handle_connection(wrapped, left, op, right, session,
+                                           stdin, cs)
         expanded_redirects, pipe_node = await expand_redirects(
             redirects, session, execute_fn, registry, cs)
         stdout, io, exec_node = await handle_redirect(recurse, dispatch,

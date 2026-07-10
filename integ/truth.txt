@@ -1757,6 +1757,18 @@ sub/a.txt
 sub/b.txt
 === glob_relative_func ===
 sub/a.txt 2
+=== redirect_after_cd ===
+hi
+=== redirect_list_last_only ===
+one
+two
+=== redirect_chain ===
+a
+b
+2
+=== redirect_group ===
+g1
+g2
 === cp_multi_into_dir ===
 
 === cp_multi_verify_a ===

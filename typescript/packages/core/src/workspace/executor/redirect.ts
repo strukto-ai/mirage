@@ -17,8 +17,7 @@ import type { ByteSource, IOResult } from '../../io/types.ts'
 import { materialize } from '../../io/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
-import { getListParts } from '../../shell/helpers.ts'
-import { NodeType as NT, type Redirect, RedirectKind } from '../../shell/types.ts'
+import { type Redirect, RedirectKind } from '../../shell/types.ts'
 import { PathSpec } from '../../types.ts'
 import type { TSNodeLike } from '../expand/variable.ts'
 import type { Session } from '../session/session.ts'
@@ -59,19 +58,6 @@ export async function handleRedirect(
         cmdStdin = text as ByteSource
       }
     }
-  }
-
-  if (command.type === NT.LIST && redirects.length > 0) {
-    const [left, op, right] = getListParts(command)
-    const [leftStdout, leftIo, leftExec] = await executeNode(left, session, cmdStdin, callStack)
-    const leftBytes = await applyBarrier(leftStdout, leftIo, BarrierPolicy.VALUE)
-    session.lastExitCode = leftIo.exitCode
-    const runRight =
-      (op === NT.OR && leftIo.exitCode !== 0) || (op === NT.AND && leftIo.exitCode === 0)
-    if (runRight) {
-      return handleRedirect(executeNode, dispatch, right, redirects, session, cmdStdin, callStack)
-    }
-    return [leftBytes, leftIo, leftExec]
   }
 
   const [stdout, io] = await executeNode(command, session, cmdStdin, callStack)

@@ -31,7 +31,12 @@ import {
   splitEnvPrefix,
 } from '../../shell/helpers.ts'
 import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
-import { NodeType as NT, RedirectKind, ShellBuiltin as SB } from '../../shell/types.ts'
+import {
+  NodeType as NT,
+  type Redirect,
+  RedirectKind,
+  ShellBuiltin as SB,
+} from '../../shell/types.ts'
 import { Precision, ProvisionResult } from '../../provision/types.ts'
 import { rollupList, rollupPipe } from '../../provision/rollup.ts'
 import { PathSpec } from '../../types.ts'
@@ -103,6 +108,56 @@ interface ProvisionContext {
 interface PlanScope {
   functions: Map<string, TSNodeLike[]>
   planning: Set<string>
+}
+
+// Plan one redirected command: expand targets, cost, degrade. A cmdsub
+// target expands empty under provision, so its classification is
+// garbage; the precision degrade keeps the plan honest without costing
+// a phantom write.
+async function provisionRedirected(
+  ctx: ProvisionContext,
+  recurse: (n: TSNodeLike, s: Session) => Promise<ProvisionResult>,
+  recurseUnknown: (n: unknown, s: Session) => Promise<ProvisionResult>,
+  command: unknown,
+  redirects: Redirect[],
+  session: Session,
+): Promise<ProvisionResult> {
+  const [expanded, pipeNode] = await expandRedirects(
+    redirects,
+    session,
+    ctx.executeFn,
+    ctx.registry,
+  )
+  const targets: [RedirectKind, PathSpec][] = []
+  for (const r of expanded) {
+    if (r.kind !== RedirectKind.STDIN && r.kind !== RedirectKind.STDOUT) continue
+    if (!(r.target instanceof PathSpec)) continue
+    if (r.target.virtual.startsWith('/dev/')) continue
+    if (r.targetNode !== null && hasCommandSubstitution(r.targetNode as TSNodeLike)) {
+      continue
+    }
+    targets.push([r.kind, r.target])
+  }
+  const result = await handleRedirectProvision(
+    recurseUnknown,
+    ctx.registry,
+    command,
+    targets,
+    session,
+    ctx.namespace ?? null,
+  )
+  if (
+    redirects.some(
+      (r) => r.targetNode !== null && hasCommandSubstitution(r.targetNode as TSNodeLike),
+    )
+  ) {
+    // A suppressed substitution hid the real redirect target.
+    result.precision = Precision.UNKNOWN
+  }
+  if (pipeNode !== null) {
+    return rollupPipe([result, await recurse(pipeNode, session)])
+  }
+  return result
 }
 
 /**
@@ -182,45 +237,17 @@ export async function provisionNode(
 
   if (kind === NodeKind.REDIRECT) {
     const [command, redirects] = getRedirects(node)
-    const [expanded, pipeNode] = await expandRedirects(
-      redirects,
-      session,
-      ctx.executeFn,
-      ctx.registry,
-    )
-    const targets: [RedirectKind, PathSpec][] = []
-    for (const r of expanded) {
-      if (r.kind !== RedirectKind.STDIN && r.kind !== RedirectKind.STDOUT) continue
-      if (!(r.target instanceof PathSpec)) continue
-      if (r.target.virtual.startsWith('/dev/')) continue
-      if (r.targetNode !== null && hasCommandSubstitution(r.targetNode as TSNodeLike)) {
-        // The suppressed substitution expanded to empty, so this
-        // target classification is garbage; the degrade below keeps
-        // the plan honest without costing a phantom write.
-        continue
-      }
-      targets.push([r.kind, r.target])
+    if ((command as TSNodeLike & { type: string }).type === NT.LIST) {
+      // Mirror the executor: a trailing redirect hoisted over an
+      // &&/|| list binds to the last command.
+      const [left, op, right] = getListParts(command)
+      const wrapped = (n: unknown, s: Session): Promise<ProvisionResult> =>
+        n === right
+          ? provisionRedirected(ctx, recurse, recurseUnknown, right, redirects, s)
+          : recurseUnknown(n, s)
+      return handleConnectionProvision(wrapped, left, op ?? '&&', right, session)
     }
-    const result = await handleRedirectProvision(
-      recurseUnknown,
-      ctx.registry,
-      command,
-      targets,
-      session,
-      ctx.namespace ?? null,
-    )
-    if (
-      redirects.some(
-        (r) => r.targetNode !== null && hasCommandSubstitution(r.targetNode as TSNodeLike),
-      )
-    ) {
-      // A suppressed substitution hid the real redirect target.
-      result.precision = Precision.UNKNOWN
-    }
-    if (pipeNode !== null) {
-      return rollupPipe([result, await recurse(pipeNode, session)])
-    }
-    return result
+    return provisionRedirected(ctx, recurse, recurseUnknown, command, redirects, session)
   }
 
   if (kind === NodeKind.IF) {

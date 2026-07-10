@@ -635,6 +635,14 @@ CASES: list[tuple[str, str]] = [
     ("glob_relative_for", "for f in sub/*.txt; do echo $f; done"),
     ("glob_relative_func",
      "f() { echo $1 $#; }; f sub/*.txt && cd / && rm -r /data/g12"),
+    ("redirect_after_cd", "mkdir -p /data/g13 && cd /data/g13"
+     " && echo hi > CDOUT && cat /data/g13/CDOUT"),
+    ("redirect_list_last_only",
+     "echo one && echo two > captured && cat captured"),
+    ("redirect_chain",
+     "echo a > chain && echo b >> chain && cat chain && wc -l < chain"),
+    ("redirect_group",
+     "{ echo g1; echo g2; } > gout && cat gout && cd / && rm -r /data/g13"),
 
     # ----- cp / mv multi-source into a directory (last; these mutate) -----
     ("cp_multi_into_dir", "cp /data/a.txt /data/b.txt /data/sub"),
