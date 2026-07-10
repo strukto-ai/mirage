@@ -19,8 +19,6 @@ import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { mvGeneric } from './mv.ts'
 
-const DEC = new TextDecoder()
-
 function key(p: PathSpec | string): string {
   return rstripSlash(typeof p === 'string' ? p : p.virtual)
 }
@@ -63,9 +61,7 @@ async function run(
   flags: { n?: boolean; v?: boolean } = {},
 ): Promise<[ByteSource | null, IOResult]> {
   const { stat, rename } = makeBackend(files, dirs)
-  const result = await mvGeneric(paths.map(spec), rename, stat, flags.n === true, flags.v === true)
-  if (result === null) throw new Error('unexpected null result')
-  return result
+  return mvGeneric(paths.map(spec), rename, stat, flags.n === true, flags.v === true)
 }
 
 describe('mvGeneric guards', () => {
@@ -81,7 +77,7 @@ describe('mvGeneric guards', () => {
     const files = new Map([['/b.txt', new Uint8Array([2])]])
     const [, io] = await run(files, new Set(['/d']), ['/missing.txt', '/b.txt', '/d'])
     expect(io.exitCode).toBe(1)
-    expect(DEC.decode(io.stderr ?? new Uint8Array())).toContain("mv: cannot stat '/missing.txt'")
+    expect(await io.stderrStr()).toContain("mv: cannot stat '/missing.txt'")
     expect(files.has('/d/b.txt')).toBe(true)
   })
 
@@ -89,9 +85,7 @@ describe('mvGeneric guards', () => {
     const files = new Map([['/a.txt', new Uint8Array([1])]])
     const [, io] = await run(files, new Set(), ['/a.txt', '/a.txt'])
     expect(io.exitCode).toBe(1)
-    expect(DEC.decode(io.stderr ?? new Uint8Array())).toContain(
-      "mv: '/a.txt' and '/a.txt' are the same file",
-    )
+    expect(await io.stderrStr()).toContain("mv: '/a.txt' and '/a.txt' are the same file")
     expect(files.has('/a.txt')).toBe(true)
   })
 
@@ -99,7 +93,7 @@ describe('mvGeneric guards', () => {
     const files = new Map([['/d/a.txt', new Uint8Array([1])]])
     const [, io] = await run(files, new Set(['/d']), ['/d/a.txt', '/d'])
     expect(io.exitCode).toBe(1)
-    expect(DEC.decode(io.stderr ?? new Uint8Array())).toContain('are the same file')
+    expect(await io.stderrStr()).toContain('are the same file')
     expect(files.has('/d/a.txt')).toBe(true)
   })
 
@@ -107,9 +101,7 @@ describe('mvGeneric guards', () => {
     const files = new Map([['/d/a.txt', new Uint8Array([1])]])
     const [, io] = await run(files, new Set(['/d', '/d/sub']), ['/d', '/d/sub'])
     expect(io.exitCode).toBe(1)
-    expect(DEC.decode(io.stderr ?? new Uint8Array())).toContain(
-      "mv: cannot move '/d' to a subdirectory of itself",
-    )
+    expect(await io.stderrStr()).toContain("mv: cannot move '/d' to a subdirectory of itself")
     expect(files.has('/d/a.txt')).toBe(true)
   })
 })

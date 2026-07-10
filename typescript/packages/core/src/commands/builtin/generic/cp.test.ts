@@ -91,7 +91,7 @@ describe('cpGeneric guards', () => {
     const files = new Map([['/b.txt', new Uint8Array([2])]])
     const [, io] = await run(files, new Set(['/d']), ['/missing.txt', '/b.txt', '/d'])
     expect(io.exitCode).toBe(1)
-    expect(DEC.decode(io.stderr ?? new Uint8Array())).toContain("cp: cannot stat '/missing.txt'")
+    expect(await io.stderrStr()).toContain("cp: cannot stat '/missing.txt'")
     expect(files.has('/d/b.txt')).toBe(true)
   })
 
@@ -99,25 +99,21 @@ describe('cpGeneric guards', () => {
     const files = new Map([['/a.txt', new Uint8Array([1])]])
     const [, io] = await run(files, new Set(), ['/a.txt', '/a.txt'])
     expect(io.exitCode).toBe(1)
-    expect(DEC.decode(io.stderr ?? new Uint8Array())).toContain(
-      "cp: '/a.txt' and '/a.txt' are the same file",
-    )
+    expect(await io.stderrStr()).toContain("cp: '/a.txt' and '/a.txt' are the same file")
   })
 
   it('refuses the same file via a directory target', async () => {
     const files = new Map([['/d/a.txt', new Uint8Array([1])]])
     const [, io] = await run(files, new Set(['/d']), ['/d/a.txt', '/d'])
     expect(io.exitCode).toBe(1)
-    expect(DEC.decode(io.stderr ?? new Uint8Array())).toContain('are the same file')
+    expect(await io.stderrStr()).toContain('are the same file')
   })
 
   it('refuses recursive copy of a directory into itself', async () => {
     const files = new Map([['/d/a.txt', new Uint8Array([1])]])
     const [, io] = await run(files, new Set(['/d']), ['/d', '/d'], { recursive: true })
     expect(io.exitCode).toBe(1)
-    expect(DEC.decode(io.stderr ?? new Uint8Array())).toContain(
-      "cp: cannot copy a directory, '/d', into itself",
-    )
+    expect(await io.stderrStr()).toContain("cp: cannot copy a directory, '/d', into itself")
     expect([...files.keys()]).toEqual(['/d/a.txt'])
   })
 
@@ -127,7 +123,7 @@ describe('cpGeneric guards', () => {
       recursive: true,
     })
     expect(io.exitCode).toBe(1)
-    expect(DEC.decode(io.stderr ?? new Uint8Array())).toContain('into itself')
+    expect(await io.stderrStr()).toContain('into itself')
     expect([...files.keys()]).toEqual(['/d/a.txt'])
   })
 

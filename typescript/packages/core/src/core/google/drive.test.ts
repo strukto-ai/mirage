@@ -46,7 +46,7 @@ describe('listFiles shared drive params', () => {
   it('sets corpus params when driveId is given', async () => {
     vi.mocked(client.googleGet).mockResolvedValue({ files: [] })
     await listFiles(STUB_TOKEN_MANAGER, { folderId: 'folder123', driveId: 'drive123' })
-    const params = vi.mocked(client.googleGet).mock.calls[0][2] as Record<string, unknown>
+    const params = vi.mocked(client.googleGet).mock.calls[0]?.[2] as Record<string, unknown>
     expect(params.corpora).toBe('drive')
     expect(params.driveId).toBe('drive123')
     expect(params.includeItemsFromAllDrives).toBe('true')
@@ -56,7 +56,7 @@ describe('listFiles shared drive params', () => {
   it('omits corpus params when no driveId', async () => {
     vi.mocked(client.googleGet).mockResolvedValue({ files: [] })
     await listFiles(STUB_TOKEN_MANAGER, { folderId: 'folder123' })
-    const params = vi.mocked(client.googleGet).mock.calls[0][2] as Record<string, unknown>
+    const params = vi.mocked(client.googleGet).mock.calls[0]?.[2] as Record<string, unknown>
     expect(params.corpora).toBeUndefined()
     expect(params.driveId).toBeUndefined()
   })
@@ -73,8 +73,8 @@ describe('listSharedDrives', () => {
       { id: 'drive2', name: 'Projects' },
     ])
     expect(vi.mocked(client.googleGet).mock.calls).toHaveLength(2)
-    const firstParams = vi.mocked(client.googleGet).mock.calls[0][2] as Record<string, unknown>
-    const secondParams = vi.mocked(client.googleGet).mock.calls[1][2] as Record<string, unknown>
+    const firstParams = vi.mocked(client.googleGet).mock.calls[0]?.[2] as Record<string, unknown>
+    const secondParams = vi.mocked(client.googleGet).mock.calls[1]?.[2] as Record<string, unknown>
     expect(firstParams.pageToken).toBeUndefined()
     expect(secondParams.pageToken).toBe('next')
   })
@@ -84,7 +84,7 @@ describe('shared-drive support flags', () => {
   it('downloadFile requests supportsAllDrives', async () => {
     vi.mocked(client.googleGetBytes).mockResolvedValue(new Uint8Array())
     await downloadFile(STUB_TOKEN_MANAGER, 'file123')
-    expect(vi.mocked(client.googleGetBytes).mock.calls[0][1]).toContain('supportsAllDrives=true')
+    expect(vi.mocked(client.googleGetBytes).mock.calls[0]?.[1]).toContain('supportsAllDrives=true')
   })
 
   it('downloadFileStream requests supportsAllDrives', async () => {
@@ -93,12 +93,12 @@ describe('shared-drive support flags', () => {
       yield new Uint8Array()
     })
     for await (const _chunk of downloadFileStream(STUB_TOKEN_MANAGER, 'file123')) void _chunk
-    expect(vi.mocked(client.googleGetStream).mock.calls[0][1]).toContain('supportsAllDrives=true')
+    expect(vi.mocked(client.googleGetStream).mock.calls[0]?.[1]).toContain('supportsAllDrives=true')
   })
 
   it('deleteFile requests supportsAllDrives', async () => {
     vi.mocked(client.googleDelete).mockResolvedValue(undefined)
     await deleteFile(STUB_TOKEN_MANAGER, 'file123')
-    expect(vi.mocked(client.googleDelete).mock.calls[0][1]).toContain('supportsAllDrives=true')
+    expect(vi.mocked(client.googleDelete).mock.calls[0]?.[1]).toContain('supportsAllDrives=true')
   })
 })
