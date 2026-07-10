@@ -16,6 +16,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
+import { enoent } from '../../utils/errors.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { handleCrossMount, isCrossMount } from './cross_mount.ts'
 import type { RunSingle } from '../../commands/builtin/generic/crossmount/index.ts'
@@ -243,6 +244,30 @@ describe('handleCrossMount — cmp', () => {
     const [out, io] = await handleCrossMount('cmp', paths, [], {}, d, runSingleNoop, null, 'cmp')
     expect(io.exitCode).toBe(1)
     expect(decode(out as Uint8Array)).toMatch(/EOF on/)
+  })
+
+  it('missing operand → GNU strerror line', async () => {
+    const d = vi.fn<
+      (
+        op: string,
+        p: PathSpec,
+        args?: readonly unknown[],
+        kw?: Record<string, unknown>,
+      ) => Promise<[unknown, IOResult]>
+    >((_op, p) => {
+      if (p.virtual.startsWith('/ram'))
+        return Promise.resolve<[unknown, IOResult]>([
+          new TextEncoder().encode('abc'),
+          new IOResult(),
+        ])
+      return Promise.reject(enoent(p))
+    })
+    const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/missing')]
+    const [, io] = await handleCrossMount('cmp', paths, [], {}, d, runSingleNoop, null, 'cmp')
+    expect(io.exitCode).toBe(1)
+    expect(decode(await materialize(io.stderr))).toBe(
+      'cmp: /disk/missing: No such file or directory\n',
+    )
   })
 })
 

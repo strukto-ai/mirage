@@ -24,6 +24,7 @@ from mirage.commands.builtin.generic.crossmount.types import (CrossResult,
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.types import PathSpec
+from mirage.utils.errors import format_fs_error
 
 
 async def handle_cross_mount(
@@ -71,6 +72,6 @@ async def handle_cross_mount(
                                 run_single,
                                 stdin=stdin)
     except (FileNotFoundError, NotADirectoryError, IsADirectoryError,
-            PermissionError) as exc:
+            FileExistsError, PermissionError) as exc:
         return None, IOResult(exit_code=1,
-                              stderr=f"{cmd_name}: {exc}\n".encode())
+                              stderr=format_fs_error(cmd_name, exc, scopes))
