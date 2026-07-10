@@ -137,8 +137,7 @@ def expand_tilde(word: str, home: str | None) -> str:
     return word
 
 
-def rebase_display(paths: list[str], original: str,
-                   display: str | None) -> list[str]:
+def rebase_raw(paths: list[str], original: str, raw: str) -> list[str]:
     """Rewrite the base of walked output paths to the as-typed form.
 
     Used by walkers like ``find``/``grep -r``: results are absolute (start
@@ -151,31 +150,32 @@ def rebase_display(paths: list[str], original: str,
 
     Example::
 
-        rebase_display(["/data/sub/x", "/data/y"], "/data", ".")
+        rebase_raw(["/data/sub/x", "/data/y"], "/data", ".")
             -> ["./sub/x", "./y"]
-        rebase_display(["/data/sub/x:hit"], "/data/sub", "sub")
+        rebase_raw(["/data/sub/x:hit"], "/data/sub", "sub")
             -> ["sub/x:hit"]
-        rebase_display(["/data/x"], "/data", "/data")   # absolute arg
-            -> ["/data/x"]                              # unchanged
+        rebase_raw(["/data/x"], "/data", "/data")   # absolute arg
+            -> ["/data/x"]                          # unchanged
 
     Args:
         paths (list[str]): Absolute result paths (or ``path:...`` lines)
             produced by walking ``original``.
         original (str): The resolved absolute start path.
-        display (str | None): The as-typed start path, or ``None``/equal to
-            leave ``paths`` unchanged (the absolute-argument case).
+        raw (str): The as-typed start path (``PathSpec.raw_path``); equal
+            to ``original`` leaves ``paths`` unchanged (the
+            absolute-argument case).
 
     Returns:
         list[str]: ``paths`` with each ``original`` base replaced by
-        ``display``.
+        ``raw``.
     """
-    if display is None or display == original:
+    if raw == original:
         return paths
-    return [rebase_one(p, original, display) for p in paths]
+    return [rebase_one(p, original, raw) for p in paths]
 
 
-def rebase_one(path: str, original: str, display: str | None) -> str:
-    """Rewrite a single path's ``original`` base to the as-typed ``display``.
+def rebase_one(path: str, original: str, raw: str) -> str:
+    """Rewrite a single path's ``original`` base to the as-typed ``raw``.
 
     Only the leading ``original`` prefix is rewritten, so any suffix after
     the path (e.g. grep's ``:line``) is preserved untouched.
@@ -186,25 +186,25 @@ def rebase_one(path: str, original: str, display: str | None) -> str:
         rebase_one("/data/sub", "/data/sub", "sub")  -> "sub"
         rebase_one("/data/x:hit", "/data", ".")      -> "./x:hit"
         rebase_one("/other/x", "/data", ".")         -> "/other/x"  # no match
-        rebase_one("/data/x", "/data", None)         -> "/data/x"   # absolute
+        rebase_one("/data/x", "/data", "/data")      -> "/data/x"   # absolute
 
     Args:
         path (str): An absolute path at or under ``original`` (optionally with
             a trailing ``:...`` suffix).
         original (str): The resolved absolute base (traversal root).
-        display (str | None): The as-typed base, or ``None``/equal to leave
-            ``path`` unchanged.
+        raw (str): The as-typed base (``PathSpec.raw_path``); equal to
+            ``original`` leaves ``path`` unchanged.
 
     Returns:
-        str: ``path`` with its ``original`` base replaced by ``display``.
+        str: ``path`` with its ``original`` base replaced by ``raw``.
     """
-    if display is None or display == original:
+    if raw == original:
         return path
     base = original.rstrip("/")
     if path == base:
-        return display
+        return raw
     if path.startswith(base + "/"):
-        return display.rstrip("/") + path[len(base):]
+        return raw.rstrip("/") + path[len(base):]
     return path
 
 

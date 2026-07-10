@@ -21,13 +21,13 @@ export interface FsError extends Error {
   virtualPath: string
 }
 
-// Accepts a PathSpec (reads .display, the as-typed form, falling back to
-// .virtual) or a bare virtual-path string. Taking a structural shape avoids
-// importing the PathSpec class (no import cycle). .display is always virtual
-// (derived from the as-typed arg or .virtual), never a real fs path.
-function virtualOf(path: string | { virtual: string; display?: string }): string {
+// Accepts a PathSpec (reads .rawPath, the word's spelling, which defaults
+// to .virtual) or a bare virtual-path string. Taking a structural shape
+// avoids importing the PathSpec class (no import cycle). .rawPath is always
+// a virtual-space path, never a real fs path.
+function virtualOf(path: string | { virtual: string; rawPath?: string }): string {
   if (typeof path === 'string') return path
-  return path.display ?? path.virtual
+  return path.rawPath ?? path.virtual
 }
 
 function fsError(path: string | { virtual: string }, code: string): FsError {

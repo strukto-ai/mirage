@@ -19,6 +19,29 @@ from mirage.utils.key_prefix import mount_key
 from mirage.workspace.mount import MountRegistry
 
 
+def _match_raw(item: PathSpec, match: PathSpec) -> PathSpec:
+    """Stamp a glob match with the spelling the user's word implies.
+
+    Bash expands `sub/*.txt` to relative matches (`sub/a.txt`), keeping
+    the typed prefix. The glob item's raw_path records the word as
+    typed; matches rebuild it by swapping the resolved directory prefix
+    for the typed one. Words with no distinct spelling (absolute:
+    raw_path == virtual) keep the resolved virtual, as do matches that
+    already carry one.
+
+    Args:
+        item (PathSpec): the glob word being resolved.
+        match (PathSpec): one resolved match.
+    """
+    if item.raw_path == item.virtual or match.raw_path != match.virtual:
+        return match
+    if not match.virtual.startswith(item.directory):
+        return match
+    raw_dir = item.raw_path[:item.raw_path.rfind("/") + 1]
+    spelled = raw_dir + match.virtual[len(item.directory):]
+    return dataclasses.replace(match, raw_path=spelled)
+
+
 async def resolve_globs(
     classified: list[str | PathSpec],
     registry: MountRegistry,
@@ -55,12 +78,15 @@ async def resolve_globs(
                     continue
                 for p in resolved:
                     if isinstance(p, PathSpec):
-                        result.append(p)
+                        result.append(_match_raw(item, p))
                     else:
                         full = prefix + p if not p.startswith(prefix) else p
                         result.append(
-                            PathSpec.from_str_path(full,
-                                                   mount_key(full, prefix)))
+                            _match_raw(
+                                item,
+                                PathSpec.from_str_path(full,
+                                                       mount_key(full,
+                                                                 prefix))))
             except (ValueError, AttributeError, TypeError):
                 result.append(item)
         elif isinstance(item, PathSpec):

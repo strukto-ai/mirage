@@ -26,7 +26,7 @@ def format_fs_error(cmd_name: str,
     exception (``exc.filename`` when set, else ``str(exc)``); backends raise
     with the resolved absolute path (``PathSpec.virtual``). When ``paths`` is
     supplied, the absolute path is rewritten to the as-typed form
-    (``PathSpec.display``) so a relative argument is reported as typed, like
+    (``PathSpec.raw_path``) so a relative argument is reported as typed, like
     GNU.
 
     Args:
@@ -39,7 +39,7 @@ def format_fs_error(cmd_name: str,
     if paths:
         for p in paths:
             if p.virtual == path:
-                path = p.display
+                path = p.raw_path
                 break
     strerror = fs_strerror(exc)
     if strerror is not None:

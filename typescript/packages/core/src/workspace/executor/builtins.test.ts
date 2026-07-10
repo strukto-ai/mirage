@@ -334,6 +334,49 @@ describe('handleTest', () => {
     const [, io] = await handleTest(dispatch, ['foo', '=', 'foo'], session)
     expect(io.exitCode).toBe(0)
   })
+
+  it('-f relative operand resolves against session.cwd', async () => {
+    const spy = vi.fn<DispatchFn>((op, scope) => {
+      const ps = scope
+      if (ps.virtual === '/data/plain.txt') {
+        return Promise.resolve<[unknown, IOResult]>([
+          new FileStat({ name: 'plain.txt' }),
+          new IOResult(),
+        ])
+      }
+      return Promise.reject(new Error(`not found: ${ps.virtual}`))
+    })
+    const s = new Session({ sessionId: 'test' })
+    s.cwd = '/data'
+    const [, io] = await handleTest(spy, ['-f', 'plain.txt'], s)
+    expect(io.exitCode).toBe(0)
+    const [, io2] = await handleTest(spy, ['-f', 'missing.txt'], s)
+    expect(io2.exitCode).toBe(1)
+  })
+
+  it('-f empty operand is false without dispatch', async () => {
+    const spy = vi.fn<DispatchFn>(() =>
+      Promise.resolve<[unknown, IOResult]>([new FileStat({ name: 'x' }), new IOResult()]),
+    )
+    const s = new Session({ sessionId: 'test' })
+    const [, io] = await handleTest(spy, ['-f', ''], s)
+    expect(io.exitCode).toBe(1)
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('-d relative operand resolves against session.cwd', async () => {
+    const spy = vi.fn<DispatchFn>((op, scope) => {
+      const ps = scope
+      if (op === 'readdir' && ps.virtual === '/data/sub') {
+        return Promise.resolve<[unknown, IOResult]>([[], new IOResult()])
+      }
+      return Promise.reject(new Error(`not found: ${ps.virtual}`))
+    })
+    const s = new Session({ sessionId: 'test' })
+    s.cwd = '/data'
+    const [, io] = await handleTest(spy, ['-d', 'sub'], s)
+    expect(io.exitCode).toBe(0)
+  })
 })
 
 describe('handleShift', () => {

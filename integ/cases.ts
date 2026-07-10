@@ -552,6 +552,39 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ["redirect_relative_write", "echo one > sub/LOG"],
   ["redirect_relative_append", "echo two >> sub/LOG && cat sub/LOG"],
   ["redirect_stdin_relative", "wc -l < sub/LOG && cd / && rm -r /data/g11"],
+  [
+    "relword_prep",
+    "mkdir -p /data/g12/sub && cd /data/g12 && printf 'y\n' | tee plain.txt > /dev/null" +
+      " && printf 'x\n' | tee sub/a.txt > /dev/null && printf 'x\n' | tee sub/b.txt > /dev/null",
+  ],
+  [
+    "test_relative_paths",
+    "test -f plain.txt && echo yes-f && test -d sub && echo yes-d" +
+      " && test -f missing.txt || echo no-f",
+  ],
+  ["glob_relative_display", "echo sub/*.txt && echo *.nope"],
+  ["glob_relative_for", "for f in sub/*.txt; do echo $f; done"],
+  ["glob_relative_func", "f() { echo $1 $#; }; f sub/*.txt && cd / && rm -r /data/g12"],
+  [
+    "redirect_after_cd",
+    "mkdir -p /data/g13 && cd /data/g13 && echo hi > CDOUT && cat /data/g13/CDOUT",
+  ],
+  ["redirect_list_last_only", "echo one && echo two > captured && cat captured"],
+  ["redirect_chain", "echo a > chain && echo b >> chain && cat chain && wc -l < chain"],
+  ["redirect_group", "{ echo g1; echo g2; } > gout && cat gout && cd / && rm -r /data/g13"],
+  [
+    "relspell_prep",
+    "mkdir -p /data/g14/sub && cd /data/g14" +
+      " && printf 'hello\n' | tee sub/a.txt > /dev/null" +
+      " && printf 'hello\n' | tee sub/b.txt > /dev/null",
+  ],
+  ["relspell_walk_grep", "grep -r hello sub"],
+  ["relspell_walk_find", "find sub -name '*.txt'"],
+  ["relspell_error_cat", "cat sub/missing.txt 2>&1"],
+  ["relspell_error_grep", "grep hello sub/missing.txt 2>&1"],
+  ["relspell_glob_dot", "echo ./sub/*.txt"],
+  ["relspell_du_slash", "du -s sub/"],
+  ["relspell_labels", "wc -l sub/a.txt && head -v sub/a.txt && cd / && rm -r /data/g14"],
 
   // ----- cp / mv multi-source into a directory (last; these mutate) -----
   ["cp_multi_into_dir", "cp /data/a.txt /data/b.txt /data/sub"],

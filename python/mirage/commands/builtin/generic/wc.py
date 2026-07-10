@@ -222,7 +222,7 @@ async def format_multi(
         if inspect.isawaitable(source):
             source = await source
         counts = await wc(source)
-        rows.append((counts, path.display))
+        rows.append((counts, path.raw_path))
         totals.merge(counts)
     if len(paths) > 1:
         rows.append((totals, "total"))

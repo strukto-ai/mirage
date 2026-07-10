@@ -40,7 +40,7 @@ async function* sha256SingleStream(
 async function* sha256Multi(stream: Stream, paths: readonly PathSpec[]): AsyncIterable<Uint8Array> {
   for (const p of paths) {
     const digest = await hashStream(stream(p))
-    yield ENC.encode(`${digest}  ${p.display}\n`)
+    yield ENC.encode(`${digest}  ${p.rawPath}\n`)
   }
 }
 

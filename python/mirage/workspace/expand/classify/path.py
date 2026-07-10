@@ -12,11 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
-
 from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_key
 from mirage.workspace.expand.classify.heuristic import classify_word
+from mirage.workspace.expand.classify.relative import relative_spec
 from mirage.workspace.mount import MountRegistry
 
 
@@ -30,27 +28,4 @@ def classify_bare_path(word: str, registry: MountRegistry,
     classified = classify_word(word, registry, cwd)
     if not isinstance(classified, str):
         return classified
-    path = posixpath.normpath(cwd.rstrip("/") + "/" + word)
-    try:
-        mount = registry.mount_for(path)
-    except ValueError:
-        return word
-    resource_path = mount_key(path, mount.prefix.rstrip("/"))
-    has_glob = any(ch in word for ch in ("*", "?", "["))
-    if has_glob:
-        last_slash = path.rfind("/")
-        return PathSpec(
-            virtual=path,
-            directory=path[:last_slash + 1],
-            resource_path=resource_path,
-            pattern=path[last_slash + 1:],
-            resolved=False,
-            raw_path=word,
-        )
-    return PathSpec(
-        virtual=path,
-        directory=path[:path.rfind("/") + 1],
-        resource_path=resource_path,
-        resolved=True,
-        raw_path=word,
-    )
+    return relative_spec(word, registry, cwd)

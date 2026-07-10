@@ -24,7 +24,7 @@ async def md5(
     for p in paths:
         data = await read_bytes(accessor, p)
         digest = hashlib.md5(data).hexdigest()
-        outputs.append(f"{digest}  {p.display}")
+        outputs.append(f"{digest}  {p.raw_path}")
     return format_records(outputs), IOResult()
 
 

@@ -199,14 +199,15 @@ class PathSpec:
     resolved: bool = True
     raw_path: str | None = None
 
-    @property
-    def display(self) -> str:
-        """The path as the user typed it, for rendering in output.
+    def __post_init__(self) -> None:
+        """Default ``raw_path`` to ``virtual``.
 
-        Falls back to ``virtual`` (the resolved absolute path) when no
-        raw form was recorded, e.g. for absolute arguments.
+        ``raw_path`` is the word's spelling: as typed for relative
+        words, the absolute path for everything else. It is always a
+        ``str`` after construction; pass None to take the default.
         """
-        return self.raw_path if self.raw_path is not None else self.virtual
+        if self.raw_path is None:
+            object.__setattr__(self, "raw_path", self.virtual)
 
     @property
     def mount_path(self) -> str:
@@ -253,6 +254,19 @@ class PathSpec:
             resource_path=(path.strip("/")
                            if resource_path is None else resource_path),
         )
+
+
+def word_text(word: "str | PathSpec") -> str:
+    """Shell-text form of an argv word.
+
+    Text words pass through; paths render as spelled (``raw_path``).
+    Use wherever a word re-enters string space (env values, function
+    args, the argv text view). Mount I/O keeps using ``virtual``.
+
+    Args:
+        word (str | PathSpec): text argument or path.
+    """
+    return word.raw_path if isinstance(word, PathSpec) else word
 
 
 class IndexType(str, Enum):

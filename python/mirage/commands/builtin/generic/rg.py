@@ -25,7 +25,7 @@ from mirage.io.stream import exit_on_empty
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
-from mirage.utils.path import rebase_display
+from mirage.utils.path import rebase_raw
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,9 +195,9 @@ async def rg(
                     glob_pattern=f.glob_pattern,
                     hidden=f.hidden,
                     warnings=warnings_f,
-                    file_prefix=p.display if label else None,
+                    file_prefix=p.raw_path if label else None,
                 )
-                results.extend(rebase_display(hits_full, p.virtual, p.display))
+                results.extend(rebase_raw(hits_full, p.virtual, p.raw_path))
             stderr = format_optional_records(warnings_f)
             if not results:
                 return b"", IOResult(exit_code=1, stderr=stderr)
@@ -211,17 +211,17 @@ async def rg(
             for p in paths:
                 data = split_lines((await
                                     rb(p.virtual)).decode(errors="replace"))
-                hits = grep_lines(p.display, data, pat, f.invert,
+                hits = grep_lines(p.raw_path, data, pat, f.invert,
                                   f.line_numbers, f.count_only, f.files_only,
                                   f.only_matching, f.max_count)
                 if f.count_only:
                     if grep_count_has_matches(hits):
                         all_results.append(
-                            f"{p.display}:{hits[0]}" if label else hits[0])
+                            f"{p.raw_path}:{hits[0]}" if label else hits[0])
                 elif f.files_only:
                     all_results.extend(hits)
                 elif label:
-                    all_results.extend(f"{p.display}:{r}" for r in hits)
+                    all_results.extend(f"{p.raw_path}:{r}" for r in hits)
                 else:
                     all_results.extend(hits)
             if not all_results:

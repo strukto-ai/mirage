@@ -118,7 +118,7 @@ async function walkGrouped(
     const msg =
       gnuStrerror((err as { code?: string }).code) ??
       (err instanceof Error ? err.message : String(err))
-    warnings.push(`ls: cannot access '${dir.display}': ${msg}`)
+    warnings.push(`ls: cannot access '${dir.rawPath}': ${msg}`)
     return
   }
   const sorted = sortStats(stats, opts.sortBy, opts.reverse)
@@ -177,7 +177,7 @@ export async function lsGeneric(
         const msg =
           gnuStrerror((err as { code?: string }).code) ??
           (err instanceof Error ? err.message : String(err))
-        warnings.push(`ls: cannot access '${p.display}': ${msg}`)
+        warnings.push(`ls: cannot access '${p.rawPath}': ${msg}`)
       }
     }
     appendListing(collected, long, human, classify, lines)
@@ -206,7 +206,7 @@ export async function lsGeneric(
           const b = rstripSlash(t.virtual)
           return dirSpec.virtual === b || dirSpec.virtual.startsWith(b + '/')
         }) ?? dirSpec
-      lines.push(`${rebaseOne(dirSpec.virtual, owner.virtual, owner.display)}:`)
+      lines.push(`${rebaseOne(dirSpec.virtual, owner.virtual, owner.rawPath)}:`)
       appendListing(entries, long, human, classify, lines)
     }
     const out: ByteSource = formatRecords(lines)
@@ -229,7 +229,7 @@ export async function lsGeneric(
         const msg =
           gnuStrerror((err as { code?: string }).code) ??
           (err instanceof Error ? err.message : String(err))
-        warnings.push(`ls: cannot access '${p.display}': ${msg}`)
+        warnings.push(`ls: cannot access '${p.rawPath}': ${msg}`)
         continue
       }
     }

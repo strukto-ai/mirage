@@ -20,7 +20,7 @@ import tree_sitter
 
 from mirage.commands.spec.types import OperandKind
 from mirage.shell.call_stack import CallStack
-from mirage.types import PathSpec
+from mirage.types import PathSpec, word_text
 from mirage.workspace.expand.classify import classify_parts
 from mirage.workspace.expand.globs import resolve_globs
 from mirage.workspace.expand.parts import expand_parts
@@ -118,7 +118,10 @@ async def expand_argv(
         words = await resolve_globs(classified, registry)
     else:
         words = classified
-    text_view = [p.virtual if isinstance(p, PathSpec) else p for p in words]
+    # The text view renders words as typed (raw_path): bash hands
+    # programs their words unchanged, so `echo sub/file.txt` prints the
+    # relative form, not the resolved absolute path.
+    text_view = [word_text(p) for p in words]
     return Argv(name=name,
                 args=tuple(text_view[1:]),
                 operands=tuple(words[1:]))

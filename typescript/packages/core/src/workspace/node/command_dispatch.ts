@@ -423,7 +423,7 @@ async function runArgv(
     let cdpathTarget: string
     if (raw instanceof PathSpec) {
       path = raw
-      cdpathTarget = raw.rawPath ?? raw.virtual
+      cdpathTarget = raw.rawPath
     } else if (rawStr.startsWith('/')) {
       path = rawStr
       cdpathTarget = rawStr

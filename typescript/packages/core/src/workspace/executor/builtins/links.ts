@@ -14,7 +14,7 @@
 
 import { resolvePath } from '../../../utils/path.ts'
 import { IOResult } from '../../../io/types.ts'
-import { FileStat, FileType, PathSpec } from '../../../types.ts'
+import { FileStat, FileType, PathSpec, wordText } from '../../../types.ts'
 import { CycleError } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { DispatchFn } from '../cross_mount.ts'
@@ -27,11 +27,6 @@ import type { Result } from './scope.ts'
 // rm/mv mutate the link entry, ln/readlink inspect it, rmdir must not
 // descend through it. Everything else follows links before dispatch,
 // mirroring open(2).
-
-function typed(arg: string | PathSpec): string {
-  if (arg instanceof PathSpec) return arg.rawPath ?? arg.virtual
-  return arg
-}
 
 function abs(arg: string | PathSpec, cwd: string): string {
   if (arg instanceof PathSpec) return arg.virtual
@@ -95,21 +90,21 @@ export function handleLn(
   // (an expanded multi-match glob source lands here).
   if (operands.length > 2) {
     const last = operands[operands.length - 1]
-    return errorResult('ln', `ln: target '${typed(last ?? '')}' is not a directory\n`)
+    return errorResult('ln', `ln: target '${wordText(last ?? '')}' is not a directory\n`)
   }
   const linkAbs = abs(linkArg, session.cwd)
-  const targetTyped = typed(targetArg)
+  const targetTyped = wordText(targetArg)
   const exists = namespace.isLink(linkAbs) && !flags.has('f')
   if (namespace.isMountRoot(linkAbs) || exists) {
     return errorResult(
       'ln',
-      `ln: failed to create symbolic link '${typed(linkArg)}': File exists\n`,
+      `ln: failed to create symbolic link '${wordText(linkArg)}': File exists\n`,
     )
   }
   namespace.symlink(linkAbs, targetTyped, Date.now() / 1000)
   let out: Uint8Array | null = null
   if (flags.has('v')) {
-    out = new TextEncoder().encode(`'${typed(linkArg)}' -> '${targetTyped}'\n`)
+    out = new TextEncoder().encode(`'${wordText(linkArg)}' -> '${targetTyped}'\n`)
   }
   return [out, new IOResult(), new ExecutionNode({ command: 'ln', exitCode: 0 })]
 }
@@ -132,7 +127,7 @@ export function followPaths(
     try {
       virtual = namespace.follow(item.virtual)
     } catch (err) {
-      if (err instanceof CycleError) throw new CycleError(item.rawPath ?? item.virtual)
+      if (err instanceof CycleError) throw new CycleError(item.rawPath)
       throw err
     }
     if (virtual === item.virtual) {
@@ -146,7 +141,7 @@ export function followPaths(
         resourcePath: '',
         pattern: item.pattern,
         resolved: item.resolved,
-        rawPath: item.rawPath ?? item.virtual,
+        rawPath: item.rawPath,
       }),
     )
   }

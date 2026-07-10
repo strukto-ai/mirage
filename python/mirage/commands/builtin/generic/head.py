@@ -125,7 +125,7 @@ async def _head_multi(
 ) -> AsyncIterator[bytes]:
     for i, p in enumerate(paths):
         if show_headers:
-            header = f"==> {p.display} <==\n"
+            header = f"==> {p.raw_path} <==\n"
             if i > 0:
                 header = "\n" + header
             yield header.encode()

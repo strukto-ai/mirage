@@ -23,7 +23,7 @@ from mirage.io.stream import exit_on_empty, quiet_match
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
-from mirage.utils.path import rebase_display
+from mirage.utils.path import rebase_raw
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,7 +166,7 @@ async def grep(
                     warnings=warnings,
                     read_stream_fn=None,
                 )
-                results.extend(rebase_display(hits, p.virtual, p.display))
+                results.extend(rebase_raw(hits, p.virtual, p.raw_path))
             stderr = format_optional_records(warnings)
             if not results:
                 return b"", IOResult(exit_code=1, stderr=stderr)
@@ -203,16 +203,15 @@ async def grep(
                         warnings=warnings,
                         read_stream_fn=None,
                     )
-                    all_results.extend(
-                        rebase_display(res, p.virtual, p.display))
+                    all_results.extend(rebase_raw(res, p.virtual, p.raw_path))
                 else:
                     data = split_lines(
                         (await rb(p.virtual)).decode(errors="replace"))
-                    hits = grep_lines(p.display, data, pat, f.invert,
+                    hits = grep_lines(p.raw_path, data, pat, f.invert,
                                       f.line_numbers, f.count_only,
                                       f.files_only, f.only_matching,
                                       f.max_count)
-                    label = "" if f.no_filename else f"{p.display}:"
+                    label = "" if f.no_filename else f"{p.raw_path}:"
                     if f.count_only and hits:
                         all_results.append(f"{label}{hits[0]}")
                     else:
@@ -236,17 +235,18 @@ async def grep(
                     s = await st(p.virtual)
                 except FileNotFoundError:
                     multi_warnings.append(
-                        f"grep: {p.display}: No such file or directory")
+                        f"grep: {p.raw_path}: No such file or directory")
                     continue
                 if s.type == FileType.DIRECTORY:
-                    multi_warnings.append(f"grep: {p.display}: Is a directory")
+                    multi_warnings.append(
+                        f"grep: {p.raw_path}: Is a directory")
                     continue
                 data = split_lines((await
                                     rb(p.virtual)).decode(errors="replace"))
-                hits = grep_lines(p.display, data, pat, f.invert,
+                hits = grep_lines(p.raw_path, data, pat, f.invert,
                                   f.line_numbers, f.count_only, f.files_only,
                                   f.only_matching, f.max_count)
-                label = "" if f.no_filename else f"{p.display}:"
+                label = "" if f.no_filename else f"{p.raw_path}:"
                 if f.count_only:
                     if hits:
                         all_results.append(f"{label}{hits[0]}")
@@ -264,7 +264,7 @@ async def grep(
 
         first_stat = await st(paths[0].virtual)
         if first_stat.type == FileType.DIRECTORY:
-            stderr = f"grep: {paths[0].display}: Is a directory\n".encode()
+            stderr = f"grep: {paths[0].raw_path}: Is a directory\n".encode()
             return b"", IOResult(exit_code=1, stderr=stderr)
 
         if read_stream is not None:
@@ -292,7 +292,7 @@ async def grep(
         if f.with_filename and not (f.after_context or f.before_context):
             # GNU labels context lines with `-` instead of `:`, which the
             # uniform prefix cannot reproduce, so -H skips context output.
-            out = prefix_lines(out, f"{paths[0].display}:")
+            out = prefix_lines(out, f"{paths[0].raw_path}:")
         return out, io
 
     source = _resolve_source(stdin,

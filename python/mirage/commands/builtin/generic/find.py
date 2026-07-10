@@ -12,7 +12,7 @@ from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, FindType, PathSpec
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
-from mirage.utils.path import rebase_display
+from mirage.utils.path import rebase_raw
 
 
 def parse_find_args(
@@ -142,7 +142,7 @@ async def find(
         try:
             await stat(search_path)
         except (FileNotFoundError, ValueError) as exc:
-            stderr = f"find: '{search_path.display}': {exc}".encode()
+            stderr = f"find: '{search_path.raw_path}': {exc}".encode()
             return b"", IOResult(stderr=stderr, exit_code=1)
     results = await find_core(
         search_path,
@@ -168,7 +168,7 @@ async def find(
                                            stat=stat,
                                            mount_prefix=root_prefix)
     results = apply_mount_prefix(results, root_prefix)
-    results = rebase_display(results, search_path.virtual, search_path.display)
+    results = rebase_raw(results, search_path.virtual, search_path.raw_path)
     return format_records(results), IOResult()
 
 

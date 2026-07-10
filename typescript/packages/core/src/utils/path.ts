@@ -55,16 +55,19 @@ export function expandTilde(word: string, home: string | null): string {
   return word
 }
 
-export function rebaseDisplay(paths: string[], virtual: string, display: string | null): string[] {
-  if (display === null || display === virtual) return paths
-  return paths.map((p) => rebaseOne(p, virtual, display))
+// Rewrite the base of walked output paths (find/grep -r results) to the
+// as-typed form (`PathSpec.rawPath`); `raw` equal to `virtual` leaves the
+// paths unchanged (the absolute-argument case).
+export function rebaseRaw(paths: string[], virtual: string, raw: string): string[] {
+  if (raw === virtual) return paths
+  return paths.map((p) => rebaseOne(p, virtual, raw))
 }
 
-export function rebaseOne(path: string, virtual: string, display: string | null): string {
-  if (display === null || display === virtual) return path
+export function rebaseOne(path: string, virtual: string, raw: string): string {
+  if (raw === virtual) return path
   const base = rstripSlash(virtual)
-  if (path === base) return display
-  if (path.startsWith(base + '/')) return rstripSlash(display) + path.slice(base.length)
+  if (path === base) return raw
+  if (path.startsWith(base + '/')) return rstripSlash(raw) + path.slice(base.length)
   return path
 }
 

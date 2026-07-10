@@ -19,7 +19,6 @@ from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
-from mirage.shell.helpers import _is_last_cmd_redirect, get_list_parts
 from mirage.shell.types import Redirect, RedirectKind
 from mirage.types import PathSpec
 from mirage.workspace.executor.builtins import _to_scope
@@ -56,22 +55,6 @@ async def handle_redirect(
                 cmd_stdin = (text + "\n").encode()
             else:
                 cmd_stdin = text
-
-    if (command.type == "list" and redirects
-            and _is_last_cmd_redirect(command, redirects)):
-        left, op, right = get_list_parts(command)
-        left_stdout, left_io, left_exec = await execute_node(
-            left, session, cmd_stdin, call_stack)
-        left_bytes = await apply_barrier(left_stdout, left_io,
-                                         BarrierPolicy.VALUE)
-        session.last_exit_code = left_io.exit_code
-        run_right = (op == "||" and left_io.exit_code
-                     != 0) or (op == "&&" and left_io.exit_code == 0)
-        if run_right:
-            return await handle_redirect(execute_node, dispatch, right,
-                                         redirects, session, cmd_stdin,
-                                         call_stack)
-        return left_bytes, left_io, left_exec
 
     stdout, io, exec_node = await execute_node(command, session, cmd_stdin,
                                                call_stack)

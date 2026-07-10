@@ -287,7 +287,7 @@ async def _run_argv(
                                    physical=physical)
         if isinstance(raw, PathSpec):
             path = raw
-            cdpath_target = raw.raw_path or raw.virtual
+            cdpath_target = raw.raw_path
         elif raw_str.startswith("/"):
             path = raw_str
             cdpath_target = raw_str

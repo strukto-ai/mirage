@@ -59,7 +59,7 @@ async def walk(
             return [await stat(path, index)], warnings
         except (FileNotFoundError, ValueError) as exc:
             detail = fs_strerror(exc) or exc
-            warnings.append(f"ls: cannot access '{path.display}': {detail}")
+            warnings.append(f"ls: cannot access '{path.raw_path}': {detail}")
             return [], warnings
 
     try:
@@ -69,7 +69,7 @@ async def walk(
         if file_entry is not None:
             return [file_entry], warnings
         warnings.append(
-            f"ls: cannot access '{path.display}': {fs_strerror(exc) or exc}")
+            f"ls: cannot access '{path.raw_path}': {fs_strerror(exc) or exc}")
         return [], warnings
 
     if not entries:
@@ -225,7 +225,7 @@ async def ls(
             for g_idx, (dir_spec, entries) in enumerate(groups):
                 if p_idx > 0 or g_idx > 0:
                     results.append("")
-                header = rebase_one(dir_spec.virtual, p.virtual, p.display)
+                header = rebase_one(dir_spec.virtual, p.virtual, p.raw_path)
                 results.append(f"{header}:")
                 _render_group(results,
                               entries,

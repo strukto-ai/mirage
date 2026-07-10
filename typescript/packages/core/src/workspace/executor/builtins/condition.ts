@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { resolvePath } from '../../../utils/path.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import { IOResult } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -21,13 +22,17 @@ import type { DispatchFn } from '../cross_mount.ts'
 import { toScope, scopePath } from './scope.ts'
 import type { Result } from './scope.ts'
 
-async function evalTest(dispatch: DispatchFn, argv: (string | PathSpec)[]): Promise<boolean> {
+async function evalTest(
+  dispatch: DispatchFn,
+  argv: (string | PathSpec)[],
+  cwd: string,
+): Promise<boolean> {
   if (argv.length === 0) return false
   const firstArg = argv[0]
   if (firstArg === undefined) return false
   const first = scopePath(firstArg)
   if (first === '!' && argv.length > 1) {
-    return !(await evalTest(dispatch, argv.slice(1)))
+    return !(await evalTest(dispatch, argv.slice(1), cwd))
   }
   if (argv.length === 1) return Boolean(first)
   if (argv.length === 2) {
@@ -37,7 +42,10 @@ async function evalTest(dispatch: DispatchFn, argv: (string | PathSpec)[]): Prom
     if (op === '-z') return scopePath(val) === ''
     if (op === '-n') return scopePath(val) !== ''
     if (op === '-f') {
-      const scope = val instanceof PathSpec ? val : toScope(scopePath(val))
+      // A relative string operand resolves against cwd, like bash:
+      // `cd /data && test -f plain.txt` checks /data/plain.txt.
+      if (!(val instanceof PathSpec) && scopePath(val) === '') return false
+      const scope = val instanceof PathSpec ? val : toScope(resolvePath(scopePath(val), cwd))
       try {
         await dispatch('stat', scope)
         return true
@@ -46,13 +54,15 @@ async function evalTest(dispatch: DispatchFn, argv: (string | PathSpec)[]): Prom
       }
     }
     if (op === '-d') {
+      if (!(val instanceof PathSpec) && scopePath(val) === '') return false
+      const dirPath = val instanceof PathSpec ? '' : resolvePath(scopePath(val), cwd)
       const scope =
         val instanceof PathSpec
           ? val
           : new PathSpec({
-              resourcePath: stripSlash(scopePath(val)),
-              virtual: scopePath(val),
-              directory: scopePath(val),
+              resourcePath: stripSlash(dirPath),
+              virtual: dirPath,
+              directory: dirPath,
               resolved: false,
             })
       try {
@@ -89,9 +99,9 @@ async function evalTest(dispatch: DispatchFn, argv: (string | PathSpec)[]): Prom
 export async function handleTest(
   dispatch: DispatchFn,
   argv: (string | PathSpec)[],
-  _session: Session,
+  session: Session,
 ): Promise<Result> {
-  const result = await evalTest(dispatch, argv)
+  const result = await evalTest(dispatch, argv, session.cwd)
   const code = result ? 0 : 1
   return [
     null,

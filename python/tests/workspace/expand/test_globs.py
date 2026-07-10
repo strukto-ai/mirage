@@ -230,3 +230,67 @@ def test_scope_error_truncates_instead_of_crash():
 
     result = asyncio.run(_run())
     assert len(result) == 5
+
+
+def test_relative_glob_matches_spelled_as_typed():
+    matches = [
+        PathSpec(resource_path="data/sub/a.txt",
+                 virtual="/data/sub/a.txt",
+                 directory="/data/sub/",
+                 resolved=True),
+    ]
+    reg = _mock_registry(resolve_result=matches)
+    glob_ps = PathSpec(
+        resource_path="data/sub/*.txt",
+        virtual="/data/sub/*.txt",
+        directory="/data/sub/",
+        pattern="*.txt",
+        resolved=False,
+        raw_path="sub/*.txt",
+    )
+    result = _run(resolve_globs(["ls", glob_ps], reg))
+    assert isinstance(result[1], PathSpec)
+    assert result[1].raw_path == "sub/a.txt"
+    assert result[1].virtual == "/data/sub/a.txt"
+
+
+def test_absolute_glob_matches_keep_virtual():
+    matches = [
+        PathSpec(resource_path="data/a.txt",
+                 virtual="/data/a.txt",
+                 directory="/data/",
+                 resolved=True),
+    ]
+    reg = _mock_registry(resolve_result=matches)
+    glob_ps = PathSpec(
+        resource_path="data/*.txt",
+        virtual="/data/*.txt",
+        directory="/data/",
+        pattern="*.txt",
+        resolved=False,
+    )
+    result = _run(resolve_globs(["ls", glob_ps], reg))
+    assert isinstance(result[1], PathSpec)
+    assert result[1].raw_path == result[1].virtual
+    assert result[1].raw_path == "/data/a.txt"
+
+
+def test_bare_relative_glob_raw_has_no_dir_prefix():
+    matches = [
+        PathSpec(resource_path="data/a.txt",
+                 virtual="/data/a.txt",
+                 directory="/data/",
+                 resolved=True),
+    ]
+    reg = _mock_registry(resolve_result=matches)
+    glob_ps = PathSpec(
+        resource_path="data/*.txt",
+        virtual="/data/*.txt",
+        directory="/data/",
+        pattern="*.txt",
+        resolved=False,
+        raw_path="*.txt",
+    )
+    result = _run(resolve_globs(["ls", glob_ps], reg))
+    assert isinstance(result[1], PathSpec)
+    assert result[1].raw_path == "a.txt"

@@ -16,13 +16,12 @@ import { PathSpec } from '../../../types.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
 import { posixNormpath } from '../../../utils/path.ts'
 import { shlexSplit } from '../../../utils/shlex.ts'
-import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
+import { stripSlash } from '../../../utils/slash.ts'
+import { GLOB_CHARS, relativeSpec } from './relative.ts'
 
 const FILENAME_CHAR = /[a-zA-Z0-9_./]/
 const NON_PATH_CHAR = /[(){}=;|&<> ]/
 const RELATIVE_PATH = /^(?:\.?[a-zA-Z0-9_-]*\/)*[a-zA-Z0-9_-]+\.[a-zA-Z0-9]+$/
-
-export const GLOB_CHARS: readonly string[] = ['*', '?', '[']
 
 export function unescapePath(word: string): string {
   if (!word.includes('\\')) return word
@@ -78,32 +77,13 @@ export function classifyWord(
     if (!FILENAME_CHAR.test(word) || NON_PATH_CHAR.test(word)) {
       return word
     }
-    const path = posixNormpath(`${rstripSlash(cwd)}/${word}`)
-    const mount = registry.mountFor(path)
-    if (mount === null) return word
-    const lastSlash = path.lastIndexOf('/')
-    return new PathSpec({
-      resourcePath: stripSlash(path),
-      virtual: path,
-      directory: path.slice(0, lastSlash + 1),
-      pattern: path.slice(lastSlash + 1),
-      resolved: false,
-      rawPath: word,
-    })
+    return relativeSpec(word, registry, cwd)
   }
 
   if (!hasGlob && word.includes('/') && RELATIVE_PATH.test(word)) {
     let w = word
     if (w.includes('\\')) w = unescapePath(w)
-    const path = posixNormpath(`${rstripSlash(cwd)}/${w}`)
-    if (registry.mountFor(path) === null) return word
-    return new PathSpec({
-      resourcePath: stripSlash(path),
-      virtual: path,
-      directory: path.slice(0, path.lastIndexOf('/') + 1),
-      resolved: true,
-      rawPath: w,
-    })
+    return relativeSpec(w, registry, cwd)
   }
 
   return word
