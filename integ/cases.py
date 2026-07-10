@@ -342,6 +342,8 @@ CASES: list[tuple[str, str]] = [
     ("awk_v_equals", "awk -v x=eq=val '{print x}' /data/one_byte.txt"),
     ("awk_f_program", "echo '{print $3, $1}' | tee /data/prog.awk > /dev/null"
      " && awk -f /data/prog.awk /data/fields.txt && rm /data/prog.awk"),
+    ("awk_default_fs", "awk '{print NF, $1}' /data/spaced.txt"),
+    ("awk_multifile", "awk '{print NR, $1}' /data/a.txt /data/b.txt"),
 
     # ----- sed advanced -----
     ("sed_d_first", "sed 1d /data/a.txt"),

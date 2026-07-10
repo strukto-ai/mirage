@@ -39,7 +39,7 @@ export function toNumber(val: string): number {
 
 export function splitFields(line: string, fs: string | null): string[] {
   if (fs === null || fs === ' ') return line.split(/\s+/).filter((s) => s !== '')
-  if (fs === '') return [...line]
+  if (fs === '') return Array.from(line)
   const re = fs.length === 1 ? new RegExp(escapeRegex(fs)) : new RegExp(fs)
   return line.split(re)
 }

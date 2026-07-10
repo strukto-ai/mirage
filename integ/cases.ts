@@ -276,6 +276,8 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
     "echo '{print $3, $1}' | tee /data/prog.awk > /dev/null" +
       " && awk -f /data/prog.awk /data/fields.txt && rm /data/prog.awk",
   ],
+  ["awk_default_fs", "awk '{print NF, $1}' /data/spaced.txt"],
+  ["awk_multifile", "awk '{print NR, $1}' /data/a.txt /data/b.txt"],
 
   ["sed_d_first", "sed 1d /data/a.txt"],
   ["sed_d_last", "sed '$d' /data/a.txt"],

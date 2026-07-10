@@ -56,7 +56,8 @@ async function run(
   o: CommandOpts,
   files: Record<string, string> = {},
 ): Promise<[string, IOResult]> {
-  const [stdout, io] = await awkGeneric(paths, texts, o, makeStream(files))
+  const result = await awkGeneric(paths, texts, o, makeStream(files))
+  const [stdout, io] = result ?? [null, new IOResult()]
   return [DEC.decode(await materialize(stdout)), io]
 }
 
@@ -92,11 +93,7 @@ describe('awkGeneric', () => {
   })
 
   it('applies repeated -v assignments', async () => {
-    const [out] = await run(
-      [],
-      ['{print a, b}'],
-      opts({ v: ['a=1', 'b=2'] }, ENC.encode('line\n')),
-    )
+    const [out] = await run([], ['{print a, b}'], opts({ v: ['a=1', 'b=2'] }, ENC.encode('line\n')))
     expect(out).toBe('1 2\n')
   })
 
@@ -146,12 +143,7 @@ describe('awkGeneric', () => {
 
   it('processes all files with continuous NR and caches each', async () => {
     const files = { '/a.txt': 'one\ntwo\n', '/b.txt': 'three\n' }
-    const [out, io] = await run(
-      [spec('/a.txt'), spec('/b.txt')],
-      ['{print NR, $1}'],
-      opts(),
-      files,
-    )
+    const [out, io] = await run([spec('/a.txt'), spec('/b.txt')], ['{print NR, $1}'], opts(), files)
     expect(out).toBe('1 one\n2 two\n3 three\n')
     expect(io.cache).toEqual(['/a.txt', '/b.txt'])
   })
@@ -184,19 +176,21 @@ describe('awkGeneric', () => {
   })
 
   it('returns exit 2 when no program is given', async () => {
-    const [stdout, io] = await awkGeneric([], [], opts(), makeStream({}))
+    const result = await awkGeneric([], [], opts(), makeStream({}))
+    const [stdout, io] = result ?? [null, new IOResult()]
     expect(stdout).toBeNull()
     expect(io.exitCode).toBe(2)
     expect(DEC.decode(io.stderr)).toContain('usage')
   })
 
   it('returns exit 2 when the -f program file is unreadable', async () => {
-    const [stdout, io] = await awkGeneric(
+    const result = await awkGeneric(
       [spec('/data.txt')],
       [],
       opts({ f: '/missing.awk' }),
       makeStream({ '/data.txt': 'x\n' }),
     )
+    const [stdout, io] = result ?? [null, new IOResult()]
     expect(stdout).toBeNull()
     expect(io.exitCode).toBe(2)
   })
