@@ -43,7 +43,7 @@ export interface GSheetsResourceState {
 export class GSheetsResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.GSHEETS
   readonly cachesReads: boolean = true
-  readonly indexTtl: number = 86_400
+  override readonly indexTtl: number = 86_400
   readonly prompt: string = GSHEETS_PROMPT
   readonly writePrompt: string = GSHEETS_WRITE_PROMPT
   readonly config: GSheetsConfig

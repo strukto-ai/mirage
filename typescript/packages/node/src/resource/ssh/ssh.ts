@@ -56,7 +56,7 @@ export interface SSHResourceState {
 export class SSHResource extends BaseResource implements Resource {
   readonly kind = ResourceName.SSH
   readonly cachesReads: boolean = true
-  readonly indexTtl: number = 60
+  override readonly indexTtl: number = 60
   readonly prompt = SSH_PROMPT
   readonly config: SSHConfig
   readonly accessor: SSHAccessor
