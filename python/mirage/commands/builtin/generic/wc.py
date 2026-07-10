@@ -7,7 +7,7 @@ from typing import Any, Callable
 from mirage.cache.read_through import cache_aware_read
 from mirage.commands.builtin.utils.output import format_records
 from mirage.types import PathSpec
-from mirage.utils.errors import fs_error_line
+from mirage.utils.errors import FS_ERRORS, fs_error_line
 from mirage.utils.stream import ensure_stream
 
 
@@ -229,8 +229,7 @@ async def format_multi(
             if inspect.isawaitable(source):
                 source = await source
             counts = await wc(source)
-        except (FileNotFoundError, NotADirectoryError, IsADirectoryError,
-                FileExistsError, PermissionError) as exc:
+        except FS_ERRORS as exc:
             err += fs_error_line("wc", path, exc).encode()
             continue
         rows.append((counts, path.raw_path))

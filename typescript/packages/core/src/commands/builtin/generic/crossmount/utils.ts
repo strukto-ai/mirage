@@ -20,6 +20,8 @@ import { type FileStat, PathSpec } from '../../../../types.ts'
 import type { CommandOpts } from '../../../config.ts'
 import type { DispatchFn, OperandRun, RunSingle } from './types.ts'
 
+const ENC = new TextEncoder()
+
 // Run one native single-mount command per operand, in operand order. Each
 // operand executes on its owning mount through `runSingle` (which also
 // expands the operand's glob natively). Output is materialized and the lazy
@@ -33,7 +35,6 @@ export async function runOperands(
   stdinBytes: Uint8Array | null = null,
 ): Promise<OperandRun[]> {
   const results: OperandRun[] = []
-  const ENC = new TextEncoder()
   for (const scope of scopes) {
     const [out, io] = await runSingle(cmdName, [scope], texts, flagKwargs, {
       stdin: stdinBytes,

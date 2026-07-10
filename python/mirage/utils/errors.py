@@ -22,6 +22,11 @@ _FS_STRERROR: list[tuple[type[OSError], str]] = [
     (PermissionError, "Permission denied"),
 ]
 
+# The recoverable per-operand filesystem errors: every catch site that
+# formats a GNU stderr line and keeps going uses this tuple, so the catch
+# set and the strerror table can never drift apart (mirrors TS isFsError).
+FS_ERRORS: tuple[type[OSError], ...] = tuple(t for t, _ in _FS_STRERROR)
+
 
 def _virtual_of(path: object) -> str:
     original = getattr(path, "virtual", None)

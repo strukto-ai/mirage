@@ -31,7 +31,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.job_table import JobTable
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
 from mirage.types import PathSpec, word_text
-from mirage.utils.errors import format_fs_error
+from mirage.utils.errors import FS_ERRORS, format_fs_error
 from mirage.workspace.executor.control import ReturnSignal
 from mirage.workspace.executor.fanout import (_fan_out_traversal,
                                               _should_fan_out)
@@ -217,8 +217,7 @@ async def run_on_mount(
             env=session.env,
             exec_allowed=registry.is_exec_allowed(),
         )
-    except (FileNotFoundError, NotADirectoryError, IsADirectoryError,
-            FileExistsError, PermissionError) as exc:
+    except FS_ERRORS as exc:
         err = format_fs_error(cmd_name, exc, paths)
         return None, IOResult(exit_code=1, stderr=err)
 

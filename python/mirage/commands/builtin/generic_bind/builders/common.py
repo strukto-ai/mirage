@@ -16,7 +16,7 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.types import PathSpec
-from mirage.utils.errors import fs_error_line
+from mirage.utils.errors import FS_ERRORS, fs_error_line
 
 
 async def resolve_or_empty(ops: CommandIO, accessor: Accessor,
@@ -59,8 +59,7 @@ async def split_readable(
     for p in paths:
         try:
             await ops.stat(accessor, p, index)
-        except (FileNotFoundError, NotADirectoryError, IsADirectoryError,
-                FileExistsError, PermissionError) as exc:
+        except FS_ERRORS as exc:
             err += fs_error_line(cmd_name, p, exc).encode()
             continue
         readable.append(p)

@@ -16,6 +16,11 @@ import { Cmd } from '../types.ts'
 
 // grep-style: an error (2) dominates, then any match wins (0), then no-match
 // (1). Everything else: worst operand wins.
+//
+// Deliberate divergence from GNU: a per-operand read error (missing file)
+// does not raise the exit to 2. The single-mount grep reports the operand on
+// stderr and still exits 0 on a match, and integ pins that, so the fan-out
+// combine mirrors it rather than GNU's errors-win rule.
 export function combinedExit(cmdName: Cmd, codes: number[]): number {
   if (cmdName === Cmd.GREP || cmdName === Cmd.RG) {
     if (codes.some((c) => c > 1)) return Math.max(...codes)
