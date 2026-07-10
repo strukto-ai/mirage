@@ -79,6 +79,10 @@ jobs:
         working-directory: typescript
         run: pnpm -r build
 
+      - name: Typecheck core
+        working-directory: typescript
+        run: pnpm --filter @struktoai/mirage-core typecheck
+
       - name: Run TypeScript tests
         working-directory: typescript
         env:
