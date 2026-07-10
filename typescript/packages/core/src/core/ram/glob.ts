@@ -12,50 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
-import { PathSpec } from '../../types.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { PathSpec } from '../../types.ts'
+import { resolveGlobWith } from '../../utils/glob_walk.ts'
 import { SCOPE_ERROR } from './constants.ts'
 import { readdir } from './readdir.ts'
-import { fnmatch } from '../../utils/fnmatch.ts'
-import { gnuBasename } from '../../utils/path.ts'
 
 export async function resolveGlob(
   accessor: RAMAccessor,
   paths: readonly PathSpec[],
   index?: IndexCacheStore,
 ): Promise<PathSpec[]> {
-  const result: PathSpec[] = []
-  for (const p of paths) {
-    if (p.resolved) {
-      result.push(p)
-    } else if (p.pattern !== null) {
-      const dirSpec = new PathSpec({
-        virtual: p.directory,
-        directory: p.directory,
-        resolved: true,
-        resourcePath: mountKey(p.directory, mountPrefixOf(p.virtual, p.resourcePath)),
-      })
-      const entries = await readdir(accessor, dirSpec, index)
-      const matched: PathSpec[] = []
-      for (const e of entries) {
-        if (fnmatch(gnuBasename(e), p.pattern)) {
-          matched.push(
-            new PathSpec({
-              virtual: e,
-              directory: p.directory,
-              resolved: true,
-              resourcePath: mountKey(e, mountPrefixOf(p.virtual, p.resourcePath)),
-            }),
-          )
-        }
-      }
-      if (matched.length > SCOPE_ERROR) matched.length = SCOPE_ERROR
-      result.push(...matched)
-    } else {
-      result.push(p)
-    }
-  }
-  return result
+  return resolveGlobWith(readdir, accessor, paths, index, SCOPE_ERROR)
 }

@@ -246,6 +246,13 @@ export { basenameFn } from './commands/builtin/generic/basename.ts'
 export { dirnameFn } from './commands/builtin/generic/dirname.ts'
 export { gnuBasename, gnuDirname, norm, parent, posixNormpath, resolvePath } from './utils/path.ts'
 export { shlexSplit } from './utils/shlex.ts'
+export {
+  expandPattern,
+  hasGlob,
+  isWordShaped,
+  resolveGlobWith,
+  spellMatch,
+} from './utils/glob_walk.ts'
 export { detectFileType, FILE_MIME_MAP, formatFileResult } from './commands/builtin/file_helper.ts'
 export {
   type AggregateResult,
