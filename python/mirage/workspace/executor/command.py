@@ -31,11 +31,11 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.job_table import JobTable
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
 from mirage.types import PathSpec, word_text
+from mirage.utils.errors import format_fs_error
 from mirage.workspace.executor.control import ReturnSignal
 from mirage.workspace.executor.fanout import (_fan_out_traversal,
                                               _should_fan_out)
 from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
-from mirage.workspace.executor.fs_error import format_fs_error
 from mirage.workspace.executor.jobs import (handle_jobs, handle_kill,
                                             handle_ps, handle_wait)
 from mirage.workspace.mount import (MountCommandUnsupported, MountEntry,

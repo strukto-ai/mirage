@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.types import PathSpec
+
 _FS_STRERROR: list[tuple[type[OSError], str]] = [
     (FileNotFoundError, "No such file or directory"),
     (NotADirectoryError, "Not a directory"),
@@ -44,15 +46,16 @@ def fs_strerror(exc: BaseException) -> str | None:
 def fs_error_line(cmd_name: str, path: object, exc: BaseException) -> str:
     """GNU coreutils stderr line for one failed path operand.
 
-    Produces ``<cmd>: <path>: <strerror>`` with the operand spelled as typed
-    (``PathSpec.raw_path``), byte-identical with the executor chokepoint and
-    the TypeScript formatter. Used by read-family commands that keep
-    processing remaining operands after one fails.
+    Produces ``<cmd>: <path>: <strerror>``, byte-identical with the
+    TypeScript formatter. ``path`` is the operand itself when the caller
+    knows it (read-family commands that keep processing remaining operands
+    after one fails, reported as typed via ``raw_path``), or an
+    already-resolved label string.
 
     Args:
         cmd_name (str): Command name for the ``<cmd>:`` prefix.
         path (object): The failed operand; ``raw_path`` (or ``virtual``) is
-            the reported spelling.
+            the reported spelling, a plain string is used verbatim.
         exc (BaseException): The filesystem error.
     """
     label = getattr(path, "raw_path", None) or _virtual_of(path)
@@ -60,3 +63,30 @@ def fs_error_line(cmd_name: str, path: object, exc: BaseException) -> str:
     if strerror is not None:
         return f"{cmd_name}: {label}: {strerror}\n"
     return f"{cmd_name}: {label}\n"
+
+
+def format_fs_error(cmd_name: str,
+                    exc: OSError,
+                    paths: list[PathSpec] | None = None) -> bytes:
+    """Format a filesystem OSError as a GNU coreutils stderr line.
+
+    The chokepoint variant of ``fs_error_line`` for callers that only hold
+    the exception: the path is recovered from it (``exc.filename`` when set,
+    else ``str(exc)``); backends raise with the resolved absolute path
+    (``PathSpec.virtual``). When ``paths`` is supplied, the absolute path is
+    rewritten to the as-typed form (``PathSpec.raw_path``) so a relative
+    argument is reported as typed, like GNU.
+
+    Args:
+        cmd_name (str): Command name for the ``<cmd>:`` prefix.
+        exc (OSError): The filesystem error.
+        paths (list[PathSpec] | None): Command operands, used to map the
+            resolved path back to the as-typed form.
+    """
+    path = exc.filename or str(exc)
+    if paths:
+        for p in paths:
+            if p.virtual == path:
+                path = p.raw_path
+                break
+    return fs_error_line(cmd_name, path, exc).encode()

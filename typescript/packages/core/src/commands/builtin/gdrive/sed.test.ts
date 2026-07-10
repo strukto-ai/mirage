@@ -147,6 +147,6 @@ describe('gdrive sed', () => {
     const [out, io] = result
     expect(out).toBeNull()
     expect(io.exitCode).toBe(1)
-    expect(DEC.decode(io.stderr ?? new Uint8Array())).toContain('read-only Google Drive mount')
+    expect(await io.stderrStr()).toContain('read-only Google Drive mount')
   })
 })

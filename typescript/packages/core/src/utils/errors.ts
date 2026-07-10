@@ -83,7 +83,7 @@ export function isFsError(err: unknown): boolean {
 // GNU coreutils stderr line for one failed path operand, spelled as typed
 // (PathSpec.rawPath). Byte-identical with the executor chokepoint and the
 // Python fs_error_line. Used by read-family commands that keep processing
-// remaining operands after one fails.
+// remaining operands after one fails, where the caller holds the operand.
 export function fsErrorLine(
   cmdName: string,
   path: string | { virtual: string; rawPath?: string },
@@ -93,4 +93,26 @@ export function fsErrorLine(
   const strerror = gnuStrerror((err as { code?: string }).code)
   if (strerror !== null) return `${cmdName}: ${label}: ${strerror}\n`
   return `${cmdName}: ${label}\n`
+}
+
+// The chokepoint variant of fsErrorLine for callers that only hold the
+// error, byte-identical with Python's format_fs_error: the path is
+// recovered from the error and, when `paths` is supplied, rewritten to the
+// as-typed spelling (PathSpec.rawPath) so a relative argument is reported
+// as typed, like GNU. Shared by the single-mount and cross-mount
+// chokepoints; takes a structural shape to avoid importing PathSpec (no
+// import cycle).
+export function formatFsError(
+  cmdName: string,
+  err: unknown,
+  paths?: readonly { virtual: string; rawPath: string }[],
+): Uint8Array {
+  const strerror = gnuStrerror((err as { code?: string }).code)
+  const vpath = errorVirtualPath(err)
+  const spelled = paths?.find((p) => p.virtual === vpath)?.rawPath ?? vpath
+  const line =
+    strerror !== null
+      ? fsErrorLine(cmdName, spelled, err)
+      : `${cmdName}: ${err instanceof Error ? err.message : String(err)}\n`
+  return new TextEncoder().encode(line)
 }

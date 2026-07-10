@@ -18,7 +18,7 @@ from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
 from mirage.shell.types import NodeType as NT
-from mirage.workspace.executor.fs_error import format_fs_error
+from mirage.utils.errors import format_fs_error
 from mirage.workspace.executor.jobs import handle_background
 from mirage.workspace.types import ExecutionNode
 
