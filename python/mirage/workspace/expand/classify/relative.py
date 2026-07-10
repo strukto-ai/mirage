@@ -15,10 +15,9 @@
 import posixpath
 
 from mirage.types import PathSpec
+from mirage.utils.glob_walk import has_glob
 from mirage.utils.key_prefix import mount_key
 from mirage.workspace.mount import MountRegistry
-
-GLOB_CHARS = ("*", "?", "[")
 
 
 def relative_spec(word: str, registry: MountRegistry,
@@ -43,7 +42,7 @@ def relative_spec(word: str, registry: MountRegistry,
         return word
     resource_path = mount_key(path, mount.prefix.rstrip("/"))
     last_slash = path.rfind("/")
-    if any(ch in word for ch in GLOB_CHARS):
+    if has_glob(word):
         return PathSpec(
             virtual=path,
             directory=path[:last_slash + 1],
