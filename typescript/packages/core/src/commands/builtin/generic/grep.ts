@@ -17,7 +17,7 @@ import { cacheAwareStream } from '../../../cache/read_through.ts'
 import { exitOnEmpty, quietMatch } from '../../../io/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
-import { rebaseDisplay } from '../../../utils/path.ts'
+import { rebaseRaw } from '../../../utils/path.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import {
   compilePattern,
@@ -164,7 +164,7 @@ export async function grepGeneric(
           filesOnlyOpts(f, recursive),
           warnings,
         )
-        for (const h of rebaseDisplay(hits, p.virtual, p.display)) results.push(h)
+        for (const h of rebaseRaw(hits, p.virtual, p.rawPath)) results.push(h)
       }
       const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n') + '\n') : undefined
       if (results.length === 0)
@@ -202,11 +202,11 @@ export async function grepGeneric(
             warnings,
             false,
           )
-          for (const r of rebaseDisplay(res, p.virtual, p.display)) allResults.push(r)
+          for (const r of rebaseRaw(res, p.virtual, p.rawPath)) allResults.push(r)
         } else {
           const data = splitLinesNoTrailing(DEC.decode(await readBytesFn(p.virtual)))
-          const hits = grepLines(p.display, data, pat, f)
-          const label = f.noFilename ? '' : `${p.display}:`
+          const hits = grepLines(p.rawPath, data, pat, f)
+          const label = f.noFilename ? '' : `${p.rawPath}:`
           if (f.countOnly) {
             if (hits.length > 0) allResults.push(`${label}${hits[0] ?? ''}`)
           } else {
@@ -236,18 +236,18 @@ export async function grepGeneric(
           s = await statFn(p.virtual)
         } catch (err) {
           if ((err as { code?: string }).code === 'ENOENT') {
-            multiWarnings.push(`grep: ${p.display}: No such file or directory`)
+            multiWarnings.push(`grep: ${p.rawPath}: No such file or directory`)
             continue
           }
           throw err
         }
         if (s.type === FileType.DIRECTORY) {
-          multiWarnings.push(`grep: ${p.display}: Is a directory`)
+          multiWarnings.push(`grep: ${p.rawPath}: Is a directory`)
           continue
         }
         const data = splitLinesNoTrailing(DEC.decode(await materialize(stream(p))))
-        const hits = grepLines(p.display, data, pat, f)
-        const label = f.noFilename ? '' : `${p.display}:`
+        const hits = grepLines(p.rawPath, data, pat, f)
+        const label = f.noFilename ? '' : `${p.rawPath}:`
         if (f.countOnly) {
           if (hits.length > 0) allResults.push(`${label}${hits[0] ?? ''}`)
         } else {
@@ -281,7 +281,7 @@ export async function grepGeneric(
         new Uint8Array(0),
         new IOResult({
           exitCode: 1,
-          stderr: ENC.encode(`grep: ${first.display}: Is a directory\n`),
+          stderr: ENC.encode(`grep: ${first.rawPath}: Is a directory\n`),
         }),
       ]
     }
@@ -296,7 +296,7 @@ export async function grepGeneric(
     if (f.withFilename && f.afterContext === 0 && f.beforeContext === 0) {
       // GNU labels context lines with `-` instead of `:`, which the uniform
       // prefix cannot reproduce, so -H skips context output.
-      out = prefixLines(out, `${first.display}:`)
+      out = prefixLines(out, `${first.rawPath}:`)
     }
     return [out, io]
   }

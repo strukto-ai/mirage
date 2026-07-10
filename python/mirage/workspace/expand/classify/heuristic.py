@@ -18,6 +18,7 @@ import shlex
 
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.workspace.expand.classify.relative import GLOB_CHARS, relative_spec
 from mirage.workspace.mount import MountRegistry
 
 _FILENAME_CHAR = re.compile(r"[a-zA-Z0-9_./]")
@@ -56,7 +57,7 @@ def classify_word(word: str, registry: MountRegistry,
     - Relative + no glob -> plain text (never a path)
     - No mount match -> plain text
     """
-    has_glob = any(ch in word for ch in ("*", "?", "["))
+    has_glob = any(ch in word for ch in GLOB_CHARS)
 
     if word.startswith("/"):
         # Unescape backslash-escaped paths (e.g. /data/Zecheng\'s\ Server).
@@ -102,20 +103,7 @@ def classify_word(word: str, registry: MountRegistry,
     if has_glob and ("/" in word or not word.startswith(".")):
         if not _FILENAME_CHAR.search(word) or _NON_PATH_CHAR.search(word):
             return word
-        path = posixpath.normpath(cwd.rstrip("/") + "/" + word)
-        try:
-            mount = registry.mount_for(path)
-        except ValueError:
-            return word
-        last_slash = path.rfind("/")
-        return PathSpec(
-            virtual=path,
-            directory=path[:last_slash + 1],
-            resource_path=mount_key(path, mount.prefix.rstrip("/")),
-            pattern=path[last_slash + 1:],
-            resolved=False,
-            raw_path=word,
-        )
+        return relative_spec(word, registry, cwd)
 
     # Relative path (no glob): resolve against cwd if the word
     # contains "/" and looks like a subdirectory path (e.g. sub/file.txt).
@@ -127,17 +115,6 @@ def classify_word(word: str, registry: MountRegistry,
     if not has_glob and "/" in word and _RELATIVE_PATH.fullmatch(word):
         if "\\" in word:
             word = _unescape_path(word)
-        path = posixpath.normpath(cwd.rstrip("/") + "/" + word)
-        try:
-            mount = registry.mount_for(path)
-        except ValueError:
-            return word
-        return PathSpec(
-            virtual=path,
-            directory=path[:path.rfind("/") + 1],
-            resource_path=mount_key(path, mount.prefix.rstrip("/")),
-            resolved=True,
-            raw_path=word,
-        )
+        return relative_spec(word, registry, cwd)
 
     return word

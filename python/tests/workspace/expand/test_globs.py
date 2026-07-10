@@ -232,7 +232,7 @@ def test_scope_error_truncates_instead_of_crash():
     assert len(result) == 5
 
 
-def test_relative_glob_matches_display_as_typed():
+def test_relative_glob_matches_spelled_as_typed():
     matches = [
         PathSpec(resource_path="data/sub/a.txt",
                  virtual="/data/sub/a.txt",
@@ -250,12 +250,11 @@ def test_relative_glob_matches_display_as_typed():
     )
     result = _run(resolve_globs(["ls", glob_ps], reg))
     assert isinstance(result[1], PathSpec)
-    assert result[1].raw_path == "sub/*.txt".replace("*.txt", "a.txt")
-    assert result[1].display == "sub/a.txt"
+    assert result[1].raw_path == "sub/a.txt"
     assert result[1].virtual == "/data/sub/a.txt"
 
 
-def test_absolute_glob_matches_keep_virtual_display():
+def test_absolute_glob_matches_keep_virtual():
     matches = [
         PathSpec(resource_path="data/a.txt",
                  virtual="/data/a.txt",
@@ -272,11 +271,11 @@ def test_absolute_glob_matches_keep_virtual_display():
     )
     result = _run(resolve_globs(["ls", glob_ps], reg))
     assert isinstance(result[1], PathSpec)
-    assert result[1].raw_path is None
-    assert result[1].display == "/data/a.txt"
+    assert result[1].raw_path == result[1].virtual
+    assert result[1].raw_path == "/data/a.txt"
 
 
-def test_bare_relative_glob_display_has_no_dir_prefix():
+def test_bare_relative_glob_raw_has_no_dir_prefix():
     matches = [
         PathSpec(resource_path="data/a.txt",
                  virtual="/data/a.txt",
@@ -294,4 +293,4 @@ def test_bare_relative_glob_display_has_no_dir_prefix():
     )
     result = _run(resolve_globs(["ls", glob_ps], reg))
     assert isinstance(result[1], PathSpec)
-    assert result[1].display == "a.txt"
+    assert result[1].raw_path == "a.txt"

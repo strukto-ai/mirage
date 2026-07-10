@@ -12,22 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import dataclasses
 import time
 from collections.abc import Callable
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
-from mirage.types import FileType, PathSpec
+from mirage.types import FileType, PathSpec, word_text
 from mirage.utils.path import CycleError, resolve_path
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
-
-
-def _typed(arg: str | PathSpec) -> str:
-    if isinstance(arg, PathSpec):
-        return arg.raw_path or arg.virtual
-    return arg
 
 
 def _split_flags(
@@ -78,18 +73,18 @@ def handle_ln(
     # namespace links never name directories, so this is always an error
     # (an expanded multi-match glob source lands here).
     if len(operands) > 2:
-        err = (f"ln: target '{_typed(operands[-1])}' "
+        err = (f"ln: target '{word_text(operands[-1])}' "
                f"is not a directory\n").encode()
         return None, IOResult(exit_code=1,
                               stderr=err), ExecutionNode(command="ln",
                                                          exit_code=1,
                                                          stderr=err)
     link_abs = _abs(operands[1], session.cwd)
-    target_typed = _typed(operands[0])
+    target_typed = word_text(operands[0])
     exists = namespace.is_link(link_abs) and "f" not in flags
     if namespace.is_mount_root(link_abs) or exists:
         err = (f"ln: failed to create symbolic link "
-               f"'{_typed(operands[1])}': File exists\n").encode()
+               f"'{word_text(operands[1])}': File exists\n").encode()
         return None, IOResult(exit_code=1,
                               stderr=err), ExecutionNode(command="ln",
                                                          exit_code=1,
@@ -97,7 +92,7 @@ def handle_ln(
     namespace.symlink(link_abs, target_typed, time.time())
     out = None
     if "v" in flags:
-        out = (f"'{_typed(operands[1])}' -> '{target_typed}'\n").encode()
+        out = (f"'{word_text(operands[1])}' -> '{target_typed}'\n").encode()
     return out, IOResult(), ExecutionNode(command="ln", exit_code=0)
 
 
@@ -127,17 +122,16 @@ def follow_paths(
         try:
             virtual = namespace.follow(item.virtual)
         except CycleError:
-            raise CycleError(item.raw_path or item.virtual) from None
+            raise CycleError(item.raw_path) from None
         if virtual == item.virtual:
             out.append(item)
             continue
         out.append(
-            PathSpec(virtual=virtual,
-                     directory=virtual[:virtual.rfind("/") + 1] or "/",
-                     resource_path="",
-                     pattern=item.pattern,
-                     resolved=item.resolved,
-                     raw_path=item.raw_path or item.virtual))
+            dataclasses.replace(item,
+                                virtual=virtual,
+                                directory=virtual[:virtual.rfind("/") + 1]
+                                or "/",
+                                resource_path=""))
     return out
 
 

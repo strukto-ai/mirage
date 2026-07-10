@@ -15,6 +15,7 @@
 from dataclasses import asdict, dataclass, field
 
 from mirage.observe import OpRecord
+from mirage.types import PathSpec
 
 
 @dataclass
@@ -28,6 +29,9 @@ class ExecutionNode:
         exit_code (int): This node's exit code.
         children (list[ExecutionNode]): Child nodes (empty for leaf commands).
         records (list[OpRecord]): I/O operation records for this node.
+        paths (list[PathSpec]): Classified path operands of a leaf mount
+            command. Transient (not serialized): lets the lazy-stream drain
+            respell filesystem errors as typed, like the eager chokepoint.
     """
 
     command: str | None = None
@@ -36,6 +40,7 @@ class ExecutionNode:
     exit_code: int = 0
     children: list["ExecutionNode"] = field(default_factory=list)
     records: list[OpRecord] = field(default_factory=list)
+    paths: list[PathSpec] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         d: dict = {}

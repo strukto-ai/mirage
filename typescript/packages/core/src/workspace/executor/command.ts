@@ -22,7 +22,7 @@ import { assertMountAllowed, MountNotAllowedError } from '../../runtime/session_
 import { CallStack } from '../../shell/call_stack.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/types.ts'
-import { PathSpec } from '../../types.ts'
+import { PathSpec, wordText } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { Namespace } from '../mount/namespace.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
@@ -184,10 +184,10 @@ export async function runOnMount(
   } catch (err) {
     const strerror = gnuStrerror((err as { code?: string }).code)
     const vpath = errorVirtualPath(err)
-    const display = paths.find((p) => p.virtual === vpath)?.display ?? vpath
+    const spelled = paths.find((p) => p.virtual === vpath)?.rawPath ?? vpath
     const line =
       strerror !== null
-        ? `${cmdName}: ${display}: ${strerror}\n`
+        ? `${cmdName}: ${spelled}: ${strerror}\n`
         : `${cmdName}: ${err instanceof Error ? err.message : String(err)}\n`
     const errBytes = new TextEncoder().encode(line)
     return [null, new IOResult({ exitCode: 1, stderr: errBytes })]
@@ -347,6 +347,7 @@ export async function handleCommand(
     }
     csIo.safeguard =
       mounts.length > 0 ? resolveAcrossMounts(cmdName, mounts) : resolveSafeguard(cmdName)
+    csExec.paths = pathScopes
     return [maybeWithTimeout(csStdout, csIo.safeguard, cmdName), csIo, csExec]
   }
 
@@ -477,6 +478,7 @@ export async function handleCommand(
     command: cmdStr,
     stderr: stderrBytes,
     exitCode: io.exitCode,
+    paths,
   })
   return [stdout, io, exec]
 }
@@ -719,7 +721,7 @@ async function executeShellFunction(
 ): Promise<Result> {
   const cs = callStack ?? new CallStack()
   // Positional args carry the word as typed ($1 stays sub/a.txt).
-  const textArgs = restParts.map((p) => (typeof p === 'string' ? p : p.display))
+  const textArgs = restParts.map(wordText)
   cs.push(textArgs, cmdName)
   const savedLocals = new Map<string, string | null>()
   session.localVars = savedLocals

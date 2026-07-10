@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { CallStack } from '../../shell/call_stack.ts'
-import { PathSpec } from '../../types.ts'
+import type { PathSpec } from '../../types.ts'
+import { wordText } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { WordPolicy, route, wordPolicy } from '../route/index.ts'
 import type { Session } from '../session/session.ts'
@@ -98,9 +99,9 @@ export async function expandArgv(
   // patterns for backend pushdown; unknown names fail without
   // touching backends.
   const words = policy === WordPolicy.SHELL ? await resolveGlobs(classified, registry) : classified
-  // The text view renders words as typed (display): bash hands
+  // The text view renders words as typed (rawPath): bash hands
   // programs their words unchanged, so `echo sub/file.txt` prints the
   // relative form, not the resolved absolute path.
-  const textView = words.map((p) => (p instanceof PathSpec ? p.display : p))
+  const textView = words.map(wordText)
   return new Argv(name, textView.slice(1), words.slice(1))
 }

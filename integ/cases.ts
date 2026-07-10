@@ -565,6 +565,19 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ["redirect_list_last_only", "echo one && echo two > captured && cat captured"],
   ["redirect_chain", "echo a > chain && echo b >> chain && cat chain && wc -l < chain"],
   ["redirect_group", "{ echo g1; echo g2; } > gout && cat gout && cd / && rm -r /data/g13"],
+  [
+    "relspell_prep",
+    "mkdir -p /data/g14/sub && cd /data/g14" +
+      " && printf 'hello\n' | tee sub/a.txt > /dev/null" +
+      " && printf 'hello\n' | tee sub/b.txt > /dev/null",
+  ],
+  ["relspell_walk_grep", "grep -r hello sub"],
+  ["relspell_walk_find", "find sub -name '*.txt'"],
+  ["relspell_error_cat", "cat sub/missing.txt 2>&1"],
+  ["relspell_error_grep", "grep hello sub/missing.txt 2>&1"],
+  ["relspell_glob_dot", "echo ./sub/*.txt"],
+  ["relspell_du_slash", "du -s sub/"],
+  ["relspell_labels", "wc -l sub/a.txt && head -v sub/a.txt && cd / && rm -r /data/g14"],
 
   // ----- cp / mv multi-source into a directory (last; these mutate) -----
   ["cp_multi_into_dir", "cp /data/a.txt /data/b.txt /data/sub"],

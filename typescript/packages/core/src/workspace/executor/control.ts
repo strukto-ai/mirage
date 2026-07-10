@@ -19,7 +19,8 @@ import { IOResult } from '../../io/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/types.ts'
-import { PathSpec } from '../../types.ts'
+import type { PathSpec } from '../../types.ts'
+import { wordText } from '../../types.ts'
 import type { TSNodeLike } from '../expand/variable.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
@@ -165,9 +166,9 @@ export async function handleFor(
 
   try {
     for (const val of values) {
-      // env stores strings only; PathSpec renders as typed (bash keeps
-      // `for f in sub/*.txt` matches relative)
-      session.env[variable] = val instanceof PathSpec ? val.display : val
+      // env stores strings only; bash keeps `for f in sub/*.txt`
+      // matches relative, so the loop variable takes the typed form
+      session.env[variable] = wordText(val)
       try {
         const [stdout, io] = await executeBody(executeNode, body, session, stdin, callStack)
         allStdout.push(stdout)

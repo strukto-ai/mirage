@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { OpRecord } from '../observe/record.ts'
+import type { PathSpec } from '../types.ts'
 import { DEFAULT_SESSION_ID } from '../types.ts'
 
 export interface ExecutionNodeInit {
@@ -22,6 +23,7 @@ export interface ExecutionNodeInit {
   exitCode?: number
   children?: ExecutionNode[]
   records?: OpRecord[]
+  paths?: PathSpec[]
 }
 
 export class ExecutionNode {
@@ -31,6 +33,10 @@ export class ExecutionNode {
   exitCode: number
   children: ExecutionNode[]
   records: OpRecord[]
+  // Classified path operands of a leaf mount command. Transient (not
+  // serialized): lets the lazy-stream drain respell filesystem errors as
+  // typed, like the eager chokepoint.
+  paths: PathSpec[]
 
   constructor(init: ExecutionNodeInit = {}) {
     this.command = init.command ?? null
@@ -39,6 +45,7 @@ export class ExecutionNode {
     this.exitCode = init.exitCode ?? 0
     this.children = init.children ?? []
     this.records = init.records ?? []
+    this.paths = init.paths ?? []
   }
 
   toJSON(): Record<string, unknown> {

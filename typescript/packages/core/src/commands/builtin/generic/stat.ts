@@ -55,7 +55,7 @@ export async function statGeneric(
   for (const p of paths) {
     const s = await stat(p)
     if (fmt !== null) {
-      lines.push(formatStat(fmt, s, p.display))
+      lines.push(formatStat(fmt, s, p.rawPath))
     } else {
       const sizeStr = s.size === null ? 'None' : String(s.size)
       const modStr = s.modified ?? 'None'

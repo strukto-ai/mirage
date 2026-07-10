@@ -24,7 +24,7 @@ from mirage.io.types import ByteSource
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
-from mirage.types import PathSpec
+from mirage.types import PathSpec, word_text
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
@@ -161,10 +161,9 @@ async def handle_for(
 
     try:
         for val in values:
-            # env stores strings only; PathSpec → .display, the word
-            # as typed (bash keeps `for f in sub/*.txt` matches relative)
-            session.env[variable] = (val.display
-                                     if isinstance(val, PathSpec) else val)
+            # env stores strings only; bash keeps `for f in sub/*.txt`
+            # matches relative, so the loop variable takes the typed form
+            session.env[variable] = word_text(val)
             try:
                 stdout, io, _ = await _execute_body(execute_node, body,
                                                     session, stdin, call_stack)
@@ -331,10 +330,9 @@ async def handle_select(
 
     try:
         for val in values:
-            # env stores strings only; PathSpec → .display, the word
-            # as typed (bash keeps `for f in sub/*.txt` matches relative)
-            session.env[variable] = (val.display
-                                     if isinstance(val, PathSpec) else val)
+            # env stores strings only; bash keeps `for f in sub/*.txt`
+            # matches relative, so the loop variable takes the typed form
+            session.env[variable] = word_text(val)
             try:
                 stdout, io, _ = await _execute_body(execute_node, body,
                                                     session, stdin, call_stack)

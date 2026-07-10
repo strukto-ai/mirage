@@ -17,7 +17,7 @@ import { cacheAwareStream } from '../../../cache/read_through.ts'
 import { exitOnEmpty } from '../../../io/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
-import { rebaseDisplay } from '../../../utils/path.ts'
+import { rebaseRaw } from '../../../utils/path.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import {
   compilePattern,
@@ -239,9 +239,9 @@ export async function rgGeneric(
         exprText,
         fullOpts,
         warnings,
-        label ? p.display : null,
+        label ? p.rawPath : null,
       )
-      results.push(...rebaseDisplay(hitsFull, p.virtual, p.display))
+      results.push(...rebaseRaw(hitsFull, p.virtual, p.rawPath))
     }
     const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n') + '\n') : undefined
     if (results.length === 0) {
@@ -269,7 +269,7 @@ export async function rgGeneric(
       for (const p of paths) {
         const counted = await materialize(grepStream(stream(p), pat, streamOpts))
         const n = Number.parseInt(DEC.decode(counted).trim() || '0', 10)
-        if (n > 0) results.push(label ? `${p.display}:${String(n)}` : String(n))
+        if (n > 0) results.push(label ? `${p.rawPath}:${String(n)}` : String(n))
       }
       if (results.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
       return [ENC.encode(results.join('\n') + '\n'), new IOResult()]

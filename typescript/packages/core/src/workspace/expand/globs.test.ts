@@ -109,8 +109,8 @@ describe('resolveGlobs', () => {
   })
 })
 
-describe('matchDisplay via resolveGlobs', () => {
-  it('relative glob matches display as typed', async () => {
+describe('matchRaw via resolveGlobs', () => {
+  it('relative glob matches spelled as typed', async () => {
     const match = new PathSpec({
       resourcePath: 'ram/sub/a.txt',
       virtual: '/ram/sub/a.txt',
@@ -128,11 +128,11 @@ describe('matchDisplay via resolveGlobs', () => {
       rawPath: 'sub/*.txt',
     })
     const out = await resolveGlobs([p], reg)
-    expect((out[0] as PathSpec).display).toBe('sub/a.txt')
+    expect((out[0] as PathSpec).rawPath).toBe('sub/a.txt')
     expect((out[0] as PathSpec).virtual).toBe('/ram/sub/a.txt')
   })
 
-  it('absolute glob matches keep the virtual display', async () => {
+  it('absolute glob matches keep the virtual path', async () => {
     const match = new PathSpec({
       resourcePath: 'ram/a.txt',
       virtual: '/ram/a.txt',
@@ -149,8 +149,8 @@ describe('matchDisplay via resolveGlobs', () => {
       resolved: false,
     })
     const out = await resolveGlobs([p], reg)
-    expect((out[0] as PathSpec).rawPath).toBeNull()
-    expect((out[0] as PathSpec).display).toBe('/ram/a.txt')
+    expect((out[0] as PathSpec).rawPath).toBe((out[0] as PathSpec).virtual)
+    expect((out[0] as PathSpec).rawPath).toBe('/ram/a.txt')
   })
 
   it('zero-match relative glob keeps the typed literal', async () => {
@@ -165,6 +165,6 @@ describe('matchDisplay via resolveGlobs', () => {
       rawPath: '*.nope',
     })
     const out = await resolveGlobs([p], reg)
-    expect((out[0] as PathSpec).display).toBe('*.nope')
+    expect((out[0] as PathSpec).rawPath).toBe('*.nope')
   })
 })

@@ -12,11 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PathSpec } from '../../../types.ts'
+import type { PathSpec } from '../../../types.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
-import { posixNormpath } from '../../../utils/path.ts'
-import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
-import { GLOB_CHARS, classifyWord } from './heuristic.ts'
+import { classifyWord } from './heuristic.ts'
+import { relativeSpec } from './relative.ts'
 
 export function classifyBarePath(
   word: string,
@@ -25,25 +24,5 @@ export function classifyBarePath(
 ): string | PathSpec {
   const classified = classifyWord(word, registry, cwd)
   if (typeof classified !== 'string') return classified
-  const path = posixNormpath(`${rstripSlash(cwd)}/${word}`)
-  if (registry.mountFor(path) === null) return word
-  const hasGlob = GLOB_CHARS.some((ch) => word.includes(ch))
-  if (hasGlob) {
-    const lastSlash = path.lastIndexOf('/')
-    return new PathSpec({
-      resourcePath: stripSlash(path),
-      virtual: path,
-      directory: path.slice(0, lastSlash + 1),
-      pattern: path.slice(lastSlash + 1),
-      resolved: false,
-      rawPath: word,
-    })
-  }
-  return new PathSpec({
-    resourcePath: stripSlash(path),
-    virtual: path,
-    directory: path.slice(0, path.lastIndexOf('/') + 1),
-    resolved: true,
-    rawPath: word,
-  })
+  return relativeSpec(word, registry, cwd)
 }

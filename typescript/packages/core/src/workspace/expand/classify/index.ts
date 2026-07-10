@@ -15,3 +15,4 @@
 export { classifyWord, unescapePath } from './heuristic.ts'
 export { classifyParts } from './parts.ts'
 export { classifyBarePath } from './path.ts'
+export { relativeSpec } from './relative.ts'

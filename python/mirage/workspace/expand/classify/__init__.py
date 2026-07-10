@@ -15,9 +15,11 @@
 from mirage.workspace.expand.classify.heuristic import classify_word
 from mirage.workspace.expand.classify.parts import classify_parts
 from mirage.workspace.expand.classify.path import classify_bare_path
+from mirage.workspace.expand.classify.relative import relative_spec
 
 __all__ = [
     "classify_bare_path",
     "classify_parts",
     "classify_word",
+    "relative_spec",
 ]

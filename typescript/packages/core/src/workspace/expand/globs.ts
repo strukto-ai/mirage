@@ -26,23 +26,25 @@ function hasGlob(r: Resource): r is ResourceWithGlob {
   return 'glob' in r && typeof (r as { glob?: unknown }).glob === 'function'
 }
 
-// Stamp a glob match with the display form the user's word implies.
+// Stamp a glob match with the spelling the user's word implies.
 // Bash expands `sub/*.txt` to relative matches (`sub/a.txt`), keeping
 // the typed prefix. The glob item's rawPath records the word as typed;
 // matches rebuild it by swapping the resolved directory prefix for the
-// typed one. Absolute words (no rawPath) keep the resolved virtual.
-function matchDisplay(item: PathSpec, match: PathSpec): PathSpec {
-  if (item.rawPath === null || match.rawPath !== null) return match
+// typed one. Words with no distinct spelling (absolute: rawPath ===
+// virtual) keep the resolved virtual, as do matches that already carry
+// one.
+function matchRaw(item: PathSpec, match: PathSpec): PathSpec {
+  if (item.rawPath === item.virtual || match.rawPath !== match.virtual) return match
   if (!match.virtual.startsWith(item.directory)) return match
   const rawDir = item.rawPath.slice(0, item.rawPath.lastIndexOf('/') + 1)
-  const display = rawDir + match.virtual.slice(item.directory.length)
+  const spelled = rawDir + match.virtual.slice(item.directory.length)
   return new PathSpec({
     virtual: match.virtual,
     directory: match.directory,
     pattern: match.pattern,
     resolved: match.resolved,
     resourcePath: match.resourcePath,
-    rawPath: display,
+    rawPath: spelled,
   })
 }
 
@@ -74,7 +76,7 @@ export async function resolveGlobs(
         if (resolved.length === 0) {
           result.push(withPrefix)
         } else {
-          for (const p of resolved) result.push(matchDisplay(withPrefix, p))
+          for (const p of resolved) result.push(matchRaw(withPrefix, p))
         }
       } catch {
         result.push(withPrefix)

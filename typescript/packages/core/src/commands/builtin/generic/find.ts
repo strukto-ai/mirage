@@ -19,7 +19,7 @@ import { parseFindExpression } from '../findParse.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import { rebaseDisplay } from '../../../utils/path.ts'
+import { rebaseRaw } from '../../../utils/path.ts'
 
 const ENC = new TextEncoder()
 
@@ -193,7 +193,7 @@ export async function findGeneric(
             : rstripSlash(root.virtual) + key.slice(rootKey === '/' ? 0 : rootKey.length)
       rootMatches.push(displayPath)
     }
-    matches.push(...rebaseDisplay(rootMatches, root.virtual, root.display))
+    matches.push(...rebaseRaw(rootMatches, root.virtual, root.rawPath))
   }
   matches.sort()
   const out: ByteSource = ENC.encode(matches.length ? matches.join('\n') + '\n' : '')

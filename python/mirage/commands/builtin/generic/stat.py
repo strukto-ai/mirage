@@ -50,7 +50,7 @@ async def stat(
     for p in paths:
         s = await stat_fn(accessor, p, index)
         if fmt is not None:
-            lines.append(_format_stat(fmt, s, p.display))
+            lines.append(_format_stat(fmt, s, p.raw_path))
         else:
             lines.append(f"name={s.name} size={s.size}"
                          f" modified={s.modified}"

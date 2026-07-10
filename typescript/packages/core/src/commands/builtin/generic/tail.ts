@@ -60,7 +60,7 @@ export async function tailGeneric(
       if (p === undefined) continue
       const raw = await materialize(stream(p))
       if (showHeaders) {
-        const header = i > 0 ? `\n==> ${p.display} <==\n` : `==> ${p.display} <==\n`
+        const header = i > 0 ? `\n==> ${p.rawPath} <==\n` : `==> ${p.rawPath} <==\n`
         chunks.push(ENC.encode(header))
       }
       if (bytesMode !== null) {

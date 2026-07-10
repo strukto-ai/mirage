@@ -1769,6 +1769,26 @@ b
 === redirect_group ===
 g1
 g2
+=== relspell_prep ===
+
+=== relspell_walk_grep ===
+sub/a.txt:hello
+sub/b.txt:hello
+=== relspell_walk_find ===
+sub/a.txt
+sub/b.txt
+=== relspell_error_cat ===
+cat: sub/missing.txt: No such file or directory
+=== relspell_error_grep ===
+grep: sub/missing.txt: No such file or directory
+=== relspell_glob_dot ===
+./sub/a.txt ./sub/b.txt
+=== relspell_du_slash ===
+12	sub/
+=== relspell_labels ===
+1 sub/a.txt
+==> sub/a.txt <==
+hello
 === cp_multi_into_dir ===
 
 === cp_multi_verify_a ===

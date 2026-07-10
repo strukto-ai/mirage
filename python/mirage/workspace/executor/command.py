@@ -30,7 +30,7 @@ from mirage.io.types import ByteSource
 from mirage.shell.call_stack import CallStack
 from mirage.shell.job_table import JobTable
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
-from mirage.types import PathSpec
+from mirage.types import PathSpec, word_text
 from mirage.workspace.executor.control import ReturnSignal
 from mirage.workspace.executor.fanout import (_fan_out_traversal,
                                               _should_fan_out)
@@ -48,19 +48,23 @@ from mirage.workspace.types import ExecutionNode
 _FIND_ACTION_FLAGS = frozenset({"delete", "print0", "ls"})
 
 
-async def _exec_node(cmd_str: str, io: IOResult) -> ExecutionNode:
+async def _exec_node(cmd_str: str, io: IOResult,
+                     paths: list[PathSpec]) -> ExecutionNode:
     """Build the recorded execution node, materializing any streamed stderr.
 
     Args:
         cmd_str (str): Original command text for the record.
         io (IOResult): Command result whose stderr/exit_code the node carries.
+        paths (list[PathSpec]): Classified path operands, carried so the
+            lazy-stream drain can respell filesystem errors as typed.
     """
     # The node is a recorded artifact (compared by value, serialized via a
     # sync to_dict, sometimes read twice), so the live lazy io.stderr is
     # materialized to concrete bytes here. On the cross-mount path it is bytes.
     return ExecutionNode(command=cmd_str,
                          stderr=await materialize(io.stderr),
-                         exit_code=io.exit_code)
+                         exit_code=io.exit_code,
+                         paths=paths)
 
 
 def _check_mount_root_guard_raw(
@@ -390,9 +394,7 @@ async def handle_command(
         func_body = session.functions[cmd_name]
         cs = call_stack or CallStack()
         # Positional args carry the word as typed ($1 stays sub/a.txt).
-        text_args = [
-            p.display if isinstance(p, PathSpec) else p for p in parts[1:]
-        ]
+        text_args = [word_text(p) for p in parts[1:]]
         cs.push(text_args, function_name=cmd_name)
         saved_locals: dict[str, str | None] = {}
         session._local_vars = saved_locals
@@ -492,7 +494,7 @@ async def handle_command(
         io.safeguard = (resolve_across_mounts(cmd_name, mounts)
                         if mounts else resolve_safeguard(cmd_name))
         stdout = maybe_with_timeout(stdout, io.safeguard, cmd_name)
-        return stdout, io, await _exec_node(cmd_str, io)
+        return stdout, io, await _exec_node(cmd_str, io, path_scopes)
 
     # Reject unsupported cross-mount commands
     if len(path_scopes) >= 2:
@@ -579,7 +581,7 @@ async def handle_command(
     stdout = maybe_with_timeout(stdout, io.safeguard, cmd_name)
     io.stderr = maybe_with_timeout(io.stderr, io.safeguard, cmd_name)
 
-    return stdout, io, await _exec_node(cmd_str, io)
+    return stdout, io, await _exec_node(cmd_str, io, paths)
 
 
 async def _inject_links(
