@@ -18,7 +18,7 @@ import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { FileType, type FileStat, PathSpec } from '../../../types.ts'
 import { gnuBasename } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandOpts } from '../../config.ts'
 import { edScript, normalDiff, unifiedDiff } from '../diff_helper.ts'
 
 const ENC = new TextEncoder()
@@ -154,7 +154,7 @@ export async function diffGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   readdir?: Readdir,
   stat?: Stat,
-): Promise<CommandFnResult> {
+): Promise<[ByteSource | null, IOResult]> {
   if (paths.length < 2) {
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode('diff: requires two paths\n') })]
   }

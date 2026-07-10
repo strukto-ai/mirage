@@ -408,10 +408,10 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
   awk: new CommandSpec({
     options: [
       new Option({ short: '-F', valueKind: OperandKind.TEXT }),
-      new Option({ short: '-v', valueKind: OperandKind.TEXT }),
+      new Option({ short: '-v', valueKind: OperandKind.TEXT, repeatable: true }),
       new Option({ short: '-f', valueKind: OperandKind.PATH }),
     ],
-    positional: [new Operand({ kind: OperandKind.TEXT })],
+    positional: [new Operand({ kind: OperandKind.TEXT, providedBy: ['-f'] })],
     rest: new Operand({ kind: OperandKind.PATH }),
   }),
   paste: new CommandSpec({

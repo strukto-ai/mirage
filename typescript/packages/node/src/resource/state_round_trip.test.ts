@@ -34,7 +34,7 @@ describe('RAM state round-trip', () => {
     expect(state.type).toBe('ram')
     expect(state).not.toHaveProperty('needsOverride')
     expect(state).not.toHaveProperty('redactedFields')
-    expect(state.files['/a.txt']).toBeInstanceOf(Uint8Array)
+    expect(state.files?.['/a.txt']).toBeInstanceOf(Uint8Array)
     expect(state.dirs).toContain('/sub')
   })
 

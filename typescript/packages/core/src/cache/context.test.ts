@@ -35,6 +35,10 @@ class FakeManager {
     this.unlinks.push(path as string)
     return Promise.resolve()
   }
+
+  cachedBytes(_path: PathSpec): Promise<Uint8Array | null> {
+    return Promise.resolve(null)
+  }
 }
 
 describe('cache context', () => {
