@@ -62,6 +62,23 @@ async def main() -> None:
                                     )
     print(await board_result.stdout_str())
 
+    # ── glob expansion: the workspace segment is the pattern, the
+    # literal tail keeps walking (lists workspaces once, then filters).
+    print("=== echo /trello/workspaces/*/boards (mid-path glob) ===")
+    result = await ws.execute("echo /trello/workspaces/*/boards")
+    glob_out = (await result.stdout_str()).strip()
+    print(f"  {glob_out[:200]}")
+    assert glob_out.endswith("/boards"), "mid-path glob did not expand"
+
+    # A glob that matches nothing stays the literal word, so the
+    # command reports it like GNU coreutils.
+    print("=== cat /trello/workspaces/zz-none-*/workspace.json ===")
+    result = await ws.execute("cat /trello/workspaces/zz-none-*/workspace.json"
+                              )
+    glob_err = (await result.stderr_str()).strip()
+    print(f"  exit={result.exit_code}  {glob_err[:120]}")
+    assert result.exit_code == 1 and "zz-none-*" in glob_err
+
     print(f"=== ls -l /trello/workspaces/{first_ws}/boards/ "
           "(mtime from dateLastActivity) ===")
     long_boards = await ws.execute(

@@ -115,6 +115,23 @@ async def main() -> None:
         for line in lines[:3]:
             print(f"  {line[:150]}")
 
+    # ── glob expansion: the folder segment is the pattern, the date
+    # tail keeps walking (lists folders once, then each match's days).
+    glob_folder = folder[:2] + "*"
+    print(f"\n=== echo /email/{glob_folder}/2* (mid-path glob) ===")
+    r = await ws.execute(f"echo /email/{glob_folder}/2*")
+    out = (await r.stdout_str()).strip()
+    print(f"  {out[:200]}")
+    assert f"/email/{folder}/2" in out, "mid-path glob did not expand"
+
+    # A glob that matches nothing stays the literal word, so the
+    # command reports it like GNU coreutils.
+    print("\n=== cat /email/zz-none-*/x.eml (no match) ===")
+    r = await ws.execute("cat /email/zz-none-*/x.eml")
+    err = (await r.stderr_str()).strip()
+    print(f"  exit={r.exit_code}  {err[:120]}")
+    assert r.exit_code == 1 and "zz-none-*" in err
+
 
 if __name__ == "__main__":
     asyncio.run(main())
