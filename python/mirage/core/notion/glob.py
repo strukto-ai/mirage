@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import fnmatch
+import dataclasses
 import logging
 import posixpath
 
@@ -21,7 +21,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.constants import SCOPE_ERROR
 from mirage.core.notion.readdir import readdir
 from mirage.types import PathSpec
-from mirage.utils.key_prefix import rekey
+from mirage.utils.glob_walk import expand_pattern, is_word_shaped
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +43,12 @@ async def resolve_glob(
         if p.resolved:
             result.append(p)
         elif p.pattern:
-            entries = await readdir(accessor, p.dir, index)
-            matched = [
-                PathSpec.from_str_path(e, rekey(p.virtual, p.resource_path, e))
-                for e in entries
-                if fnmatch.fnmatch(e.rsplit("/", 1)[-1], p.pattern)
-            ]
+            matched = await expand_pattern(readdir, accessor, p, index)
+            if not matched and is_word_shaped(p):
+                # bash nullglob off: an unmatched glob word stays literal
+                result.append(
+                    dataclasses.replace(p, pattern=None, resolved=True))
+                continue
             if len(matched) > SCOPE_ERROR:
                 logger.warning(
                     "%s: %d matches exceeds limit (%d), truncating",

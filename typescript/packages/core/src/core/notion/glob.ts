@@ -12,10 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { rekey } from '../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
-import { fnmatch } from '../../utils/fnmatch.ts'
+import { expandPattern, isWordShaped } from '../../utils/glob_walk.ts'
 import { SCOPE_ERROR } from '../s3/constants.ts'
 import type { NotionTransport } from './_client.ts'
 import { readdir } from './readdir.ts'
@@ -36,12 +35,20 @@ export async function resolveNotionGlob(
       continue
     }
     if (p.pattern !== null && p.pattern !== '') {
-      const entries = await readdir(accessor, p, index)
-      const matched: PathSpec[] = []
-      for (const entry of entries) {
-        const base = entry.split('/').pop() ?? entry
-        if (!fnmatch(base, p.pattern)) continue
-        matched.push(PathSpec.fromStrPath(entry, rekey(p.virtual, p.resourcePath, entry)))
+      const matched = await expandPattern(readdir, accessor, p, index)
+      if (matched.length === 0 && isWordShaped(p)) {
+        // bash nullglob off: an unmatched glob word stays literal
+        result.push(
+          new PathSpec({
+            virtual: p.virtual,
+            directory: p.directory,
+            resourcePath: p.resourcePath,
+            pattern: null,
+            resolved: true,
+            rawPath: p.rawPath,
+          }),
+        )
+        continue
       }
       const truncated = matched.length > SCOPE_ERROR ? matched.slice(0, SCOPE_ERROR) : matched
       result.push(...truncated)
