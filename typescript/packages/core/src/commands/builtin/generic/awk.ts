@@ -29,16 +29,18 @@ type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 interface AwkFlags {
   readonly fieldSeparator: string | null
   readonly assignments: readonly string[]
-  readonly programFile: string | null
+  readonly programFiles: readonly string[]
 }
 
 function parseFlags(opts: CommandOpts): AwkFlags {
   const rawV = opts.flags.v
   const assignments = Array.isArray(rawV) ? rawV : typeof rawV === 'string' ? [rawV] : []
+  const rawF = opts.flags.f
+  const programFiles = Array.isArray(rawF) ? rawF : typeof rawF === 'string' ? [rawF] : []
   return {
     fieldSeparator: typeof opts.flags.F === 'string' ? opts.flags.F : null,
     assignments,
-    programFile: typeof opts.flags.f === 'string' ? opts.flags.f : null,
+    programFiles,
   }
 }
 
@@ -50,20 +52,24 @@ export async function awkGeneric(
 ): Promise<CommandFnResult> {
   const f = parseFlags(opts)
   let program: string
-  if (f.programFile !== null) {
+  if (f.programFiles.length > 0) {
     const mountPrefix =
       (paths[0] === undefined
         ? undefined
         : mountPrefixOf(paths[0].virtual, paths[0].resourcePath)) ??
       opts.mountPrefix ??
       ''
-    const programSpec = PathSpec.fromStrPath(f.programFile, mountKey(f.programFile, mountPrefix))
-    try {
-      program = DEC.decode(await materialize(stream(programSpec))).trim()
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(`${msg}\n`) })]
+    const pieces: string[] = []
+    for (const programFile of f.programFiles) {
+      const programSpec = PathSpec.fromStrPath(programFile, mountKey(programFile, mountPrefix))
+      try {
+        pieces.push(DEC.decode(await materialize(stream(programSpec))).trim())
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(`${msg}\n`) })]
+      }
     }
+    program = pieces.join('\n')
   } else if (texts.length > 0 && texts[0] !== undefined) {
     program = texts[0]
   } else {

@@ -404,3 +404,20 @@ async def test_awk_brace_literal_with_condition():
         stdin=b"x\ny\n",
     )
     assert (await _drain(output)).decode() == "}\n"
+
+
+@pytest.mark.asyncio
+async def test_awk_repeated_program_files_concatenate():
+    rb, rs = _make_backend({
+        "/p1.awk": b"{sum += $1}\n",
+        "/p2.awk": b"END {print sum}\n",
+        "/nums.txt": b"1\n2\n3\n",
+    })
+    output, _ = await awk(
+        [_spec("/nums.txt")],
+        (),
+        {"f": [_spec("/p1.awk"), _spec("/p2.awk")]},
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    assert (await _drain(output)).decode() == "6\n"

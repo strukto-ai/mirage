@@ -207,6 +207,16 @@ describe('awkGeneric', () => {
     expect(io.cache).toEqual(['/a.txt', '/b.txt'])
   })
 
+  it('concatenates repeated -f program files', async () => {
+    const files = {
+      '/p1.awk': '{sum += $1}\n',
+      '/p2.awk': 'END {print sum}\n',
+      '/nums.txt': '1\n2\n3\n',
+    }
+    const [out] = await run([spec('/nums.txt')], [], opts({ f: ['/p1.awk', '/p2.awk'] }), files)
+    expect(out).toBe('6\n')
+  })
+
   it('resolves -v variables in BEGIN and END blocks', async () => {
     const [out] = await run(
       [],

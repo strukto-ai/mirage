@@ -27,7 +27,7 @@ USAGE = "awk: usage: awk [-F fs] [-v var=val] 'program' [file ...]"
 class AwkFlags:
     field_separator: str | None
     assignments: tuple[str, ...]
-    program_file: PathSpec | None
+    program_files: tuple[PathSpec, ...]
 
 
 def parse_flags(fl: FlagView) -> AwkFlags:
@@ -37,10 +37,16 @@ def parse_flags(fl: FlagView) -> AwkFlags:
         fl (FlagView): spec-validated view over the raw flag kwargs.
     """
     raw_f = fl.raw("f")
+    if isinstance(raw_f, PathSpec):
+        program_files: tuple[PathSpec, ...] = (raw_f, )
+    elif isinstance(raw_f, list):
+        program_files = tuple(p for p in raw_f if isinstance(p, PathSpec))
+    else:
+        program_files = ()
     return AwkFlags(
         field_separator=fl.str("F"),
         assignments=tuple(fl.list("v")),
-        program_file=raw_f if isinstance(raw_f, PathSpec) else None,
+        program_files=program_files,
     )
 
 
@@ -289,14 +295,17 @@ async def awk(
     fl = FlagView(flags, spec=SPECS["awk"])
     f = parse_flags(fl)
 
-    if f.program_file is not None:
-        try:
-            raw = await read_bytes(accessor, f.program_file)
-        except FileNotFoundError as exc:
-            # GNU awk exits 2 when the -f program file cannot be opened.
-            raise UsageError(f"awk: {f.program_file.mount_path}: "
-                             "No such file or directory") from exc
-        program = raw.decode(errors="replace").strip()
+    if f.program_files:
+        pieces: list[str] = []
+        for prog in f.program_files:
+            try:
+                raw = await read_bytes(accessor, prog)
+            except FileNotFoundError as exc:
+                # GNU awk exits 2 when a -f program file cannot be opened.
+                raise UsageError(f"awk: {prog.mount_path}: "
+                                 "No such file or directory") from exc
+            pieces.append(raw.decode(errors="replace").strip())
+        program = "\n".join(pieces)
     elif texts:
         program = texts[0]
     else:

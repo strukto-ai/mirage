@@ -234,3 +234,12 @@ def test_awk_dash_f_frees_positional_slot_for_paths():
                            "/")
     assert parsed.texts() == []
     assert parsed.paths() == ["/data/a.txt", "/data/b.txt"]
+
+
+def test_awk_repeated_dash_f_accumulates_and_routes_each_file():
+    parsed = parse_command(SPECS["awk"],
+                           ["-f", "/p1.awk", "-f", "/p2.awk", "/data/a.txt"],
+                           "/")
+    assert parsed.flags["-f"] == ["/p1.awk", "/p2.awk"]
+    assert parsed.texts() == []
+    assert parsed.paths() == ["/data/a.txt"]
