@@ -344,6 +344,10 @@ CASES: list[tuple[str, str]] = [
      " && awk -f /data/prog.awk /data/fields.txt && rm /data/prog.awk"),
     ("awk_default_fs", "awk '{print NF, $1}' /data/spaced.txt"),
     ("awk_multifile", "awk '{print NR, $1}' /data/a.txt /data/b.txt"),
+    ("awk_f_repeat", "echo '{sum += $1}' | tee /data/pa.awk > /dev/null"
+     " && echo 'END {print sum}' | tee /data/pb.awk > /dev/null"
+     " && awk -f /data/pa.awk -f /data/pb.awk /data/numbers.txt"
+     " && rm /data/pa.awk /data/pb.awk"),
 
     # ----- sed advanced -----
     ("sed_d_first", "sed 1d /data/a.txt"),

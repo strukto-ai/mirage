@@ -943,6 +943,8 @@ manager carol
 6 1
 7 2
 8 3
+=== awk_f_repeat ===
+51
 === sed_d_first ===
 world
 foo
