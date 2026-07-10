@@ -201,6 +201,13 @@ async function checkCompare(
   check(`${label}: cmp identical`, code === 0);
   [out, , code] = await run(ws, `cmp ${src} ${other}`);
   check(`${label}: cmp differing`, code === 1 && out.includes("differ"));
+  // A missing operand carries the GNU strerror suffix, like single-mount.
+  const miss = `${dst}/copied/missing.txt`;
+  const [, err, missCode] = await run(ws, `diff ${src} ${miss}`);
+  check(
+    `${label}: diff missing strerror`,
+    missCode === 1 && err === `diff: ${miss}: No such file or directory\n`,
+  );
 }
 
 // cd must traverse mount boundaries within one session: hop straight from one

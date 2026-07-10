@@ -71,3 +71,25 @@ export function errorVirtualPath(err: unknown): string {
   if (typeof v === 'string') return v
   return err instanceof Error ? err.message : String(err)
 }
+
+// Format a filesystem error as a GNU coreutils stderr line, byte-identical
+// with Python's format_fs_error: `<cmd>: <path>: <strerror>` for recognized
+// codes, `<cmd>: <message>` otherwise. When `paths` is supplied the resolved
+// virtual path is rewritten to the as-typed spelling (PathSpec.rawPath) so a
+// relative argument is reported as typed, like GNU. Shared by the
+// single-mount and cross-mount chokepoints; takes a structural shape to
+// avoid importing PathSpec (no import cycle).
+export function formatFsError(
+  cmdName: string,
+  err: unknown,
+  paths?: readonly { virtual: string; rawPath: string }[],
+): Uint8Array {
+  const strerror = gnuStrerror((err as { code?: string }).code)
+  const vpath = errorVirtualPath(err)
+  const spelled = paths?.find((p) => p.virtual === vpath)?.rawPath ?? vpath
+  const line =
+    strerror !== null
+      ? `${cmdName}: ${spelled}: ${strerror}\n`
+      : `${cmdName}: ${err instanceof Error ? err.message : String(err)}\n`
+  return new TextEncoder().encode(line)
+}

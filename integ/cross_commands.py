@@ -137,6 +137,11 @@ async def check_compare(ws: Workspace, dst: str, label: str) -> None:
     check(f"{label}: cmp identical", code == 0)
     out, _, code = await run(ws, f"cmp {src} {other}")
     check(f"{label}: cmp differing", code == 1 and "differ" in out)
+    # A missing operand carries the GNU strerror suffix, like single-mount.
+    miss = f"{dst}/copied/missing.txt"
+    _, err, code = await run(ws, f"diff {src} {miss}")
+    check(f"{label}: diff missing strerror", code == 1
+          and err == f"diff: {miss}: No such file or directory\n")
 
 
 async def check_cd_cross_mount(ws: Workspace, dst: str, label: str) -> None:

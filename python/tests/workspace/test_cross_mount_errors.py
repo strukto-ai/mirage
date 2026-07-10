@@ -114,3 +114,17 @@ def test_cross_mount_cat_missing_has_strerror():
     out, err, code = _run(ws, "cat /a/file.txt /b/missing.txt")
     assert code == 1
     assert err == "cat: /b/missing.txt: No such file or directory\n"
+
+
+def test_cross_mount_diff_missing_has_strerror():
+    ws = _make_ws()
+    out, err, code = _run(ws, "diff /a/missing.txt /b/file.txt")
+    assert code == 1
+    assert err == "diff: /a/missing.txt: No such file or directory\n"
+
+
+def test_cross_mount_cmp_missing_has_strerror():
+    ws = _make_ws()
+    out, err, code = _run(ws, "cmp /a/file.txt /b/missing.txt")
+    assert code == 1
+    assert err == "cmp: /b/missing.txt: No such file or directory\n"

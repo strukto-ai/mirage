@@ -14,7 +14,7 @@
 
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { errorVirtualPath, gnuStrerror } from '../../../../utils/errors.ts'
+import { formatFsError } from '../../../../utils/errors.ts'
 import { strategyFor } from './detect.ts'
 import { runFanout } from './fanout/index.ts'
 import { Strategy, type Cmd, type CrossResult, type DispatchFn, type RunSingle } from './types.ts'
@@ -51,13 +51,6 @@ export async function handleCrossMount(
     }
     return await runFanout(cmd, scopes, textArgs, flagKwargs, runSingle, stdin)
   } catch (err) {
-    const strerror = gnuStrerror((err as { code?: string }).code)
-    const vpath = errorVirtualPath(err)
-    const display = scopes.find((p) => p.virtual === vpath)?.rawPath ?? vpath
-    const line =
-      strerror !== null
-        ? `${cmdName}: ${display}: ${strerror}\n`
-        : `${cmdName}: ${err instanceof Error ? err.message : String(err)}\n`
-    return [null, new IOResult({ exitCode: 1, stderr: new TextEncoder().encode(line) })]
+    return [null, new IOResult({ exitCode: 1, stderr: formatFsError(cmdName, err, scopes) })]
   }
 }
