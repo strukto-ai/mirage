@@ -171,12 +171,22 @@ async function checkReadFamily(
   check(`${label}: head invalid -n`, hbad[2] === 1 && hbad[1].includes("abc"));
   const tbad = await run(ws, `tail -n abc ${src} ${copied}`);
   check(`${label}: tail invalid -n`, tbad[2] === 1 && tbad[1].includes("abc"));
-  // A missing operand carries the GNU strerror suffix, like single-mount cat.
+  // A missing operand carries the GNU strerror suffix, like single-mount:
+  // cat exercises the STREAM strategy, grep the FANOUT strategy.
   const miss = `${dst}/copied/missing.txt`;
   const cmiss = await run(ws, `cat ${src} ${miss}`);
   check(
     `${label}: cat missing strerror`,
     cmiss[2] === 1 && cmiss[1] === `cat: ${miss}: No such file or directory\n`,
+  );
+  // grep still searches the good operand and exits 0 on a match, with the
+  // missing operand reported on stderr (matching single-mount grep).
+  const gmiss = await run(ws, `grep aaa ${src} ${miss}`);
+  check(
+    `${label}: grep missing strerror`,
+    gmiss[2] === 0 &&
+      gmiss[0].includes(`${src}:aaa`) &&
+      gmiss[1] === `grep: ${miss}: No such file or directory\n`,
   );
 }
 
