@@ -19,6 +19,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.aggregators import concat_aggregate
 from mirage.commands.builtin.generic.cat import cat as generic_cat
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.builders.common import split_readable
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.stream import async_chain, chain_cachables
@@ -38,13 +39,12 @@ async def cat(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths and ops.is_mounted(accessor):
         paths = await ops.resolve_glob(accessor, paths, index)
-        if ops.local:
-            for p in paths:
-                await ops.stat(accessor, p, index)
+        paths, err = await split_readable(ops, accessor, paths, index, "cat")
+        if not paths:
+            return None, IOResult(exit_code=1 if err else 0,
+                                  stderr=err or None)
         if len(paths) == 1:
             p = paths[0]
-            if not ops.local:
-                await ops.stat(accessor, p, index)
             cachable = CachableAsyncIterator(
                 ops.read_stream(accessor, p, index))
             io = IOResult(reads={p.mount_path: cachable}, cache=[p.mount_path])
@@ -69,6 +69,9 @@ async def cat(
                 parts.append(data)
             io = IOResult(reads=reads, cache=list(reads))
             source = async_chain(*parts)
+        if err:
+            io.stderr = err
+            io.exit_code = 1
         if n:
             return generic_cat(source, number_lines=True), io
         return source, io

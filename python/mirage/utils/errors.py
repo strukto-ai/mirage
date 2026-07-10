@@ -39,3 +39,24 @@ def fs_strerror(exc: BaseException) -> str | None:
         if isinstance(exc, exc_type):
             return strerror
     return None
+
+
+def fs_error_line(cmd_name: str, path: object, exc: BaseException) -> str:
+    """GNU coreutils stderr line for one failed path operand.
+
+    Produces ``<cmd>: <path>: <strerror>`` with the operand spelled as typed
+    (``PathSpec.raw_path``), byte-identical with the executor chokepoint and
+    the TypeScript formatter. Used by read-family commands that keep
+    processing remaining operands after one fails.
+
+    Args:
+        cmd_name (str): Command name for the ``<cmd>:`` prefix.
+        path (object): The failed operand; ``raw_path`` (or ``virtual``) is
+            the reported spelling.
+        exc (BaseException): The filesystem error.
+    """
+    label = getattr(path, "raw_path", None) or _virtual_of(path)
+    strerror = fs_strerror(exc)
+    if strerror is not None:
+        return f"{cmd_name}: {label}: {strerror}\n"
+    return f"{cmd_name}: {label}\n"

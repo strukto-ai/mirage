@@ -43,15 +43,15 @@ async def wc(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths and ops.is_mounted(accessor):
         paths = await ops.resolve_glob(accessor, paths, index)
-        body = await format_multi(paths,
-                                  read=with_index(ops.read_stream, index),
-                                  accessor=accessor,
-                                  args_l=args_l,
-                                  w=w,
-                                  c=c,
-                                  m=m,
-                                  L=L)
-        return body, IOResult()
+        body, err = await format_multi(paths,
+                                       read=with_index(ops.read_stream, index),
+                                       accessor=accessor,
+                                       args_l=args_l,
+                                       w=w,
+                                       c=c,
+                                       m=m,
+                                       L=L)
+        return body, IOResult(exit_code=1 if err else 0, stderr=err or None)
     source: AsyncIterator[bytes] = _resolve_source(stdin,
                                                    "wc: missing operand")
     if args_l and not (L or w or c or m):

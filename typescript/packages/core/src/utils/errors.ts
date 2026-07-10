@@ -71,3 +71,26 @@ export function errorVirtualPath(err: unknown): string {
   if (typeof v === 'string') return v
   return err instanceof Error ? err.message : String(err)
 }
+
+// True when the error carries a recognized filesystem code, i.e. it is the
+// per-operand kind a read-family command skips (GNU keeps processing the
+// remaining operands). Anything else keeps propagating.
+export function isFsError(err: unknown): boolean {
+  const code = (err as { code?: unknown }).code
+  return typeof code === 'string' && gnuStrerror(code) !== null
+}
+
+// GNU coreutils stderr line for one failed path operand, spelled as typed
+// (PathSpec.rawPath). Byte-identical with the executor chokepoint and the
+// Python fs_error_line. Used by read-family commands that keep processing
+// remaining operands after one fails.
+export function fsErrorLine(
+  cmdName: string,
+  path: string | { virtual: string; rawPath?: string },
+  err: unknown,
+): string {
+  const label = virtualOf(path)
+  const strerror = gnuStrerror((err as { code?: string }).code)
+  if (strerror !== null) return `${cmdName}: ${label}: ${strerror}\n`
+  return `${cmdName}: ${label}\n`
+}

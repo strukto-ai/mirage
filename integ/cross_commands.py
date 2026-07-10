@@ -117,6 +117,30 @@ async def check_read_family(ws: Workspace, dst: str, label: str) -> None:
     check(f"{label}: tail invalid -n", code == 1 and "abc" in err)
 
 
+async def check_partial_read(ws: Workspace, dst: str, label: str) -> None:
+    # One good + one missing operand: GNU keeps the good operand's output,
+    # reports the missing operand on stderr via the shared formatter, and
+    # exits 1. Single-mount and cross-mount must produce identical bytes.
+    src = "/ram/dir/a.txt"
+    miss = f"{dst}/copied/nope.txt"
+    out, err, code = await run(ws, f"cat {src} {miss}")
+    check(
+        f"{label}: cat keeps partial output", out == "aaa\n" and code == 1
+        and err == f"cat: {miss}: No such file or directory\n")
+    out, err, code = await run(ws, f"wc -l {src} {miss}")
+    check(
+        f"{label}: wc keeps total", out == f"1 {src}\n1 total\n" and code == 1
+        and err == f"wc: {miss}: No such file or directory\n")
+    out, err, code = await run(ws, f"head -n 1 {src} {miss}")
+    check(
+        f"{label}: head keeps banner", out == f"==> {src} <==\naaa\n"
+        and code == 1 and err == f"head: {miss}: No such file or directory\n")
+    out, err, code = await run(ws, f"tail -n 1 {src} {miss}")
+    check(
+        f"{label}: tail keeps banner", out == f"==> {src} <==\naaa\n"
+        and code == 1 and err == f"tail: {miss}: No such file or directory\n")
+
+
 async def check_compare(ws: Workspace, dst: str, label: str) -> None:
     # diff/cmp two files that live on different mounts: identical operands
     # exit 0 with no output, differing operands exit 1 and report the change.
@@ -306,6 +330,7 @@ async def exercise(ws: Workspace, dst: str, label: str,
     await check_recursive(ws, dst, label, expect_dirs)
     await check_cd_cross_mount(ws, dst, label)
     await check_read_family(ws, dst, label)
+    await check_partial_read(ws, dst, label)
     await check_compare(ws, dst, label)
     await check_no_clobber(ws, dst, label)
     await check_omit_directory(ws, dst, label)
@@ -338,6 +363,7 @@ async def main() -> None:
     ws = Workspace(mounts, mode=MountMode.WRITE)
     try:
         await seed_tree(ws, "/ram")
+        await check_partial_read(ws, "/ram", "ram-single")
         await exercise(ws, "/ram2", "ram", expect_dirs=True)
         if redis_url:
             await exercise(ws, "/redis", "redis", expect_dirs=True)

@@ -16,6 +16,7 @@ import { CachableAsyncIterator } from '../../../io/cachable_iterator.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import { splitReadable } from '../utils/operands.ts'
 import { resolveSource } from '../utils/stream.ts'
 
 const ENC = new TextEncoder()
@@ -75,11 +76,15 @@ export async function catGeneric(
 ): Promise<CommandFnResult> {
   const nFlag = opts.flags.n === true
   if (paths.length > 0) {
-    for (const p of paths) await stat(p)
+    const [readable, err] = await splitReadable(paths, stat, 'cat')
+    const errBytes = err === '' ? null : ENC.encode(err)
+    if (readable.length === 0) {
+      return [null, new IOResult({ exitCode: err === '' ? 0 : 1, stderr: errBytes })]
+    }
     const reads: Record<string, ByteSource> = {}
     const cacheKeys: string[] = []
     const outputs: AsyncIterable<Uint8Array>[] = []
-    for (const p of paths) {
+    for (const p of readable) {
       const cachable = new CachableAsyncIterator(stream(p))
       reads[p.mountPath] = cachable
       cacheKeys.push(p.mountPath)
@@ -87,7 +92,10 @@ export async function catGeneric(
     }
     const merged = chainStreams(outputs)
     const out: ByteSource = nFlag ? numberLines(merged) : merged
-    return [out, new IOResult({ reads, cache: cacheKeys })]
+    return [
+      out,
+      new IOResult({ reads, cache: cacheKeys, exitCode: err === '' ? 0 : 1, stderr: errBytes }),
+    ]
   }
   try {
     const source = resolveSource(opts.stdin, 'cat: missing operand')

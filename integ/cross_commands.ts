@@ -173,6 +173,46 @@ async function checkReadFamily(
   check(`${label}: tail invalid -n`, tbad[2] === 1 && tbad[1].includes("abc"));
 }
 
+// One good + one missing operand: GNU keeps the good operand's output,
+// reports the missing operand on stderr via the shared formatter, and exits
+// 1. Single-mount and cross-mount must produce identical bytes.
+async function checkPartialRead(
+  ws: Workspace,
+  dst: string,
+  label: string,
+): Promise<void> {
+  const src = "/ram/dir/a.txt";
+  const miss = `${dst}/copied/nope.txt`;
+  let [out, err, code] = await run(ws, `cat ${src} ${miss}`);
+  check(
+    `${label}: cat keeps partial output`,
+    out === "aaa\n" &&
+      code === 1 &&
+      err === `cat: ${miss}: No such file or directory\n`,
+  );
+  [out, err, code] = await run(ws, `wc -l ${src} ${miss}`);
+  check(
+    `${label}: wc keeps total`,
+    out === `1 ${src}\n1 total\n` &&
+      code === 1 &&
+      err === `wc: ${miss}: No such file or directory\n`,
+  );
+  [out, err, code] = await run(ws, `head -n 1 ${src} ${miss}`);
+  check(
+    `${label}: head keeps banner`,
+    out === `==> ${src} <==\naaa\n` &&
+      code === 1 &&
+      err === `head: ${miss}: No such file or directory\n`,
+  );
+  [out, err, code] = await run(ws, `tail -n 1 ${src} ${miss}`);
+  check(
+    `${label}: tail keeps banner`,
+    out === `==> ${src} <==\naaa\n` &&
+      code === 1 &&
+      err === `tail: ${miss}: No such file or directory\n`,
+  );
+}
+
 // diff/cmp two files that live on different mounts: identical operands exit 0
 // with no output, differing operands exit 1 and report the change.
 async function checkCompare(
@@ -391,6 +431,7 @@ async function exercise(
   await checkRecursive(ws, dst, label, expectDirs);
   await checkCdCrossMount(ws, dst, label);
   await checkReadFamily(ws, dst, label);
+  await checkPartialRead(ws, dst, label);
   await checkCompare(ws, dst, label);
   await checkNoClobber(ws, dst, label);
   await checkOmitDirectory(ws, dst, label);
@@ -429,6 +470,7 @@ async function main(): Promise<void> {
   const ws = new Workspace(mounts, { mode: MountMode.WRITE });
   try {
     await seedTree(ws, "/ram");
+    await checkPartialRead(ws, "/ram", "ram-single");
     await exercise(ws, "/ram2", "ram", true);
     if (redisUrl) await exercise(ws, "/redis", "redis", true);
     else process.stdout.write("SKIP redis (REDIS_URL unset)\n");
