@@ -46,7 +46,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-i",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
@@ -54,7 +55,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-w",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
@@ -62,7 +64,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-b",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
@@ -70,7 +73,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-e",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
@@ -78,7 +82,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-u",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
@@ -86,7 +91,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-q",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
@@ -94,7 +100,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-r",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     }
   ],
   "positional": [],

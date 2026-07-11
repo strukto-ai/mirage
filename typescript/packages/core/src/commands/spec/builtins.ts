@@ -34,6 +34,8 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ short: '-R' }),
       new Option({ short: '-d' }),
       new Option({ short: '-F' }),
+      // Accepted no-op like grep --color (#471).
+      new Option({ long: '--color', valueKind: OperandKind.TEXT, valueOptional: true }),
     ],
     rest: new Operand({ kind: OperandKind.PATH }),
   }),
@@ -186,6 +188,11 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ short: '-C', valueKind: OperandKind.TEXT }),
       new Option({ short: '-e', valueKind: OperandKind.TEXT, repeatable: true }),
       new Option({ short: '-f', valueKind: OperandKind.PATH, repeatable: true }),
+      // Accepted no-ops: output is never a tty, so plain output is
+      // exactly what GNU produces with --color=auto (#471).
+      new Option({ long: '--color', valueKind: OperandKind.TEXT, valueOptional: true }),
+      new Option({ long: '--colour', valueKind: OperandKind.TEXT, valueOptional: true }),
+      new Option({ long: '--line-buffered' }),
     ],
     positional: [new Operand({ kind: OperandKind.TEXT, providedBy: ['-e', '-f'] })],
     rest: new Operand({ kind: OperandKind.PATH }),
@@ -211,6 +218,8 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ long: '--hidden' }),
       new Option({ long: '--type', valueKind: OperandKind.TEXT }),
       new Option({ long: '--glob', valueKind: OperandKind.TEXT }),
+      // Accepted no-op like grep --color (#471).
+      new Option({ long: '--color', valueKind: OperandKind.TEXT, valueOptional: true }),
     ],
     positional: [new Operand({ kind: OperandKind.TEXT, providedBy: ['-e', '-f'] })],
     rest: new Operand({ kind: OperandKind.PATH }),

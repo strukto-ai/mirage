@@ -71,6 +71,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
   const valueFlags = new Set<string>()
   const longBoolFlags = new Set<string>()
   const longValueFlags = new Set<string>()
+  const longOptionalFlags = new Set<string>()
   const valueFlagKinds = new Map<string, OperandKind>()
   const repeatFlags = new Set<string>()
   let numericShorthandFlag: string | null = null
@@ -89,6 +90,11 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     if (opt.long !== null) {
       if (opt.valueKind === OperandKind.NONE) {
         longBoolFlags.add(opt.long)
+      } else if (opt.valueOptional) {
+        // GNU optional argument: bare form is boolean, value only attaches
+        // via `=`; a detached next token is an operand.
+        longBoolFlags.add(opt.long)
+        longOptionalFlags.add(opt.long)
       } else {
         longValueFlags.add(opt.long)
         valueFlagKinds.set(opt.long, opt.valueKind)
@@ -173,7 +179,10 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
         i += 2
       } else {
         const eq = tok.indexOf('=')
-        if (eq !== -1 && longValueFlags.has(tok.slice(0, eq))) {
+        if (
+          eq !== -1 &&
+          (longValueFlags.has(tok.slice(0, eq)) || longOptionalFlags.has(tok.slice(0, eq)))
+        ) {
           setValueFlag(flags, tok.slice(0, eq), tok.slice(eq + 1), repeatFlags)
         } else if (lenientDashOperands) {
           rawArgs.push(tok)

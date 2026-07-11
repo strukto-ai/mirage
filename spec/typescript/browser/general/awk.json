@@ -40,7 +40,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-F",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": null,
@@ -48,7 +49,8 @@
       "numeric_shorthand": false,
       "repeatable": true,
       "short": "-v",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": null,
@@ -56,7 +58,8 @@
       "numeric_shorthand": false,
       "repeatable": true,
       "short": "-f",
-      "value_kind": "path"
+      "value_kind": "path",
+      "value_optional": false
     }
   ],
   "positional": [

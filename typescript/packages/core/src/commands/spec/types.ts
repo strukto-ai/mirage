@@ -38,6 +38,12 @@ export interface OptionInit {
    * and route each joined path.
    */
   repeatable?: boolean
+  /**
+   * GNU optional-argument long option (e.g. `--color[=WHEN]`): bare
+   * `--color` parses as true, `--color=auto` parses as the string, and a
+   * detached next token is never consumed. Requires a long form.
+   */
+  valueOptional?: boolean
   description?: string
 }
 
@@ -47,6 +53,7 @@ export class Option {
   readonly valueKind: OperandKind
   readonly numericShorthand: boolean
   readonly repeatable: boolean
+  readonly valueOptional: boolean
   readonly description: string | null
 
   constructor(init: OptionInit = {}) {
@@ -55,6 +62,7 @@ export class Option {
     this.valueKind = init.valueKind ?? OperandKind.NONE
     this.numericShorthand = init.numericShorthand ?? false
     this.repeatable = init.repeatable ?? false
+    this.valueOptional = init.valueOptional ?? false
     this.description = init.description ?? null
     Object.freeze(this)
   }

@@ -131,12 +131,11 @@ def test_long_value_flag_equals_syntax_rg():
 
 
 def test_unknown_long_flag_dropped_with_warning():
-    parsed = parse_command(SPECS["grep"], ["--color=auto", "pat", "/a.txt"],
-                           "/")
-    assert "--color" not in parsed.flags
+    parsed = parse_command(SPECS["grep"], ["--bogus=x", "pat", "/a.txt"], "/")
+    assert "--bogus" not in parsed.flags
     assert parsed.texts() == ["pat"]
     assert parsed.paths() == ["/a.txt"]
-    assert any("--color=auto" in w for w in parsed.warnings)
+    assert any("--bogus=x" in w for w in parsed.warnings)
 
 
 def test_cluster_ending_in_value_flag_consumes_next_arg():
@@ -243,3 +242,25 @@ def test_awk_repeated_dash_f_accumulates_and_routes_each_file():
     assert parsed.flags["-f"] == ["/p1.awk", "/p2.awk"]
     assert parsed.texts() == []
     assert parsed.paths() == ["/data/a.txt"]
+
+
+def test_value_optional_bare_is_boolean():
+    parsed = parse_command(SPECS["grep"], ["--color", "world", "/a.txt"], "/")
+    assert parsed.flags["--color"] is True
+    assert parsed.texts() == ["world"]
+    assert parsed.paths() == ["/a.txt"]
+    assert parsed.warnings == []
+
+
+def test_value_optional_equals_form_carries_value():
+    parsed = parse_command(SPECS["grep"],
+                           ["--color=auto", "world", "/a.txt"], "/")
+    assert parsed.flags["--color"] == "auto"
+    assert parsed.texts() == ["world"]
+    assert parsed.warnings == []
+
+
+def test_value_optional_never_consumes_next_token():
+    parsed = parse_command(SPECS["ls"], ["--color", "/data"], "/")
+    assert parsed.flags["--color"] is True
+    assert parsed.paths() == ["/data"]

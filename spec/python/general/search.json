@@ -19,7 +19,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": null,
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": null,
@@ -27,7 +28,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": null,
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": null,
@@ -35,7 +37,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": null,
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     }
   ],
   "positional": [

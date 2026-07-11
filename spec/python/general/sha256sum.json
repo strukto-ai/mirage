@@ -46,7 +46,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-c",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     }
   ],
   "positional": [],

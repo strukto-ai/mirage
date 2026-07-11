@@ -40,6 +40,15 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-C", value_kind=OperandKind.TEXT),
             Option(short="-e", value_kind=OperandKind.TEXT, repeatable=True),
             Option(short="-f", value_kind=OperandKind.PATH, repeatable=True),
+            # Accepted no-ops: output is never a tty, so plain output is
+            # exactly what GNU produces with --color=auto (#471).
+            Option(long="--color",
+                   value_kind=OperandKind.TEXT,
+                   value_optional=True),
+            Option(long="--colour",
+                   value_kind=OperandKind.TEXT,
+                   value_optional=True),
+            Option(long="--line-buffered"),
         ),
         positional=(Operand(kind=OperandKind.TEXT,
                             provided_by=("-e", "-f")), ),
@@ -77,6 +86,10 @@ SPECS: dict[str, CommandSpec] = {
             Option(long="--hidden"),
             Option(long="--type", value_kind=OperandKind.TEXT),
             Option(long="--glob", value_kind=OperandKind.TEXT),
+            # Accepted no-op like grep --color (#471).
+            Option(long="--color",
+                   value_kind=OperandKind.TEXT,
+                   value_optional=True),
         ),
         positional=(Operand(kind=OperandKind.TEXT,
                             provided_by=("-e", "-f")), ),

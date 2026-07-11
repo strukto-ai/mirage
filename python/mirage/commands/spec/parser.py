@@ -74,6 +74,7 @@ def parse_command(
     value_flags: set[str] = set()
     long_bool_flags: set[str] = set()
     long_value_flags: set[str] = set()
+    long_optional_flags: set[str] = set()
     value_flag_kinds: dict[str, OperandKind] = {}
     repeat_flags: set[str] = set()
     numeric_shorthand_flag: str | None = None
@@ -91,6 +92,11 @@ def parse_command(
         if opt.long:
             if opt.value_kind == OperandKind.NONE:
                 long_bool_flags.add(opt.long)
+            elif opt.value_optional:
+                # GNU optional argument: bare form is boolean, value only
+                # attaches via `=`; a detached next token is an operand.
+                long_bool_flags.add(opt.long)
+                long_optional_flags.add(opt.long)
             else:
                 long_value_flags.add(opt.long)
                 value_flag_kinds[opt.long] = opt.value_kind
@@ -163,7 +169,8 @@ def parse_command(
                 i += 2
             else:
                 eq = tok.find("=")
-                if eq != -1 and tok[:eq] in long_value_flags:
+                if eq != -1 and (tok[:eq] in long_value_flags
+                                 or tok[:eq] in long_optional_flags):
                     _set_value_flag(flags, tok[:eq], tok[eq + 1:],
                                     repeat_flags)
                 elif lenient_dash_operands:

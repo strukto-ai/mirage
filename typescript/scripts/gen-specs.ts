@@ -69,6 +69,7 @@ function serializeOption(o: Option): Record<string, unknown> {
     repeatable: o.repeatable,
     short: o.short,
     value_kind: o.valueKind,
+    value_optional: o.valueOptional,
   }
 }
 

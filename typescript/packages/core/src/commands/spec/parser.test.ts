@@ -334,11 +334,33 @@ describe('parseCommand — GNU long flag =value syntax', () => {
   })
 
   it('unknown long flag with = is dropped with a warning', () => {
-    const p = parseCommand(specOf('grep'), ['--color=auto', 'pat', '/a.txt'], '/')
-    expect(p.flags['--color']).toBeUndefined()
+    const p = parseCommand(specOf('grep'), ['--bogus=x', 'pat', '/a.txt'], '/')
+    expect(p.flags['--bogus']).toBeUndefined()
     expect(p.texts()).toEqual(['pat'])
     expect(p.paths()).toEqual(['/a.txt'])
-    expect(p.warnings.some((w) => w.includes('--color=auto'))).toBe(true)
+    expect(p.warnings.some((w) => w.includes('--bogus=x'))).toBe(true)
+  })
+})
+
+describe('parseCommand — optional-value long options', () => {
+  it('bare form is boolean and never consumes the next token', () => {
+    const p = parseCommand(specOf('grep'), ['--color', 'world', '/a.txt'], '/')
+    expect(p.flags['--color']).toBe(true)
+    expect(p.texts()).toEqual(['world'])
+    expect(p.paths()).toEqual(['/a.txt'])
+    expect(p.warnings).toEqual([])
+  })
+
+  it('equals form carries the value', () => {
+    const p = parseCommand(specOf('grep'), ['--color=auto', 'world', '/a.txt'], '/')
+    expect(p.flags['--color']).toBe('auto')
+    expect(p.warnings).toEqual([])
+  })
+
+  it('ls --color keeps its path operand', () => {
+    const p = parseCommand(specOf('ls'), ['--color', '/data'], '/')
+    expect(p.flags['--color']).toBe(true)
+    expect(p.paths()).toEqual(['/data'])
   })
 })
 

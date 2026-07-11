@@ -15,7 +15,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-s",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": "Pad numbers with zeros to equal width.",
@@ -23,7 +24,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-w",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": "Format each number with a printf-style format string.",
@@ -31,7 +33,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-f",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     }
   ],
   "positional": [],

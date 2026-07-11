@@ -1320,6 +1320,15 @@ baz
 world
 === grep_unknown_short_flag ===
 world
+=== grep_color_auto ===
+world
+=== grep_color_bare ===
+world
+=== grep_line_buffered ===
+world
+=== ls_color ===
+deep
+nested.txt
 === head_numeric_shorthand ===
 hello
 world
