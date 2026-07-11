@@ -25,7 +25,7 @@ export function backendKeyDefault(path: PathSpec): string {
   return rstripSlash(path.mountPath)
 }
 
-export function childPath(parent: PathSpec, name: string): PathSpec {
+function childPath(parent: PathSpec, name: string): PathSpec {
   const child = `${rstripSlash(parent.virtual)}/${name}`
   return PathSpec.fromStrPath(child, rekey(parent.virtual, parent.resourcePath, child))
 }

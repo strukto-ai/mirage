@@ -28,6 +28,6 @@ export {
   type AuthConfig,
   type JWTConfig,
 } from './config.ts'
-export { JWTVerificationError, verifyJwt } from './jwt.ts'
+export { JWTVerificationError } from './jwt.ts'
 export { registerAuth } from './middleware.ts'
 export { DEFAULT_TOKEN_FILE, ensureTokenFile, readTokenFile } from './storage.ts'

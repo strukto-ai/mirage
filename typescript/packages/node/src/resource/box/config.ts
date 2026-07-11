@@ -40,7 +40,7 @@ export interface BoxConfigRedacted {
   accessToken?: '<REDACTED>'
 }
 
-export const BoxConfigSchema = z.object({
+const BoxConfigSchema = z.object({
   clientId: z.string().optional(),
   clientSecret: secretStr().optional(),
   refreshToken: secretStr().optional(),

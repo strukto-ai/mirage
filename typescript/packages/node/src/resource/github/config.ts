@@ -30,7 +30,7 @@ export interface GitHubConfigRedacted {
   baseUrl?: string
 }
 
-export const GitHubConfigSchema = z.object({
+const GitHubConfigSchema = z.object({
   token: secretStr(),
   owner: z.string(),
   repo: z.string(),

@@ -27,7 +27,7 @@ export interface TencentConfigRedacted extends Omit<TencentConfig, 'presignedUrl
   presignedUrlProvider: '<REDACTED>'
 }
 
-export const TencentConfigSchema = z.object({
+const TencentConfigSchema = z.object({
   bucket: z.string(),
   presignedUrlProvider: secretSchema(
     z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),

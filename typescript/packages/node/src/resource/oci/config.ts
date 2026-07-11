@@ -35,7 +35,7 @@ export interface OCIConfigRedacted {
   timeoutMs?: number
 }
 
-export const OCIConfigSchema = z.object({
+const OCIConfigSchema = z.object({
   bucket: z.string(),
   namespace: z.string(),
   region: z.string(),
@@ -45,7 +45,7 @@ export const OCIConfigSchema = z.object({
   timeoutMs: z.number().optional(),
 })
 
-export function resolvedOciEndpoint(config: OCIConfig): string {
+function resolvedOciEndpoint(config: OCIConfig): string {
   if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint
   return `https://${config.namespace}.compat.objectstorage.${config.region}.oci.customer-oci.com`
 }

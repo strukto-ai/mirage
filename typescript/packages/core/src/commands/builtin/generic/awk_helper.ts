@@ -30,13 +30,13 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-export function splitFields(line: string, fs: string): string[] {
+function splitFields(line: string, fs: string): string[] {
   if (fs === '') return line.split(/\s+/).filter((s) => s !== '')
   const re = fs.length === 1 ? new RegExp(escapeRegex(fs)) : new RegExp(fs)
   return line.split(re)
 }
 
-export function parseProgram(program: string): [string, string] {
+function parseProgram(program: string): [string, string] {
   const trimmed = program.trim()
   if (trimmed.startsWith('{')) return ['', trimmed.slice(1).replace(/\}$/, '')]
   if (trimmed.includes('{')) {
@@ -98,7 +98,7 @@ function evalSimple(rawExpr: string, fieldMap: Record<string, string>): boolean 
   return false
 }
 
-export function evalCondition(condition: string, fieldMap: Record<string, string>): boolean {
+function evalCondition(condition: string, fieldMap: Record<string, string>): boolean {
   const cond = condition.trim()
   if (cond === AwkBlock.BEGIN || cond === AwkBlock.END) return false
   if (cond.includes(AwkBoolOp.OR)) {
@@ -110,7 +110,7 @@ export function evalCondition(condition: string, fieldMap: Record<string, string
   return evalSimple(cond, fieldMap)
 }
 
-export function evalAction(action: string, fieldMap: Record<string, string>): string {
+function evalAction(action: string, fieldMap: Record<string, string>): string {
   const parts: string[] = []
   for (const rawStmt of action.split(';')) {
     const stmt = rawStmt.trim()
@@ -137,7 +137,7 @@ export function evalAction(action: string, fieldMap: Record<string, string>): st
   return parts.join('\n')
 }
 
-export function buildFieldMap(
+function buildFieldMap(
   line: string,
   fs: string,
   nr: number,
@@ -155,7 +155,7 @@ export function buildFieldMap(
   return fieldMap
 }
 
-export function awkEvalLine(
+function awkEvalLine(
   line: string,
   program: string,
   fs: string,
@@ -169,7 +169,7 @@ export function awkEvalLine(
   return evalAction(action, fieldMap)
 }
 
-export function parseBlocks(program: string): [string, string, string] {
+function parseBlocks(program: string): [string, string, string] {
   let begin = ''
   let end = ''
   let main = program
@@ -188,7 +188,7 @@ export function parseBlocks(program: string): [string, string, string] {
   return [begin, main, end]
 }
 
-export function evalAccumulator(
+function evalAccumulator(
   action: string,
   fieldMap: Record<string, string>,
   accum: Record<string, number>,
@@ -206,7 +206,7 @@ export function evalAccumulator(
   }
 }
 
-export function evalBegin(action: string): string {
+function evalBegin(action: string): string {
   const parts: string[] = []
   for (const rawStmt of action.split(';')) {
     const stmt = rawStmt.trim()
@@ -228,7 +228,7 @@ export function evalBegin(action: string): string {
   return parts.join('\n')
 }
 
-export function evalEndPrint(
+function evalEndPrint(
   action: string,
   accum: Record<string, number>,
   endMap: Record<string, string>,

@@ -25,7 +25,7 @@ export interface NotionConfigRedacted {
   serverUrl?: string
 }
 
-export const NotionConfigSchema = z.object({
+const NotionConfigSchema = z.object({
   authProvider: secretSchema(
     z.custom<OAuthClientProvider>((value) => value !== null && typeof value === 'object'),
   ),

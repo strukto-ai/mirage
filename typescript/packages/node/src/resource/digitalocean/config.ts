@@ -33,7 +33,7 @@ export interface DigitalOceanConfigRedacted {
   timeoutMs?: number
 }
 
-export const DigitalOceanConfigSchema = z.object({
+const DigitalOceanConfigSchema = z.object({
   bucket: z.string(),
   accessKeyId: secretStr(),
   secretAccessKey: secretStr(),

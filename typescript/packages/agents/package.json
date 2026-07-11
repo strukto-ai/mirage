@@ -117,7 +117,6 @@
   },
   "devDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.178",
-    "@mariozechner/pi-ai": "^0.70.2",
     "@mariozechner/pi-coding-agent": "^0.70.2",
     "@mastra/core": "^1.29.1",
     "@openai/agents": "^0.8.0",

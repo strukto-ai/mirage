@@ -62,32 +62,6 @@ export const JobKey = Object.freeze({
   SESSION_ID: 'session_id',
 } as const)
 
-export const RecordKey = Object.freeze({
-  AGENT: 'agent',
-  COMMAND: 'command',
-  STDOUT: 'stdout',
-  STDIN: 'stdin',
-  EXIT_CODE: 'exit_code',
-  TREE: 'tree',
-  TIMESTAMP: 'timestamp',
-  SESSION_ID: 'session_id',
-} as const)
-
-export const NodeKey = Object.freeze({
-  COMMAND: 'command',
-  OP: 'op',
-  STDERR: 'stderr',
-  EXIT_CODE: 'exit_code',
-  CHILDREN: 'children',
-} as const)
-
-export const SessionKey = Object.freeze({
-  SESSION_ID: 'session_id',
-  CWD: 'cwd',
-  ENV: 'env',
-  LAST_EXIT_CODE: 'last_exit_code',
-} as const)
-
 export const ResourceStateKey = Object.freeze({
   TYPE: 'type',
   CONFIG: 'config',

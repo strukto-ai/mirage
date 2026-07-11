@@ -29,7 +29,7 @@ export interface S3ConfigRedacted extends S3CoreConfigRedacted {
   profile?: string
 }
 
-export const S3ConfigSchema = S3CoreConfigSchema.extend({
+const S3ConfigSchema = S3CoreConfigSchema.extend({
   profile: z.string().optional(),
 })
 

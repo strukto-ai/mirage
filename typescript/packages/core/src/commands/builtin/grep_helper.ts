@@ -110,7 +110,7 @@ export function mergePatternList(
   return parts.join('\n')
 }
 
-export function buildPatternStr(pattern: string, fixedString = false, wholeWord = false): string {
+function buildPatternStr(pattern: string, fixedString = false, wholeWord = false): string {
   const parts = pattern.split('\n')
   if (parts.length === 1) {
     let patStr = fixedString ? escapeRegex(pattern) : pattern

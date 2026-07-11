@@ -28,7 +28,7 @@ export interface OCIConfigRedacted extends Omit<OCIConfig, 'presignedUrlProvider
   presignedUrlProvider: '<REDACTED>'
 }
 
-export const OCIConfigSchema = z.object({
+const OCIConfigSchema = z.object({
   bucket: z.string(),
   presignedUrlProvider: secretSchema(
     z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),

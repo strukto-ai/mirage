@@ -58,7 +58,7 @@ export async function searchSegments(
   return queryResultToBytes(response, accessor.config.slugField, mountPrefix, scopedSlugs)
 }
 
-export function validateArgs(query: string, topK: number): void {
+function validateArgs(query: string, topK: number): void {
   if (query === '') {
     throw new Error('search: query is required')
   }
@@ -70,7 +70,7 @@ export function validateArgs(query: string, topK: number): void {
   }
 }
 
-export async function targetEntries(
+async function targetEntries(
   accessor: ChromaAccessor,
   paths: readonly PathSpec[],
   index?: IndexCacheStore,
@@ -99,13 +99,13 @@ export async function targetEntries(
   return targets
 }
 
-export interface ChromaQueryResponse {
+interface ChromaQueryResponse {
   documents?: unknown
   metadatas?: unknown
   distances?: unknown
 }
 
-export function queryResultToBytes(
+function queryResultToBytes(
   response: ChromaQueryResponse,
   slugField: string,
   mountPrefix: string,
@@ -134,7 +134,7 @@ export function queryResultToBytes(
   return ENC.encode(contents.join('\n') + '\n')
 }
 
-export function firstResultList(value: unknown): unknown[] {
+function firstResultList(value: unknown): unknown[] {
   if (!Array.isArray(value)) return []
   if (value.length > 0 && Array.isArray(value[0])) return value[0] as unknown[]
   return value

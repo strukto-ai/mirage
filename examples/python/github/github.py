@@ -36,7 +36,7 @@ async def main() -> None:
     resource = GitHubResource(
         config=config,
         owner="strukto-ai",
-        repo="mirage-internal",
+        repo="mirage",
         ref="main",
     )
     ws = Workspace({"/github": resource}, mode=MountMode.READ)

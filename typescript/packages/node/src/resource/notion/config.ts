@@ -24,7 +24,7 @@ export interface NotionConfigRedacted {
   baseUrl?: string
 }
 
-export const NotionConfigSchema = z.object({
+const NotionConfigSchema = z.object({
   apiKey: secretStr(),
   baseUrl: z.string().optional(),
 })

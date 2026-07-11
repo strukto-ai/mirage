@@ -19,7 +19,7 @@ import * as hdf5Module from '../../../core/filetype/hdf5.ts'
 import * as parquetModule from '../../../core/filetype/parquet.ts'
 import type { PathSpec } from '../../../types.ts'
 
-export interface LsMeta {
+interface LsMeta {
   size: number
   modified: string | null
   name: string

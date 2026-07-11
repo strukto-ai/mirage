@@ -74,7 +74,7 @@ export type DispatchFn = (
 
 export type CrossResult = [ByteSource | null, IOResult]
 
-export interface RunSingleOpts {
+interface RunSingleOpts {
   stdin?: ByteSource | null
   resolveHint?: PathSpec | null
 }

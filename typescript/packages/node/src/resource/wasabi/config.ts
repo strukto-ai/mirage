@@ -33,7 +33,7 @@ export interface WasabiConfigRedacted {
   timeoutMs?: number
 }
 
-export const WasabiConfigSchema = z.object({
+const WasabiConfigSchema = z.object({
   bucket: z.string(),
   accessKeyId: secretStr(),
   secretAccessKey: secretStr(),

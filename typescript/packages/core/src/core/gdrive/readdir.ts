@@ -44,7 +44,7 @@ function resourceTypeFor(mime: string): string {
   return 'gdrive/file'
 }
 
-export function uniqueSharedDriveName(name: string, existingNames: Set<string>): string {
+function uniqueSharedDriveName(name: string, existingNames: Set<string>): string {
   if (!existingNames.has(name)) return name
   let filename = `${name} [Shared Drive]`
   let suffix = 2

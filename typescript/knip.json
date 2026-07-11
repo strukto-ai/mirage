@@ -1,11 +1,11 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
+  "ignoreBinaries": ["diskutil", "fusermount"],
   "workspaces": {
     ".": {
       "entry": ["scripts/*.ts"]
     },
     "packages/node": {
-      "ignoreBinaries": ["diskutil", "fusermount"],
       "ignoreDependencies": [
         "@napi-rs/lzma",
         "compressjs",

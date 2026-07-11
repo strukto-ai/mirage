@@ -15,7 +15,7 @@
 import type { EventDict } from '../../observe/observer.ts'
 import type { RAMResourceState } from '../../resource/ram/ram.ts'
 
-export interface ResourceStateBase {
+interface ResourceStateBase {
   type: string
   config?: unknown
 }
@@ -40,13 +40,13 @@ export interface CacheEntrySnapshot {
   size: number
 }
 
-export interface CacheSnapshot {
+interface CacheSnapshot {
   limit: number
   max_drain_bytes: number | null
   entries: CacheEntrySnapshot[]
 }
 
-export interface ExecutionNodeSnapshot {
+interface ExecutionNodeSnapshot {
   command: string | null
   op: string | null
   stderr: Uint8Array

@@ -17,15 +17,13 @@ import type { SlackAccessor } from '../../accessor/slack.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
-import { listChannels, listDms, type SlackChannel } from './channels.ts'
+import { listChannels, listDms } from './channels.ts'
 import { channelDirname, dmDirname, fileBlobName, userFilename } from './formatters.ts'
 import { fetchMessagesForDay, type SlackMessage } from './history.ts'
 import { detectScope } from './scope.ts'
 import { listUsers } from './users.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
-
-export const VIRTUAL_ROOTS = ['channels', 'dms', 'users'] as const
 
 const SOFT_HISTORY_ERRORS = [
   'not_in_channel',
@@ -432,5 +430,3 @@ export async function readdir(
   }
   return []
 }
-
-export type { SlackChannel }

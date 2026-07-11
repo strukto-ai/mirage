@@ -21,14 +21,6 @@ import { GENERAL_PYTHON, GENERAL_PYTHON3 } from './python.ts'
 import { GENERAL_SEQ } from './seq.ts'
 import { GENERAL_WGET } from './wget.ts'
 
-export { GENERAL_BC } from './bc.ts'
-export { GENERAL_CURL } from './curl.ts'
-export { GENERAL_DATE } from './date.ts'
-export { GENERAL_EXPR } from './expr.ts'
-export { GENERAL_PYTHON, GENERAL_PYTHON3 } from './python.ts'
-export { GENERAL_SEQ } from './seq.ts'
-export { GENERAL_WGET } from './wget.ts'
-
 export const GENERAL_COMMANDS: readonly RegisteredCommand[] = [
   ...GENERAL_BC,
   ...GENERAL_CURL,

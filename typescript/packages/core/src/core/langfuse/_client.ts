@@ -192,14 +192,6 @@ export async function fetchSessions(
   return getData(body)
 }
 
-export async function fetchSession(
-  transport: LangfuseTransport,
-  sessionId: string,
-): Promise<Record<string, unknown>> {
-  const body = await transport.request(`/api/public/sessions/${encodeURIComponent(sessionId)}`)
-  return asObject(body)
-}
-
 export async function fetchPrompts(
   transport: LangfuseTransport,
 ): Promise<Record<string, unknown>[]> {
@@ -223,14 +215,6 @@ export async function fetchDatasets(
 ): Promise<Record<string, unknown>[]> {
   const body = await transport.request('/api/public/v2/datasets')
   return getData(body)
-}
-
-export async function fetchDataset(
-  transport: LangfuseTransport,
-  name: string,
-): Promise<Record<string, unknown>> {
-  const body = await transport.request(`/api/public/v2/datasets/${encodeURIComponent(name)}`)
-  return asObject(body)
 }
 
 export async function fetchDatasetItems(
