@@ -89,3 +89,10 @@ export function formatLsLong(stats: readonly FileStat[], opts: LsLongOptions = {
     return `${mode} 1 ${owner} ${group} ${size} ${time} ${s.name}`
   })
 }
+
+const NUMERIC_PREFIX = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?/
+
+export function toNumber(val: string): number {
+  const m = NUMERIC_PREFIX.exec(val.trim())
+  return m === null ? 0 : Number.parseFloat(m[0])
+}

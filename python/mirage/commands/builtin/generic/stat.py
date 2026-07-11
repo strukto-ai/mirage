@@ -1,6 +1,7 @@
 import re
 from collections.abc import Awaitable, Callable
 
+from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import ByteSource, IOResult
@@ -38,7 +39,7 @@ async def stat(
     paths: list[PathSpec],
     *,
     stat_fn: Callable[..., Awaitable[FileStat]],
-    accessor: object = None,
+    accessor: Accessor | None = None,
     c: str | None = None,
     f: str | None = None,
     index: IndexCacheStore | None = None,

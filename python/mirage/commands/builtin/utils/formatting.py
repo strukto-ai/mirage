@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
 from datetime import datetime, timezone
 
 from mirage.types import FileStat, FileType
@@ -96,3 +97,25 @@ def format_ls_long(
         time = _ls_time_string(s.modified)
         out.append(f"{mode} 1 {owner} {group} {size} {time} {s.name}")
     return out
+
+
+NUMERIC_PREFIX = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?")
+
+
+def to_number(val: str) -> float:
+    """Coerce a string to a number with GNU awk semantics.
+
+    Args:
+        val (str): raw token; the leading numeric prefix counts, else 0.
+    """
+    m = NUMERIC_PREFIX.match(val.strip())
+    return float(m.group(0)) if m else 0.0
+
+
+def format_number(val: float) -> str:
+    """Render an awk numeric value, collapsing integral floats.
+
+    Args:
+        val (float): numeric value to render.
+    """
+    return str(int(val)) if val == int(val) else str(val)

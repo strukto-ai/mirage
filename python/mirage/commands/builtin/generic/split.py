@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator, Awaitable, Callable
 
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
@@ -23,7 +24,7 @@ async def split(
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
-    accessor: object = None,
+    accessor: Accessor | None = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     lines_per_file: int = 0,
     byte_limit: int = 0,

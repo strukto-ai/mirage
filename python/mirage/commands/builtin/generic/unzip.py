@@ -2,6 +2,7 @@ import io
 import zipfile
 from collections.abc import Awaitable, Callable
 
+from mirage.accessor.base import Accessor
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
@@ -23,7 +24,7 @@ async def unzip(
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
     mkdir_fn: Callable[..., Awaitable[None]],
-    accessor: object = None,
+    accessor: Accessor | None = None,
     o: bool = False,
     args_l: bool = False,
     d: str | PathSpec | None = None,

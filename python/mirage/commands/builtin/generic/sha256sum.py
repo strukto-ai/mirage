@@ -1,6 +1,7 @@
 import hashlib
 from collections.abc import AsyncIterator, Awaitable, Callable
 
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.types import ByteSource, IOResult
@@ -17,7 +18,7 @@ async def _sha256_stream(source: AsyncIterator[bytes],
 
 
 async def _sha256_multi(
-    accessor: object,
+    accessor: Accessor,
     paths: list[PathSpec],
     read_stream: Callable[..., AsyncIterator[bytes]],
 ) -> AsyncIterator[bytes]:
@@ -37,7 +38,7 @@ def _resolve_check_target(filename: str, mount_prefix: str) -> str | PathSpec:
 
 
 async def _sha256_check(
-    accessor: object,
+    accessor: Accessor,
     path: PathSpec,
     read_bytes: Callable[..., Awaitable[bytes]],
     read_stream: Callable[..., AsyncIterator[bytes]],
@@ -71,7 +72,7 @@ async def sha256sum(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     read_stream: Callable[..., AsyncIterator[bytes]],
-    accessor: object = None,
+    accessor: Accessor | None = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     check: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:

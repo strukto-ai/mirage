@@ -5,6 +5,7 @@ from collections.abc import (AsyncIterator, Awaitable, Callable, Mapping,
 from dataclasses import dataclass
 from functools import partial
 
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.grep_helper import (build_pattern_str,
                                                  resolve_pattern)
 from mirage.commands.builtin.utils.lines import split_lines
@@ -17,7 +18,7 @@ from mirage.types import PathSpec
 
 async def _read_plain(
     read_bytes: Callable[..., Awaitable[bytes]],
-    accessor: object,
+    accessor: Accessor,
     path: PathSpec,
     index: object = None,
 ) -> bytes:
@@ -133,7 +134,7 @@ async def zgrep(
     flags: Mapping[str, object] | None = None,
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
-    accessor: object = None,
+    accessor: Accessor | None = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     index: object = None,
 ) -> tuple[ByteSource | None, IOResult]:

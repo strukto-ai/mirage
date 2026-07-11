@@ -1,5 +1,6 @@
 from collections.abc import Awaitable, Callable
 
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -55,7 +56,7 @@ async def comm(
     paths: list[PathSpec],
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
-    accessor: object = None,
+    accessor: Accessor | None = None,
     suppress1: bool = False,
     suppress2: bool = False,
     suppress3: bool = False,
