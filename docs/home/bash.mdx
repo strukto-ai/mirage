@@ -96,7 +96,7 @@ Both bindings support cooperative cancellation observed at recursion boundaries 
     JOB_ID=$(mirage execute -w demo -c "sleep 60" --bg)
     mirage job cancel "$JOB_ID"
     ```
-    Per-call timeout is not a CLI flag yet. Use `--bg` to get a job id and `mirage job cancel` to terminate.
+    Per-call timeout is not a CLI flag yet. Use `--bg` to get a job id and `mirage job cancel` to terminate, or wrap the command in the `timeout` builtin: `mirage execute -w demo -c "timeout 30 <cmd>"` exits `124` on overrun.
   </Tab>
 </Tabs>
 
@@ -120,6 +120,7 @@ Mirage Bash is a tree-sitter-bash parser plus a custom executor. It implements t
 - **Control flow:** `if`/`elif`/`else`/`fi`, `for`, `while`, `until`, `case`, `select`, `function name() {}`, `break`, `continue`, `return`.
 - **Grouping:** subshells `(cmd)`, compound `{ cmd; }`, negation `! cmd`.
 - **Builtins:** `cd`, `pwd`, `echo`, `printf`, `printenv`, `read`, `source`, `.`, `eval`, `export`, `unset`, `local`, `set`, `shift`, `trap` (no-op), `test`, `[`, `[[`, `true`, `false`, `sleep`, `xargs`, `timeout`, `bash`, `sh`, `python`, `python3`.
+- **Builtin options (GNU semantics):** `echo -n/-e/-E` (leading-word option rule: `echo hi -n` prints `hi -n`), `read -r`, `xargs -n/-0/-d/-r/--` (batching, GNU exit codes: `123` when an invocation fails, `126`/`127` stop the run), `timeout DURATION` with `s`/`m`/`h`/`d` suffixes (kills at the deadline with exit `124`, usage errors exit `125`). `shift` and `return` report bash's `numeric argument required` errors.
 - **Globs:** `*`, `?`, `[...]` classes and `[!...]` negation (Python `fnmatch` semantics in both implementations), resolved by the shell or pushed down to the resource.
 - **Comments:** `#`.
 
@@ -128,8 +129,9 @@ Mirage Bash is a tree-sitter-bash parser plus a custom executor. It implements t
 - **Job control:** `bg`, `disown`. (`fg`, `jobs`, `wait`, `kill`, `ps` work; use the `--background` flag and `mirage job` CLI for long-running work.)
 - **Shell internals:** `exec`, `complete`, `compgen`, `ulimit`.
 - **Output process substitution:** `>(cmd)` (the `<(cmd)` direction works).
+- **Builtin options with no process backing:** `xargs -I`/`-P` (exit `1`) and `timeout -s`/`-k`/`--preserve-status` (exit `125`) return an `unsupported option` error: commands run as coroutines inside the workspace, so there is no process to signal or parallelize.
 
-Each returns `exit_code 2` with stderr `mirage: unsupported builtin: <name>` or `mirage: unsupported: process substitution >(...)`.
+Each returns `exit_code 2` with stderr `mirage: unsupported builtin: <name>` or `mirage: unsupported: process substitution >(...)`, except the builtin options above, which use the listed GNU-shaped exit codes.
 
 ### Syntax errors
 
