@@ -407,6 +407,9 @@ async def handle_command(
                     stdout, io, last_exec = await execute_node(
                         cmd, session, stdin, cs)
                 except ReturnSignal as sig:
+                    if sig.stderr:
+                        merged_io = await merged_io.merge(
+                            IOResult(stderr=sig.stderr))
                     merged_io.exit_code = sig.exit_code
                     break
                 if stdout is not None:

@@ -342,15 +342,13 @@ async def _run_argv(
         return await handle_man(args, session, registry)
 
     if name == SB.READ:
-        variables = args if args else ["REPLY"]
-        return await handle_read(variables, session, stdin)
+        return await handle_read(args, session, stdin)
 
     if name == SB.SET:
         return await handle_set(args, session, call_stack=call_stack)
 
     if name == SB.SHIFT:
-        n = int(args[0]) if args else 1
-        return await handle_shift(n, call_stack, session=session)
+        return await handle_shift(args, call_stack, session=session)
 
     if name == SB.TRAP:
         return await handle_trap(session)
@@ -359,10 +357,7 @@ async def _run_argv(
         return await handle_test(dispatch, operands, session)
 
     if name == SB.ECHO:
-        n_flag = "-n" in args
-        e_flag = "-e" in args
-        echo_args = [a for a in args if a not in ("-n", "-e")]
-        return await handle_echo(echo_args, n_flag=n_flag, e_flag=e_flag)
+        return await handle_echo(args)
 
     if name == SB.PRINTF:
         return await handle_printf(args)
@@ -371,8 +366,7 @@ async def _run_argv(
         return await handle_sleep(args, cancel=cancel)
 
     if name == SB.RETURN:
-        exit_code = int(args[0]) if args else 0
-        return await handle_return(exit_code)
+        return await handle_return(args)
 
     if name == SB.XARGS:
         return await handle_xargs(execute_fn, args, session, stdin)

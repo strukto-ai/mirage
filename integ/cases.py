@@ -670,6 +670,27 @@ CASES: list[tuple[str, str]] = [
     ("glob_pushdown_labels", "wc -l s*/x.txt && grep -l hi sub/*.txt"),
     ("glob_ls_operand", "ls sub/*.txt && cd / && rm -r /data/g15"),
 
+    # ----- shell builtins: GNU argument handling -----
+    ("xargs_n1", "echo a b c | xargs -n1 echo"),
+    ("xargs_n2", "echo a b c d e | xargs -n2 echo"),
+    ("xargs_invalid_opt", "echo hi | xargs -q echo 2>&1; echo code=$?"),
+    ("xargs_n0", "echo x | xargs -n0 echo 2>&1; echo code=$?"),
+    ("xargs_delim", "printf 'a,b,c' | xargs -d, echo"),
+    ("xargs_empty_r", "printf '' | xargs -r echo hi; echo code=$?"),
+    ("xargs_empty_default", "printf '' | xargs echo hi"),
+    ("timeout_kill", "timeout 0.2 sleep 5; echo code=$?"),
+    ("timeout_ok", "timeout 5 echo fast"),
+    ("timeout_bad_duration", "timeout xx sleep 1 2>&1; echo code=$?"),
+    ("timeout_unsupported", "timeout -s KILL 1 sleep 1 2>&1; echo code=$?"),
+    ("echo_trailing_dash_n", "echo hi -n"),
+    ("echo_cluster", "echo -ne 'ab\\tcd'; echo"),
+    ("echo_unknown_cluster", "echo -nq hi"),
+    ("shift_non_numeric", "shift x 2>&1; echo code=$?"),
+    ("shift_too_many", "shift 1 2 2>&1; echo code=$?"),
+    ("return_non_numeric", "f() { return x; }; f 2>&1; echo code=$?"),
+    ("read_r_flag", "printf 'hi there\\n' | read -r v; echo code=$?"),
+    ("read_invalid_opt", "read -q v 2>&1; echo code=$?"),
+
     # ----- cp / mv multi-source into a directory (last; these mutate) -----
     ("cp_multi_into_dir", "cp /data/a.txt /data/b.txt /data/sub"),
     ("cp_multi_verify_a", "cat /data/sub/a.txt"),

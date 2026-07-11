@@ -188,10 +188,12 @@ export async function runOnMount(
 
 export class ReturnSignal extends Error {
   readonly exitCode: number
-  constructor(exitCode: number) {
+  readonly stderr: Uint8Array
+  constructor(exitCode: number, stderr: Uint8Array = new Uint8Array()) {
     super('return')
     this.name = 'ReturnSignal'
     this.exitCode = exitCode
+    this.stderr = stderr
   }
 }
 
@@ -739,6 +741,9 @@ async function executeShellFunction(
         }
       } catch (err) {
         if (err instanceof ReturnSignal) {
+          if (err.stderr.length > 0) {
+            mergedIo = await mergedIo.merge(new IOResult({ stderr: err.stderr }))
+          }
           mergedIo.exitCode = err.exitCode
           break
         }

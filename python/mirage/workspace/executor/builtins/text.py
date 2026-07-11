@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
+
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.workspace.types import ExecutionNode
@@ -30,6 +32,8 @@ _SIMPLE_ESCAPES = {
 _HEX = set("0123456789abcdefABCDEF")
 
 _OCT = set("01234567")
+
+_ECHO_OPTION = re.compile(r"-[neE]+")
 
 
 def _interpret_escapes(text: str) -> str:
@@ -85,14 +89,36 @@ def _interpret_escapes(text: str) -> str:
 
 
 async def handle_echo(
-    args: list[str],
-    n_flag: bool = False,
-    e_flag: bool = False,
+        args: list[str],  # noqa: E125
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    text = " ".join(args)
-    if e_flag:
+    """Print arguments, honoring GNU echo's option rules.
+
+    GNU echo is not getopt: options are LEADING words matching
+    ``-[neE]+`` only. The first word that does not match (including
+    ``-x`` or a repeated ``hi -n``) ends option parsing and prints
+    literally. Within clusters the last of -e/-E wins; -n sticks.
+
+    Args:
+        args (list[str]): words after the command name, as typed.
+    """
+    no_newline = False
+    escapes = False
+    idx = 0
+    for word in args:
+        if not _ECHO_OPTION.fullmatch(word):
+            break
+        for ch in word[1:]:
+            if ch == "n":
+                no_newline = True
+            elif ch == "e":
+                escapes = True
+            else:
+                escapes = False
+        idx += 1
+    text = " ".join(args[idx:])
+    if escapes:
         text = _interpret_escapes(text)
-    if not n_flag:
+    if not no_newline:
         text += "\n"
     out = text.encode()
     return out, IOResult(), ExecutionNode(command="echo", exit_code=0)
