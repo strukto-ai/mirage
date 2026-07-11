@@ -37,7 +37,7 @@ export interface SupabaseConfigRedacted {
   timeoutMs?: number
 }
 
-export const SupabaseConfigSchema = z.object({
+const SupabaseConfigSchema = z.object({
   bucket: z.string(),
   region: z.string(),
   projectRef: z.string().optional(),

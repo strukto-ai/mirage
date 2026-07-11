@@ -25,7 +25,7 @@ load_dotenv(".env.development")
 config = GitHubCIConfig(
     token=os.environ["GITHUB_TOKEN"],
     owner="strukto-ai",
-    repo="mirage-internal",
+    repo="mirage",
     max_runs=300,
 )
 resource = GitHubCIResource(config=config)

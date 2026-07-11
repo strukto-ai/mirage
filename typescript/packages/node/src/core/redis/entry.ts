@@ -14,12 +14,12 @@
 
 import { IndexEntry } from '@struktoai/mirage-core'
 
-export const RedisResourceType = Object.freeze({
+const RedisResourceType = Object.freeze({
   FILE: 'file',
   FOLDER: 'folder',
 } as const)
 
-export type RedisResourceType = (typeof RedisResourceType)[keyof typeof RedisResourceType]
+type RedisResourceType = (typeof RedisResourceType)[keyof typeof RedisResourceType]
 
 export class RedisIndexEntry extends IndexEntry {
   // size defaults to null, not 0: a readdir knows a key exists but not

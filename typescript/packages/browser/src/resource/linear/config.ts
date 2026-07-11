@@ -28,7 +28,7 @@ export interface LinearConfigRedacted {
   baseUrl?: string
 }
 
-export const LinearConfigSchema = z.object({
+const LinearConfigSchema = z.object({
   apiKey: secretStr(),
   workspace: z.string().optional(),
   teamIds: z.array(z.string()).optional(),

@@ -12,16 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export {
-  IndexEntry,
-  IndexType,
-  LookupStatus,
-  ResourceType,
-  type IndexConfig,
-  type ListResult,
-  type LookupResult,
-  type RedisIndexConfig,
-} from './config.ts'
-export { RAMIndexCacheStore } from './ram.ts'
-export { RedisIndexCacheStore, type RedisClientLike, type RedisIndexCacheOptions } from './redis.ts'
+export { IndexEntry } from './config.ts'
+
 export { IndexCacheStore } from './store.ts'

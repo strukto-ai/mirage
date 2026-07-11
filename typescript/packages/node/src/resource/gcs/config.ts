@@ -36,7 +36,7 @@ export interface GCSConfigRedacted {
   timeoutMs?: number
 }
 
-export const GCSConfigSchema = z.object({
+const GCSConfigSchema = z.object({
   bucket: z.string(),
   accessKeyId: secretStr(),
   secretAccessKey: secretStr(),

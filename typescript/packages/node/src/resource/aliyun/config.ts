@@ -33,7 +33,7 @@ export interface AliyunConfigRedacted {
   timeoutMs?: number
 }
 
-export const AliyunConfigSchema = z.object({
+const AliyunConfigSchema = z.object({
   bucket: z.string(),
   accessKeyId: secretStr(),
   secretAccessKey: secretStr(),

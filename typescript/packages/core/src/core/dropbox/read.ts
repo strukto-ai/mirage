@@ -101,5 +101,3 @@ export async function* stream(
     yield chunk
   }
 }
-
-export { dropboxPathFromVirtual }

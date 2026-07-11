@@ -33,7 +33,7 @@ export interface BackblazeConfigRedacted {
   timeoutMs?: number
 }
 
-export const BackblazeConfigSchema = z.object({
+const BackblazeConfigSchema = z.object({
   bucket: z.string(),
   accessKeyId: secretStr(),
   secretAccessKey: secretStr(),

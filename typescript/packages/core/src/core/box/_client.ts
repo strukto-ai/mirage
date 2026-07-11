@@ -14,7 +14,7 @@
 
 export const BOX_TOKEN_URL = 'https://api.box.com/oauth2/token'
 export const BOX_API_BASE = 'https://api.box.com/2.0'
-export const TOKEN_BUFFER_SECONDS = 300
+const TOKEN_BUFFER_SECONDS = 300
 
 export interface BoxConfig {
   clientId?: string
@@ -84,7 +84,7 @@ export async function refreshAccessToken(
   }
 }
 
-export async function fetchCcgToken(
+async function fetchCcgToken(
   config: BoxConfig,
 ): Promise<{ accessToken: string; expiresIn: number }> {
   if (config.clientId === undefined || config.clientId === '') {

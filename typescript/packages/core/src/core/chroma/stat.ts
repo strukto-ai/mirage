@@ -19,14 +19,6 @@ import { resolvePath } from './path.ts'
 import { enoent } from '../../utils/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
-export function statLight(
-  accessor: ChromaAccessor,
-  path: PathSpec | string,
-  index?: IndexCacheStore,
-): Promise<FileStat> {
-  return stat(accessor, path, index)
-}
-
 export async function stat(
   accessor: ChromaAccessor,
   path: PathSpec | string,
@@ -52,7 +44,7 @@ export async function stat(
   })
 }
 
-export function statName(virtualKey: string, mountPrefix: string): string {
+function statName(virtualKey: string, mountPrefix: string): string {
   const root = rstripSlash(mountPrefix) !== '' ? rstripSlash(mountPrefix) : '/'
   if (virtualKey === root) return '/'
   const stripped = rstripSlash(virtualKey)

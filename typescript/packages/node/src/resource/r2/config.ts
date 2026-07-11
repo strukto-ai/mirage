@@ -37,7 +37,7 @@ export interface R2ConfigRedacted {
   timeoutMs?: number
 }
 
-export const R2ConfigSchema = z.object({
+const R2ConfigSchema = z.object({
   bucket: z.string(),
   accessKeyId: secretStr(),
   secretAccessKey: secretStr(),
@@ -48,7 +48,7 @@ export const R2ConfigSchema = z.object({
   timeoutMs: z.number().optional(),
 })
 
-export function resolvedR2Endpoint(config: R2Config): string {
+function resolvedR2Endpoint(config: R2Config): string {
   if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint
   if (config.accountId !== undefined && config.accountId !== '') {
     return `https://${config.accountId}.r2.cloudflarestorage.com`

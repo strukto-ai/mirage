@@ -27,7 +27,7 @@ export interface GDriveConfigRedacted {
   refreshToken: '<REDACTED>'
 }
 
-export const GDriveConfigSchema = z.object({
+const GDriveConfigSchema = z.object({
   clientId: z.string(),
   clientSecret: secretStr(),
   refreshToken: secretStr(),

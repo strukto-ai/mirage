@@ -486,7 +486,7 @@ export function makeSearchProvision<A extends Accessor>(
   }
 }
 
-export const FILE_READ_COMMANDS: ReadonlySet<string> = new Set([
+const FILE_READ_COMMANDS: ReadonlySet<string> = new Set([
   'awk',
   'base64',
   'cat',
@@ -520,9 +520,9 @@ export const FILE_READ_COMMANDS: ReadonlySet<string> = new Set([
 ])
 // file reads a bounded prefix (magic bytes), so it shares head/tail's
 // 0..size range estimate.
-export const HEAD_TAIL_COMMANDS: ReadonlySet<string> = new Set(['file', 'head', 'tail'])
-export const SEARCH_COMMANDS: ReadonlySet<string> = new Set(['grep', 'rg', 'zgrep'])
-export const METADATA_COMMANDS: ReadonlySet<string> = new Set([
+const HEAD_TAIL_COMMANDS: ReadonlySet<string> = new Set(['file', 'head', 'tail'])
+const SEARCH_COMMANDS: ReadonlySet<string> = new Set(['grep', 'rg', 'zgrep'])
+const METADATA_COMMANDS: ReadonlySet<string> = new Set([
   'basename',
   'dirname',
   'du',
@@ -533,7 +533,7 @@ export const METADATA_COMMANDS: ReadonlySet<string> = new Set([
   'stat',
   'tree',
 ])
-export const TRANSFORM_COMMANDS: ReadonlySet<string> = new Set([
+const TRANSFORM_COMMANDS: ReadonlySet<string> = new Set([
   'csplit',
   'gunzip',
   'gzip',
@@ -543,7 +543,7 @@ export const TRANSFORM_COMMANDS: ReadonlySet<string> = new Set([
   'unzip',
   'zip',
 ])
-export const WRITE_METADATA_COMMANDS: ReadonlySet<string> = new Set([
+const WRITE_METADATA_COMMANDS: ReadonlySet<string> = new Set([
   'ln',
   'mkdir',
   'mktemp',

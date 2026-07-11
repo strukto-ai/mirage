@@ -40,7 +40,7 @@ export interface SSHConfigRedacted {
   knownHosts?: string
 }
 
-export const SSHConfigSchema = z.object({
+const SSHConfigSchema = z.object({
   host: z.string(),
   hostname: z.string().optional(),
   port: z.number().optional(),

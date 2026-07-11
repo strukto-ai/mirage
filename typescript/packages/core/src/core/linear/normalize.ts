@@ -47,7 +47,7 @@ function nodesOf(value: unknown): Json[] {
   return Array.isArray(nodes) ? (nodes as Json[]) : []
 }
 
-export interface NormalizedTeamState {
+interface NormalizedTeamState {
   state_id: string | null
   state_name: string | null
   type: string | null

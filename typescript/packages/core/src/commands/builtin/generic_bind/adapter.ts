@@ -26,13 +26,13 @@ export type ReaddirOp<A extends Accessor = Accessor> = (
   index?: IndexCacheStore,
 ) => Promise<string[]>
 
-export type ReadBytesOp<A extends Accessor = Accessor> = (
+type ReadBytesOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   index?: IndexCacheStore,
 ) => Promise<Uint8Array>
 
-export type ReadStreamOp<A extends Accessor = Accessor> = (
+type ReadStreamOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   index?: IndexCacheStore,
@@ -44,50 +44,47 @@ export type StatOp<A extends Accessor = Accessor> = (
   index?: IndexCacheStore,
 ) => Promise<FileStat>
 
-export type WriteOp<A extends Accessor = Accessor> = (
+type WriteOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   data: Uint8Array,
 ) => Promise<void>
 
-export type ExistsOp<A extends Accessor = Accessor> = (
-  accessor: A,
-  path: PathSpec,
-) => Promise<boolean>
+type ExistsOp<A extends Accessor = Accessor> = (accessor: A, path: PathSpec) => Promise<boolean>
 
-export type PathOp<A extends Accessor = Accessor> = (accessor: A, path: PathSpec) => Promise<void>
+type PathOp<A extends Accessor = Accessor> = (accessor: A, path: PathSpec) => Promise<void>
 
-export type MkdirOp<A extends Accessor = Accessor> = (
+type MkdirOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   parents?: boolean,
 ) => Promise<void>
 
-export type RenameOp<A extends Accessor = Accessor> = (
+type RenameOp<A extends Accessor = Accessor> = (
   accessor: A,
   src: PathSpec,
   dst: PathSpec,
 ) => Promise<void>
 
-export type CopyOp<A extends Accessor = Accessor> = (
+type CopyOp<A extends Accessor = Accessor> = (
   accessor: A,
   src: PathSpec,
   dst: PathSpec,
 ) => Promise<void>
 
-export type FindOp<A extends Accessor = Accessor> = (
+type FindOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   options: FindOptions,
 ) => Promise<string[]>
 
-export type DuTotalOp<A extends Accessor = Accessor> = (
+type DuTotalOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   index?: IndexCacheStore,
 ) => Promise<number>
 
-export type DuAllOp<A extends Accessor = Accessor> = (
+type DuAllOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   index?: IndexCacheStore,
@@ -150,16 +147,4 @@ export interface Builder<A extends Accessor = Accessor> {
   write?: boolean
   aggregate?: AggregateFn
   read?: boolean
-}
-
-export async function resolveOrEmpty<A extends Accessor = Accessor>(
-  ops: CommandIO<A>,
-  accessor: A,
-  paths: PathSpec[],
-  index?: IndexCacheStore,
-): Promise<PathSpec[]> {
-  if (paths.length > 0 && ops.isMounted(accessor)) {
-    return resolveGlobOf(ops)(accessor, paths, index)
-  }
-  return []
 }

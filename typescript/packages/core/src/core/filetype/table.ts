@@ -66,7 +66,7 @@ export function renderTable(
   return lines
 }
 
-export function formatCell(v: unknown): string {
+function formatCell(v: unknown): string {
   if (v === null || v === undefined) return ''
   if (typeof v === 'bigint') return String(v)
   if (typeof v === 'number') return String(v)

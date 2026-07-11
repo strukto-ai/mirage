@@ -14,7 +14,7 @@
 
 const SIMPLE_CMDS = new Set(['d', 'D', 'p', 'P', 'h', 'H', 'g', 'G', 'x', 'N', 'q'])
 
-export type SedAddr = ['line', string] | ['last', ''] | ['regex', string]
+type SedAddr = ['line', string] | ['last', ''] | ['regex', string]
 
 export interface SedCommand {
   cmd: string

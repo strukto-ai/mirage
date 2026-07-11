@@ -38,12 +38,3 @@ export function detectScope(path: PathSpec): EmailScope {
   }
   return { useNative: false, folder: parts[0] ?? null, resourcePath: key }
 }
-
-export function extractFolder(paths: readonly PathSpec[]): string | null {
-  if (paths.length === 0) return null
-  const p = paths[0]
-  if (p === undefined) return null
-  const key = stripSlash(p.mountPath)
-  const parts = key.split('/').filter((s) => s !== '')
-  return parts[0] ?? null
-}

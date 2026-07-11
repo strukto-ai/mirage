@@ -18,4 +18,3 @@ import { readdirOp } from './readdir.ts'
 import { statOp } from './stat.ts'
 
 export const EMAIL_OPS: readonly RegisteredOp[] = [readdirOp, readOp, statOp] as const
-export { readOp, readdirOp, statOp }

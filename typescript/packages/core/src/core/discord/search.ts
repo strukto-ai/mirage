@@ -29,7 +29,7 @@ function flattenContexts(contexts: DiscordSearchMessage[][]): DiscordSearchMessa
   return out
 }
 
-export async function* searchGuildStream(
+async function* searchGuildStream(
   accessor: DiscordAccessor,
   guildId: string,
   query: string,
