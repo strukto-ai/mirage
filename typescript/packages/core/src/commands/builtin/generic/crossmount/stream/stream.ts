@@ -13,12 +13,26 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { asyncChain } from '../../../../../io/stream.ts'
-import { IOResult, type ByteSource } from '../../../../../io/types.ts'
+import { IOResult, materialize, type ByteSource } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import { Cmd, type CrossResult, type RunSingle } from '../types.ts'
 
+const ENC = new TextEncoder()
+const DEC = new TextDecoder()
+
 function hasActiveFlags(flagKwargs: Record<string, string | boolean | string[]>): boolean {
   return Object.values(flagKwargs).some((v) => v !== false)
+}
+
+// The per-operand fetch is a native cat sub-run, so its error lines carry
+// the "cat:" prefix; respell them to the real command so the cross-mount
+// bytes match single-mount.
+function respellCatStderr(stderr: Uint8Array, cmdName: string): Uint8Array {
+  const lines = DEC.decode(stderr).split('\n')
+  const respelled = lines.map((line) =>
+    line.startsWith('cat: ') ? `${cmdName}: ${line.slice('cat: '.length)}` : line,
+  )
+  return ENC.encode(respelled.join('\n'))
 }
 
 // Run a stream command (`cmd files...` == `cat files... | cmd`). Each
@@ -41,11 +55,15 @@ export async function runStream(
   let failed = false
   for (const scope of scopes) {
     const [out, io] = await runSingle(Cmd.CAT, [scope], [], {})
-    mergedIo = await mergedIo.merge(io)
     if (io.exitCode !== 0) {
       failed = true
+      if (cmdName !== Cmd.CAT && io.stderr !== null) {
+        io.stderr = respellCatStderr(await materialize(io.stderr), cmdName)
+      }
+      mergedIo = await mergedIo.merge(io)
       continue
     }
+    mergedIo = await mergedIo.merge(io)
     if (out !== null) sources.push(out)
   }
   const body: ByteSource = asyncChain(...sources)

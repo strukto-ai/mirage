@@ -151,6 +151,22 @@ async def check_partial_read(ws: Workspace, dst: str, label: str) -> None:
     check(
         f"{label}: tail keeps banner", out == f"==> {src} <==\naaa\n"
         and code == 1 and err == f"tail: {miss}: No such file or directory\n")
+    # nl rides the STREAM strategy cross-mount: the error line must carry
+    # nl's own name, not the cat sub-run that fetched the operand.
+    out, err, code = await run(ws, f"nl {src} {miss}")
+    check(
+        f"{label}: nl keeps output, own name", out == "     1\taaa\n"
+        and code == 1 and err == f"nl: {miss}: No such file or directory\n")
+    out, err, code = await run(ws, f"md5 {src} {miss}")
+    check(
+        f"{label}: md5 keeps good hash",
+        out == f"5c9597f3c8245907ea71a89d9d39d08e  {src}\n" and code == 1
+        and err == f"md5: {miss}: No such file or directory\n")
+    # stat fans out per operand; mtimes vary, so pin shape and exit only.
+    out, err, code = await run(ws, f"stat {src} {miss}")
+    check(
+        f"{label}: stat keeps good row", "name=a.txt" in out and code == 1
+        and err == f"stat: {miss}: No such file or directory\n")
 
 
 async def check_compare(ws: Workspace, dst: str, label: str) -> None:

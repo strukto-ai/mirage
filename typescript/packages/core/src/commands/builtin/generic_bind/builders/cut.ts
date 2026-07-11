@@ -14,6 +14,7 @@
 
 import { cutGeneric } from '../../generic/cut.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { withReadable } from '../../utils/operands.ts'
 
 export const CUT_BUILDER: Builder = {
   name: 'cut',
@@ -21,6 +22,11 @@ export const CUT_BUILDER: Builder = {
   fn: async (ops, accessor, paths, _texts, opts) => {
     const idx = opts.index ?? undefined
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return cutGeneric(resolved, opts, (p) => ops.readStream(accessor, p, idx))
+    return withReadable(
+      resolved,
+      (p) => ops.stat(accessor, p, idx),
+      'cut',
+      (readable) => cutGeneric(readable, opts, (p) => ops.readStream(accessor, p, idx)),
+    )
   },
 }

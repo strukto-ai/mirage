@@ -25,22 +25,7 @@ async function collectLines(source: AsyncIterable<Uint8Array>): Promise<Uint8Arr
   return lines
 }
 
-export async function tacGeneric(
-  paths: PathSpec[],
-  opts: CommandOpts,
-  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-): Promise<CommandFnResult> {
-  const cache: string[] = []
-  let source: AsyncIterable<Uint8Array>
-  if (paths.length > 0) {
-    const first = paths[0]
-    if (first === undefined) return [null, new IOResult()]
-    source = stream(first)
-    cache.push(first.virtual)
-  } else {
-    source = resolveSource(opts.stdin)
-  }
-  const lines = await collectLines(source)
+function reverseJoin(lines: Uint8Array[]): Uint8Array {
   lines.reverse()
   let total = 0
   for (const l of lines) total += l.byteLength + 1
@@ -52,6 +37,36 @@ export async function tacGeneric(
     out[offset] = 0x0a
     offset += 1
   }
-  const result: ByteSource = out
-  return [result, new IOResult({ cache })]
+  return out
+}
+
+export async function tacGeneric(
+  paths: PathSpec[],
+  opts: CommandOpts,
+  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
+): Promise<CommandFnResult> {
+  // Each operand is reversed independently and the outputs concatenate in
+  // operand order, like GNU tac.
+  if (paths.length > 0) {
+    const cache: string[] = []
+    const parts: Uint8Array[] = []
+    let total = 0
+    for (const p of paths) {
+      const part = reverseJoin(await collectLines(stream(p)))
+      parts.push(part)
+      total += part.byteLength
+      cache.push(p.virtual)
+    }
+    const out = new Uint8Array(total)
+    let offset = 0
+    for (const part of parts) {
+      out.set(part, offset)
+      offset += part.byteLength
+    }
+    const result: ByteSource = out
+    return [result, new IOResult({ cache })]
+  }
+  const lines = await collectLines(resolveSource(opts.stdin))
+  const result: ByteSource = reverseJoin(lines)
+  return [result, new IOResult()]
 }

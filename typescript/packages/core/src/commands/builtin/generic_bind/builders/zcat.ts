@@ -14,6 +14,7 @@
 
 import { zcatGeneric } from '../../generic/zcat.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { withReadable } from '../../utils/operands.ts'
 
 export const ZCAT_BUILDER: Builder = {
   name: 'zcat',
@@ -21,6 +22,11 @@ export const ZCAT_BUILDER: Builder = {
   fn: async (ops, accessor, paths, _texts, opts) => {
     const idx = opts.index ?? undefined
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return zcatGeneric(resolved, opts, (p) => ops.readStream(accessor, p, idx))
+    return withReadable(
+      resolved,
+      (p) => ops.stat(accessor, p, idx),
+      'zcat',
+      (readable) => zcatGeneric(readable, opts, (p) => ops.readStream(accessor, p, idx)),
+    )
   },
 }

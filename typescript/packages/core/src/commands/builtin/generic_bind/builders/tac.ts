@@ -14,6 +14,7 @@
 
 import { tacGeneric } from '../../generic/tac.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { withReadable } from '../../utils/operands.ts'
 
 export const TAC_BUILDER: Builder = {
   name: 'tac',
@@ -21,6 +22,11 @@ export const TAC_BUILDER: Builder = {
   fn: async (ops, accessor, paths, _texts, opts) => {
     const idx = opts.index ?? undefined
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return tacGeneric(resolved, opts, (p) => ops.readStream(accessor, p, idx))
+    return withReadable(
+      resolved,
+      (p) => ops.stat(accessor, p, idx),
+      'tac',
+      (readable) => tacGeneric(readable, opts, (p) => ops.readStream(accessor, p, idx)),
+    )
   },
 }

@@ -228,6 +228,30 @@ async function checkPartialRead(
       code === 1 &&
       err === `tail: ${miss}: No such file or directory\n`,
   );
+  // nl rides the STREAM strategy cross-mount: the error line must carry
+  // nl's own name, not the cat sub-run that fetched the operand.
+  [out, err, code] = await run(ws, `nl ${src} ${miss}`);
+  check(
+    `${label}: nl keeps output, own name`,
+    out === "     1\taaa\n" &&
+      code === 1 &&
+      err === `nl: ${miss}: No such file or directory\n`,
+  );
+  [out, err, code] = await run(ws, `md5 ${src} ${miss}`);
+  check(
+    `${label}: md5 keeps good hash`,
+    out === `5c9597f3c8245907ea71a89d9d39d08e  ${src}\n` &&
+      code === 1 &&
+      err === `md5: ${miss}: No such file or directory\n`,
+  );
+  // stat fans out per operand; mtimes vary, so pin shape and exit only.
+  [out, err, code] = await run(ws, `stat ${src} ${miss}`);
+  check(
+    `${label}: stat keeps good row`,
+    out.includes("name=a.txt") &&
+      code === 1 &&
+      err === `stat: ${miss}: No such file or directory\n`,
+  );
 }
 
 // diff/cmp two files that live on different mounts: identical operands exit 0

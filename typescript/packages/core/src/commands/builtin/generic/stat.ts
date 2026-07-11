@@ -14,6 +14,7 @@
 
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
+import { fsErrorLine, isFsError } from '../../../utils/errors.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { formatRecords } from '../utils/output.ts'
 
@@ -52,8 +53,17 @@ export async function statGeneric(
         ? opts.flags.f
         : null
   const lines: string[] = []
+  let err = ''
   for (const p of paths) {
-    const s = await stat(p)
+    let s: FileStat
+    try {
+      s = await stat(p)
+    } catch (e) {
+      // GNU stat keeps reporting the remaining operands, exit 1.
+      if (!isFsError(e)) throw e
+      err += fsErrorLine('stat', p, e)
+      continue
+    }
     if (fmt !== null) {
       lines.push(formatStat(fmt, s, p.rawPath))
     } else {
@@ -63,6 +73,11 @@ export async function statGeneric(
       lines.push(`name=${s.name} size=${sizeStr} modified=${modStr} type=${typeStr}`)
     }
   }
+  const io = new IOResult({
+    exitCode: err === '' ? 0 : 1,
+    stderr: err === '' ? null : ENC.encode(err),
+  })
+  if (lines.length === 0) return [null, io]
   const out: ByteSource = formatRecords(lines)
-  return [out, new IOResult()]
+  return [out, io]
 }

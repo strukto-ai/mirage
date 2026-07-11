@@ -117,6 +117,32 @@ describe('single-mount partial output on missing operands', () => {
 })
 
 describe('cross-mount partial output matches single-mount bytes', () => {
+  it('nl reports its own name through the stream strategy', async () => {
+    const ws = await makeWs()
+    try {
+      await ws.execute("printf '1\\n2\\n' > /a/n.txt")
+      const result = await ws.execute('nl /a/n.txt /b/missing.txt')
+      expect(result.stdoutText).toBe('     1\t1\n     2\t2\n')
+      expect(result.stderrText).toBe('nl: /b/missing.txt: No such file or directory\n')
+      expect(result.exitCode).toBe(1)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('md5 keeps partial output across mounts', async () => {
+    const ws = await makeWs()
+    try {
+      await ws.execute("printf '1\\n2\\n' > /a/n.txt")
+      const result = await ws.execute('md5 /a/n.txt /b/missing.txt')
+      expect(result.stdoutText).toBe('6ddb4095eb719e2a9f0a3f95677d24e0  /a/n.txt\n')
+      expect(result.stderrText).toBe('md5: /b/missing.txt: No such file or directory\n')
+      expect(result.exitCode).toBe(1)
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('cat good then missing keeps partial output', async () => {
     const [out, err, code] = await run('cat /a/f.txt /b/missing.txt')
     expect(out).toBe('aaa\n')
@@ -142,6 +168,138 @@ describe('cross-mount partial output matches single-mount bytes', () => {
     const [out, err, code] = await run('tail -n 1 /a/f.txt /b/missing.txt')
     expect(out).toBe('==> /a/f.txt <==\naaa\n')
     expect(err).toBe('tail: /b/missing.txt: No such file or directory\n')
+    expect(code).toBe(1)
+  })
+})
+
+async function makeNumberedWs(): Promise<Workspace> {
+  const parser = await getTestParser()
+  const ops = new OpsRegistry()
+  const a = new RAMResource()
+  ops.registerResource(a)
+  const ws = new Workspace({ '/a': a }, { mode: MountMode.WRITE, ops, shellParser: parser })
+  await ws.execute("printf '1\\n2\\n' > /a/f.txt && printf '3\\n4\\n' > /a/g.txt")
+  await ws.execute("printf 'hello\\n' > /a/h.txt")
+  return ws
+}
+
+async function runNumbered(cmds: string[]): Promise<[string, string, number]> {
+  const ws = await makeNumberedWs()
+  try {
+    let result = await ws.execute(cmds[0] ?? '')
+    for (const cmd of cmds.slice(1)) result = await ws.execute(cmd)
+    return [result.stdoutText, result.stderrText, result.exitCode]
+  } finally {
+    await ws.close()
+  }
+}
+
+describe('every operand is processed, not just the first', () => {
+  it('cut processes all operands', async () => {
+    const [out, err, code] = await runNumbered(['cut -c1 /a/f.txt /a/g.txt'])
+    expect(out).toBe('1\n2\n3\n4\n')
+    expect(err).toBe('')
+    expect(code).toBe(0)
+  })
+
+  it('tac reverses each operand independently', async () => {
+    const [out, err, code] = await runNumbered(['tac /a/f.txt /a/g.txt'])
+    expect(out).toBe('2\n1\n4\n3\n')
+    expect(err).toBe('')
+    expect(code).toBe(0)
+  })
+
+  it('nl numbering continues across operands', async () => {
+    const [out, err, code] = await runNumbered(['nl /a/f.txt /a/g.txt'])
+    expect(out).toBe('     1\t1\n     2\t2\n     3\t3\n     4\t4\n')
+    expect(err).toBe('')
+    expect(code).toBe(0)
+  })
+
+  it('strings scans all operands', async () => {
+    const [out, err, code] = await runNumbered([
+      "printf 'worlds\\n' > /a/h2.txt",
+      'strings /a/h.txt /a/h2.txt',
+    ])
+    expect(out).toBe('hello\nworlds\n')
+    expect(err).toBe('')
+    expect(code).toBe(0)
+  })
+
+  it('zcat concatenates all operands', async () => {
+    const [out, err, code] = await runNumbered([
+      "printf 'z\\n' > /a/z1.txt && printf 'y\\n' > /a/z2.txt && gzip /a/z1.txt /a/z2.txt",
+      'zcat /a/z1.txt.gz /a/z2.txt.gz',
+    ])
+    expect(out).toBe('z\ny\n')
+    expect(err).toBe('')
+    expect(code).toBe(0)
+  })
+})
+
+describe('rest of the read family keeps partial output past missing', () => {
+  const CASES: [string, string, string][] = [
+    ['nl /a/f.txt /a/missing.txt', '     1\t1\n     2\t2\n', 'nl'],
+    ['md5 /a/f.txt /a/missing.txt', '6ddb4095eb719e2a9f0a3f95677d24e0  /a/f.txt\n', 'md5'],
+    [
+      'sha256sum /a/f.txt /a/missing.txt',
+      'a6e2b7a040683432de03a18fd8a1939a2fdf82585b364bfc874bdd4095c4cae1  /a/f.txt\n',
+      'sha256sum',
+    ],
+    ['tac /a/f.txt /a/missing.txt', '2\n1\n', 'tac'],
+    ['rev /a/f.txt /a/missing.txt', '1\n2\n', 'rev'],
+    ['cut -c1 /a/f.txt /a/missing.txt', '1\n2\n', 'cut'],
+    ['expand /a/f.txt /a/missing.txt', '1\n2\n', 'expand'],
+    ['unexpand /a/f.txt /a/missing.txt', '1\n2\n', 'unexpand'],
+    ['fold /a/f.txt /a/missing.txt', '1\n2\n', 'fold'],
+    ['fmt /a/f.txt /a/missing.txt', '1 2\n', 'fmt'],
+  ]
+  for (const [cmd, expected, name] of CASES) {
+    it(`${name} keeps partial output`, async () => {
+      const [out, err, code] = await runNumbered([cmd])
+      expect(out).toBe(expected)
+      expect(err).toBe(`${name}: /a/missing.txt: No such file or directory\n`)
+      expect(code).toBe(1)
+    })
+  }
+
+  it('strings keeps partial output', async () => {
+    const [out, err, code] = await runNumbered(['strings /a/h.txt /a/missing.txt'])
+    expect(out).toBe('hello\n')
+    expect(err).toBe('strings: /a/missing.txt: No such file or directory\n')
+    expect(code).toBe(1)
+  })
+
+  it('zcat keeps partial output', async () => {
+    const [out, err, code] = await runNumbered([
+      "printf 'z\\n' > /a/z1.txt && gzip /a/z1.txt",
+      'zcat /a/z1.txt.gz /a/missing.gz',
+    ])
+    expect(out).toBe('z\n')
+    expect(err).toBe('zcat: /a/missing.gz: No such file or directory\n')
+    expect(code).toBe(1)
+  })
+
+  it('nl all missing reports each operand', async () => {
+    const [out, err, code] = await runNumbered(['nl /a/m1.txt /a/m2.txt'])
+    expect(out).toBe('')
+    expect(err).toBe(
+      'nl: /a/m1.txt: No such file or directory\n' + 'nl: /a/m2.txt: No such file or directory\n',
+    )
+    expect(code).toBe(1)
+  })
+
+  it('stat keeps the good row past missing', async () => {
+    const [out, err, code] = await runNumbered(['stat /a/f.txt /a/missing.txt'])
+    expect(out).toContain('name=f.txt')
+    expect(err).toBe('stat: /a/missing.txt: No such file or directory\n')
+    expect(code).toBe(1)
+  })
+
+  it('sort still aborts on missing', async () => {
+    const [out, err, code] = await runNumbered(['sort /a/f.txt /a/missing.txt'])
+    expect(out).toBe('')
+    expect(err).toBe('sort: /a/missing.txt: No such file or directory\n')
     expect(code).toBe(1)
   })
 })

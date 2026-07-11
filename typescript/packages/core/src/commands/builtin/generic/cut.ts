@@ -20,6 +20,14 @@ import { resolveSource } from '../utils/stream.ts'
 
 const ENC = new TextEncoder()
 
+async function* chainStreams(
+  streams: readonly AsyncIterable<Uint8Array>[],
+): AsyncIterable<Uint8Array> {
+  for (const s of streams) {
+    for await (const chunk of s) yield chunk
+  }
+}
+
 export function cutGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
@@ -34,21 +42,26 @@ export function cutGeneric(
   const chars = c !== null ? parseCutRanges(c) : null
   const delim = d ?? '\t'
 
-  let source: AsyncIterable<Uint8Array>
-  const cache: string[] = []
   if (paths.length > 0) {
-    const first = paths[0]
-    if (first === undefined) return [null, new IOResult()]
-    source = stream(first)
-    cache.push(first.virtual)
-  } else {
-    try {
-      source = resolveSource(opts.stdin, 'cut: missing operand')
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
+    // Each operand is cut independently and the outputs concatenate in
+    // operand order, like GNU (a file without a trailing newline never
+    // merges its last line into the next operand's first).
+    const cache: string[] = []
+    const outputs: AsyncIterable<Uint8Array>[] = []
+    for (const p of paths) {
+      outputs.push(cutStream(stream(p), delim, fields, chars, complement, z))
+      cache.push(p.virtual)
     }
+    const out: ByteSource = chainStreams(outputs)
+    return [out, new IOResult({ cache })]
+  }
+  let source: AsyncIterable<Uint8Array>
+  try {
+    source = resolveSource(opts.stdin, 'cut: missing operand')
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
   }
   const out: ByteSource = cutStream(source, delim, fields, chars, complement, z)
-  return [out, new IOResult({ cache })]
+  return [out, new IOResult()]
 }

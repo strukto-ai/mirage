@@ -45,16 +45,19 @@ export async function stringsGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
   const minLen = typeof opts.flags.n === 'string' ? Number.parseInt(opts.flags.n, 10) : 4
-  let raw: Uint8Array
+  // Each operand is scanned independently and the matches concatenate in
+  // operand order, like GNU strings.
   if (paths.length > 0) {
-    const first = paths[0]
-    if (first === undefined) return [null, new IOResult()]
-    raw = await materialize(stream(first))
-  } else {
-    const stdinData = await readStdinAsync(opts.stdin)
-    raw = stdinData ?? new Uint8Array(0)
+    let output = ''
+    for (const p of paths) {
+      const matches = extractStrings(await materialize(stream(p)), minLen)
+      if (matches.length > 0) output += matches.join('\n') + '\n'
+    }
+    const result: ByteSource = ENC.encode(output)
+    return [result, new IOResult()]
   }
-  const matches = extractStrings(raw, minLen)
+  const stdinData = await readStdinAsync(opts.stdin)
+  const matches = extractStrings(stdinData ?? new Uint8Array(0), minLen)
   const output = matches.length > 0 ? matches.join('\n') + '\n' : ''
   const result: ByteSource = ENC.encode(output)
   return [result, new IOResult()]

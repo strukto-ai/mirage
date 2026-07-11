@@ -14,6 +14,7 @@
 
 import { stringsGeneric } from '../../generic/strings.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { withReadable } from '../../utils/operands.ts'
 
 export const STRINGS_BUILDER: Builder = {
   name: 'strings',
@@ -21,6 +22,11 @@ export const STRINGS_BUILDER: Builder = {
   fn: async (ops, accessor, paths, _texts, opts) => {
     const idx = opts.index ?? undefined
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return stringsGeneric(resolved, opts, (p) => ops.readStream(accessor, p, idx))
+    return withReadable(
+      resolved,
+      (p) => ops.stat(accessor, p, idx),
+      'strings',
+      (readable) => stringsGeneric(readable, opts, (p) => ops.readStream(accessor, p, idx)),
+    )
   },
 }

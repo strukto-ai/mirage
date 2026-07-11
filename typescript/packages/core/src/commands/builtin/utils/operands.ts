@@ -12,8 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { IOResult, materialize } from '../../../io/types.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
 import { fsErrorLine, isFsError } from '../../../utils/errors.ts'
+import type { CommandFnResult } from '../../config.ts'
+
+const ENC = new TextEncoder()
 
 type Stat = (p: PathSpec) => Promise<FileStat>
 
@@ -42,4 +46,37 @@ export async function splitReadable(
     readable.push(p)
   }
   return [readable, err]
+}
+
+// Read-family builder entry: split the operands, run the generic on the
+// readable ones, and attach the failed operands' stderr lines (exit 1, per
+// GNU). When every operand failed the generic never runs, so the command
+// does not fall back to stdin mode; when no operands were given at all the
+// generic keeps its stdin behavior.
+export async function withReadable(
+  paths: PathSpec[],
+  stat: Stat,
+  cmdName: string,
+  run: (readable: PathSpec[]) => Promise<CommandFnResult> | CommandFnResult,
+): Promise<CommandFnResult> {
+  const [readable, err] = await splitReadable(paths, stat, cmdName)
+  if (readable.length === 0 && err !== '') {
+    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(err) })]
+  }
+  const result = await run(readable)
+  if (result === null) {
+    if (err === '') return null
+    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(err) })]
+  }
+  const [out, io] = result
+  if (err !== '') {
+    const existing = await materialize(io.stderr)
+    const line = ENC.encode(err)
+    const merged = new Uint8Array(existing.byteLength + line.byteLength)
+    merged.set(existing, 0)
+    merged.set(line, existing.byteLength)
+    io.stderr = merged
+    io.exitCode = 1
+  }
+  return [out, io]
 }

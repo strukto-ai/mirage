@@ -15,6 +15,8 @@
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.io.stream import materialize
+from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_error_line
 
@@ -64,3 +66,50 @@ async def split_readable(
             continue
         readable.append(p)
     return readable, err
+
+
+async def resolve_readable(
+    ops: CommandIO,
+    accessor: Accessor,
+    paths: list[PathSpec],
+    index: IndexCacheStore | None,
+    cmd_name: str,
+) -> tuple[list[PathSpec], bytes]:
+    """Resolve globs, then drop unreadable operands via ``split_readable``.
+
+    The read-family builder entry: an empty result with empty stderr means
+    stdin mode (no path operands were given), while an empty result with
+    stderr lines means every operand failed and the builder must not fall
+    back to stdin.
+
+    Args:
+        ops (CommandIO): Backend I/O bundle.
+        accessor (Accessor): Backend accessor.
+        paths (list[PathSpec]): Raw path operands (may hold globs).
+        index (IndexCacheStore | None): Index cache store.
+        cmd_name (str): Command name for the stderr prefix.
+    """
+    resolved = await resolve_or_empty(ops, accessor, paths, index)
+    if not resolved:
+        return [], b""
+    return await split_readable(ops, accessor, resolved, index, cmd_name)
+
+
+async def merge_split_errors(
+    result: tuple[ByteSource | None, IOResult],
+    err: bytes,
+) -> tuple[ByteSource | None, IOResult]:
+    """Attach ``split_readable`` stderr lines to a generic's result.
+
+    Args:
+        result (tuple[ByteSource | None, IOResult]): The generic's return.
+        err (bytes): Stderr lines for the operands dropped by the split;
+            when non-empty the command exits 1, per GNU.
+    """
+    if not err:
+        return result
+    out, io = result
+    existing = await materialize(io.stderr) if io.stderr else b""
+    io.stderr = existing + err
+    io.exit_code = 1
+    return out, io

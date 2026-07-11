@@ -63,8 +63,20 @@ async function* nlMulti(
   opts: NlOptions,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): AsyncIterable<Uint8Array> {
+  // One counter across every operand: GNU nl numbering continues from
+  // file to file (it resets per logical page, never per file).
+  let num = opts.start
   for (const p of paths) {
-    for await (const chunk of nlStream(stream(p), opts)) yield chunk
+    const iter = new AsyncLineIterator(stream(p))
+    for await (const raw of iter) {
+      const line = DEC.decode(raw)
+      if (shouldNumber(line, opts.bodyNumbering, opts.pattern)) {
+        yield ENC.encode(`${padLeft(String(num), opts.width)}${opts.separator}${line}\n`)
+        num += opts.increment
+      } else {
+        yield ENC.encode(`${' '.repeat(opts.width)}${opts.separator}${line}\n`)
+      }
+    }
   }
 }
 
