@@ -130,12 +130,13 @@ def test_long_value_flag_equals_syntax_rg():
     assert parsed.paths() == ["/x"]
 
 
-def test_unknown_long_flag_dropped_with_warning():
+def test_unknown_long_flag_reported_as_invalid():
     parsed = parse_command(SPECS["grep"], ["--bogus=x", "pat", "/a.txt"], "/")
     assert "--bogus" not in parsed.flags
     assert parsed.texts() == ["pat"]
     assert parsed.paths() == ["/a.txt"]
-    assert any("--bogus=x" in w for w in parsed.warnings)
+    assert parsed.invalid_options == ["--bogus=x"]
+    assert parsed.warnings == []
 
 
 def test_cluster_ending_in_value_flag_consumes_next_arg():
@@ -161,19 +162,28 @@ def test_cluster_bool_then_count_flag_value():
     assert parsed.paths() == ["/a.txt"]
 
 
-def test_cluster_with_unknown_char_dropped_with_warning():
+def test_cluster_with_unknown_char_reports_offending_char():
     parsed = parse_command(SPECS["grep"], ["-nx", "pat", "/a.txt"], "/")
     assert "-n" not in parsed.flags
     assert parsed.texts() == ["pat"]
     assert parsed.paths() == ["/a.txt"]
-    assert any("-nx" in w for w in parsed.warnings)
+    assert parsed.invalid_options == ["x"]
 
 
-def test_unknown_short_flag_dropped_with_warning():
+def test_unknown_long_flag_reported_bare():
     parsed = parse_command(SPECS["grep"], ["--bogus", "pat", "/a.txt"], "/")
     assert parsed.texts() == ["pat"]
     assert parsed.paths() == ["/a.txt"]
-    assert any("--bogus" in w for w in parsed.warnings)
+    assert parsed.invalid_options == ["--bogus"]
+
+
+def test_missing_value_reported_short_and_long():
+    parsed = parse_command(SPECS["grep"], ["-m"], "/")
+    assert parsed.needs_value_options == ["m"]
+    parsed = parse_command(SPECS["du"], ["--max-depth"], "/")
+    assert parsed.needs_value_options == ["--max-depth"]
+    parsed = parse_command(SPECS["grep"], ["-ne"], "/")
+    assert parsed.needs_value_options == ["e"]
 
 
 def test_text_rest_keeps_unknown_dash_tokens():

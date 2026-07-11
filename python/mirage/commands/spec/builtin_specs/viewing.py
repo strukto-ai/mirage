@@ -18,7 +18,16 @@ from mirage.commands.spec.types import (CommandSpec, Operand, OperandKind,
 SPECS: dict[str, CommandSpec] = {
     'cat':
     CommandSpec(
-        options=(Option(short="-n"), ),
+        options=(
+            Option(short="-n"),
+            Option(short="-E"),
+            Option(short="-T"),
+            Option(short="-v"),
+            Option(short="-e"),
+            Option(short="-t"),
+            Option(short="-A"),
+            Option(short="-s"),
+        ),
         rest=Operand(kind=OperandKind.PATH),
     ),
     'head':

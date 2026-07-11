@@ -23,6 +23,7 @@ async def sort(
     human_numeric: bool = False,
     version_sort: bool = False,
     month_sort: bool = False,
+    ignore_blanks: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         all_lines: list[str] = []
@@ -36,7 +37,7 @@ async def sort(
         all_lines = split_lines(raw.decode(errors="replace"))
 
     key_args = (key_field, field_separator, fold_case, numeric, human_numeric,
-                version_sort, month_sort)
+                version_sort, month_sort, ignore_blanks)
     all_lines.sort(key=lambda x: _sort_key(x, *key_args), reverse=reverse)
     if unique:
         seen: set[object] = set()

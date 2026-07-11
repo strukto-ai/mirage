@@ -33,9 +33,25 @@ async def cat(
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     n: bool = False,
+    E: bool = False,
+    T: bool = False,
+    v: bool = False,
+    e: bool = False,
+    t: bool = False,
+    A: bool = False,
+    s: bool = False,
     index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
+    # GNU combinations: -e is -vE, -t is -vT, -A is -vET.
+    display = dict(
+        number_lines=n,
+        show_ends=E or e or A,
+        show_tabs=T or t or A,
+        show_nonprinting=v or e or t or A,
+        squeeze_blank=s,
+    )
+    wants_display = any(display.values())
     if paths and ops.is_mounted(accessor):
         paths = await ops.resolve_glob(accessor, paths, index)
         if ops.local:
@@ -69,12 +85,12 @@ async def cat(
                 parts.append(data)
             io = IOResult(reads=reads, cache=list(reads))
             source = async_chain(*parts)
-        if n:
-            return generic_cat(source, number_lines=True), io
+        if wants_display:
+            return generic_cat(source, **display), io
         return source, io
     source = _resolve_source(stdin, "cat: missing operand")
-    if n:
-        return generic_cat(source, number_lines=True), IOResult()
+    if wants_display:
+        return generic_cat(source, **display), IOResult()
     return source, IOResult()
 
 

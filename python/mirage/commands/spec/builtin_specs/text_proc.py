@@ -40,6 +40,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-V"),
             Option(short="-s"),
             Option(short="-M"),
+            Option(short="-b"),
         ),
         rest=Operand(kind=OperandKind.PATH),
     ),

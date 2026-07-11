@@ -14,6 +14,7 @@
 
 import { SPECS } from '../../commands/spec/index.ts'
 import { parseCommand, parseToKwargs } from '../../commands/spec/parser.ts'
+import { missingValueError, unknownOptionError } from '../../commands/spec/usage.ts'
 import { concatBytes } from '../../core/jq/format.ts'
 import { OperandKind } from '../../commands/spec/types.ts'
 import type { CommandSpec } from '../../commands/spec/types.ts'
@@ -310,6 +311,15 @@ export async function handleCommand(
     const csParsed = parseFlags(parts.slice(1), SPECS[cmdName] ?? null, cmdName, session.cwd)
     const csFlags = csParsed[2]
     const csTexts = findExprTokens ?? csParsed[1]
+    const csRefusal = optionError(cmdName, csParsed[4], csParsed[5])
+    if (csRefusal !== null) {
+      const [msg, code] = csRefusal
+      return [
+        null,
+        new IOResult({ exitCode: code, stderr: msg }),
+        new ExecutionNode({ command: cmdStr, exitCode: code, stderr: msg }),
+      ]
+    }
     const runCtx: RunOnMountCtx = {
       registry,
       session,
@@ -407,12 +417,17 @@ export async function handleCommand(
     throw err
   }
 
-  const [paths, textsRaw, flagKwargs, parseWarnings] = parseFlags(
-    parts.slice(1),
-    mount.specFor(cmdName),
-    cmdName,
-    session.cwd,
-  )
+  const [paths, textsRaw, flagKwargs, parseWarnings, invalidOptions, needsValueOptions] =
+    parseFlags(parts.slice(1), mount.specFor(cmdName), cmdName, session.cwd)
+  const refusal = optionError(cmdName, invalidOptions, needsValueOptions)
+  if (refusal !== null) {
+    const [msg, code] = refusal
+    return [
+      null,
+      new IOResult({ exitCode: code, stderr: msg }),
+      new ExecutionNode({ command: cmdStr, exitCode: code, stderr: msg }),
+    ]
+  }
   const texts = findExprTokens ?? textsRaw
   if (findExprTokens !== null) {
     // `repeatable: true` on find value-flags makes parseToKwargs emit arrays;
@@ -494,7 +509,7 @@ function parseFlags(
   spec: CommandSpec | null,
   cmdName: string,
   cwd: string,
-): [PathSpec[], string[], Record<string, string | boolean | string[]>, string[]] {
+): [PathSpec[], string[], Record<string, string | boolean | string[]>, string[], string[], string[]] {
   const argv: string[] = parts.map((item) => (item instanceof PathSpec ? item.virtual : item))
   const scopeMap = new Map<string, PathSpec>()
   for (const item of parts) {
@@ -540,7 +555,7 @@ function parseFlags(
         texts.push(value)
       }
     }
-    return [paths, texts, flagKwargs, parsed.warnings]
+    return [paths, texts, flagKwargs, parsed.warnings, parsed.invalidOptions, parsed.needsValueOptions]
   }
 
   const paths: PathSpec[] = []
@@ -549,7 +564,21 @@ function parseFlags(
     if (item instanceof PathSpec) paths.push(item)
     else texts.push(item)
   }
-  return [paths, texts, {}, []]
+  return [paths, texts, {}, [], [], []]
+}
+
+// GNU-shaped refusal for option errors the parser reported. find is
+// exempt: its expression tokens are validated by parseFindExpression,
+// which raises the GNU predicate error itself.
+function optionError(
+  cmdName: string,
+  invalid: readonly string[],
+  needsValue: readonly string[],
+): [Uint8Array, number] | null {
+  if (cmdName === 'find') return null
+  if (invalid.length > 0) return unknownOptionError(cmdName, invalid[0] ?? '')
+  if (needsValue.length > 0) return missingValueError(cmdName, needsValue[0] ?? '')
+  return null
 }
 
 function prefixKeys(obj: Record<string, ByteSource>, prefix: string): Record<string, ByteSource> {

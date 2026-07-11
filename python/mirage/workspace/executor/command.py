@@ -25,6 +25,8 @@ from mirage.commands.safeguard import resolve_across_mounts, resolve_safeguard
 from mirage.commands.spec import (SPECS, CommandSpec, OperandKind,
                                   flag_kwarg_name, parse_command,
                                   parse_to_kwargs)
+from mirage.commands.spec.usage import (missing_value_error,
+                                        unknown_option_error)
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource
@@ -252,6 +254,8 @@ class _ParsedCommand(NamedTuple):
     texts: list[str]
     flag_kwargs: dict[str, object]
     warnings: list[str]
+    invalid_options: list[str]
+    needs_value_options: list[str]
 
 
 def _parse_flags(
@@ -357,12 +361,35 @@ def _parse_flags(
                 paths.append(scope)
             else:
                 texts.append(value)
-        return _ParsedCommand(paths, texts, flag_kwargs, parsed.warnings)
+        return _ParsedCommand(paths, texts, flag_kwargs,
+                              parsed.warnings, parsed.invalid_options,
+                              parsed.needs_value_options)
 
     # No spec: separate by type
     paths = [item for item in parts if isinstance(item, PathSpec)]
     texts = [item for item in parts if not isinstance(item, PathSpec)]
-    return _ParsedCommand(paths, texts, {}, [])
+    return _ParsedCommand(paths, texts, {}, [], [], [])
+
+
+
+def _option_error(cmd_name: str,
+                  parsed: _ParsedCommand) -> tuple[bytes, int] | None:
+    """GNU-shaped refusal for option errors the parser reported.
+
+    find is exempt: its expression tokens are validated by
+    parse_find_expression, which raises the GNU predicate error itself.
+
+    Args:
+        cmd_name (str): command name for message shape and exit code.
+        parsed (_ParsedCommand): parse result carrying the reports.
+    """
+    if cmd_name == "find":
+        return None
+    if parsed.invalid_options:
+        return unknown_option_error(cmd_name, parsed.invalid_options[0])
+    if parsed.needs_value_options:
+        return missing_value_error(cmd_name, parsed.needs_value_options[0])
+    return None
 
 
 async def handle_command(
@@ -493,6 +520,13 @@ async def handle_command(
                                     str_flag_paths=True)
         cross_texts = (find_expr_tokens if find_expr_tokens is not None else
                        cross_parsed.texts)
+        cross_refusal = _option_error(cmd_name, cross_parsed)
+        if cross_refusal is not None:
+            msg, code = cross_refusal
+            return None, IOResult(exit_code=code,
+                                  stderr=msg), ExecutionNode(command=cmd_str,
+                                                             exit_code=code,
+                                                             stderr=msg)
         run_single = functools.partial(run_on_mount, registry, session,
                                        dispatch, namespace)
         stdout, io = await handle_cross_mount(cmd_name,
@@ -566,8 +600,19 @@ async def handle_command(
                                                          stderr=err)
 
     # Parse flags upstream — mount receives clean args
-    paths, texts, flag_kwargs, parse_warnings = _parse_flags(
-        parts[1:], mount.spec_for(cmd_name), cmd_name, session.cwd)
+    single_parsed = _parse_flags(parts[1:], mount.spec_for(cmd_name), cmd_name,
+                                 session.cwd)
+    paths, texts, flag_kwargs, parse_warnings = (single_parsed.paths,
+                                                 single_parsed.texts,
+                                                 single_parsed.flag_kwargs,
+                                                 single_parsed.warnings)
+    refusal = _option_error(cmd_name, single_parsed)
+    if refusal is not None:
+        msg, code = refusal
+        return None, IOResult(exit_code=code,
+                              stderr=msg), ExecutionNode(command=cmd_str,
+                                                         exit_code=code,
+                                                         stderr=msg)
 
     if find_expr_tokens is not None:
         texts = find_expr_tokens

@@ -145,6 +145,8 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
   // dropped token shifts every later kind onto the wrong word.
   const wordKinds: (OperandKind | null)[] = new Array<OperandKind | null>(argv.length).fill(null)
   const warnings: string[] = []
+  const invalidOptions: string[] = []
+  const needsValueOptions: string[] = []
   // Free-text commands (echo/python/bash-style TEXT rest) keep unknown dash
   // tokens verbatim; elsewhere they are dropped with a warning so a stray
   // flag never corrupts pattern/path classification.
@@ -184,11 +186,14 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
           (longValueFlags.has(tok.slice(0, eq)) || longOptionalFlags.has(tok.slice(0, eq)))
         ) {
           setValueFlag(flags, tok.slice(0, eq), tok.slice(eq + 1), repeatFlags)
+        } else if (longValueFlags.has(tok)) {
+          // Declared value flag at end of line with no argument.
+          needsValueOptions.push(tok)
         } else if (lenientDashOperands) {
           rawArgs.push(tok)
           rawIndices.push(origIndices[i] ?? -1)
         } else {
-          warnings.push(`warning: unknown option '${tok}' ignored`)
+          invalidOptions.push(tok)
         }
         i += 1
       }
@@ -258,8 +263,22 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
       if (lenientDashOperands || NUMERIC_SHORT.test(tok)) {
         rawArgs.push(tok)
         rawIndices.push(origIndices[i] ?? -1)
+      } else if (valueFlags.has(tok)) {
+        // A declared value flag with no argument left on the line.
+        needsValueOptions.push(tok.slice(1))
+      } else if (mixed !== null && mixed.attached === null) {
+        // A cluster ending in a value flag that ran out of line.
+        needsValueOptions.push(mixed.valueFlag.slice(1))
       } else {
-        warnings.push(`warning: unknown option '${tok}' ignored`)
+        // GNU reports the first offending character, not the token.
+        let bad = tok.slice(1, 2)
+        for (const ch of tok.slice(1)) {
+          if (!boolFlags.has(`-${ch}`) && !valueFlags.has(`-${ch}`)) {
+            bad = ch
+            break
+          }
+        }
+        invalidOptions.push(bad)
       }
       i += 1
       continue
@@ -332,6 +351,8 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     rawOperands,
     textFlagValues,
     warnings,
+    invalidOptions,
+    needsValueOptions,
     wordKinds,
   })
 }

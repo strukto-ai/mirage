@@ -185,13 +185,13 @@ describe('parseCommand — clustered flags shift positionals when one is missing
     rest: new Operand({ kind: OperandKind.PATH }),
   })
 
-  it('drops the cluster with a warning when -I is missing from the spec', () => {
+  it('reports the missing cluster char without shifting positionals', () => {
     const p = parseCommand(grepLikeMissingI, ['-RIl', 'Base3\\|base3', '/r2/Review'], '/')
-    // -RIl can't fully resolve; it is dropped with a warning instead of
-    // becoming the pattern and shifting the real pattern into the paths.
+    // -RIl can't fully resolve; the offending char is reported instead of
+    // the token becoming the pattern and shifting the real pattern.
     expect(p.texts()).toEqual(['Base3\\|base3'])
     expect(p.paths()).toEqual(['/r2/Review'])
-    expect(p.warnings.some((w) => w.includes('-RIl'))).toBe(true)
+    expect(p.invalidOptions).toEqual(['I'])
   })
 
   it('correctly assigns pattern + path once -I is registered', () => {
@@ -333,12 +333,13 @@ describe('parseCommand — GNU long flag =value syntax', () => {
     expect(p.paths()).toEqual(['/x'])
   })
 
-  it('unknown long flag with = is dropped with a warning', () => {
+  it('unknown long flag with = is reported as invalid', () => {
     const p = parseCommand(specOf('grep'), ['--bogus=x', 'pat', '/a.txt'], '/')
     expect(p.flags['--bogus']).toBeUndefined()
     expect(p.texts()).toEqual(['pat'])
     expect(p.paths()).toEqual(['/a.txt'])
-    expect(p.warnings.some((w) => w.includes('--bogus=x'))).toBe(true)
+    expect(p.invalidOptions).toEqual(['--bogus=x'])
+    expect(p.warnings).toEqual([])
   })
 })
 
@@ -365,11 +366,19 @@ describe('parseCommand — optional-value long options', () => {
 })
 
 describe('parseCommand — unknown dash tokens warn and drop', () => {
-  it('drops unknown long flags from operands', () => {
+  it('reports unknown long flags and keeps operands aligned', () => {
     const p = parseCommand(specOf('grep'), ['--bogus', 'pat', '/a.txt'], '/')
     expect(p.texts()).toEqual(['pat'])
     expect(p.paths()).toEqual(['/a.txt'])
-    expect(p.warnings.some((w) => w.includes('--bogus'))).toBe(true)
+    expect(p.invalidOptions).toEqual(['--bogus'])
+  })
+
+  it('reports missing values for declared flags', () => {
+    expect(parseCommand(specOf('grep'), ['-m'], '/').needsValueOptions).toEqual(['m'])
+    expect(parseCommand(specOf('du'), ['--max-depth'], '/').needsValueOptions).toEqual([
+      '--max-depth',
+    ])
+    expect(parseCommand(specOf('grep'), ['-ne'], '/').needsValueOptions).toEqual(['e'])
   })
 
   it('keeps dash tokens for TEXT-rest commands', () => {
@@ -413,11 +422,11 @@ describe('parseCommand — clusters ending in a value flag (getopt)', () => {
     expect(p.texts()).toEqual(['pat'])
   })
 
-  it('unknown char in cluster drops the token with a warning', () => {
+  it('unknown char in cluster reports the offending char', () => {
     const p = parseCommand(specOf('grep'), ['-nx', 'pat', '/a.txt'], '/')
     expect(p.flags['-n']).toBeUndefined()
     expect(p.texts()).toEqual(['pat'])
-    expect(p.warnings.some((w) => w.includes('-nx'))).toBe(true)
+    expect(p.invalidOptions).toEqual(['x'])
   })
 
   it('find multi-char short flags still work', () => {

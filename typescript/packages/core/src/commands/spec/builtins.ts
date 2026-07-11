@@ -97,7 +97,16 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
     rest: new Operand({ kind: OperandKind.PATH }),
   }),
   cat: new CommandSpec({
-    options: [new Option({ short: '-n' })],
+    options: [
+      new Option({ short: '-n' }),
+      new Option({ short: '-E' }),
+      new Option({ short: '-T' }),
+      new Option({ short: '-v' }),
+      new Option({ short: '-e' }),
+      new Option({ short: '-t' }),
+      new Option({ short: '-A' }),
+      new Option({ short: '-s' }),
+    ],
     rest: new Operand({ kind: OperandKind.PATH }),
   }),
   head: new CommandSpec({
@@ -245,6 +254,7 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ short: '-V' }),
       new Option({ short: '-s' }),
       new Option({ short: '-M' }),
+      new Option({ short: '-b' }),
     ],
     rest: new Operand({ kind: OperandKind.PATH }),
   }),

@@ -128,6 +128,8 @@ export interface ParsedArgsInit {
   textFlagValues?: string[]
   warnings?: string[]
   wordKinds?: (OperandKind | null)[]
+  invalidOptions?: string[]
+  needsValueOptions?: string[]
 }
 
 export class ParsedArgs {
@@ -139,6 +141,11 @@ export class ParsedArgs {
   readonly textFlagValues: string[]
   readonly warnings: string[]
   readonly wordKinds: (OperandKind | null)[]
+  // GNU-shaped option errors, reported (never thrown) by the parser:
+  // undeclared options ('--bogus' or the offending cluster char 'Y'),
+  // and declared value flags that ran out of line ('--max-depth', 'm').
+  readonly invalidOptions: string[]
+  readonly needsValueOptions: string[]
 
   constructor(init: ParsedArgsInit) {
     this.flags = init.flags
@@ -149,6 +156,8 @@ export class ParsedArgs {
     this.textFlagValues = init.textFlagValues ?? []
     this.warnings = init.warnings ?? []
     this.wordKinds = init.wordKinds ?? []
+    this.invalidOptions = init.invalidOptions ?? []
+    this.needsValueOptions = init.needsValueOptions ?? []
   }
 
   paths(): string[] {

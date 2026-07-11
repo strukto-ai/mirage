@@ -154,11 +154,11 @@ def test_parse_combined_bool_and_value():
     assert parsed.args == [("/file.txt", OperandKind.PATH)]
 
 
-def test_clustered_flags_with_unknown_short_dropped_with_warning():
+def test_clustered_flags_with_unknown_short_reported_as_invalid():
     # Regression: a real user ran `grep -RIl "Base3\|base3" /r2/Review` and
     # the pattern + path got swapped because `-I` was missing from the spec.
-    # Unknown dash tokens are now dropped with a warning instead of becoming
-    # the pattern and shifting the real pattern into the paths.
+    # The offending character is reported as invalid instead of the token
+    # becoming the pattern and shifting the real pattern into the paths.
     spec_missing_I = CommandSpec(
         options=(Option(short="-R"),
                  Option(short="-l")),  # -I deliberately missing
@@ -170,7 +170,7 @@ def test_clustered_flags_with_unknown_short_dropped_with_warning():
                            cwd="/")
     assert parsed.texts() == ["Base3\\|base3"]
     assert parsed.paths() == ["/r2/Review"]
-    assert any("-RIl" in w for w in parsed.warnings)
+    assert parsed.invalid_options == ["I"]
 
 
 def test_clustered_flags_with_all_known_short_classifies_correctly():

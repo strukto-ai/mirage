@@ -1316,10 +1316,26 @@ baz
 2:world
 === du_max_depth_eq ===
 20	/data/sub
-=== grep_unknown_flag_ignored ===
-world
+=== grep_unknown_long_flag ===
+grep: unrecognized option '--bogus'
+Try 'grep --help' for more information.
+code=2
 === grep_unknown_short_flag ===
-world
+grep: invalid option -- 'Y'
+Try 'grep --help' for more information.
+code=2
+=== cat_unknown_long_flag ===
+cat: unrecognized option '--bogus'
+Try 'cat --help' for more information.
+code=1
+=== grep_missing_flag_value ===
+grep: option requires an argument -- 'm'
+Try 'grep --help' for more information.
+code=2
+=== du_missing_flag_value ===
+du: option '--max-depth' requires an argument
+Try 'du --help' for more information.
+code=1
 === grep_color_auto ===
 world
 === grep_color_bare ===
@@ -1561,19 +1577,19 @@ foo
 bar
 baz
 === cat_E ===
-hello
-world
-foo
-bar
-baz
+hello$
+world$
+foo$
+bar$
+baz$
 === cat_T ===
-a	1
-b	2
-c	3
+a^I1
+b^I2
+c^I3
 === cat_A ===
-a	1
-b	2
-c	3
+a^I1$
+b^I2$
+c^I3$
 === nl_d_pipe ===
      1	hello
      2	world
@@ -2500,10 +2516,10 @@ xm_moved.txt
 === xm_grep_multi ===
 /data/a.txt:0
 /data2/xm.txt:1
-=== xm_unknown_flag_warns ===
-/data2/xm.txt:cross
-grep: warning: unknown option '--bogus' ignored
-code=0
+=== xm_unknown_flag_errors ===
+grep: unrecognized option '--bogus'
+Try 'grep --help' for more information.
+code=2
 === xm_wc_multi ===
 5 /data/a.txt
 1 /data2/xm.txt
