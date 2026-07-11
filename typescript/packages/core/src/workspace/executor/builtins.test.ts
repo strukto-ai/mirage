@@ -45,6 +45,7 @@ import {
   handleWhoami,
   handleXargs,
 } from './builtins/index.ts'
+import { parseDuration } from './builtins/timeout.ts'
 import { ReturnSignal } from './command.ts'
 
 function wireMount(mount: MountEntry): void {
@@ -736,6 +737,23 @@ describe('handleXargs', () => {
 
 describe('handleTimeout', () => {
   const session = new Session({ sessionId: 'test' })
+
+  it('parses duration units', () => {
+    expect(parseDuration('1')).toBe(1)
+    expect(parseDuration('0.5')).toBe(0.5)
+    expect(parseDuration('2s')).toBe(2)
+    expect(parseDuration('2m')).toBe(120)
+    expect(parseDuration('1h')).toBe(3600)
+    expect(parseDuration('1d')).toBe(86400)
+    expect(parseDuration('.5')).toBe(0.5)
+  })
+
+  it('rejects garbage durations', () => {
+    expect(parseDuration('xx')).toBeNull()
+    expect(parseDuration('-1')).toBeNull()
+    expect(parseDuration('1x')).toBeNull()
+    expect(parseDuration('')).toBeNull()
+  })
 
   it('passes through when the command finishes in time', async () => {
     const shell = fakeShell([3])
