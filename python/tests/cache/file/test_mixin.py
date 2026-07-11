@@ -217,13 +217,13 @@ class TestDrainBudget:
         assert cache.max_drain_bytes is None
         assert cache.drain_budget == 1024
 
-    def test_below_limit_kept(self):
+    def test_explicit_below_limit_honored(self):
         cache = RAMFileCacheStore(cache_limit="1KB", max_drain_bytes=100)
         assert cache.drain_budget == 100
 
-    def test_above_limit_clamped(self):
+    def test_explicit_above_limit_honored(self):
         cache = RAMFileCacheStore(cache_limit="1KB", max_drain_bytes=4096)
-        assert cache.drain_budget == 1024
+        assert cache.drain_budget == 4096
 
 
 class TestEviction:

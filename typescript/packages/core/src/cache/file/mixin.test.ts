@@ -23,13 +23,13 @@ describe('drainBudget', () => {
     expect(drainBudget(cache)).toBe(1024)
   })
 
-  it('keeps maxDrainBytes below the limit', () => {
+  it('honors an explicit maxDrainBytes below the limit', () => {
     const cache = new RAMFileCacheStore({ limit: 1024, maxDrainBytes: 100 })
     expect(drainBudget(cache)).toBe(100)
   })
 
-  it('clamps maxDrainBytes above the limit', () => {
+  it('honors an explicit maxDrainBytes above the limit', () => {
     const cache = new RAMFileCacheStore({ limit: 1024, maxDrainBytes: 4096 })
-    expect(drainBudget(cache)).toBe(1024)
+    expect(drainBudget(cache)).toBe(4096)
   })
 })

@@ -46,12 +46,13 @@ export interface FileCache {
 /**
  * Max bytes a background drain may buffer to fill the cache.
  *
- * An entry larger than `cacheLimit` is evicted straight after the add,
- * so draining past the limit is provably wasted work: `maxDrainBytes`
- * is clamped to `cacheLimit`, and null (the default) means the full
- * limit. Mirrors the Python `FileCacheMixin.drain_budget` property.
+ * null (the default) derives the budget from `cacheLimit`: on evicting
+ * stores (RAM) a larger entry is dropped straight after the add, and on
+ * advisory stores (Redis) the limit still expresses the operator's
+ * cache-size intent while bounding the client-side drain buffer. An
+ * explicit `maxDrainBytes` is honored as configured, even above
+ * `cacheLimit`. Mirrors the Python `FileCacheMixin.drain_budget`.
  */
 export function drainBudget(cache: FileCache): number {
-  if (cache.maxDrainBytes === null) return cache.cacheLimit
-  return Math.min(cache.maxDrainBytes, cache.cacheLimit)
+  return cache.maxDrainBytes ?? cache.cacheLimit
 }

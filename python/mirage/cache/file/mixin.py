@@ -97,11 +97,13 @@ class FileCacheMixin:
     def drain_budget(self) -> int:
         """Max bytes a background drain may buffer to fill this cache.
 
-        An entry larger than ``cache_limit`` is evicted straight after
-        the add, so draining past the limit is provably wasted work:
-        ``max_drain_bytes`` is clamped to ``cache_limit``, and ``None``
-        (the default) means the full limit.
+        ``None`` (the default) derives the budget from ``cache_limit``:
+        on evicting stores (RAM) a larger entry is dropped straight
+        after the add, and on advisory stores (Redis) the limit still
+        expresses the operator's cache-size intent while bounding the
+        client-side drain buffer. An explicit ``max_drain_bytes`` is
+        honored as configured, even above ``cache_limit``.
         """
         if self.max_drain_bytes is None:
             return self.cache_limit
-        return min(self.max_drain_bytes, self.cache_limit)
+        return self.max_drain_bytes
