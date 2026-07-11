@@ -12,10 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
 from dataclasses import dataclass, field
 
 from mirage.commands.spec.types import (CommandSpec, Operand, OperandKind,
                                         Option)
+
+# GNU echo is not getopt, so its option surface is a word shape, not a
+# CommandSpec: options are LEADING words matching this pattern only.
+ECHO_OPTION = re.compile(r"-[neE]+")
 
 SHELL_SPECS: dict[str, CommandSpec] = {
     "xargs":

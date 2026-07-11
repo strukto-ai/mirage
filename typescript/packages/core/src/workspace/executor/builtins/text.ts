@@ -13,11 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { interpretEscapes } from '../../../commands/builtin/utils/escapes.ts'
+import { ECHO_OPTION } from '../../../commands/spec/shell.ts'
 import { IOResult } from '../../../io/types.ts'
 import { ExecutionNode } from '../../types.ts'
 import type { Result } from './scope.ts'
-
-const ECHO_OPTION = /^-[neE]+$/
 
 /**
  * Print arguments, honoring GNU echo's option rules.

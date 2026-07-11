@@ -14,6 +14,10 @@
 
 import { CommandSpec, Operand, OperandKind, Option } from './types.ts'
 
+// GNU echo is not getopt, so its option surface is a word shape, not a
+// CommandSpec: options are LEADING words matching this pattern only.
+export const ECHO_OPTION = /^-[neE]+$/
+
 export const SHELL_SPECS = Object.freeze({
   xargs: new CommandSpec({
     description: 'Build and run command lines from standard input.',

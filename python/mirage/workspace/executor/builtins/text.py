@@ -12,8 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
-
+from mirage.commands.spec.shell import ECHO_OPTION
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.workspace.types import ExecutionNode
@@ -32,8 +31,6 @@ _SIMPLE_ESCAPES = {
 _HEX = set("0123456789abcdefABCDEF")
 
 _OCT = set("01234567")
-
-_ECHO_OPTION = re.compile(r"-[neE]+")
 
 
 def _interpret_escapes(text: str) -> str:
@@ -105,7 +102,7 @@ async def handle_echo(
     escapes = False
     idx = 0
     for word in args:
-        if not _ECHO_OPTION.fullmatch(word):
+        if not ECHO_OPTION.fullmatch(word):
             break
         for ch in word[1:]:
             if ch == "n":
