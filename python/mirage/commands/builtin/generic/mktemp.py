@@ -2,6 +2,7 @@ import random
 import string
 from collections.abc import Awaitable, Callable
 
+from mirage.accessor.base import Accessor
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -31,7 +32,7 @@ async def mktemp(
     *texts: str,
     mkdir_fn: Callable[..., Awaitable[None]],
     write_bytes_fn: Callable[..., Awaitable[None]],
-    accessor: object = None,
+    accessor: Accessor | None = None,
     d: bool = False,
     p: str | PathSpec | None = None,
     t: bool = False,

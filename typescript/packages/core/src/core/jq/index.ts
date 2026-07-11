@@ -13,12 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export { jqEval } from './eval.ts'
-export { JQ_EMPTY, concatBytes, formatJqOutput } from './format.ts'
+export { concatBytes, formatJqOutput } from './format.ts'
 export {
   evalJsonlStream,
   isJsonlPath,
   isStreamableJsonlExpr,
   parseJsonAuto,
   parseJsonPath,
-  parseJsonl,
 } from './stream.ts'

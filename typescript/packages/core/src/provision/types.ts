@@ -103,7 +103,7 @@ export class ProvisionResult {
   }
 }
 
-export const COMBINE_FIELDS = [
+const COMBINE_FIELDS = [
   'networkReadLow',
   'networkReadHigh',
   'cacheReadLow',
@@ -131,7 +131,7 @@ const PRECISION_ORDER: Record<Precision, number> = {
  * Missing knowledge is carried by precision, not by null fields: when this
  * returns UNKNOWN the combined numeric totals are lower bounds.
  */
-export function combinedPrecision(children: readonly ProvisionResult[]): Precision {
+function combinedPrecision(children: readonly ProvisionResult[]): Precision {
   let worst: Precision = Precision.EXACT
   for (const c of children) {
     if (PRECISION_ORDER[c.precision] > PRECISION_ORDER[worst]) worst = c.precision
@@ -144,7 +144,7 @@ export function combinedPrecision(children: readonly ProvisionResult[]): Precisi
  * only nullable field, so a single costless child makes the total
  * unknowable rather than silently undercounted.
  */
-export function combinedCost(children: readonly ProvisionResult[]): number | null {
+function combinedCost(children: readonly ProvisionResult[]): number | null {
   const costs = children.map((c) => c.estimatedCostUsd).filter((c): c is number => c !== null)
   if (children.length > 0 && costs.length === children.length) {
     return costs.reduce((a, b) => a + b, 0)

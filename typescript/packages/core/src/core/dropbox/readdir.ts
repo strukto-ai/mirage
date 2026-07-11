@@ -77,5 +77,3 @@ export async function readdir(
   }
   return out
 }
-
-export { dropboxPathFromKey }

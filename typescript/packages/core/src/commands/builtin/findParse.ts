@@ -50,7 +50,7 @@ export interface FindExpr {
   usesEmpty: boolean
 }
 
-export function parseSize(spec: string): [number | null, number | null] {
+function parseSize(spec: string): [number | null, number | null] {
   const suffixes: Record<string, number> = { c: 1, k: 1024, M: 1024 ** 2, G: 1024 ** 3 }
   const raw = spec.startsWith('+') || spec.startsWith('-') ? spec.slice(1) : spec
   const last = raw[raw.length - 1] ?? ''
@@ -61,7 +61,7 @@ export function parseSize(spec: string): [number | null, number | null] {
   return [num, num]
 }
 
-export function parseMtime(spec: string): [number | null, number | null] {
+function parseMtime(spec: string): [number | null, number | null] {
   const day = 86400
   const now = Date.now() / 1000
   const n = Number.parseInt(spec.replace(/^[+-]/, ''), 10)

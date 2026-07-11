@@ -27,7 +27,7 @@ export interface CephConfigRedacted extends Omit<CephConfig, 'presignedUrlProvid
   presignedUrlProvider: '<REDACTED>'
 }
 
-export const CephConfigSchema = z.object({
+const CephConfigSchema = z.object({
   bucket: z.string(),
   presignedUrlProvider: secretSchema(
     z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),

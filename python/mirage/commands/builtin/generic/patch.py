@@ -1,6 +1,7 @@
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, IOResult
@@ -111,7 +112,7 @@ async def _load_patch_data(
     has_resource: bool,
     stdin: AsyncIterator[bytes] | bytes | None,
     read_bytes: Callable[..., Awaitable[bytes]],
-    accessor: object,
+    accessor: Accessor,
 ) -> bytes:
     if i is not None and has_resource:
         return await read_bytes(accessor, i.mount_path)
@@ -129,7 +130,7 @@ async def patch(
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
     has_resource: bool,
-    accessor: object = None,
+    accessor: Accessor | None = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     p: str | None = None,
     R: bool = False,

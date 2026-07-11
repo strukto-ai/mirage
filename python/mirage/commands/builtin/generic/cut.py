@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator, Callable
 
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.cut_helper import cut_stream, parse_ranges
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.stream import async_chain
@@ -11,7 +12,7 @@ async def cut(
     paths: list[PathSpec],
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
-    accessor: object = None,
+    accessor: Accessor | None = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     f: str | None = None,
     d: str | None = None,

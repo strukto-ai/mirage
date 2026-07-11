@@ -27,7 +27,7 @@ export interface QingStorConfigRedacted extends Omit<QingStorConfig, 'presignedU
   presignedUrlProvider: '<REDACTED>'
 }
 
-export const QingStorConfigSchema = z.object({
+const QingStorConfigSchema = z.object({
   bucket: z.string(),
   presignedUrlProvider: secretSchema(
     z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),

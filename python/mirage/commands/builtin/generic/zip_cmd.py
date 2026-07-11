@@ -3,6 +3,7 @@ import posixpath
 import zipfile
 from collections.abc import Awaitable, Callable
 
+from mirage.accessor.base import Accessor
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -12,7 +13,7 @@ async def zip_cmd(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
-    accessor: object = None,
+    accessor: Accessor | None = None,
     r: bool = False,
     j: bool = False,
     q: bool = False,

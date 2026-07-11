@@ -1,5 +1,6 @@
 from collections.abc import Awaitable, Callable
 
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.errors import UsageError
 from mirage.io.types import ByteSource, IOResult
@@ -10,7 +11,7 @@ async def cmp_cmd(
     paths: list[PathSpec],
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
-    accessor: object = None,
+    accessor: Accessor | None = None,
     silent: bool = False,
     verbose: bool = False,
     limit: int | None = None,

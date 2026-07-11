@@ -32,7 +32,7 @@ export interface LangfuseConfigRedacted {
   defaultFromTimestamp?: string
 }
 
-export const LangfuseConfigSchema = z.object({
+const LangfuseConfigSchema = z.object({
   publicKey: z.string(),
   secretKey: secretStr(),
   host: z.string().optional(),

@@ -17,7 +17,7 @@ import type * as Nodemailer from 'nodemailer'
 import type { EmailConfig } from '../../resource/email/config.ts'
 import type { FetchedMessage } from './_client.ts'
 
-let transporterCache = new WeakMap<EmailConfig, Nodemailer.Transporter>()
+const transporterCache = new WeakMap<EmailConfig, Nodemailer.Transporter>()
 
 async function getTransporter(config: EmailConfig): Promise<Nodemailer.Transporter> {
   const existing = transporterCache.get(config)
@@ -114,8 +114,4 @@ export async function forwardMessage(
     original.body_text
   await t.sendMail({ from: config.username, to, subject, text: fwdBody })
   return { status: 'sent', to, subject }
-}
-
-export function _resetTransporterCacheForTests(): void {
-  transporterCache = new WeakMap()
 }

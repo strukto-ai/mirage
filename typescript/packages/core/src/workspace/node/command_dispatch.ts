@@ -470,21 +470,14 @@ async function runArgv(
   if (name === SB.HISTORY) return handleHistory(registry, args, session)
   if (name === SB.SET) return handleSet(args, session, callStack)
   if (name === SB.SHIFT) {
-    const n = args.length > 0 ? Number(args[0]) : 1
-    return handleShift(Number.isFinite(n) ? n : 1, callStack, session)
+    return handleShift(args, callStack, session)
   }
   if (name === SB.TRAP) return handleTrap(session)
   if (name === SB.TEST || name === SB.BRACKET || name === SB.DOUBLE_BRACKET) {
     return handleTest(dispatch, operands, session)
   }
   if (name === SB.ECHO) {
-    const nFlag = args.includes('-n')
-    const eFlag = args.includes('-e')
-    return handleEcho(
-      args.filter((a) => a !== '-n' && a !== '-e'),
-      nFlag,
-      eFlag,
-    )
+    return handleEcho(args)
   }
   if (name === SB.PRINTF) return handlePrintf(args)
   if (name === SB.SLEEP) return handleSleep(args, signal)
@@ -496,8 +489,7 @@ async function runArgv(
     return handleSource(dispatch, executeFn, target, session)
   }
   if (name === SB.RETURN) {
-    const n = args.length > 0 ? Number(args[0]) : 0
-    return handleReturn(Number.isFinite(n) ? n : 0)
+    return handleReturn(args)
   }
   if (name === SB.BREAK) throw new BreakSignal()
   if (name === SB.CONTINUE) throw new ContinueSignal()

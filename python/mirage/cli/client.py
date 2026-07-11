@@ -16,7 +16,6 @@ import os
 import subprocess
 import sys
 import time
-from pathlib import Path
 
 import httpx
 
@@ -24,6 +23,7 @@ from mirage.cli.env import ENV_AUTH_MODE, ENV_AUTH_TOKEN
 from mirage.cli.settings import DaemonSettings, load_daemon_settings
 from mirage.server.auth import AuthMode
 from mirage.server.auth import storage as auth_storage
+from mirage.server.paths import mirage_home
 
 
 class DaemonUnreachable(RuntimeError):
@@ -103,7 +103,7 @@ class DaemonClient:
         env = dict(os.environ)
         if not self.settings.auth_token:
             self.settings.auth_token = auth_storage.ensure_token_file(
-                auth_storage.DEFAULT_TOKEN_FILE)
+                auth_storage.default_token_file())
         env[ENV_AUTH_TOKEN] = self.settings.auth_token
         if ENV_AUTH_MODE not in env:
             env[ENV_AUTH_MODE] = AuthMode.LOCAL.value
@@ -119,7 +119,7 @@ class DaemonClient:
             "--log-level",
             "warning",
         ]
-        log_dir = Path.home() / ".mirage"
+        log_dir = mirage_home()
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / "daemon.log"
         with open(log_file, "ab") as f:

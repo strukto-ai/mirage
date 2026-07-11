@@ -13,9 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { existsSync, readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { DEFAULT_TOKEN_FILE, readTokenFile } from '@struktoai/mirage-server'
+import { defaultTokenFile, mirageHome, readTokenFile } from '@struktoai/mirage-server'
 
 import { ENV_DAEMON_URL, ENV_TOKEN } from './env.ts'
 
@@ -33,8 +32,8 @@ export interface LoadOptions {
   tokenFile?: string
 }
 
-function defaultConfigPath(): string {
-  return join(homedir(), '.mirage', 'config.toml')
+function defaultConfigPath(env: Record<string, string | undefined>): string {
+  return join(mirageHome(env), 'config.toml')
 }
 
 function parseValue(raw: string): string {
@@ -69,7 +68,7 @@ function readDaemonTable(path: string): Record<string, string> {
 
 export function loadDaemonSettings(options: LoadOptions = {}): DaemonSettings {
   const env = options.env ?? (process.env as Record<string, string | undefined>)
-  const path = options.configPath ?? defaultConfigPath()
+  const path = options.configPath ?? defaultConfigPath(env)
   const table = readDaemonTable(path)
   const settings: DaemonSettings = {
     url: table.url ?? DEFAULT_DAEMON_URL,
@@ -85,7 +84,7 @@ export function loadDaemonSettings(options: LoadOptions = {}): DaemonSettings {
     settings.authToken = envToken
   }
   if (settings.authToken === '') {
-    const fileToken = readTokenFile(options.tokenFile ?? DEFAULT_TOKEN_FILE)
+    const fileToken = readTokenFile(options.tokenFile ?? defaultTokenFile(env))
     if (fileToken !== undefined && fileToken !== '') {
       settings.authToken = fileToken
     }

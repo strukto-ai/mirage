@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export {
-  GoogleConfigSchema as GmailConfigSchema,
   normalizeGoogleConfig as normalizeGmailConfig,
   redactGoogleConfig as redactGmailConfig,
   type GoogleConfig as GmailConfig,

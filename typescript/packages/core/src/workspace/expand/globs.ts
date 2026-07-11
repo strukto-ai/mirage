@@ -16,7 +16,8 @@ import { mountKey } from '../../utils/key_prefix.ts'
 import type { Resource } from '../../resource/base.ts'
 import { PathSpec } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { rstripSlash } from '../../utils/slash.ts'
+import { hasGlob as hasGlobChars, spellMatch } from '../../utils/glob_walk.ts'
+import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 
 export interface ResourceWithGlob extends Resource {
   glob(paths: readonly PathSpec[], prefix?: string): Promise<PathSpec[]>
@@ -24,6 +25,58 @@ export interface ResourceWithGlob extends Resource {
 
 function hasGlob(r: Resource): r is ResourceWithGlob {
   return 'glob' in r && typeof (r as { glob?: unknown }).glob === 'function'
+}
+
+// Expand a mid-path pattern level by level via the resource's glob. A glob
+// in a non-final segment (`s*/x.txt`) cannot resolve in one listing: each
+// glob segment is matched against its (already expanded) parent directory,
+// using the backend's own single-level glob per parent, so no backend needs
+// mid-path support. Matches are spelled the way bash expansion implies
+// (typed head + matched tail). An intermediate match that cannot be listed
+// is skipped, matching bash's directories-only descent.
+async function walkSegments(
+  item: PathSpec,
+  resource: ResourceWithGlob,
+  prefix: string,
+): Promise<PathSpec[]> {
+  const segments = stripSlash(item.virtual).split('/')
+  const first = segments.findIndex((seg) => hasGlobChars(seg))
+  const walked = segments.length - first
+  let level: string[] = ['/' + segments.slice(0, first).join('/')]
+  for (const seg of segments.slice(first)) {
+    const gathered: string[] = []
+    for (const parent of level) {
+      const dirVirtual = `${rstripSlash(parent)}/`
+      const spec = new PathSpec({
+        virtual: dirVirtual,
+        directory: dirVirtual,
+        resourcePath: mountKey(dirVirtual, prefix),
+        pattern: seg,
+        resolved: false,
+      })
+      let matches: PathSpec[]
+      try {
+        matches = await resource.glob([spec], prefix)
+      } catch (err) {
+        // fs-coded failures mean this parent is not a listable directory
+        // (bash skips it); anything else is a real bug and propagates.
+        if ((err as { code?: string }).code === undefined) throw err
+        continue
+      }
+      for (const m of matches) gathered.push(m.virtual)
+    }
+    level = gathered
+    if (level.length === 0) return []
+  }
+  return level.map((v) => {
+    const base = PathSpec.fromStrPath(v, mountKey(v, prefix))
+    return new PathSpec({
+      virtual: base.virtual,
+      directory: base.directory,
+      resourcePath: base.resourcePath,
+      rawPath: spellMatch(item.rawPath, v, walked),
+    })
+  })
 }
 
 // Stamp a glob match with the spelling the user's word implies.
@@ -70,7 +123,9 @@ export async function resolveGlobs(
         rawPath: item.rawPath,
       })
       try {
-        const resolved = await mount.resource.glob([withPrefix], prefix)
+        const resolved = hasGlobChars(withPrefix.directory)
+          ? await walkSegments(withPrefix, mount.resource, prefix)
+          : await mount.resource.glob([withPrefix], prefix)
         // bash with nullglob off: a zero-match glob stays the literal
         // word instead of vanishing.
         if (resolved.length === 0) {

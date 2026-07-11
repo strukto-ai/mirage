@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { ensureTokenFile, readTokenFile } from './storage.ts'
+import { defaultTokenFile, ensureTokenFile, readTokenFile } from './storage.ts'
 
 describe('storage', () => {
   let dir: string
@@ -55,5 +55,11 @@ describe('storage', () => {
     const target = join(dir, 'auth_token')
     writeFileSync(target, '  abc-def  \n')
     expect(readTokenFile(target)).toBe('abc-def')
+  })
+
+  it('defaultTokenFile follows MIRAGE_HOME', () => {
+    expect(defaultTokenFile({ MIRAGE_HOME: '/data/mirage' })).toBe(
+      join('/data/mirage', 'auth_token'),
+    )
   })
 })

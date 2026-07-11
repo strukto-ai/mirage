@@ -19,6 +19,7 @@ from pathlib import Path
 
 from mirage.cli.env import ENV_DAEMON_URL, ENV_TOKEN
 from mirage.server.auth import storage as auth_storage
+from mirage.server.paths import mirage_home
 
 DEFAULT_DAEMON_URL = "http://127.0.0.1:8765"
 
@@ -32,7 +33,7 @@ class DaemonSettings:
 
 
 def config_path() -> Path:
-    return Path.home() / ".mirage" / "config.toml"
+    return mirage_home() / "config.toml"
 
 
 def _read_toml(path: Path) -> dict:
@@ -48,7 +49,8 @@ def load_daemon_settings(path: Path | None = None) -> DaemonSettings:
     Order of precedence (highest first):
         1. ``MIRAGE_DAEMON_URL`` env var
         2. ``MIRAGE_TOKEN`` env var
-        3. values in ``~/.mirage/config.toml`` ``[daemon]`` table
+        3. values in ``$MIRAGE_HOME/config.toml`` (default
+           ``~/.mirage/config.toml``) ``[daemon]`` table
         4. defaults
 
     Args:
@@ -74,7 +76,7 @@ def load_daemon_settings(path: Path | None = None) -> DaemonSettings:
         settings.auth_token = env_token
     if not settings.auth_token:
         file_token = auth_storage.read_token_file(
-            auth_storage.DEFAULT_TOKEN_FILE)
+            auth_storage.default_token_file())
         if file_token:
             settings.auth_token = file_token
     return settings

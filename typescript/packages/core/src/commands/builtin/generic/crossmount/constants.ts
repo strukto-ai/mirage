@@ -22,7 +22,7 @@ export const STREAM_COMMANDS: ReadonlySet<string> = new Set([
   Cmd.SED,
   Cmd.REV,
 ])
-export const FANOUT_COMMANDS: ReadonlySet<string> = new Set([
+const FANOUT_COMMANDS: ReadonlySet<string> = new Set([
   Cmd.GREP,
   Cmd.RG,
   Cmd.HEAD,

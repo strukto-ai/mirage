@@ -37,7 +37,11 @@ async def _file_entry(
         s = await stat(path, index)
     except (FileNotFoundError, ValueError):
         return None
-    return s if s.type != FileType.DIRECTORY else None
+    if s.type == FileType.DIRECTORY:
+        return None
+    # GNU ls prints a file operand as given (`ls sub/x.txt` shows
+    # sub/x.txt, not x.txt); the row carries the operand spelling.
+    return s.model_copy(update={"name": path.raw_path})
 
 
 async def walk(
@@ -56,11 +60,13 @@ async def walk(
     warnings: list[str] = []
     if list_dir:
         try:
-            return [await stat(path, index)], warnings
+            listed = await stat(path, index)
         except (FileNotFoundError, ValueError) as exc:
             detail = fs_strerror(exc) or exc
             warnings.append(f"ls: cannot access '{path.raw_path}': {detail}")
             return [], warnings
+        # GNU ls -d prints the operand as given.
+        return [listed.model_copy(update={"name": path.raw_path})], warnings
 
     try:
         entries = await readdir(path, index)

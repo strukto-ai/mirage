@@ -24,6 +24,7 @@
       "notion",
       "opfs",
       "postgres",
+      "qdrant",
       "ram",
       "s3",
       "slack",
@@ -40,6 +41,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": true,
       "short": "-name",
       "value_kind": "text"
     },
@@ -47,6 +49,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": true,
       "short": "-type",
       "value_kind": "text"
     },
@@ -54,6 +57,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": true,
       "short": "-maxdepth",
       "value_kind": "text"
     },
@@ -61,6 +65,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": true,
       "short": "-size",
       "value_kind": "text"
     },
@@ -68,6 +73,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": true,
       "short": "-mtime",
       "value_kind": "text"
     },
@@ -75,6 +81,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": true,
       "short": "-iname",
       "value_kind": "text"
     },
@@ -82,6 +89,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": true,
       "short": "-path",
       "value_kind": "text"
     },
@@ -89,6 +97,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": true,
       "short": "-mindepth",
       "value_kind": "text"
     },
@@ -96,6 +105,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-print",
       "value_kind": "none"
     },
@@ -103,6 +113,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-print0",
       "value_kind": "none"
     },
@@ -110,6 +121,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-delete",
       "value_kind": "none"
     },
@@ -117,6 +129,15 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-depth",
+      "value_kind": "none"
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-prune",
       "value_kind": "none"
     },
@@ -124,6 +145,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-ls",
       "value_kind": "none"
     },
@@ -131,6 +153,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-empty",
       "value_kind": "none"
     },
@@ -138,6 +161,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-o",
       "value_kind": "none"
     },
@@ -145,6 +169,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-or",
       "value_kind": "none"
     },
@@ -152,6 +177,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-a",
       "value_kind": "none"
     },
@@ -159,6 +185,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-and",
       "value_kind": "none"
     },
@@ -166,12 +193,14 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-not",
       "value_kind": "none"
     }
   ],
   "positional": [],
   "rest": {
-    "kind": "path"
+    "kind": "path",
+    "provided_by": []
   }
 }

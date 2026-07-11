@@ -116,6 +116,25 @@ async function main(): Promise<void> {
           `(warm speedup ${(coldMs / Math.max(warmMs, 0.001)).toFixed(0)}x)`,
       )
     }
+
+    console.log('\n' + '='.repeat(60))
+    console.log('GLOB: mid-path patterns walk segment by segment')
+    console.log('='.repeat(60))
+    const globR = await ws.execute('echo /langfuse/prom*/*')
+    const globOut = globR.stdoutText.trim()
+    console.log(`  echo /langfuse/prom*/* -> ${globOut.slice(0, 200)}`)
+    if (!globOut.includes('/langfuse/prompts/')) {
+      throw new Error('regression: mid-path glob did not expand')
+    }
+
+    // A glob that matches nothing stays the literal word, so the
+    // command reports it like GNU coreutils.
+    const litR = await ws.execute('cat /langfuse/zz-none-*/x.json')
+    const litErr = litR.stderrText.trim()
+    console.log(`  cat /langfuse/zz-none-*/x.json -> exit=${litR.exitCode} ${litErr.slice(0, 120)}`)
+    if (litR.exitCode !== 1 || !litErr.includes('zz-none-*')) {
+      throw new Error('regression: zero-match glob did not keep the literal')
+    }
   } finally {
     await ws.close()
   }

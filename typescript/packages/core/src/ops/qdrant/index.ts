@@ -18,5 +18,3 @@ import { readdirOp } from './readdir.ts'
 import { statOp } from './stat.ts'
 
 export const QDRANT_OPS: readonly RegisteredOp[] = [readOp, readdirOp, statOp]
-
-export { readOp, readdirOp, statOp }

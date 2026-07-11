@@ -201,6 +201,22 @@ async def main():
         print(f"  served_from_cache={warm_ms < cold_ms / 5} "
               f"(warm speedup {cold_ms / max(warm_ms, 0.001):.0f}x)")
 
+    print("\n" + "=" * 60)
+    print("GLOB: mid-path patterns walk segment by segment")
+    print("=" * 60)
+    r = await ws.execute("echo /langfuse/prom*/*")
+    out = (await r.stdout_str()).strip()
+    print(f"  echo /langfuse/prom*/* -> {out[:200]}")
+    assert "/langfuse/prompts/" in out, "mid-path glob did not expand"
+
+    # A glob that matches nothing stays the literal word, so the
+    # command reports it like GNU coreutils.
+    r = await ws.execute("cat /langfuse/zz-none-*/x.json")
+    err = (await r.stderr_str()).strip()
+    print(f"  cat /langfuse/zz-none-*/x.json -> exit={r.exit_code} "
+          f"{err[:120]}")
+    assert r.exit_code == 1 and "zz-none-*" in err
+
 
 if __name__ == "__main__":
     asyncio.run(main())

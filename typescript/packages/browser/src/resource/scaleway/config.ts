@@ -27,7 +27,7 @@ export interface ScalewayConfigRedacted extends Omit<ScalewayConfig, 'presignedU
   presignedUrlProvider: '<REDACTED>'
 }
 
-export const ScalewayConfigSchema = z.object({
+const ScalewayConfigSchema = z.object({
   bucket: z.string(),
   presignedUrlProvider: secretSchema(
     z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),

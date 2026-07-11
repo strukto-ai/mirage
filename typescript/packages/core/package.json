@@ -48,13 +48,10 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@aws-sdk/client-s3": "^3.0.0",
-    "@modelcontextprotocol/sdk": "^1.0.0",
     "@qdrant/js-client-rest": "^1.18.0",
     "chromadb": "^3.4.3",
     "hyparquet-writer": "^0.13.0",
     "pyodide": "^0.29.3",
-    "redis": "^5.0.0",
     "tree-sitter-bash": "^0.25.1",
     "tsup": "^8.5.0",
     "typescript": "^6.0.0",

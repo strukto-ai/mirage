@@ -58,7 +58,7 @@ function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T | typeof TI
   })
 }
 
-export async function* withTimeout(
+async function* withTimeout(
   src: ByteSource,
   seconds: number,
   command: string,

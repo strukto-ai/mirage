@@ -2,16 +2,39 @@
   "_meta": {
     "filetypes": [],
     "has_aggregate": false,
-    "has_provision": false,
+    "has_provision": true,
     "has_write": false,
     "resources": [
+      "chroma",
+      "databricks_volume",
+      "dify",
+      "discord",
       "disk",
+      "email",
+      "gdocs",
       "gdrive",
       "github",
+      "github_ci",
+      "gmail",
+      "gsheets",
+      "gslides",
+      "hf_buckets",
+      "lancedb",
+      "langfuse",
+      "linear",
+      "mongodb",
+      "nextcloud",
+      "notion",
+      "onedrive",
+      "postgres",
+      "qdrant",
       "ram",
       "redis",
       "s3",
-      "ssh"
+      "sharepoint",
+      "slack",
+      "ssh",
+      "trello"
     ]
   },
   "description": null,
@@ -21,6 +44,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-r",
       "value_kind": "none"
     },
@@ -28,6 +52,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-n",
       "value_kind": "none"
     },
@@ -35,6 +60,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-u",
       "value_kind": "none"
     },
@@ -42,6 +68,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-f",
       "value_kind": "none"
     },
@@ -49,6 +76,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-k",
       "value_kind": "text"
     },
@@ -56,6 +84,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-t",
       "value_kind": "text"
     },
@@ -63,6 +92,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-h",
       "value_kind": "none"
     },
@@ -70,6 +100,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-V",
       "value_kind": "none"
     },
@@ -77,6 +108,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-s",
       "value_kind": "none"
     },
@@ -84,12 +116,14 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-M",
       "value_kind": "none"
     }
   ],
   "positional": [],
   "rest": {
-    "kind": "path"
+    "kind": "path",
+    "provided_by": []
   }
 }

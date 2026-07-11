@@ -29,12 +29,12 @@ function indexType(idx: Record<string, unknown>): string {
   return IndexType.BTREE
 }
 
-export interface DatabaseJsonCollection {
+interface DatabaseJsonCollection {
   name: string
   document_count: number
 }
 
-export interface DatabaseJsonView {
+interface DatabaseJsonView {
   name: string
 }
 
@@ -62,7 +62,7 @@ export async function buildDatabaseJson(
   return { database, collections, views }
 }
 
-export interface CollectionSchemaIndex {
+interface CollectionSchemaIndex {
   name: string | undefined
   keys: Record<string, unknown>
   type: string

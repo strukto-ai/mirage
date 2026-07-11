@@ -39,10 +39,13 @@ import {
   handleSleep,
   handleSource,
   handleTest,
+  handleTimeout,
   handleTrap,
   handleUnset,
   handleWhoami,
+  handleXargs,
 } from './builtins/index.ts'
+import { parseDuration } from './builtins/timeout.ts'
 import { ReturnSignal } from './command.ts'
 
 function wireMount(mount: MountEntry): void {
@@ -146,27 +149,27 @@ describe('handleEcho', () => {
   })
 
   it('-n suppresses trailing newline', () => {
-    const [out] = handleEcho(['hi'], true, false)
+    const [out] = handleEcho(['-n', 'hi'])
     expect(decode(out as Uint8Array)).toBe('hi')
   })
 
   it('-e interprets backslash escapes', () => {
-    const [out] = handleEcho(['hello\\nworld'], false, true)
+    const [out] = handleEcho(['-e', 'hello\\nworld'])
     expect(decode(out as Uint8Array)).toBe('hello\nworld\n')
   })
 
   it('-e \\t becomes tab', () => {
-    const [out] = handleEcho(['a\\tb'], false, true)
+    const [out] = handleEcho(['-e', 'a\\tb'])
     expect(decode(out as Uint8Array)).toBe('a\tb\n')
   })
 
   it('-e unknown escape passes through literally', () => {
-    const [out] = handleEcho(['\\z'], false, true)
+    const [out] = handleEcho(['-e', '\\z'])
     expect(decode(out as Uint8Array)).toBe('\\z\n')
   })
 
   it('-e \\c stops output at that point', () => {
-    const [out] = handleEcho(['hi\\cgone'], false, true)
+    const [out] = handleEcho(['-e', 'hi\\cgone'])
     expect(decode(out as Uint8Array)).toBe('hi\n')
   })
 })
@@ -383,14 +386,14 @@ describe('handleShift', () => {
   it('shifts call-stack positional args', () => {
     const cs = new CallStack()
     cs.push(['a', 'b', 'c', 'd'])
-    handleShift(2, cs, null)
+    handleShift(['2'], cs, null)
     expect(cs.getAllPositional()).toEqual(['c', 'd'])
   })
 
   it('shifts session.positionalArgs when call stack empty', () => {
     const cs = new CallStack()
     const s = new Session({ sessionId: 'test', positionalArgs: ['x', 'y', 'z'] })
-    handleShift(1, cs, s)
+    handleShift(['1'], cs, s)
     expect(s.positionalArgs).toEqual(['y', 'z'])
   })
 })
@@ -417,9 +420,9 @@ describe('handleTrap / handleReturn / handleLocal', () => {
   })
 
   it('handleReturn throws ReturnSignal with exit code', () => {
-    expect(() => handleReturn(42)).toThrow(ReturnSignal)
+    expect(() => handleReturn(['42'])).toThrow(ReturnSignal)
     try {
-      handleReturn(42)
+      handleReturn(['42'])
     } catch (err) {
       if (err instanceof ReturnSignal) expect(err.exitCode).toBe(42)
     }
@@ -580,3 +583,224 @@ describe('handleMan', () => {
     expect(matches).toBe(1)
   })
 })
+
+function fakeShell(exitCodes: number[] = []): {
+  lines: string[]
+  fn: (script: string, opts: { sessionId: string }) => Promise<IOResult>
+} {
+  const lines: string[] = []
+  return {
+    lines,
+    fn: (script: string) => {
+      lines.push(script)
+      const code = exitCodes[lines.length - 1] ?? 0
+      return Promise.resolve(
+        new IOResult({ stdout: new TextEncoder().encode(`ran:${script}\n`), exitCode: code }),
+      )
+    },
+  }
+}
+
+describe('handleEcho GNU option rules', () => {
+  it('trailing -n prints literally', () => {
+    const [out] = handleEcho(['hi', '-n'])
+    expect(decode(out as Uint8Array)).toBe('hi -n\n')
+  })
+
+  it('unknown char makes the word literal', () => {
+    const [out] = handleEcho(['-nq', 'hi'])
+    expect(decode(out as Uint8Array)).toBe('-nq hi\n')
+  })
+
+  it('cluster -ne applies both', () => {
+    const [out] = handleEcho(['-ne', 'a\\tb'])
+    expect(decode(out as Uint8Array)).toBe('a\tb')
+  })
+
+  it('last of -e/-E wins', () => {
+    const [a] = handleEcho(['-eE', 'a\\tb'])
+    expect(decode(a as Uint8Array)).toBe('a\\tb\n')
+    const [b] = handleEcho(['-Ee', 'a\\tb'])
+    expect(decode(b as Uint8Array)).toBe('a\tb\n')
+  })
+})
+
+describe('handleShift / handleReturn argument checks', () => {
+  it('shift with a non-numeric arg errors like bash', async () => {
+    const [, io] = handleShift(['x'], null, new Session({ sessionId: 'test' }))
+    expect(io.exitCode).toBe(1)
+    expect(decode(await materialize(io.stderr))).toBe('shift: x: numeric argument required\n')
+  })
+
+  it('shift with two args errors', async () => {
+    const [, io] = handleShift(['1', '2'], null, new Session({ sessionId: 'test' }))
+    expect(io.exitCode).toBe(1)
+    expect(decode(await materialize(io.stderr))).toBe('shift: too many arguments\n')
+  })
+
+  it('return with a non-numeric arg raises 2 with a message', () => {
+    try {
+      handleReturn(['x'])
+      expect.unreachable()
+    } catch (err) {
+      if (!(err instanceof ReturnSignal)) throw err
+      expect(err.exitCode).toBe(2)
+      expect(decode(err.stderr)).toBe('return: x: numeric argument required\n')
+    }
+  })
+})
+
+describe('handleRead options', () => {
+  it('-r is consumed, not a variable', async () => {
+    const s = new Session({ sessionId: 'test' })
+    const stdin = new TextEncoder().encode('hello world\n')
+    const [, io] = await handleRead(['-r', 'v'], s, stdin)
+    expect(io.exitCode).toBe(0)
+    expect(s.env.v).toBe('hello world')
+    expect('-r' in s.env).toBe(false)
+  })
+
+  it('unknown option errors like bash', async () => {
+    const s = new Session({ sessionId: 'test' })
+    const [, io] = await handleRead(['-q', 'v'], s, new TextEncoder().encode('x\n'))
+    expect(io.exitCode).toBe(2)
+    expect(decode(await materialize(io.stderr))).toBe('read: -q: invalid option\n')
+  })
+
+  it('defaults to REPLY', async () => {
+    const s = new Session({ sessionId: 'test' })
+    await handleRead([], s, new TextEncoder().encode('hi\n'))
+    expect(s.env.REPLY).toBe('hi')
+  })
+})
+
+describe('handleXargs', () => {
+  const session = new Session({ sessionId: 'test' })
+
+  it('-n1 batches one arg per run', async () => {
+    const shell = fakeShell()
+    const [, io] = await handleXargs(shell.fn, ['-n1', 'echo'], session, aBC())
+    expect(shell.lines).toEqual(['echo a', 'echo b', 'echo c'])
+    expect(io.exitCode).toBe(0)
+  })
+
+  it('failing invocation exits 123 but continues', async () => {
+    const shell = fakeShell([1, 0])
+    const [, io] = await handleXargs(shell.fn, ['-n1', 'wc'], session, ab())
+    expect(shell.lines).toEqual(['wc a', 'wc b'])
+    expect(io.exitCode).toBe(123)
+  })
+
+  it('command-not-found stops with 127', async () => {
+    const shell = fakeShell([127, 0])
+    const [, io] = await handleXargs(shell.fn, ['-n1', 'nope'], session, ab())
+    expect(shell.lines).toEqual(['nope a'])
+    expect(io.exitCode).toBe(127)
+  })
+
+  it('-r skips the run on empty input', async () => {
+    const shell = fakeShell()
+    const [, io] = await handleXargs(shell.fn, ['-r', 'echo', 'hi'], session, new Uint8Array())
+    expect(shell.lines).toEqual([])
+    expect(io.exitCode).toBe(0)
+  })
+
+  it('-0 splits on NUL', async () => {
+    const shell = fakeShell()
+    await handleXargs(shell.fn, ['-0', 'echo'], session, new TextEncoder().encode('a b\0c\0'))
+    expect(shell.lines).toEqual(["echo 'a b' c"])
+  })
+
+  it('-d splits on the delimiter', async () => {
+    const shell = fakeShell()
+    await handleXargs(shell.fn, ['-d,', 'echo'], session, new TextEncoder().encode('a,b,c'))
+    expect(shell.lines).toEqual(['echo a b c'])
+  })
+
+  it('invalid option exits 1 without running', async () => {
+    const shell = fakeShell()
+    const [, io] = await handleXargs(shell.fn, ['-q', 'echo'], session, ab())
+    expect(io.exitCode).toBe(1)
+    expect(decode(await materialize(io.stderr))).toBe("xargs: invalid option -- 'q'\n")
+    expect(shell.lines).toEqual([])
+  })
+
+  it('-n0 is rejected', async () => {
+    const shell = fakeShell()
+    const [, io] = await handleXargs(shell.fn, ['-n0', 'echo'], session, ab())
+    expect(io.exitCode).toBe(1)
+    expect(decode(await materialize(io.stderr))).toBe(
+      'xargs: value 0 for -n option should be >= 1\n',
+    )
+  })
+})
+
+describe('handleTimeout', () => {
+  const session = new Session({ sessionId: 'test' })
+
+  it('parses duration units', () => {
+    expect(parseDuration('1')).toBe(1)
+    expect(parseDuration('0.5')).toBe(0.5)
+    expect(parseDuration('2s')).toBe(2)
+    expect(parseDuration('2m')).toBe(120)
+    expect(parseDuration('1h')).toBe(3600)
+    expect(parseDuration('1d')).toBe(86400)
+    expect(parseDuration('.5')).toBe(0.5)
+  })
+
+  it('rejects garbage durations', () => {
+    expect(parseDuration('xx')).toBeNull()
+    expect(parseDuration('-1')).toBeNull()
+    expect(parseDuration('1x')).toBeNull()
+    expect(parseDuration('')).toBeNull()
+  })
+
+  it('passes through when the command finishes in time', async () => {
+    const shell = fakeShell([3])
+    const [stdout, io] = await handleTimeout(shell.fn, ['5', 'wc', '-l'], session)
+    expect(shell.lines).toEqual(['wc -l'])
+    expect(io.exitCode).toBe(3)
+    expect(decode(stdout as Uint8Array)).toBe('ran:wc -l\n')
+  })
+
+  it('exits 124 on overrun', async () => {
+    const slow = (): Promise<IOResult> =>
+      new Promise((resolve) =>
+        setTimeout(() => {
+          resolve(new IOResult())
+        }, 1000),
+      )
+    const [, io] = await handleTimeout(slow, ['0.05', 'sleep', '1'], session)
+    expect(io.exitCode).toBe(124)
+  })
+
+  it('invalid duration exits 125', async () => {
+    const shell = fakeShell()
+    const [, io] = await handleTimeout(shell.fn, ['xx', 'sleep', '1'], session)
+    expect(io.exitCode).toBe(125)
+    expect(decode(await materialize(io.stderr))).toBe("timeout: invalid time interval 'xx'\n")
+    expect(shell.lines).toEqual([])
+  })
+
+  it('missing operand exits 125', async () => {
+    const shell = fakeShell()
+    const [, io] = await handleTimeout(shell.fn, ['5'], session)
+    expect(io.exitCode).toBe(125)
+    expect(decode(await materialize(io.stderr))).toBe('timeout: missing operand\n')
+  })
+
+  it('signal option is rejected', async () => {
+    const shell = fakeShell()
+    const [, io] = await handleTimeout(shell.fn, ['-s', 'KILL', '1', 'sleep', '3'], session)
+    expect(io.exitCode).toBe(125)
+    expect(decode(await materialize(io.stderr))).toBe("timeout: unsupported option -- '-s'\n")
+  })
+})
+
+function aBC(): Uint8Array {
+  return new TextEncoder().encode('a b c')
+}
+
+function ab(): Uint8Array {
+  return new TextEncoder().encode('a b')
+}

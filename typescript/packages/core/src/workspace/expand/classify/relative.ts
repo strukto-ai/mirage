@@ -14,10 +14,9 @@
 
 import { PathSpec } from '../../../types.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
+import { hasGlob } from '../../../utils/glob_walk.ts'
 import { posixNormpath } from '../../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
-
-export const GLOB_CHARS: readonly string[] = ['*', '?', '[']
 
 /**
  * Build the PathSpec for a word typed relative to cwd.
@@ -36,7 +35,7 @@ export function relativeSpec(
   const path = posixNormpath(`${rstripSlash(cwd)}/${word}`)
   if (registry.mountFor(path) === null) return word
   const lastSlash = path.lastIndexOf('/')
-  if (GLOB_CHARS.some((ch) => word.includes(ch))) {
+  if (hasGlob(word)) {
     return new PathSpec({
       resourcePath: stripSlash(path),
       virtual: path,

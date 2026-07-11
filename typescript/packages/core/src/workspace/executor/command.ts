@@ -51,7 +51,7 @@ import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 type Flags = Record<string, string | boolean | string[]>
 
-export interface RunOnMountCtx {
+interface RunOnMountCtx {
   registry: MountRegistry
   session: Session
   dispatch: DispatchFn
@@ -60,7 +60,7 @@ export interface RunOnMountCtx {
   pythonRuntime?: PyodideRuntime
 }
 
-export interface RunOnMountOpts {
+interface RunOnMountOpts {
   stdin?: ByteSource | null
   resolveHint?: PathSpec | null
   mount?: MountEntry | null
@@ -88,7 +88,7 @@ function scalarFindFlags(flagKwargs: Flags): Flags {
 // mount. `resolveHint` resolves the mount when `paths` is empty (a stream
 // command running in stdin mode); a pre-resolved `mount` skips resolution and
 // grant checks, which the caller already performed.
-export async function runOnMount(
+async function runOnMount(
   ctx: RunOnMountCtx,
   cmdName: string,
   paths: PathSpec[],
@@ -188,10 +188,12 @@ export async function runOnMount(
 
 export class ReturnSignal extends Error {
   readonly exitCode: number
-  constructor(exitCode: number) {
+  readonly stderr: Uint8Array
+  constructor(exitCode: number, stderr: Uint8Array = new Uint8Array()) {
     super('return')
     this.name = 'ReturnSignal'
     this.exitCode = exitCode
+    this.stderr = stderr
   }
 }
 
@@ -739,6 +741,9 @@ async function executeShellFunction(
         }
       } catch (err) {
         if (err instanceof ReturnSignal) {
+          if (err.stderr.length > 0) {
+            mergedIo = await mergedIo.merge(new IOResult({ stderr: err.stderr }))
+          }
           mergedIo.exitCode = err.exitCode
           break
         }

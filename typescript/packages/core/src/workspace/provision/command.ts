@@ -222,5 +222,3 @@ export async function handleCommandProvision(
 
   return result
 }
-
-export { checkCacheHits }

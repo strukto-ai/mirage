@@ -45,7 +45,7 @@ function stripMeta(d: DiffResult): DiffResult {
   return { added: keep(d.added), modified: keep(d.modified), deleted: keep(d.deleted) }
 }
 
-export async function snapshotTreeFromState(
+async function snapshotTreeFromState(
   store: VersionStore,
   state: WorkspaceStateDict,
 ): Promise<string> {

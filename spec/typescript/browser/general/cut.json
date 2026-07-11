@@ -1,23 +1,41 @@
 {
   "_meta": {
     "filetypes": [
+      ".arrow",
       ".feather",
       ".h5",
+      ".hdf5",
+      ".ipc",
       ".parquet"
     ],
     "has_aggregate": false,
-    "has_provision": false,
+    "has_provision": true,
     "has_write": false,
     "resources": [
       "box",
       "chroma",
       "databricks_volume",
+      "discord",
       "dropbox",
+      "gdocs",
       "gdrive",
       "github",
+      "github_ci",
+      "gmail",
+      "gsheets",
+      "gslides",
+      "lancedb",
+      "langfuse",
+      "linear",
+      "mongodb",
+      "notion",
       "opfs",
+      "postgres",
+      "qdrant",
       "ram",
-      "s3"
+      "s3",
+      "slack",
+      "trello"
     ]
   },
   "description": null,
@@ -27,6 +45,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-f",
       "value_kind": "text"
     },
@@ -34,6 +53,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-d",
       "value_kind": "text"
     },
@@ -41,6 +61,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-c",
       "value_kind": "text"
     },
@@ -48,6 +69,7 @@
       "description": null,
       "long": "--complement",
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": null,
       "value_kind": "none"
     },
@@ -55,12 +77,14 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-z",
       "value_kind": "none"
     }
   ],
   "positional": [],
   "rest": {
-    "kind": "path"
+    "kind": "path",
+    "provided_by": []
   }
 }

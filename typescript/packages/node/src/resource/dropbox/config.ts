@@ -27,7 +27,7 @@ export interface DropboxConfigRedacted {
   refreshToken: '<REDACTED>'
 }
 
-export const DropboxConfigSchema = z.object({
+const DropboxConfigSchema = z.object({
   clientId: z.string(),
   clientSecret: secretStr(),
   refreshToken: secretStr(),

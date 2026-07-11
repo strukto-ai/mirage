@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey, mountPrefixOf, stripMount } from '../../../utils/key_prefix.ts'
+import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { awkStream } from './awk_helper.ts'
+import { USAGE, type AwkFlags } from './awk_types.ts'
 import { resolveSource } from '../utils/stream.ts'
 
 const ENC = new TextEncoder()
@@ -24,62 +25,64 @@ const DEC = new TextDecoder('utf-8', { fatal: false })
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 
+function parseFlags(opts: CommandOpts): AwkFlags {
+  const rawV = opts.flags.v
+  const assignments = Array.isArray(rawV) ? rawV : typeof rawV === 'string' ? [rawV] : []
+  const rawF = opts.flags.f
+  const programFiles = Array.isArray(rawF) ? rawF : typeof rawF === 'string' ? [rawF] : []
+  return {
+    fieldSeparator: typeof opts.flags.F === 'string' ? opts.flags.F : null,
+    assignments,
+    programFiles,
+  }
+}
+
 export async function awkGeneric(
   paths: PathSpec[],
   texts: string[],
   opts: CommandOpts,
   stream: Stream,
 ): Promise<CommandFnResult> {
-  const fFlag = typeof opts.flags.f === 'string' ? opts.flags.f : null
+  const f = parseFlags(opts)
   let program: string
-  let dataPaths: string[]
-  if (fFlag !== null) {
-    const programPath = fFlag
+  if (f.programFiles.length > 0) {
     const mountPrefix =
       (paths[0] === undefined
         ? undefined
         : mountPrefixOf(paths[0].virtual, paths[0].resourcePath)) ??
       opts.mountPrefix ??
       ''
-    const programSpec = PathSpec.fromStrPath(programPath, mountKey(programPath, mountPrefix))
-    try {
-      program = DEC.decode(await materialize(stream(programSpec))).trim()
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
+    const pieces: string[] = []
+    for (const programFile of f.programFiles) {
+      const programSpec = PathSpec.fromStrPath(programFile, mountKey(programFile, mountPrefix))
+      try {
+        pieces.push(DEC.decode(await materialize(stream(programSpec))).trim())
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(`${msg}\n`) })]
+      }
     }
-    dataPaths = [...texts.map((t) => stripMount(t, mountPrefix)), ...paths.map((p) => p.mountPath)]
+    program = pieces.join('\n')
   } else if (texts.length > 0 && texts[0] !== undefined) {
     program = texts[0]
-    dataPaths = paths.map((p) => p.mountPath)
   } else {
-    return [
-      null,
-      new IOResult({
-        exitCode: 1,
-        stderr: ENC.encode(`awk: usage: awk [-F fs] [-v var=val] 'program' [file ...]\n`),
-      }),
-    ]
+    return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(`${USAGE}\n`) })]
   }
-  const fs = typeof opts.flags.F === 'string' ? opts.flags.F : ' '
+
   const variables: Record<string, string> = {}
-  const rawV = opts.flags.v
-  const assignments = Array.isArray(rawV) ? rawV : typeof rawV === 'string' ? [rawV] : []
-  for (const assignment of assignments) {
-    if (typeof assignment !== 'string') continue
+  for (const assignment of f.assignments) {
     const eq = assignment.indexOf('=')
     if (eq > 0) variables[assignment.slice(0, eq)] = assignment.slice(eq + 1)
   }
-  const cache: string[] = []
-  let source: AsyncIterable<Uint8Array>
-  if (dataPaths.length > 0) {
-    const firstPath = dataPaths[0]
-    if (firstPath === undefined) return [null, new IOResult()]
-    const spec = PathSpec.fromStrPath(firstPath)
-    source = stream(spec)
-    cache.push(firstPath)
+
+  let sources: AsyncIterable<Uint8Array>[]
+  let cache: string[]
+  if (paths.length > 0) {
+    sources = paths.map((p) => stream(p))
+    cache = paths.map((p) => p.mountPath)
   } else {
-    source = resolveSource(opts.stdin)
+    sources = [resolveSource(opts.stdin)]
+    cache = []
   }
-  return [awkStream(source, program, fs, variables), new IOResult({ cache })]
+  return [awkStream(sources, program, f.fieldSeparator, variables), new IOResult({ cache })]
 }

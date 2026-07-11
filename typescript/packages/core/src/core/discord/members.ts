@@ -20,7 +20,7 @@ export interface DiscordMember {
   [key: string]: unknown
 }
 
-export function listMembersStream(
+function listMembersStream(
   accessor: DiscordAccessor,
   guildId: string,
   pageSize = 1000,

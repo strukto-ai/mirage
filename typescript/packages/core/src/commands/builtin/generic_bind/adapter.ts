@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { rekey } from '../../../utils/key_prefix.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import type { FindOptions } from '../../../resource/base.ts'
-import { type FileStat, PathSpec } from '../../../types.ts'
-import { fnmatch } from '../../../utils/fnmatch.ts'
+import type { PathSpec } from '../../../types.ts'
+import { type FileStat } from '../../../types.ts'
+import { resolveGlobWith } from '../../../utils/glob_walk.ts'
 import type { AggregateFn, CommandFnResult, CommandOpts, ProvisionFn } from '../../config.ts'
 
 export type ReaddirOp<A extends Accessor = Accessor> = (
@@ -26,13 +26,13 @@ export type ReaddirOp<A extends Accessor = Accessor> = (
   index?: IndexCacheStore,
 ) => Promise<string[]>
 
-export type ReadBytesOp<A extends Accessor = Accessor> = (
+type ReadBytesOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   index?: IndexCacheStore,
 ) => Promise<Uint8Array>
 
-export type ReadStreamOp<A extends Accessor = Accessor> = (
+type ReadStreamOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   index?: IndexCacheStore,
@@ -44,50 +44,47 @@ export type StatOp<A extends Accessor = Accessor> = (
   index?: IndexCacheStore,
 ) => Promise<FileStat>
 
-export type WriteOp<A extends Accessor = Accessor> = (
+type WriteOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   data: Uint8Array,
 ) => Promise<void>
 
-export type ExistsOp<A extends Accessor = Accessor> = (
-  accessor: A,
-  path: PathSpec,
-) => Promise<boolean>
+type ExistsOp<A extends Accessor = Accessor> = (accessor: A, path: PathSpec) => Promise<boolean>
 
-export type PathOp<A extends Accessor = Accessor> = (accessor: A, path: PathSpec) => Promise<void>
+type PathOp<A extends Accessor = Accessor> = (accessor: A, path: PathSpec) => Promise<void>
 
-export type MkdirOp<A extends Accessor = Accessor> = (
+type MkdirOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   parents?: boolean,
 ) => Promise<void>
 
-export type RenameOp<A extends Accessor = Accessor> = (
+type RenameOp<A extends Accessor = Accessor> = (
   accessor: A,
   src: PathSpec,
   dst: PathSpec,
 ) => Promise<void>
 
-export type CopyOp<A extends Accessor = Accessor> = (
+type CopyOp<A extends Accessor = Accessor> = (
   accessor: A,
   src: PathSpec,
   dst: PathSpec,
 ) => Promise<void>
 
-export type FindOp<A extends Accessor = Accessor> = (
+type FindOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   options: FindOptions,
 ) => Promise<string[]>
 
-export type DuTotalOp<A extends Accessor = Accessor> = (
+type DuTotalOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   index?: IndexCacheStore,
 ) => Promise<number>
 
-export type DuAllOp<A extends Accessor = Accessor> = (
+type DuAllOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   index?: IndexCacheStore,
@@ -103,33 +100,8 @@ export function makeResolveGlob<A extends Accessor = Accessor>(
   readdir: ReaddirOp<A>,
   maxGlobMatches?: number,
 ): ResolveGlobOp<A> {
-  return async (accessor, paths, index) => {
-    const result: PathSpec[] = []
-    for (const p of paths) {
-      if (p.resolved) {
-        result.push(p)
-        continue
-      }
-      if (p.pattern !== null && p.pattern !== '') {
-        const entries = await readdir(accessor, p.dir, index)
-        const matched: PathSpec[] = []
-        for (const entry of entries) {
-          const base = entry.split('/').pop() ?? ''
-          if (fnmatch(base, p.pattern)) {
-            matched.push(PathSpec.fromStrPath(entry, rekey(p.virtual, p.resourcePath, entry)))
-          }
-        }
-        const capped =
-          maxGlobMatches !== undefined && matched.length > maxGlobMatches
-            ? matched.slice(0, maxGlobMatches)
-            : matched
-        result.push(...capped)
-      } else {
-        result.push(p)
-      }
-    }
-    return result
-  }
+  return async (accessor, paths, index) =>
+    resolveGlobWith(readdir, accessor, paths, index, maxGlobMatches)
 }
 
 export interface CommandIO<A extends Accessor = Accessor> {
@@ -175,16 +147,4 @@ export interface Builder<A extends Accessor = Accessor> {
   write?: boolean
   aggregate?: AggregateFn
   read?: boolean
-}
-
-export async function resolveOrEmpty<A extends Accessor = Accessor>(
-  ops: CommandIO<A>,
-  accessor: A,
-  paths: PathSpec[],
-  index?: IndexCacheStore,
-): Promise<PathSpec[]> {
-  if (paths.length > 0 && ops.isMounted(accessor)) {
-    return resolveGlobOf(ops)(accessor, paths, index)
-  }
-  return []
 }

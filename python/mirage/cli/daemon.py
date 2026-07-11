@@ -15,18 +15,16 @@
 import os
 import signal
 import time
-from pathlib import Path
 
 import httpx
 import typer
 
 from mirage.cli.client import make_client
 from mirage.cli.output import emit, fail, format_age
+from mirage.server.paths import pid_file_path
 
 app = typer.Typer(no_args_is_help=True,
                   help="Manage the daemon process lifecycle.")
-
-_PID_FILE = Path.home() / ".mirage" / "daemon.pid"
 
 
 def _format_status(d: dict) -> str:
@@ -64,10 +62,11 @@ def _format_kill(d: dict) -> str:
 
 
 def _read_pid() -> int | None:
-    if not _PID_FILE.exists():
+    pid_file = pid_file_path()
+    if not pid_file.exists():
         return None
     try:
-        return int(_PID_FILE.read_text().strip())
+        return int(pid_file.read_text().strip())
     except (ValueError, OSError):
         return None
 
