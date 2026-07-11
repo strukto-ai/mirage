@@ -36,6 +36,7 @@
       "mongodb",
       "notion",
       "postgres",
+      "qdrant",
       "ram",
       "redis",
       "s3",
@@ -51,6 +52,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-l",
       "value_kind": "none"
     },
@@ -58,6 +60,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-a",
       "value_kind": "none"
     },
@@ -65,6 +68,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-A",
       "value_kind": "none"
     },
@@ -72,6 +76,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-h",
       "value_kind": "none"
     },
@@ -79,6 +84,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-t",
       "value_kind": "none"
     },
@@ -86,6 +92,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-S",
       "value_kind": "none"
     },
@@ -93,6 +100,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-r",
       "value_kind": "none"
     },
@@ -100,6 +108,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-1",
       "value_kind": "none"
     },
@@ -107,6 +116,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-R",
       "value_kind": "none"
     },
@@ -114,6 +124,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-d",
       "value_kind": "none"
     },
@@ -121,12 +132,14 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-F",
       "value_kind": "none"
     }
   ],
   "positional": [],
   "rest": {
-    "kind": "path"
+    "kind": "path",
+    "provided_by": []
   }
 }

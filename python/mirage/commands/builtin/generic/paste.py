@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator, Awaitable, Callable
 from itertools import zip_longest
 
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, IOResult
@@ -11,7 +12,7 @@ async def paste(
     paths: list[PathSpec],
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
-    accessor: object = None,
+    accessor: Accessor | None = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     delimiter: str = "\t",
     serial: bool = False,

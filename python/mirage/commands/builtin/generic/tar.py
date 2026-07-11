@@ -3,6 +3,7 @@ import io
 import tarfile
 from collections.abc import Awaitable, Callable
 
+from mirage.accessor.base import Accessor
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -30,7 +31,7 @@ async def _create_archive(
     verbose: bool,
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
-    accessor: object,
+    accessor: Accessor,
 ) -> tuple[ByteSource | None, IOResult]:
     buf = io.BytesIO()
     names: list[str] = []
@@ -54,7 +55,7 @@ async def _list_archive(
     archive_path: str,
     mode_suffix: str,
     read_bytes: Callable[..., Awaitable[bytes]],
-    accessor: object,
+    accessor: Accessor,
 ) -> tuple[ByteSource | None, IOResult]:
     data = await read_bytes(accessor, archive_path)
     with tarfile.open(fileobj=io.BytesIO(data), mode=f"r{mode_suffix}") as tf:
@@ -71,7 +72,7 @@ async def _extract_archive(
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
     mkdir_fn: Callable[..., Awaitable[None]],
-    accessor: object,
+    accessor: Accessor,
 ) -> tuple[ByteSource | None, IOResult]:
     data = await read_bytes(accessor, archive_path)
     writes: dict[str, bytes] = {}
@@ -106,7 +107,7 @@ async def tar(
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
     mkdir_fn: Callable[..., Awaitable[None]],
-    accessor: object = None,
+    accessor: Accessor | None = None,
     c: bool = False,
     x: bool = False,
     t: bool = False,

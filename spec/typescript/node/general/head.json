@@ -1,12 +1,12 @@
 {
   "_meta": {
     "filetypes": [
+      ".arrow",
       ".feather",
       ".h5",
-      ".mp3",
-      ".ogg",
-      ".parquet",
-      ".wav"
+      ".hdf5",
+      ".ipc",
+      ".parquet"
     ],
     "has_aggregate": true,
     "has_provision": true,
@@ -36,6 +36,7 @@
       "mongodb",
       "notion",
       "postgres",
+      "qdrant",
       "ram",
       "redis",
       "s3",
@@ -51,6 +52,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": true,
+      "repeatable": false,
       "short": "-n",
       "value_kind": "text"
     },
@@ -58,12 +60,30 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-c",
       "value_kind": "text"
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-q",
+      "value_kind": "none"
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": "-v",
+      "value_kind": "none"
     }
   ],
   "positional": [],
   "rest": {
-    "kind": "path"
+    "kind": "path",
+    "provided_by": []
   }
 }

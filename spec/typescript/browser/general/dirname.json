@@ -2,21 +2,29 @@
   "_meta": {
     "filetypes": [],
     "has_aggregate": false,
-    "has_provision": false,
+    "has_provision": true,
     "has_write": false,
     "resources": [
       "box",
+      "chroma",
+      "databricks_volume",
       "discord",
       "dropbox",
       "gdocs",
       "gdrive",
       "github",
+      "github_ci",
       "gmail",
       "gsheets",
       "gslides",
+      "lancedb",
+      "langfuse",
       "linear",
+      "mongodb",
       "notion",
       "opfs",
+      "postgres",
+      "qdrant",
       "ram",
       "s3",
       "slack",
@@ -28,6 +36,7 @@
   "options": [],
   "positional": [],
   "rest": {
-    "kind": "text"
+    "kind": "text",
+    "provided_by": []
   }
 }

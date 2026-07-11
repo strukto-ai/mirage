@@ -1,6 +1,7 @@
 import re
 from collections.abc import AsyncIterator, Callable
 
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
@@ -38,7 +39,7 @@ async def _nl_stream(
 
 
 async def _nl_multi(
-    accessor: object,
+    accessor: Accessor,
     paths: list[PathSpec],
     read_stream: Callable[..., AsyncIterator[bytes]],
     body_numbering: str,
@@ -59,7 +60,7 @@ async def nl(
     paths: list[PathSpec],
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
-    accessor: object = None,
+    accessor: Accessor | None = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     body_numbering_raw: str | None = None,
     start_raw: str | None = None,

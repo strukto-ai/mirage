@@ -12,7 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import dataclass
 from enum import StrEnum
+
+from mirage.types import PathSpec
 
 
 class AwkCmpOp(StrEnum):
@@ -45,12 +48,24 @@ PRINT_STMT = "print"
 
 CMP_OP_PATTERN = r"==|!=|>=|<=|>|<"
 
+USAGE = "awk: usage: awk [-F fs] [-v var=val] 'program' [file ...]"
+
+
+@dataclass(frozen=True, slots=True)
+class AwkFlags:
+    field_separator: str | None
+    assignments: tuple[str, ...]
+    program_files: tuple[PathSpec, ...]
+
+
 __all__ = [
     "AwkBlock",
+    "AwkFlags",
     "AwkBoolOp",
     "AwkBuiltin",
     "AwkCmpOp",
     "CMP_OP_PATTERN",
     "FIELD_PREFIX",
     "PRINT_STMT",
+    "USAGE",
 ]

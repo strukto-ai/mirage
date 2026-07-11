@@ -13,6 +13,9 @@
     "has_provision": true,
     "has_write": false,
     "resources": [
+      "chroma",
+      "databricks_volume",
+      "dify",
       "discord",
       "disk",
       "email",
@@ -23,13 +26,21 @@
       "gmail",
       "gsheets",
       "gslides",
+      "hf_buckets",
+      "history",
+      "lancedb",
       "langfuse",
       "linear",
       "mongodb",
+      "nextcloud",
+      "notion",
+      "onedrive",
       "postgres",
+      "qdrant",
       "ram",
       "redis",
       "s3",
+      "sharepoint",
       "slack",
       "ssh",
       "trello"
@@ -42,6 +53,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-l",
       "value_kind": "none"
     },
@@ -49,6 +61,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-w",
       "value_kind": "none"
     },
@@ -56,6 +69,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-c",
       "value_kind": "none"
     },
@@ -63,6 +77,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-m",
       "value_kind": "none"
     },
@@ -70,12 +85,14 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-L",
       "value_kind": "none"
     }
   ],
   "positional": [],
   "rest": {
-    "kind": "path"
+    "kind": "path",
+    "provided_by": []
   }
 }

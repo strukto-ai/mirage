@@ -3,6 +3,7 @@ import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.diff_helper import _ed_script, _normal_diff
 from mirage.commands.builtin.utils.lines import split_lines_keepends
 from mirage.commands.errors import UsageError
@@ -31,7 +32,7 @@ def _child_spec(parent: PathSpec, name: str) -> PathSpec:
 
 
 async def _diff_pair(
-    accessor: object,
+    accessor: Accessor,
     path1: PathSpec | str,
     path2: PathSpec | str,
     read_bytes: Callable[..., Awaitable[bytes]],
@@ -70,7 +71,7 @@ async def _diff_pair(
 
 
 async def _diff_dirs(
-    accessor: object,
+    accessor: Accessor,
     dir_a: PathSpec,
     dir_b: PathSpec,
     read_bytes: Callable[..., Awaitable[bytes]],
@@ -128,7 +129,7 @@ async def diff(
     read_bytes: Callable[..., Awaitable[bytes]],
     readdir_fn: Callable[..., Awaitable[list[str]]],
     stat_fn: Callable[..., Awaitable[object]] | None = None,
-    accessor: object = None,
+    accessor: Accessor | None = None,
     index: object = None,
     i: bool = False,
     w: bool = False,

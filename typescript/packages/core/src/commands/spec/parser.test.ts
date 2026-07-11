@@ -439,6 +439,13 @@ describe('parseCommand — awk spec', () => {
     expect(p.paths()).toEqual(['/data/x.txt'])
   })
 
+  it('accumulates repeated -f program files', () => {
+    const p = parseCommand(specOf('awk'), ['-f', '/p1.awk', '-f', '/p2.awk', '/data/a.txt'], '/')
+    expect(p.flags['-f']).toEqual(['/p1.awk', '/p2.awk'])
+    expect(p.texts()).toEqual([])
+    expect(p.paths()).toEqual(['/data/a.txt'])
+  })
+
   it('frees the program slot when -f is present', () => {
     const p = parseCommand(specOf('awk'), ['-f', '/prog.awk', '/data/a.txt', '/data/b.txt'], '/')
     expect(p.texts()).toEqual([])

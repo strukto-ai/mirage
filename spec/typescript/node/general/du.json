@@ -6,18 +6,36 @@
     "has_write": false,
     "resources": [
       "box",
+      "chroma",
+      "databricks_volume",
+      "discord",
       "disk",
       "dropbox",
+      "email",
+      "gdocs",
       "gdrive",
       "github",
+      "github_ci",
+      "gmail",
+      "gsheets",
+      "gslides",
       "hf_buckets",
       "hf_datasets",
       "hf_models",
       "hf_spaces",
+      "lancedb",
+      "langfuse",
+      "linear",
+      "mongodb",
+      "notion",
+      "postgres",
+      "qdrant",
       "ram",
       "redis",
       "s3",
-      "ssh"
+      "slack",
+      "ssh",
+      "trello"
     ]
   },
   "description": null,
@@ -27,6 +45,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-h",
       "value_kind": "none"
     },
@@ -34,6 +53,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-s",
       "value_kind": "none"
     },
@@ -41,6 +61,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-a",
       "value_kind": "none"
     },
@@ -48,6 +69,7 @@
       "description": null,
       "long": "--max-depth",
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": null,
       "value_kind": "text"
     },
@@ -55,12 +77,14 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-c",
       "value_kind": "none"
     }
   ],
   "positional": [],
   "rest": {
-    "kind": "path"
+    "kind": "path",
+    "provided_by": []
   }
 }
