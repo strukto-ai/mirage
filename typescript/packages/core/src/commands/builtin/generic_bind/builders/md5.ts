@@ -14,7 +14,6 @@
 
 import { md5Generic } from '../../generic/md5.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
-import { withReadable } from '../../utils/operands.ts'
 
 export const MD5_BUILDER: Builder = {
   name: 'md5',
@@ -22,11 +21,6 @@ export const MD5_BUILDER: Builder = {
   fn: async (ops, accessor, paths, _texts, opts) => {
     const idx = opts.index ?? undefined
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return withReadable(
-      resolved,
-      (p) => ops.stat(accessor, p, idx),
-      'md5',
-      (readable) => md5Generic(readable, opts, (p) => ops.readStream(accessor, p, idx)),
-    )
+    return md5Generic(resolved, opts, (p) => ops.readStream(accessor, p, idx))
   },
 }

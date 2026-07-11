@@ -14,7 +14,6 @@
 
 import { fmtGeneric } from '../../generic/fmt.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
-import { withReadable } from '../../utils/operands.ts'
 
 export const FMT_BUILDER: Builder = {
   name: 'fmt',
@@ -22,11 +21,6 @@ export const FMT_BUILDER: Builder = {
   fn: async (ops, accessor, paths, _texts, opts) => {
     const idx = opts.index ?? undefined
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return withReadable(
-      resolved,
-      (p) => ops.stat(accessor, p, idx),
-      'fmt',
-      (readable) => fmtGeneric(readable, opts, (p) => ops.readStream(accessor, p, idx)),
-    )
+    return fmtGeneric(resolved, opts, (p) => ops.readStream(accessor, p, idx))
   },
 }

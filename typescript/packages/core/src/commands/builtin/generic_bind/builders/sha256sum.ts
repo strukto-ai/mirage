@@ -14,7 +14,6 @@
 
 import { sha256sumGeneric } from '../../generic/sha256sum.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
-import { withReadable } from '../../utils/operands.ts'
 
 export const SHA256SUM_BUILDER: Builder = {
   name: 'sha256sum',
@@ -22,11 +21,6 @@ export const SHA256SUM_BUILDER: Builder = {
   fn: async (ops, accessor, paths, _texts, opts) => {
     const idx = opts.index ?? undefined
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return withReadable(
-      resolved,
-      (p) => ops.stat(accessor, p, idx),
-      'sha256sum',
-      (readable) => sha256sumGeneric(readable, opts, (p) => ops.readStream(accessor, p, idx)),
-    )
+    return sha256sumGeneric(resolved, opts, (p) => ops.readStream(accessor, p, idx))
   },
 }

@@ -17,6 +17,7 @@ import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { cutStream, parseCutRanges } from '../cut_helper.ts'
 import { resolveSource } from '../utils/stream.ts'
+import { operandsIo, readOperands, singleChunk } from '../utils/operands.ts'
 
 const ENC = new TextEncoder()
 
@@ -28,11 +29,11 @@ async function* chainStreams(
   }
 }
 
-export function cutGeneric(
+export async function cutGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-): CommandFnResult {
+): Promise<CommandFnResult> {
   const f = typeof opts.flags.f === 'string' ? opts.flags.f : null
   const d = typeof opts.flags.d === 'string' ? opts.flags.d : null
   const c = typeof opts.flags.c === 'string' ? opts.flags.c : null
@@ -43,17 +44,18 @@ export function cutGeneric(
   const delim = d ?? '\t'
 
   if (paths.length > 0) {
-    // Each operand is cut independently and the outputs concatenate in
-    // operand order, like GNU (a file without a trailing newline never
-    // merges its last line into the next operand's first).
-    const cache: string[] = []
-    const outputs: AsyncIterable<Uint8Array>[] = []
-    for (const p of paths) {
-      outputs.push(cutStream(stream(p), delim, fields, chars, complement, z))
-      cache.push(p.virtual)
-    }
+    // Each operand is read eagerly (a missing one is reported and skipped,
+    // GNU-style), cut independently, and the outputs concatenate in operand
+    // order (a file without a trailing newline never merges its last line
+    // into the next operand's first).
+    const [ok, err] = await readOperands(paths, stream, 'cut')
+    const io = operandsIo(err, { cache: ok.map((o) => o.path.virtual) })
+    if (ok.length === 0 && err !== '') return [null, io]
+    const outputs = ok.map((o) =>
+      cutStream(singleChunk(o.data), delim, fields, chars, complement, z),
+    )
     const out: ByteSource = chainStreams(outputs)
-    return [out, new IOResult({ cache })]
+    return [out, io]
   }
   let source: AsyncIterable<Uint8Array>
   try {

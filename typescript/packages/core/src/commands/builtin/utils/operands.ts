@@ -15,7 +15,6 @@
 import { IOResult, materialize } from '../../../io/types.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
 import { fsErrorLine, isFsError } from '../../../utils/errors.ts'
-import type { CommandFnResult } from '../../config.ts'
 
 const ENC = new TextEncoder()
 
@@ -48,35 +47,47 @@ export async function splitReadable(
   return [readable, err]
 }
 
-// Read-family builder entry: split the operands, run the generic on the
-// readable ones, and attach the failed operands' stderr lines (exit 1, per
-// GNU). When every operand failed the generic never runs, so the command
-// does not fall back to stdin mode; when no operands were given at all the
-// generic keeps its stdin behavior.
-export async function withReadable(
-  paths: PathSpec[],
-  stat: Stat,
+export interface ReadOperand {
+  path: PathSpec
+  data: Uint8Array
+}
+
+// Read every operand eagerly, skipping the ones whose read fails with a
+// filesystem error: each failed operand becomes one GNU stderr line and the
+// remaining operands still process (the read-family rule). Lives inside the
+// generics so every wrapper — factory builders and bespoke backend commands
+// alike — inherits the behavior. Non-filesystem errors keep propagating.
+export async function readOperands(
+  paths: readonly PathSpec[],
+  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   cmdName: string,
-  run: (readable: PathSpec[]) => Promise<CommandFnResult> | CommandFnResult,
-): Promise<CommandFnResult> {
-  const [readable, err] = await splitReadable(paths, stat, cmdName)
-  if (readable.length === 0 && err !== '') {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(err) })]
+): Promise<[ReadOperand[], string]> {
+  const ok: ReadOperand[] = []
+  let err = ''
+  for (const p of paths) {
+    try {
+      ok.push({ path: p, data: await materialize(stream(p)) })
+    } catch (e) {
+      if (!isFsError(e)) throw e
+      err += fsErrorLine(cmdName, p, e)
+    }
   }
-  const result = await run(readable)
-  if (result === null) {
-    if (err === '') return null
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(err) })]
-  }
-  const [out, io] = result
-  if (err !== '') {
-    const existing = await materialize(io.stderr)
-    const line = ENC.encode(err)
-    const merged = new Uint8Array(existing.byteLength + line.byteLength)
-    merged.set(existing, 0)
-    merged.set(line, existing.byteLength)
-    io.stderr = merged
-    io.exitCode = 1
-  }
-  return [out, io]
+  return [ok, err]
+}
+
+// IOResult carrying the readOperands stderr lines: exit 1 when any operand
+// failed, exit 0 otherwise.
+export function operandsIo(err: string, init?: { cache?: string[] }): IOResult {
+  return new IOResult({
+    ...(init?.cache !== undefined ? { cache: init.cache } : {}),
+    exitCode: err === '' ? 0 : 1,
+    stderr: err === '' ? null : ENC.encode(err),
+  })
+}
+
+// A one-shot stream over already-materialized bytes, for feeding buffered
+// operands back through a stream transformer.
+// eslint-disable-next-line @typescript-eslint/require-await
+export async function* singleChunk(data: Uint8Array): AsyncIterable<Uint8Array> {
+  if (data.byteLength > 0) yield data
 }

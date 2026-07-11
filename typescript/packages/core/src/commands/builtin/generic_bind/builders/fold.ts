@@ -14,7 +14,6 @@
 
 import { foldGeneric } from '../../generic/fold.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
-import { withReadable } from '../../utils/operands.ts'
 
 export const FOLD_BUILDER: Builder = {
   name: 'fold',
@@ -22,11 +21,6 @@ export const FOLD_BUILDER: Builder = {
   fn: async (ops, accessor, paths, _texts, opts) => {
     const idx = opts.index ?? undefined
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return withReadable(
-      resolved,
-      (p) => ops.stat(accessor, p, idx),
-      'fold',
-      (readable) => foldGeneric(readable, opts, (p) => ops.readStream(accessor, p, idx)),
-    )
+    return foldGeneric(resolved, opts, (p) => ops.readStream(accessor, p, idx))
   },
 }

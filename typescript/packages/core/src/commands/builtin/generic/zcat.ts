@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { gunzip } from '../../../utils/compress.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { readStdinAsync } from '../utils/stream.ts'
+import { operandsIo, readOperands } from '../utils/operands.ts'
 
 const ENC = new TextEncoder()
 
@@ -28,10 +29,15 @@ export async function zcatGeneric(
   // Each operand decompresses independently and the outputs concatenate
   // in operand order, like GNU zcat.
   if (paths.length > 0) {
+    // A missing operand is reported and skipped; the remaining operands
+    // still decompress (GNU zcat).
+    const [ok, err] = await readOperands(paths, stream, 'zcat')
+    const io = operandsIo(err)
+    if (ok.length === 0 && err !== '') return [null, io]
     const parts: Uint8Array[] = []
     let total = 0
-    for (const p of paths) {
-      const part = await gunzip(await materialize(stream(p)))
+    for (const o of ok) {
+      const part = await gunzip(o.data)
       parts.push(part)
       total += part.byteLength
     }
@@ -42,7 +48,7 @@ export async function zcatGeneric(
       offset += part.byteLength
     }
     const result: ByteSource = out
-    return [result, new IOResult()]
+    return [result, io]
   }
   const stdinBytes = await readStdinAsync(opts.stdin)
   if (stdinBytes === null) {
