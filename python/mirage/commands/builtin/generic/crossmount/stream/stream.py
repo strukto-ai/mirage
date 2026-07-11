@@ -70,6 +70,12 @@ async def run_stream(cmd_name: str, scopes: list[PathSpec],
         merged_io = await merged_io.merge(io)
         if out is not None:
             sources.append(out)
+    # sort aborts on any failed operand like GNU (it needs every input
+    # before emitting anything), matching the single-mount builder.
+    if failed and cmd_name == Cmd.SORT:
+        merged_io.exit_code = merged_io.exit_code or 1
+        return None, merged_io
+
     body: ByteSource = async_chain(*sources)
 
     if cmd_name == Cmd.CAT and not _has_active_flags(flag_kwargs):

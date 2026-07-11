@@ -336,3 +336,27 @@ def test_stat_good_then_missing_keeps_row():
     assert "name=f.txt" in out
     assert err == "stat: /a/missing.txt: No such file or directory\n"
     assert code == 1
+
+
+def test_sed_good_then_missing_keeps_output():
+    out, err, code = _run(_make_numbered_ws(),
+                          "sed s/1/X/ /a/f.txt /a/missing.txt")
+    assert out == "X\n2\n"
+    assert err == "sed: /a/missing.txt: No such file or directory\n"
+    assert code == 1
+
+
+def test_cross_sed_good_then_missing_keeps_output():
+    out, err, code = _run(_make_cross_numbered_ws(),
+                          "sed s/1/X/ /a/f.txt /b/missing.txt")
+    assert out == "X\n2\n"
+    assert err == "sed: /b/missing.txt: No such file or directory\n"
+    assert code == 1
+
+
+def test_cross_sort_aborts_like_single_mount():
+    out, err, code = _run(_make_cross_numbered_ws(),
+                          "sort /a/f.txt /b/missing.txt")
+    assert out == ""
+    assert err == "sort: /b/missing.txt: No such file or directory\n"
+    assert code == 1

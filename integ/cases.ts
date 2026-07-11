@@ -1081,6 +1081,54 @@ export const NOT_FOUND_CASES: ReadonlyArray<readonly [string, string]> = [
   ["glob_ln_multi_source", "ln -s /data/sorted_*.txt /data/lnk_multi"],
 ];
 
+// Multi-file read commands process every operand, GNU-style: each case
+// prints exit, stdout, and stderr, so a command that drops a good operand's
+// output, stops at the first missing operand, or silently swallows the
+// error diverges from truth. Seeds live under /data/pr and are removed at
+// the end so later sections see an untouched /data. stat is excluded (its
+// output carries mtimes); it is pinned in cross_commands instead.
+export const PARTIAL_READ_CASES: ReadonlyArray<readonly [string, string]> = [
+  [
+    "pr_seed",
+    "mkdir -p /data/pr && printf '1\\n2\\n' > /data/pr/one.txt" +
+      " && printf '3\\n4\\n' > /data/pr/two.txt" +
+      " && printf 'hello\\n' > /data/pr/h1.txt" +
+      " && printf 'worlds\\n' > /data/pr/h2.txt" +
+      " && printf 'z\\n' > /data/pr/z1.txt" +
+      " && printf 'y\\n' > /data/pr/z2.txt" +
+      " && gzip /data/pr/z1.txt /data/pr/z2.txt",
+  ],
+  // every operand is processed, not just the first
+  ["pr_cut_multi", "cut -c1 /data/pr/one.txt /data/pr/two.txt"],
+  ["pr_tac_multi", "tac /data/pr/one.txt /data/pr/two.txt"],
+  ["pr_nl_multi", "nl /data/pr/one.txt /data/pr/two.txt"],
+  ["pr_strings_multi", "strings /data/pr/h1.txt /data/pr/h2.txt"],
+  ["pr_zcat_multi", "zcat /data/pr/z1.txt.gz /data/pr/z2.txt.gz"],
+  // good + missing keeps partial output, one stderr line, exit 1
+  ["pr_cat", "cat /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_head", "head -n 1 /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_tail", "tail -n 1 /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_wc", "wc -l /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_nl", "nl /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_md5", "md5 /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_sha256sum", "sha256sum /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_strings", "strings /data/pr/h1.txt /data/pr/missing.txt"],
+  ["pr_tac", "tac /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_rev", "rev /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_cut", "cut -c1 /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_expand", "expand /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_unexpand", "unexpand /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_fold", "fold /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_fmt", "fmt /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_zcat", "zcat /data/pr/z1.txt.gz /data/pr/missing.gz"],
+  ["pr_sed", "sed s/1/X/ /data/pr/one.txt /data/pr/missing.txt"],
+  // sort aborts (it needs every input before emitting anything)
+  ["pr_sort", "sort /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_missing_first", "cat /data/pr/missing.txt /data/pr/one.txt"],
+  ["pr_all_missing_wc", "wc -l /data/pr/m1.txt /data/pr/m2.txt"],
+  ["pr_cleanup", "rm -r /data/pr"],
+];
+
 const ENC = new TextEncoder();
 
 // Backend-agnostic not-found probe: every backend (whatever its mount prefix)
@@ -1152,6 +1200,16 @@ export async function runCases(ws: Workspace): Promise<void> {
     const err = new TextDecoder().decode(result.stderr).trim();
     process.stdout.write(`=== ${name} ===\n`);
     process.stdout.write(`exit=${result.exitCode}\n`);
+    if (err) process.stdout.write(err + "\n");
+  }
+
+  for (const [name, cmd] of PARTIAL_READ_CASES) {
+    const result = await ws.execute(cmd);
+    const out = new TextDecoder().decode(result.stdout);
+    const err = new TextDecoder().decode(result.stderr).trim();
+    process.stdout.write(`=== ${name} ===\n`);
+    process.stdout.write(`exit=${result.exitCode}\n`);
+    if (out) emitBody(out);
     if (err) process.stdout.write(err + "\n");
   }
 

@@ -252,6 +252,27 @@ async function checkPartialRead(
       code === 1 &&
       err === `stat: ${miss}: No such file or directory\n`,
   );
+  [out, err, code] = await run(ws, `cut -c1 ${src} ${miss}`);
+  check(
+    `${label}: cut keeps partial output`,
+    out === "a\n" && code === 1 && err === `cut: ${miss}: No such file or directory\n`,
+  );
+  [out, err, code] = await run(ws, `tac ${src} ${miss}`);
+  check(
+    `${label}: tac keeps partial output`,
+    out === "aaa\n" && code === 1 && err === `tac: ${miss}: No such file or directory\n`,
+  );
+  [out, err, code] = await run(ws, `sed s/a/X/ ${src} ${miss}`);
+  check(
+    `${label}: sed keeps partial output`,
+    out === "Xaa\n" && code === 1 && err === `sed: ${miss}: No such file or directory\n`,
+  );
+  // sort aborts on any failed operand, single- and cross-mount alike.
+  [out, err, code] = await run(ws, `sort ${src} ${miss}`);
+  check(
+    `${label}: sort aborts`,
+    out === "" && code === 1 && err === `sort: ${miss}: No such file or directory\n`,
+  );
 }
 
 // diff/cmp two files that live on different mounts: identical operands exit 0

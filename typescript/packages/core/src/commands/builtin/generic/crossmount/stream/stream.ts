@@ -66,6 +66,13 @@ export async function runStream(
     mergedIo = await mergedIo.merge(io)
     if (out !== null) sources.push(out)
   }
+  // sort aborts on any failed operand like GNU (it needs every input
+  // before emitting anything), matching the single-mount builder.
+  if (failed && cmdName === Cmd.SORT) {
+    mergedIo.exitCode = mergedIo.exitCode || 1
+    return [null, mergedIo]
+  }
+
   const body: ByteSource = asyncChain(...sources)
 
   if (cmdName === Cmd.CAT && !hasActiveFlags(flagKwargs)) {

@@ -117,6 +117,31 @@ describe('single-mount partial output on missing operands', () => {
 })
 
 describe('cross-mount partial output matches single-mount bytes', () => {
+  it('sed keeps partial output across mounts', async () => {
+    const ws = await makeWs()
+    try {
+      await ws.execute("printf '1\\n2\\n' > /a/n.txt")
+      const result = await ws.execute('sed s/1/X/ /a/n.txt /b/missing.txt')
+      expect(result.stdoutText).toBe('X\n2\n')
+      expect(result.stderrText).toBe('sed: /b/missing.txt: No such file or directory\n')
+      expect(result.exitCode).toBe(1)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('sort aborts across mounts like single-mount', async () => {
+    const ws = await makeWs()
+    try {
+      const result = await ws.execute('sort /a/f.txt /b/missing.txt')
+      expect(result.stdoutText).toBe('')
+      expect(result.stderrText).toBe('sort: /b/missing.txt: No such file or directory\n')
+      expect(result.exitCode).toBe(1)
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('nl reports its own name through the stream strategy', async () => {
     const ws = await makeWs()
     try {
@@ -293,6 +318,13 @@ describe('rest of the read family keeps partial output past missing', () => {
     const [out, err, code] = await runNumbered(['stat /a/f.txt /a/missing.txt'])
     expect(out).toContain('name=f.txt')
     expect(err).toBe('stat: /a/missing.txt: No such file or directory\n')
+    expect(code).toBe(1)
+  })
+
+  it('sed keeps partial output past missing', async () => {
+    const [out, err, code] = await runNumbered(['sed s/1/X/ /a/f.txt /a/missing.txt'])
+    expect(out).toBe('X\n2\n')
+    expect(err).toBe('sed: /a/missing.txt: No such file or directory\n')
     expect(code).toBe(1)
   })
 
