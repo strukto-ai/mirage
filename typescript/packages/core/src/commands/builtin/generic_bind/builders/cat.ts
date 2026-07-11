@@ -27,7 +27,9 @@ export const CAT_BUILDER: Builder = {
       resolved,
       texts,
       opts,
-      (p) => ops.stat(accessor, p, idx),
+      ops.local === true || ops.catPreflightStat !== false
+        ? (p) => ops.stat(accessor, p, idx)
+        : null,
       (p) => ops.readStream(accessor, p, idx),
     )
   },

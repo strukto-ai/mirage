@@ -41,6 +41,7 @@ _DATABRICKS_CMD_OPS = CommandIO(
     stat=_stat,
     is_mounted=lambda a: True,
     local=False,
+    cat_preflight_stat=False,
     write=_write,
     exists=_exists,
     mkdir=_mkdir,

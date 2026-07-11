@@ -54,11 +54,30 @@ describe('readStream', () => {
   })
 
   it('raises ENOENT for missing files', async () => {
-    const { fetch } = routedFetch(() => notFoundResponse())
+    const { fetch, calls } = routedFetch(() => notFoundResponse())
     vi.stubGlobal('fetch', fetch)
     const err = (await collect(readStream(makeAccessor(), spec('/volume/gone.bin'))).catch(
       (e: unknown) => e,
     )) as Error & { code?: string }
     expect(err.code).toBe('ENOENT')
+    expect(calls.map((call) => call.url)).toEqual([
+      'https://dbc.example.com/api/2.0/fs/files/Volumes/main/default/agent_files/root/gone.bin',
+      'https://dbc.example.com/api/2.0/fs/directories/Volumes/main/default/agent_files/root/gone.bin',
+    ])
+  })
+
+  it('raises EISDIR when a failed file download resolves as a directory', async () => {
+    const { fetch, calls } = routedFetch((call) =>
+      call.url.includes('/directories/') ? new Response(null, { status: 200 }) : notFoundResponse(),
+    )
+    vi.stubGlobal('fetch', fetch)
+    const err = (await collect(readStream(makeAccessor(), spec('/volume/folder'))).catch(
+      (e: unknown) => e,
+    )) as Error & { code?: string }
+    expect(err.code).toBe('EISDIR')
+    expect(calls.map((call) => call.url)).toEqual([
+      'https://dbc.example.com/api/2.0/fs/files/Volumes/main/default/agent_files/root/folder',
+      'https://dbc.example.com/api/2.0/fs/directories/Volumes/main/default/agent_files/root/folder',
+    ])
   })
 })

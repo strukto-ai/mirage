@@ -12,7 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+from typing import NoReturn
+
+from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
+from mirage.core.databricks_volume.errors import is_not_found
 from mirage.types import PathSpec
+from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 
@@ -37,3 +43,18 @@ def parent_path(path: PathSpec | str) -> PathSpec:
         original = parent_relative
     return PathSpec.from_str_path(original or "/",
                                   mount_key(original or "/", prefix))
+
+
+async def raise_not_found_or_directory(
+    accessor: DatabricksVolumeAccessor,
+    remote_path: str,
+    path: PathSpec,
+) -> NoReturn:
+    try:
+        await asyncio.to_thread(accessor.files.get_directory_metadata,
+                                remote_path)
+    except Exception as exc:
+        if is_not_found(exc):
+            raise enoent(path) from exc
+        raise
+    raise IsADirectoryError(path.virtual)
