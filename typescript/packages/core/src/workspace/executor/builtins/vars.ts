@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { SHELL_SPECS, parseShellOptions } from '../../../commands/spec/shell.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { asyncChain } from '../../../io/stream.ts'
 import { IOResult } from '../../../io/types.ts'
@@ -137,11 +138,35 @@ export function handleLocal(assignments: string[], session: Session): Result {
   return [null, new IOResult(), new ExecutionNode({ command: 'local', exitCode: 0 })]
 }
 
+function isShiftCount(word: string): boolean {
+  const body = word.startsWith('-') || word.startsWith('+') ? word.slice(1) : word
+  return /^\d+$/.test(body)
+}
+
+/** Shift positional parameters, with bash's argument checks. */
 export function handleShift(
-  n: number,
+  args: readonly string[],
   callStack: CallStack | null,
   session: Session | null = null,
 ): Result {
+  if (args.length > 1) {
+    const err = new TextEncoder().encode('shift: too many arguments\n')
+    return [
+      null,
+      new IOResult({ exitCode: 1, stderr: err }),
+      new ExecutionNode({ command: 'shift', exitCode: 1 }),
+    ]
+  }
+  const first = args[0]
+  if (first !== undefined && !isShiftCount(first)) {
+    const err = new TextEncoder().encode(`shift: ${first}: numeric argument required\n`)
+    return [
+      null,
+      new IOResult({ exitCode: 1, stderr: err }),
+      new ExecutionNode({ command: 'shift', exitCode: 1 }),
+    ]
+  }
+  const n = first !== undefined ? Number(first) : 1
   let shifted = false
   if (callStack !== null && callStack.getAllPositional().length > 0) {
     callStack.shift(n)
@@ -200,15 +225,42 @@ export function handleTrap(_session: Session): Result {
   return [null, new IOResult(), new ExecutionNode({ command: 'trap', exitCode: 0 })]
 }
 
-export function handleReturn(exitCode: number): Result {
-  throw new ReturnSignal(exitCode)
+/** Return from a function, with bash's argument check. */
+export function handleReturn(args: readonly string[]): Result {
+  const first = args[0]
+  if (first !== undefined && !isShiftCount(first)) {
+    // bash prints the error and the function returns 2.
+    throw new ReturnSignal(
+      2,
+      new TextEncoder().encode(`return: ${first}: numeric argument required\n`),
+    )
+  }
+  throw new ReturnSignal(first !== undefined ? Number(first) : 0)
 }
 
+/**
+ * Read one line into variables, with bash's option handling.
+ *
+ * Only -r is accepted (our read is already raw, so it is consumed with
+ * no effect); anything else errors like bash instead of being treated
+ * as a variable name.
+ */
 export async function handleRead(
-  variables: string[],
+  args: string[],
   session: Session,
   stdin: ByteSource | null,
 ): Promise<Result> {
+  const parse = parseShellOptions(SHELL_SPECS.read, args)
+  if (parse.invalid !== null) {
+    const token = parse.invalid.startsWith('--') ? parse.invalid : `-${parse.invalid}`
+    const err = new TextEncoder().encode(`read: ${token}: invalid option\n`)
+    return [
+      null,
+      new IOResult({ exitCode: 2, stderr: err }),
+      new ExecutionNode({ command: 'read', exitCode: 2 }),
+    ]
+  }
+  const variables = parse.operands.length > 0 ? parse.operands : ['REPLY']
   if (session.stdinBuffer === null && stdin !== null) {
     if (stdin instanceof Uint8Array) {
       session.stdinBuffer = new AsyncLineIterator(asyncChain(stdin))

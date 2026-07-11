@@ -135,7 +135,7 @@ export function normalizeSlug(value: string): string {
   return '/' + parts.join('/')
 }
 
-export function raiseOnCollisions(paths: ReadonlySet<string>): void {
+function raiseOnCollisions(paths: ReadonlySet<string>): void {
   for (const path of [...paths].sort()) {
     const parts = stripSlash(path).split('/')
     for (let i = 1; i < parts.length; i++) {
@@ -150,7 +150,7 @@ export function raiseOnCollisions(paths: ReadonlySet<string>): void {
   }
 }
 
-export function collectDirectories(paths: ReadonlySet<string>): Set<string> {
+function collectDirectories(paths: ReadonlySet<string>): Set<string> {
   const directories = new Set<string>(['/'])
   for (const path of paths) {
     const parts = stripSlash(path).split('/')
@@ -161,14 +161,14 @@ export function collectDirectories(paths: ReadonlySet<string>): Set<string> {
   return directories
 }
 
-export function metadataOrNull(metadata: Record<string, unknown>, key: string): string | null {
+function metadataOrNull(metadata: Record<string, unknown>, key: string): string | null {
   const value = metadata[key]
   if (typeof value === 'string') return value
   if (typeof value === 'number' || typeof value === 'boolean') return String(value)
   return null
 }
 
-export function metadataIntOrNull(metadata: Record<string, unknown>, key: string): number | null {
+function metadataIntOrNull(metadata: Record<string, unknown>, key: string): number | null {
   const value = metadata[key]
   if (typeof value === 'boolean' || value === undefined || value === null) return null
   if (typeof value === 'number') return Math.trunc(value)
@@ -176,7 +176,7 @@ export function metadataIntOrNull(metadata: Record<string, unknown>, key: string
   return null
 }
 
-export function mountRoot(prefix: string): string {
+function mountRoot(prefix: string): string {
   const stripped = rstripSlash(prefix)
   return stripped !== '' ? stripped : '/'
 }

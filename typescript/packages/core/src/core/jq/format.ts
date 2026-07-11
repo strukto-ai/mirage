@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export const JQ_EMPTY: unique symbol = Symbol('JQ_EMPTY')
-export type JqEmpty = typeof JQ_EMPTY
 
 const ENC = new TextEncoder()
 

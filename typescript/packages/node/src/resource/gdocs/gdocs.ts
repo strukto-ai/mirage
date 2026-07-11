@@ -43,7 +43,7 @@ export interface GDocsResourceState {
 export class GDocsResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.GDOCS
   readonly cachesReads: boolean = true
-  readonly indexTtl: number = 86_400
+  override readonly indexTtl: number = 86_400
   readonly prompt: string = GDOCS_PROMPT
   readonly writePrompt: string = GDOCS_WRITE_PROMPT
   readonly config: GDocsConfig

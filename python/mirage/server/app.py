@@ -27,6 +27,8 @@ from mirage.server.auth import (AuthConfig, AuthMiddleware, AuthMode,
 from mirage.server.host_validation import (HostHeaderMiddleware,
                                            resolve_allowed_hosts)
 from mirage.server.jobs import JobTable
+from mirage.server.paths import (default_snapshot_root, default_version_root,
+                                 pid_file_path)
 from mirage.server.registry import WorkspaceRegistry
 from mirage.server.routers import (execute, health, jobs, sessions, versions,
                                    workspaces)
@@ -35,21 +37,16 @@ from mirage.server.version.backend import LocalBackend
 logger = logging.getLogger(__name__)
 
 
-def _pid_file_path() -> Path:
-    return Path.home() / ".mirage" / "daemon.pid"
+def _write_pid_file(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(str(os.getpid()))
 
 
-def _write_pid_file() -> None:
-    p = _pid_file_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(str(os.getpid()))
-
-
-def _remove_pid_file() -> None:
+def _remove_pid_file(path: Path) -> None:
     try:
-        _pid_file_path().unlink(missing_ok=True)
+        path.unlink(missing_ok=True)
     except OSError:
-        logger.debug("could not remove pid file %s", _pid_file_path())
+        logger.debug("could not remove pid file %s", path)
 
 
 async def _watch_exit(exit_event: asyncio.Event) -> None:
@@ -67,14 +64,14 @@ async def _watch_exit(exit_event: asyncio.Event) -> None:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    _write_pid_file()
+    _write_pid_file(app.state.pid_file)
     exit_task = asyncio.create_task(_watch_exit(app.state.exit_event))
     try:
         yield
     finally:
         exit_task.cancel()
         await app.state.registry.close_all()
-        _remove_pid_file()
+        _remove_pid_file(app.state.pid_file)
 
 
 def build_app(idle_grace_seconds: float = 30.0,
@@ -82,7 +79,8 @@ def build_app(idle_grace_seconds: float = 30.0,
               allowed_hosts: list[str] | None = None,
               auth_config: AuthConfig | None = None,
               version_root: str | Path | None = None,
-              snapshot_root: str | Path | None = None) -> FastAPI:
+              snapshot_root: str | Path | None = None,
+              pid_file: str | Path | None = None) -> FastAPI:
     """Construct a daemon FastAPI app.
 
     The workspace registry is created eagerly so the app is usable
@@ -104,6 +102,13 @@ def build_app(idle_grace_seconds: float = 30.0,
         auth_config (AuthConfig | None): bearer/JWT auth config.
             ``None`` (default) resolves from ``MIRAGE_AUTH_MODE`` env
             and the mode-specific ``MIRAGE_*`` env vars.
+        version_root (str | Path | None): git repos root. ``None``
+            (default) uses ``$MIRAGE_HOME/repos`` (or ``~/.mirage/repos``).
+        snapshot_root (str | Path | None): snapshot root. ``None``
+            (default) uses ``$MIRAGE_HOME/snapshots``.
+        pid_file (str | Path | None): daemon pid file path. ``None``
+            (default) resolves ``$MIRAGE_PID_FILE`` then
+            ``$MIRAGE_HOME/daemon.pid`` (or ``~/.mirage/daemon.pid``).
 
     Returns:
         FastAPI: configured app with all routers mounted.
@@ -128,11 +133,12 @@ def build_app(idle_grace_seconds: float = 30.0,
         exit_event=app.state.exit_event,
     )
     app.state.jobs = JobTable()
-    vroot = (Path(version_root) if version_root is not None else Path.home() /
-             ".mirage" / "repos")
+    app.state.pid_file = pid_file_path(pid_file)
+    vroot = (Path(version_root)
+             if version_root is not None else default_version_root())
     app.state.version_backend = LocalBackend(vroot)
     app.state.snapshot_root = (Path(snapshot_root) if snapshot_root is not None
-                               else Path.home() / ".mirage" / "snapshots")
+                               else default_snapshot_root())
     app.include_router(workspaces.router)
     app.include_router(versions.router)
     app.include_router(sessions.router)

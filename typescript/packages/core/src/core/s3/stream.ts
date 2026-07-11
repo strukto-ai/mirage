@@ -103,5 +103,3 @@ export async function rangeRead(
   const { read } = await import('./read.ts')
   return read(accessor, path, undefined, { offset, size })
 }
-
-export { DEFAULT_CHUNK_SIZE }

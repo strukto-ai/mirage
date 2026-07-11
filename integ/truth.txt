@@ -930,6 +930,21 @@ eq=val
 engineer alice
 designer bob
 manager carol
+=== awk_default_fs ===
+1 leading
+1 trailing
+1 both
+=== awk_multifile ===
+1 hello
+2 world
+3 foo
+4 bar
+5 baz
+6 1
+7 2
+8 3
+=== awk_f_repeat ===
+51
 === sed_d_first ===
 world
 foo
@@ -1303,6 +1318,14 @@ baz
 20	/data/sub
 === grep_unknown_flag_ignored ===
 world
+=== grep_unknown_short_flag ===
+world
+=== head_numeric_shorthand ===
+hello
+world
+=== tail_numeric_shorthand ===
+bar
+baz
 === grep_cluster_attached ===
 2:world
 === grep_cluster_count ===
@@ -1818,6 +1841,56 @@ cat: *.nope: No such file or directory
 sub/x.txt
 === glob_ls_operand ===
 sub/x.txt
+=== xargs_n1 ===
+a
+b
+c
+=== xargs_n2 ===
+a b
+c d
+e
+=== xargs_invalid_opt ===
+xargs: invalid option -- 'q'
+code=1
+=== xargs_n0 ===
+xargs: value 0 for -n option should be >= 1
+code=1
+=== xargs_delim ===
+a b c
+=== xargs_empty_r ===
+code=0
+=== xargs_empty_default ===
+hi
+=== timeout_kill ===
+code=124
+=== timeout_ok ===
+fast
+=== timeout_bad_duration ===
+timeout: invalid time interval 'xx'
+code=125
+=== timeout_unsupported ===
+timeout: unsupported option -- '-s'
+code=125
+=== echo_trailing_dash_n ===
+hi -n
+=== echo_cluster ===
+ab	cd
+=== echo_unknown_cluster ===
+-nq hi
+=== shift_non_numeric ===
+shift: x: numeric argument required
+code=1
+=== shift_too_many ===
+shift: too many arguments
+code=1
+=== return_non_numeric ===
+return: x: numeric argument required
+code=2
+=== read_r_flag ===
+code=0
+=== read_invalid_opt ===
+read: -q: invalid option
+code=2
 === cp_multi_into_dir ===
 
 === cp_multi_verify_a ===
@@ -2150,6 +2223,10 @@ exit=2
 === rg_usage_exit ===
 exit=2
 === zgrep_usage_exit ===
+exit=2
+=== awk_usage_exit ===
+exit=2
+=== awk_f_missing_exit ===
 exit=2
 === grep_usage_no_input ===
 exit=2

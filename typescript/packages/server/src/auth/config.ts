@@ -14,7 +14,7 @@
 
 import { readFileSync } from 'node:fs'
 
-import { DEFAULT_TOKEN_FILE, readTokenFile } from './storage.ts'
+import { defaultTokenFile, readTokenFile } from './storage.ts'
 
 export const ENV_AUTH_MODE = 'MIRAGE_AUTH_MODE'
 export const ENV_AUTH_TOKEN = 'MIRAGE_AUTH_TOKEN'
@@ -34,7 +34,7 @@ export const AuthMode = {
 export type AuthMode = (typeof AuthMode)[keyof typeof AuthMode]
 
 const VALID_MODES: readonly AuthMode[] = Object.values(AuthMode)
-export const DEFAULT_CLOCK_SKEW_SECONDS = 5
+const DEFAULT_CLOCK_SKEW_SECONDS = 5
 
 export interface JWTConfig {
   readonly key: string
@@ -63,7 +63,7 @@ function pickEnv(opts: ResolveOptions | undefined): Record<string, string | unde
 }
 
 function pickTokenFile(opts: ResolveOptions | undefined): string {
-  return opts?.tokenFile ?? DEFAULT_TOKEN_FILE
+  return opts?.tokenFile ?? defaultTokenFile()
 }
 
 export function resolveLocalToken(opts?: ResolveOptions): string | undefined {

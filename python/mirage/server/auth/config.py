@@ -67,7 +67,7 @@ def resolve_local_token(
         env (Mapping[str, str] | None): environment to read
             ``MIRAGE_AUTH_TOKEN`` from. Defaults to ``os.environ``.
         token_file (Path | None): location of the token file.
-            Defaults to ``DEFAULT_TOKEN_FILE``.
+            Defaults to ``default_token_file()``.
 
     Returns:
         str | None: resolved token, or ``None`` if no source provides one.
@@ -77,7 +77,7 @@ def resolve_local_token(
     if val:
         return val
     path = (token_file
-            if token_file is not None else _storage.DEFAULT_TOKEN_FILE)
+            if token_file is not None else _storage.default_token_file())
     return _storage.read_token_file(path)
 
 
@@ -106,7 +106,7 @@ def resolve_auth_config(
         env (Mapping[str, str] | None): environment to read from.
             Defaults to ``os.environ``.
         token_file (Path | None): override the local-mode token file
-            location. Defaults to ``DEFAULT_TOKEN_FILE``.
+            location. Defaults to ``default_token_file()``.
 
     Returns:
         AuthConfig: resolved configuration.

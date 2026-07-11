@@ -23,6 +23,7 @@ copy-pasted body.
 import posixpath
 from collections.abc import AsyncIterator, Awaitable, Callable
 
+from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.sed import sed as generic_sed
 from mirage.commands.builtin.generic_bind.provision import make_sed_provision
@@ -70,7 +71,7 @@ GlobWhen = Callable[[object, IndexCacheStore | None], bool]
 
 async def _scripts_from_files(
     make_read: MakeRead,
-    accessor: object,
+    accessor: Accessor,
     index: IndexCacheStore | None,
     f_files: list[PathSpec],
 ) -> list[str]:
@@ -78,7 +79,7 @@ async def _scripts_from_files(
 
     Args:
         make_read (MakeRead): builds the backend read_bytes callable.
-        accessor (object): backend accessor.
+        accessor (Accessor | None): backend accessor.
         index (IndexCacheStore | None): optional cache index.
         f_files (list[PathSpec]): -f script-file paths.
     """
@@ -110,7 +111,7 @@ def make_sed(
         spec=SPECS["sed"],
         provision=make_sed_provision(stat_fn) if stat_fn is not None else None)
     async def sed(
-        accessor: object,
+        accessor: Accessor,
         paths: list[PathSpec],
         *texts: str,
         stdin: AsyncIterator[bytes] | bytes | None = None,

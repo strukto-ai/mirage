@@ -5,10 +5,30 @@
     "has_provision": true,
     "has_write": false,
     "resources": [
+      "box",
+      "chroma",
+      "databricks_volume",
+      "discord",
+      "dropbox",
+      "gdocs",
       "gdrive",
+      "github",
+      "github_ci",
+      "gmail",
+      "gsheets",
+      "gslides",
+      "lancedb",
+      "langfuse",
+      "linear",
+      "mongodb",
+      "notion",
       "opfs",
+      "postgres",
+      "qdrant",
       "ram",
-      "s3"
+      "s3",
+      "slack",
+      "trello"
     ]
   },
   "description": null,
@@ -18,6 +38,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-t",
       "value_kind": "text"
     },
@@ -25,12 +46,14 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-i",
       "value_kind": "none"
     }
   ],
   "positional": [],
   "rest": {
-    "kind": "path"
+    "kind": "path",
+    "provided_by": []
   }
 }

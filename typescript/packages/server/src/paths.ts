@@ -12,7 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { resolve, sep } from 'node:path'
+import { homedir } from 'node:os'
+import { join, resolve, sep } from 'node:path'
+import { ENV_HOME, ENV_PID_FILE } from './env.ts'
 
 export class PathOutsideRootError extends Error {
   constructor(message: string) {
@@ -22,6 +24,29 @@ export class PathOutsideRootError extends Error {
 }
 
 const SAFE_SEGMENT_RE = /^[A-Za-z0-9._-]+$/
+
+export function mirageHome(env: Record<string, string | undefined> = process.env): string {
+  const override = env[ENV_HOME]
+  return override !== undefined && override !== '' ? resolve(override) : join(homedir(), '.mirage')
+}
+
+export function pidFilePath(
+  explicit?: string,
+  env: Record<string, string | undefined> = process.env,
+): string {
+  if (explicit !== undefined) return resolve(explicit)
+  const override = env[ENV_PID_FILE]
+  if (override !== undefined && override !== '') return resolve(override)
+  return join(mirageHome(env), 'daemon.pid')
+}
+
+export function defaultVersionRoot(env: Record<string, string | undefined> = process.env): string {
+  return join(mirageHome(env), 'repos')
+}
+
+export function defaultSnapshotRoot(env: Record<string, string | undefined> = process.env): string {
+  return join(mirageHome(env), 'snapshots')
+}
 
 export function resolveWithinRoot(root: string, userPath: string): string {
   const resolvedRoot = resolve(root)

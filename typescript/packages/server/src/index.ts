@@ -24,7 +24,6 @@ export {
 } from './config.ts'
 export {
   AuthMode,
-  DEFAULT_TOKEN_FILE,
   ENV_AUTH_MODE,
   ENV_AUTH_TOKEN,
   ENV_JWT_ALG,
@@ -35,6 +34,7 @@ export {
   ENV_JWT_PUBKEY,
   ENV_JWT_PUBKEY_FILE,
   JWTVerificationError,
+  defaultTokenFile,
   ensureTokenFile,
   readTokenFile,
   registerAuth,
@@ -44,3 +44,4 @@ export {
   type JWTConfig,
 } from './auth/index.ts'
 export { ENV_ALLOWED_HOSTS, ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS } from './env.ts'
+export { mirageHome, pidFilePath } from './paths.ts'

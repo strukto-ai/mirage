@@ -28,7 +28,7 @@ export interface SupabaseConfigRedacted extends Omit<SupabaseConfig, 'presignedU
   presignedUrlProvider: '<REDACTED>'
 }
 
-export const SupabaseConfigSchema = z.object({
+const SupabaseConfigSchema = z.object({
   bucket: z.string(),
   presignedUrlProvider: secretSchema(
     z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),

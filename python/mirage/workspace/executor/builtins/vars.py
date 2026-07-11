@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.stream import async_chain
@@ -105,10 +106,30 @@ async def handle_whoami(
 
 
 async def handle_read(
-    variables: list[str],
+    args: list[str],
     session: Session,
     stdin: ByteSource | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """Read one line into variables, with bash's option handling.
+
+    Only -r is accepted (our read is already raw, so it is consumed
+    with no effect); anything else errors like bash instead of being
+    treated as a variable name.
+
+    Args:
+        args (list[str]): words after the command name.
+        session (Session): shell session state.
+        stdin (ByteSource | None): line source.
+    """
+    parse = parse_shell_options(SHELL_SPECS["read"], args)
+    if parse.invalid is not None:
+        token = (parse.invalid
+                 if parse.invalid.startswith("--") else f"-{parse.invalid}")
+        err = f"read: {token}: invalid option\n".encode()
+        return None, IOResult(exit_code=2,
+                              stderr=err), ExecutionNode(command="read",
+                                                         exit_code=2)
+    variables = parse.operands or ["REPLY"]
     if session._stdin_buffer is None and stdin is not None:
         if isinstance(stdin, bytes):
             session._stdin_buffer = AsyncLineIterator(async_chain(stdin))
@@ -168,10 +189,29 @@ async def handle_local(
 
 
 async def handle_shift(
-    n: int,
+    args: list[str],
     call_stack: CallStack | None,
     session: Session | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """Shift positional parameters, with bash's argument checks.
+
+    Args:
+        args (list[str]): words after the command name; at most one,
+            the shift count.
+        call_stack (CallStack | None): function-call positional frames.
+        session (Session | None): shell session state.
+    """
+    if len(args) > 1:
+        err = b"shift: too many arguments\n"
+        return None, IOResult(exit_code=1,
+                              stderr=err), ExecutionNode(command="shift",
+                                                         exit_code=1)
+    if args and not _is_shift_count(args[0]):
+        err = f"shift: {args[0]}: numeric argument required\n".encode()
+        return None, IOResult(exit_code=1,
+                              stderr=err), ExecutionNode(command="shift",
+                                                         exit_code=1)
+    n = int(args[0]) if args else 1
     shifted = False
     if call_stack is not None and call_stack.get_all_positional():
         call_stack.shift(n)
@@ -181,6 +221,11 @@ async def handle_shift(
         if pos is not None:
             session.positional_args = pos[n:]
     return None, IOResult(), ExecutionNode(command="shift", exit_code=0)
+
+
+def _is_shift_count(word: str) -> bool:
+    body = word[1:] if word[:1] in ("-", "+") else word
+    return body.isdigit()
 
 
 async def handle_set(
@@ -225,6 +270,17 @@ async def handle_trap(
 
 
 async def handle_return(
-        exit_code: int,  # noqa: E125
+        args: list[str],  # noqa: E125
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    raise ReturnSignal(exit_code)
+    """Return from a function, with bash's argument check.
+
+    Args:
+        args (list[str]): words after the command name; at most one,
+            the return status.
+    """
+    if args and not _is_shift_count(args[0]):
+        # bash prints the error and the function returns 2.
+        raise ReturnSignal(
+            2,
+            stderr=f"return: {args[0]}: numeric argument required\n".encode())
+    raise ReturnSignal(int(args[0]) if args else 0)

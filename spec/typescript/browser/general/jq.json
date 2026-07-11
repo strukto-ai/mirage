@@ -6,21 +6,25 @@
     "has_write": false,
     "resources": [
       "box",
+      "chroma",
       "databricks_volume",
       "discord",
       "dropbox",
       "gdocs",
       "gdrive",
       "github",
+      "github_ci",
       "gmail",
       "gsheets",
       "gslides",
+      "lancedb",
       "langfuse",
       "linear",
       "mongodb",
       "notion",
       "opfs",
       "postgres",
+      "qdrant",
       "ram",
       "s3",
       "slack",
@@ -34,6 +38,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-r",
       "value_kind": "none"
     },
@@ -41,6 +46,7 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-c",
       "value_kind": "none"
     },
@@ -48,16 +54,19 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-s",
       "value_kind": "none"
     }
   ],
   "positional": [
     {
-      "kind": "text"
+      "kind": "text",
+      "provided_by": []
     }
   ],
   "rest": {
-    "kind": "path"
+    "kind": "path",
+    "provided_by": []
   }
 }

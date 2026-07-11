@@ -22,7 +22,7 @@ export function runWithSession<T>(session: Session, fn: () => Promise<T>): Promi
   return Promise.resolve(sessionStorage.run(session, fn))
 }
 
-export function getCurrentSession(): Session | null {
+function getCurrentSession(): Session | null {
   return sessionStorage.getStore() ?? null
 }
 

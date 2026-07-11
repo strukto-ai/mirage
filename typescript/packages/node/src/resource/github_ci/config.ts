@@ -32,7 +32,7 @@ export interface GitHubCIConfigRedacted {
   baseUrl?: string
 }
 
-export const GitHubCIConfigSchema = z.object({
+const GitHubCIConfigSchema = z.object({
   token: secretStr(),
   owner: z.string(),
   repo: z.string(),

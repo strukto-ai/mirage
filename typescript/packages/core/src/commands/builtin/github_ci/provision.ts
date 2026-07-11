@@ -13,35 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../../accessor/base.ts'
-import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { Precision, ProvisionResult } from '../../../provision/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
-
-export async function fileReadProvision(
-  _accessor: Accessor,
-  paths: PathSpec[],
-  _texts: string[],
-  opts: CommandOpts,
-): Promise<ProvisionResult> {
-  if (paths.length === 0) {
-    return new ProvisionResult({ precision: Precision.UNKNOWN })
-  }
-  const index: IndexCacheStore | undefined = opts.index ?? undefined
-  let ops = 0
-  if (index !== undefined) {
-    for (const p of paths) {
-      const lookup = await index.get(p.virtual)
-      if (lookup.entry !== undefined && lookup.entry !== null) ops += 1
-    }
-  }
-  return new ProvisionResult({
-    networkReadLow: 0,
-    networkReadHigh: 0,
-    readOps: ops,
-    precision: Precision.EXACT,
-  })
-}
 
 export function metadataProvision(
   _accessor: Accessor,

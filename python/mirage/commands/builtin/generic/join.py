@@ -1,5 +1,6 @@
 from collections.abc import Awaitable, Callable
 
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -114,7 +115,7 @@ async def join_cmd(
     paths: list[PathSpec],
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
-    accessor: object = None,
+    accessor: Accessor | None = None,
     field1: int = 0,
     field2: int = 0,
     separator: str | None = None,

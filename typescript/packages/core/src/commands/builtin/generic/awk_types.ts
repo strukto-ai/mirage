@@ -44,3 +44,11 @@ export type AwkBuiltin = (typeof AwkBuiltin)[keyof typeof AwkBuiltin]
 export const FIELD_PREFIX = '$'
 export const PRINT_STMT = 'print'
 export const CMP_OP_PATTERN = /==|!=|>=|<=|>|</
+
+export const USAGE = "awk: usage: awk [-F fs] [-v var=val] 'program' [file ...]"
+
+export interface AwkFlags {
+  readonly fieldSeparator: string | null
+  readonly assignments: readonly string[]
+  readonly programFiles: readonly string[]
+}

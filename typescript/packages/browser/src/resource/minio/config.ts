@@ -27,7 +27,7 @@ export interface MinIOConfigRedacted extends Omit<MinIOConfig, 'presignedUrlProv
   presignedUrlProvider: '<REDACTED>'
 }
 
-export const MinIOConfigSchema = z.object({
+const MinIOConfigSchema = z.object({
   bucket: z.string(),
   presignedUrlProvider: secretSchema(
     z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),

@@ -21,7 +21,7 @@ import {
 } from '@struktoai/mirage-core'
 import { buildResource, Workspace, type Resource } from '@struktoai/mirage-node'
 
-export interface OverrideMountBlock {
+interface OverrideMountBlock {
   resource: string
   config?: Record<string, unknown>
 }

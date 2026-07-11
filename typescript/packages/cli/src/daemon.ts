@@ -13,8 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { existsSync, readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { pidFilePath } from '@struktoai/mirage-server'
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
 import { emit, fail, formatAge } from './output.ts'
@@ -54,10 +53,6 @@ function formatKill(d: { killed: boolean; pid?: number | null }): string {
   if (d.killed) return `Killed PID ${String(d.pid ?? '?')}.`
   if (d.pid === null || d.pid === undefined) return 'Daemon not running.'
   return `Already gone (PID ${String(d.pid)}).`
-}
-
-function pidFilePath(): string {
-  return join(homedir(), '.mirage', 'daemon.pid')
 }
 
 function readPid(): number | null {

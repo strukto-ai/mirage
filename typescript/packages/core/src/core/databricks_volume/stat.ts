@@ -27,7 +27,7 @@ function nameFromBackendPath(remotePath: string): string {
   return stripped.split('/').pop() ?? stripped
 }
 
-export function modifiedFromHeader(value: string | null): string | null {
+function modifiedFromHeader(value: string | null): string | null {
   if (value === null || value === '') return null
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return value

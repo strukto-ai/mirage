@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator, Callable
 
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.escapes import interpret_escapes
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.types import ByteSource, IOResult
@@ -57,7 +58,7 @@ async def tr(
     texts: tuple[str, ...],
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
-    accessor: object = None,
+    accessor: Accessor | None = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     delete: bool = False,
     squeeze: bool = False,

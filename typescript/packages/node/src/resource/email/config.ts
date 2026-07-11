@@ -33,7 +33,7 @@ export interface EmailConfigRedacted extends Omit<EmailConfig, 'password'> {
   password: '<REDACTED>'
 }
 
-export const EmailConfigSchema = z.object({
+const EmailConfigSchema = z.object({
   imapHost: z.string(),
   imapPort: z.number(),
   smtpHost: z.string(),

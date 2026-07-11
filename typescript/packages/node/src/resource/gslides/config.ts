@@ -27,7 +27,7 @@ export interface GSlidesConfigRedacted {
   refreshToken: '<REDACTED>'
 }
 
-export const GSlidesConfigSchema = z.object({
+const GSlidesConfigSchema = z.object({
   clientId: z.string(),
   clientSecret: secretStr(),
   refreshToken: secretStr(),

@@ -49,7 +49,7 @@ function runNative(cwd: string, cmd: string, stdin: Uint8Array | null): Promise<
   })
 }
 
-export function makeRamEnv(): NativeEnv {
+function makeRamEnv(): NativeEnv {
   const tmp = mkdtempSync(join(tmpdir(), 'mirage-native-ram-'))
   const resource = new RAMResource()
   const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE })
@@ -84,7 +84,7 @@ export function makeRamEnv(): NativeEnv {
   return env
 }
 
-export function makeDiskEnv(): NativeEnv {
+function makeDiskEnv(): NativeEnv {
   const tmp = mkdtempSync(join(tmpdir(), 'mirage-native-disk-'))
   const diskRoot = join(tmp, 'disk')
   mkdirSync(diskRoot, { recursive: true })

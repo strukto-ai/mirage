@@ -35,7 +35,7 @@ export interface MinIOConfigRedacted {
   timeoutMs?: number
 }
 
-export const MinIOConfigSchema = z.object({
+const MinIOConfigSchema = z.object({
   bucket: z.string(),
   endpoint: z.string(),
   accessKeyId: secretStr(),

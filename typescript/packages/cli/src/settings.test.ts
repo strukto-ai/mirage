@@ -64,4 +64,17 @@ describe('loadDaemonSettings', () => {
       rmSync(dir, { recursive: true, force: true })
     }
   })
+
+  it('reads config.toml and token file under MIRAGE_HOME', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-settings-'))
+    try {
+      writeFileSync(join(dir, 'config.toml'), '[daemon]\nurl = "http://127.0.0.1:9999"\n')
+      writeFileSync(join(dir, 'auth_token'), 'home-token')
+      const s = loadDaemonSettings({ env: { MIRAGE_HOME: dir } })
+      expect(s.url).toBe('http://127.0.0.1:9999')
+      expect(s.authToken).toBe('home-token')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })

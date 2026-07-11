@@ -12,14 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Where } from 'chromadb'
 import type { ChromaAccessor } from '../../accessor/chroma.ts'
 import { enoent } from '../../utils/errors.ts'
 
-export const PATH_TREE_ID = '__path_tree__'
-export const PAGE_CHUNK_BATCH_SIZE = 100
+const PATH_TREE_ID = '__path_tree__'
+const PAGE_CHUNK_BATCH_SIZE = 100
 
-export interface ChromaChunk {
+interface ChromaChunk {
   document: string
   metadata: Record<string, unknown>
 }
@@ -53,7 +52,7 @@ export async function* iterPageChunks(
   }
 }
 
-export async function pageChunks(accessor: ChromaAccessor, slug: string): Promise<ChromaChunk[]> {
+async function pageChunks(accessor: ChromaAccessor, slug: string): Promise<ChromaChunk[]> {
   const collection = await accessor.getCollection()
   const field = accessor.config.chunkIndexField
   const chunks: ChromaChunk[] = []
@@ -79,29 +78,7 @@ export async function pageChunks(accessor: ChromaAccessor, slug: string): Promis
   return chunks.sort((a, b) => chunkIndex(a.metadata, field) - chunkIndex(b.metadata, field))
 }
 
-export async function queryContains(
-  accessor: ChromaAccessor,
-  pattern: string,
-  candidateSlugs: readonly string[],
-  regex = false,
-): Promise<string[]> {
-  if (candidateSlugs.length === 0) return []
-  const collection = await accessor.getCollection()
-  const result = await collection.get({
-    where: { [accessor.config.slugField]: { $in: [...candidateSlugs] } } as Where,
-    whereDocument: regex ? { $regex: pattern } : { $contains: pattern },
-    include: ['metadatas'],
-  })
-  const matched = new Set<string>()
-  for (const metadata of result.metadatas) {
-    if (metadata === null) continue
-    const slug = metadataString(metadata[accessor.config.slugField])
-    if (slug !== null) matched.add(slug)
-  }
-  return [...matched].sort()
-}
-
-export function chunkIndex(metadata: Record<string, unknown>, field: string): number {
+function chunkIndex(metadata: Record<string, unknown>, field: string): number {
   const value = metadata[field] ?? 0
   if (typeof value === 'boolean') return 0
   if (typeof value === 'number') return Math.trunc(value)

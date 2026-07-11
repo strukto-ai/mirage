@@ -31,23 +31,18 @@ async def awk(
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
-    F: str | None = None,
-    v: str | list[str] | None = None,
-    f: PathSpec | None = None,
     index: IndexCacheStore | None = None,
-    **kwargs,
+    **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
     paths = await resolve_or_empty(ops, accessor, paths, index)
     return await generic_awk(
         paths,
         texts,
+        flags,
         read_bytes=with_index(ops.read_bytes, index),
         read_stream=with_index(ops.read_stream, index),
         accessor=accessor,
         stdin=stdin,
-        field_separator=F,
-        variable_assignment=v,
-        program_file=f if ops.is_mounted(accessor) else None,
         index=index,
     )
 

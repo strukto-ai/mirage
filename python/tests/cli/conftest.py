@@ -49,6 +49,7 @@ def daemon(tmp_path):
     env = dict(os.environ)
     env["MIRAGE_DAEMON_URL"] = url
     env["MIRAGE_IDLE_GRACE_SECONDS"] = "60"
+    env["MIRAGE_HOME"] = str(tmp_path)
     env["MIRAGE_VERSION_ROOT"] = str(tmp_path / "repos")
     env["MIRAGE_SNAPSHOT_ROOT"] = str(tmp_path)
     env.pop("MIRAGE_AUTH_TOKEN", None)

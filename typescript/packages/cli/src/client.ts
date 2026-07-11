@@ -15,9 +15,8 @@
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, openSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { AuthMode, DEFAULT_TOKEN_FILE, ensureTokenFile } from '@struktoai/mirage-server'
+import { AuthMode, defaultTokenFile, ensureTokenFile, mirageHome } from '@struktoai/mirage-server'
 
 import { ENV_AUTH_MODE, ENV_AUTH_TOKEN, ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS } from './env.ts'
 import type { DaemonSettings } from './settings.ts'
@@ -129,11 +128,11 @@ export class DaemonClient {
     env[ENV_DAEMON_PORT] = String(this.portFromUrl())
     env[ENV_IDLE_GRACE_SECONDS] = String(this.settings.idleGraceSeconds)
     if (this.settings.authToken === '') {
-      this.settings.authToken = ensureTokenFile(DEFAULT_TOKEN_FILE)
+      this.settings.authToken = ensureTokenFile(defaultTokenFile())
     }
     env[ENV_AUTH_TOKEN] = this.settings.authToken
     env[ENV_AUTH_MODE] ??= AuthMode.Local
-    const logDir = join(homedir(), '.mirage')
+    const logDir = mirageHome()
     mkdirSync(logDir, { recursive: true })
     const out = openSync(join(logDir, 'daemon.log'), 'a')
     const daemonEntry = requireFromHere.resolve('@struktoai/mirage-server/bin/daemon')

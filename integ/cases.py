@@ -342,6 +342,12 @@ CASES: list[tuple[str, str]] = [
     ("awk_v_equals", "awk -v x=eq=val '{print x}' /data/one_byte.txt"),
     ("awk_f_program", "echo '{print $3, $1}' | tee /data/prog.awk > /dev/null"
      " && awk -f /data/prog.awk /data/fields.txt && rm /data/prog.awk"),
+    ("awk_default_fs", "awk '{print NF, $1}' /data/spaced.txt"),
+    ("awk_multifile", "awk '{print NR, $1}' /data/a.txt /data/b.txt"),
+    ("awk_f_repeat", "echo '{sum += $1}' | tee /data/pa.awk > /dev/null"
+     " && echo 'END {print sum}' | tee /data/pb.awk > /dev/null"
+     " && awk -f /data/pa.awk -f /data/pb.awk /data/numbers.txt"
+     " && rm /data/pa.awk /data/pb.awk"),
 
     # ----- sed advanced -----
     ("sed_d_first", "sed 1d /data/a.txt"),
@@ -477,6 +483,9 @@ CASES: list[tuple[str, str]] = [
     ("grep_cluster_ne", "grep -ne world /data/a.txt"),
     ("du_max_depth_eq", "du --max-depth=1 /data/sub"),
     ("grep_unknown_flag_ignored", "grep --color=auto world /data/a.txt"),
+    ("grep_unknown_short_flag", "grep -Y world /data/a.txt"),
+    ("head_numeric_shorthand", "head -2 /data/a.txt"),
+    ("tail_numeric_shorthand", "tail -2 /data/a.txt"),
     ("grep_cluster_attached", "grep -neworld /data/a.txt"),
     ("grep_cluster_count", "grep -im1 l /data/mixed.txt"),
     ("rg_f_multi",
@@ -670,6 +679,27 @@ CASES: list[tuple[str, str]] = [
     ("glob_pushdown_labels", "wc -l s*/x.txt && grep -l hi sub/*.txt"),
     ("glob_ls_operand", "ls sub/*.txt && cd / && rm -r /data/g15"),
 
+    # ----- shell builtins: GNU argument handling -----
+    ("xargs_n1", "echo a b c | xargs -n1 echo"),
+    ("xargs_n2", "echo a b c d e | xargs -n2 echo"),
+    ("xargs_invalid_opt", "echo hi | xargs -q echo 2>&1; echo code=$?"),
+    ("xargs_n0", "echo x | xargs -n0 echo 2>&1; echo code=$?"),
+    ("xargs_delim", "printf 'a,b,c' | xargs -d, echo"),
+    ("xargs_empty_r", "printf '' | xargs -r echo hi; echo code=$?"),
+    ("xargs_empty_default", "printf '' | xargs echo hi"),
+    ("timeout_kill", "timeout 0.2 sleep 5; echo code=$?"),
+    ("timeout_ok", "timeout 5 echo fast"),
+    ("timeout_bad_duration", "timeout xx sleep 1 2>&1; echo code=$?"),
+    ("timeout_unsupported", "timeout -s KILL 1 sleep 1 2>&1; echo code=$?"),
+    ("echo_trailing_dash_n", "echo hi -n"),
+    ("echo_cluster", "echo -ne 'ab\\tcd'; echo"),
+    ("echo_unknown_cluster", "echo -nq hi"),
+    ("shift_non_numeric", "shift x 2>&1; echo code=$?"),
+    ("shift_too_many", "shift 1 2 2>&1; echo code=$?"),
+    ("return_non_numeric", "f() { return x; }; f 2>&1; echo code=$?"),
+    ("read_r_flag", "printf 'hi there\\n' | read -r v; echo code=$?"),
+    ("read_invalid_opt", "read -q v 2>&1; echo code=$?"),
+
     # ----- cp / mv multi-source into a directory (last; these mutate) -----
     ("cp_multi_into_dir", "cp /data/a.txt /data/b.txt /data/sub"),
     ("cp_multi_verify_a", "cat /data/sub/a.txt"),
@@ -855,6 +885,8 @@ EXIT_CODE_CASES: list[tuple[str, str]] = [
     ("grep_usage_exit", "grep"),
     ("rg_usage_exit", "rg"),
     ("zgrep_usage_exit", "zgrep"),
+    ("awk_usage_exit", "awk"),
+    ("awk_f_missing_exit", "awk -f /data/nope.awk /data/a.txt"),
     ("grep_usage_no_input", "grep foo"),
     ("rg_usage_no_input", "rg foo"),
     ("grep_usage_stdin_only", "echo hi | grep"),

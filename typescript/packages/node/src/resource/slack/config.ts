@@ -24,7 +24,7 @@ export interface SlackConfigRedacted {
   searchToken?: '<REDACTED>'
 }
 
-export const SlackConfigSchema = z.object({
+const SlackConfigSchema = z.object({
   token: secretStr(),
   searchToken: secretStr().optional(),
 })

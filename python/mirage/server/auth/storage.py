@@ -16,7 +16,12 @@ import os
 import secrets
 from pathlib import Path
 
-DEFAULT_TOKEN_FILE: Path = Path.home() / ".mirage" / "auth_token"
+from mirage.server.paths import mirage_home
+
+
+def default_token_file() -> Path:
+    """Default auth token location, under :func:`mirage_home`."""
+    return mirage_home() / "auth_token"
 
 
 def read_token_file(path: Path) -> str | None:

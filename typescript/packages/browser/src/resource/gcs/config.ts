@@ -27,7 +27,7 @@ export interface GCSConfigRedacted extends Omit<GCSConfig, 'presignedUrlProvider
   presignedUrlProvider: '<REDACTED>'
 }
 
-export const GCSConfigSchema = z.object({
+const GCSConfigSchema = z.object({
   bucket: z.string(),
   presignedUrlProvider: secretSchema(
     z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),

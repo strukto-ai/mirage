@@ -27,7 +27,7 @@ export interface BackblazeConfigRedacted extends Omit<BackblazeConfig, 'presigne
   presignedUrlProvider: '<REDACTED>'
 }
 
-export const BackblazeConfigSchema = z.object({
+const BackblazeConfigSchema = z.object({
   bucket: z.string(),
   presignedUrlProvider: secretSchema(
     z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),

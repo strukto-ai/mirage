@@ -19,7 +19,7 @@ export interface GmailHeader {
   value?: string
 }
 
-export interface GmailBody {
+interface GmailBody {
   data?: string
   size?: number
   attachmentId?: string
@@ -63,7 +63,7 @@ export interface GmailAddress {
   email: string
 }
 
-export interface GmailProcessedAttachment {
+interface GmailProcessedAttachment {
   id: string
   filename: string
   path: string

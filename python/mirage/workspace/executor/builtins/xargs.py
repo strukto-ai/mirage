@@ -15,11 +15,37 @@
 import shlex
 from collections.abc import Callable
 
+from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
 from mirage.io import IOResult
-from mirage.io.stream import materialize
+from mirage.io.stream import async_chain, materialize
 from mirage.io.types import ByteSource
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
+
+_UNSUPPORTED = ("I", "P")
+
+
+def _usage_error(message: str) -> tuple[None, IOResult, ExecutionNode]:
+    stderr = f"xargs: {message}\n".encode()
+    return None, IOResult(exit_code=1,
+                          stderr=stderr), ExecutionNode(command="xargs",
+                                                        exit_code=1)
+
+
+def _split_items(data: bytes, flags: dict[str, str | bool]) -> list[str]:
+    if flags.get("0") is True:
+        return [
+            chunk.decode(errors="replace") for chunk in data.split(b"\0")
+            if chunk
+        ]
+    delim = flags.get("d")
+    if isinstance(delim, str):
+        delim = delim.replace("\\n", "\n").replace("\\t", "\t")
+        text = data.decode(errors="replace")
+        if text.endswith(delim):
+            text = text[:-len(delim)]
+        return text.split(delim) if text else []
+    return data.decode(errors="replace").split()
 
 
 async def handle_xargs(
@@ -37,16 +63,62 @@ async def handle_xargs(
 
     Args:
         execute_fn (Callable): shell evaluator for the inner line.
-        args (list[str]): command name and initial arguments; defaults
-            to ["echo"] like GNU when absent.
+        args (list[str]): options, then command name and initial
+            arguments; the command defaults to ["echo"] like GNU.
         session (Session): shell session state.
         stdin (ByteSource | None): input whose words become arguments.
     """
+    parse = parse_shell_options(SHELL_SPECS["xargs"], args or [])
+    if parse.invalid is not None:
+        if parse.invalid.startswith("--"):
+            return _usage_error(f"unrecognized option '{parse.invalid}'")
+        return _usage_error(f"invalid option -- '{parse.invalid}'")
+    if parse.needs_value is not None:
+        return _usage_error(
+            f"option requires an argument -- '{parse.needs_value}'")
+    for name in _UNSUPPORTED:
+        if name in parse.flags:
+            return _usage_error(f"unsupported option -- '{name}'")
+    max_args: int | None = None
+    raw_n = parse.flags.get("n")
+    if isinstance(raw_n, str):
+        if not raw_n.isdigit():
+            return _usage_error(f'invalid number "{raw_n}" for -n option')
+        max_args = int(raw_n)
+        if max_args < 1:
+            return _usage_error(f"value {raw_n} for -n option should be >= 1")
+
     data = await materialize(stdin)
     if data is None:
         data = b""
-    input_args = data.decode(errors="replace").split()
-    inner = shlex.join([*(args or ["echo"]), *input_args])
-    io = await execute_fn(inner, session_id=session.session_id)
-    return io.stdout, io, ExecutionNode(command="xargs",
-                                        exit_code=io.exit_code)
+    items = _split_items(data, parse.flags)
+    if not items and parse.flags.get("r") is True:
+        return None, IOResult(), ExecutionNode(command="xargs", exit_code=0)
+
+    command = parse.operands or ["echo"]
+    if max_args is None:
+        batches = [items]
+    else:
+        batches = [
+            items[i:i + max_args] for i in range(0, len(items), max_args)
+        ] or [[]]
+
+    stdouts: list[ByteSource] = []
+    merged = IOResult()
+    exit_code = 0
+    for batch in batches:
+        inner = shlex.join([*command, *batch])
+        io = await execute_fn(inner, session_id=session.session_id)
+        if io.stdout is not None:
+            stdouts.append(io.stdout)
+        merged = await merged.merge(io)
+        if io.exit_code in (126, 127):
+            # GNU xargs stops when the command cannot run or is missing.
+            exit_code = io.exit_code
+            break
+        if io.exit_code != 0:
+            # GNU exits 123 when any invocation fails, but keeps going.
+            exit_code = 123
+    merged.exit_code = exit_code
+    out = async_chain(*stdouts) if stdouts else None
+    return out, merged, ExecutionNode(command="xargs", exit_code=exit_code)
