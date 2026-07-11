@@ -19,6 +19,7 @@ import pytest
 from mirage.cache.file import io as cache_io
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.io import CachableAsyncIterator, IOResult
+from mirage.io.stream import close_quietly
 from mirage.observe.record import OpRecord
 
 
@@ -244,6 +245,27 @@ def _make_chunked_stream(chunks: list[bytes]) -> CachableAsyncIterator:
             yield c
 
     return CachableAsyncIterator(_gen())
+
+
+@pytest.mark.asyncio
+async def test_drain_survives_pipeline_close_quietly():
+    """SIGPIPE-style teardown must not starve the background drain.
+
+    `cat big.json | head -n 5` consumes one chunk, then pipes.py calls
+    close_quietly on the upstream stream. The drain must still pull the
+    remainder and cache the FULL file — a partial entry would poison
+    every later read of the path (integ regression: 8192-byte cache).
+    """
+    cache = RAMFileCacheStore()
+    chunks = [b"a" * 100 for _ in range(10)]
+    stream = _make_chunked_stream(chunks)
+    await stream.__anext__()
+    await close_quietly(stream)
+    io = IOResult(reads={"/big.json": stream}, cache=["/big.json"])
+    await cache_io.apply_io(cache, io)
+    await asyncio.sleep(0.05)
+    cached = await cache.get("/big.json")
+    assert cached is not None and len(cached) == 1000
 
 
 @pytest.mark.asyncio

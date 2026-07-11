@@ -75,14 +75,20 @@ class CachableAsyncIterator:
                 self._buffer.append(chunk)
                 total += len(chunk)
                 if total > max_bytes:
-                    await self.aclose()
+                    await self._close_source()
                     return b"".join(self._buffer), False
         finally:
             self._exhausted = True
         return b"".join(self._buffer), True
 
-    async def aclose(self) -> None:
-        """Close the underlying source iterator if it supports aclose."""
+    async def _close_source(self) -> None:
+        """Close the underlying source iterator if it supports aclose.
+
+        Deliberately NOT named ``aclose``: pipes.py close_quietly duck-
+        types on that name for SIGPIPE-style teardown, and it must keep
+        no-opping on this wrapper so an early-exiting consumer (``cat x
+        | head``) leaves the source open for the background cache drain.
+        """
         close = getattr(self._source, "aclose", None)
         if close is not None:
             await close()
