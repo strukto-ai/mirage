@@ -12,22 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-# GNU usage-error exit codes, pinned against debian coreutils/grep/diffutils
-# (plus ripgrep and jq upstream docs). Everything else exits 1.
-USAGE_EXIT = {
-    "grep": 2,
-    "egrep": 2,
-    "fgrep": 2,
-    "zgrep": 2,
-    "rg": 2,
-    "ls": 2,
-    "sort": 2,
-    "diff": 2,
-    "cmp": 2,
-    "awk": 2,
-    "jq": 2,
-    "tar": 64,
-}
+from mirage.commands.spec.constants import USAGE_EXIT
 
 
 def usage_exit_code(cmd_name: str) -> int:
