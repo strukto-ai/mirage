@@ -14,7 +14,8 @@
 
 from dataclasses import dataclass, field
 
-from mirage.commands.spec.types import CommandSpec, Operand, OperandKind, Option
+from mirage.commands.spec.types import (CommandSpec, Operand, OperandKind,
+                                        Option)
 
 SHELL_SPECS: dict[str, CommandSpec] = {
     "xargs":

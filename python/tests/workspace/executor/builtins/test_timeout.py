@@ -69,8 +69,8 @@ async def test_invalid_duration_exits_125():
     _, io, _ = await handle_timeout(shell, ["xx", "sleep", "1"],
                                     make_session())
     assert io.exit_code == 125
-    assert (await materialize(io.stderr)
-            ) == b"timeout: invalid time interval 'xx'\n"
+    assert (await
+            materialize(io.stderr)) == b"timeout: invalid time interval 'xx'\n"
     assert shell.lines == []
 
 

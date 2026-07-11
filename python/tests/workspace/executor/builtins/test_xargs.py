@@ -43,8 +43,7 @@ async def test_single_run_without_n():
 @pytest.mark.asyncio
 async def test_failing_invocation_exits_123_but_continues():
     shell = FakeShell(exit_codes=[1, 0])
-    _, io, _ = await handle_xargs(shell, ["-n1", "wc"], make_session(),
-                                  b"a b")
+    _, io, _ = await handle_xargs(shell, ["-n1", "wc"], make_session(), b"a b")
     assert shell.lines == ["wc a", "wc b"]
     assert io.exit_code == 123
 
@@ -104,7 +103,8 @@ async def test_unsupported_option_exits_1():
     _, io, _ = await handle_xargs(shell, ["-I", "{}", "echo"], make_session(),
                                   b"x")
     assert io.exit_code == 1
-    assert await materialize(io.stderr) == b"xargs: unsupported option -- 'I'\n"
+    assert await materialize(io.stderr
+                             ) == b"xargs: unsupported option -- 'I'\n"
 
 
 @pytest.mark.asyncio
@@ -112,8 +112,9 @@ async def test_n_zero_rejected():
     shell = FakeShell()
     _, io, _ = await handle_xargs(shell, ["-n0", "echo"], make_session(), b"x")
     assert io.exit_code == 1
-    assert (await materialize(io.stderr)
-            ) == b"xargs: value 0 for -n option should be >= 1\n"
+    assert (await
+            materialize(io.stderr
+                        )) == b"xargs: value 0 for -n option should be >= 1\n"
 
 
 @pytest.mark.asyncio

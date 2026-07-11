@@ -30,7 +30,11 @@ export const SHELL_SPECS = Object.freeze({
         valueKind: OperandKind.TEXT,
         description: 'Input items are separated by this character.',
       }),
-      new Option({ short: '-0', long: '--null', description: 'Input items are terminated by NUL.' }),
+      new Option({
+        short: '-0',
+        long: '--null',
+        description: 'Input items are terminated by NUL.',
+      }),
       new Option({
         short: '-r',
         long: '--no-run-if-empty',
@@ -135,11 +139,13 @@ export function parseShellOptions(spec: CommandSpec, argv: readonly string[]): S
       } else if (longValue.has(name)) {
         if (eq >= 0) {
           flags[alias.get(name) ?? name] = tok.slice(eq + 1)
-        } else if (i + 1 < argv.length) {
-          i += 1
-          flags[alias.get(name) ?? name] = argv[i] as string
         } else {
-          return { flags, operands: argv.slice(i + 1), invalid: null, needsValue: name }
+          const value = argv[i + 1]
+          if (value === undefined) {
+            return { flags, operands: argv.slice(i + 1), invalid: null, needsValue: name }
+          }
+          i += 1
+          flags[alias.get(name) ?? name] = value
         }
       } else {
         return { flags, operands: argv.slice(i + 1), invalid: tok, needsValue: null }
@@ -151,7 +157,8 @@ export function parseShellOptions(spec: CommandSpec, argv: readonly string[]): S
       const chars = tok.slice(1)
       let j = 0
       while (j < chars.length) {
-        const ch = chars[j] as string
+        const ch = chars[j]
+        if (ch === undefined) break
         if (shortBool.has(ch)) {
           flags[alias.get(ch) ?? ch] = true
           j += 1
@@ -161,11 +168,13 @@ export function parseShellOptions(spec: CommandSpec, argv: readonly string[]): S
           const rest = chars.slice(j + 1)
           if (rest !== '') {
             flags[alias.get(ch) ?? ch] = rest
-          } else if (i + 1 < argv.length) {
-            i += 1
-            flags[alias.get(ch) ?? ch] = argv[i] as string
           } else {
-            return { flags, operands: argv.slice(i + 1), invalid: null, needsValue: ch }
+            const value = argv[i + 1]
+            if (value === undefined) {
+              return { flags, operands: argv.slice(i + 1), invalid: null, needsValue: ch }
+            }
+            i += 1
+            flags[alias.get(ch) ?? ch] = value
           }
           break
         }

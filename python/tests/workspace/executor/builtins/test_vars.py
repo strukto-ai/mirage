@@ -1,7 +1,8 @@
 import pytest
 
 from mirage.io.stream import materialize
-from mirage.workspace.executor.builtins.vars import (handle_read, handle_return,
+from mirage.workspace.executor.builtins.vars import (handle_read,
+                                                     handle_return,
                                                      handle_shift)
 from mirage.workspace.executor.control import ReturnSignal
 from mirage.workspace.session.session import Session
