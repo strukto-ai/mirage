@@ -141,7 +141,7 @@ describe('resolveNotionGlob', () => {
     ])
   })
 
-  it('returns an empty array when the pattern matches nothing', async () => {
+  it('keeps the literal word when the pattern matches nothing', async () => {
     const transport = new FakeTransport()
     transport.enqueue('API-post-search', {
       results: [topPage(TOP1_ID, 'Top1'), topPage(TOP2_ID, 'Top2')],
@@ -156,6 +156,11 @@ describe('resolveNotionGlob', () => {
       resourcePath: 'NoSuchPrefix*',
     })
     const out = await resolveNotionGlob(makeAccessor(transport), [spec])
-    expect(out).toEqual([])
+    // bash nullglob off: an unmatched glob word stays the literal so the
+    // command errors on it like GNU.
+    expect(out).toHaveLength(1)
+    expect(out[0]?.virtual).toBe('/NoSuchPrefix*')
+    expect(out[0]?.pattern).toBeNull()
+    expect(out[0]?.resolved).toBe(true)
   })
 })

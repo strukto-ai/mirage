@@ -68,6 +68,26 @@ async function main(): Promise<void> {
     console.log(`\n=== cat ${wsBase}/workspace.json ===`)
     await run(ws, `cat "${wsBase}/workspace.json"`)
 
+    // ── glob expansion: the workspace segment is the pattern, the
+    // literal tail keeps walking (lists workspaces once, then filters).
+    console.log('\n=== echo /trello/workspaces/*/boards (mid-path glob) ===')
+    const globR = await ws.execute('echo /trello/workspaces/*/boards')
+    const globOut = globR.stdoutText.trim()
+    console.log(`  ${globOut.slice(0, 200)}`)
+    if (!globOut.endsWith('/boards')) {
+      throw new Error('regression: mid-path glob did not expand')
+    }
+
+    // A glob that matches nothing stays the literal word, so the
+    // command reports it like GNU coreutils.
+    console.log('\n=== cat /trello/workspaces/zz-none-*/workspace.json (no match) ===')
+    const litR = await ws.execute('cat /trello/workspaces/zz-none-*/workspace.json')
+    const litErr = litR.stderrText.trim()
+    console.log(`  exit=${litR.exitCode}  ${litErr.slice(0, 120)}`)
+    if (litR.exitCode !== 1 || !litErr.includes('zz-none-*')) {
+      throw new Error('regression: zero-match glob did not keep the literal')
+    }
+
     console.log(`\n=== ls ${wsBase}/boards/ ===`)
     const b0 = (await run(ws, `ls "${wsBase}/boards/" | head -n 1`)).trim()
     if (b0 === '') return

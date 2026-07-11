@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import fnmatch
+import dataclasses
 import functools
 import logging
 import posixpath
@@ -23,7 +23,7 @@ from typing import NamedTuple
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.types import PathSpec
-from mirage.utils.key_prefix import rekey
+from mirage.utils.glob_walk import expand_pattern, is_word_shaped
 
 logger = logging.getLogger(__name__)
 
@@ -79,13 +79,16 @@ def make_resolve_glob(readdir: Callable,
             if p.resolved:
                 result.append(p)
             elif p.pattern:
-                entries = await readdir(accessor, p.dir, index)
-                matched = [
-                    PathSpec.from_str_path(
-                        e, rekey(p.virtual, p.resource_path, e))
-                    for e in entries
-                    if fnmatch.fnmatch(e.rsplit("/", 1)[-1], p.pattern)
-                ]
+                matched = await expand_pattern(readdir, accessor, p, index)
+                if not matched and is_word_shaped(p):
+                    # bash with nullglob off: an unmatched glob word stays
+                    # the literal; the command then errors on it like GNU
+                    # (cat '*.nope' -> No such file or directory, exit 1).
+                    # Dir-shaped specs (PathSpec.dir) are internal
+                    # expansions and keep the empty result.
+                    result.append(
+                        dataclasses.replace(p, pattern=None, resolved=True))
+                    continue
                 if (max_glob_matches is not None
                         and len(matched) > max_glob_matches):
                     logger.warning(

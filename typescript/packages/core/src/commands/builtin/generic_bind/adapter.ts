@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { rekey } from '../../../utils/key_prefix.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import type { FindOptions } from '../../../resource/base.ts'
-import { type FileStat, PathSpec } from '../../../types.ts'
-import { fnmatch } from '../../../utils/fnmatch.ts'
+import type { PathSpec } from '../../../types.ts'
+import { type FileStat } from '../../../types.ts'
+import { resolveGlobWith } from '../../../utils/glob_walk.ts'
 import type { AggregateFn, CommandFnResult, CommandOpts, ProvisionFn } from '../../config.ts'
 
 export type ReaddirOp<A extends Accessor = Accessor> = (
@@ -103,33 +103,8 @@ export function makeResolveGlob<A extends Accessor = Accessor>(
   readdir: ReaddirOp<A>,
   maxGlobMatches?: number,
 ): ResolveGlobOp<A> {
-  return async (accessor, paths, index) => {
-    const result: PathSpec[] = []
-    for (const p of paths) {
-      if (p.resolved) {
-        result.push(p)
-        continue
-      }
-      if (p.pattern !== null && p.pattern !== '') {
-        const entries = await readdir(accessor, p.dir, index)
-        const matched: PathSpec[] = []
-        for (const entry of entries) {
-          const base = entry.split('/').pop() ?? ''
-          if (fnmatch(base, p.pattern)) {
-            matched.push(PathSpec.fromStrPath(entry, rekey(p.virtual, p.resourcePath, entry)))
-          }
-        }
-        const capped =
-          maxGlobMatches !== undefined && matched.length > maxGlobMatches
-            ? matched.slice(0, maxGlobMatches)
-            : matched
-        result.push(...capped)
-      } else {
-        result.push(p)
-      }
-    }
-    return result
-  }
+  return async (accessor, paths, index) =>
+    resolveGlobWith(readdir, accessor, paths, index, maxGlobMatches)
 }
 
 export interface CommandIO<A extends Accessor = Accessor> {
