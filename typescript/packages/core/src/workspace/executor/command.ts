@@ -341,9 +341,7 @@ export async function handleCommand(
       cmdStr,
     )
     if (csParsed[3].length > 0) {
-      const csWarn = new TextEncoder().encode(
-        csParsed[3].map((w) => `${cmdName}: ${w}\n`).join(''),
-      )
+      const csWarn = new TextEncoder().encode(csParsed[3].map((w) => `${cmdName}: ${w}\n`).join(''))
       const csExisting = await materialize(csIo.stderr)
       csIo.stderr = concatBytes([csWarn, csExisting])
       csExec.stderr = concatBytes([csWarn, csExec.stderr])
@@ -509,7 +507,14 @@ function parseFlags(
   spec: CommandSpec | null,
   cmdName: string,
   cwd: string,
-): [PathSpec[], string[], Record<string, string | boolean | string[]>, string[], string[], string[]] {
+): [
+  PathSpec[],
+  string[],
+  Record<string, string | boolean | string[]>,
+  string[],
+  string[],
+  string[],
+] {
   const argv: string[] = parts.map((item) => (item instanceof PathSpec ? item.virtual : item))
   const scopeMap = new Map<string, PathSpec>()
   for (const item of parts) {
@@ -555,7 +560,14 @@ function parseFlags(
         texts.push(value)
       }
     }
-    return [paths, texts, flagKwargs, parsed.warnings, parsed.invalidOptions, parsed.needsValueOptions]
+    return [
+      paths,
+      texts,
+      flagKwargs,
+      parsed.warnings,
+      parsed.invalidOptions,
+      parsed.needsValueOptions,
+    ]
   }
 
   const paths: PathSpec[] = []

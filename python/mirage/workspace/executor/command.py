@@ -361,15 +361,14 @@ def _parse_flags(
                 paths.append(scope)
             else:
                 texts.append(value)
-        return _ParsedCommand(paths, texts, flag_kwargs,
-                              parsed.warnings, parsed.invalid_options,
+        return _ParsedCommand(paths, texts, flag_kwargs, parsed.warnings,
+                              parsed.invalid_options,
                               parsed.needs_value_options)
 
     # No spec: separate by type
     paths = [item for item in parts if isinstance(item, PathSpec)]
     texts = [item for item in parts if not isinstance(item, PathSpec)]
     return _ParsedCommand(paths, texts, {}, [], [], [])
-
 
 
 def _option_error(cmd_name: str,
@@ -518,8 +517,8 @@ async def handle_command(
                                     cmd_name,
                                     session.cwd,
                                     str_flag_paths=True)
-        cross_texts = (find_expr_tokens if find_expr_tokens is not None else
-                       cross_parsed.texts)
+        cross_texts = (find_expr_tokens
+                       if find_expr_tokens is not None else cross_parsed.texts)
         cross_refusal = _option_error(cmd_name, cross_parsed)
         if cross_refusal is not None:
             msg, code = cross_refusal

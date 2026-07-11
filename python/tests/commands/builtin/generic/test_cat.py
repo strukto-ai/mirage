@@ -163,8 +163,10 @@ async def test_cat_show_tabs_renders_caret_i():
 @pytest.mark.asyncio
 async def test_cat_show_all_combines_tabs_and_ends():
     out = b"".join([
-        c async for c in cat(
-            b"a\tb\nx\n", show_tabs=True, show_ends=True, show_nonprinting=True)
+        c async for c in cat(b"a\tb\nx\n",
+                             show_tabs=True,
+                             show_ends=True,
+                             show_nonprinting=True)
     ])
     assert out == b"a^Ib$\nx$\n"
 

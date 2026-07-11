@@ -66,7 +66,7 @@ async function* chainStreams(
   }
 }
 
-export interface CatDisplay {
+interface CatDisplay {
   numberLines: boolean
   showEnds: boolean
   showTabs: boolean
@@ -78,7 +78,7 @@ export interface CatDisplay {
 // control bytes become ^X, DEL becomes ^?, and high bytes get the M- prefix
 // with the same rules applied to the low seven bits.
 function visible(
-  line: Uint8Array<ArrayBufferLike>,
+  line: Uint8Array,
   showTabs: boolean,
   showNonprinting: boolean,
 ): Uint8Array<ArrayBuffer> {
@@ -107,7 +107,7 @@ function visible(
 }
 
 /** Line-process a stream for GNU cat's display flags (-n -E -T -v -s). */
-export async function* displayLines(
+async function* displayLines(
   source: AsyncIterable<Uint8Array>,
   display: CatDisplay,
 ): AsyncIterable<Uint8Array> {

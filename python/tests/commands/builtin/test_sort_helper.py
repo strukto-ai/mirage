@@ -12,5 +12,5 @@ def test_strip_blanks_ignores_key_leading_blanks():
 
 
 def test_strip_blanks_without_key_field_is_noop():
-    assert _sort_key("  both  ", None, None, False,
-                     False, strip_blanks=True) == "  both  "
+    assert _sort_key("  both  ", None, None, False, False,
+                     strip_blanks=True) == "  both  "

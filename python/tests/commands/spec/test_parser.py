@@ -263,8 +263,8 @@ def test_value_optional_bare_is_boolean():
 
 
 def test_value_optional_equals_form_carries_value():
-    parsed = parse_command(SPECS["grep"],
-                           ["--color=auto", "world", "/a.txt"], "/")
+    parsed = parse_command(SPECS["grep"], ["--color=auto", "world", "/a.txt"],
+                           "/")
     assert parsed.flags["--color"] == "auto"
     assert parsed.texts() == ["world"]
     assert parsed.warnings == []

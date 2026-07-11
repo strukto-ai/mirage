@@ -47,7 +47,10 @@ export function usageExitCode(cmdName: string): number {
 export function unknownOptionError(cmdName: string, token: string): [Uint8Array, number] {
   if (cmdName === 'find') {
     const dashed = token.startsWith('-') ? token : `-${token}`
-    return [new TextEncoder().encode(`find: unknown predicate \`${dashed}'\n`), usageExitCode(cmdName)]
+    return [
+      new TextEncoder().encode(`find: unknown predicate \`${dashed}'\n`),
+      usageExitCode(cmdName),
+    ]
   }
   const line = token.startsWith('--')
     ? `${cmdName}: unrecognized option '${token}'\n`

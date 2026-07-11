@@ -84,10 +84,11 @@ describe('displayLines flags', () => {
       [],
       { ...opts(), flags } as CommandOpts,
       statFn,
-      () => (async function* () {
-        await Promise.resolve()
-        yield ENC.encode(text)
-      })(),
+      () =>
+        (async function* () {
+          await Promise.resolve()
+          yield ENC.encode(text)
+        })(),
     )
     const [stdout] = result ?? [null]
     return DEC.decode(await materialize(stdout))

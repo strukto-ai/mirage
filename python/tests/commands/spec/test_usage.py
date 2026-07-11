@@ -1,5 +1,5 @@
-from mirage.commands.spec.usage import (missing_value_error, usage_exit_code,
-                                        unknown_option_error)
+from mirage.commands.spec.usage import (missing_value_error,
+                                        unknown_option_error, usage_exit_code)
 
 
 def test_exit_codes_match_gnu():
