@@ -15,13 +15,25 @@
 from mirage.commands.builtin.generic.crossmount.types import (Cmd, CrossResult,
                                                               RunSingle)
 from mirage.io import IOResult
-from mirage.io.stream import async_chain
+from mirage.io.stream import async_chain, materialize
 from mirage.io.types import ByteSource
 from mirage.types import PathSpec
 
 
 def _has_active_flags(flag_kwargs: dict) -> bool:
     return any(v not in (None, False) for v in flag_kwargs.values())
+
+
+def _respell_fetch_stderr(stderr: bytes, cmd_name: str) -> bytes:
+    # The per-operand fetch is a native Cmd.CAT sub-run, so its error lines
+    # carry the fetch command's prefix; respell them to the real command so
+    # the cross-mount bytes match single-mount.
+    fetch_prefix = Cmd.CAT.encode() + b": "
+    prefix = cmd_name.encode() + b": "
+    return b"\n".join(
+        prefix +
+        line[len(fetch_prefix):] if line.startswith(fetch_prefix) else line
+        for line in stderr.split(b"\n"))
 
 
 async def run_stream(cmd_name: str, scopes: list[PathSpec],
@@ -49,12 +61,22 @@ async def run_stream(cmd_name: str, scopes: list[PathSpec],
     failed = False
     for scope in scopes:
         out, io = await run_single(Cmd.CAT, [scope], [], {})
-        merged_io = await merged_io.merge(io)
         if io.exit_code != 0:
             failed = True
+            if cmd_name != Cmd.CAT and io.stderr is not None:
+                io.stderr = _respell_fetch_stderr(await materialize(io.stderr),
+                                                  cmd_name)
+            merged_io = await merged_io.merge(io)
             continue
+        merged_io = await merged_io.merge(io)
         if out is not None:
             sources.append(out)
+    # sort aborts on any failed operand like GNU (it needs every input
+    # before emitting anything), matching the single-mount builder.
+    if failed and cmd_name == Cmd.SORT:
+        merged_io.exit_code = merged_io.exit_code or 1
+        return None, merged_io
+
     body: ByteSource = async_chain(*sources)
 
     if cmd_name == Cmd.CAT and not _has_active_flags(flag_kwargs):

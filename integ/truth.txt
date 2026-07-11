@@ -2462,6 +2462,129 @@ nosuchcmd: command not found
 === glob_ln_multi_source ===
 exit=1
 ln: target '/data/lnk_multi' is not a directory
+=== pr_seed ===
+exit=0
+=== pr_cut_multi ===
+exit=0
+1
+2
+3
+4
+=== pr_tac_multi ===
+exit=0
+2
+1
+4
+3
+=== pr_nl_multi ===
+exit=0
+     1	1
+     2	2
+     3	3
+     4	4
+=== pr_strings_multi ===
+exit=0
+hello
+worlds
+=== pr_zcat_multi ===
+exit=0
+z
+y
+=== pr_cat ===
+exit=1
+1
+2
+cat: /data/pr/missing.txt: No such file or directory
+=== pr_head ===
+exit=1
+==> /data/pr/one.txt <==
+1
+head: /data/pr/missing.txt: No such file or directory
+=== pr_tail ===
+exit=1
+==> /data/pr/one.txt <==
+2
+tail: /data/pr/missing.txt: No such file or directory
+=== pr_wc ===
+exit=1
+2 /data/pr/one.txt
+2 total
+wc: /data/pr/missing.txt: No such file or directory
+=== pr_nl ===
+exit=1
+     1	1
+     2	2
+nl: /data/pr/missing.txt: No such file or directory
+=== pr_md5 ===
+exit=1
+6ddb4095eb719e2a9f0a3f95677d24e0  /data/pr/one.txt
+md5: /data/pr/missing.txt: No such file or directory
+=== pr_sha256sum ===
+exit=1
+a6e2b7a040683432de03a18fd8a1939a2fdf82585b364bfc874bdd4095c4cae1  /data/pr/one.txt
+sha256sum: /data/pr/missing.txt: No such file or directory
+=== pr_strings ===
+exit=1
+hello
+strings: /data/pr/missing.txt: No such file or directory
+=== pr_tac ===
+exit=1
+2
+1
+tac: /data/pr/missing.txt: No such file or directory
+=== pr_rev ===
+exit=1
+1
+2
+rev: /data/pr/missing.txt: No such file or directory
+=== pr_cut ===
+exit=1
+1
+2
+cut: /data/pr/missing.txt: No such file or directory
+=== pr_expand ===
+exit=1
+1
+2
+expand: /data/pr/missing.txt: No such file or directory
+=== pr_unexpand ===
+exit=1
+1
+2
+unexpand: /data/pr/missing.txt: No such file or directory
+=== pr_fold ===
+exit=1
+1
+2
+fold: /data/pr/missing.txt: No such file or directory
+=== pr_fmt ===
+exit=1
+1 2
+fmt: /data/pr/missing.txt: No such file or directory
+=== pr_zcat ===
+exit=1
+z
+zcat: /data/pr/missing.gz: No such file or directory
+=== pr_sed ===
+exit=1
+X
+2
+sed: /data/pr/missing.txt: No such file or directory
+=== pr_sort ===
+exit=1
+sort: /data/pr/missing.txt: No such file or directory
+=== pr_missing_first ===
+exit=1
+1
+2
+cat: /data/pr/missing.txt: No such file or directory
+=== pr_all_missing_wc ===
+exit=1
+0 total
+wc: /data/pr/m1.txt: No such file or directory
+wc: /data/pr/m2.txt: No such file or directory
+=== pr_cleanup ===
+exit=0
 === find_bad_maxdepth ===
 exit=1
 find: invalid argument 'abc' to '-maxdepth'

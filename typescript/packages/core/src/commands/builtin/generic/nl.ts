@@ -17,6 +17,7 @@ import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { resolveSource } from '../utils/stream.ts'
+import { operandsIo, readOperands, singleChunk } from '../utils/operands.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -59,12 +60,23 @@ async function* nlStream(
 }
 
 async function* nlMulti(
-  paths: readonly PathSpec[],
+  buffers: readonly Uint8Array[],
   opts: NlOptions,
-  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): AsyncIterable<Uint8Array> {
-  for (const p of paths) {
-    for await (const chunk of nlStream(stream(p), opts)) yield chunk
+  // One counter across every operand: GNU nl numbering continues from
+  // file to file (it resets per logical page, never per file).
+  let num = opts.start
+  for (const data of buffers) {
+    const iter = new AsyncLineIterator(singleChunk(data))
+    for await (const raw of iter) {
+      const line = DEC.decode(raw)
+      if (shouldNumber(line, opts.bodyNumbering, opts.pattern)) {
+        yield ENC.encode(`${padLeft(String(num), opts.width)}${opts.separator}${line}\n`)
+        num += opts.increment
+      } else {
+        yield ENC.encode(`${' '.repeat(opts.width)}${opts.separator}${line}\n`)
+      }
+    }
   }
 }
 
@@ -88,7 +100,6 @@ function parseOptions(flags: Record<string, string | boolean | string[]>): NlOpt
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/require-await
 export async function nlGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
@@ -96,7 +107,19 @@ export async function nlGeneric(
 ): Promise<CommandFnResult> {
   const nlOpts = parseOptions(opts.flags)
   if (paths.length > 0) {
-    return [nlMulti(paths, nlOpts, stream), new IOResult()]
+    // Operands read eagerly so a missing one is reported up front and the
+    // remaining operands still number (GNU); the IOResult is sealed before
+    // the output stream is handed back.
+    const [ok, err] = await readOperands(paths, stream, 'nl')
+    const io = operandsIo(err)
+    if (ok.length === 0 && err !== '') return [null, io]
+    return [
+      nlMulti(
+        ok.map((o) => o.data),
+        nlOpts,
+      ),
+      io,
+    ]
   }
   try {
     const source = resolveSource(opts.stdin, 'nl: missing operand')

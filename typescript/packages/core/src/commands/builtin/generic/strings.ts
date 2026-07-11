@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { readStdinAsync } from '../utils/stream.ts'
+import { operandsIo, readOperands } from '../utils/operands.ts'
 
 const ENC = new TextEncoder()
 
@@ -45,16 +46,24 @@ export async function stringsGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
   const minLen = typeof opts.flags.n === 'string' ? Number.parseInt(opts.flags.n, 10) : 4
-  let raw: Uint8Array
+  // Each operand is scanned independently and the matches concatenate in
+  // operand order, like GNU strings.
   if (paths.length > 0) {
-    const first = paths[0]
-    if (first === undefined) return [null, new IOResult()]
-    raw = await materialize(stream(first))
-  } else {
-    const stdinData = await readStdinAsync(opts.stdin)
-    raw = stdinData ?? new Uint8Array(0)
+    // A missing operand is reported and skipped; the remaining operands
+    // still scan (GNU strings).
+    const [ok, err] = await readOperands(paths, stream, 'strings')
+    const io = operandsIo(err)
+    if (ok.length === 0 && err !== '') return [null, io]
+    let output = ''
+    for (const o of ok) {
+      const matches = extractStrings(o.data, minLen)
+      if (matches.length > 0) output += matches.join('\n') + '\n'
+    }
+    const result: ByteSource = ENC.encode(output)
+    return [result, io]
   }
-  const matches = extractStrings(raw, minLen)
+  const stdinData = await readStdinAsync(opts.stdin)
+  const matches = extractStrings(stdinData ?? new Uint8Array(0), minLen)
   const output = matches.length > 0 ? matches.join('\n') + '\n' : ''
   const result: ByteSource = ENC.encode(output)
   return [result, new IOResult()]

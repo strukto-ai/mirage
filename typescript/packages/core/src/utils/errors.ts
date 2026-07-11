@@ -72,13 +72,36 @@ export function errorVirtualPath(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-// Format a filesystem error as a GNU coreutils stderr line, byte-identical
-// with Python's format_fs_error: `<cmd>: <path>: <strerror>` for recognized
-// codes, `<cmd>: <message>` otherwise. When `paths` is supplied the resolved
-// virtual path is rewritten to the as-typed spelling (PathSpec.rawPath) so a
-// relative argument is reported as typed, like GNU. Shared by the
-// single-mount and cross-mount chokepoints; takes a structural shape to
-// avoid importing PathSpec (no import cycle).
+// True when the error carries a recognized filesystem code, i.e. it is the
+// per-operand kind a read-family command skips (GNU keeps processing the
+// remaining operands). Anything else keeps propagating.
+export function isFsError(err: unknown): boolean {
+  const code = (err as { code?: unknown }).code
+  return typeof code === 'string' && gnuStrerror(code) !== null
+}
+
+// GNU coreutils stderr line for one failed path operand, spelled as typed
+// (PathSpec.rawPath). Byte-identical with the executor chokepoint and the
+// Python fs_error_line. Used by read-family commands that keep processing
+// remaining operands after one fails, where the caller holds the operand.
+export function fsErrorLine(
+  cmdName: string,
+  path: string | { virtual: string; rawPath?: string },
+  err: unknown,
+): string {
+  const label = virtualOf(path)
+  const strerror = gnuStrerror((err as { code?: string }).code)
+  if (strerror !== null) return `${cmdName}: ${label}: ${strerror}\n`
+  return `${cmdName}: ${label}\n`
+}
+
+// The chokepoint variant of fsErrorLine for callers that only hold the
+// error, byte-identical with Python's format_fs_error: the path is
+// recovered from the error and, when `paths` is supplied, rewritten to the
+// as-typed spelling (PathSpec.rawPath) so a relative argument is reported
+// as typed, like GNU. Shared by the single-mount and cross-mount
+// chokepoints; takes a structural shape to avoid importing PathSpec (no
+// import cycle).
 export function formatFsError(
   cmdName: string,
   err: unknown,
@@ -89,7 +112,7 @@ export function formatFsError(
   const spelled = paths?.find((p) => p.virtual === vpath)?.rawPath ?? vpath
   const line =
     strerror !== null
-      ? `${cmdName}: ${spelled}: ${strerror}\n`
+      ? fsErrorLine(cmdName, spelled, err)
       : `${cmdName}: ${err instanceof Error ? err.message : String(err)}\n`
   return new TextEncoder().encode(line)
 }

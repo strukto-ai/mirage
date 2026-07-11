@@ -19,8 +19,8 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.expand import expand as generic_expand
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           with_index)
-from mirage.commands.builtin.generic_bind.builders.common import \
-    resolve_or_empty
+from mirage.commands.builtin.generic_bind.builders.common import (
+    merge_split_errors, resolve_readable)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -36,13 +36,16 @@ async def expand(
     index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
-    paths = await resolve_or_empty(ops, accessor, paths, index)
-    return await generic_expand(paths,
-                                read_bytes=with_index(ops.read_bytes, index),
-                                accessor=accessor,
-                                stdin=stdin,
-                                tabsize=int(t) if t is not None else 8,
-                                initial_only=i)
+    paths, err = await resolve_readable(ops, accessor, paths, index, "expand")
+    if err and not paths:
+        return None, IOResult(exit_code=1, stderr=err)
+    return await merge_split_errors(
+        await generic_expand(paths,
+                             read_bytes=with_index(ops.read_bytes, index),
+                             accessor=accessor,
+                             stdin=stdin,
+                             tabsize=int(t) if t is not None else 8,
+                             initial_only=i), err)
 
 
 BUILDER = Builder('expand', expand, None, False, None, read=True)

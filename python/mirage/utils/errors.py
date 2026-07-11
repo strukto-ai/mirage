@@ -22,6 +22,11 @@ _FS_STRERROR: list[tuple[type[OSError], str]] = [
     (PermissionError, "Permission denied"),
 ]
 
+# The recoverable per-operand filesystem errors: every catch site that
+# formats a GNU stderr line and keeps going uses this tuple, so the catch
+# set and the strerror table can never drift apart (mirrors TS isFsError).
+FS_ERRORS: tuple[type[OSError], ...] = tuple(t for t, _ in _FS_STRERROR)
+
 
 def _virtual_of(path: object) -> str:
     original = getattr(path, "virtual", None)
@@ -43,18 +48,39 @@ def fs_strerror(exc: BaseException) -> str | None:
     return None
 
 
+def fs_error_line(cmd_name: str, path: object, exc: BaseException) -> str:
+    """GNU coreutils stderr line for one failed path operand.
+
+    Produces ``<cmd>: <path>: <strerror>``, byte-identical with the
+    TypeScript formatter. ``path`` is the operand itself when the caller
+    knows it (read-family commands that keep processing remaining operands
+    after one fails, reported as typed via ``raw_path``), or an
+    already-resolved label string.
+
+    Args:
+        cmd_name (str): Command name for the ``<cmd>:`` prefix.
+        path (object): The failed operand; ``raw_path`` (or ``virtual``) is
+            the reported spelling, a plain string is used verbatim.
+        exc (BaseException): The filesystem error.
+    """
+    label = getattr(path, "raw_path", None) or _virtual_of(path)
+    strerror = fs_strerror(exc)
+    if strerror is not None:
+        return f"{cmd_name}: {label}: {strerror}\n"
+    return f"{cmd_name}: {label}\n"
+
+
 def format_fs_error(cmd_name: str,
                     exc: OSError,
                     paths: list[PathSpec] | None = None) -> bytes:
     """Format a filesystem OSError as a GNU coreutils stderr line.
 
-    Produces ``<cmd>: <path>: <strerror>`` so output is byte-identical with
-    the TypeScript executor. The path is the bare path carried by the
-    exception (``exc.filename`` when set, else ``str(exc)``); backends raise
-    with the resolved absolute path (``PathSpec.virtual``). When ``paths`` is
-    supplied, the absolute path is rewritten to the as-typed form
-    (``PathSpec.raw_path``) so a relative argument is reported as typed, like
-    GNU.
+    The chokepoint variant of ``fs_error_line`` for callers that only hold
+    the exception: the path is recovered from it (``exc.filename`` when set,
+    else ``str(exc)``); backends raise with the resolved absolute path
+    (``PathSpec.virtual``). When ``paths`` is supplied, the absolute path is
+    rewritten to the as-typed form (``PathSpec.raw_path``) so a relative
+    argument is reported as typed, like GNU.
 
     Args:
         cmd_name (str): Command name for the ``<cmd>:`` prefix.
@@ -68,7 +94,4 @@ def format_fs_error(cmd_name: str,
             if p.virtual == path:
                 path = p.raw_path
                 break
-    strerror = fs_strerror(exc)
-    if strerror is not None:
-        return f"{cmd_name}: {path}: {strerror}\n".encode()
-    return f"{cmd_name}: {path}\n".encode()
+    return fs_error_line(cmd_name, path, exc).encode()

@@ -17,6 +17,7 @@ import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { resolveSource } from '../utils/stream.ts'
+import { operandsIo, readOperands, singleChunk } from '../utils/operands.ts'
 
 async function collectLines(source: AsyncIterable<Uint8Array>): Promise<Uint8Array[]> {
   const lines: Uint8Array[] = []
@@ -25,22 +26,7 @@ async function collectLines(source: AsyncIterable<Uint8Array>): Promise<Uint8Arr
   return lines
 }
 
-export async function tacGeneric(
-  paths: PathSpec[],
-  opts: CommandOpts,
-  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-): Promise<CommandFnResult> {
-  const cache: string[] = []
-  let source: AsyncIterable<Uint8Array>
-  if (paths.length > 0) {
-    const first = paths[0]
-    if (first === undefined) return [null, new IOResult()]
-    source = stream(first)
-    cache.push(first.virtual)
-  } else {
-    source = resolveSource(opts.stdin)
-  }
-  const lines = await collectLines(source)
+function reverseJoin(lines: Uint8Array[]): Uint8Array {
   lines.reverse()
   let total = 0
   for (const l of lines) total += l.byteLength + 1
@@ -52,6 +38,39 @@ export async function tacGeneric(
     out[offset] = 0x0a
     offset += 1
   }
-  const result: ByteSource = out
-  return [result, new IOResult({ cache })]
+  return out
+}
+
+export async function tacGeneric(
+  paths: PathSpec[],
+  opts: CommandOpts,
+  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
+): Promise<CommandFnResult> {
+  // Each operand is reversed independently and the outputs concatenate in
+  // operand order, like GNU tac.
+  if (paths.length > 0) {
+    // A missing operand is reported and skipped; the remaining operands
+    // still reverse (GNU tac).
+    const [ok, err] = await readOperands(paths, stream, 'tac')
+    const io = operandsIo(err, { cache: ok.map((o) => o.path.virtual) })
+    if (ok.length === 0 && err !== '') return [null, io]
+    const parts: Uint8Array[] = []
+    let total = 0
+    for (const o of ok) {
+      const part = reverseJoin(await collectLines(singleChunk(o.data)))
+      parts.push(part)
+      total += part.byteLength
+    }
+    const out = new Uint8Array(total)
+    let offset = 0
+    for (const part of parts) {
+      out.set(part, offset)
+      offset += part.byteLength
+    }
+    const result: ByteSource = out
+    return [result, io]
+  }
+  const lines = await collectLines(resolveSource(opts.stdin))
+  const result: ByteSource = reverseJoin(lines)
+  return [result, new IOResult()]
 }

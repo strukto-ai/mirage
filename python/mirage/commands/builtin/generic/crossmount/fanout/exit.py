@@ -18,6 +18,11 @@ from mirage.commands.builtin.generic.crossmount.types import Cmd
 def combined_exit(cmd_name: str, codes: list[int]) -> int:
     # grep-style: an error (2) dominates, then any match wins (0), then
     # no-match (1). Everything else: worst operand wins.
+    #
+    # Deliberate divergence from GNU: a per-operand read error (missing
+    # file) does not raise the exit to 2. The single-mount grep reports the
+    # operand on stderr and still exits 0 on a match, and integ pins that,
+    # so the fan-out combine mirrors it rather than GNU's errors-win rule.
     if cmd_name in (Cmd.GREP, Cmd.RG):
         if any(code > 1 for code in codes):
             return max(codes)

@@ -129,6 +129,63 @@ async def check_read_family(ws: Workspace, dst: str, label: str) -> None:
         and err == f"grep: {miss}: No such file or directory\n")
 
 
+async def check_partial_read(ws: Workspace, dst: str, label: str) -> None:
+    # One good + one missing operand: GNU keeps the good operand's output,
+    # reports the missing operand on stderr via the shared formatter, and
+    # exits 1. Single-mount and cross-mount must produce identical bytes.
+    src = "/ram/dir/a.txt"
+    miss = f"{dst}/copied/nope.txt"
+    out, err, code = await run(ws, f"cat {src} {miss}")
+    check(
+        f"{label}: cat keeps partial output", out == "aaa\n" and code == 1
+        and err == f"cat: {miss}: No such file or directory\n")
+    out, err, code = await run(ws, f"wc -l {src} {miss}")
+    check(
+        f"{label}: wc keeps total", out == f"1 {src}\n1 total\n" and code == 1
+        and err == f"wc: {miss}: No such file or directory\n")
+    out, err, code = await run(ws, f"head -n 1 {src} {miss}")
+    check(
+        f"{label}: head keeps banner", out == f"==> {src} <==\naaa\n"
+        and code == 1 and err == f"head: {miss}: No such file or directory\n")
+    out, err, code = await run(ws, f"tail -n 1 {src} {miss}")
+    check(
+        f"{label}: tail keeps banner", out == f"==> {src} <==\naaa\n"
+        and code == 1 and err == f"tail: {miss}: No such file or directory\n")
+    # nl rides the STREAM strategy cross-mount: the error line must carry
+    # nl's own name, not the cat sub-run that fetched the operand.
+    out, err, code = await run(ws, f"nl {src} {miss}")
+    check(
+        f"{label}: nl keeps output, own name", out == "     1\taaa\n"
+        and code == 1 and err == f"nl: {miss}: No such file or directory\n")
+    out, err, code = await run(ws, f"md5 {src} {miss}")
+    check(
+        f"{label}: md5 keeps good hash",
+        out == f"5c9597f3c8245907ea71a89d9d39d08e  {src}\n" and code == 1
+        and err == f"md5: {miss}: No such file or directory\n")
+    # stat fans out per operand; mtimes vary, so pin shape and exit only.
+    out, err, code = await run(ws, f"stat {src} {miss}")
+    check(
+        f"{label}: stat keeps good row", "name=a.txt" in out and code == 1
+        and err == f"stat: {miss}: No such file or directory\n")
+    out, err, code = await run(ws, f"cut -c1 {src} {miss}")
+    check(
+        f"{label}: cut keeps partial output", out == "a\n" and code == 1
+        and err == f"cut: {miss}: No such file or directory\n")
+    out, err, code = await run(ws, f"tac {src} {miss}")
+    check(
+        f"{label}: tac keeps partial output", out == "aaa\n" and code == 1
+        and err == f"tac: {miss}: No such file or directory\n")
+    out, err, code = await run(ws, f"sed s/a/X/ {src} {miss}")
+    check(
+        f"{label}: sed keeps partial output", out == "Xaa\n" and code == 1
+        and err == f"sed: {miss}: No such file or directory\n")
+    # sort aborts on any failed operand, single- and cross-mount alike.
+    out, err, code = await run(ws, f"sort {src} {miss}")
+    check(
+        f"{label}: sort aborts", out == "" and code == 1
+        and err == f"sort: {miss}: No such file or directory\n")
+
+
 async def check_compare(ws: Workspace, dst: str, label: str) -> None:
     # diff/cmp two files that live on different mounts: identical operands
     # exit 0 with no output, differing operands exit 1 and report the change.
@@ -323,6 +380,7 @@ async def exercise(ws: Workspace, dst: str, label: str,
     await check_recursive(ws, dst, label, expect_dirs)
     await check_cd_cross_mount(ws, dst, label)
     await check_read_family(ws, dst, label)
+    await check_partial_read(ws, dst, label)
     await check_compare(ws, dst, label)
     await check_no_clobber(ws, dst, label)
     await check_omit_directory(ws, dst, label)
@@ -355,6 +413,7 @@ async def main() -> None:
     ws = Workspace(mounts, mode=MountMode.WRITE)
     try:
         await seed_tree(ws, "/ram")
+        await check_partial_read(ws, "/ram", "ram-single")
         await exercise(ws, "/ram2", "ram", expect_dirs=True)
         if redis_url:
             await exercise(ws, "/redis", "redis", expect_dirs=True)

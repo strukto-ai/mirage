@@ -17,6 +17,7 @@ import type { PathSpec } from '../../../types.ts'
 import { md5Hex } from '../../../utils/hash.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { formatRecords } from '../utils/output.ts'
+import { operandsIo, readOperands } from '../utils/operands.ts'
 
 export async function md5Generic(
   paths: PathSpec[],
@@ -25,11 +26,16 @@ export async function md5Generic(
 ): Promise<CommandFnResult> {
   const lines: string[] = []
   if (paths.length > 0) {
-    for (const p of paths) {
-      const data = await materialize(stream(p))
-      lines.push(`${md5Hex(data)}  ${p.rawPath}`)
-    }
-  } else if (opts.stdin !== null) {
+    // A missing operand is reported and skipped; the good hashes still
+    // print (GNU md5sum).
+    const [ok, err] = await readOperands(paths, stream, 'md5')
+    const io = operandsIo(err)
+    if (ok.length === 0 && err !== '') return [null, io]
+    for (const o of ok) lines.push(`${md5Hex(o.data)}  ${o.path.rawPath}`)
+    const out: ByteSource = formatRecords(lines)
+    return [out, io]
+  }
+  if (opts.stdin !== null) {
     const data = await materialize(opts.stdin)
     lines.push(`${md5Hex(data)}  -`)
   }

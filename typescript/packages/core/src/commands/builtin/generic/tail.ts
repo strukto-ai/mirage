@@ -17,6 +17,7 @@ import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { countNewlines, numberFlagError, parseN, tailBytes } from '../tail_helper.ts'
+import { fsErrorLine, isFsError } from '../../../utils/errors.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 
 const ENC = new TextEncoder()
@@ -55,14 +56,24 @@ export async function tailGeneric(
     const chunks: Uint8Array[] = []
     const cache: string[] = []
     const showHeaders = (vFlag || paths.length > 1) && !qFlag
-    for (let i = 0; i < paths.length; i++) {
-      const p = paths[i]
-      if (p === undefined) continue
-      const raw = await materialize(stream(p))
+    let err = ''
+    let printed = 0
+    for (const p of paths) {
+      let raw: Uint8Array
+      try {
+        raw = await materialize(stream(p))
+      } catch (e) {
+        if (!isFsError(e)) throw e
+        err += fsErrorLine('tail', p, e)
+        continue
+      }
       if (showHeaders) {
-        const header = i > 0 ? `\n==> ${p.rawPath} <==\n` : `==> ${p.rawPath} <==\n`
+        // Separator keyed on printed blocks, not operand index: a good file
+        // after a failed operand starts without a leading blank line (GNU).
+        const header = printed > 0 ? `\n==> ${p.rawPath} <==\n` : `==> ${p.rawPath} <==\n`
         chunks.push(ENC.encode(header))
       }
+      printed += 1
       if (bytesMode !== null) {
         chunks.push(bytesMode === 0 ? new Uint8Array(0) : raw.slice(-bytesMode))
         if (bytesMode >= raw.byteLength) cache.push(p.virtual)
@@ -71,8 +82,14 @@ export async function tailGeneric(
         if (!plusMode && lines >= countNewlines(raw)) cache.push(p.virtual)
       }
     }
+    const io = new IOResult({
+      cache,
+      exitCode: err === '' ? 0 : 1,
+      stderr: err === '' ? null : ENC.encode(err),
+    })
+    if (printed === 0 && err !== '') return [null, io]
     const out: ByteSource = concat(chunks)
-    return [out, new IOResult({ cache })]
+    return [out, io]
   }
   const raw = await readStdinAsync(opts.stdin)
   if (raw === null) {
