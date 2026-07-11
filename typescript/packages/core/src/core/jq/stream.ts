@@ -22,7 +22,7 @@ function parseSafe(text: string): unknown {
   return JSON.parse(text) as unknown
 }
 
-export function parseJsonl(raw: Uint8Array): unknown[] {
+function parseJsonl(raw: Uint8Array): unknown[] {
   const text = DEC.decode(raw)
   return text
     .split('\n')

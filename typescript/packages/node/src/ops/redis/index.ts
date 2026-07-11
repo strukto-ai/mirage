@@ -44,20 +44,3 @@ export const REDIS_OPS: readonly RegisteredOp[] = [
   unlinkOp,
   writeOp,
 ]
-
-export {
-  appendOp,
-  createOp,
-  mkdirOp,
-  readOp,
-  readFeatherOp,
-  readHdf5Op,
-  readParquetOp,
-  readdirOp,
-  renameOp,
-  rmdirOp,
-  statOp,
-  truncateOp,
-  unlinkOp,
-  writeOp,
-}

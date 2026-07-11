@@ -44,7 +44,7 @@ export interface LinearResourceState {
 export class LinearResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.LINEAR
   readonly cachesReads: boolean = true
-  readonly indexTtl: number = 600
+  override readonly indexTtl: number = 600
   readonly prompt: string = LINEAR_PROMPT
   readonly writePrompt: string = LINEAR_WRITE_PROMPT
   readonly config: LinearConfig

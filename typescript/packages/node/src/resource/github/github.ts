@@ -49,7 +49,7 @@ export interface GitHubResourceState {
 export class GitHubResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.GITHUB
   readonly cachesReads: boolean = true
-  readonly indexTtl: number = 86_400
+  override readonly indexTtl: number = 86_400
   readonly config: GitHubConfig
   readonly accessor: GitHubAccessor
 

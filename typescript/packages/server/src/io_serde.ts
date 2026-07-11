@@ -14,19 +14,19 @@
 
 import { ExecuteResult } from '@struktoai/mirage-core'
 
-export interface IoResultDict {
+interface IoResultDict {
   kind: 'io'
   exitCode: number
   stdout: string
   stderr: string
 }
 
-export interface ProvisionResultDict {
+interface ProvisionResultDict {
   kind: 'provision'
   [k: string]: unknown
 }
 
-export interface RawResultDict {
+interface RawResultDict {
   kind: 'raw'
   value: string
 }

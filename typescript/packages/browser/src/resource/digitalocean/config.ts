@@ -30,7 +30,7 @@ export interface DigitalOceanConfigRedacted extends Omit<
   presignedUrlProvider: '<REDACTED>'
 }
 
-export const DigitalOceanConfigSchema = z.object({
+const DigitalOceanConfigSchema = z.object({
   bucket: z.string(),
   presignedUrlProvider: secretSchema(
     z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),

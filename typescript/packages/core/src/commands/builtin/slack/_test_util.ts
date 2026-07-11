@@ -50,11 +50,6 @@ export function makeFakeResource(transport: SlackTransport): SlackResourceLike {
   return resource as SlackResourceLike
 }
 
-export interface SeededIndex {
-  index: RAMIndexCacheStore
-  prefix: string
-}
-
 export async function seedChannel(
   index: RAMIndexCacheStore,
   prefix: string,

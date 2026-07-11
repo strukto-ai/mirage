@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 const JINA_READER_PREFIX = 'https://r.jina.ai/'
-export const DEFAULT_USER_AGENT = 'Mozilla/5.0 (compatible; mirage/1.0)'
+const DEFAULT_USER_AGENT = 'Mozilla/5.0 (compatible; mirage/1.0)'
 
 function toJinaUrl(url: string): string {
   if (url.startsWith(JINA_READER_PREFIX)) return url

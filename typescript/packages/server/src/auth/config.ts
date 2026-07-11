@@ -34,7 +34,7 @@ export const AuthMode = {
 export type AuthMode = (typeof AuthMode)[keyof typeof AuthMode]
 
 const VALID_MODES: readonly AuthMode[] = Object.values(AuthMode)
-export const DEFAULT_CLOCK_SKEW_SECONDS = 5
+const DEFAULT_CLOCK_SKEW_SECONDS = 5
 
 export interface JWTConfig {
   readonly key: string

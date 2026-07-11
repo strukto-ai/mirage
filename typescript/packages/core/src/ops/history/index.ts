@@ -21,7 +21,7 @@ import type { RegisteredOp } from '../registry.ts'
 
 const R = ResourceName.HISTORY
 
-export const readOp: RegisteredOp = {
+const readOp: RegisteredOp = {
   name: 'read',
   resource: R,
   filetype: null,
@@ -29,7 +29,7 @@ export const readOp: RegisteredOp = {
   fn: (accessor: HistoryAccessor, path: PathSpec) => coreRead(accessor, path),
 }
 
-export const statOp: RegisteredOp = {
+const statOp: RegisteredOp = {
   name: 'stat',
   resource: R,
   filetype: null,
@@ -37,7 +37,7 @@ export const statOp: RegisteredOp = {
   fn: (accessor: HistoryAccessor, path: PathSpec) => coreStat(accessor, path),
 }
 
-export const readdirOp: RegisteredOp = {
+const readdirOp: RegisteredOp = {
   name: 'readdir',
   resource: R,
   filetype: null,

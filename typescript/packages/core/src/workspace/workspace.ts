@@ -237,7 +237,7 @@ export class Workspace {
     // The file cache is a hidden store (attached above), never a mount. Arg-less
     // commands and root listing resolve against a neutral root anchor: reuse the
     // user's `/` mount if they gave one, else add a plain empty RAM mount at `/`.
-    // A synthetic anchor is mirage-internal and must NOT be forwarded to Pyodide,
+    // A synthetic anchor is internal to Mirage and must NOT be forwarded to Pyodide,
     // whose own `/` filesystem (holding the Python stdlib) would be hijacked.
     if (this.registry.rootMount === null) {
       this.registry.mount('/', new RAMResource(), options.mode ?? MountMode.READ)

@@ -56,7 +56,7 @@ export interface DiscordResourceState {
 export class DiscordResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.DISCORD
   readonly cachesReads: boolean = true
-  readonly indexTtl: number = 600
+  override readonly indexTtl: number = 600
   readonly prompt: string = DISCORD_PROMPT
   readonly writePrompt: string = DISCORD_WRITE_PROMPT
   readonly config: DiscordConfig

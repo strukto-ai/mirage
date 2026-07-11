@@ -27,7 +27,7 @@ export interface WasabiConfigRedacted extends Omit<WasabiConfig, 'presignedUrlPr
   presignedUrlProvider: '<REDACTED>'
 }
 
-export const WasabiConfigSchema = z.object({
+const WasabiConfigSchema = z.object({
   bucket: z.string(),
   presignedUrlProvider: secretSchema(
     z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),

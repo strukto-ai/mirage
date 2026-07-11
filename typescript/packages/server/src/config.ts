@@ -147,7 +147,7 @@ export function interpolateEnv<T>(value: T, env: Record<string, string>): T {
   return out as T
 }
 
-export interface RawSafeguardBlock {
+interface RawSafeguardBlock {
   maxBytes?: number | null
   maxLines?: number | null
   timeoutSeconds?: number | null
@@ -162,13 +162,13 @@ export interface MountBlock {
   fuse?: boolean | string
 }
 
-export interface RamCacheBlock {
+interface RamCacheBlock {
   type?: 'ram'
   limit?: string | number
   maxDrainBytes?: number | null
 }
 
-export interface RedisCacheBlock {
+interface RedisCacheBlock {
   type: 'redis'
   limit?: string | number
   maxDrainBytes?: number | null
@@ -176,12 +176,12 @@ export interface RedisCacheBlock {
   keyPrefix?: string
 }
 
-export interface RamIndexBlock {
+interface RamIndexBlock {
   type?: 'ram'
   ttl?: number
 }
 
-export interface RedisIndexBlock {
+interface RedisIndexBlock {
   type: 'redis'
   ttl?: number
   url?: string

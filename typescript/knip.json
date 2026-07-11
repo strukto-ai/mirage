@@ -1,0 +1,22 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "ignoreBinaries": ["diskutil", "fusermount"],
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/*.ts"]
+    },
+    "packages/node": {
+      "ignoreDependencies": [
+        "@napi-rs/lzma",
+        "compressjs",
+        "fs-monkey",
+        "tree-sitter-bash",
+        "web-tree-sitter"
+      ]
+    },
+    "packages/browser": {
+      "entry": ["scripts/*.mjs"],
+      "ignoreDependencies": ["tree-sitter-bash", "web-tree-sitter"]
+    }
+  }
+}

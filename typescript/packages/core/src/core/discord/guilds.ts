@@ -21,7 +21,7 @@ export interface DiscordGuild {
   [key: string]: unknown
 }
 
-export function listGuildsStream(
+function listGuildsStream(
   accessor: DiscordAccessor,
   pageSize = 200,
 ): AsyncIterableIterator<DiscordGuild[]> {

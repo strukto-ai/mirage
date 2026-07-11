@@ -47,7 +47,7 @@ export interface MongoDBResourceOptions {
 export class MongoDBResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.MONGODB
   readonly cachesReads: boolean = false
-  readonly indexTtl: number = 0
+  override readonly indexTtl: number = 0
   readonly prompt: string
   readonly config: MongoDBConfigResolved
   readonly store: MongoDBStore

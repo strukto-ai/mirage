@@ -43,7 +43,7 @@ export interface NotionResourceState {
 export class NotionResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.NOTION
   readonly cachesReads: boolean = true
-  readonly indexTtl: number = 600
+  override readonly indexTtl: number = 600
   readonly prompt: string = NOTION_PROMPT
   readonly writePrompt: string = NOTION_WRITE_PROMPT
   readonly config: NotionConfig

@@ -33,7 +33,7 @@ export interface QingStorConfigRedacted {
   timeoutMs?: number
 }
 
-export const QingStorConfigSchema = z.object({
+const QingStorConfigSchema = z.object({
   bucket: z.string(),
   accessKeyId: secretStr(),
   secretAccessKey: secretStr(),

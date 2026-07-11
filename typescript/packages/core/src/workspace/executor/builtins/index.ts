@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export type { ExecuteStringFn, Result } from './scope.ts'
-export { scopePath, toScope } from './scope.ts'
+export type { ExecuteStringFn } from './scope.ts'
+
 export { handleCd } from './dirs.ts'
 export {
   followPaths,

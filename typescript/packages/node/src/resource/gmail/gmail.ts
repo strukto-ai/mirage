@@ -43,7 +43,7 @@ export interface GmailResourceState {
 export class GmailResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.GMAIL
   readonly cachesReads: boolean = true
-  readonly indexTtl: number = 86_400
+  override readonly indexTtl: number = 86_400
   readonly prompt: string = GMAIL_PROMPT
   readonly writePrompt: string = GMAIL_WRITE_PROMPT
   readonly config: GmailConfig

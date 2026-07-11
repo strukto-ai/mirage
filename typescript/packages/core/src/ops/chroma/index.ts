@@ -18,5 +18,3 @@ import { readdirOp } from './readdir.ts'
 import { statOp } from './stat.ts'
 
 export const CHROMA_OPS: readonly RegisteredOp[] = [readOp, readdirOp, statOp]
-
-export { readOp, readdirOp, statOp }

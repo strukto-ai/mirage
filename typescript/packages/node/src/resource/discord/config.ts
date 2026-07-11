@@ -22,7 +22,7 @@ export interface DiscordConfigRedacted {
   token: '<REDACTED>'
 }
 
-export const DiscordConfigSchema = z.object({
+const DiscordConfigSchema = z.object({
   token: secretStr(),
 })
 

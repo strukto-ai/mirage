@@ -44,7 +44,7 @@ export interface PostgresResourceOptions {
 export class PostgresResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.POSTGRES
   readonly cachesReads: boolean = false
-  readonly indexTtl: number = 0
+  override readonly indexTtl: number = 0
   readonly prompt: string
   readonly config: PostgresConfigResolved
   readonly store: PostgresStore
