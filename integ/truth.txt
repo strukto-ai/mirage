@@ -392,32 +392,32 @@ tabbed.txt
 user.json
 users.json
 === ls_file ===
-a.txt
+/data/a.txt
 === ls_glob ===
-a.txt
-anchors.txt
-b.txt
-c.txt
-dup.txt
-empty.txt
-fields.txt
-mixed.txt
-multi.txt
-no_nl.txt
-numbers.txt
-one_byte.txt
-oooo.txt
-patterns.txt
-patterns2.txt
-poem.txt
-prefix_dup.txt
-repeats.txt
-sections.txt
-sorted_a.txt
-sorted_b.txt
-sorted_c.txt
-spaced.txt
-tabbed.txt
+/data/a.txt
+/data/anchors.txt
+/data/b.txt
+/data/c.txt
+/data/dup.txt
+/data/empty.txt
+/data/fields.txt
+/data/mixed.txt
+/data/multi.txt
+/data/no_nl.txt
+/data/numbers.txt
+/data/one_byte.txt
+/data/oooo.txt
+/data/patterns.txt
+/data/patterns2.txt
+/data/poem.txt
+/data/prefix_dup.txt
+/data/repeats.txt
+/data/sections.txt
+/data/sorted_a.txt
+/data/sorted_b.txt
+/data/sorted_c.txt
+/data/spaced.txt
+/data/tabbed.txt
 === expand ===
 a       1
 b       2
@@ -1727,7 +1727,7 @@ yes
 === glob_matched_echo ===
 /data/sorted_a.txt /data/sorted_b.txt /data/sorted_c.txt
 === glob_pattern_dup_word ===
-/data/g8/l1.txt:x *.txt y
+l1.txt:x *.txt y
 === redirect_bare_prep ===
 
 === redirect_bare_target ===
@@ -1797,6 +1797,27 @@ grep: sub/missing.txt: No such file or directory
 1 sub/a.txt
 ==> sub/a.txt <==
 hello
+=== midglob_prep ===
+
+=== midglob_echo ===
+sea/x.txt sub/x.txt
+=== midglob_cat ===
+yo
+hi
+=== midglob_absolute ===
+yo
+hi
+=== midglob_zero_literal ===
+n*/x.txt
+=== glob_zero_mount_error ===
+cat: *.nope: No such file or directory
+=== glob_pushdown_labels ===
+1 sea/x.txt
+1 sub/x.txt
+2 total
+sub/x.txt
+=== glob_ls_operand ===
+sub/x.txt
 === cp_multi_into_dir ===
 
 === cp_multi_verify_a ===
@@ -2527,8 +2548,8 @@ cross
 hello
 cross
 === xm_ls_files ===
-b.txt
-xm.txt
+/data/b.txt
+/data2/xm.txt
 === xm_find_roots ===
 /data/sub/deep/a.txt
 /data/sub/deep/b.txt
@@ -2538,8 +2559,8 @@ xm.txt
 /data2/xm_copy.txt
 /data2/xm_moved.txt
 === xm_touch_rm ===
-xt.txt
-xt.txt
+/data/xt.txt
+/data2/xt.txt
 xm.txt
 xm_copy.txt
 xm_moved.txt
@@ -2727,7 +2748,7 @@ net=0 write=0 cache=0 ops=2 hits=0 precision=exact
 === prov_glob ===
 net=24 write=0 cache=0 ops=1 hits=0 precision=exact
 === prov_glob_unmatched ===
-net=0 write=0 cache=0 ops=0 hits=0 precision=unknown
+net=0 write=0 cache=0 ops=1 hits=0 precision=unknown
 === prov_grep_r ===
 net=60 write=0 cache=0 ops=2 hits=0 precision=exact
 === prov_pathless ===

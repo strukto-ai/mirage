@@ -243,6 +243,32 @@ async function main(): Promise<void> {
     } else {
       console.log('  (no members visible)')
     }
+
+    // ── glob expansion: a mid-path glob replaces the guild segment
+    // (which may contain spaces) and walks into the literal tail.
+    console.log('\n=== echo /discord/*/channels (mid-path glob) ===')
+    r = await ws.execute('echo /discord/*/channels')
+    const globOut = r.stdoutText.trim()
+    console.log(`  ${globOut.slice(0, 200)}`)
+    if (!globOut.endsWith('/channels')) {
+      throw new Error('regression: mid-path glob did not expand')
+    }
+
+    console.log('\n=== for f in /discord/*/channels/* (channel glob loop) ===')
+    r = await ws.execute('for f in /discord/*/channels/*; do echo found:$f; done | head -n 3')
+    for (const line of r.stdoutText.trim().split('\n')) {
+      console.log(`  ${line.slice(0, 120)}`)
+    }
+
+    // A glob that matches nothing stays the literal word, so the
+    // command reports it like GNU coreutils.
+    console.log('\n=== cat /discord/zz-none-*/guild.json (no match) ===')
+    r = await ws.execute('cat /discord/zz-none-*/guild.json')
+    const globErr = r.stderrText.trim()
+    console.log(`  exit=${r.exitCode}  ${globErr.slice(0, 120)}`)
+    if (r.exitCode !== 1 || !globErr.includes('zz-none-*')) {
+      throw new Error('regression: zero-match glob did not keep the literal')
+    }
   } finally {
     await ws.close()
   }

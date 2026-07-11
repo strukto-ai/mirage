@@ -142,6 +142,25 @@ async function main(): Promise<void> {
       if (r.err.trim() !== '') console.log(`  stderr: ${r.err.trim().slice(0, 200)}`)
       for (const line of lines.slice(0, 3)) console.log(`  ${line.slice(0, 150)}`)
     }
+
+    // ── glob expansion: the folder segment is the pattern, the date
+    // tail keeps walking (lists folders once, then each match's days).
+    const globFolder = `${folder.slice(0, 2)}*`
+    console.log(`\n=== echo /email/${globFolder}/2* (mid-path glob) ===`)
+    const globR = await run(ws, `echo /email/${globFolder}/2*`)
+    console.log(`  ${globR.out.trim().slice(0, 200)}`)
+    if (!globR.out.includes(`/email/${folder}/2`)) {
+      throw new Error('regression: mid-path glob did not expand')
+    }
+
+    // A glob that matches nothing stays the literal word, so the
+    // command reports it like GNU coreutils.
+    console.log('\n=== cat /email/zz-none-*/x.eml (no match) ===')
+    const litR = await run(ws, 'cat /email/zz-none-*/x.eml')
+    console.log(`  exit=${String(litR.code)}  ${litR.err.trim().slice(0, 120)}`)
+    if (litR.code !== 1 || !litR.err.includes('zz-none-*')) {
+      throw new Error('regression: zero-match glob did not keep the literal')
+    }
   } finally {
     await ws.close()
   }

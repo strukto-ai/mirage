@@ -585,6 +585,19 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ["relspell_glob_dot", "echo ./sub/*.txt"],
   ["relspell_du_slash", "du -s sub/"],
   ["relspell_labels", "wc -l sub/a.txt && head -v sub/a.txt && cd / && rm -r /data/g14"],
+  [
+    "midglob_prep",
+    "mkdir -p /data/g15/sub /data/g15/sea && cd /data/g15" +
+      " && printf 'hi\\n' | tee sub/x.txt > /dev/null" +
+      " && printf 'yo\\n' | tee sea/x.txt > /dev/null",
+  ],
+  ["midglob_echo", "echo s*/x.txt"],
+  ["midglob_cat", "cat s*/x.txt"],
+  ["midglob_absolute", "cat /data/g15/s*/x.txt"],
+  ["midglob_zero_literal", "echo n*/x.txt"],
+  ["glob_zero_mount_error", "cat *.nope 2>&1"],
+  ["glob_pushdown_labels", "wc -l s*/x.txt && grep -l hi sub/*.txt"],
+  ["glob_ls_operand", "ls sub/*.txt && cd / && rm -r /data/g15"],
 
   // ----- cp / mv multi-source into a directory (last; these mutate) -----
   ["cp_multi_into_dir", "cp /data/a.txt /data/b.txt /data/sub"],

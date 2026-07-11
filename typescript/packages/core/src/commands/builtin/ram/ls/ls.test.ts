@@ -168,7 +168,8 @@ describe('ls', () => {
     const resource = new RAMResource()
     seed(resource, ['/tmp'], { '/tmp/a.txt': 'a' })
     const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { d: true })
-    expect(out).toBe('tmp\n')
+    // GNU ls -d prints the operand as given.
+    expect(out).toBe('/tmp\n')
   })
 
   it('-1 overrides -l: forces short (one-per-line) format', async () => {

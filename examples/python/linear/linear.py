@@ -179,6 +179,22 @@ async def main() -> None:
     for line in out.splitlines():
         print(f"  {line[:120]}")
 
+    # ── mid-path glob: the team segment is the pattern, the literal
+    # tail keeps walking (lists teams once, then filters).
+    print("\n=== echo /linear/teams/*/issues (mid-path glob) ===")
+    r = await ws.execute("echo /linear/teams/*/issues")
+    out = (await r.stdout_str()).strip()
+    print(f"  {out[:200]}")
+    assert out.endswith("/issues"), "mid-path glob did not expand"
+
+    # A glob that matches nothing stays the literal word, so the
+    # command reports it like GNU coreutils.
+    print("\n=== cat /linear/teams/zz-none-*/team.json (no match) ===")
+    r = await ws.execute("cat /linear/teams/zz-none-*/team.json")
+    err = (await r.stderr_str()).strip()
+    print(f"  exit={r.exit_code}  {err[:120]}")
+    assert r.exit_code == 1 and "zz-none-*" in err
+
 
 if __name__ == "__main__":
     asyncio.run(main())

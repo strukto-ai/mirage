@@ -258,6 +258,29 @@ async def main():
     else:
         print("  (no members visible)")
 
+    # ── glob expansion: a mid-path glob replaces the guild segment
+    # (which may contain spaces) and walks into the literal tail.
+    print("\n=== echo /discord/*/channels (mid-path glob) ===")
+    r = await ws.execute("echo /discord/*/channels")
+    out = (await r.stdout_str()).strip()
+    print(f"  {out[:200]}")
+    assert out.endswith("/channels"), "mid-path glob did not expand"
+
+    print("\n=== for f in /discord/*/channels/* (channel glob loop) ===")
+    r = await ws.execute(
+        "for f in /discord/*/channels/*; do echo found:$f; done | head -n 3")
+    out = (await r.stdout_str()).strip()
+    for line in out.splitlines():
+        print(f"  {line[:120]}")
+
+    # A glob that matches nothing stays the literal word, so the
+    # command reports it like GNU coreutils.
+    print("\n=== cat /discord/zz-none-*/guild.json (no match) ===")
+    r = await ws.execute("cat /discord/zz-none-*/guild.json")
+    err = (await r.stderr_str()).strip()
+    print(f"  exit={r.exit_code}  {err[:120]}")
+    assert r.exit_code == 1 and "zz-none-*" in err
+
 
 if __name__ == "__main__":
     asyncio.run(main())

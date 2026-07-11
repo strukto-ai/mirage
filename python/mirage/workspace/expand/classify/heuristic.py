@@ -17,8 +17,9 @@ import re
 import shlex
 
 from mirage.types import PathSpec
+from mirage.utils.glob_walk import has_glob
 from mirage.utils.key_prefix import mount_key
-from mirage.workspace.expand.classify.relative import GLOB_CHARS, relative_spec
+from mirage.workspace.expand.classify.relative import relative_spec
 from mirage.workspace.mount import MountRegistry
 
 _FILENAME_CHAR = re.compile(r"[a-zA-Z0-9_./]")
@@ -57,7 +58,7 @@ def classify_word(word: str, registry: MountRegistry,
     - Relative + no glob -> plain text (never a path)
     - No mount match -> plain text
     """
-    has_glob = any(ch in word for ch in GLOB_CHARS)
+    word_has_glob = has_glob(word)
 
     if word.startswith("/"):
         # Unescape backslash-escaped paths (e.g. /data/Zecheng\'s\ Server).
@@ -74,7 +75,7 @@ def classify_word(word: str, registry: MountRegistry,
         if not is_dir and path + "/" == mount.prefix:
             is_dir = True
         resource_path = mount_key(path, mount.prefix.rstrip("/"))
-        if has_glob:
+        if word_has_glob:
             last_slash = path.rfind("/")
             return PathSpec(
                 virtual=path,
@@ -100,7 +101,7 @@ def classify_word(word: str, registry: MountRegistry,
     # filename pattern (has alphanumeric, dot, or slash alongside
     # glob chars). Bare globs like *, ?, [a-z] are command
     # arguments (e.g. expr 4 * 3), not path patterns.
-    if has_glob and ("/" in word or not word.startswith(".")):
+    if word_has_glob and ("/" in word or not word.startswith(".")):
         if not _FILENAME_CHAR.search(word) or _NON_PATH_CHAR.search(word):
             return word
         return relative_spec(word, registry, cwd)
@@ -112,7 +113,7 @@ def classify_word(word: str, registry: MountRegistry,
     #   cat file.txt   (file path — should resolve)
     #   for f in file.txt  (loop value — should stay text)
     # Users must use "./file.txt" or absolute paths for bare filenames.
-    if not has_glob and "/" in word and _RELATIVE_PATH.fullmatch(word):
+    if not word_has_glob and "/" in word and _RELATIVE_PATH.fullmatch(word):
         if "\\" in word:
             word = _unescape_path(word)
         return relative_spec(word, registry, cwd)
