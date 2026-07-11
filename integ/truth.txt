@@ -1318,6 +1318,14 @@ baz
 20	/data/sub
 === grep_unknown_flag_ignored ===
 world
+=== grep_unknown_short_flag ===
+world
+=== head_numeric_shorthand ===
+hello
+world
+=== tail_numeric_shorthand ===
+bar
+baz
 === grep_cluster_attached ===
 2:world
 === grep_cluster_count ===
