@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator, Awaitable, Callable
 
+from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.sed_helper import (_execute_program,
                                                 _parse_one_command,
@@ -20,7 +21,7 @@ async def sed(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
-    accessor: object = None,
+    accessor: Accessor | None = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     in_place: bool = False,
     suppress: bool = False,

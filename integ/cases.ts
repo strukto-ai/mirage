@@ -276,6 +276,15 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
     "echo '{print $3, $1}' | tee /data/prog.awk > /dev/null" +
       " && awk -f /data/prog.awk /data/fields.txt && rm /data/prog.awk",
   ],
+  ["awk_default_fs", "awk '{print NF, $1}' /data/spaced.txt"],
+  ["awk_multifile", "awk '{print NR, $1}' /data/a.txt /data/b.txt"],
+  [
+    "awk_f_repeat",
+    "echo '{sum += $1}' | tee /data/pa.awk > /dev/null" +
+      " && echo 'END {print sum}' | tee /data/pb.awk > /dev/null" +
+      " && awk -f /data/pa.awk -f /data/pb.awk /data/numbers.txt" +
+      " && rm /data/pa.awk /data/pb.awk",
+  ],
 
   ["sed_d_first", "sed 1d /data/a.txt"],
   ["sed_d_last", "sed '$d' /data/a.txt"],
@@ -792,6 +801,8 @@ export const EXIT_CODE_CASES: ReadonlyArray<readonly [string, string]> = [
   ["grep_usage_exit", "grep"],
   ["rg_usage_exit", "rg"],
   ["zgrep_usage_exit", "zgrep"],
+  ["awk_usage_exit", "awk"],
+  ["awk_f_missing_exit", "awk -f /data/nope.awk /data/a.txt"],
   ["grep_usage_no_input", "grep foo"],
   ["rg_usage_no_input", "rg foo"],
   ["grep_usage_stdin_only", "echo hi | grep"],

@@ -13,6 +13,7 @@
       "description": "Write the downloaded content to the given file.",
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-O",
       "value_kind": "path"
     },
@@ -20,6 +21,7 @@
       "description": "Run quietly with no output.",
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-q",
       "value_kind": "none"
     },
@@ -27,16 +29,19 @@
       "description": "Check that the URL exists without downloading it.",
       "long": "--spider",
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": null,
       "value_kind": "none"
     }
   ],
   "positional": [
     {
-      "kind": "text"
+      "kind": "text",
+      "provided_by": []
     }
   ],
   "rest": {
-    "kind": "path"
+    "kind": "path",
+    "provided_by": []
   }
 }

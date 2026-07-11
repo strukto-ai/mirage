@@ -930,6 +930,21 @@ eq=val
 engineer alice
 designer bob
 manager carol
+=== awk_default_fs ===
+1 leading
+1 trailing
+1 both
+=== awk_multifile ===
+1 hello
+2 world
+3 foo
+4 bar
+5 baz
+6 1
+7 2
+8 3
+=== awk_f_repeat ===
+51
 === sed_d_first ===
 world
 foo
@@ -2150,6 +2165,10 @@ exit=2
 === rg_usage_exit ===
 exit=2
 === zgrep_usage_exit ===
+exit=2
+=== awk_usage_exit ===
+exit=2
+=== awk_f_missing_exit ===
 exit=2
 === grep_usage_no_input ===
 exit=2

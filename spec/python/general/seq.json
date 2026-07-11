@@ -2,7 +2,7 @@
   "_meta": {
     "filetypes": [],
     "has_aggregate": false,
-    "has_provision": false,
+    "has_provision": true,
     "has_write": false,
     "resources": []
   },
@@ -13,6 +13,7 @@
       "description": "Use the given string as separator between numbers.",
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-s",
       "value_kind": "text"
     },
@@ -20,6 +21,7 @@
       "description": "Pad numbers with zeros to equal width.",
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-w",
       "value_kind": "text"
     },
@@ -27,12 +29,14 @@
       "description": "Format each number with a printf-style format string.",
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-f",
       "value_kind": "text"
     }
   ],
   "positional": [],
   "rest": {
-    "kind": "text"
+    "kind": "text",
+    "provided_by": []
   }
 }
