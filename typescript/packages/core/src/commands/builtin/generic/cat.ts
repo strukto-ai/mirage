@@ -70,12 +70,14 @@ export async function catGeneric(
   paths: PathSpec[],
   texts: string[],
   opts: CommandOpts,
-  stat: Stat,
+  stat: Stat | null,
   stream: Stream,
 ): Promise<CommandFnResult> {
   const nFlag = opts.flags.n === true
   if (paths.length > 0) {
-    for (const p of paths) await stat(p)
+    if (stat !== null) {
+      for (const p of paths) await stat(p)
+    }
     const reads: Record<string, ByteSource> = {}
     const cacheKeys: string[] = []
     const outputs: AsyncIterable<Uint8Array>[] = []

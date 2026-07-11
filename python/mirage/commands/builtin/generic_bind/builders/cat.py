@@ -43,7 +43,7 @@ async def cat(
                 await ops.stat(accessor, p, index)
         if len(paths) == 1:
             p = paths[0]
-            if not ops.local:
+            if not ops.local and ops.cat_preflight_stat:
                 await ops.stat(accessor, p, index)
             cachable = CachableAsyncIterator(
                 ops.read_stream(accessor, p, index))

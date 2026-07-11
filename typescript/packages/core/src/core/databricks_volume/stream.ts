@@ -16,7 +16,8 @@ import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.
 import { recordStream } from '../../observe/context.ts'
 import { ResourceName, type PathSpec } from '../../types.ts'
 import { dbxFetch } from './_client.ts'
-import { isNotFound, notFoundError } from './errors.ts'
+import { throwNotFoundOrDirectory } from './_helpers.ts'
+import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
 import { readBytes } from './read.ts'
 
@@ -42,7 +43,7 @@ export async function* readStream(
       headers: { Accept: 'application/octet-stream' },
     })
   } catch (exc) {
-    if (isNotFound(exc)) throw notFoundError(path.virtual)
+    if (isNotFound(exc)) await throwNotFoundOrDirectory(accessor, remotePath, path)
     throw exc
   }
   const body = r.body

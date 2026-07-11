@@ -114,6 +114,7 @@ export interface CommandIO<A extends Accessor = Accessor> {
   stat: StatOp<A>
   isMounted: (accessor: A) => boolean
   local?: boolean
+  catPreflightStat?: boolean
   maxGlobMatches?: number
   write?: WriteOp<A>
   exists?: ExistsOp<A>

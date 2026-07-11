@@ -18,12 +18,12 @@ from typing import BinaryIO
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.core.databricks_volume._helpers import raise_not_found_or_directory
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.read import read_bytes
 from mirage.observe.context import record_stream
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
 
 
 def _download_contents(response) -> BinaryIO:
@@ -73,7 +73,7 @@ async def read_stream(
             yield chunk
     except Exception as exc:
         if is_not_found(exc):
-            raise enoent(path) from exc
+            await raise_not_found_or_directory(accessor, remote_path, path)
         raise
     finally:
         if contents is not None:

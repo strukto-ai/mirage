@@ -51,6 +51,16 @@ function statFn(p: PathSpec): Promise<FileStat> {
 }
 
 describe('catGeneric multi-file streaming', () => {
+  it('does not stat before streaming', async () => {
+    const pulled: string[] = []
+    const result = await catGeneric([spec('/a.txt')], [], opts(), null, (p) =>
+      fileStream(p.virtual, pulled),
+    )
+    const [stdout] = result ?? [null]
+    expect(DEC.decode(await materialize(stdout))).toBe('a1\na2\na3\n')
+    expect(pulled).toEqual(['/a.txt'])
+  })
+
   it('records one reads entry per file, not the joined stream', async () => {
     const pulled: string[] = []
     const result = await catGeneric([spec('/a.txt'), spec('/b.txt')], [], opts(), statFn, (p) =>

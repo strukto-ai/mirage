@@ -126,6 +126,7 @@ class CommandIO:
     find: Callable | None = None
     du_total: Callable | None = None
     du_all: Callable | None = None
+    cat_preflight_stat: bool = True
 
     @property
     def resolve_glob(self) -> Callable:

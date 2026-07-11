@@ -35,6 +35,7 @@ export const DATABRICKS_VOLUME_CMD_OPS: CommandIO<DatabricksVolumeAccessor> = {
   stat: dbxStat,
   isMounted: () => true,
   local: false,
+  catPreflightStat: false,
   write: dbxWrite,
   exists: dbxExists,
   mkdir: (accessor, path, parents) => dbxMkdir(accessor, path, undefined, parents === true),

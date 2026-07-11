@@ -12,9 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { PathSpec } from '../../types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { dbxFetch } from './_client.ts'
+import { isADirectoryError, isNotFound, notFoundError } from './errors.ts'
 
 export function ensurePathSpec(path: PathSpec | string): PathSpec {
   if (path instanceof PathSpec) return path
@@ -36,4 +39,18 @@ export function parentPath(path: PathSpec | string): PathSpec {
   }
   const full = virtual !== '' ? virtual : '/'
   return PathSpec.fromStrPath(full, mountKey(full, prefix))
+}
+
+export async function throwNotFoundOrDirectory(
+  accessor: DatabricksVolumeAccessor,
+  remotePath: string,
+  path: PathSpec,
+): Promise<never> {
+  try {
+    await dbxFetch(accessor, 'HEAD', 'directories', remotePath)
+  } catch (exc) {
+    if (isNotFound(exc)) throw notFoundError(path.virtual)
+    throw exc
+  }
+  throw isADirectoryError(path.virtual)
 }
