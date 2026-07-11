@@ -24,15 +24,16 @@ def _has_active_flags(flag_kwargs: dict) -> bool:
     return any(v not in (None, False) for v in flag_kwargs.values())
 
 
-def _respell_cat_stderr(stderr: bytes, cmd_name: str) -> bytes:
-    # The per-operand fetch is a native cat sub-run, so its error lines
-    # carry the "cat:" prefix; respell them to the real command so the
-    # cross-mount bytes match single-mount.
-    lines = stderr.split(b"\n")
+def _respell_fetch_stderr(stderr: bytes, cmd_name: str) -> bytes:
+    # The per-operand fetch is a native Cmd.CAT sub-run, so its error lines
+    # carry the fetch command's prefix; respell them to the real command so
+    # the cross-mount bytes match single-mount.
+    fetch_prefix = Cmd.CAT.encode() + b": "
     prefix = cmd_name.encode() + b": "
     return b"\n".join(
-        prefix + line[len(b"cat: "):] if line.startswith(b"cat: ") else line
-        for line in lines)
+        prefix +
+        line[len(fetch_prefix):] if line.startswith(fetch_prefix) else line
+        for line in stderr.split(b"\n"))
 
 
 async def run_stream(cmd_name: str, scopes: list[PathSpec],
@@ -63,8 +64,8 @@ async def run_stream(cmd_name: str, scopes: list[PathSpec],
         if io.exit_code != 0:
             failed = True
             if cmd_name != Cmd.CAT and io.stderr is not None:
-                io.stderr = _respell_cat_stderr(await materialize(io.stderr),
-                                                cmd_name)
+                io.stderr = _respell_fetch_stderr(await materialize(io.stderr),
+                                                  cmd_name)
             merged_io = await merged_io.merge(io)
             continue
         merged_io = await merged_io.merge(io)

@@ -24,13 +24,14 @@ function hasActiveFlags(flagKwargs: Record<string, string | boolean | string[]>)
   return Object.values(flagKwargs).some((v) => v !== false)
 }
 
-// The per-operand fetch is a native cat sub-run, so its error lines carry
-// the "cat:" prefix; respell them to the real command so the cross-mount
-// bytes match single-mount.
-function respellCatStderr(stderr: Uint8Array, cmdName: string): Uint8Array {
+// The per-operand fetch is a native Cmd.CAT sub-run, so its error lines
+// carry the fetch command's prefix; respell them to the real command so the
+// cross-mount bytes match single-mount.
+function respellFetchStderr(stderr: Uint8Array, cmdName: string): Uint8Array {
+  const fetchPrefix = `${Cmd.CAT}: `
   const lines = DEC.decode(stderr).split('\n')
   const respelled = lines.map((line) =>
-    line.startsWith('cat: ') ? `${cmdName}: ${line.slice('cat: '.length)}` : line,
+    line.startsWith(fetchPrefix) ? `${cmdName}: ${line.slice(fetchPrefix.length)}` : line,
   )
   return ENC.encode(respelled.join('\n'))
 }
@@ -58,7 +59,7 @@ export async function runStream(
     if (io.exitCode !== 0) {
       failed = true
       if (cmdName !== Cmd.CAT && io.stderr !== null) {
-        io.stderr = respellCatStderr(await materialize(io.stderr), cmdName)
+        io.stderr = respellFetchStderr(await materialize(io.stderr), cmdName)
       }
       mergedIo = await mergedIo.merge(io)
       continue
