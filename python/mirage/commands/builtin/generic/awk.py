@@ -1,15 +1,13 @@
 import re
 from collections.abc import (AsyncIterator, Awaitable, Callable, Mapping,
                              Sequence)
-from dataclasses import dataclass
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.generic.awk_types import (CMP_OP_PATTERN,
-                                                       FIELD_PREFIX,
-                                                       PRINT_STMT, AwkBlock,
-                                                       AwkBoolOp, AwkBuiltin,
-                                                       AwkCmpOp)
+from mirage.commands.builtin.generic.awk_types import (  # yapf: disable
+    CMP_OP_PATTERN, FIELD_PREFIX, PRINT_STMT, USAGE, AwkBlock, AwkBoolOp,
+    AwkBuiltin, AwkCmpOp, AwkFlags)
+from mirage.commands.builtin.utils.formatting import format_number, to_number
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
@@ -17,17 +15,6 @@ from mirage.commands.spec.types import FlagView
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-NUMERIC_PREFIX = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?")
-
-USAGE = "awk: usage: awk [-F fs] [-v var=val] 'program' [file ...]"
-
-
-@dataclass(frozen=True, slots=True)
-class AwkFlags:
-    field_separator: str | None
-    assignments: tuple[str, ...]
-    program_files: tuple[PathSpec, ...]
 
 
 def parse_flags(fl: FlagView) -> AwkFlags:
@@ -48,15 +35,6 @@ def parse_flags(fl: FlagView) -> AwkFlags:
         assignments=tuple(fl.list("v")),
         program_files=program_files,
     )
-
-
-def _to_number(val: str) -> float:
-    m = NUMERIC_PREFIX.match(val.strip())
-    return float(m.group(0)) if m else 0.0
-
-
-def _format_number(val: float) -> str:
-    return str(int(val)) if val == int(val) else str(val)
 
 
 def _parse_program(program: str) -> tuple[str, str]:
@@ -204,7 +182,7 @@ def _eval_accumulator(action: str, field_map: Mapping[str, str],
         if m:
             var, expr = m.group(1), m.group(2).strip()
             val = field_map.get(expr, expr)
-            accum[var] = accum.get(var, 0.0) + _to_number(val)
+            accum[var] = accum.get(var, 0.0) + to_number(val)
 
 
 async def _awk_stream(
@@ -249,7 +227,7 @@ async def _awk_stream(
             AwkBuiltin.NF: "0",
         } | variables
         for k, v in accum.items():
-            end_map[k] = _format_number(v)
+            end_map[k] = format_number(v)
         result = _eval_action(end, end_map)
         if result is not None:
             yield (result + "\n").encode()

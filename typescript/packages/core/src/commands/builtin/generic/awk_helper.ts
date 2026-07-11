@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
+import { toNumber } from '../utils/formatting.ts'
 import {
   AwkBlock,
   AwkBoolOp,
@@ -26,15 +27,8 @@ import {
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
-const NUMERIC_PREFIX = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?/
-
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-export function toNumber(val: string): number {
-  const m = NUMERIC_PREFIX.exec(val.trim())
-  return m === null ? 0 : Number.parseFloat(m[0])
 }
 
 export function splitFields(line: string, fs: string | null): string[] {

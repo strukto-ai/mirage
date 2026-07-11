@@ -17,20 +17,13 @@ import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { awkStream } from './awk_helper.ts'
+import { USAGE, type AwkFlags } from './awk_types.ts'
 import { resolveSource } from '../utils/stream.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
-const USAGE = "awk: usage: awk [-F fs] [-v var=val] 'program' [file ...]"
-
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
-
-interface AwkFlags {
-  readonly fieldSeparator: string | null
-  readonly assignments: readonly string[]
-  readonly programFiles: readonly string[]
-}
 
 function parseFlags(opts: CommandOpts): AwkFlags {
   const rawV = opts.flags.v
