@@ -2491,6 +2491,10 @@ xm_moved.txt
 === xm_grep_multi ===
 /data/a.txt:0
 /data2/xm.txt:1
+=== xm_unknown_flag_warns ===
+/data2/xm.txt:cross
+grep: warning: unknown option '--bogus' ignored
+code=0
 === xm_wc_multi ===
 5 /data/a.txt
 1 /data2/xm.txt

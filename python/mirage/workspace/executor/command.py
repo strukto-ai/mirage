@@ -22,8 +22,9 @@ from mirage.commands.builtin.generic.crossmount import (handle_cross_mount,
                                                         is_cross_mount)
 from mirage.commands.builtin.utils.safeguard import maybe_with_timeout
 from mirage.commands.safeguard import resolve_across_mounts, resolve_safeguard
-from mirage.commands.spec import (SPECS, OperandKind, flag_kwarg_name,
-                                  parse_command, parse_to_kwargs)
+from mirage.commands.spec import (SPECS, CommandSpec, OperandKind,
+                                  flag_kwarg_name, parse_command,
+                                  parse_to_kwargs)
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource
@@ -255,18 +256,29 @@ class _ParsedCommand(NamedTuple):
 
 def _parse_flags(
     parts: list[str | PathSpec],
-    mount: object,
+    spec: CommandSpec | None,
     cmd_name: str,
     cwd: str,
+    str_flag_paths: bool = False,
 ) -> _ParsedCommand:
     """Parse flags from classified parts, recovering PathSpec for PATH values.
+
+    Single-mount dispatch and cross-mount dispatch both parse through
+    here, so flags, texts, and parser warnings cannot drift between the
+    two paths (a cross-mount `grep --bogus` used to lose its warning).
 
     Args:
         parts (list[str | PathSpec]): expanded command words after the
             command name; path-classified words arrive as PathSpec.
-        mount (object): mount providing spec_for(cmd_name).
-        cmd_name (str): command name used to look up the spec.
+        spec (CommandSpec | None): command spec, from the owning mount on
+            the single-mount path or the shared SPECS registry on the
+            cross-mount path; None falls back to type separation.
+        cmd_name (str): command name used in warnings.
         cwd (str): current working directory for relative path resolution.
+        str_flag_paths (bool): keep PATH flag values as their resolved
+            virtual-path strings instead of PathSpec. Cross-mount
+            strategies read flags through FlagView, which type-checks
+            str, so they get the string view.
 
     Returns:
         _ParsedCommand: positional paths, positional texts, parsed flag dict
@@ -285,7 +297,6 @@ def _parse_flags(
             if stripped and stripped != item.virtual:
                 scope_map[stripped] = item
 
-    spec = mount.spec_for(cmd_name)
     if spec is not None:
         parsed = parse_command(spec, argv, cwd=cwd)
         flag_kwargs = parse_to_kwargs(parsed)
@@ -308,25 +319,27 @@ def _parse_flags(
             if opt.value_kind == OperandKind.PATH and not opt.repeatable
             for name in (opt.short, opt.long) if name
         }
-        for key, value in flag_kwargs.items():
-            if key in repeat_path_keys and isinstance(value, list):
-                flag_kwargs[key] = [
-                    scope_map.get(
-                        part,
-                        PathSpec(virtual=part,
-                                 directory=part[:part.rfind("/") + 1] or "/",
+        if not str_flag_paths:
+            for key, value in flag_kwargs.items():
+                if key in repeat_path_keys and isinstance(value, list):
+                    flag_kwargs[key] = [
+                        scope_map.get(
+                            part,
+                            PathSpec(virtual=part,
+                                     directory=part[:part.rfind("/") + 1]
+                                     or "/",
+                                     resource_path="",
+                                     resolved=True)) for part in value
+                    ]
+                elif key in single_path_keys and isinstance(value, str):
+                    flag_kwargs[key] = scope_map.get(
+                        value,
+                        PathSpec(virtual=value,
+                                 directory=value[:value.rfind("/") + 1] or "/",
                                  resource_path="",
-                                 resolved=True)) for part in value
-                ]
-            elif key in single_path_keys and isinstance(value, str):
-                flag_kwargs[key] = scope_map.get(
-                    value,
-                    PathSpec(virtual=value,
-                             directory=value[:value.rfind("/") + 1] or "/",
-                             resource_path="",
-                             resolved=True))
-            elif isinstance(value, str) and value in scope_map:
-                flag_kwargs[key] = scope_map[value]
+                                 resolved=True))
+                elif isinstance(value, str) and value in scope_map:
+                    flag_kwargs[key] = scope_map[value]
 
         # Classify positional args
         paths: list[PathSpec] = []
@@ -473,18 +486,27 @@ async def handle_command(
         # against the shared spec so flags and text operands do not depend on
         # the source mount. The bound single-mount runner lets the strategy
         # runners execute each operand natively on its owning mount.
-        parsed = parse_command(SPECS[cmd_name], raw_argv, cwd=session.cwd)
-        cross_texts = (find_expr_tokens
-                       if find_expr_tokens is not None else parsed.texts())
+        cross_parsed = _parse_flags(parts[1:],
+                                    SPECS.get(cmd_name),
+                                    cmd_name,
+                                    session.cwd,
+                                    str_flag_paths=True)
+        cross_texts = (find_expr_tokens if find_expr_tokens is not None else
+                       cross_parsed.texts)
         run_single = functools.partial(run_on_mount, registry, session,
                                        dispatch, namespace)
         stdout, io = await handle_cross_mount(cmd_name,
                                               path_scopes,
                                               cross_texts,
-                                              parse_to_kwargs(parsed),
+                                              cross_parsed.flag_kwargs,
                                               dispatch,
                                               run_single,
                                               stdin=stdin)
+        if cross_parsed.warnings:
+            warn = "".join(f"{cmd_name}: {w}\n"
+                           for w in cross_parsed.warnings).encode()
+            existing = await materialize(io.stderr) if io.stderr else b""
+            io.stderr = warn + existing
         # The native sub-runs carry their own mount's safeguard; the
         # cross-mount command as a whole uses the strictest one across the
         # operand mounts, regardless of which sub-run merged last.
@@ -545,7 +567,7 @@ async def handle_command(
 
     # Parse flags upstream — mount receives clean args
     paths, texts, flag_kwargs, parse_warnings = _parse_flags(
-        parts[1:], mount, cmd_name, session.cwd)
+        parts[1:], mount.spec_for(cmd_name), cmd_name, session.cwd)
 
     if find_expr_tokens is not None:
         texts = find_expr_tokens

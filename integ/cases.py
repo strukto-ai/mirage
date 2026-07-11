@@ -1042,6 +1042,8 @@ CROSS_MOUNT_CASES: list[tuple[str, str]] = [
     ("xm_mv_over", "mv /data/xm_back.txt /data2/xm_moved.txt"
      " && cat /data2/xm_moved.txt && ls /data2"),
     ("xm_grep_multi", "grep -c s /data/a.txt /data2/xm.txt"),
+    ("xm_unknown_flag_warns",
+     "grep --bogus s /data/a.txt /data2/xm.txt 2>&1; echo code=$?"),
     ("xm_wc_multi", "wc -l /data/a.txt /data2/xm.txt"),
     # du/md5/file fan out per mount and aggregate like the other readers
     ("xm_du_multi", "du /data/b.txt /data2/xm.txt"),
