@@ -1,3 +1,4 @@
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.dify import search as search_core
@@ -17,10 +18,7 @@ def default_paths(paths: list[PathSpec],
 
 
 def is_mount_root(path: PathSpec) -> bool:
-    root = mount_prefix_of(path.virtual,
-                           path.resource_path).rstrip("/") if mount_prefix_of(
-                               path.virtual, path.resource_path) else "/"
-    root = root or "/"
+    root = mount_prefix_of(path.virtual, path.resource_path).rstrip("/") or "/"
     value = path.virtual.rstrip("/") or "/"
     return value == "/" or value == root
 
@@ -33,15 +31,14 @@ async def search(
     method: str = "semantic",
     top_k: str | int = 10,
     threshold: str | float = 0.0,
+    index: IndexCacheStore | None = None,
+    cwd: PathSpec | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not texts:
         raise ValueError("search: query is required")
     query = texts[0]
-    index = _extra.get("index")
-    cwd = _extra.get("cwd")
-    target_paths = default_paths(paths,
-                                 cwd if isinstance(cwd, PathSpec) else None)
+    target_paths = default_paths(paths, cwd)
     mount_prefix = mount_prefix_of(
         target_paths[0].virtual,
         target_paths[0].resource_path) if target_paths else ""
