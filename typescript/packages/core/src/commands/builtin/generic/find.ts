@@ -15,7 +15,7 @@
 import { isEnoent } from '../../../core/generic/find.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { FindOptions } from '../../../resource/base.ts'
-import { parseFindExpression } from '../findParse.ts'
+import { parseFindExpression, parseSize } from '../findParse.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
@@ -33,19 +33,6 @@ export function invalidFindArg(value: string, flag: string): CommandFnResult {
       stderr: ENC.encode(`find: invalid argument '${value}' to '${flag}'\n`),
     }),
   ]
-}
-
-function parseSize(spec: string): [number | null, number | null] {
-  const suffixes: Record<string, number> = { c: 1, k: 1024, M: 1024 ** 2, G: 1024 ** 3 }
-  const sign = spec.startsWith('+') ? '+' : spec.startsWith('-') ? '-' : ''
-  const raw = sign === '' ? spec : spec.slice(1)
-  const lastChar = raw.slice(-1)
-  const mult = suffixes[lastChar] ?? 1
-  const numPart = lastChar in suffixes ? raw.slice(0, -1) : raw
-  const num = Number.parseInt(numPart, 10) * mult
-  if (sign === '+') return [num, null]
-  if (sign === '-') return [null, num]
-  return [num, num]
 }
 
 function parseMtime(spec: string): [number | null, number | null] {

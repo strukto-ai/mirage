@@ -55,7 +55,7 @@ export interface FindExpr {
 // ceil(size/unit) < N, N alone keeps ceil(size/unit) === N. Expressed
 // as inclusive byte bounds: +N -> [N*unit + 1, inf), -N ->
 // [0, (N-1)*unit], N -> [(N-1)*unit + 1, N*unit].
-function parseSize(spec: string): [number | null, number | null] {
+export function parseSize(spec: string): [number | null, number | null] {
   const suffixes: Record<string, number> = { c: 1, k: 1024, M: 1024 ** 2, G: 1024 ** 3 }
   const raw = spec.startsWith('+') || spec.startsWith('-') ? spec.slice(1) : spec
   const last = raw[raw.length - 1] ?? ''
