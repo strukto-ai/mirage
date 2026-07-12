@@ -25,6 +25,18 @@ from mirage.types import FileType, MountMode
 from .conftest import _ram_registered_ops, make_ops, run
 
 
+class TestMountPrefixes:
+
+    def test_mount_prefixes_returns_prefixes(self):
+        ops, _ = make_ops()
+        assert ops.mount_prefixes() == ["/data/"]
+
+    def test_mount_prefixes_reflects_unmount(self):
+        ops, _ = make_ops()
+        ops.unmount("/data/")
+        assert ops.mount_prefixes() == []
+
+
 class TestResolve:
 
     def test_resolve_basic(self):
