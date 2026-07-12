@@ -40,7 +40,10 @@ class TestCurl:
             curl(None, None, "https://example.com", jina=True))
         body = result.decode() if isinstance(result, bytes) else result
         assert "<html" not in body.lower()
-        assert "Example Domain" in body
+        # Assert on the reader envelope, not page content: Jina sometimes
+        # serves a cached third-party snapshot of example.com, but its
+        # markdown output always carries the URL Source header line.
+        assert "https://example.com" in body
 
 
 @pytest.fixture
