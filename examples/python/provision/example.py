@@ -47,32 +47,31 @@ def build(backend: str):
             api_key=os.environ["LINEAR_API_KEY"]))
     if backend == "trello":
         from mirage.resource.trello import TrelloConfig, TrelloResource
-        return TrelloResource(config=TrelloConfig(
-            api_key=os.environ["TRELLO_API_KEY"],
-            api_token=os.environ["TRELLO_API_TOKEN"]))
+        return TrelloResource(
+            config=TrelloConfig(api_key=os.environ["TRELLO_API_KEY"],
+                                api_token=os.environ["TRELLO_API_TOKEN"]))
     if backend == "langfuse":
         from mirage.resource.langfuse import LangfuseConfig, LangfuseResource
-        return LangfuseResource(config=LangfuseConfig(
-            public_key=os.environ["LANGFUSE_PUBLIC_KEY"],
-            secret_key=os.environ["LANGFUSE_SECRET_KEY"],
-            host=os.environ["LANGFUSE_HOST"],
-            default_trace_limit=5))
+        return LangfuseResource(
+            config=LangfuseConfig(public_key=os.environ["LANGFUSE_PUBLIC_KEY"],
+                                  secret_key=os.environ["LANGFUSE_SECRET_KEY"],
+                                  host=os.environ["LANGFUSE_HOST"],
+                                  default_trace_limit=5))
     if backend == "email":
         from mirage.resource.email import EmailConfig, EmailResource
-        return EmailResource(config=EmailConfig(
-            imap_host=os.environ["IMAP_HOST"],
-            smtp_host=os.environ["SMTP_HOST"],
-            username=os.environ["EMAIL_USERNAME"],
-            password=os.environ["EMAIL_PASSWORD"],
-            max_messages=5))
+        return EmailResource(
+            config=EmailConfig(imap_host=os.environ["IMAP_HOST"],
+                               smtp_host=os.environ["SMTP_HOST"],
+                               username=os.environ["EMAIL_USERNAME"],
+                               password=os.environ["EMAIL_PASSWORD"],
+                               max_messages=5))
     if backend == "github_ci":
-        from mirage.resource.github_ci import (GitHubCIConfig,
-                                               GitHubCIResource)
-        return GitHubCIResource(config=GitHubCIConfig(
-            token=os.environ["GITHUB_TOKEN"],
-            owner="strukto-ai",
-            repo="mirage",
-            max_runs=20))
+        from mirage.resource.github_ci import GitHubCIConfig, GitHubCIResource
+        return GitHubCIResource(
+            config=GitHubCIConfig(token=os.environ["GITHUB_TOKEN"],
+                                  owner="strukto-ai",
+                                  repo="mirage",
+                                  max_runs=20))
     if backend == "gdocs":
         from mirage.resource.gdocs import GDocsConfig, GDocsResource
         return GDocsResource(config=GDocsConfig(
