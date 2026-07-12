@@ -25,12 +25,18 @@ DEV_PREFIX = "/dev/"
 
 
 class MountCommandUnsupported(Exception):
-    """Raised when a path-bound command is unsupported by its backend."""
+    """Raised when a path-bound command is unsupported by its backend.
 
-    def __init__(self, cmd_name: str, backend: str) -> None:
+    Rendered in the GNU shape ``<cmd>: <operand>: <reason>`` with the
+    EOPNOTSUPP strerror, naming the offending path like coreutils does;
+    the backend name stays on the exception for programmatic use (#394).
+    """
+
+    def __init__(self, cmd_name: str, backend: str, operand: str) -> None:
         self.cmd_name = cmd_name
         self.backend = backend
-        super().__init__(f"{cmd_name}: not supported on the {backend} backend")
+        self.operand = operand
+        super().__init__(f"{cmd_name}: {operand}: Operation not supported")
 
 
 class MountRegistry:
@@ -264,7 +270,8 @@ class MountRegistry:
 
         if mount is not None and mount.resolve_command(cmd_name) is None:
             if path_scopes:
-                raise MountCommandUnsupported(cmd_name, mount.resource.name)
+                raise MountCommandUnsupported(cmd_name, mount.resource.name,
+                                              path_scopes[0].raw_path)
             mount = self.mount_for_command(cmd_name)
         elif mount is None:
             mount = self.mount_for_command(cmd_name)

@@ -27,6 +27,7 @@ from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
 from mirage.core.email._client import fetch_message
+from mirage.core.email.glob import resolve_glob
 from mirage.core.email.read import read as email_read
 from mirage.core.email.readdir import readdir as _readdir
 from mirage.core.email.scope import extract_folder
@@ -62,7 +63,9 @@ async def rg(
     max_count = fl.int("m")
     pat = compile_pattern(pattern_str, i, F, w)
 
-    if paths:
+    # IMAP text search takes one pattern; a newline-joined multi -e set
+    # must fall through to the generic so each pattern matches (#347).
+    if paths and "\n" not in pattern_str:
         folder = extract_folder(paths)
         if not folder:
             return b"", IOResult(exit_code=1)
@@ -112,8 +115,9 @@ async def rg(
             return b"", IOResult(exit_code=1)
         return format_records(all_results), IOResult()
 
+    resolved = await resolve_glob(accessor, paths, index) if paths else []
     return await generic_rg(
-        [],
+        resolved,
         texts,
         flags,
         readdir=_readdir,

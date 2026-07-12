@@ -341,7 +341,7 @@ describe('MountRegistry.resolveMount: path-bound dispatch', () => {
       MountCommandUnsupported,
     )
     await expect(reg.resolveMount('fallback-only', [path], '/limited')).rejects.toThrow(
-      'fallback-only: not supported on the limited backend',
+      'fallback-only: /limited/file.txt: Operation not supported',
     )
   })
 
