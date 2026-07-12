@@ -19,13 +19,9 @@ import { IOResult } from '../../../io/types.ts'
 import { PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { defaultPaths } from '../utils/operands.ts'
 
 const ENC = new TextEncoder()
-
-function defaultPaths(paths: PathSpec[], cwd: string): PathSpec[] {
-  if (paths.length > 0) return paths
-  return [PathSpec.fromStrPath(cwd)]
-}
 
 async function searchCommand(
   accessor: LanceDBAccessor,
