@@ -12,41 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.gslides import GSlidesAccessor
-from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.utils.output import format_optional_records
-from mirage.commands.registry import command
-from mirage.commands.spec import SPECS
+from mirage.commands.builtin.generic.rm_command import make_rm
 from mirage.core.gslides.glob import resolve_glob
 from mirage.core.gslides.unlink import unlink
-from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
 
-
-@command("rm", resource="gslides", spec=SPECS["rm"], write=True)
-async def rm(
-    accessor: GSlidesAccessor,
-    paths: list[PathSpec],
-    *texts: str,
-    f: bool = False,
-    v: bool = False,
-    index: IndexCacheStore = None,
-    **_extra: object,
-) -> tuple[ByteSource | None, IOResult]:
-    if not paths:
-        raise ValueError("rm: missing operand")
-    paths = await resolve_glob(accessor, paths, index)
-    verbose_parts: list[str] = []
-    removed: dict[str, bytes] = {}
-    for p in paths:
-        try:
-            await unlink(accessor, p, index)
-        except (FileNotFoundError, ValueError):
-            if f:
-                continue
-            raise
-        removed[p.mount_path] = b""
-        if v:
-            verbose_parts.append(f"removed '{p.virtual}'")
-    output = format_optional_records(verbose_parts) if v else None
-    return output, IOResult(writes=removed)
+rm = make_rm(resource="gslides", glob_fn=resolve_glob, unlink=unlink)

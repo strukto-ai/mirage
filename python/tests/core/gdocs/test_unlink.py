@@ -43,7 +43,7 @@ async def test_unlink_calls_delete_with_doc_id(accessor, index):
                     resource_type="gdocs/file",
                     vfs_name="foo.gdoc.json")),
     ])
-    with patch("mirage.core.gdocs.unlink.delete_file",
+    with patch("mirage.core.google.tree_ops.delete_file",
                new_callable=AsyncMock) as mock_delete:
         await unlink(
             accessor,
