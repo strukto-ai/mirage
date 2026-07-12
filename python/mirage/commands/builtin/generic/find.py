@@ -322,6 +322,8 @@ async def walk_find(
             if st is None:
                 continue
         if need_size:
+            # Directories count as size 0 for -size: GNU compares the inode
+            # size (e.g. 4096 on ext4); see CLAUDE.md Rules.
             size = 0 if is_dir else ((st.size if st is not None else 0) or 0)
             if args.min_size is not None and size < args.min_size:
                 continue

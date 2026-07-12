@@ -152,6 +152,7 @@ export function emitStartPath(
     (opts.minSize !== null && opts.minSize !== undefined) ||
     (opts.maxSize !== null && opts.maxSize !== undefined)
   ) {
+    // Directories count as size 0 for -size: GNU compares the inode size (e.g. 4096 on ext4); see CLAUDE.md Rules.
     const effective = opts.kind !== 'f' ? 0 : (opts.size ?? null)
     if (effective !== null) {
       if (opts.minSize !== null && opts.minSize !== undefined && effective < opts.minSize) return

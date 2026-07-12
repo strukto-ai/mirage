@@ -119,6 +119,8 @@ def _find_sync(
             if not keep(entry, tree, mindepth):
                 continue
 
+            # Directories count as size 0 for -size (deliberate GNU
+            # divergence).
             if min_size is not None or max_size is not None:
                 if kind == "f":
                     try:

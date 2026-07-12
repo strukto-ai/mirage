@@ -239,6 +239,8 @@ def emit_start_path(
     if not keep(entry, tree, mindepth):
         return
     if min_size is not None or max_size is not None:
+        # Directories count as size 0 for -size: GNU compares the inode size
+        # (e.g. 4096 on ext4); see CLAUDE.md Rules.
         effective = 0 if kind != "f" else size
         if effective is not None:
             if min_size is not None and effective < min_size:

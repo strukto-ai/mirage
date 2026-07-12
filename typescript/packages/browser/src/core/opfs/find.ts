@@ -97,6 +97,7 @@ async function walk(
       accept = false
     }
 
+    // Directories count as size 0 for -size (deliberate GNU divergence).
     if (accept && kind !== 'f' && (opts.minSize != null || opts.maxSize != null)) {
       // Directories contribute size 0 to -size (#318).
       if (opts.minSize != null && opts.minSize > 0) accept = false

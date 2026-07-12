@@ -117,6 +117,7 @@ def _matches(entry, path, is_dir, depth, maxdepth, mindepth, tree, min_size,
     if not keep(find_entry, tree, mindepth):
         return False
     if min_size is not None or max_size is not None:
+        # Directories count as size 0 for -size (deliberate GNU divergence).
         size = 0 if is_dir else (entry.attrs.size or 0)
         if min_size is not None and size < min_size:
             return False

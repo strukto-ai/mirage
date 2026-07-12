@@ -79,6 +79,7 @@ function matches(
     return false
   }
   if (opts.minSize != null || opts.maxSize != null) {
+    // Directories count as size 0 for -size (deliberate GNU divergence).
     const size = isDir ? 0 : entry.attrs.size
     if (opts.minSize != null && size < opts.minSize) return false
     if (opts.maxSize != null && size > opts.maxSize) return false

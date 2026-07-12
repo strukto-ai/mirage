@@ -89,6 +89,8 @@ async def find(
             if not keep(entry, tree, mindepth):
                 continue
             if min_size is not None or max_size is not None:
+                # Directories count as size 0 for -size (deliberate GNU
+                # divergence).
                 effective = 0 if is_dir else size
                 if min_size is not None and effective < min_size:
                     continue

@@ -99,6 +99,7 @@ export function find(
         kind === 'f' ? (accessor.store.files.get(key)?.byteLength ?? 0) === 0 : !nonempty.has(key)
     }
     if (!keep({ key, name: basename, kind, depth, isEmpty }, tree, options.minDepth)) continue
+    // Directories count as size 0 for -size (deliberate GNU divergence).
     if (options.minSize != null || options.maxSize != null) {
       let size = 0
       if (kind === 'f') {

@@ -73,6 +73,7 @@ async function matches(
     depth: relativeDepth(item, root),
   }
   if (!keep(entry, tree, options.minDepth)) return false
+  // Directories count as size 0 for -size (deliberate GNU divergence).
   if (options.minSize != null || options.maxSize != null) {
     let size = 0
     if (kind === 'f') {

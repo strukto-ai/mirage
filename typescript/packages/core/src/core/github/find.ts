@@ -76,6 +76,7 @@ export function find(
     ) {
       continue
     }
+    // Directories count as size 0 for -size (deliberate GNU divergence).
     const size = isDir ? 0 : (entry.size ?? 0)
     if (options.minSize !== null && options.minSize !== undefined && size < options.minSize) {
       continue

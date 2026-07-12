@@ -161,6 +161,7 @@ export async function walkFind(
       if (st === null) continue
     }
     if (needSize) {
+      // Directories count as size 0 for -size: GNU compares the inode size (e.g. 4096 on ext4); see CLAUDE.md Rules.
       const size = entry.file ? (st?.size ?? 0) : 0
       if (options.minSize != null && size < options.minSize) continue
       if (options.maxSize != null && size > options.maxSize) continue

@@ -48,6 +48,7 @@ function matchesFilters(
     return false
   }
   if (options.minSize != null || options.maxSize != null) {
+    // Directories count as size 0 for -size (deliberate GNU divergence).
     const size = kind === 'f' ? meta.size : 0
     if (options.minSize != null && size < options.minSize) {
       return false

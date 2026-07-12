@@ -83,6 +83,7 @@ async def _matches(
                       depth=_relative_depth(item, root))
     if not keep(entry, tree, mindepth):
         return False
+    # Directories count as size 0 for -size (deliberate GNU divergence).
     if min_size is not None or max_size is not None:
         if kind == "d":
             size = 0

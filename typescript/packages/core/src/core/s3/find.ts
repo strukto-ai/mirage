@@ -88,6 +88,7 @@ export async function find(
           continue
         }
         if (options.minSize != null || options.maxSize != null) {
+          // Directories count as size 0 for -size (deliberate GNU divergence).
           const effective = isDir ? 0 : size
           if (options.minSize != null && effective < options.minSize) {
             continue
