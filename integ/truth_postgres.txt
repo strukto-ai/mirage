@@ -73,6 +73,11 @@ output truncated at safeguard limit (2 lines)
 2:{"id":2,"title":"beta","author":"ben","year":2021
 4:{"id":4,"title":"delta","author":"ada","year":2023
 5:{"id":5,"title":"epsilon","author":"ben","year":2024
+=== rg_e_multi ===
+1:{"id":1,"title":"alpha","author":"ada","year":2020
+2:{"id":2,"title":"beta","author":"ben","year":2021
+4:{"id":4,"title":"delta","author":"ada","year":2023
+5:{"id":5,"title":"epsilon","author":"ben","year":2024
 === nf_cat ===
 exit=1
 cat: /pg/__nf_missing__.txt: No such file or directory

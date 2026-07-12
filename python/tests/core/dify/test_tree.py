@@ -1,6 +1,7 @@
 import pytest
 
 from mirage.core.dify import tree
+from mirage.core.dify._client import is_visible_document
 
 from .conftest import document
 
@@ -8,7 +9,9 @@ tree_calls = {"documents": 0}
 
 
 async def list_documents_with_hidden_and_fallbacks(config):
-    return [
+    # Mirrors the list_all_documents contract: hidden documents (archived,
+    # disabled, still indexing) never leave the client.
+    documents = [
         document("doc-1", "Quickstart", slug="guides/quickstart", size=333),
         document("doc-2", "API", slug="api", size=444, archived=True),
         document("doc-3", "Draft", slug="draft", indexing_status="indexing"),
@@ -16,6 +19,7 @@ async def list_documents_with_hidden_and_fallbacks(config):
         document("doc-5", "Archived", slug="archived", archived=True),
         document("doc-6", "README.md", size=None),
     ]
+    return [doc for doc in documents if is_visible_document(doc)]
 
 
 async def counted_documents(config):
