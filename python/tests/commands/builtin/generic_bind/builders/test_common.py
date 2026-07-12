@@ -34,7 +34,11 @@ def _ops(missing: set[str],
         return FileStat(name=path.virtual, size=0)
 
     async def readdir(_accessor, path, _index):
-        return ["child.txt"] if path.virtual in dirs else []
+        target = path.virtual.rstrip("/") or "/"
+        entries = [d for d in dirs if (d.rsplit("/", 1)[0] or "/") == target]
+        if path.virtual in dirs:
+            entries.append(path.virtual.rstrip("/") + "/child.txt")
+        return entries
 
     async def read_stream(_accessor, _path, _index):
         yield b"data"
@@ -71,6 +75,63 @@ async def test_split_readable_reports_implicit_dir_as_eisdir():
                                      "cat")
     assert good == []
     assert err == b"cat: /sub: Is a directory\n"
+
+
+@pytest.mark.asyncio
+async def test_split_readable_ignores_fabricated_children():
+    # Synthetic hierarchies (postgres schema level) answer a readdir of
+    # any missing name with fabricated children; only the parent listing
+    # decides, so the original ENOENT stands.
+
+    async def stat(_accessor, path, _index):
+        raise FileNotFoundError(path.virtual)
+
+    async def readdir(_accessor, path, _index):
+        target = path.virtual.rstrip("/") or "/"
+        if target == "/":
+            return ["/real.txt"]
+        return [f"{target}/tables", f"{target}/views"]
+
+    async def unused(*_args):
+        raise AssertionError("not used")
+
+    ops = CommandIO(readdir=readdir,
+                    read_bytes=unused,
+                    read_stream=unused,
+                    stat=stat,
+                    is_mounted=lambda _a: True)
+    good, err = await split_readable(ops, None,
+                                     [PathSpec.from_str_path("/nope.txt")],
+                                     None, "cat")
+    assert good == []
+    assert err == b"cat: /nope.txt: No such file or directory\n"
+
+
+@pytest.mark.asyncio
+async def test_split_readable_probe_swallows_driver_errors():
+    # A backend whose readdir raises a non-FS driver error for missing
+    # names (lancedb: "Table ... was not found") must not leak it through
+    # the probe; the original ENOENT stands.
+
+    async def stat(_accessor, path, _index):
+        raise FileNotFoundError(path.virtual)
+
+    async def readdir(_accessor, path, _index):
+        raise ValueError("Table 'nope.txt' was not found")
+
+    async def unused(*_args):
+        raise AssertionError("not used")
+
+    ops = CommandIO(readdir=readdir,
+                    read_bytes=unused,
+                    read_stream=unused,
+                    stat=stat,
+                    is_mounted=lambda _a: True)
+    good, err = await split_readable(ops, None,
+                                     [PathSpec.from_str_path("/nope.txt")],
+                                     None, "wc")
+    assert good == []
+    assert err == b"wc: /nope.txt: No such file or directory\n"
 
 
 @pytest.mark.asyncio

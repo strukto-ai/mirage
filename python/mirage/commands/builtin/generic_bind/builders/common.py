@@ -22,6 +22,7 @@ from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, eisdir, fs_error_line
+from mirage.utils.path import norm, parent
 
 
 async def resolve_or_empty(ops: CommandIO, accessor: Accessor,
@@ -37,10 +38,16 @@ async def _is_implicit_dir(ops: CommandIO, accessor: Accessor, path: PathSpec,
     """Whether a path that failed stat with ENOENT is an implicit directory.
 
     Keyed backends (RAM/Redis/S3) have no directory entries: stat of a
-    prefix that only exists through deeper keys raises ENOENT. A readdir
-    probe with entries means the operand is a directory, so the caller
-    reports GNU's ``Is a directory`` instead. A readdir failure is a
-    negative probe (the original ENOENT stands), not an error to surface.
+    prefix that only exists through deeper keys raises ENOENT. The operand's
+    own readdir cannot serve as the probe: synthetic hierarchies fabricate
+    children for any name (postgres answers ``tables/views`` for a missing
+    schema) and database backends raise driver errors for missing tables.
+    The parent listing is authoritative instead: the operand is an implicit
+    directory only if its parent's readdir lists it. When the operand is
+    the mount root there is no parent to list, so its own readdir decides
+    (root listings are real in every backend). Any probe failure is a
+    negative probe (the original ENOENT stands), never an error to surface,
+    which is why the except is deliberately broad.
 
     Args:
         ops (CommandIO): Backend I/O bundle providing ``readdir``.
@@ -48,11 +55,24 @@ async def _is_implicit_dir(ops: CommandIO, accessor: Accessor, path: PathSpec,
         path (PathSpec): The operand whose stat raised ENOENT.
         index (IndexCacheStore | None): Index cache store for ``readdir``.
     """
+    target = norm(path.virtual)
+    key = path.resource_path.strip("/")
+    if not key:
+        try:
+            entries = await ops.readdir(accessor, path, index)
+        except Exception:
+            return False
+        return bool(entries)
+    parent_key = key.rsplit("/", 1)[0] if "/" in key else ""
+    parent_virtual = parent(target)
+    parent_path = PathSpec(virtual=parent_virtual,
+                           directory=parent_virtual,
+                           resource_path=parent_key)
     try:
-        entries = await ops.readdir(accessor, path, index)
-    except FS_ERRORS:
+        entries = await ops.readdir(accessor, parent_path, index)
+    except Exception:
         return False
-    return bool(entries)
+    return any(norm(entry) == target for entry in entries)
 
 
 async def split_readable(

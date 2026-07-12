@@ -15,10 +15,11 @@
 import type { Accessor } from '../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import type { FindOptions } from '../../../resource/base.ts'
-import type { PathSpec } from '../../../types.ts'
-import { FileType, type FileStat } from '../../../types.ts'
+import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import { eisdir } from '../../../utils/errors.ts'
 import { resolveGlobWith } from '../../../utils/glob_walk.ts'
+import { norm, parent } from '../../../utils/path.ts'
+import { stripSlash } from '../../../utils/slash.ts'
 import type { AggregateFn, CommandFnResult, CommandOpts, ProvisionFn } from '../../config.ts'
 
 export type ReaddirOp<A extends Accessor = Accessor> = (
@@ -135,19 +136,41 @@ export function resolveGlobOf<A extends Accessor = Accessor>(ops: CommandIO<A>):
 
 // Whether a path that failed with ENOENT is an implicit directory. Keyed
 // backends (RAM/Redis/S3) have no directory entries: stat/read of a prefix
-// that only exists through deeper keys raises ENOENT. A readdir probe with
-// entries means the operand is a directory, so the caller reports GNU's
-// `Is a directory` instead. A readdir failure is a negative probe (the
-// original ENOENT stands), not an error to surface.
+// that only exists through deeper keys raises ENOENT. The operand's own
+// readdir cannot serve as the probe: synthetic hierarchies fabricate
+// children for any name (postgres answers tables/views for a missing
+// schema) and database backends raise driver errors for missing tables.
+// The parent listing is authoritative instead: the operand is an implicit
+// directory only if its parent's readdir lists it. When the operand is the
+// mount root there is no parent to list, so its own readdir decides (root
+// listings are real in every backend). Any probe failure is a negative
+// probe (the original ENOENT stands), never an error to surface.
 async function isImplicitDir<A extends Accessor>(
   ops: CommandIO<A>,
   accessor: A,
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<boolean> {
+  const target = norm(path.virtual)
+  const key = stripSlash(path.resourcePath)
+  if (!key) {
+    try {
+      const entries = await ops.readdir(accessor, path, index)
+      return entries.length > 0
+    } catch {
+      return false
+    }
+  }
+  const parentKey = key.includes('/') ? key.slice(0, key.lastIndexOf('/')) : ''
+  const parentVirtual = parent(target)
+  const parentPath = new PathSpec({
+    virtual: parentVirtual,
+    directory: parentVirtual,
+    resourcePath: parentKey,
+  })
   try {
-    const entries = await ops.readdir(accessor, path, index)
-    return entries.length > 0
+    const entries = await ops.readdir(accessor, parentPath, index)
+    return entries.some((entry) => norm(entry) === target)
   } catch {
     return false
   }
@@ -186,8 +209,9 @@ async function* streamRefusingDirs<A extends Accessor>(
   p: PathSpec,
   index?: IndexCacheStore,
 ): AsyncIterable<Uint8Array> {
+  let st: FileStat
   try {
-    yield* ops.readStream(accessor, p, index)
+    st = await ops.stat(accessor, p, index)
   } catch (e) {
     if (
       (e as { code?: string }).code === 'ENOENT' &&
@@ -196,12 +220,16 @@ async function* streamRefusingDirs<A extends Accessor>(
       throw eisdir(p)
     throw e
   }
+  if (st.type === FileType.DIRECTORY) throw eisdir(p)
+  yield* ops.readStream(accessor, p, index)
 }
 
 // Read stream for the read-family per-operand chokepoint (`readOperands`):
-// the raw backend read raises ENOENT for an implicit keyed-backend
-// directory, so the wrapper refines it to EISDIR the same way
-// `dirAwareStat` does before the generic formats the stderr line (#457).
+// the operand is stat'ed first so a directory fails with EISDIR before any
+// backend read runs (sftp reads of a directory raise an opaque `Failure`,
+// not ENOENT), and an ENOENT for an implicit keyed-backend directory is
+// refined the same way `dirAwareStat` does, before the generic formats the
+// stderr line (#457). Mirrors the Python `_read_refusing_dirs`.
 export function dirAwareStream<A extends Accessor>(
   ops: CommandIO<A>,
   accessor: A,

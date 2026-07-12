@@ -80,7 +80,13 @@ async function* dataStream(): AsyncIterable<Uint8Array> {
 
 function dirOps(implicitDirs: readonly string[], explicitDirs: readonly string[] = []): CommandIO {
   return {
-    readdir: (_a, p) => Promise.resolve(implicitDirs.includes(p.virtual) ? ['child.txt'] : []),
+    readdir: (_a, p) => {
+      const target = `/${stripSlash(p.virtual)}`
+      const entries = implicitDirs.filter((d) => (d.slice(0, d.lastIndexOf('/')) || '/') === target)
+      if (implicitDirs.includes(p.virtual))
+        entries.push(`${target === '/' ? '' : target}/child.txt`)
+      return Promise.resolve(entries)
+    },
     readBytes: () => Promise.resolve(new Uint8Array()),
     readStream: (_a, p) => {
       if (implicitDirs.includes(p.virtual)) throw enoent(p)
@@ -113,6 +119,32 @@ describe('dirAwareStat', () => {
     await expect(stat(PathSpec.fromStrPath('/nope.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
+  it('ignores fabricated children from synthetic hierarchies', async () => {
+    // A postgres-style backend answers a readdir of any missing name with
+    // fabricated children; only the parent listing decides.
+    const lying: CommandIO = {
+      ...dirOps([]),
+      stat: (_a, p) => Promise.reject(enoent(p)),
+      readdir: (_a, p) => {
+        const target = `/${stripSlash(p.virtual)}`
+        if (target === '/') return Promise.resolve(['/real.txt'])
+        return Promise.resolve([`${target}/tables`, `${target}/views`])
+      },
+    }
+    const stat = dirAwareStat(lying, accessor)
+    await expect(stat(PathSpec.fromStrPath('/nope.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('keeps ENOENT when the probe readdir raises a driver error', async () => {
+    const throwing: CommandIO = {
+      ...dirOps([]),
+      stat: (_a, p) => Promise.reject(enoent(p)),
+      readdir: () => Promise.reject(new Error("Table 'nope.txt' was not found")),
+    }
+    const stat = dirAwareStat(throwing, accessor)
+    await expect(stat(PathSpec.fromStrPath('/nope.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
   it('passes regular files through', async () => {
     const stat = dirAwareStat(dirOps([]), accessor)
     await expect(stat(PathSpec.fromStrPath('/f.txt'))).resolves.toMatchObject({ size: 0 })
@@ -122,6 +154,24 @@ describe('dirAwareStat', () => {
 describe('dirAwareStream', () => {
   it('refuses an implicit directory with EISDIR when consumed', async () => {
     const stream = dirAwareStream(dirOps(['/sub']), accessor)
+    const consume = async () => {
+      for await (const chunk of stream(PathSpec.fromStrPath('/sub'))) {
+        throw new Error(`no data expected, got ${String(chunk.byteLength)} bytes`)
+      }
+    }
+    await expect(consume()).rejects.toMatchObject({ code: 'EISDIR' })
+  })
+
+  it('refuses a stat-typed directory before the backend read runs', async () => {
+    // sftp reads of a directory raise an opaque `Failure`; the stat-first
+    // check must win so the generic formats GNU's `Is a directory`.
+    const sshLike: CommandIO = {
+      ...dirOps([], ['/sub']),
+      readStream: () => {
+        throw new Error('Failure')
+      },
+    }
+    const stream = dirAwareStream(sshLike, accessor)
     const consume = async () => {
       for await (const chunk of stream(PathSpec.fromStrPath('/sub'))) {
         throw new Error(`no data expected, got ${String(chunk.byteLength)} bytes`)
