@@ -13,14 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { NotionAccessor } from '../../../accessor/notion.ts'
-import type { IndexCacheStore } from '../../../cache/index/index.ts'
 import { read as notionRead } from '../../../core/notion/read.ts'
 import { readdir as notionReaddir } from '../../../core/notion/readdir.ts'
 import { stat as notionStat } from '../../../core/notion/stat.ts'
-import type { PathSpec } from '../../../types.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
 import { streamFromBytes } from '../utils/wrap.ts'
-
 
 export const NOTION_CMD_OPS: CommandIO<NotionAccessor> = {
   readdir: notionReaddir,

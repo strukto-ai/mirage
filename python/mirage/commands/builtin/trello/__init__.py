@@ -16,7 +16,6 @@ from functools import partial
 
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.builtin.trello.trello_card_assign import \
     trello_card_assign
 from mirage.commands.builtin.trello.trello_card_comment_add import \
@@ -32,6 +31,7 @@ from mirage.commands.builtin.trello.trello_card_label_remove import \
 from mirage.commands.builtin.trello.trello_card_move import trello_card_move
 from mirage.commands.builtin.trello.trello_card_update import \
     trello_card_update
+from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.core.trello.read import read as _read
 from mirage.core.trello.readdir import readdir as _readdir
 from mirage.core.trello.stat import stat as _stat

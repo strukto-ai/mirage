@@ -16,7 +16,6 @@ from functools import partial
 
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.builtin.notion.notion_block_append import \
     notion_block_append
 from mirage.commands.builtin.notion.notion_comment_add import \
@@ -24,6 +23,7 @@ from mirage.commands.builtin.notion.notion_comment_add import \
 from mirage.commands.builtin.notion.notion_page_create import \
     notion_page_create
 from mirage.commands.builtin.notion.notion_search import notion_search
+from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.core.notion.find import find as _find
 from mirage.core.notion.read import read as _read
 from mirage.core.notion.readdir import readdir as _readdir

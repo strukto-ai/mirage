@@ -13,14 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { LinearAccessor } from '../../../accessor/linear.ts'
-import type { IndexCacheStore } from '../../../cache/index/index.ts'
 import { read as linearRead } from '../../../core/linear/read.ts'
 import { readdir as linearReaddir } from '../../../core/linear/readdir.ts'
 import { stat as linearStat } from '../../../core/linear/stat.ts'
-import type { PathSpec } from '../../../types.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
 import { streamFromBytes } from '../utils/wrap.ts'
-
 
 export const LINEAR_CMD_OPS: CommandIO<LinearAccessor> = {
   readdir: linearReaddir,

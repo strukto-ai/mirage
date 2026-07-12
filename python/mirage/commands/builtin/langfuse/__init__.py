@@ -16,9 +16,9 @@ from functools import partial
 
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.builtin.langfuse.grep import grep
 from mirage.commands.builtin.langfuse.rg import rg
+from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.core.langfuse.read import read as _read
 from mirage.core.langfuse.readdir import is_dir_name as _is_dir_name
 from mirage.core.langfuse.readdir import readdir as _readdir

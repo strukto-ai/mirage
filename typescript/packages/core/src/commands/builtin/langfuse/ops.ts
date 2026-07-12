@@ -13,14 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { LangfuseAccessor } from '../../../accessor/langfuse.ts'
-import type { IndexCacheStore } from '../../../cache/index/index.ts'
 import { read as langfuseRead } from '../../../core/langfuse/read.ts'
 import { isDirName, readdir as langfuseReaddir } from '../../../core/langfuse/readdir.ts'
 import { stat as langfuseStat } from '../../../core/langfuse/stat.ts'
-import type { PathSpec } from '../../../types.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
 import { streamFromBytes } from '../utils/wrap.ts'
-
 
 export const LANGFUSE_CMD_OPS: CommandIO<LangfuseAccessor> = {
   readdir: langfuseReaddir,

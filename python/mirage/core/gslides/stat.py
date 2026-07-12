@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.gslides.readdir import readdir
 from mirage.core.google.tree_ops import make_stat
+from mirage.core.gslides.readdir import readdir
 
 stat = make_stat(readdir)

@@ -108,8 +108,8 @@ def make_unlink(readdir: Callable) -> Callable:
                             resource_path=path.strip("/"))
         prefix = mount_prefix_of(path.virtual, path.resource_path)
         raw = path.virtual
-        stripped = raw[len(prefix):] if prefix and raw.startswith(
-            prefix) else raw
+        stripped = raw[len(prefix
+                           ):] if prefix and raw.startswith(prefix) else raw
         key = stripped.strip("/")
         if key in VIRTUAL_DIRS:
             raise IsADirectoryError(raw)

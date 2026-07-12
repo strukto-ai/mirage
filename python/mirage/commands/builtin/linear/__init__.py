@@ -16,7 +16,6 @@ from functools import partial
 
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.builtin.linear.linear_issue_add_label import \
     linear_issue_add_label
 from mirage.commands.builtin.linear.linear_issue_assign import \
@@ -36,6 +35,7 @@ from mirage.commands.builtin.linear.linear_issue_transition import \
 from mirage.commands.builtin.linear.linear_issue_update import \
     linear_issue_update
 from mirage.commands.builtin.linear.linear_search import linear_search
+from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.core.linear.read import read as _read
 from mirage.core.linear.readdir import readdir as _readdir
 from mirage.core.linear.stat import stat as _stat

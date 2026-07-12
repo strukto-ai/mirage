@@ -13,14 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiscordAccessor } from '../../../accessor/discord.ts'
-import type { IndexCacheStore } from '../../../cache/index/index.ts'
 import { read as discordRead } from '../../../core/discord/read.ts'
 import { isDirName, readdir as discordReaddir } from '../../../core/discord/readdir.ts'
 import { stat as discordStat } from '../../../core/discord/stat.ts'
-import type { PathSpec } from '../../../types.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
 import { streamFromBytes } from '../utils/wrap.ts'
-
 
 export const DISCORD_CMD_OPS: CommandIO<DiscordAccessor> = {
   readdir: discordReaddir,
