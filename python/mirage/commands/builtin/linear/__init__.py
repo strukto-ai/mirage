@@ -14,7 +14,6 @@
 
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.linear.find import find
 from mirage.commands.builtin.linear.linear_issue_add_label import \
     linear_issue_add_label
 from mirage.commands.builtin.linear.linear_issue_assign import \
@@ -39,8 +38,8 @@ from mirage.core.linear.readdir import readdir as _readdir
 from mirage.core.linear.stat import stat as _stat
 from mirage.core.linear.stream import read_stream as _read_stream
 
-# Linear issues/projects/teams are read through the generic factory; find keeps
-# a wrapper for its bespoke readdir-walk filtering, and the linear_issue_* and
+# Linear issues/projects/teams are read through the generic factory (find
+# included); the linear_issue_* and
 # linear_search commands are the bespoke write/search surface. The generic
 # byte-mutation commands are intentionally absent (mutations go through the
 # platform commands, no write op wired).
@@ -53,15 +52,11 @@ _LINEAR_CMD_OPS = CommandIO(
     local=False,
 )
 
-_LINEAR_OVERRIDES = {"find"}
-
 COMMANDS = [
     *make_generic_commands(
         "linear",
         _LINEAR_CMD_OPS,
-        overrides=_LINEAR_OVERRIDES,
     ),
-    find,
     linear_issue_add_label,
     linear_issue_assign,
     linear_issue_comment_add,
