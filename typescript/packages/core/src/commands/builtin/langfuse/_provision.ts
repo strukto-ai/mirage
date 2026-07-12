@@ -12,35 +12,4 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { LangfuseAccessor } from '../../../accessor/langfuse.ts'
-import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import { Precision, ProvisionResult } from '../../../provision/types.ts'
-import type { PathSpec } from '../../../types.ts'
-import type { CommandOpts } from '../../config.ts'
-
-export async function fileReadProvision(
-  _accessor: LangfuseAccessor,
-  paths: PathSpec[],
-  _texts: string[],
-  opts: CommandOpts,
-): Promise<ProvisionResult> {
-  if (paths.length === 0) {
-    return new ProvisionResult({ precision: Precision.UNKNOWN })
-  }
-  const index: IndexCacheStore | undefined = opts.index ?? undefined
-  let ops = 0
-  if (index !== undefined) {
-    for (const p of paths) {
-      const lookup = await index.get(p.virtual)
-      if (lookup.entry !== undefined && lookup.entry !== null) {
-        ops += 1
-      }
-    }
-  }
-  return new ProvisionResult({
-    networkReadLow: 0,
-    networkReadHigh: 0,
-    readOps: ops,
-    precision: Precision.EXACT,
-  })
-}
+export { indexHitReadProvision as fileReadProvision } from '../generic_bind/provision.ts'

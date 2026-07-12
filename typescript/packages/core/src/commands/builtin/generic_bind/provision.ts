@@ -289,6 +289,54 @@ export function metadataProvision(
 }
 
 /** Provision for jq: streamable jsonl reads a range, else the whole file. */
+export function exactZeroProvision(
+  _accessor: Accessor,
+  _paths: PathSpec[],
+  _texts: string[],
+  opts: CommandOpts,
+): ProvisionResult {
+  // Chat/KB backends materialize their virtual tree from state the mount
+  // already fetched, so metadata commands cost no backend I/O at all
+  // (unlike metadataProvision, which charges one op per operand).
+  return new ProvisionResult({
+    command: opts.command ?? '',
+    networkReadLow: 0,
+    networkReadHigh: 0,
+    readOps: 0,
+    precision: Precision.EXACT,
+  })
+}
+
+export async function indexHitReadProvision(
+  _accessor: Accessor,
+  paths: PathSpec[],
+  _texts: string[],
+  opts: CommandOpts,
+): Promise<ProvisionResult> {
+  // The chat backends rebuild file bytes from API state, so a read costs
+  // ops rather than sized transfers; operands the index has never seen
+  // leave the estimate UNKNOWN.
+  const command = opts.command ?? ''
+  if (paths.length === 0) {
+    return new ProvisionResult({ command, precision: Precision.UNKNOWN })
+  }
+  const index = opts.index ?? undefined
+  let ops = 0
+  if (index !== undefined) {
+    for (const p of paths) {
+      const lookup = await index.get(p.virtual)
+      if (lookup.entry !== undefined && lookup.entry !== null) ops += 1
+    }
+  }
+  return new ProvisionResult({
+    command,
+    networkReadLow: 0,
+    networkReadHigh: 0,
+    readOps: ops,
+    precision: Precision.EXACT,
+  })
+}
+
 export function makeJqProvision<A extends Accessor>(stat: StatOp<A>): ProvisionFn<A> {
   return async (accessor: A, paths: PathSpec[], texts: string[], opts: CommandOpts) => {
     const p = paths[0]

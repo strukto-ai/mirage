@@ -12,73 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.gdocs import GDocsAccessor
-from mirage.cache.index import IndexCacheStore
-from mirage.core.gdocs.stat import stat as gdocs_stat
-from mirage.provision.types import Precision, ProvisionResult
-from mirage.types import PathSpec
+from mirage.commands.builtin.generic_bind.provision import (
+    exact_zero_provision, make_file_read_provision)
+from mirage.core.gdocs.stat import stat as _stat
 
+file_read_provision = make_file_read_provision(_stat)
+metadata_provision = exact_zero_provision
 
-async def _resolve_sizes(
-    accessor: GDocsAccessor,
-    paths: list[PathSpec],
-    index: IndexCacheStore | None,
-) -> tuple[list[tuple[str, int]], int]:
-    """Walk paths, return (path, size) pairs. Self-heals via stat fallback."""
-    resolved: list[tuple[str, int]] = []
-    missing = 0
-    for p in paths:
-        path_str = p.virtual if isinstance(p, PathSpec) else p
-        size = None
-        if index is not None:
-            lookup = await index.get(path_str)
-            if lookup.entry is not None:
-                size = lookup.entry.size
-        if size is None:
-            try:
-                file_stat = await gdocs_stat(accessor, p, index)
-                size = file_stat.size
-            except (FileNotFoundError, ValueError):
-                pass
-        if size is not None:
-            resolved.append((path_str, size))
-        else:
-            missing += 1
-    return resolved, missing
-
-
-async def file_read_provision(
-    accessor: GDocsAccessor,
-    paths: list[PathSpec],
-    command: str = "",
-    index: IndexCacheStore | None = None,
-    **_extra: object,
-) -> ProvisionResult:
-    """Cost estimate for full file reads (cat, wc) over Google Docs."""
-    if not paths:
-        return ProvisionResult(command=command, precision=Precision.UNKNOWN)
-    if index is None:
-        index = index
-    resolved, missing = await _resolve_sizes(accessor, paths, index)
-    if missing > 0 or not resolved:
-        return ProvisionResult(command=command, precision=Precision.UNKNOWN)
-    total = sum(size for _, size in resolved)
-    return ProvisionResult(
-        command=command,
-        network_read_low=total,
-        network_read_high=total,
-        read_ops=len(resolved),
-        precision=Precision.EXACT,
-    )
-
-
-async def metadata_provision(command: str = "",
-                             **_extra: object) -> ProvisionResult:
-    """Cost estimate for metadata-only ops over Google Docs."""
-    return ProvisionResult(
-        command=command,
-        network_read_low=0,
-        network_read_high=0,
-        read_ops=0,
-        precision=Precision.EXACT,
-    )
+__all__ = ["file_read_provision", "metadata_provision"]
