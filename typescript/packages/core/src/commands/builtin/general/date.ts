@@ -19,6 +19,7 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { pureProvision } from '../generic_bind/provision.ts'
 import { extraOperandError } from '../../spec/usage.ts'
+import { CommandName } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -156,7 +157,7 @@ function dateCommand(
   texts: string[],
   opts: CommandOpts,
 ): CommandFnResult {
-  if (texts.length > 1) throw extraOperandError('date', texts[1] ?? '')
+  if (texts.length > 1) throw extraOperandError(CommandName.DATE, texts[1] ?? '')
   const u = opts.flags.u === true
   const d = typeof opts.flags.d === 'string' ? opts.flags.d : null
   const argsI = opts.flags.I === true || opts.flags.args_I === true

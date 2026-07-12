@@ -12,24 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-const TOKEN = new RegExp(
-  [
-    '(0[xX][0-9a-fA-F]+|\\d+)',
-    '([A-Za-z_]\\w*)',
-    '(<<=|>>=|\\*\\*|\\+\\+|--|<<|>>|<=|>=|==|!=|&&|\\|\\||\\+=|-=|\\*=|/=|%=|&=|\\^=|\\|=|[-+*/%<>=!~&|^?:(),])',
-    '(\\s+)',
-    '(.)',
-  ].join('|'),
-  'g',
-)
-
-const ASSIGN_OPS = new Set(['=', '+=', '-=', '*=', '/=', '%=', '<<=', '>>=', '&=', '^=', '|='])
-
-const NAME = /^[A-Za-z_]\w*$/
-
-const MAX_DEPTH = 16
-
-export class ArithError extends Error {}
+import { ARITH_ASSIGN_OPS, ARITH_MAX_DEPTH, ARITH_NAME, ARITH_TOKEN } from './constants.ts'
+import { ArithError } from './errors.ts'
 
 type ArithNode =
   | { kind: 'num'; value: bigint }
@@ -45,7 +29,7 @@ type ArithNode =
 
 function tokenize(expr: string): string[] {
   const tokens: string[] = []
-  for (const match of expr.matchAll(TOKEN)) {
+  for (const match of expr.matchAll(ARITH_TOKEN)) {
     const [, num, name, op, ws, bad] = match
     if (ws !== undefined) continue
     if (bad !== undefined) throw new ArithError(`syntax error: invalid character "${bad}"`)
@@ -75,7 +59,7 @@ function parseLiteral(text: string): bigint {
 // equality, relational, shift, additive, multiplicative, **, unary,
 // ++/--, primary). Evaluation is separate so &&/||/ternary can
 // short-circuit side effects.
-class Parser {
+class ArithParser {
   private pos = 0
   constructor(private readonly tokens: string[]) {}
 
@@ -115,7 +99,7 @@ class Parser {
   private assign(): ArithNode {
     const tok = this.peek()
     const next = this.tokens[this.pos + 1]
-    if (tok !== null && NAME.test(tok) && next !== undefined && ASSIGN_OPS.has(next)) {
+    if (tok !== null && ARITH_NAME.test(tok) && next !== undefined && ARITH_ASSIGN_OPS.has(next)) {
       const name = this.take()
       const op = this.take()
       return { kind: 'assign', name, op, rhs: this.assign() }
@@ -243,7 +227,7 @@ class Parser {
     if (tok === '++' || tok === '--') {
       this.take()
       const name = this.take()
-      if (!NAME.test(name)) throw new ArithError(`syntax error: "${tok}" requires a variable`)
+      if (!ARITH_NAME.test(name)) throw new ArithError(`syntax error: "${tok}" requires a variable`)
       return { kind: 'pre', op: tok, name }
     }
     return this.postfix()
@@ -266,7 +250,7 @@ class Parser {
       this.expect(')')
       return node
     }
-    if (NAME.test(tok)) return { kind: 'var', name: tok }
+    if (ARITH_NAME.test(tok)) return { kind: 'var', name: tok }
     return { kind: 'num', value: parseLiteral(tok) }
   }
 }
@@ -275,7 +259,7 @@ class Parser {
 // Reads resolve through `updates` first, then `env`; every write lands in
 // `updates` so the caller decides what to apply to the session (bash
 // arithmetic assignments are real assignments).
-class Evaluator {
+class ArithEvaluator {
   constructor(
     private readonly env: Readonly<Record<string, string>>,
     private readonly updates: Record<string, string>,
@@ -288,7 +272,7 @@ class Evaluator {
     try {
       return parseLiteral(raw)
     } catch {
-      if (this.depth >= MAX_DEPTH)
+      if (this.depth >= ARITH_MAX_DEPTH)
         throw new ArithError(`expression recursion level exceeded (error token is "${raw}")`)
       const { value } = evaluateArith(raw, { ...this.env, ...this.updates }, this.depth + 1)
       return value
@@ -411,8 +395,8 @@ export function evaluateArith(
 ): { value: bigint; updates: Record<string, string> } {
   const tokens = tokenize(expr)
   if (tokens.length === 0) return { value: 0n, updates: {} }
-  const node = new Parser(tokens).parse()
+  const node = new ArithParser(tokens).parse()
   const updates: Record<string, string> = {}
-  const value = new Evaluator(env, updates, depth).run(node)
+  const value = new ArithEvaluator(env, updates, depth).run(node)
   return { value, updates }
 }

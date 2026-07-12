@@ -13,7 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.errors import UsageError
-from mirage.commands.spec.constants import USAGE_EXIT
+from mirage.commands.spec.constants import USAGE_EXIT, USAGE_HINT_PREFIX
+from mirage.commands.spec.types import CommandName
 
 
 def usage_exit_code(cmd_name: str) -> int:
@@ -39,7 +40,7 @@ def unknown_option_error(cmd_name: str, token: str) -> tuple[bytes, int]:
         cmd_name (str): command name for the message and exit code.
         token (str): offending token ('--bogus') or cluster char ('Y').
     """
-    if cmd_name == "find":
+    if cmd_name == CommandName.FIND:
         dashed = token if token.startswith("-") else f"-{token}"
         line = f"find: unknown predicate `{dashed}'\n"
         return line.encode(), usage_exit_code(cmd_name)
@@ -79,10 +80,10 @@ def extra_operand_error(cmd_name: str, operand: str) -> UsageError:
         cmd_name (str): command name for the message and exit code.
         operand (str): the first extra operand as typed.
     """
-    if cmd_name == "mktemp":
+    if cmd_name == CommandName.MKTEMP:
         line = "mktemp: too many templates"
     else:
         line = f"{cmd_name}: extra operand '{operand}'"
-    prefix = f"{cmd_name}: " if cmd_name in ("diff", "cmp") else ""
+    prefix = f"{cmd_name}: " if cmd_name in USAGE_HINT_PREFIX else ""
     hint = f"{prefix}Try '{cmd_name} --help' for more information."
     return UsageError(f"{line}\n{hint}", usage_exit_code(cmd_name))

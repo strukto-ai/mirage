@@ -14,10 +14,37 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Any
 
 from mirage.commands.spec.constants import flag_kwarg_name
+
+
+class CommandName(StrEnum):
+    """Command names the spec layer references by value.
+
+    Not a registry of every command: only names that appear away from
+    their own module (usage message shapes, arity guards). StrEnum
+    members compare and hash as their plain string values, so the raw
+    ``str`` the executor passes still matches. Mirrors the crossmount
+    ``Cmd`` pattern.
+    """
+    BASE64 = "base64"
+    CMP = "cmp"
+    COMM = "comm"
+    DATE = "date"
+    DIFF = "diff"
+    FIND = "find"
+    JOIN = "join"
+    LOOK = "look"
+    MKTEMP = "mktemp"
+    PATCH = "patch"
+    SEQ = "seq"
+    SPLIT = "split"
+    TR = "tr"
+    TSORT = "tsort"
+    UNIQ = "uniq"
+    XXD = "xxd"
 
 
 class OperandKind(str, Enum):

@@ -1,6 +1,7 @@
 import pytest
 
-from mirage.shell.arith import ArithError, evaluate_arith
+from mirage.shell.arith import evaluate_arith
+from mirage.shell.errors import ArithError
 
 
 def test_basic_precedence():

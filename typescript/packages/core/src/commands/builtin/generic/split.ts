@@ -19,6 +19,7 @@ import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { extraOperandError } from '../../spec/usage.ts'
+import { CommandName } from '../../spec/types.ts'
 
 function alphaSuffix(index: number, length: number): string {
   const chars: string[] = []
@@ -64,7 +65,7 @@ export async function splitGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<CommandFnResult> {
-  if (paths.length > 2) throw extraOperandError('split', paths[2]?.rawPath ?? '')
+  if (paths.length > 2) throw extraOperandError(CommandName.SPLIT, paths[2]?.rawPath ?? '')
   const prefixPath = paths.length >= 2 && paths[1] !== undefined ? paths[1].mountPath : 'x'
   const linesFlag = typeof opts.flags.l === 'string' ? opts.flags.l : null
   const bFlag = typeof opts.flags.b === 'string' ? opts.flags.b : null

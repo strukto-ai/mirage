@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.spec.types import CommandName
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -139,7 +140,7 @@ async def patch(
     N: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 2:
-        raise extra_operand_error("patch", paths[2].raw_path)
+        raise extra_operand_error(CommandName.PATCH, paths[2].raw_path)
     strip_count = int(p) if p else 0
     patch_data = await _load_patch_data(i, paths, has_resource, stdin,
                                         read_bytes, accessor)

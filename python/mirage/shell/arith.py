@@ -12,37 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
 from collections.abc import Mapping
 
-_TOKEN = re.compile(
-    r"""
-    (?P<num>0[xX][0-9a-fA-F]+|\d+)
-  | (?P<name>[A-Za-z_]\w*)
-  | (?P<op><<=|>>=|\*\*|\+\+|--|<<|>>|<=|>=|==|!=|&&|\|\|
-       |\+=|-=|\*=|/=|%=|&=|\^=|\|=
-       |[-+*/%<>=!~&|^?:(),])
-  | (?P<ws>\s+)
-  | (?P<bad>.)
-""", re.VERBOSE)
-
-_ASSIGN_OPS = frozenset(
-    {"=", "+=", "-=", "*=", "/=", "%=", "<<=", ">>=", "&=", "^=", "|="})
-
-# 64-bit wrap like bash (intmax_t arithmetic).
-_WRAP = 1 << 64
-_SIGN = 1 << 63
-
-_MAX_DEPTH = 16
-
-
-class ArithError(ValueError):
-    """A bash arithmetic syntax or evaluation error."""
+from mirage.shell.constants import (ARITH_ASSIGN_OPS, ARITH_MAX_DEPTH,
+                                    ARITH_NAME, ARITH_SIGN, ARITH_TOKEN,
+                                    ARITH_WRAP)
+from mirage.shell.errors import ArithError
 
 
 def _tokenize(expr: str) -> list[str]:
     tokens: list[str] = []
-    for match in _TOKEN.finditer(expr):
+    for match in ARITH_TOKEN.finditer(expr):
         kind = match.lastgroup
         if kind == "ws":
             continue
@@ -53,8 +33,8 @@ def _tokenize(expr: str) -> list[str]:
 
 
 def _wrap(value: int) -> int:
-    value &= _WRAP - 1
-    return value - _WRAP if value & _SIGN else value
+    value &= ARITH_WRAP - 1
+    return value - ARITH_WRAP if value & ARITH_SIGN else value
 
 
 def _trunc_div(a: int, b: int) -> int:
@@ -82,7 +62,7 @@ def _parse_literal(text: str) -> int:
     return int(text)
 
 
-class _Parser:
+class ArithParser:
     """Recursive-descent parser producing tuple AST nodes.
 
     Grammar mirrors bash arithmetic precedence (comma, assignment,
@@ -124,9 +104,10 @@ class _Parser:
         return parts[0] if len(parts) == 1 else ("comma", parts)
 
     def assign(self) -> tuple:
-        if (self.peek() is not None and _NAME.fullmatch(self.tokens[self.pos])
+        if (self.peek() is not None
+                and ARITH_NAME.fullmatch(self.tokens[self.pos])
                 and self.pos + 1 < len(self.tokens)
-                and self.tokens[self.pos + 1] in _ASSIGN_OPS):
+                and self.tokens[self.pos + 1] in ARITH_ASSIGN_OPS):
             name = self.take()
             op = self.take()
             return ("assign", name, op, self.assign())
@@ -227,7 +208,7 @@ class _Parser:
         if tok in ("++", "--"):
             self.take()
             name = self.take()
-            if not _NAME.fullmatch(name):
+            if not ARITH_NAME.fullmatch(name):
                 raise ArithError(f'syntax error: "{tok}" requires a variable')
             return ("pre", tok, name)
         return self.postfix()
@@ -245,7 +226,7 @@ class _Parser:
             node = self.comma()
             self.expect(")")
             return node
-        if _NAME.fullmatch(tok):
+        if ARITH_NAME.fullmatch(tok):
             return ("var", tok)
         try:
             return ("num", _parse_literal(tok))
@@ -254,10 +235,7 @@ class _Parser:
                 from None
 
 
-_NAME = re.compile(r"[A-Za-z_]\w*")
-
-
-class _Evaluator:
+class ArithEvaluator:
     """Evaluates the tuple AST against an env, recording assignments.
 
     Reads resolve through ``updates`` first, then ``env``; every write
@@ -282,7 +260,7 @@ class _Evaluator:
         try:
             return _parse_literal(raw)
         except (ValueError, ArithError):
-            if self.depth >= _MAX_DEPTH:
+            if self.depth >= ARITH_MAX_DEPTH:
                 raise ArithError(
                     f"expression recursion level exceeded (error token is "
                     f'"{raw}")') from None
@@ -416,7 +394,7 @@ def evaluate_arith(expr: str,
     tokens = _tokenize(expr)
     if not tokens:
         return 0, {}
-    node = _Parser(tokens).parse()
+    node = ArithParser(tokens).parse()
     updates: dict[str, str] = {}
-    value = _Evaluator(env, updates, depth).run(node)
+    value = ArithEvaluator(env, updates, depth).run(node)
     return value, updates

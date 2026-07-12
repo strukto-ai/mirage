@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { ArithError, evaluateArith } from './arith.ts'
+import { evaluateArith } from './arith.ts'
+import { ArithError } from './errors.ts'
 
 describe('evaluateArith', () => {
   it('follows precedence', () => {

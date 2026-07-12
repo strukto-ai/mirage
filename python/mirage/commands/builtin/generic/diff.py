@@ -7,6 +7,7 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.diff_helper import _ed_script, _normal_diff
 from mirage.commands.builtin.utils.lines import split_lines_keepends
 from mirage.commands.errors import UsageError
+from mirage.commands.spec.types import CommandName
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
@@ -141,7 +142,7 @@ async def diff(
     r: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 2:
-        raise extra_operand_error("diff", paths[2].raw_path)
+        raise extra_operand_error(CommandName.DIFF, paths[2].raw_path)
     if len(paths) < 2:
         raise UsageError("diff: requires two paths")
     flags = _DiffFlags(i=i, w=w, b=b, e=e, u=u, q=q)

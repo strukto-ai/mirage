@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator, Callable
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.spec.types import CommandName
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -45,7 +46,7 @@ async def base64_cmd(
     wrap: int | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 1:
-        raise extra_operand_error("base64", paths[1].raw_path)
+        raise extra_operand_error(CommandName.BASE64, paths[1].raw_path)
     cache: list[str] = []
     if paths:
         source: AsyncIterator[bytes] = read_stream(accessor, paths[0])

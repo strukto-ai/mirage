@@ -17,8 +17,9 @@ from collections.abc import Callable
 
 import tree_sitter
 
-from mirage.shell.arith import ArithError, evaluate_arith
+from mirage.shell.arith import evaluate_arith
 from mirage.shell.call_stack import CallStack
+from mirage.shell.errors import ArithError
 from mirage.shell.types import NodeType as NT
 from mirage.utils.path import expand_tilde
 from mirage.workspace.expand.constants import ARITH_DELIMITERS, ARITH_OPERATORS

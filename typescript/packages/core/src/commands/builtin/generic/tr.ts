@@ -18,6 +18,7 @@ import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { interpretEscapes } from '../utils/escapes.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { extraOperandError } from '../../spec/usage.ts'
+import { CommandName } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -130,7 +131,7 @@ export async function trGeneric(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
-  if (texts.length > 2) throw extraOperandError('tr', texts[2] ?? '')
+  if (texts.length > 2) throw extraOperandError(CommandName.TR, texts[2] ?? '')
   let trOpts: TrOptions
   try {
     trOpts = buildOptions(texts, opts.flags)

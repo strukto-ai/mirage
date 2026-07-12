@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { UsageError } from '../errors.ts'
-import { USAGE_EXIT } from './constants'
+import { USAGE_EXIT, USAGE_HINT_PREFIX } from './constants'
+import { CommandName } from './types.ts'
 
 /** GNU usage-error exit code for a command. */
 export function usageExitCode(cmdName: string): number {
@@ -31,7 +32,7 @@ export function usageExitCode(cmdName: string): number {
  * registered command serves `--help`.
  */
 export function unknownOptionError(cmdName: string, token: string): [Uint8Array, number] {
-  if (cmdName === 'find') {
+  if (cmdName === (CommandName.FIND as string)) {
     const dashed = token.startsWith('-') ? token : `-${token}`
     return [
       new TextEncoder().encode(`find: unknown predicate \`${dashed}'\n`),
@@ -64,8 +65,10 @@ export function missingValueError(cmdName: string, token: string): [Uint8Array, 
  */
 export function extraOperandError(cmdName: string, operand: string): UsageError {
   const line =
-    cmdName === 'mktemp' ? 'mktemp: too many templates' : `${cmdName}: extra operand '${operand}'`
-  const prefix = cmdName === 'diff' || cmdName === 'cmp' ? `${cmdName}: ` : ''
+    cmdName === (CommandName.MKTEMP as string)
+      ? 'mktemp: too many templates'
+      : `${cmdName}: extra operand '${operand}'`
+  const prefix = USAGE_HINT_PREFIX.has(cmdName) ? `${cmdName}: ` : ''
   const hint = `${prefix}Try '${cmdName} --help' for more information.`
   return new UsageError(`${line}\n${hint}`, usageExitCode(cmdName))
 }
