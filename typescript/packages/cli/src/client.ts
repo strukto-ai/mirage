@@ -16,7 +16,14 @@ import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, openSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
-import { AuthMode, defaultTokenFile, ensureTokenFile, mirageHome } from '@struktoai/mirage-server'
+import {
+  AuthMode,
+  defaultTokenFile,
+  ensureTokenFile,
+  mirageHome,
+  readDaemonTable,
+  validateDaemonTable,
+} from '@struktoai/mirage-server'
 
 import { ENV_AUTH_MODE, ENV_AUTH_TOKEN, ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS } from './env.ts'
 import type { DaemonSettings } from './settings.ts'
@@ -121,17 +128,21 @@ export class DaemonClient {
   }
 
   private spawnDaemon(): void {
+    const table = readDaemonTable(mirageHome())
+    validateDaemonTable(table)
     const env: Record<string, string> = {}
     for (const [k, v] of Object.entries(process.env)) {
       if (typeof v === 'string') env[k] = v
     }
-    env[ENV_DAEMON_PORT] = String(this.portFromUrl())
+    env[ENV_DAEMON_PORT] = String(this.resolvePort(table))
     env[ENV_IDLE_GRACE_SECONDS] = String(this.settings.idleGraceSeconds)
     if (this.settings.authToken === '') {
       this.settings.authToken = ensureTokenFile(defaultTokenFile())
     }
     env[ENV_AUTH_TOKEN] = this.settings.authToken
-    env[ENV_AUTH_MODE] ??= AuthMode.Local
+    if ((env[ENV_AUTH_MODE] ?? '') === '' && (table.auth_mode ?? '') === '') {
+      env[ENV_AUTH_MODE] = AuthMode.Local
+    }
     const logDir = mirageHome()
     mkdirSync(logDir, { recursive: true })
     const out = openSync(join(logDir, 'daemon.log'), 'a')
@@ -150,6 +161,14 @@ export class DaemonClient {
       console.error('failed to spawn daemon:', err)
     })
     child.unref()
+  }
+
+  private resolvePort(table: Record<string, string>): number {
+    const envPort = process.env[ENV_DAEMON_PORT]
+    if (envPort !== undefined && envPort !== '') return Number(envPort)
+    const configPort = table.port
+    if (configPort !== undefined && configPort !== '') return Number(configPort)
+    return this.portFromUrl()
   }
 
   private portFromUrl(): number {

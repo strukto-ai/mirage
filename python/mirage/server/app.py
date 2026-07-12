@@ -24,11 +24,13 @@ from fastapi import FastAPI
 
 from mirage.server.auth import (AuthConfig, AuthMiddleware, AuthMode,
                                 resolve_auth_config)
+from mirage.server.daemon_config import (read_daemon_table,
+                                         validate_daemon_table)
 from mirage.server.host_validation import (HostHeaderMiddleware,
                                            resolve_allowed_hosts)
 from mirage.server.jobs import JobTable
-from mirage.server.paths import (default_snapshot_root, default_version_root,
-                                 pid_file_path)
+from mirage.server.paths import (mirage_home, pid_file_path,
+                                 snapshot_root_path, version_root_path)
 from mirage.server.registry import WorkspaceRegistry
 from mirage.server.routers import (execute, health, jobs, sessions, versions,
                                    workspaces)
@@ -113,6 +115,7 @@ def build_app(idle_grace_seconds: float = 30.0,
     Returns:
         FastAPI: configured app with all routers mounted.
     """
+    validate_daemon_table(read_daemon_table(mirage_home()))
     app = FastAPI(title="Mirage daemon", version="0.1", lifespan=_lifespan)
     hosts = resolve_allowed_hosts(allowed_hosts)
     if "*" not in hosts:
@@ -134,11 +137,8 @@ def build_app(idle_grace_seconds: float = 30.0,
     )
     app.state.jobs = JobTable()
     app.state.pid_file = pid_file_path(pid_file)
-    vroot = (Path(version_root)
-             if version_root is not None else default_version_root())
-    app.state.version_backend = LocalBackend(vroot)
-    app.state.snapshot_root = (Path(snapshot_root) if snapshot_root is not None
-                               else default_snapshot_root())
+    app.state.version_backend = LocalBackend(version_root_path(version_root))
+    app.state.snapshot_root = snapshot_root_path(snapshot_root)
     app.include_router(workspaces.router)
     app.include_router(versions.router)
     app.include_router(sessions.router)

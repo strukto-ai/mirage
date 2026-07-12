@@ -14,8 +14,10 @@
 
 import pytest
 
-from mirage.server.auth.config import (JWTConfig, resolve_auth_config,
+from mirage.server.auth.config import (AuthMode, JWTConfig,
+                                       resolve_auth_config,
                                        resolve_local_token)
+from mirage.server.daemon_config import ALLOWED_KEYS
 
 
 @pytest.mark.no_host_override
@@ -147,3 +149,60 @@ def test_resolve_auth_config_unknown_mode_raises(tmp_path):
     with pytest.raises(RuntimeError, match="MIRAGE_AUTH_MODE"):
         resolve_auth_config(env={"MIRAGE_AUTH_MODE": "wat"},
                             token_file=tmp_path / "missing")
+
+
+def test_auth_mode_from_config_table(tmp_path):
+    cfg = resolve_auth_config(env={"MIRAGE_AUTH_TOKEN": "tok"},
+                              table={"auth_mode": "token"})
+    assert cfg.mode == AuthMode.TOKEN
+    assert cfg.bearer_token == "tok"
+
+
+def test_env_auth_mode_beats_config_table(tmp_path):
+    cfg = resolve_auth_config(env={"MIRAGE_AUTH_MODE": "local"},
+                              token_file=tmp_path / "missing",
+                              table={"auth_mode": "token"})
+    assert cfg.mode == AuthMode.LOCAL
+
+
+def test_jwt_settings_from_config_table(tmp_path):
+    key_file = tmp_path / "pub.pem"
+    key_file.write_text("KEYDATA")
+    cfg = resolve_auth_config(env={},
+                              table={
+                                  "auth_mode": "jwt",
+                                  "jwt_pubkey_file": str(key_file),
+                                  "jwt_alg": "RS256",
+                                  "jwt_issuer": "https://issuer",
+                                  "jwt_audience": "aud",
+                                  "jwt_authorized_parties": "a,b",
+                                  "jwt_clock_skew": 9,
+                              })
+    assert cfg.mode == AuthMode.JWT
+    assert cfg.jwt is not None
+    assert cfg.jwt.key == "KEYDATA"
+    assert cfg.jwt.algorithm == "RS256"
+    assert cfg.jwt.issuer == "https://issuer"
+    assert cfg.jwt.audience == "aud"
+    assert cfg.jwt.authorized_parties == ("a", "b")
+    assert cfg.jwt.clock_skew_seconds == 9
+
+
+def test_env_jwt_alg_beats_config_table(tmp_path):
+    key_file = tmp_path / "pub.pem"
+    key_file.write_text("KEYDATA")
+    cfg = resolve_auth_config(env={
+        "MIRAGE_AUTH_MODE": "jwt",
+        "MIRAGE_JWT_PUBKEY_FILE": str(key_file),
+        "MIRAGE_JWT_ALG": "ES256",
+    },
+                              table={"jwt_alg": "RS256"})
+    assert cfg.jwt is not None
+    assert cfg.jwt.algorithm == "ES256"
+
+
+def test_secret_keys_have_no_config_key():
+    assert "jwt_pubkey" not in ALLOWED_KEYS
+    assert "MIRAGE_AUTH_TOKEN" not in ALLOWED_KEYS
+    assert "auth_mode" in ALLOWED_KEYS
+    assert "jwt_alg" in ALLOWED_KEYS

@@ -14,7 +14,10 @@
 
 import os
 
+import pytest
+
 from mirage.server.app import _remove_pid_file, _write_pid_file, build_app
+from mirage.server.daemon_config import DaemonConfigError
 from mirage.server.env import ENV_HOME, ENV_PID_FILE
 
 
@@ -48,3 +51,18 @@ def test_write_and_remove_pid_file_creates_parents(tmp_path):
 
 def test_remove_pid_file_missing_is_quiet(tmp_path):
     _remove_pid_file(tmp_path / "does_not_exist.pid")
+
+
+def test_build_app_rejects_unknown_config_key(monkeypatch, tmp_path):
+    monkeypatch.setenv(ENV_HOME, str(tmp_path))
+    monkeypatch.delenv(ENV_PID_FILE, raising=False)
+    (tmp_path / "config.toml").write_text('[daemon]\ntypo_key = "x"\n')
+    with pytest.raises(DaemonConfigError, match="typo_key"):
+        build_app()
+
+
+def test_build_app_accepts_valid_config(monkeypatch, tmp_path):
+    monkeypatch.setenv(ENV_HOME, str(tmp_path))
+    monkeypatch.delenv(ENV_PID_FILE, raising=False)
+    (tmp_path / "config.toml").write_text('[daemon]\nurl = "http://h:1"\n')
+    build_app()

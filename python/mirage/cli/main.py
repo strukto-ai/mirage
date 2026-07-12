@@ -14,12 +14,14 @@
 
 import typer
 
+from mirage.cli import config as config_module
 from mirage.cli import daemon as daemon_module
 from mirage.cli import execute as execute_module
 from mirage.cli import job as job_module
 from mirage.cli import provision as provision_module
 from mirage.cli import session as session_module
 from mirage.cli import workspace as workspace_module
+from mirage.server.daemon_config import DaemonConfigError
 
 app = typer.Typer(
     name="mirage",
@@ -32,6 +34,17 @@ app.add_typer(job_module.app, name="job")
 app.add_typer(execute_module.app, name="execute")
 app.add_typer(provision_module.app, name="provision")
 app.add_typer(daemon_module.app, name="daemon")
+app.add_typer(config_module.app, name="config")
+
+
+def main() -> None:
+    """Entry point that turns config errors into clean exit-2 lines."""
+    try:
+        app()
+    except DaemonConfigError as e:
+        typer.echo(str(e), err=True)
+        raise SystemExit(2) from e
+
 
 if __name__ == "__main__":
-    app()
+    main()

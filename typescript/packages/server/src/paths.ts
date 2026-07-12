@@ -14,7 +14,8 @@
 
 import { homedir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
-import { ENV_HOME, ENV_PID_FILE } from './env.ts'
+import { readDaemonTable } from './daemon_config.ts'
+import { ENV_HOME, ENV_PID_FILE, ENV_SNAPSHOT_ROOT, ENV_VERSION_ROOT } from './env.ts'
 
 export class PathOutsideRootError extends Error {
   constructor(message: string) {
@@ -37,15 +38,36 @@ export function pidFilePath(
   if (explicit !== undefined) return resolve(explicit)
   const override = env[ENV_PID_FILE]
   if (override !== undefined && override !== '') return resolve(override)
-  return join(mirageHome(env), 'daemon.pid')
+  const home = mirageHome(env)
+  const fromConfig = readDaemonTable(home).pid_file
+  if (fromConfig !== undefined && fromConfig !== '') return resolve(fromConfig)
+  return join(home, 'daemon.pid')
 }
 
-export function defaultVersionRoot(env: Record<string, string | undefined> = process.env): string {
-  return join(mirageHome(env), 'repos')
+export function versionRootPath(
+  explicit?: string,
+  env: Record<string, string | undefined> = process.env,
+): string {
+  if (explicit !== undefined) return resolve(explicit)
+  const override = env[ENV_VERSION_ROOT]
+  if (override !== undefined && override !== '') return resolve(override)
+  const home = mirageHome(env)
+  const fromConfig = readDaemonTable(home).version_root
+  if (fromConfig !== undefined && fromConfig !== '') return resolve(fromConfig)
+  return join(home, 'repos')
 }
 
-export function defaultSnapshotRoot(env: Record<string, string | undefined> = process.env): string {
-  return join(mirageHome(env), 'snapshots')
+export function snapshotRootPath(
+  explicit?: string,
+  env: Record<string, string | undefined> = process.env,
+): string {
+  if (explicit !== undefined) return resolve(explicit)
+  const override = env[ENV_SNAPSHOT_ROOT]
+  if (override !== undefined && override !== '') return resolve(override)
+  const home = mirageHome(env)
+  const fromConfig = readDaemonTable(home).snapshot_root
+  if (fromConfig !== undefined && fromConfig !== '') return resolve(fromConfig)
+  return join(home, 'snapshots')
 }
 
 export function resolveWithinRoot(root: string, userPath: string): string {

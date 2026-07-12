@@ -20,7 +20,7 @@ describe('mirage CLI program', () => {
     const program = buildProgram()
     const names = program.commands.map((c) => c.name())
     expect(names.sort()).toEqual(
-      ['daemon', 'execute', 'job', 'provision', 'session', 'workspace'].sort(),
+      ['config', 'daemon', 'execute', 'job', 'provision', 'session', 'workspace'].sort(),
     )
   })
 

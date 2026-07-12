@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import Mapping
 
 from mirage.server.auth import storage as _storage
+from mirage.server.daemon_config import read_daemon_table
+from mirage.server.paths import mirage_home
 
 ENV_AUTH_MODE = "MIRAGE_AUTH_MODE"
 ENV_AUTH_TOKEN = "MIRAGE_AUTH_TOKEN"
@@ -96,25 +98,71 @@ def _parse_csv(value: str) -> tuple[str, ...]:
     return tuple(p.strip() for p in value.split(",") if p.strip())
 
 
+_CONFIG_ENV_KEYS = {
+    "auth_mode": ENV_AUTH_MODE,
+    "jwt_alg": ENV_JWT_ALG,
+    "jwt_issuer": ENV_JWT_ISSUER,
+    "jwt_audience": ENV_JWT_AUDIENCE,
+    "jwt_pubkey_file": ENV_JWT_PUBKEY_FILE,
+    "jwt_clock_skew": ENV_JWT_CLOCK_SKEW,
+    "jwt_authorized_parties": ENV_JWT_AUTHORIZED_PARTIES,
+}
+
+
+def _merge_config_table(env: Mapping[str, str],
+                        table: Mapping[str, object]) -> dict[str, str]:
+    """Fold config.toml auth keys under their env names, env winning.
+
+    Only non-secret keys have config counterparts: the raw
+    ``MIRAGE_AUTH_TOKEN`` and inline ``MIRAGE_JWT_PUBKEY`` stay
+    env-only (use the token file / ``jwt_pubkey_file`` instead).
+
+    Args:
+        env (Mapping[str, str]): the process environment view.
+        table (Mapping[str, object]): the ``[daemon]`` config table.
+
+    Returns:
+        dict[str, str]: env copy with config fallbacks applied.
+    """
+    merged = dict(env)
+    for cfg_key, env_name in _CONFIG_ENV_KEYS.items():
+        if merged.get(env_name, "").strip():
+            continue
+        value = table.get(cfg_key)
+        if value is not None and str(value).strip():
+            merged[env_name] = str(value)
+    return merged
+
+
 def resolve_auth_config(
     env: Mapping[str, str] | None = None,
     token_file: Path | None = None,
+    table: Mapping[str, object] | None = None,
 ) -> AuthConfig:
-    """Resolve daemon auth configuration from environment.
+    """Resolve daemon auth configuration from environment and config.
+
+    Per key the environment variable wins over the ``[daemon]`` table
+    in ``config.toml``, which wins over the default.
 
     Args:
         env (Mapping[str, str] | None): environment to read from.
             Defaults to ``os.environ``.
         token_file (Path | None): override the local-mode token file
             location. Defaults to ``default_token_file()``.
+        table (Mapping[str, object] | None): the ``[daemon]`` config
+            table. Defaults to reading ``$MIRAGE_HOME/config.toml``
+            when ``env`` is also defaulted; an explicit ``env`` with no
+            ``table`` stays hermetic and reads no file.
 
     Returns:
         AuthConfig: resolved configuration.
 
     Raises:
-        RuntimeError: if required env vars are missing for the chosen mode.
+        RuntimeError: if required settings are missing for the chosen mode.
     """
-    e = env if env is not None else os.environ
+    if table is None:
+        table = read_daemon_table(mirage_home()) if env is None else {}
+    e = _merge_config_table(env if env is not None else os.environ, table)
     raw_mode = (e.get(ENV_AUTH_MODE, "")
                 or AuthMode.LOCAL.value).strip().lower()
     try:

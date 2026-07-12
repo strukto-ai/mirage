@@ -12,8 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { readDaemonTable } from './daemon_config.ts'
 import { ENV_ALLOWED_HOSTS } from './env.ts'
 import { DEFAULT_ALLOWED_HOSTS, HOST_PATTERN } from './host_validation_constants.ts'
+import { mirageHome } from './paths.ts'
 
 export function parseAllowedHosts(value: string | undefined): string[] {
   if (value === undefined) return [...DEFAULT_ALLOWED_HOSTS]
@@ -24,9 +26,16 @@ export function parseAllowedHosts(value: string | undefined): string[] {
   return items.length > 0 ? items : [...DEFAULT_ALLOWED_HOSTS]
 }
 
-export function resolveAllowedHosts(allowedHosts?: readonly string[]): string[] {
+export function resolveAllowedHosts(
+  allowedHosts?: readonly string[],
+  env: Record<string, string | undefined> = process.env,
+): string[] {
   if (allowedHosts !== undefined) return [...allowedHosts]
-  return parseAllowedHosts(process.env[ENV_ALLOWED_HOSTS])
+  const raw = env[ENV_ALLOWED_HOSTS]
+  if (raw !== undefined && raw !== '') return parseAllowedHosts(raw)
+  const fromConfig = readDaemonTable(mirageHome(env)).allowed_hosts
+  if (fromConfig !== undefined && fromConfig !== '') return parseAllowedHosts(fromConfig)
+  return parseAllowedHosts(undefined)
 }
 
 export function stripPort(rawHost: string): string {
