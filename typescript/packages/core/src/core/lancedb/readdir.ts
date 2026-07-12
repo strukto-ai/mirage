@@ -76,7 +76,6 @@ export async function readdir(
   throw notFound(spec.virtual)
 }
 
-
 export function isDirName(child: string, config: LanceDBAccessor['config']): boolean {
   // Row files are recognized by extension, so classification never
   // needs the stat fallback.

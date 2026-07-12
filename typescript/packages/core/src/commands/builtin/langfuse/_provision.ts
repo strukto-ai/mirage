@@ -44,18 +44,3 @@ export async function fileReadProvision(
     precision: Precision.EXACT,
   })
 }
-
-// eslint-disable-next-line @typescript-eslint/require-await
-export async function metadataProvision(
-  _accessor: LangfuseAccessor,
-  _paths: PathSpec[],
-  _texts: string[],
-  _opts: CommandOpts,
-): Promise<ProvisionResult> {
-  return new ProvisionResult({
-    networkReadLow: 0,
-    networkReadHigh: 0,
-    readOps: 0,
-    precision: Precision.EXACT,
-  })
-}

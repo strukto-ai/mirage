@@ -12,12 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
+import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import type { ChromaAccessor } from '../../../accessor/chroma.ts'
 import { resolveGlob } from '../../../core/chroma/glob.ts'
 import { searchSegments } from '../../../core/chroma/search.ts'
 import { IOResult } from '../../../io/types.ts'
-import { PathSpec, ResourceName } from '../../../types.ts'
+import type { PathSpec } from '../../../types.ts'
+import { ResourceName } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
