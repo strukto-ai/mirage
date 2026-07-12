@@ -122,9 +122,9 @@ describe('gdocs core find', () => {
     expect(vi.mocked(statMod.stat)).not.toHaveBeenCalled()
   })
 
-  it('treats a null size as 0 for size filters and lets dirs pass', async () => {
+  it('treats a null size as 0 for size filters, dirs contribute 0 too', async () => {
     const out = await find(makeAccessor(), ROOT, { minSize: 1024 })
-    expect(out).toEqual(['/owned', '/owned/Big__d2.gdoc.json', '/shared'])
+    expect(out).toEqual(['/owned/Big__d2.gdoc.json'])
   })
 
   it('filters by mtime, excluding dirs without a modified time', async () => {

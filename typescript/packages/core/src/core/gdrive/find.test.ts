@@ -170,11 +170,11 @@ describe('gdrive core find', () => {
     expect(statted).not.toContain('/docs/inner')
   })
 
-  it('filters files by minSize letting directories pass', async () => {
+  it('filters by minSize with directories contributing size 0', async () => {
     mockTree(TREE)
     mockStats(SIZES)
     const out = await find(makeAccessor(), ROOT, { minSize: 1024 })
-    expect(out).toEqual(['/docs', '/docs/inner', '/docs/inner/deep.md', '/docs/readme.md'])
+    expect(out).toEqual(['/docs/inner/deep.md', '/docs/readme.md'])
   })
 
   it('filters files by maxSize', async () => {
@@ -214,7 +214,7 @@ describe('gdrive core find', () => {
     expect(out).toEqual(['/docs/inner/deep.md'])
   })
 
-  it('matches pathPattern against prefix-stripped paths', async () => {
+  it('matches pathPattern against the display path', async () => {
     mockTree({
       '/mnt/gdv': ['/mnt/gdv/docs/', '/mnt/gdv/notes.txt'],
       '/mnt/gdv/docs': ['/mnt/gdv/docs/readme.md'],
@@ -224,7 +224,7 @@ describe('gdrive core find', () => {
       directory: '/mnt/gdv',
       resourcePath: mountKey('/mnt/gdv', '/mnt/gdv'),
     })
-    const out = await find(makeAccessor(), root, { pathPattern: '/docs/*' })
+    const out = await find(makeAccessor(), root, { pathPattern: '/mnt/gdv/docs/*' })
     expect(out).toEqual(['/docs/readme.md'])
   })
 

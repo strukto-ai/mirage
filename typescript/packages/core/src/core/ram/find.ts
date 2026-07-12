@@ -99,14 +99,16 @@ export function find(
         kind === 'f' ? (accessor.store.files.get(key)?.byteLength ?? 0) === 0 : !nonempty.has(key)
     }
     if (!keep({ key, name: basename, kind, depth, isEmpty }, tree, options.minDepth)) continue
-    if (kind === 'f' && (options.minSize !== null || options.maxSize !== null)) {
-      const data = accessor.store.files.get(key)
-      if (data === undefined) continue
-      const size = data.byteLength
-      if (options.minSize !== null && options.minSize !== undefined && size < options.minSize)
-        continue
-      if (options.maxSize !== null && options.maxSize !== undefined && size > options.maxSize)
-        continue
+    // Directories count as size 0 for -size (deliberate GNU divergence).
+    if (options.minSize != null || options.maxSize != null) {
+      let size = 0
+      if (kind === 'f') {
+        const data = accessor.store.files.get(key)
+        if (data === undefined) continue
+        size = data.byteLength
+      }
+      if (options.minSize != null && size < options.minSize) continue
+      if (options.maxSize != null && size > options.maxSize) continue
     }
     results.push(key)
   }

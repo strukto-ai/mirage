@@ -22,7 +22,7 @@ from mirage.commands.builtin.github_ci.find import find
 from mirage.commands.errors import FindParseError
 from mirage.io.stream import materialize
 from mirage.resource.github_ci.config import GitHubCIConfig
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 
 
@@ -84,3 +84,52 @@ async def test_find_single_run_allowed(accessor, index):
         )
         data = await materialize(out)
         assert b"/runs/wf_1/jobs/build_1.log" in data
+
+
+@pytest.mark.asyncio
+async def test_find_path_pattern_is_honored(accessor, index):
+
+    async def fake_readdir(_acc, p, _idx=None):
+        if p.virtual == "/runs/wf_1":
+            return ["/runs/wf_1/run.json", "/runs/wf_1/jobs"]
+        if p.virtual == "/runs/wf_1/jobs":
+            return ["/runs/wf_1/jobs/build_1.log"]
+        return []
+
+    with patch("mirage.commands.builtin.github_ci.find._readdir",
+               new=AsyncMock(side_effect=fake_readdir)):
+        out, _io = await find(accessor, [_scope("/runs/wf_1")],
+                              path="*jobs*",
+                              index=index)
+        data = await materialize(out)
+        assert data.decode().splitlines() == [
+            "/runs/wf_1/jobs", "/runs/wf_1/jobs/build_1.log"
+        ]
+
+
+@pytest.mark.asyncio
+async def test_find_size_counts_sizeless_entries_as_zero(accessor, index):
+
+    async def fake_readdir(_acc, p, _idx=None):
+        if p.virtual == "/runs/wf_1":
+            return ["/runs/wf_1/run.json", "/runs/wf_1/jobs"]
+        if p.virtual == "/runs/wf_1/jobs":
+            return ["/runs/wf_1/jobs/build_1.log"]
+        return []
+
+    async def fake_stat(_acc, p, _idx=None):
+        virtual = p.virtual if isinstance(p, PathSpec) else p
+        name = virtual.rsplit("/", 1)[-1]
+        if "." in name:
+            return FileStat(name=name, type=FileType.TEXT, size=None)
+        return FileStat(name=name, type=FileType.DIRECTORY)
+
+    with patch("mirage.commands.builtin.github_ci.find._readdir",
+               new=AsyncMock(side_effect=fake_readdir)), \
+         patch("mirage.commands.builtin.github_ci.find._stat",
+               new=AsyncMock(side_effect=fake_stat)):
+        out, _io = await find(accessor, [_scope("/runs/wf_1")],
+                              size="+0c",
+                              index=index)
+        data = await materialize(out)
+        assert data == b""

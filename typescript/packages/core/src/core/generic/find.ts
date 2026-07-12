@@ -15,7 +15,12 @@
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { FindOptions } from '../../resource/base.ts'
-import { buildTree, type FindEntry, keep } from '../../commands/builtin/findEval.ts'
+import {
+  optionsTree,
+  prefixPathNodes,
+  type FindEntry,
+  keep,
+} from '../../commands/builtin/findEval.ts'
 import { FileType, PathSpec, type FileStat } from '../../types.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 
@@ -122,16 +127,7 @@ export async function walkFind(
   await walk(deps, path, index, options.maxDepth ?? null, 1, collected)
   const prefix = mountPrefixOf(path.virtual, path.resourcePath)
   const results: string[] = []
-  const tree =
-    options.tree ??
-    buildTree({
-      name: options.name,
-      iname: options.iname,
-      pathPattern: options.pathPattern,
-      type: options.type,
-      nameExclude: options.nameExclude,
-      orNames: options.orNames,
-    })
+  const tree = prefixPathNodes(optionsTree(options), prefix)
   const searchKey = stripSlash(path.mountPath)
   if (searchKey !== '' && (options.maxDepth == null || options.maxDepth >= 0)) {
     let rootStat: FileStat | null = null
@@ -157,22 +153,24 @@ export async function walkFind(
       depth: entry.depth,
     }
     if (!keep(findEntry, tree, options.minDepth)) continue
-    const needSize = entry.file && (options.minSize != null || options.maxSize != null)
+    const needSize = options.minSize != null || options.maxSize != null
     const needMtime = options.mtimeMin != null || options.mtimeMax != null
-    if (needSize || needMtime) {
-      const st = await statEntry(deps, entry.path, prefix, index)
+    let st: FileStat | null = null
+    if ((needSize && entry.file) || needMtime) {
+      st = await statEntry(deps, entry.path, prefix, index)
       if (st === null) continue
-      if (needSize) {
-        const size = st.size ?? 0
-        if (options.minSize != null && size < options.minSize) continue
-        if (options.maxSize != null && size > options.maxSize) continue
-      }
-      if (needMtime) {
-        const mt = modifiedTs(st.modified)
-        if (mt === null) continue
-        if (options.mtimeMin != null && mt < options.mtimeMin) continue
-        if (options.mtimeMax != null && mt > options.mtimeMax) continue
-      }
+    }
+    if (needSize) {
+      // Directories count as size 0 for -size: GNU compares the inode size (e.g. 4096 on ext4); see CLAUDE.md Rules.
+      const size = entry.file ? (st?.size ?? 0) : 0
+      if (options.minSize != null && size < options.minSize) continue
+      if (options.maxSize != null && size > options.maxSize) continue
+    }
+    if (needMtime && st !== null) {
+      const mt = modifiedTs(st.modified)
+      if (mt === null) continue
+      if (options.mtimeMin != null && mt < options.mtimeMin) continue
+      if (options.mtimeMax != null && mt > options.mtimeMax) continue
     }
     results.push(key)
   }

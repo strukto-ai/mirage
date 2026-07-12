@@ -78,10 +78,11 @@ function matches(
   ) {
     return false
   }
-  if (!isDir) {
-    const size = entry.attrs.size
-    if (opts.minSize !== null && opts.minSize !== undefined && size < opts.minSize) return false
-    if (opts.maxSize !== null && opts.maxSize !== undefined && size > opts.maxSize) return false
+  if (opts.minSize != null || opts.maxSize != null) {
+    // Directories count as size 0 for -size (deliberate GNU divergence).
+    const size = isDir ? 0 : entry.attrs.size
+    if (opts.minSize != null && size < opts.minSize) return false
+    if (opts.maxSize != null && size > opts.maxSize) return false
   }
   if (
     (opts.mtimeMin !== null && opts.mtimeMin !== undefined) ||
@@ -188,6 +189,9 @@ export async function find(
       tree,
       maxDepth: options.maxDepth,
       minDepth: options.minDepth,
+      size: st === null || st.isDir ? null : st.size,
+      minSize: options.minSize,
+      maxSize: options.maxSize,
     })
   }
   await walk({ accessor, options, results, baseDepth, tree }, virtual, 0)

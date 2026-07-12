@@ -82,8 +82,28 @@ describe('parseFindExpression', () => {
 
   it('size extracted as global', () => {
     const e = parseFindExpression(['-size', '+50c'])
-    expect(e.minSize).toBe(50)
+    expect(e.minSize).toBe(51)
     expect(e.maxSize).toBeNull()
+  })
+
+  it('size bounds follow GNU strictness', () => {
+    let e = parseFindExpression(['-size', '+0c'])
+    expect([e.minSize, e.maxSize]).toEqual([1, null])
+    e = parseFindExpression(['-size', '-2c'])
+    expect([e.minSize, e.maxSize]).toEqual([null, 1])
+    e = parseFindExpression(['-size', '2c'])
+    expect([e.minSize, e.maxSize]).toEqual([2, 2])
+  })
+
+  it('size rounds up to the unit like GNU', () => {
+    // GNU -size -1k keeps only empty files; 1k keeps 1..1024 bytes;
+    // +1k excludes a file of exactly 1024 bytes.
+    let e = parseFindExpression(['-size', '-1k'])
+    expect([e.minSize, e.maxSize]).toEqual([null, 0])
+    e = parseFindExpression(['-size', '1k'])
+    expect([e.minSize, e.maxSize]).toEqual([1, 1024])
+    e = parseFindExpression(['-size', '+1k'])
+    expect([e.minSize, e.maxSize]).toEqual([1025, null])
   })
 
   it('empty expression is true', () => {

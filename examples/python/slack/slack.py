@@ -274,6 +274,28 @@ async def main():
         for line in out.splitlines():
             print(f"  {line}")
 
+    # -path matches the display path; -size counts dirs and sizeless
+    # rendered files as 0 (so +0c drops them, -1k keeps them).
+    print(f"\n=== find {base}/ -path '*general*' | tail -n 5 ===")
+    r = await ws.execute(f'find "{base}/" -path "*general*" | tail -n 5')
+    print(f"  exit={r.exit_code}")
+    out = (await r.stdout_str()).strip()
+    if out:
+        for line in out.splitlines():
+            print(f"  {line}")
+
+    print(f"\n=== find {base}/ -maxdepth 1 -size +0c ===")
+    r = await ws.execute(f'find "{base}/" -maxdepth 1 -size +0c')
+    print(f"  exit={r.exit_code} (dirs count as size 0, expect no output)")
+
+    print(f"\n=== find {base}/ -maxdepth 1 -size -1k | tail -n 3 ===")
+    r = await ws.execute(f'find "{base}/" -maxdepth 1 -size -1k | tail -n 3')
+    print(f"  exit={r.exit_code}")
+    out = (await r.stdout_str()).strip()
+    if out:
+        for line in out.splitlines():
+            print(f"  {line}")
+
     # ── pwd / cd ─────────────────────────────────────
     print("\n=== pwd ===")
     r = await ws.execute("pwd")

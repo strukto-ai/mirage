@@ -164,13 +164,16 @@ async def test_multiple_start_points_walk_in_operand_order():
 
 
 @pytest.mark.asyncio
-async def test_size_filter_excludes_sizeless_rendered_files():
-    # -size applies to files only (GNU filters regular files by size);
-    # Mongo's rendered files carry no size, so every file drops out and
-    # directories pass through untouched.
+async def test_sizeless_rendered_files_count_as_size_zero():
+    # Mongo's rendered files carry no size; like directories they count as
+    # size 0 for -size (matches what find sees over FUSE, which reports 0
+    # before a file is opened), so +1 excludes everything and -1k keeps
+    # everything.
     lines = await _run([_spec(MOUNT)], size="+1")
+    assert lines == []
+    lines = await _run([_spec(MOUNT)], size="-1k")
     assert lines
-    assert all(not line.endswith((".json", ".jsonl")) for line in lines)
+    assert any(line.endswith((".json", ".jsonl")) for line in lines)
 
 
 @pytest.mark.asyncio

@@ -12,55 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import fnmatch
+from functools import partial
 
 from mirage.accessor.github_ci import GitHubCIAccessor
 from mirage.cache.index import IndexCacheStore
-from mirage.commands.builtin.find_helper import (_parse_depth,
-                                                 _validate_size_mtime)
+from mirage.commands.builtin.generic.find import parse_find_args, walk_find
 from mirage.commands.builtin.github_ci._provision import metadata_provision
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.github_ci.glob import is_cross_run_root, resolve_glob
+from mirage.core.github_ci.readdir import is_dir_name
 from mirage.core.github_ci.readdir import readdir as _readdir
+from mirage.core.github_ci.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_key, mount_prefix_of
-
-
-async def _walk(
-    accessor: GitHubCIAccessor,
-    path: PathSpec,
-    index: IndexCacheStore | None,
-    maxdepth: int | None,
-    depth: int = 0,
-) -> list[str]:
-    if maxdepth is not None and depth > maxdepth:
-        return []
-    try:
-        children = await _readdir(accessor, path, index)
-    except FileNotFoundError:
-        return []
-    results: list[str] = []
-    for child in children:
-        results.append(child)
-        if not (child.endswith(".json") or child.endswith(".jsonl")
-                or child.endswith(".log") or child.endswith(".zip")):
-            child_spec = PathSpec(virtual=child,
-                                  directory=child,
-                                  resolved=False,
-                                  resource_path=mount_key(
-                                      child,
-                                      mount_prefix_of(path.virtual,
-                                                      path.resource_path)))
-            results.extend(await _walk(accessor,
-                                       child_spec,
-                                       index,
-                                       maxdepth,
-                                       depth=depth + 1))
-    return results
 
 
 async def find_provision(
@@ -90,39 +57,36 @@ async def find(
     iname: str | None = None,
     path: str | None = None,
     mindepth: str | None = None,
+    empty: bool = False,
     prefix: str = "",
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
+    # The wrapper only exists for the cross-run guard: walking every run
+    # would fetch every run's logs. Filtering is the shared generic walk.
     paths = await resolve_glob(accessor, paths, index=index)
-    p0 = paths[0] if paths else None
-    search_path = p0.virtual if p0 else "/"
-    search_prefix = mount_prefix_of(p0.virtual, p0.resource_path) if p0 else ""
-    md = _parse_depth(maxdepth, "-maxdepth") if maxdepth is not None else None
-    md_min = (_parse_depth(mindepth, "-mindepth")
-              if mindepth is not None else None)
-    _validate_size_mtime(size, mtime)
-
-    search_spec = PathSpec(virtual=search_path,
-                           directory=search_path,
-                           resolved=False,
-                           resource_path=mount_key(search_path, search_prefix))
-    if is_cross_run_root(search_spec):
-        raise ValueError("find: recursive search across runs is disabled; "
-                         "target a specific run (e.g. /ci/runs/<run>)")
-    all_paths = await _walk(accessor, search_spec, index, md)
+    searches = paths if paths else [
+        PathSpec(virtual="/", directory="/", resource_path="")
+    ]
+    args = parse_find_args(texts,
+                           name=name,
+                           type=type,
+                           size=size,
+                           mtime=mtime,
+                           maxdepth=maxdepth,
+                           iname=iname,
+                           path=path,
+                           mindepth=mindepth,
+                           empty=empty)
     results: list[str] = []
-    base_depth = search_path.strip("/").count("/") if search_path.strip(
-        "/") else -1
-    for p in sorted(all_paths):
-        entry_name = p.rsplit("/", 1)[-1]
-        depth = p.strip("/").count("/") - (base_depth + 1)
-        if md_min is not None and depth < md_min:
-            continue
-        if name and not fnmatch.fnmatch(entry_name, name):
-            continue
-        if iname and not fnmatch.fnmatch(entry_name.lower(), iname.lower()):
-            continue
-        results.append(p)
-    output = format_records(results)
-    return output, IOResult()
+    for search in searches:
+        if is_cross_run_root(search):
+            raise ValueError("find: recursive search across runs is disabled;"
+                             " target a specific run (e.g. /ci/runs/<run>)")
+        results.extend(await walk_find(search,
+                                       readdir=partial(_readdir, accessor),
+                                       stat=partial(_stat, accessor),
+                                       is_dir_name=is_dir_name,
+                                       index=index,
+                                       args=args))
+    return format_records(results), IOResult()

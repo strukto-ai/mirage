@@ -80,7 +80,8 @@ async def find(
                           depth=depth)
         if not keep(entry, tree, mindepth):
             continue
-        size = entry_meta.size or 0
+        # Directories count as size 0 for -size (deliberate GNU divergence).
+        size = 0 if is_dir else (entry_meta.size or 0)
         if min_size is not None and size < min_size:
             continue
         if max_size is not None and size > max_size:

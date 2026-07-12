@@ -13,57 +13,26 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import fnmatch
+from functools import partial
 
 from mirage.accessor.email import EmailAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.email._provision import metadata_provision
-from mirage.commands.builtin.find_helper import (_parse_depth,
-                                                 _validate_size_mtime)
+from mirage.commands.builtin.generic.find import parse_find_args, walk_find
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.email._client import fetch_headers
 from mirage.core.email.glob import resolve_glob
-from mirage.core.email.readdir import _date_from_header, _sanitize
+from mirage.core.email.readdir import _date_from_header, _sanitize, is_dir_name
 from mirage.core.email.readdir import readdir as _readdir
 from mirage.core.email.scope import extract_folder
 from mirage.core.email.search import search_messages
+from mirage.core.email.stat import stat as _stat
 from mirage.io.types import ByteSource, IOResult
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_key, mount_prefix_of
-
-
-async def _walk(
-    accessor: EmailAccessor,
-    path: PathSpec,
-    index: IndexCacheStore | None,
-    maxdepth: int | None,
-    depth: int = 0,
-) -> list[str]:
-    if maxdepth is not None and depth > maxdepth:
-        return []
-    try:
-        children = await _readdir(accessor, path, index)
-    except FileNotFoundError:
-        return []
-    results: list[str] = []
-    for child in children:
-        results.append(child)
-        if not child.endswith(".email.json"):
-            child_spec = PathSpec(virtual=child,
-                                  directory=child,
-                                  resolved=False,
-                                  resource_path=mount_key(
-                                      child,
-                                      mount_prefix_of(path.virtual,
-                                                      path.resource_path)))
-            results.extend(await _walk(accessor,
-                                       child_spec,
-                                       index,
-                                       maxdepth,
-                                       depth=depth + 1))
-    return results
+from mirage.utils.key_prefix import mount_prefix_of
 
 
 def _is_folder_level(paths: list[PathSpec]) -> bool:
@@ -101,44 +70,44 @@ async def find(
     iname: str | None = None,
     path: str | None = None,
     mindepth: str | None = None,
+    empty: bool = False,
     prefix: str = "",
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    index = index
     paths = await resolve_glob(accessor, paths, index)
-    p0 = paths[0] if paths else None
-    search_path = p0.virtual if p0 else "/"
-    search_prefix = mount_prefix_of(p0.virtual, p0.resource_path) if p0 else ""
-
-    if name and _is_folder_level(paths):
+    # A pure -name search at folder level pushes the subject query down to
+    # IMAP search instead of walking every message; any other predicate
+    # falls through to the local walk so nothing is silently dropped.
+    name_only = not (texts or size or mtime or type or iname or path
+                     or mindepth or maxdepth or empty)
+    if name and name_only and _is_folder_level(paths):
+        p0 = paths[0]
+        search_prefix = mount_prefix_of(p0.virtual, p0.resource_path)
         return await _find_server_side(accessor, paths, name, search_prefix)
 
-    md = _parse_depth(maxdepth, "-maxdepth") if maxdepth is not None else None
-    md_min = (_parse_depth(mindepth, "-mindepth")
-              if mindepth is not None else None)
-    _validate_size_mtime(size, mtime)
-
-    search_spec = PathSpec(virtual=search_path,
-                           directory=search_path,
-                           resolved=False,
-                           resource_path=mount_key(search_path, search_prefix))
-    all_paths = await _walk(accessor, search_spec, index, md)
+    args = parse_find_args(texts,
+                           name=name,
+                           type=type,
+                           size=size,
+                           mtime=mtime,
+                           maxdepth=maxdepth,
+                           iname=iname,
+                           path=path,
+                           mindepth=mindepth,
+                           empty=empty)
+    searches = paths if paths else [
+        PathSpec(virtual="/", directory="/", resource_path="")
+    ]
     results: list[str] = []
-    base_depth = search_path.strip("/").count("/") if search_path.strip(
-        "/") else -1
-    for p in sorted(all_paths):
-        entry_name = p.rsplit("/", 1)[-1]
-        depth = p.strip("/").count("/") - (base_depth + 1)
-        if md_min is not None and depth < md_min:
-            continue
-        if name and not fnmatch.fnmatch(entry_name, name):
-            continue
-        if iname and not fnmatch.fnmatch(entry_name.lower(), iname.lower()):
-            continue
-        results.append(p)
-    output = format_records(results)
-    return output, IOResult()
+    for search in searches:
+        results.extend(await walk_find(search,
+                                       readdir=partial(_readdir, accessor),
+                                       stat=partial(_stat, accessor),
+                                       is_dir_name=is_dir_name,
+                                       index=index,
+                                       args=args))
+    return format_records(results), IOResult()
 
 
 async def _find_server_side(

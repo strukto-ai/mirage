@@ -170,11 +170,11 @@ describe('box core find', () => {
     expect(statted).not.toContain('/docs/inner')
   })
 
-  it('filters files by minSize letting directories pass', async () => {
+  it('filters by minSize with directories contributing size 0', async () => {
     mockTree(TREE)
     mockStats(SIZES)
     const out = await find(makeAccessor(), ROOT, { minSize: 1024 })
-    expect(out).toEqual(['/docs', '/docs/inner', '/docs/inner/deep.md', '/docs/readme.md'])
+    expect(out).toEqual(['/docs/inner/deep.md', '/docs/readme.md'])
   })
 
   it('filters files by maxSize', async () => {
@@ -214,7 +214,7 @@ describe('box core find', () => {
     expect(out).toEqual(['/docs/inner/deep.md'])
   })
 
-  it('matches pathPattern against prefix-stripped paths', async () => {
+  it('matches pathPattern against the display path', async () => {
     mockTree({
       '/mnt/box': ['/mnt/box/docs/', '/mnt/box/notes.txt'],
       '/mnt/box/docs': ['/mnt/box/docs/readme.md'],
@@ -224,7 +224,7 @@ describe('box core find', () => {
       directory: '/mnt/box',
       resourcePath: mountKey('/mnt/box', '/mnt/box'),
     })
-    const out = await find(makeAccessor(), root, { pathPattern: '/docs/*' })
+    const out = await find(makeAccessor(), root, { pathPattern: '/mnt/box/docs/*' })
     expect(out).toEqual(['/docs/readme.md'])
   })
 

@@ -47,11 +47,13 @@ function matchesFilters(
   if (!keep({ key: entryPath, name: entryName, kind, depth }, tree, options.minDepth)) {
     return false
   }
-  if (kind === 'f' && (options.minSize !== null || options.maxSize !== null)) {
-    if (options.minSize !== null && options.minSize !== undefined && meta.size < options.minSize) {
+  if (options.minSize != null || options.maxSize != null) {
+    // Directories count as size 0 for -size (deliberate GNU divergence).
+    const size = kind === 'f' ? meta.size : 0
+    if (options.minSize != null && size < options.minSize) {
       return false
     }
-    if (options.maxSize !== null && options.maxSize !== undefined && meta.size > options.maxSize) {
+    if (options.maxSize != null && size > options.maxSize) {
       return false
     }
   }
@@ -154,6 +156,8 @@ export async function find(
       tree,
       maxDepth: options.maxDepth,
       minDepth: options.minDepth,
+      minSize: options.minSize,
+      maxSize: options.maxSize,
     })
   }
   return [...new Set(results)].sort()
