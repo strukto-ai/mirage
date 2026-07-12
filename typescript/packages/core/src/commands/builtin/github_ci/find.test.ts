@@ -34,7 +34,7 @@ import type { CITransport } from '../../../core/github_ci/_client.ts'
 import * as readdirModule from '../../../core/github_ci/readdir.ts'
 import * as statModule from '../../../core/github_ci/stat.ts'
 import { materialize } from '../../../io/types.ts'
-import { type FileStat, FileType, PathSpec } from '../../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { GITHUB_CI_FIND } from './find.ts'
 
 const DEC = new TextDecoder()
@@ -78,9 +78,9 @@ function fakeStat(_acc: unknown, p: PathSpec | string): FileStat {
   const virtual = p instanceof PathSpec ? p.virtual : p
   const name = virtual.split('/').pop() ?? ''
   if (name.includes('.')) {
-    return { name, type: FileType.TEXT, size: null, modified: null }
+    return new FileStat({ name, type: FileType.TEXT, size: null })
   }
-  return { name, type: FileType.DIRECTORY, size: null, modified: null }
+  return new FileStat({ name, type: FileType.DIRECTORY })
 }
 
 async function runFind(
@@ -94,6 +94,7 @@ async function runFind(
     flags,
     filetypeFns: null,
     cwd: '/',
+    resource: { kind: 'github_ci' } as never,
   })
   if (result === null) return ''
   const [out] = result
