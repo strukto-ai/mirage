@@ -519,7 +519,6 @@ export {
   expandParts,
   type ExecuteFn,
   lookupVar,
-  safeEval,
   type TSNodeLike,
   unescapePath,
 } from './workspace/expand/index.ts'
