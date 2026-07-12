@@ -15,9 +15,12 @@
 from typing import Callable
 
 from mirage.commands.builtin.generic.crossmount.relay.cmp import run_cmp
+from mirage.commands.builtin.generic.crossmount.relay.comm import run_comm
 from mirage.commands.builtin.generic.crossmount.relay.cp import run_cp
 from mirage.commands.builtin.generic.crossmount.relay.diff import run_diff
+from mirage.commands.builtin.generic.crossmount.relay.join import run_join
 from mirage.commands.builtin.generic.crossmount.relay.mv import run_mv
+from mirage.commands.builtin.generic.crossmount.relay.paste import run_paste
 from mirage.commands.builtin.generic.crossmount.types import Cmd, CrossResult
 from mirage.types import PathSpec
 
@@ -31,7 +34,7 @@ async def run_relay(cmd_name: str, scopes: list[PathSpec], flag_kwargs: dict,
     its primitive mode, so output matches the single-mount commands.
 
     Args:
-        cmd_name (str): One of cp, mv, diff, cmp.
+        cmd_name (str): One of cp, mv, diff, cmp, paste, comm, join.
         scopes (list[PathSpec]): Path operands in command-line order.
         flag_kwargs (dict): Flags parsed against the shared command spec.
         dispatch (Callable): Workspace operation dispatcher.
@@ -42,4 +45,10 @@ async def run_relay(cmd_name: str, scopes: list[PathSpec], flag_kwargs: dict,
         return await run_mv(scopes, flag_kwargs, dispatch)
     if cmd_name == Cmd.DIFF:
         return await run_diff(scopes, flag_kwargs, dispatch)
+    if cmd_name == Cmd.PASTE:
+        return await run_paste(scopes, flag_kwargs, dispatch)
+    if cmd_name == Cmd.COMM:
+        return await run_comm(scopes, flag_kwargs, dispatch)
+    if cmd_name == Cmd.JOIN:
+        return await run_join(scopes, flag_kwargs, dispatch)
     return await run_cmp(scopes, flag_kwargs, dispatch)
