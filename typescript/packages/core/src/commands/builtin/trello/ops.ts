@@ -19,19 +19,13 @@ import { readdir as trelloReaddir } from '../../../core/trello/readdir.ts'
 import { stat as trelloStat } from '../../../core/trello/stat.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
+import { streamFromBytes } from '../utils/wrap.ts'
 
-async function* trelloReadStream(
-  accessor: TrelloAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): AsyncIterable<Uint8Array> {
-  yield await trelloRead(accessor, path, index)
-}
 
 export const TRELLO_CMD_OPS: CommandIO<TrelloAccessor> = {
   readdir: trelloReaddir,
   readBytes: trelloRead,
-  readStream: trelloReadStream,
+  readStream: (a, p, i) => streamFromBytes(trelloRead, a, p, i),
   stat: trelloStat,
   isMounted: () => true,
   local: false,

@@ -19,19 +19,13 @@ import { readdir as linearReaddir } from '../../../core/linear/readdir.ts'
 import { stat as linearStat } from '../../../core/linear/stat.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
+import { streamFromBytes } from '../utils/wrap.ts'
 
-async function* linearReadStream(
-  accessor: LinearAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): AsyncIterable<Uint8Array> {
-  yield await linearRead(accessor, path, index)
-}
 
 export const LINEAR_CMD_OPS: CommandIO<LinearAccessor> = {
   readdir: linearReaddir,
   readBytes: linearRead,
-  readStream: linearReadStream,
+  readStream: (a, p, i) => streamFromBytes(linearRead, a, p, i),
   stat: linearStat,
   isMounted: () => true,
   local: false,

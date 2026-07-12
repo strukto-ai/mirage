@@ -19,19 +19,13 @@ import { isDirName, readdir as langfuseReaddir } from '../../../core/langfuse/re
 import { stat as langfuseStat } from '../../../core/langfuse/stat.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
+import { streamFromBytes } from '../utils/wrap.ts'
 
-async function* langfuseReadStream(
-  accessor: LangfuseAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): AsyncIterable<Uint8Array> {
-  yield await langfuseRead(accessor, path, index)
-}
 
 export const LANGFUSE_CMD_OPS: CommandIO<LangfuseAccessor> = {
   readdir: langfuseReaddir,
   readBytes: langfuseRead,
-  readStream: langfuseReadStream,
+  readStream: (a, p, i) => streamFromBytes(langfuseRead, a, p, i),
   stat: langfuseStat,
   isMounted: () => true,
   isDirName: (_accessor, child) => isDirName(child),

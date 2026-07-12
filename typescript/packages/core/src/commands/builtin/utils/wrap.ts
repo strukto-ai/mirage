@@ -12,13 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { LanceDBAccessor } from '../../accessor/lancedb.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
-import { read } from './read.ts'
+import type { IndexCacheStore } from '../../../cache/index/store.ts'
+import type { PathSpec } from '../../../types.ts'
 
-export async function* stream(
-  accessor: LanceDBAccessor,
+// Synthesize a streaming read from a whole-file read, for backends with
+// no native streaming (mirrors python's utils/wrap.stream_from_bytes).
+export async function* streamFromBytes<A>(
+  read: (accessor: A, path: PathSpec, index?: IndexCacheStore) => Promise<Uint8Array>,
+  accessor: A,
   path: PathSpec,
   index?: IndexCacheStore,
 ): AsyncIterable<Uint8Array> {

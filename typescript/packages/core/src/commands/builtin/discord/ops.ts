@@ -19,19 +19,13 @@ import { isDirName, readdir as discordReaddir } from '../../../core/discord/read
 import { stat as discordStat } from '../../../core/discord/stat.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
+import { streamFromBytes } from '../utils/wrap.ts'
 
-async function* discordReadStream(
-  accessor: DiscordAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): AsyncIterable<Uint8Array> {
-  yield await discordRead(accessor, path, index)
-}
 
 export const DISCORD_CMD_OPS: CommandIO<DiscordAccessor> = {
   readdir: discordReaddir,
   readBytes: discordRead,
-  readStream: discordReadStream,
+  readStream: (a, p, i) => streamFromBytes(discordRead, a, p, i),
   stat: discordStat,
   isMounted: () => true,
   isDirName: (_accessor, child) => isDirName(child),

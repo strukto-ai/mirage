@@ -19,19 +19,13 @@ import { isDirName, readdir as gmailReaddir } from '../../../core/gmail/readdir.
 import { stat as gmailStat } from '../../../core/gmail/stat.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
+import { streamFromBytes } from '../utils/wrap.ts'
 
-async function* gmailReadStream(
-  accessor: GmailAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): AsyncIterable<Uint8Array> {
-  yield await gmailRead(accessor, path, index)
-}
 
 export const GMAIL_CMD_OPS: CommandIO<GmailAccessor> = {
   readdir: gmailReaddir,
   readBytes: gmailRead,
-  readStream: gmailReadStream,
+  readStream: (a, p, i) => streamFromBytes(gmailRead, a, p, i),
   stat: gmailStat,
   isMounted: () => true,
   isDirName: (_accessor, child) => isDirName(child),
