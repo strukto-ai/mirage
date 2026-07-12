@@ -42,8 +42,6 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-s",
                    description="Run silently without progress output."),
             Option(short="-S", description="Show errors even when silent."),
-            Option(long="--jina",
-                   description="Fetch via the Jina Reader proxy."),
         ),
         rest=Operand(kind=OperandKind.TEXT),
     ),
