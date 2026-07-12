@@ -168,7 +168,10 @@ export function dirAwareStat<A extends Accessor>(
     try {
       st = await ops.stat(accessor, p, index)
     } catch (e) {
-      if ((e as { code?: string }).code === 'ENOENT' && (await isImplicitDir(ops, accessor, p, index)))
+      if (
+        (e as { code?: string }).code === 'ENOENT' &&
+        (await isImplicitDir(ops, accessor, p, index))
+      )
         throw eisdir(p)
       throw e
     }
@@ -186,7 +189,10 @@ async function* streamRefusingDirs<A extends Accessor>(
   try {
     yield* ops.readStream(accessor, p, index)
   } catch (e) {
-    if ((e as { code?: string }).code === 'ENOENT' && (await isImplicitDir(ops, accessor, p, index)))
+    if (
+      (e as { code?: string }).code === 'ENOENT' &&
+      (await isImplicitDir(ops, accessor, p, index))
+    )
       throw eisdir(p)
     throw e
   }

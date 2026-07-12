@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-
 import { IOResult } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import { pasteGeneric } from '../../paste.ts'

@@ -15,7 +15,8 @@
 import re
 from collections.abc import Mapping
 
-_TOKEN = re.compile(r"""
+_TOKEN = re.compile(
+    r"""
     (?P<num>0[xX][0-9a-fA-F]+|\d+)
   | (?P<name>[A-Za-z_]\w*)
   | (?P<op><<=|>>=|\*\*|\+\+|--|<<|>>|<=|>=|==|!=|&&|\|\|

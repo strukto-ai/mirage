@@ -23,12 +23,8 @@ export const CAT_BUILDER: Builder = {
   fn: async (ops, accessor, paths, texts, opts) => {
     const idx = opts.index ?? undefined
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return catGeneric(
-      resolved,
-      texts,
-      opts,
-      dirAwareStat(ops, accessor, idx),
-      (p) => ops.readStream(accessor, p, idx),
+    return catGeneric(resolved, texts, opts, dirAwareStat(ops, accessor, idx), (p) =>
+      ops.readStream(accessor, p, idx),
     )
   },
 }

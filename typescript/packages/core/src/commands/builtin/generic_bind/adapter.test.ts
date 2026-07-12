@@ -124,7 +124,7 @@ describe('dirAwareStream', () => {
     const stream = dirAwareStream(dirOps(['/sub']), accessor)
     const consume = async () => {
       for await (const chunk of stream(PathSpec.fromStrPath('/sub'))) {
-        throw new Error(`no data expected, got ${chunk.byteLength} bytes`)
+        throw new Error(`no data expected, got ${String(chunk.byteLength)} bytes`)
       }
     }
     await expect(consume()).rejects.toMatchObject({ code: 'EISDIR' })

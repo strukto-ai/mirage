@@ -17,8 +17,7 @@ from typing import Callable
 
 from mirage.commands.builtin.generic.comm import comm as generic_comm
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
-from mirage.commands.builtin.generic.crossmount.utils import (flat_scopes,
-                                                              relay)
+from mirage.commands.builtin.generic.crossmount.utils import flat_scopes, relay
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
 from mirage.types import PathSpec

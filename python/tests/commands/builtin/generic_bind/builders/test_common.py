@@ -66,8 +66,9 @@ async def test_split_readable_keeps_order_and_reports_missing():
 @pytest.mark.asyncio
 async def test_split_readable_reports_implicit_dir_as_eisdir():
     ops = _ops(set(), implicit_dirs={"/sub"})
-    good, err = await split_readable(
-        ops, None, [PathSpec.from_str_path("/sub")], None, "cat")
+    good, err = await split_readable(ops, None,
+                                     [PathSpec.from_str_path("/sub")], None,
+                                     "cat")
     assert good == []
     assert err == b"cat: /sub: Is a directory\n"
 
@@ -75,8 +76,9 @@ async def test_split_readable_reports_implicit_dir_as_eisdir():
 @pytest.mark.asyncio
 async def test_split_readable_reports_stat_typed_dir_as_eisdir():
     ops = _ops(set(), explicit_dirs={"/sub"})
-    good, err = await split_readable(
-        ops, None, [PathSpec.from_str_path("/sub")], None, "head")
+    good, err = await split_readable(ops, None,
+                                     [PathSpec.from_str_path("/sub")], None,
+                                     "head")
     assert good == []
     assert err == b"head: /sub: Is a directory\n"
 

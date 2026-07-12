@@ -21,8 +21,7 @@ from mirage.shell.arith import ArithError, evaluate_arith
 from mirage.shell.call_stack import CallStack
 from mirage.shell.types import NodeType as NT
 from mirage.utils.path import expand_tilde
-from mirage.workspace.expand.constants import (ARITH_DELIMITERS,
-                                               ARITH_OPERATORS)
+from mirage.workspace.expand.constants import ARITH_DELIMITERS, ARITH_OPERATORS
 from mirage.workspace.expand.variable import _expand_braces, _lookup_var
 from mirage.workspace.session import Session
 from mirage.workspace.session.shell_dirs import home_dir

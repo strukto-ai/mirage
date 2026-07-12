@@ -184,4 +184,3 @@ export async function expandNode(
 
   return tsNode.text
 }
-
