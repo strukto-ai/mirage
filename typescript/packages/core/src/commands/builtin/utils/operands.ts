@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult, materialize } from '../../../io/types.ts'
-import type { FileStat, PathSpec } from '../../../types.ts'
-import { fsErrorLine, isFsError } from '../../../utils/errors.ts'
+import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
+import { eisdir, fsErrorLine, isFsError } from '../../../utils/errors.ts'
 
 const ENC = new TextEncoder()
 
@@ -35,11 +35,16 @@ export async function splitReadable(
   const readable: PathSpec[] = []
   let err = ''
   for (const p of paths) {
+    let st: FileStat
     try {
-      await stat(p)
+      st = await stat(p)
     } catch (e) {
       if (!isFsError(e)) throw e
       err += fsErrorLine(cmdName, p, e)
+      continue
+    }
+    if (st.type === FileType.DIRECTORY) {
+      err += fsErrorLine(cmdName, p, eisdir(p))
       continue
     }
     readable.push(p)

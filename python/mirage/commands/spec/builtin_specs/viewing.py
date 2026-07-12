@@ -112,7 +112,9 @@ SPECS: dict[str, CommandSpec] = {
     'look':
     CommandSpec(
         options=(Option(short="-f"), ),
-        positional=(Operand(kind=OperandKind.TEXT), ),
-        rest=Operand(kind=OperandKind.PATH),
+        positional=(
+            Operand(kind=OperandKind.TEXT),
+            Operand(kind=OperandKind.PATH),
+        ),
     ),
 }

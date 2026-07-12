@@ -21,6 +21,7 @@ from mirage.commands.builtin.find_parse import (FindParseError, find_expr_tail,
 from mirage.commands.builtin.generic.crossmount import (handle_cross_mount,
                                                         is_cross_mount)
 from mirage.commands.builtin.utils.safeguard import maybe_with_timeout
+from mirage.commands.errors import UsageError
 from mirage.commands.safeguard import resolve_across_mounts, resolve_safeguard
 from mirage.commands.spec import (SPECS, CommandSpec, OperandKind,
                                   flag_kwarg_name, parse_command,
@@ -220,6 +221,12 @@ async def run_on_mount(
             env=session.env,
             exec_allowed=registry.is_exec_allowed(),
         )
+    except UsageError as exc:
+        # Command-owned usage errors (extra operands, missing patterns)
+        # become this command's IOResult so the rest of the line keeps
+        # running, like a real shell (#452).
+        return None, IOResult(exit_code=exc.exit_code,
+                              stderr=f"{exc}\n".encode())
     except FS_ERRORS as exc:
         err = format_fs_error(cmd_name, exc, paths)
         return None, IOResult(exit_code=1, stderr=err)

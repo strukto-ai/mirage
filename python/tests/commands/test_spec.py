@@ -587,12 +587,15 @@ def test_parse_new_spec_positional_text_then_path():
 
 
 def test_parse_new_spec_no_rest():
+    # Overflow past a fixed arity is classified like the last positional
+    # slot and passed through; the command owns the refusal (#452).
     spec = CommandSpec(positional=(Operand(kind=OperandKind.TEXT),
                                    Operand(kind=OperandKind.TEXT)), )
     parsed = parse_command(spec, ["hello", "world", "extra"], cwd="/")
     assert parsed.args == [
         ("hello", OperandKind.TEXT),
         ("world", OperandKind.TEXT),
+        ("extra", OperandKind.TEXT),
     ]
 
 

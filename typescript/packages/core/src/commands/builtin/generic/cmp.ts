@@ -16,6 +16,8 @@ import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import { formatRecords } from '../utils/output.ts'
+import { extraOperandError } from '../../spec/usage.ts'
+import { CommandName } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -34,6 +36,7 @@ export async function cmpGeneric(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<[ByteSource | null, IOResult]> {
+  if (paths.length > 2) throw extraOperandError(CommandName.CMP, paths[2]?.rawPath ?? '')
   if (paths.length < 2) {
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode('cmp: requires two paths\n') })]
   }

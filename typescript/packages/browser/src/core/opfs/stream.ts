@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type PathSpec, recordStream, ResourceName } from '@struktoai/mirage-core'
-import { enoent } from '@struktoai/mirage-core'
+import { eisdir, enoent } from '@struktoai/mirage-core'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
 import { isNotFound, resolveFileHandle } from './utils.ts'
 
@@ -25,6 +25,7 @@ export async function* stream(accessor: OPFSAccessor, path: PathSpec): AsyncIter
     handle = await resolveFileHandle(root, virtual, { create: false })
   } catch (err) {
     if (isNotFound(err)) throw enoent(path)
+    if (err instanceof DOMException && err.name === 'TypeMismatchError') throw eisdir(path)
     throw err
   }
   const file = await handle.getFile()

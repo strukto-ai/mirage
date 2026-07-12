@@ -16,6 +16,8 @@ from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.commands.builtin.generic_bind.provision import pure_provision
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import CommandName
+from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -60,6 +62,8 @@ async def seq(
     f: str | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
+    if len(texts) > 3:
+        raise extra_operand_error(CommandName.SEQ, texts[3])
     separator = s if s is not None else "\n"
     result = _seq_generate(texts, separator, w, f)
     return result.encode(), IOResult()

@@ -29,7 +29,10 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-q"),
             Option(short="-r"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        positional=(
+            Operand(kind=OperandKind.PATH),
+            Operand(kind=OperandKind.PATH),
+        ),
     ),
     'base64':
     CommandSpec(
@@ -38,7 +41,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-D"),
             Option(short="-w", value_kind=OperandKind.TEXT),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        positional=(Operand(kind=OperandKind.PATH), ),
     ),
     'sha256sum':
     CommandSpec(
@@ -56,7 +59,10 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-g", value_kind=OperandKind.TEXT),
             Option(short="-u"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        positional=(
+            Operand(kind=OperandKind.PATH),
+            Operand(kind=OperandKind.PATH),
+        ),
     ),
     'patch':
     CommandSpec(
@@ -66,7 +72,10 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-i", value_kind=OperandKind.PATH),
             Option(short="-N"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        positional=(
+            Operand(kind=OperandKind.PATH),
+            Operand(kind=OperandKind.PATH),
+        ),
     ),
     'cmp':
     CommandSpec(
@@ -77,7 +86,10 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-b"),
             Option(short="-i", value_kind=OperandKind.TEXT),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        positional=(
+            Operand(kind=OperandKind.PATH),
+            Operand(kind=OperandKind.PATH),
+        ),
     ),
     'iconv':
     CommandSpec(

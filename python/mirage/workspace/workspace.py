@@ -754,7 +754,7 @@ class Workspace:
             return io
         except UsageError as exc:
             msg = f"{exc}\n".encode()
-            io = IOResult(exit_code=2, stderr=msg)
+            io = IOResult(exit_code=exc.exit_code, stderr=msg)
             return io
         except OSError as exc:
             cmd_name = command.split()[0] if command.split() else command

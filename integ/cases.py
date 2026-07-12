@@ -709,6 +709,32 @@ CASES: list[tuple[str, str]] = [
     ("read_r_flag", "printf 'hi there\\n' | read -r v; echo code=$?"),
     ("read_invalid_opt", "read -q v 2>&1; echo code=$?"),
 
+    # ----- arithmetic: (( )) command + $(( )) assignment forms -----
+    ("arith_cmd_true", "(( 2 > 1 )); echo code=$?"),
+    ("arith_cmd_false", "(( 0 )); echo code=$?"),
+    ("arith_incr",
+     "i=0; (( i++ )); echo code=$? i=$i; (( i++ )); echo code=$? i=$i;"
+     " unset i"),
+    ("arith_assign_comma", "x=$(( y = 3, y + 2 )); echo $x $y; unset x y"),
+    ("arith_c_semantics",
+     "echo $(( -7 / 2 )) $(( -7 % 2 )) $(( 2 ** 10 )) $(( 0x10 )) $(( 010 ))"),
+    ("arith_while",
+     "n=0; while (( n < 3 )); do (( n++ )); done; echo n=$n; unset n"),
+    ("arith_if", "if (( 2 > 1 )); then echo yes; fi"),
+    ("arith_divzero", "(( 1 / 0 )) 2>&1; echo code=$?"),
+    ("arith_short_circuit", "(( 0 && (q = 7) )); echo q=${q:-unset}"),
+
+    # ----- fixed arity: extra operands refuse with GNU errors (#452) -----
+    ("arity_uniq",
+     "uniq /data/a.txt /data/b.txt /data/mixed.txt 2>&1; echo code=$?"),
+    ("arity_tr", "tr a b /data/a.txt 2>&1; echo code=$?"),
+    ("arity_diff",
+     "diff /data/a.txt /data/b.txt /data/mixed.txt 2>&1; echo code=$?"),
+    ("arity_seq", "seq 1 2 3 4 2>&1; echo code=$?"),
+    ("arity_mktemp", "mktemp t1 t2 2>&1; echo code=$?"),
+    ("arity_relative", "(cd /data && uniq a.txt b.txt extra.txt 2>&1);"
+     " echo code=$?"),
+
     # ----- cp / mv multi-source into a directory (last; these mutate) -----
     ("cp_multi_into_dir", "cp /data/a.txt /data/b.txt /data/sub"),
     ("cp_multi_verify_a", "cat /data/sub/a.txt"),
@@ -1059,6 +1085,11 @@ PARTIAL_READ_CASES: list[tuple[str, str]] = [
     ("pr_sort", "sort /data/pr/one.txt /data/pr/missing.txt"),
     ("pr_missing_first", "cat /data/pr/missing.txt /data/pr/one.txt"),
     ("pr_all_missing_wc", "wc -l /data/pr/m1.txt /data/pr/m2.txt"),
+    # a directory operand refuses with GNU EISDIR, partial output kept (#457)
+    ("pr_cat_dir", "cat /data/pr/one.txt /data/pr"),
+    ("pr_head_dir", "head /data/pr"),
+    ("pr_wc_dir", "wc /data/pr/one.txt /data/pr"),
+    ("pr_tac_dir", "tac /data/pr"),
     ("pr_cleanup", "rm -r /data/pr"),
 ]
 
@@ -1121,6 +1152,20 @@ CROSS_MOUNT_CASES: list[tuple[str, str]] = [
     ("xm_cut", "cut -c1 /data/a.txt /data2/xm.txt"),
     ("xm_sed_stream", "sed s/l/L/ /data/a.txt /data2/xm.txt"),
     ("xm_rev", "rev /data/b.txt /data2/xm.txt"),
+    ("xm_awk", "awk '{print $1}' /data/a.txt /data2/xm.txt"),
+    ("xm_awk_nr", "awk 'END{print NR}' /data/a.txt /data2/xm.txt"),
+    # ----- RELAY interleave: paste/comm/join colocate via dispatch reads -----
+    ("xm_paste", "paste /data/b.txt /data2/xm.txt"),
+    ("xm_paste_d", "paste -d, /data/b.txt /data2/xm.txt"),
+    ("xm_comm", "printf 'a\\nb\\nc\\n' | tee /data/xc1.txt > /dev/null"
+     " && printf 'b\\nc\\nd\\n' | tee /data2/xc2.txt > /dev/null"
+     " && comm /data/xc1.txt /data2/xc2.txt"),
+    ("xm_comm_12", "comm -12 /data/xc1.txt /data2/xc2.txt"),
+    ("xm_join", "printf '1 alpha\\n2 beta\\n' | tee /data/xj1.txt > /dev/null"
+     " && printf '1 one\\n3 three\\n' | tee /data2/xj2.txt > /dev/null"
+     " && join /data/xj1.txt /data2/xj2.txt"),
+    ("xm_join_a", "join -a 1 /data/xj1.txt /data2/xj2.txt"
+     " && rm /data/xc1.txt /data2/xc2.txt /data/xj1.txt /data2/xj2.txt"),
     # ----- FANOUT strategy: one native run per operand -----
     ("xm_tac", "tac /data/b.txt /data2/xm.txt"),
     ("xm_grep_names", "grep -n o /data/a.txt /data2/xm.txt"),
@@ -1169,7 +1214,7 @@ CROSS_MOUNT_EXIT_CASES: list[tuple[str, str]] = [
 # Non-whitelisted commands spanning mounts must refuse with the shared
 # message, pinning the whitelist boundary; printed like NOT_FOUND_CASES.
 CROSS_MOUNT_ERR_CASES: list[tuple[str, str]] = [
-    ("xm_refuse_paste", "paste /data/a.txt /data2/xm.txt"),
+    ("xm_refuse_uniq", "uniq /data/a.txt /data2/xm_uniq_out.txt"),
 ]
 
 # Provision (dry-run cost estimates) must print identical numbers on every

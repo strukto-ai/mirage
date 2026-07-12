@@ -39,7 +39,9 @@ import type { JobTable } from '../../shell/job_table.ts'
 import { ERREXIT_EXEMPT_TYPES, NodeType as NT } from '../../shell/types.ts'
 import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
 import { expandRedirects } from '../expand/redirects.ts'
-import { type ExecuteFn, expandNode } from '../expand/node.ts'
+import { type ExecuteFn, expandArith, expandNode } from '../expand/node.ts'
+import { evaluateArith } from '../../shell/arith.ts'
+import { ArithError } from '../../shell/errors.ts'
 import { expandAndClassify } from '../expand/parts.ts'
 import type { TSNodeLike } from '../expand/variable.ts'
 import {
@@ -203,6 +205,41 @@ export async function executeNode(
 
   if (kind === NodeKind.SUBSHELL) {
     return handleSubshell(recurse, getSubshellBody(node), session, stdin, callStack)
+  }
+
+  if (kind === NodeKind.COMPOUND && node.children[0]?.type === NT.ARITH_OPEN) {
+    const text = getText(node)
+    const expr = await expandArith(node, session, executeFn, callStack)
+    let value: bigint
+    let updates: Record<string, string>
+    try {
+      ;({ value, updates } = evaluateArith(expr, session.env))
+    } catch (err) {
+      if (!(err instanceof ArithError)) throw err
+      const errBytes = new TextEncoder().encode(`bash: ((: ${expr}: ${err.message}\n`)
+      return [
+        null,
+        new IOResult({ exitCode: 1, stderr: errBytes }),
+        new ExecutionNode({ command: text, exitCode: 1, stderr: errBytes }),
+      ]
+    }
+    for (const name of Object.keys(updates)) {
+      if (session.readonlyVars.has(name)) {
+        const errBytes = new TextEncoder().encode(`bash: ${name}: readonly variable\n`)
+        return [
+          null,
+          new IOResult({ exitCode: 1, stderr: errBytes }),
+          new ExecutionNode({ command: text, exitCode: 1, stderr: errBytes }),
+        ]
+      }
+    }
+    Object.assign(session.env, updates)
+    const code = value !== 0n ? 0 : 1
+    return [
+      null,
+      new IOResult({ exitCode: code }),
+      new ExecutionNode({ command: text, exitCode: code }),
+    ]
   }
 
   if (kind === NodeKind.COMPOUND) {

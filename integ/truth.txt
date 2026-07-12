@@ -1916,6 +1916,50 @@ code=0
 === read_invalid_opt ===
 read: -q: invalid option
 code=2
+=== arith_cmd_true ===
+code=0
+=== arith_cmd_false ===
+code=1
+=== arith_incr ===
+code=1 i=1
+code=0 i=2
+=== arith_assign_comma ===
+5 3
+=== arith_c_semantics ===
+-3 -1 1024 16 8
+=== arith_while ===
+n=3
+=== arith_if ===
+yes
+=== arith_divzero ===
+bash: ((: 1 / 0: division by 0
+code=1
+=== arith_short_circuit ===
+q=unset
+=== arity_uniq ===
+uniq: extra operand '/data/mixed.txt'
+Try 'uniq --help' for more information.
+code=1
+=== arity_tr ===
+tr: extra operand '/data/a.txt'
+Try 'tr --help' for more information.
+code=1
+=== arity_diff ===
+diff: extra operand '/data/mixed.txt'
+diff: Try 'diff --help' for more information.
+code=2
+=== arity_seq ===
+seq: extra operand '4'
+Try 'seq --help' for more information.
+code=1
+=== arity_mktemp ===
+mktemp: too many templates
+Try 'mktemp --help' for more information.
+code=1
+=== arity_relative ===
+uniq: extra operand 'extra.txt'
+Try 'uniq --help' for more information.
+code=1
 === cp_multi_into_dir ===
 
 === cp_multi_verify_a ===
@@ -2583,6 +2627,22 @@ exit=1
 0 total
 wc: /data/pr/m1.txt: No such file or directory
 wc: /data/pr/m2.txt: No such file or directory
+=== pr_cat_dir ===
+exit=1
+1
+2
+cat: /data/pr: Is a directory
+=== pr_head_dir ===
+exit=1
+head: /data/pr: Is a directory
+=== pr_wc_dir ===
+exit=1
+2 2 4 /data/pr/one.txt
+2 2 4 total
+wc: /data/pr: Is a directory
+=== pr_tac_dir ===
+exit=1
+tac: /data/pr: Is a directory
 === pr_cleanup ===
 exit=0
 === find_bad_maxdepth ===
@@ -2729,6 +2789,36 @@ cross
 2
 3
 ssorc
+=== xm_awk ===
+hello
+world
+foo
+bar
+baz
+cross
+=== xm_awk_nr ===
+6
+=== xm_paste ===
+1	cross
+2	
+3	
+=== xm_paste_d ===
+1,cross
+2,
+3,
+=== xm_comm ===
+a
+		b
+		c
+	d
+=== xm_comm_12 ===
+b
+c
+=== xm_join ===
+1 alpha one
+=== xm_join_a ===
+1 alpha one
+2 beta
 === xm_tac ===
 3
 2
@@ -2835,9 +2925,9 @@ exit=1
 /data/xdiff.txt /data2/xdiff.txt differ: char 6, line 2
 === xm_cmp_equal ===
 exit=0
-=== xm_refuse_paste ===
+=== xm_refuse_uniq ===
 exit=1
-paste: paths span multiple mounts (/data/, /data2/), cross-mount not supported
+uniq: paths span multiple mounts (/data/, /data2/), cross-mount not supported
 === prov_cat ===
 net=24 write=0 cache=0 ops=1 hits=0 precision=exact
 === prov_cat_multi ===

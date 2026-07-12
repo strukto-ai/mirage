@@ -12,6 +12,30 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+// Command names the spec layer references by value. Not a registry of
+// every command: only names that appear away from their own module
+// (usage message shapes, arity guards). Members are their plain string
+// values, so the raw string the executor passes still matches. Mirrors
+// the Python CommandName StrEnum and the crossmount Cmd pattern.
+export enum CommandName {
+  BASE64 = 'base64',
+  CMP = 'cmp',
+  COMM = 'comm',
+  DATE = 'date',
+  DIFF = 'diff',
+  FIND = 'find',
+  JOIN = 'join',
+  LOOK = 'look',
+  MKTEMP = 'mktemp',
+  PATCH = 'patch',
+  SEQ = 'seq',
+  SPLIT = 'split',
+  TR = 'tr',
+  TSORT = 'tsort',
+  UNIQ = 'uniq',
+  XXD = 'xxd',
+}
+
 export const OperandKind = Object.freeze({
   NONE: 'none',
   PATH: 'path',

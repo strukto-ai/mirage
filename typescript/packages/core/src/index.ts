@@ -519,7 +519,6 @@ export {
   expandParts,
   type ExecuteFn,
   lookupVar,
-  safeEval,
   type TSNodeLike,
   unescapePath,
 } from './workspace/expand/index.ts'
@@ -1097,7 +1096,14 @@ export {
   type PredNode,
   startBasename,
 } from './commands/builtin/findEval.ts'
-export { enoent, enotdir, errorVirtualPath, type FsError, gnuStrerror } from './utils/errors.ts'
+export {
+  eisdir,
+  enoent,
+  enotdir,
+  errorVirtualPath,
+  type FsError,
+  gnuStrerror,
+} from './utils/errors.ts'
 
 export {
   DatabricksVolumeAccessor,

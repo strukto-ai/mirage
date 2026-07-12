@@ -14,9 +14,12 @@
 
 import type { PathSpec } from '../../../../../types.ts'
 import { runCmp } from './cmp.ts'
+import { runComm } from './comm.ts'
 import { runCp } from './cp.ts'
 import { runDiff } from './diff.ts'
+import { runJoin } from './join.ts'
 import { runMv } from './mv.ts'
+import { runPaste } from './paste.ts'
 import { Cmd, type CrossResult, type DispatchFn } from '../types.ts'
 
 // Run a command whose data must colocate across mounts. Pure wiring: every
@@ -32,5 +35,8 @@ export async function runRelay(
   if (cmdName === Cmd.CP) return runCp(scopes, flagKwargs, dispatch)
   if (cmdName === Cmd.MV) return runMv(scopes, flagKwargs, dispatch)
   if (cmdName === Cmd.DIFF) return runDiff(scopes, flagKwargs, dispatch)
+  if (cmdName === Cmd.PASTE) return runPaste(scopes, flagKwargs, dispatch)
+  if (cmdName === Cmd.COMM) return runComm(scopes, flagKwargs, dispatch)
+  if (cmdName === Cmd.JOIN) return runJoin(scopes, flagKwargs, dispatch)
   return runCmp(scopes, flagKwargs, dispatch)
 }

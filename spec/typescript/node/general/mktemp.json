@@ -48,9 +48,11 @@
       "value_optional": false
     }
   ],
-  "positional": [],
-  "rest": {
-    "kind": "text",
-    "provided_by": []
-  }
+  "positional": [
+    {
+      "kind": "text",
+      "provided_by": []
+    }
+  ],
+  "rest": null
 }

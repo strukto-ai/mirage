@@ -41,6 +41,10 @@ def enotdir(path: object) -> NotADirectoryError:
     return NotADirectoryError(_virtual_of(path))
 
 
+def eisdir(path: object) -> IsADirectoryError:
+    return IsADirectoryError(_virtual_of(path))
+
+
 def fs_strerror(exc: BaseException) -> str | None:
     for exc_type, strerror in _FS_STRERROR:
         if isinstance(exc, exc_type):

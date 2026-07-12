@@ -274,3 +274,12 @@ def test_value_optional_never_consumes_next_token():
     parsed = parse_command(SPECS["ls"], ["--color", "/data"], "/")
     assert parsed.flags["--color"] is True
     assert parsed.paths() == ["/data"]
+
+
+def test_overflow_operands_pass_through_like_last_slot():
+    parsed = parse_command(SPECS["uniq"], ["a.txt", "b.txt", "c.txt"],
+                           cwd="/data")
+    assert [k for _, k in parsed.args] == [OperandKind.PATH] * 3
+
+    parsed = parse_command(SPECS["tr"], ["a", "b", "extra.txt"], cwd="/data")
+    assert [k for _, k in parsed.args] == [OperandKind.TEXT] * 3

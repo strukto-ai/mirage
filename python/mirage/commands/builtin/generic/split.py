@@ -2,6 +2,8 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.spec.types import CommandName
+from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -32,6 +34,8 @@ async def split(
     suffix_len: int = 2,
     numeric_suffix: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
+    if len(paths) > 2:
+        raise extra_operand_error(CommandName.SPLIT, paths[2].raw_path)
     prefix_name = paths[1].mount_path if len(paths) >= 2 else "x"
     if lines_per_file == 0 and byte_limit == 0 and n_chunks == 0:
         lines_per_file = 1000

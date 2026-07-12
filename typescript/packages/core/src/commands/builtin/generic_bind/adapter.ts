@@ -15,9 +15,11 @@
 import type { Accessor } from '../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import type { FindOptions } from '../../../resource/base.ts'
-import type { PathSpec } from '../../../types.ts'
-import { type FileStat } from '../../../types.ts'
+import { FileType, PathSpec, type FileStat } from '../../../types.ts'
+import { eisdir } from '../../../utils/errors.ts'
 import { resolveGlobWith } from '../../../utils/glob_walk.ts'
+import { norm, parent } from '../../../utils/path.ts'
+import { stripSlash } from '../../../utils/slash.ts'
 import type { AggregateFn, CommandFnResult, CommandOpts, ProvisionFn } from '../../config.ts'
 
 export type ReaddirOp<A extends Accessor = Accessor> = (
@@ -130,6 +132,110 @@ export interface CommandIO<A extends Accessor = Accessor> {
 
 export function resolveGlobOf<A extends Accessor = Accessor>(ops: CommandIO<A>): ResolveGlobOp<A> {
   return makeResolveGlob(ops.readdir, ops.maxGlobMatches)
+}
+
+// Whether a path that failed with ENOENT is an implicit directory. Keyed
+// backends (RAM/Redis/S3) have no directory entries: stat/read of a prefix
+// that only exists through deeper keys raises ENOENT. The operand's own
+// readdir cannot serve as the probe: synthetic hierarchies fabricate
+// children for any name (postgres answers tables/views for a missing
+// schema) and database backends raise driver errors for missing tables.
+// The parent listing is authoritative instead: the operand is an implicit
+// directory only if its parent's readdir lists it. When the operand is the
+// mount root there is no parent to list, so its own readdir decides (root
+// listings are real in every backend). Any probe failure is a negative
+// probe (the original ENOENT stands), never an error to surface.
+async function isImplicitDir<A extends Accessor>(
+  ops: CommandIO<A>,
+  accessor: A,
+  path: PathSpec,
+  index?: IndexCacheStore,
+): Promise<boolean> {
+  const target = norm(path.virtual)
+  const key = stripSlash(path.resourcePath)
+  if (!key) {
+    try {
+      const entries = await ops.readdir(accessor, path, index)
+      return entries.length > 0
+    } catch {
+      return false
+    }
+  }
+  const parentKey = key.includes('/') ? key.slice(0, key.lastIndexOf('/')) : ''
+  const parentVirtual = parent(target)
+  const parentPath = new PathSpec({
+    virtual: parentVirtual,
+    directory: parentVirtual,
+    resourcePath: parentKey,
+  })
+  try {
+    const entries = await ops.readdir(accessor, parentPath, index)
+    return entries.some((entry) => norm(entry) === target)
+  } catch {
+    return false
+  }
+}
+
+// Stat for the read-family chokepoint (`splitReadable`): a directory operand
+// fails with EISDIR instead of succeeding (explicit, via the stat type) or
+// failing with ENOENT (implicit keyed-backend directory, via a readdir
+// probe), so cat/head/tail report GNU's `Is a directory` and keep the
+// remaining operands (#457).
+export function dirAwareStat<A extends Accessor>(
+  ops: CommandIO<A>,
+  accessor: A,
+  index?: IndexCacheStore,
+): (p: PathSpec) => Promise<FileStat> {
+  return async (p) => {
+    let st: FileStat
+    try {
+      st = await ops.stat(accessor, p, index)
+    } catch (e) {
+      if (
+        (e as { code?: string }).code === 'ENOENT' &&
+        (await isImplicitDir(ops, accessor, p, index))
+      )
+        throw eisdir(p)
+      throw e
+    }
+    if (st.type === FileType.DIRECTORY) throw eisdir(p)
+    return st
+  }
+}
+
+async function* streamRefusingDirs<A extends Accessor>(
+  ops: CommandIO<A>,
+  accessor: A,
+  p: PathSpec,
+  index?: IndexCacheStore,
+): AsyncIterable<Uint8Array> {
+  let st: FileStat
+  try {
+    st = await ops.stat(accessor, p, index)
+  } catch (e) {
+    if (
+      (e as { code?: string }).code === 'ENOENT' &&
+      (await isImplicitDir(ops, accessor, p, index))
+    )
+      throw eisdir(p)
+    throw e
+  }
+  if (st.type === FileType.DIRECTORY) throw eisdir(p)
+  yield* ops.readStream(accessor, p, index)
+}
+
+// Read stream for the read-family per-operand chokepoint (`readOperands`):
+// the operand is stat'ed first so a directory fails with EISDIR before any
+// backend read runs (sftp reads of a directory raise an opaque `Failure`,
+// not ENOENT), and an ENOENT for an implicit keyed-backend directory is
+// refined the same way `dirAwareStat` does, before the generic formats the
+// stderr line (#457). Mirrors the Python `_read_refusing_dirs`.
+export function dirAwareStream<A extends Accessor>(
+  ops: CommandIO<A>,
+  accessor: A,
+  index?: IndexCacheStore,
+): (p: PathSpec) => AsyncIterable<Uint8Array> {
+  return (p) => streamRefusingDirs(ops, accessor, p, index)
 }
 
 export type BuilderFn<A extends Accessor = Accessor> = (

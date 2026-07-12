@@ -132,9 +132,10 @@ describe('parseCommand — positional classification', () => {
     ])
   })
 
-  it('drops extra args when no rest', () => {
+  it('passes overflow args through like the last slot when no rest', () => {
     const p = parseCommand(spec, ['pattern', '/ram/x', 'extra'], '/')
-    expect(p.args).toHaveLength(2)
+    expect(p.args).toHaveLength(3)
+    expect(p.args[2]?.[1]).toBe(OperandKind.PATH)
   })
 })
 
@@ -481,5 +482,22 @@ describe('parseCommand — awk spec', () => {
     const p = parseCommand(specOf('awk'), ['-f', '/prog.awk', '/data/a.txt', '/data/b.txt'], '/')
     expect(p.texts()).toEqual([])
     expect(p.paths()).toEqual(['/data/a.txt', '/data/b.txt'])
+  })
+})
+
+describe('overflow operand pass-through', () => {
+  it('classifies overflow like the last positional slot', () => {
+    const uniq = parseCommand(specOf('uniq'), ['a.txt', 'b.txt', 'c.txt'], '/data')
+    expect(uniq.args.map(([, k]) => k)).toEqual([
+      OperandKind.PATH,
+      OperandKind.PATH,
+      OperandKind.PATH,
+    ])
+    const tr = parseCommand(specOf('tr'), ['a', 'b', 'extra.txt'], '/data')
+    expect(tr.args.map(([, k]) => k)).toEqual([
+      OperandKind.TEXT,
+      OperandKind.TEXT,
+      OperandKind.TEXT,
+    ])
   })
 })

@@ -2,6 +2,8 @@ from collections.abc import Awaitable, Callable
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.lines import split_lines
+from mirage.commands.spec.types import CommandName
+from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -62,6 +64,8 @@ async def comm(
     suppress3: bool = False,
     check_order: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
+    if len(paths) > 2:
+        raise extra_operand_error(CommandName.COMM, paths[2].raw_path)
     if len(paths) < 2:
         raise ValueError("comm: requires two paths")
     data1 = (await read_bytes(accessor, paths[0])).decode(errors="replace")

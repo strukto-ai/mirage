@@ -48,6 +48,7 @@ import { maybeWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
 import { resolveAcrossMounts, resolveSafeguard } from '../../commands/safeguard.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
 import { handleJobs, handleKill, handlePs, handleWait } from './jobs.ts'
+import { UsageError } from '../../commands/errors.ts'
 import { formatFsError } from '../../utils/errors.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 
@@ -185,6 +186,18 @@ async function runOnMount(
     }
     return [stdout, io]
   } catch (err) {
+    // Command-owned usage errors (extra operands, missing patterns) become
+    // this command's IOResult so the rest of the line keeps running, like a
+    // real shell (#452).
+    if (err instanceof UsageError) {
+      return [
+        null,
+        new IOResult({
+          exitCode: err.exitCode,
+          stderr: new TextEncoder().encode(`${err.message}\n`),
+        }),
+      ]
+    }
     return [null, new IOResult({ exitCode: 1, stderr: formatFsError(cmdName, err, paths) })]
   }
 }

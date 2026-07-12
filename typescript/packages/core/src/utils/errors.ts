@@ -48,6 +48,10 @@ export function enotdir(path: string | { virtual: string }): FsError {
   return fsError(path, 'ENOTDIR')
 }
 
+export function eisdir(path: string | { virtual: string }): FsError {
+  return fsError(path, 'EISDIR')
+}
+
 const STRERROR: Record<string, string> = {
   ENOENT: 'No such file or directory',
   ENOTDIR: 'Not a directory',

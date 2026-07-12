@@ -46,7 +46,7 @@ describe('isCrossMount', () => {
 
   it('returns false for non-cross-mount commands', () => {
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
-    expect(isCrossMount('paste', paths, reg)).toBe(false)
+    expect(isCrossMount('uniq', paths, reg)).toBe(false)
   })
 
   it('returns false when paths share a mount', () => {

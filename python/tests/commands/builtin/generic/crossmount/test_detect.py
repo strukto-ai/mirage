@@ -85,5 +85,5 @@ def test_is_cross_mount_false_for_single_mount_or_unknown_command():
     same = [_scope("/a/x.txt"), _scope("/a/y.txt")]
     assert not is_cross_mount("sort", same, registry)
     spanning = [_scope("/a/x.txt"), _scope("/b/y.txt")]
-    assert not is_cross_mount("paste", spanning, registry)
+    assert not is_cross_mount("uniq", spanning, registry)
     assert not is_cross_mount("sort", spanning[:1], registry)

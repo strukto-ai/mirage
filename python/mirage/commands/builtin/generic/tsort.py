@@ -3,6 +3,8 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.spec.types import CommandName
+from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -43,6 +45,8 @@ async def tsort(
     accessor: Accessor | None = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
+    if len(paths) > 1:
+        raise extra_operand_error(CommandName.TSORT, paths[1].raw_path)
     if paths:
         raw = await read_bytes(accessor, paths[0])
     else:

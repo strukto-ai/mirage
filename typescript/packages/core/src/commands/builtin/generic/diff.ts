@@ -20,6 +20,8 @@ import { gnuBasename } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { CommandOpts } from '../../config.ts'
 import { edScript, normalDiff, unifiedDiff } from '../diff_helper.ts'
+import { extraOperandError } from '../../spec/usage.ts'
+import { CommandName } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -155,6 +157,7 @@ export async function diffGeneric(
   readdir?: Readdir,
   stat?: Stat,
 ): Promise<[ByteSource | null, IOResult]> {
+  if (paths.length > 2) throw extraOperandError(CommandName.DIFF, paths[2]?.rawPath ?? '')
   if (paths.length < 2) {
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode('diff: requires two paths\n') })]
   }

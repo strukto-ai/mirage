@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { missingValueError, unknownOptionError, usageExitCode } from './usage.ts'
+import { extraOperandError, missingValueError, unknownOptionError, usageExitCode } from './usage.ts'
 
 const td = new TextDecoder()
 
@@ -59,5 +59,27 @@ describe('missingValueError', () => {
     const [longMsg, longCode] = missingValueError('du', '--max-depth')
     expect(td.decode(longMsg)).toContain("du: option '--max-depth' requires an argument\n")
     expect(longCode).toBe(1)
+  })
+})
+
+describe('extraOperandError', () => {
+  it('uses GNU wording and per-command exit codes', () => {
+    const err = extraOperandError('uniq', 'c.txt')
+    expect(err.message).toBe("uniq: extra operand 'c.txt'\nTry 'uniq --help' for more information.")
+    expect(err.exitCode).toBe(1)
+  })
+
+  it('prefixes the hint for diff and exits 2', () => {
+    const err = extraOperandError('diff', 'c.txt')
+    expect(err.message).toBe(
+      "diff: extra operand 'c.txt'\ndiff: Try 'diff --help' for more information.",
+    )
+    expect(err.exitCode).toBe(2)
+  })
+
+  it('says too many templates for mktemp', () => {
+    const err = extraOperandError('mktemp', 't2')
+    expect(err.message.startsWith('mktemp: too many templates\n')).toBe(true)
+    expect(err.exitCode).toBe(1)
   })
 })

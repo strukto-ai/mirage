@@ -1,4 +1,5 @@
-from mirage.commands.spec.usage import (missing_value_error,
+from mirage.commands.spec.usage import (extra_operand_error,
+                                        missing_value_error,
                                         unknown_option_error, usage_exit_code)
 
 
@@ -37,3 +38,23 @@ def test_missing_value_short_and_long():
     msg, code = missing_value_error("du", "--max-depth")
     assert msg.startswith(b"du: option '--max-depth' requires an argument\n")
     assert code == 1
+
+
+def test_extra_operand_uses_gnu_wording_and_exit():
+    err = extra_operand_error("uniq", "c.txt")
+    assert str(err) == ("uniq: extra operand 'c.txt'\n"
+                        "Try 'uniq --help' for more information.")
+    assert err.exit_code == 1
+
+
+def test_extra_operand_diff_prefixes_hint_and_exits_2():
+    err = extra_operand_error("diff", "c.txt")
+    assert str(err) == ("diff: extra operand 'c.txt'\n"
+                        "diff: Try 'diff --help' for more information.")
+    assert err.exit_code == 2
+
+
+def test_extra_operand_mktemp_says_too_many_templates():
+    err = extra_operand_error("mktemp", "t2")
+    assert str(err).startswith("mktemp: too many templates\n")
+    assert err.exit_code == 1
