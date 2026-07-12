@@ -67,7 +67,6 @@ async def test_type_split_uses_field_config_hint(accessor):
 
 @pytest.mark.asyncio
 async def test_negated_name_prunes_blobs(accessor):
-    lines = await _run(accessor, [_spec("/")], "!", "-name", "*.png",
-                       type="f")
+    lines = await _run(accessor, [_spec("/")], "!", "-name", "*.png", type="f")
     assert lines
     assert all(not line.endswith(".png") for line in lines)

@@ -79,11 +79,11 @@ async def test_depth_and_start_point(accessor):
 
 @pytest.mark.asyncio
 async def test_multi_start_points_in_operand_order(accessor):
-    lines = await _run(accessor,
-                       [_spec("/animals/dog"),
-                        _spec("/animals/cat")],
-                       type="f",
-                       name="*.md")
+    lines = await _run(
+        accessor,
+        [_spec("/animals/dog"), _spec("/animals/cat")],
+        type="f",
+        name="*.md")
     assert lines == [
         "/animals/dog/big/3.md",
         "/animals/dog/small/4.md",
