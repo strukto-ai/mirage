@@ -20,6 +20,8 @@ import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { rebaseRaw } from '../../../utils/path.ts'
+import { mountPrefixOf } from '../../../utils/key_prefix.ts'
+import { optionsTree, prefixPathNodes } from '../findEval.ts'
 
 const ENC = new TextEncoder()
 
@@ -173,9 +175,17 @@ export async function findGeneric(
         }
   const matches: string[] = []
   for (const root of targets) {
+    // `-path` matches the display path as printed; stamp the mount
+    // prefix onto path nodes before the backend walks mount-relative
+    // keys (#396).
+    const prefix = mountPrefixOf(root.virtual, root.resourcePath)
+    const rootOptions: FindOptions = {
+      ...options,
+      tree: prefixPathNodes(optionsTree(options), prefix),
+    }
     let keys: string[]
     try {
-      keys = await find(root, options)
+      keys = await find(root, rootOptions)
     } catch (err) {
       // GNU find reports missing roots and moves on; anything else
       // (rate limits, auth failures) must surface.

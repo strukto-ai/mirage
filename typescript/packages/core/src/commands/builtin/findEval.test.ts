@@ -20,6 +20,9 @@ import {
   type FindEntry,
   keep,
   treeHasType,
+  displayPath,
+  emitStartPath,
+  prefixPathNodes,
 } from './findEval.ts'
 
 function entry(over: Partial<FindEntry> = {}): FindEntry {
@@ -160,5 +163,58 @@ describe('buildTree', () => {
     ).toBe(true)
     expect(treeHasType({ op: 'not', kid: { op: 'type', kind: 'f' } })).toBe(true)
     expect(treeHasType({ op: 'true' })).toBe(false)
+  })
+})
+
+describe('prefixPathNodes', () => {
+  it('matches -path against the display path (#396)', () => {
+    const tree = prefixPathNodes({ op: 'path', pattern: '*data/sub*' }, '/data')
+    expect(evalPredicate(tree, { key: '/sub', name: 'sub', kind: 'd', depth: 1 })).toBe(true)
+    expect(evalPredicate(tree, { key: '/other', name: 'other', kind: 'd', depth: 1 })).toBe(false)
+    const exact = prefixPathNodes({ op: 'path', pattern: '/data/sub' }, '/data')
+    expect(evalPredicate(exact, { key: '/sub', name: 'sub', kind: 'd', depth: 1 })).toBe(true)
+  })
+
+  it('rewrites nested nodes and leaves root mounts untouched', () => {
+    const tree = prefixPathNodes({ op: 'and', kids: [{ op: 'path', pattern: '/data/*' }] }, '/data')
+    expect(evalPredicate(tree, { key: '/x', name: 'x', kind: 'f', depth: 1 })).toBe(true)
+    const same: Parameters<typeof prefixPathNodes>[0] = { op: 'path', pattern: '*a*' }
+    expect(prefixPathNodes(same, '')).toBe(same)
+  })
+})
+
+describe('displayPath', () => {
+  it('joins like applyMountPrefix', () => {
+    expect(displayPath('', '/sub/x')).toBe('/sub/x')
+    expect(displayPath('/data', '/sub/x')).toBe('/data/sub/x')
+    expect(displayPath('/data', '/')).toBe('/data')
+  })
+})
+
+describe('emitStartPath size on directories', () => {
+  it('directory start contributes size 0: +N excludes, -N keeps (#318)', () => {
+    const results: string[] = []
+    emitStartPath(results, '/data', 'data', {
+      kind: 'd',
+      isEmpty: null,
+      exists: true,
+      tree: { op: 'true' },
+      maxDepth: null,
+      minDepth: null,
+      minSize: 5,
+      maxSize: null,
+    })
+    expect(results).toEqual([])
+    emitStartPath(results, '/data', 'data', {
+      kind: 'd',
+      isEmpty: null,
+      exists: true,
+      tree: { op: 'true' },
+      maxDepth: null,
+      minDepth: null,
+      minSize: null,
+      maxSize: 5,
+    })
+    expect(results).toEqual(['/data'])
   })
 })

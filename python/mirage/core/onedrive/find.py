@@ -93,10 +93,11 @@ async def find(
                               is_empty=is_empty)
             if not keep(entry, tree, mindepth):
                 continue
-            if not is_dir:
-                if min_size is not None and size < min_size:
+            if min_size is not None or max_size is not None:
+                effective = 0 if is_dir else size
+                if min_size is not None and effective < min_size:
                     continue
-                if max_size is not None and size > max_size:
+                if max_size is not None and effective > max_size:
                     continue
             results.append(full_path)
     dir_exists = saw_descendant
@@ -116,5 +117,7 @@ async def find(
                         exists=True,
                         tree=tree,
                         maxdepth=maxdepth,
-                        mindepth=mindepth)
+                        mindepth=mindepth,
+                        min_size=min_size,
+                        max_size=max_size)
     return sorted(results)

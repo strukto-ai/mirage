@@ -451,6 +451,19 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ["find_size_lt", "find /data -size -5c"],
   ["find_depth", "find /data -depth -type f"],
   ["find_mtime", "find /data -mtime +0 -o -mtime -1"],
+  // -size on directories: mirage counts a directory as size 0 (GNU
+  // compares the inode size), so +N excludes dirs and -N keeps them.
+  [
+    "find_size_gt_dirs",
+    "mkdir -p /data/fs/sub && printf 12345678 > /data/fs/sub/big.bin" +
+      " && printf x > /data/fs/small.bin && find /data/fs -size +4c",
+  ],
+  ["find_size_lt_dirs", "find /data/fs -size -4c"],
+  // -path matches the display path as printed (GNU), not the
+  // mount-relative key.
+  ["find_path_glob", "find /data/fs -path '*data/fs/sub*'"],
+  ["find_path_exact", "find /data/fs -path '/data/fs/sub'"],
+  ["find_path_or_name", "find /data/fs -path '*sub*' -o -name small.bin"],
 
   ["xxd_c4", "head -c 12 /data/a.txt | xxd -c 4"],
   ["xxd_g1", "head -c 8 /data/a.txt | xxd -g 1"],
