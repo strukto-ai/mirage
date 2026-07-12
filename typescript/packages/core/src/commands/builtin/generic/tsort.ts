@@ -16,6 +16,7 @@ import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { readStdinAsync } from '../utils/stream.ts'
+import { extraOperandError } from '../../spec/usage.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -70,6 +71,7 @@ export async function tsortGeneric(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
+  if (paths.length > 1) throw extraOperandError('tsort', paths[1]?.rawPath ?? '')
   let raw: Uint8Array
   if (paths.length > 0) {
     const first = paths[0]

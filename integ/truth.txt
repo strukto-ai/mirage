@@ -1936,6 +1936,30 @@ bash: ((: 1 / 0: division by 0
 code=1
 === arith_short_circuit ===
 q=unset
+=== arity_uniq ===
+uniq: extra operand '/data/mixed.txt'
+Try 'uniq --help' for more information.
+code=1
+=== arity_tr ===
+tr: extra operand '/data/a.txt'
+Try 'tr --help' for more information.
+code=1
+=== arity_diff ===
+diff: extra operand '/data/mixed.txt'
+diff: Try 'diff --help' for more information.
+code=2
+=== arity_seq ===
+seq: extra operand '4'
+Try 'seq --help' for more information.
+code=1
+=== arity_mktemp ===
+mktemp: too many templates
+Try 'mktemp --help' for more information.
+code=1
+=== arity_relative ===
+uniq: extra operand 'extra.txt'
+Try 'uniq --help' for more information.
+code=1
 === cp_multi_into_dir ===
 
 === cp_multi_verify_a ===

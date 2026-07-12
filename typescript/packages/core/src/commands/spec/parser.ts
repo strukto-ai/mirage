@@ -293,6 +293,12 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     .filter((op) => !op.providedBy.some((name) => name in flags))
     .map((op) => op.kind)
 
+  // Overflow operands past the declared positional slots pass through
+  // classified like the last slot (TEXT when there is none), so a
+  // fixed-arity command receives them and raises its own extra-operand
+  // UsageError (#452). The parser classifies, it never drops or raises.
+  const overflowKind: OperandKind = positional.at(-1) ?? OperandKind.TEXT
+
   const classified: [string, OperandKind][] = []
   const rawOperands: [string, OperandKind][] = []
   for (let j = 0; j < rawArgs.length; j++) {
@@ -304,7 +310,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     } else if (restKind !== null) {
       kind = restKind
     } else {
-      continue
+      kind = overflowKind
     }
     if (kind === OperandKind.PATH) {
       classified.push([resolvePath(arg, cwd), OperandKind.PATH])

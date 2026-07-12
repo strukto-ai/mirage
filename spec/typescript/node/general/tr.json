@@ -79,8 +79,5 @@
       "provided_by": []
     }
   ],
-  "rest": {
-    "kind": "path",
-    "provided_by": []
-  }
+  "rest": null
 }

@@ -55,7 +55,10 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-i"),
             Option(short="-w", value_kind=OperandKind.TEXT),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        positional=(
+            Operand(kind=OperandKind.PATH),
+            Operand(kind=OperandKind.PATH),
+        ),
     ),
     'cut':
     CommandSpec(
@@ -89,7 +92,6 @@ SPECS: dict[str, CommandSpec] = {
             Operand(kind=OperandKind.TEXT),
             Operand(kind=OperandKind.TEXT),
         ),
-        rest=Operand(kind=OperandKind.PATH),
     ),
     'paste':
     CommandSpec(
@@ -124,7 +126,11 @@ SPECS: dict[str, CommandSpec] = {
                              "format string."),
             ),
         ),
-        rest=Operand(kind=OperandKind.TEXT),
+        positional=(
+            Operand(kind=OperandKind.TEXT),
+            Operand(kind=OperandKind.TEXT),
+            Operand(kind=OperandKind.TEXT),
+        ),
     ),
     'split':
     CommandSpec(
@@ -135,7 +141,10 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-d"),
             Option(short="-a", value_kind=OperandKind.TEXT),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        positional=(
+            Operand(kind=OperandKind.PATH),
+            Operand(kind=OperandKind.PATH),
+        ),
     ),
     'shuf':
     CommandSpec(
@@ -156,7 +165,10 @@ SPECS: dict[str, CommandSpec] = {
             Option(long="--check-order"),
             Option(long="--nocheck-order"),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        positional=(
+            Operand(kind=OperandKind.PATH),
+            Operand(kind=OperandKind.PATH),
+        ),
     ),
     'csplit':
     CommandSpec(
@@ -171,7 +183,7 @@ SPECS: dict[str, CommandSpec] = {
         rest=Operand(kind=OperandKind.TEXT),
     ),
     'tsort':
-    CommandSpec(rest=Operand(kind=OperandKind.PATH)),
+    CommandSpec(positional=(Operand(kind=OperandKind.PATH), )),
     'join':
     CommandSpec(
         options=(
@@ -183,6 +195,9 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-e", value_kind=OperandKind.TEXT),
             Option(short="-o", value_kind=OperandKind.TEXT),
         ),
-        rest=Operand(kind=OperandKind.PATH),
+        positional=(
+            Operand(kind=OperandKind.PATH),
+            Operand(kind=OperandKind.PATH),
+        ),
     ),
 }

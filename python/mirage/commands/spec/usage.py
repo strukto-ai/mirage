@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.errors import UsageError
 from mirage.commands.spec.constants import USAGE_EXIT
 
 
@@ -63,3 +64,25 @@ def missing_value_error(cmd_name: str, token: str) -> tuple[bytes, int]:
         line = f"{cmd_name}: option requires an argument -- '{token}'\n"
     hint = f"Try '{cmd_name} --help' for more information.\n"
     return (line + hint).encode(), usage_exit_code(cmd_name)
+
+
+def extra_operand_error(cmd_name: str, operand: str) -> UsageError:
+    """GNU-shaped usage error for an operand past a command's arity.
+
+    Shapes pinned against real GNU: ``<cmd>: extra operand '<arg>'`` with
+    the ``Try '--help'`` hint (diff and cmp prefix the hint line with the
+    command name; mktemp says ``too many templates`` with no operand).
+    The operand must be the as-typed spelling (``raw_path``), never the
+    resolved path.
+
+    Args:
+        cmd_name (str): command name for the message and exit code.
+        operand (str): the first extra operand as typed.
+    """
+    if cmd_name == "mktemp":
+        line = "mktemp: too many templates"
+    else:
+        line = f"{cmd_name}: extra operand '{operand}'"
+    prefix = f"{cmd_name}: " if cmd_name in ("diff", "cmp") else ""
+    hint = f"{prefix}Try '{cmd_name} --help' for more information."
+    return UsageError(f"{line}\n{hint}", usage_exit_code(cmd_name))

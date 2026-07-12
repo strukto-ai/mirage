@@ -272,6 +272,12 @@ def parse_command(
                                    if not any(name in flags
                                               for name in op.provided_by))
 
+    # Overflow operands past the declared positional slots pass through
+    # classified like the last slot (TEXT when there is none), so a
+    # fixed-arity command receives them and raises its own extra-operand
+    # UsageError (#452). The parser classifies, it never drops or raises.
+    overflow_kind = positional[-1] if positional else OperandKind.TEXT
+
     classified: list[tuple[str, OperandKind]] = []
     raw_operands: list[tuple[str, OperandKind]] = []
     for j, arg in enumerate(raw_args):
@@ -280,7 +286,7 @@ def parse_command(
         elif rest_kind is not None:
             kind = rest_kind
         else:
-            continue
+            kind = overflow_kind
         if kind == OperandKind.PATH:
             classified.append((resolve_path(arg, cwd), OperandKind.PATH))
             raw_operands.append((arg, OperandKind.PATH))

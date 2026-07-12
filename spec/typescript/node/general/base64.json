@@ -69,9 +69,11 @@
       "value_optional": false
     }
   ],
-  "positional": [],
-  "rest": {
-    "kind": "path",
-    "provided_by": []
-  }
+  "positional": [
+    {
+      "kind": "path",
+      "provided_by": []
+    }
+  ],
+  "rest": null
 }

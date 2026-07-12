@@ -724,6 +724,17 @@ CASES: list[tuple[str, str]] = [
     ("arith_divzero", "(( 1 / 0 )) 2>&1; echo code=$?"),
     ("arith_short_circuit", "(( 0 && (q = 7) )); echo q=${q:-unset}"),
 
+    # ----- fixed arity: extra operands refuse with GNU errors (#452) -----
+    ("arity_uniq",
+     "uniq /data/a.txt /data/b.txt /data/mixed.txt 2>&1; echo code=$?"),
+    ("arity_tr", "tr a b /data/a.txt 2>&1; echo code=$?"),
+    ("arity_diff",
+     "diff /data/a.txt /data/b.txt /data/mixed.txt 2>&1; echo code=$?"),
+    ("arity_seq", "seq 1 2 3 4 2>&1; echo code=$?"),
+    ("arity_mktemp", "mktemp t1 t2 2>&1; echo code=$?"),
+    ("arity_relative", "(cd /data && uniq a.txt b.txt extra.txt 2>&1);"
+     " echo code=$?"),
+
     # ----- cp / mv multi-source into a directory (last; these mutate) -----
     ("cp_multi_into_dir", "cp /data/a.txt /data/b.txt /data/sub"),
     ("cp_multi_verify_a", "cat /data/sub/a.txt"),

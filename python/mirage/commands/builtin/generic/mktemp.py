@@ -3,6 +3,7 @@ import string
 from collections.abc import Awaitable, Callable
 
 from mirage.accessor.base import Accessor
+from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -37,6 +38,8 @@ async def mktemp(
     p: str | PathSpec | None = None,
     t: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
+    if len(texts) > 1:
+        raise extra_operand_error("mktemp", texts[1])
     path, parent = _build_path(p, t, texts)
     await mkdir_fn(accessor, parent, parents=True)
     if d:

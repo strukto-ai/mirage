@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { UsageError } from '../errors.ts'
 import { USAGE_EXIT } from './constants'
 
 /** GNU usage-error exit code for a command. */
@@ -51,4 +52,20 @@ export function missingValueError(cmdName: string, token: string): [Uint8Array, 
     : `${cmdName}: option requires an argument -- '${token}'\n`
   const hint = `Try '${cmdName} --help' for more information.\n`
   return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
+}
+
+/**
+ * GNU-shaped usage error for an operand past a command's arity.
+ *
+ * Shapes pinned against real GNU: `<cmd>: extra operand '<arg>'` with the
+ * `Try '--help'` hint (diff and cmp prefix the hint line with the command
+ * name; mktemp says `too many templates` with no operand). The operand must
+ * be the as-typed spelling (`rawPath`), never the resolved path.
+ */
+export function extraOperandError(cmdName: string, operand: string): UsageError {
+  const line =
+    cmdName === 'mktemp' ? 'mktemp: too many templates' : `${cmdName}: extra operand '${operand}'`
+  const prefix = cmdName === 'diff' || cmdName === 'cmp' ? `${cmdName}: ` : ''
+  const hint = `${prefix}Try '${cmdName} --help' for more information.`
+  return new UsageError(`${line}\n${hint}`, usageExitCode(cmdName))
 }

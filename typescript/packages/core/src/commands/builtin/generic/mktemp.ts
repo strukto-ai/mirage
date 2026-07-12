@@ -16,6 +16,7 @@ import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
+import { extraOperandError } from '../../spec/usage.ts'
 
 const ENC = new TextEncoder()
 
@@ -43,6 +44,7 @@ export async function mktempGeneric(
   mkdir: (p: PathSpec, parents?: boolean) => Promise<void>,
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<CommandFnResult> {
+  if (texts.length > 1) throw extraOperandError('mktemp', texts[1] ?? '')
   const tFlag = opts.flags.t === true
   const parent = tFlag ? '/tmp' : typeof opts.flags.p === 'string' ? opts.flags.p : '/tmp'
   const templateArg = texts[0]
