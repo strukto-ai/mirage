@@ -14,7 +14,7 @@
 
 import type { GSlidesAccessor } from '../../../accessor/gslides.ts'
 import { read as gslidesRead, stream as gslidesStream } from '../../../core/gslides/read.ts'
-import { readdir as gslidesReaddir } from '../../../core/gslides/readdir.ts'
+import { isDirName, readdir as gslidesReaddir } from '../../../core/gslides/readdir.ts'
 import { stat as gslidesStat } from '../../../core/gslides/stat.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
 
@@ -24,5 +24,6 @@ export const GSLIDES_CMD_OPS: CommandIO<GSlidesAccessor> = {
   readStream: gslidesStream,
   stat: gslidesStat,
   isMounted: () => true,
+  isDirName: (_accessor, child) => isDirName(child),
   local: false,
 }

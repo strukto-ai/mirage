@@ -16,12 +16,11 @@ import type { DropboxAccessor } from '../../../accessor/dropbox.ts'
 import { ResourceName } from '../../../types.ts'
 import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { DROPBOX_FIND } from './find.ts'
 import { DROPBOX_CMD_OPS } from './ops.ts'
 import { fileReadProvision, metadataProvision } from './provision.ts'
 import { DROPBOX_SED } from './sed.ts'
 
-const DROPBOX_OVERRIDES = new Set(['find', 'sed'])
+const DROPBOX_OVERRIDES = new Set(['sed'])
 
 export const DROPBOX_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<DropboxAccessor>(ResourceName.DROPBOX, DROPBOX_CMD_OPS, {
@@ -33,6 +32,5 @@ export const DROPBOX_COMMANDS: readonly RegisteredCommand[] = [
       du: metadataProvision as ProvisionFn,
     },
   }),
-  ...DROPBOX_FIND,
   ...DROPBOX_SED,
 ]

@@ -12,20 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
+from mirage.types import PathSpec
 
-from mirage import MountMode, RAMResource, Workspace
 
-ws = Workspace(
-    {"/data/": RAMResource()},
-    mode=MountMode.WRITE,
-)
+def default_paths(paths: list[PathSpec],
+                  cwd: PathSpec | None) -> list[PathSpec]:
+    """Default a command's path operands the way the shell would.
 
-print("=== curl (returns the raw page body) ===")
-result = asyncio.run(ws.execute("curl https://example.com"))
-print(result.stdout)
-
-print("\n=== curl a documentation page ===")
-result = asyncio.run(
-    ws.execute("curl https://docs.python.org/3/library/json.html"))
-print(result.stdout)
+    Args:
+        paths (list[PathSpec]): operands as parsed; returned untouched
+            when non-empty.
+        cwd (PathSpec | None): the session working directory injected by
+            the dispatcher, used when no operand was given.
+    """
+    if paths:
+        return paths
+    if cwd is not None:
+        return [cwd]
+    return [PathSpec(resource_path="", virtual="/", directory="/")]

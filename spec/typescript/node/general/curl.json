@@ -89,15 +89,6 @@
       "short": "-S",
       "value_kind": "none",
       "value_optional": false
-    },
-    {
-      "description": "Fetch via the Jina Reader proxy.",
-      "long": "--jina",
-      "numeric_shorthand": false,
-      "repeatable": false,
-      "short": null,
-      "value_kind": "none",
-      "value_optional": false
     }
   ],
   "positional": [],

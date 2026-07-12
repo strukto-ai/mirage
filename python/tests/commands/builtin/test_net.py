@@ -35,27 +35,15 @@ class TestCurl:
         body = result.decode() if isinstance(result, bytes) else result
         assert "<html" in body.lower() or "<h1" in body.lower()
 
-    def test_curl_jina_returns_markdown(self):
-        result, _ = asyncio.run(
-            curl(None, None, "https://example.com", jina=True))
-        body = result.decode() if isinstance(result, bytes) else result
-        assert "<html" not in body.lower()
-        assert "Example Domain" in body
-
 
 @pytest.fixture
 def mock_http(monkeypatch):
     payload = b"hello body"
 
-    def _fake_request(url,
-                      method="GET",
-                      headers=None,
-                      data=None,
-                      timeout=30,
-                      jina=False):
+    def _fake_request(url, method="GET", headers=None, data=None, timeout=30):
         return payload
 
-    def _fake_get(url, headers=None, timeout=30, jina=False):
+    def _fake_get(url, headers=None, timeout=30):
         return payload
 
     monkeypatch.setattr(curl_mod, "_http_request", _fake_request)

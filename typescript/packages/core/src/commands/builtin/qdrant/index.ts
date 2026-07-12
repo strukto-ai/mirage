@@ -16,16 +16,14 @@ import type { QdrantAccessor } from '../../../accessor/qdrant.ts'
 import { ResourceName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { QDRANT_FIND } from './find.ts'
 import { QDRANT_CMD_OPS } from './ops.ts'
 import { QDRANT_SEARCH } from './search.ts'
 
-const QDRANT_OVERRIDES = new Set(['find', 'search'])
+const QDRANT_OVERRIDES = new Set(['search'])
 
 export const QDRANT_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<QdrantAccessor>(ResourceName.QDRANT, QDRANT_CMD_OPS, {
     overrides: QDRANT_OVERRIDES,
   }),
-  ...QDRANT_FIND,
   ...QDRANT_SEARCH,
 ]

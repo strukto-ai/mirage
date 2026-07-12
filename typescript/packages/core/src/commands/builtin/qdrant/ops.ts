@@ -14,7 +14,7 @@
 
 import type { QdrantAccessor } from '../../../accessor/qdrant.ts'
 import { read as qdrantRead } from '../../../core/qdrant/read.ts'
-import { readdir as qdrantReaddir } from '../../../core/qdrant/readdir.ts'
+import { isDirName, readdir as qdrantReaddir } from '../../../core/qdrant/readdir.ts'
 import { stat as qdrantStat } from '../../../core/qdrant/stat.ts'
 import { stream as qdrantStream } from '../../../core/qdrant/stream.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
@@ -25,5 +25,6 @@ export const QDRANT_CMD_OPS: CommandIO<QdrantAccessor> = {
   readStream: qdrantStream,
   stat: qdrantStat,
   isMounted: () => true,
+  isDirName: (accessor, child) => isDirName(child, accessor.config),
   local: false,
 }

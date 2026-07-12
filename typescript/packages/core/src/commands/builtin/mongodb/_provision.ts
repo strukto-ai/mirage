@@ -17,10 +17,8 @@ import {
   makeFileReadProvision,
   makeHeadTailProvision,
   makeSearchProvision,
-  metadataProvision,
 } from '../generic_bind/provision.ts'
 
 export const fileReadProvision = makeFileReadProvision(mongoStat)
 export const headTailProvision = makeHeadTailProvision(mongoStat)
 export const searchProvision = makeSearchProvision(mongoStat)
-export { metadataProvision }

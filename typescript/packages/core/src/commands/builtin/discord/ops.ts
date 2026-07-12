@@ -15,7 +15,7 @@
 import type { DiscordAccessor } from '../../../accessor/discord.ts'
 import type { IndexCacheStore } from '../../../cache/index/index.ts'
 import { read as discordRead } from '../../../core/discord/read.ts'
-import { readdir as discordReaddir } from '../../../core/discord/readdir.ts'
+import { isDirName, readdir as discordReaddir } from '../../../core/discord/readdir.ts'
 import { stat as discordStat } from '../../../core/discord/stat.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
@@ -34,5 +34,6 @@ export const DISCORD_CMD_OPS: CommandIO<DiscordAccessor> = {
   readStream: discordReadStream,
   stat: discordStat,
   isMounted: () => true,
+  isDirName: (_accessor, child) => isDirName(child),
   local: false,
 }

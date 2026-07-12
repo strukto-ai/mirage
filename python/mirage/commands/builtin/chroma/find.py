@@ -3,6 +3,7 @@ from functools import partial
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.find import find as generic_find
 from mirage.commands.builtin.utils.output import format_records
+from mirage.commands.builtin.utils.paths import default_paths
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.chroma.find import find as find_core
@@ -12,15 +13,6 @@ from mirage.core.chroma.stat import stat_light
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
-
-
-def _default_paths(paths: list[PathSpec],
-                   cwd: PathSpec | None) -> list[PathSpec]:
-    if paths:
-        return paths
-    if cwd is not None:
-        return [cwd]
-    return [PathSpec(resource_path="", virtual="/", directory="/")]
 
 
 def _is_bare_name(texts: tuple[str, ...]) -> bool:
@@ -73,7 +65,7 @@ async def find(
     cwd: PathSpec | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    paths = _default_paths(paths, cwd)
+    paths = default_paths(paths, cwd)
     paths = await resolve_glob(accessor, paths, index)
     search_path = paths[0]
     stat_fn = (partial(stat_core, accessor, index=index) if mtime is not None

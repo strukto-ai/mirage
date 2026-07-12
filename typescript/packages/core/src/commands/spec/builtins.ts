@@ -393,7 +393,6 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ short: '-L', description: 'Follow HTTP redirects.' }),
       new Option({ short: '-s', description: 'Run silently with no progress or messages.' }),
       new Option({ short: '-S', description: 'Show errors even when silent.' }),
-      new Option({ long: '--jina', description: 'Fetch via the Jina Reader proxy.' }),
     ],
     rest: new Operand({ kind: OperandKind.TEXT }),
   }),

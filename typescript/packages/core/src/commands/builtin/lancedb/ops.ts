@@ -14,7 +14,7 @@
 
 import type { LanceDBAccessor } from '../../../accessor/lancedb.ts'
 import { read as lancedbRead } from '../../../core/lancedb/read.ts'
-import { readdir as lancedbReaddir } from '../../../core/lancedb/readdir.ts'
+import { isDirName, readdir as lancedbReaddir } from '../../../core/lancedb/readdir.ts'
 import { stat as lancedbStat } from '../../../core/lancedb/stat.ts'
 import { stream as lancedbStream } from '../../../core/lancedb/stream.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
@@ -25,5 +25,6 @@ export const LANCEDB_CMD_OPS: CommandIO<LanceDBAccessor> = {
   readStream: lancedbStream,
   stat: lancedbStat,
   isMounted: () => true,
+  isDirName: (accessor, child) => isDirName(child, accessor.config),
   local: false,
 }

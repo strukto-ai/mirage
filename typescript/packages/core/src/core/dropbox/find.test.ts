@@ -30,9 +30,30 @@ vi.mock('./stat.ts', async () => {
 import { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { DropboxTokenManager } from './_client.ts'
-import { find } from './find.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { FindOptions } from '../../resource/base.ts'
+import { walkFind } from '../generic/find.ts'
+import { isDirName } from './readdir.ts'
 import * as readdirMod from './readdir.ts'
 import * as statMod from './stat.ts'
+
+async function find(
+  accessor: DropboxAccessor,
+  path: PathSpec,
+  options: FindOptions = {},
+  index?: IndexCacheStore,
+): Promise<string[]> {
+  return walkFind(
+    path,
+    {
+      readdir: (spec, idx) => readdirMod.readdir(accessor, spec, idx),
+      stat: (spec, idx) => statMod.stat(accessor, spec, idx),
+      isDirName: (child) => isDirName(child),
+    },
+    options,
+    index,
+  )
+}
 
 const STUB_TM = {} as DropboxTokenManager
 

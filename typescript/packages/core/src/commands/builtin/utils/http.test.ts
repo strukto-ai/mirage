@@ -113,16 +113,6 @@ describe('http proxy routing', () => {
     )
   })
 
-  it('combines jina rewriting with proxy routing for GET requests', async () => {
-    const fetchMock = makeFetchMock('content')
-    vi.stubGlobal('fetch', fetchMock)
-    setHttpProxyBase('/__proxy')
-    await httpRequest('https://news.example.com/article', { jina: true })
-    expect(urlsCalled(fetchMock)).toEqual([
-      '/__proxy?url=https%3A%2F%2Fr.jina.ai%2Fhttps%3A%2F%2Fnews.example.com%2Farticle',
-    ])
-  })
-
   it('forwards body and method untouched when proxying', async () => {
     const fetchMock = makeFetchMock('ok')
     vi.stubGlobal('fetch', fetchMock)
