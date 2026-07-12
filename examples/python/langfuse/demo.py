@@ -175,6 +175,11 @@ async def main():
         ws,
         'find "/langfuse/prompts/" -name "*.json"',
     )
+    # -path matches the display path; -size counts dirs and sizeless
+    # rendered files as 0 (so +0c drops them, -1k keeps them).
+    await _run(ws, 'find "/langfuse/" -maxdepth 1 -path "*prompts*"')
+    await _run(ws, 'find "/langfuse/" -maxdepth 1 -size +0c')
+    await _run(ws, 'find "/langfuse/" -maxdepth 1 -size -1k')
 
     await ws.execute('cd "/langfuse/prompts"')
     await _run(ws, "pwd")

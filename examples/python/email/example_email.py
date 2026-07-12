@@ -89,6 +89,26 @@ async def main() -> None:
     result = await ws.execute(f'jq ".from" {first_msg}')
     print(await result.stdout_str())
 
+    # find: -name at folder level pushes down to IMAP search; -path and
+    # -size run the local walk (dirs and sizeless entries count as 0, so
+    # +0c drops them and -1k keeps them).
+    print(f"=== find /email/{folder}/ -name '*.email.json' | head -n 5 ===")
+    result = await ws.execute(
+        f'find /email/{folder}/ -name "*.email.json" | head -n 5')
+    print(await result.stdout_str())
+
+    print(f"=== find /email/{folder}/ -path '*{first_date}*'"
+          " | head -n 5 ===")
+    result = await ws.execute(
+        f'find /email/{folder}/ -path "*{first_date}*" | head -n 5')
+    print(await result.stdout_str())
+
+    print(f"=== find /email/{folder}/ -maxdepth 1 -size +0c"
+          " (dirs drop out) ===")
+    result = await ws.execute(f"find /email/{folder}/ -maxdepth 1 -size +0c")
+    print(f"  exit={result.exit_code}")
+    print(await result.stdout_str())
+
     print("=== email-triage --unseen --max 5 ===")
     result = await ws.execute(
         f'email-triage --folder {folder} --unseen --max 5')

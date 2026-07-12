@@ -144,6 +144,19 @@ async def main() -> None:
                               " | head -n 5")
     print(await result.stdout_str())
 
+    # -path matches the display path; -size counts dirs and sizeless
+    # rendered files as 0 (so +0c drops them, -1k keeps them).
+    print("=== find team -path '*issues*' ===")
+    result = await ws.execute(f'find /linear/teams/{first_team}/'
+                              f' -path "*issues*" | head -n 5')
+    print(await result.stdout_str())
+
+    print("=== find team -maxdepth 1 -size +0c (dirs drop out) ===")
+    result = await ws.execute(
+        f"find /linear/teams/{first_team}/ -maxdepth 1 -size +0c")
+    print(f"  exit={result.exit_code}")
+    print(await result.stdout_str())
+
     print(f"=== du -s teams/{first_team} (walk fallback) ===")
     result = await ws.execute(f"du -s /linear/teams/{first_team}/")
     print(await result.stdout_str())

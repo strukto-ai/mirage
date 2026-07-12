@@ -188,6 +188,18 @@ async def main() -> None:
         f'find {list_path}/cards/ -name "*.json" | head -n 5')
     print(await result.stdout_str())
 
+    # -path matches the display path; -size counts dirs and sizeless
+    # rendered files as 0 (so +0c drops them, -1k keeps them).
+    print("=== find board -path '*cards*' ===")
+    result = await ws.execute(f'find {board_path}/ -path "*cards*" | head -n 5'
+                              )
+    print(await result.stdout_str())
+
+    print("=== find board -maxdepth 1 -size +0c (dirs drop out) ===")
+    result = await ws.execute(f"find {board_path}/ -maxdepth 1 -size +0c")
+    print(f"  exit={result.exit_code}")
+    print(await result.stdout_str())
+
     print("=== find board -type d (directory filter) ===")
     result = await ws.execute(f"find {board_path}/ -type d | head -n 5")
     print(await result.stdout_str())

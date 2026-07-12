@@ -167,6 +167,17 @@ async def main():
     r = await ws.execute(f'find "{run_path}/" -name "*.json" | head -n 10')
     print(await r.stdout_str())
 
+    # -path matches the display path; -size counts dirs and sizeless
+    # rendered files as 0 (so +0c drops them, -1k keeps them).
+    print(f"=== find {run_path}/ -path '*jobs*' | head -n 5 ===")
+    r = await ws.execute(f'find "{run_path}/" -path "*jobs*" | head -n 5')
+    print(await r.stdout_str())
+
+    print(f"=== find {run_path}/ -maxdepth 1 -size +0c ===")
+    r = await ws.execute(f'find "{run_path}/" -maxdepth 1 -size +0c')
+    print(f"  exit={r.exit_code} (sizeless entries count as 0,"
+          " expect no output)")
+
     # ── cd into a run ─────────────────────────────────
     print("=== pwd ===")
     r = await ws.execute("pwd")
