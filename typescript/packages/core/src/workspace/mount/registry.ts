@@ -24,15 +24,21 @@ import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 
 export const DEV_PREFIX = '/dev/'
 
+// Raised when a path-bound command is unsupported by its backend.
+// Rendered in the GNU shape `<cmd>: <operand>: <reason>` with the
+// EOPNOTSUPP strerror, naming the offending path like coreutils does;
+// the backend name stays on the error for programmatic use (#394).
 export class MountCommandUnsupported extends Error {
   readonly cmdName: string
   readonly backend: string
+  readonly operand: string
 
-  constructor(cmdName: string, backend: string) {
-    super(`${cmdName}: not supported on the ${backend} backend`)
+  constructor(cmdName: string, backend: string, operand: string) {
+    super(`${cmdName}: ${operand}: Operation not supported`)
     this.name = 'MountCommandUnsupported'
     this.cmdName = cmdName
     this.backend = backend
+    this.operand = operand
   }
 }
 
@@ -332,7 +338,7 @@ export class MountRegistry {
     const mountPath = pathScopes.length > 0 ? (pathScopes[0]?.virtual ?? cwd) : cwd
     let mount = this.mountFor(mountPath)
     if (mount !== null && mount.resolveCommand(cmdName) == null && pathScopes.length > 0) {
-      throw new MountCommandUnsupported(cmdName, mount.resource.kind)
+      throw new MountCommandUnsupported(cmdName, mount.resource.kind, pathScopes[0]?.rawPath ?? cwd)
     }
     if (mount?.resolveCommand(cmdName) == null) {
       mount = this.mountForCommand(cmdName)

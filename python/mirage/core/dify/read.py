@@ -1,5 +1,6 @@
 import errno
 from collections.abc import AsyncIterator
+from typing import Any
 
 from mirage.cache.index import IndexCacheStore
 from mirage.core.dify._client import get_document_segments, iter_segment_pages
@@ -31,11 +32,11 @@ async def read_stream(accessor, path: PathSpec,
             yield segment_text(segment).encode()
 
 
-def segments_to_bytes(segments: list[dict]) -> bytes:
+def segments_to_bytes(segments: list[dict[str, Any]]) -> bytes:
     return "\n".join(segment_text(segment) for segment in segments).encode()
 
 
-def segment_text(segment: dict) -> str:
+def segment_text(segment: dict[str, Any]) -> str:
     value = segment.get("content")
     if value is None:
         return ""
