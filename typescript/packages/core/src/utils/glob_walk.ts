@@ -17,7 +17,7 @@ import { fnmatch } from './fnmatch.ts'
 import { rekey } from './key_prefix.ts'
 import { rstripSlash } from './slash.ts'
 
-const GLOB_CHARS = ['*', '?', '[']
+export const GLOB_CHARS = ['*', '?', '[']
 
 export function hasGlob(segment: string): boolean {
   return GLOB_CHARS.some((ch) => segment.includes(ch))
