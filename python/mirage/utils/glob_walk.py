@@ -14,12 +14,16 @@
 
 import dataclasses
 import fnmatch
+import logging
+import posixpath
 from collections.abc import Callable
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import rekey
+
+logger = logging.getLogger(__name__)
 
 GLOB_CHARS = ("*", "?", "[")
 
@@ -132,3 +136,57 @@ async def expand_pattern(
                             raw_path=spell_match(path.raw_path, m.virtual,
                                                  walked)) for m in matches
     ]
+
+
+async def resolve_glob_with(
+    readdir: Callable,
+    accessor: Accessor,
+    paths: list[PathSpec],
+    index: IndexCacheStore | None,
+    cap: int | None = None,
+) -> list[PathSpec]:
+    """Shared resolve_glob loop over a backend's readdir.
+
+    Resolved specs pass through, pattern specs expand segment-by-segment
+    via :func:`expand_pattern` (mid-path aware, spelled as typed), an
+    unmatched glob word stays the literal (bash with nullglob off: the
+    command then errors on it like GNU), and matches cap at ``cap`` when
+    given. Per-backend glob modules bind their own readdir.
+
+    Args:
+        readdir (Callable): backend readdir ``(accessor, path, index)``
+            returning absolute virtual paths.
+        accessor (Accessor): backend handle passed through to readdir.
+        paths (list[PathSpec]): specs to resolve.
+        index (IndexCacheStore | None): the per-call cache index.
+        cap (int | None): cap on matches per pattern before truncation.
+    """
+    result: list[PathSpec] = []
+    for p in paths:
+        if isinstance(p, str):
+            result.append(
+                PathSpec(virtual=p,
+                         directory=posixpath.dirname(p),
+                         resource_path=p.strip("/")))
+            continue
+        if p.resolved:
+            result.append(p)
+        elif p.pattern:
+            matched = await expand_pattern(readdir, accessor, p, index)
+            if not matched and is_word_shaped(p):
+                # bash with nullglob off: an unmatched glob word stays
+                # the literal; the command then errors on it like GNU
+                # (cat '*.nope' -> No such file or directory, exit 1).
+                # Dir-shaped specs (PathSpec.dir) are internal
+                # expansions and keep the empty result.
+                result.append(
+                    dataclasses.replace(p, pattern=None, resolved=True))
+                continue
+            if cap is not None and len(matched) > cap:
+                logger.warning("%s: %d matches exceeds limit (%d), truncating",
+                               p.directory, len(matched), cap)
+                matched = matched[:cap]
+            result.extend(matched)
+        else:
+            result.append(p)
+    return result

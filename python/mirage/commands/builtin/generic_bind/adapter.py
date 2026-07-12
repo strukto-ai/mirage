@@ -12,10 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import dataclasses
 import functools
-import logging
-import posixpath
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import NamedTuple
@@ -23,9 +20,7 @@ from typing import NamedTuple
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.types import PathSpec
-from mirage.utils.glob_walk import expand_pattern, is_word_shaped
-
-logger = logging.getLogger(__name__)
+from mirage.utils.glob_walk import resolve_glob_with
 
 
 def with_index(fn: Callable | None,
@@ -68,37 +63,8 @@ def make_resolve_glob(readdir: Callable,
 
     async def resolve_glob(accessor: Accessor, paths: list[PathSpec],
                            index: IndexCacheStore | None) -> list[PathSpec]:
-        result: list[PathSpec] = []
-        for p in paths:
-            if isinstance(p, str):
-                result.append(
-                    PathSpec(virtual=p,
-                             directory=posixpath.dirname(p),
-                             resource_path=p.strip("/")))
-                continue
-            if p.resolved:
-                result.append(p)
-            elif p.pattern:
-                matched = await expand_pattern(readdir, accessor, p, index)
-                if not matched and is_word_shaped(p):
-                    # bash with nullglob off: an unmatched glob word stays
-                    # the literal; the command then errors on it like GNU
-                    # (cat '*.nope' -> No such file or directory, exit 1).
-                    # Dir-shaped specs (PathSpec.dir) are internal
-                    # expansions and keep the empty result.
-                    result.append(
-                        dataclasses.replace(p, pattern=None, resolved=True))
-                    continue
-                if (max_glob_matches is not None
-                        and len(matched) > max_glob_matches):
-                    logger.warning(
-                        "%s: %d matches exceeds limit (%d), truncating",
-                        p.directory, len(matched), max_glob_matches)
-                    matched = matched[:max_glob_matches]
-                result.extend(matched)
-            else:
-                result.append(p)
-        return result
+        return await resolve_glob_with(readdir, accessor, paths, index,
+                                       max_glob_matches)
 
     return resolve_glob
 
