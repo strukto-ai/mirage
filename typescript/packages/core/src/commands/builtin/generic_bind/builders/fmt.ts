@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { fmtGeneric } from '../../generic/fmt.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { type Builder, dirAwareStream, resolveGlobOf } from '../adapter.ts'
 
 export const FMT_BUILDER: Builder = {
   name: 'fmt',
@@ -21,6 +21,6 @@ export const FMT_BUILDER: Builder = {
   fn: async (ops, accessor, paths, _texts, opts) => {
     const idx = opts.index ?? undefined
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return fmtGeneric(resolved, opts, (p) => ops.readStream(accessor, p, idx))
+    return fmtGeneric(resolved, opts, dirAwareStream(ops, accessor, idx))
   },
 }

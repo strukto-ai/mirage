@@ -14,7 +14,7 @@
 
 import { concatAggregate } from '../../aggregators.ts'
 import { catGeneric } from '../../generic/cat.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { type Builder, dirAwareStat, resolveGlobOf } from '../adapter.ts'
 
 export const CAT_BUILDER: Builder = {
   name: 'cat',
@@ -27,7 +27,7 @@ export const CAT_BUILDER: Builder = {
       resolved,
       texts,
       opts,
-      (p) => ops.stat(accessor, p, idx),
+      dirAwareStat(ops, accessor, idx),
       (p) => ops.readStream(accessor, p, idx),
     )
   },

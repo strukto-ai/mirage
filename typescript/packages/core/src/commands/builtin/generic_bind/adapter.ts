@@ -16,7 +16,8 @@ import type { Accessor } from '../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import type { FindOptions } from '../../../resource/base.ts'
 import type { PathSpec } from '../../../types.ts'
-import { type FileStat } from '../../../types.ts'
+import { FileType, type FileStat } from '../../../types.ts'
+import { eisdir } from '../../../utils/errors.ts'
 import { resolveGlobWith } from '../../../utils/glob_walk.ts'
 import type { AggregateFn, CommandFnResult, CommandOpts, ProvisionFn } from '../../config.ts'
 
@@ -130,6 +131,77 @@ export interface CommandIO<A extends Accessor = Accessor> {
 
 export function resolveGlobOf<A extends Accessor = Accessor>(ops: CommandIO<A>): ResolveGlobOp<A> {
   return makeResolveGlob(ops.readdir, ops.maxGlobMatches)
+}
+
+// Whether a path that failed with ENOENT is an implicit directory. Keyed
+// backends (RAM/Redis/S3) have no directory entries: stat/read of a prefix
+// that only exists through deeper keys raises ENOENT. A readdir probe with
+// entries means the operand is a directory, so the caller reports GNU's
+// `Is a directory` instead. A readdir failure is a negative probe (the
+// original ENOENT stands), not an error to surface.
+async function isImplicitDir<A extends Accessor>(
+  ops: CommandIO<A>,
+  accessor: A,
+  path: PathSpec,
+  index?: IndexCacheStore,
+): Promise<boolean> {
+  try {
+    const entries = await ops.readdir(accessor, path, index)
+    return entries.length > 0
+  } catch {
+    return false
+  }
+}
+
+// Stat for the read-family chokepoint (`splitReadable`): a directory operand
+// fails with EISDIR instead of succeeding (explicit, via the stat type) or
+// failing with ENOENT (implicit keyed-backend directory, via a readdir
+// probe), so cat/head/tail report GNU's `Is a directory` and keep the
+// remaining operands (#457).
+export function dirAwareStat<A extends Accessor>(
+  ops: CommandIO<A>,
+  accessor: A,
+  index?: IndexCacheStore,
+): (p: PathSpec) => Promise<FileStat> {
+  return async (p) => {
+    let st: FileStat
+    try {
+      st = await ops.stat(accessor, p, index)
+    } catch (e) {
+      if ((e as { code?: string }).code === 'ENOENT' && (await isImplicitDir(ops, accessor, p, index)))
+        throw eisdir(p)
+      throw e
+    }
+    if (st.type === FileType.DIRECTORY) throw eisdir(p)
+    return st
+  }
+}
+
+async function* streamRefusingDirs<A extends Accessor>(
+  ops: CommandIO<A>,
+  accessor: A,
+  p: PathSpec,
+  index?: IndexCacheStore,
+): AsyncIterable<Uint8Array> {
+  try {
+    yield* ops.readStream(accessor, p, index)
+  } catch (e) {
+    if ((e as { code?: string }).code === 'ENOENT' && (await isImplicitDir(ops, accessor, p, index)))
+      throw eisdir(p)
+    throw e
+  }
+}
+
+// Read stream for the read-family per-operand chokepoint (`readOperands`):
+// the raw backend read raises ENOENT for an implicit keyed-backend
+// directory, so the wrapper refines it to EISDIR the same way
+// `dirAwareStat` does before the generic formats the stderr line (#457).
+export function dirAwareStream<A extends Accessor>(
+  ops: CommandIO<A>,
+  accessor: A,
+  index?: IndexCacheStore,
+): (p: PathSpec) => AsyncIterable<Uint8Array> {
+  return (p) => streamRefusingDirs(ops, accessor, p, index)
 }
 
 export type BuilderFn<A extends Accessor = Accessor> = (

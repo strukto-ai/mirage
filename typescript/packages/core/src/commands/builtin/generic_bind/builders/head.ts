@@ -14,7 +14,7 @@
 
 import { headerAggregate } from '../../aggregators.ts'
 import { headGeneric } from '../../generic/head.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { type Builder, dirAwareStat, resolveGlobOf } from '../adapter.ts'
 
 export const HEAD_BUILDER: Builder = {
   name: 'head',
@@ -27,7 +27,7 @@ export const HEAD_BUILDER: Builder = {
       resolved,
       texts,
       opts,
-      (p) => ops.stat(accessor, p, idx),
+      dirAwareStat(ops, accessor, idx),
       (p) => ops.readStream(accessor, p, idx),
     )
   },
