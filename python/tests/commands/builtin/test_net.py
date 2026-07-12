@@ -43,7 +43,9 @@ class TestCurl:
         # Assert on the reader envelope, not page content: Jina sometimes
         # serves a cached third-party snapshot of example.com, but its
         # markdown output always carries the URL Source header line.
-        assert "https://example.com" in body
+        assert any(
+            line.startswith("URL Source: https://example.com")
+            for line in body.splitlines())
 
 
 @pytest.fixture
