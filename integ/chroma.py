@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import chromadb  # noqa: E402
 from cases import run_provision_probe  # noqa: E402
-from cases import run_not_found, run_sed_readonly_probe
+from cases import run_not_found, run_sed_readonly_probe  # noqa: E402
 
 from mirage import MountMode, Workspace  # noqa: E402
 from mirage.resource.chroma import ChromaConfig, ChromaResource  # noqa: E402
