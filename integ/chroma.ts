@@ -16,7 +16,7 @@ import { randomBytes } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { ChromaClient } from "chromadb";
 import { ChromaResource, MountMode, Workspace } from "@struktoai/mirage-node";
-import { runNotFound, runProvisionProbe } from "./cases.ts";
+import { runNotFound, runProvisionProbe, runSedReadonlyProbe } from "./cases.ts";
 
 const CHROMA_HOST = process.env.CHROMA_HOST ?? "localhost";
 const CHROMA_PORT = Number.parseInt(process.env.CHROMA_PORT ?? "8000", 10);
@@ -247,6 +247,7 @@ async function main(): Promise<void> {
     }
     await runNotFound(ws, MOUNT);
     await runProvisionProbe(ws, `${MOUNT}guides/auth.md`);
+    await runSedReadonlyProbe(ws, `${MOUNT}guides/auth.md`);
   } finally {
     await ws.close();
   }

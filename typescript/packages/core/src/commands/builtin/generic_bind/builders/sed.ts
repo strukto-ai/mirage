@@ -56,7 +56,7 @@ export const SED_BUILDER: Builder = {
         null,
         new IOResult({
           exitCode: 1,
-          stderr: ENC.encode('sed: -i not supported on this backend\n'),
+          stderr: ENC.encode('sed: -i not supported on this backend: Permission denied\n'),
         }),
       ]
     }
@@ -73,7 +73,9 @@ export const SED_BUILDER: Builder = {
       (p) => ops.readStream(accessor, p, idx),
       (p, d) => {
         if (write === undefined) {
-          return Promise.reject(new Error('sed: -i not supported on this backend'))
+          return Promise.reject(
+            new Error('sed: -i not supported on this backend: Permission denied'),
+          )
         }
         return write(accessor, p, d)
       },

@@ -1368,6 +1368,20 @@ async def run_provision_probe(ws, file_path: str) -> None:
         print(provision_line(result))
 
 
+async def run_sed_readonly_probe(ws, file_path: str) -> None:
+    """Sed on a read-only backend: streaming works, in-place is rejected."""
+    result = await ws.execute(f"sed -n 1p {file_path}")
+    out = await result.stdout_str()
+    print("=== sed_stream_1p ===")
+    print(out, end="" if out.endswith("\n") else "\n")
+    result = await ws.execute(f"sed -i s/x/y/ {file_path}")
+    err = (await result.stderr_str()).strip()
+    print("=== sed_i_readonly ===")
+    print(f"exit={result.exit_code}")
+    if err:
+        print(err)
+
+
 async def _backend_bytes(ws, cmd: str) -> int:
     before = sum(rec.bytes for rec in ws.ops.records)
     result = await ws.execute(cmd)

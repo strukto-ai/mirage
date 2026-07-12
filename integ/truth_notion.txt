@@ -316,3 +316,8 @@ net=0 write=0 cache=0 ops=1 hits=1 precision=unknown
 net=0 write=0 cache=0 ops=1 hits=1 precision=unknown
 === prov_probe_ls ===
 net=0 write=0 cache=0 ops=1 hits=0 precision=exact
+=== sed_stream_1p ===
+{
+=== sed_i_readonly ===
+exit=1
+sed: -i not supported on this backend: Permission denied

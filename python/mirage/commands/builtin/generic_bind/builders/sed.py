@@ -110,7 +110,7 @@ async def sed(
     # The default stream-to-stdout path is read-only and works on every
     # backend; only in-place editing needs a write op (#382).
     if i and ops.write is None:
-        raise PermissionError("sed: -i not supported on this backend")
+        raise PermissionError("-i not supported on this backend")
     operands = list(paths)
     if flag_script:
         # With -e/-f the positional operand is a file, not the script.

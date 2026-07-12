@@ -16,7 +16,7 @@ import asyncio
 import os
 
 import asyncpg
-from cases import run_not_found, run_provision_probe
+from cases import run_not_found, run_provision_probe, run_sed_readonly_probe
 
 from mirage import MountMode, Workspace
 from mirage.resource.postgres import PostgresConfig, PostgresResource
@@ -135,6 +135,7 @@ async def main() -> None:
         await _run(ws, name, cmd)
     await run_not_found(ws, MOUNT)
     await run_provision_probe(ws, f"{MOUNT}/public/tables/books/rows.jsonl")
+    await run_sed_readonly_probe(ws, f"{MOUNT}/public/tables/books/rows.jsonl")
     await resource.accessor.close()
 
 

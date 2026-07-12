@@ -145,7 +145,7 @@ async def test_sed_stdin(accessor, index):
 @pytest.mark.asyncio
 async def test_sed_in_place_rejected(accessor, index):
     with pytest.raises(PermissionError,
-                       match="sed: -i not supported on this backend"):
+                       match="-i not supported on this backend"):
         await sed(
             accessor,
             [_scope("/test/file.txt")],

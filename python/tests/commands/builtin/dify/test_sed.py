@@ -46,7 +46,7 @@ async def test_sed_rejects_in_place(monkeypatch, dify_accessor, dify_index,
     monkeypatch.setattr(tree, "list_all_documents", list_documents)
 
     with pytest.raises(PermissionError,
-                       match="sed: -i not supported on this backend"):
+                       match="-i not supported on this backend"):
         await sed(dify_accessor, [guide_path],
                   "s/alpha/gamma/",
                   i=True,
