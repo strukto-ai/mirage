@@ -14,6 +14,8 @@
 
 import { readFileSync } from 'node:fs'
 
+import { readDaemonTable } from '../daemon_config.ts'
+import { mirageHome } from '../paths.ts'
 import { defaultTokenFile, readTokenFile } from './storage.ts'
 
 export const ENV_AUTH_MODE = 'MIRAGE_AUTH_MODE'
@@ -55,11 +57,41 @@ export interface AuthConfig {
 export interface ResolveOptions {
   readonly env?: Record<string, string | undefined>
   readonly tokenFile?: string
+  readonly table?: Record<string, string>
+}
+
+const CONFIG_ENV_KEYS: Record<string, string> = {
+  auth_mode: ENV_AUTH_MODE,
+  jwt_alg: ENV_JWT_ALG,
+  jwt_issuer: ENV_JWT_ISSUER,
+  jwt_audience: ENV_JWT_AUDIENCE,
+  jwt_pubkey_file: ENV_JWT_PUBKEY_FILE,
+  jwt_clock_skew: ENV_JWT_CLOCK_SKEW,
+  jwt_authorized_parties: ENV_JWT_AUTHORIZED_PARTIES,
+}
+
+function mergeConfigTable(
+  env: Record<string, string | undefined>,
+  table: Record<string, string>,
+): Record<string, string | undefined> {
+  const merged = { ...env }
+  for (const [cfgKey, envName] of Object.entries(CONFIG_ENV_KEYS)) {
+    if ((merged[envName] ?? '').trim() !== '') continue
+    const value = table[cfgKey]
+    if (value !== undefined && value.trim() !== '') merged[envName] = value
+  }
+  return merged
 }
 
 function pickEnv(opts: ResolveOptions | undefined): Record<string, string | undefined> {
   if (opts?.env !== undefined) return opts.env
   return process.env
+}
+
+function pickTable(opts: ResolveOptions | undefined): Record<string, string> {
+  if (opts?.table !== undefined) return opts.table
+  if (opts?.env !== undefined) return {}
+  return readDaemonTable(mirageHome())
 }
 
 function pickTokenFile(opts: ResolveOptions | undefined): string {
@@ -93,7 +125,7 @@ function isAuthMode(value: string): value is AuthMode {
 }
 
 export function resolveAuthConfig(opts?: ResolveOptions): AuthConfig {
-  const env = pickEnv(opts)
+  const env = mergeConfigTable(pickEnv(opts), pickTable(opts))
   const raw = (env[ENV_AUTH_MODE] ?? AuthMode.Local).trim().toLowerCase() || AuthMode.Local
   if (!isAuthMode(raw)) {
     throw new Error(

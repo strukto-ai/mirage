@@ -58,7 +58,7 @@ Documentation = "https://docs.mirage.strukto.ai"
 Issues = "https://github.com/strukto-ai/mirage/issues"
 
 [project.scripts]
-mirage = "mirage.cli.main:app"
+mirage = "mirage.cli.main:main"
 
 [build-system]
 requires = ["setuptools>=68"]

@@ -12,9 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildApp } from './app.ts'
+import { DaemonConfigError } from './daemon_config.ts'
 
 describe('buildApp pid file wiring', () => {
   afterEach(() => {
@@ -40,6 +43,30 @@ describe('buildApp pid file wiring', () => {
     vi.stubEnv('MIRAGE_PID_FILE', '')
     const app = buildApp()
     expect(app.pidFile).toBe(join('/data/mirage', 'daemon.pid'))
+    await app.close()
+  })
+})
+
+describe('buildApp config validation', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('rejects an unknown [daemon] key at startup', () => {
+    const home = mkdtempSync(join(tmpdir(), 'mir-app-'))
+    writeFileSync(join(home, 'config.toml'), '[daemon]\ntypo_key = "x"\n')
+    vi.stubEnv('MIRAGE_HOME', home)
+    vi.stubEnv('MIRAGE_PID_FILE', '')
+    expect(() => buildApp()).toThrow(DaemonConfigError)
+    expect(() => buildApp()).toThrow(/typo_key/)
+  })
+
+  it('accepts a valid config.toml', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'mir-app-'))
+    writeFileSync(join(home, 'config.toml'), '[daemon]\nurl = "http://h:1"\n')
+    vi.stubEnv('MIRAGE_HOME', home)
+    vi.stubEnv('MIRAGE_PID_FILE', '')
+    const app = buildApp()
     await app.close()
   })
 })

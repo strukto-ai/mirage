@@ -26,7 +26,8 @@ import { registerJobsRoutes } from './routers/jobs.ts'
 import { registerSessionsRoutes } from './routers/sessions.ts'
 import { registerVersionsRoutes } from './routers/versions.ts'
 import { registerWorkspacesRoutes } from './routers/workspaces.ts'
-import { defaultSnapshotRoot, defaultVersionRoot, pidFilePath } from './paths.ts'
+import { readDaemonTable, validateDaemonTable } from './daemon_config.ts'
+import { mirageHome, pidFilePath, snapshotRootPath, versionRootPath } from './paths.ts'
 import { LocalBackend } from './version/backend.ts'
 
 export interface BuildAppOptions {
@@ -46,6 +47,7 @@ function noop(): void {
 }
 
 export function buildApp(options: BuildAppOptions = {}) {
+  validateDaemonTable(readDaemonTable(mirageHome()))
   const startedAt = Date.now() / 1000
   const exitFn = options.onIdleExit ?? noop
   const registry = new WorkspaceRegistry({
@@ -55,8 +57,8 @@ export function buildApp(options: BuildAppOptions = {}) {
     onIdleExit: exitFn,
   })
   const jobs = new JobTable()
-  const versionBackend = new LocalBackend(options.versionRoot ?? defaultVersionRoot())
-  const snapshotRoot = options.snapshotRoot ?? defaultSnapshotRoot()
+  const versionBackend = new LocalBackend(versionRootPath(options.versionRoot))
+  const snapshotRoot = snapshotRootPath(options.snapshotRoot)
   const pidFile = pidFilePath(options.pidFile)
   const app = Fastify({ logger: false })
   void app.register(rateLimit, {

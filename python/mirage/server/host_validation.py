@@ -19,9 +19,11 @@ from collections.abc import Iterable
 from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from mirage.server.daemon_config import read_daemon_table
 from mirage.server.env import ENV_ALLOWED_HOSTS
 from mirage.server.host_validation_constants import (DEFAULT_ALLOWED_HOSTS,
                                                      HOST_PATTERN)
+from mirage.server.paths import mirage_home
 
 logger = logging.getLogger(__name__)
 
@@ -50,14 +52,20 @@ def resolve_allowed_hosts(
     Args:
         allowed_hosts (Iterable[str] | None): explicit list. If
             ``None``, falls back to ``$MIRAGE_ALLOWED_HOSTS`` env var,
-            then ``DEFAULT_ALLOWED_HOSTS``.
+            then the ``allowed_hosts`` key in ``config.toml``
+            ``[daemon]`` (comma-separated), then
+            ``DEFAULT_ALLOWED_HOSTS``.
 
     Returns:
         list[str]: resolved host list.
     """
     if allowed_hosts is not None:
         return list(allowed_hosts)
-    return parse_allowed_hosts(os.environ.get(ENV_ALLOWED_HOSTS))
+    raw = os.environ.get(ENV_ALLOWED_HOSTS)
+    if not raw:
+        from_config = read_daemon_table(mirage_home()).get("allowed_hosts")
+        raw = str(from_config) if from_config else None
+    return parse_allowed_hosts(raw)
 
 
 def strip_port(raw_host: str) -> str:

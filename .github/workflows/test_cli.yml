@@ -38,6 +38,7 @@ jobs:
               - 'integ/cross.yaml'
               - 'integ/parity.sh'
               - 'integ/cli_fuse.sh'
+              - 'integ/cli_config.sh'
               - '.github/workflows/test_cli.yml'
 
   python:
@@ -702,6 +703,12 @@ jobs:
       - name: Run CLI feature parity (subshell, sessions, versioning, fuse)
         run: |
           bash integ/parity.sh \
+            "python/.venv/bin/mirage" \
+            "node typescript/packages/cli/dist/bin/mirage.js"
+
+      - name: Run CLI config battery (relocation, validation, resolved view)
+        run: |
+          bash integ/cli_config.sh \
             "python/.venv/bin/mirage" \
             "node typescript/packages/cli/dist/bin/mirage.js"
 
