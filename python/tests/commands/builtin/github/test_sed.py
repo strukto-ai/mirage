@@ -98,5 +98,6 @@ async def test_sed_address_delete(mock_github_api, github_env):
 @pytest.mark.asyncio
 async def test_sed_inplace_rejected(mock_github_api, github_env):
     accessor, index = github_env
-    with pytest.raises(PermissionError, match="sed: -i not supported on this backend"):
+    with pytest.raises(PermissionError,
+                       match="sed: -i not supported on this backend"):
         await _run(accessor, index, "src/main.py", "s/import/X/", i=True)
