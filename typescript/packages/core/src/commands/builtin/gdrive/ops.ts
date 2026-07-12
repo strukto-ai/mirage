@@ -14,7 +14,7 @@
 
 import type { GDriveAccessor } from '../../../accessor/gdrive.ts'
 import { read as gdriveRead, stream as gdriveStream } from '../../../core/gdrive/read.ts'
-import { readdir as gdriveReaddir } from '../../../core/gdrive/readdir.ts'
+import { isDirName, readdir as gdriveReaddir } from '../../../core/gdrive/readdir.ts'
 import { stat as gdriveStat } from '../../../core/gdrive/stat.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
 
@@ -24,5 +24,6 @@ export const GDRIVE_CMD_OPS: CommandIO<GDriveAccessor> = {
   readStream: gdriveStream,
   stat: gdriveStat,
   isMounted: () => true,
+  isDirName: (_accessor, child) => isDirName(child),
   local: false,
 }

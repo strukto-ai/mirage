@@ -16,7 +16,6 @@ import type { DatabricksVolumeAccessor } from '../../../accessor/databricks_volu
 import { ResourceName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { DATABRICKS_VOLUME_FIND } from './find.ts'
 import { DATABRICKS_VOLUME_HEAD } from './head.ts'
 import { DATABRICKS_VOLUME_MKDIR } from './mkdir.ts'
 import { DATABRICKS_VOLUME_CMD_OPS } from './ops.ts'
@@ -24,7 +23,7 @@ import { DATABRICKS_VOLUME_RM } from './rm.ts'
 import { DATABRICKS_VOLUME_SED } from './sed.ts'
 import { DATABRICKS_VOLUME_TOUCH } from './touch.ts'
 
-const DATABRICKS_VOLUME_OVERRIDES = new Set(['head', 'sed', 'mkdir', 'touch', 'rm', 'find'])
+const DATABRICKS_VOLUME_OVERRIDES = new Set(['head', 'sed', 'mkdir', 'touch', 'rm'])
 
 export const DATABRICKS_VOLUME_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<DatabricksVolumeAccessor>(
@@ -34,7 +33,6 @@ export const DATABRICKS_VOLUME_COMMANDS: readonly RegisteredCommand[] = [
       overrides: DATABRICKS_VOLUME_OVERRIDES,
     },
   ),
-  ...DATABRICKS_VOLUME_FIND,
   ...DATABRICKS_VOLUME_HEAD,
   ...DATABRICKS_VOLUME_MKDIR,
   ...DATABRICKS_VOLUME_TOUCH,

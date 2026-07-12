@@ -14,7 +14,7 @@
 
 import type { PostgresAccessor } from '../../../accessor/postgres.ts'
 import { read as postgresRead, readStream as postgresStream } from '../../../core/postgres/read.ts'
-import { readdir as postgresReaddir } from '../../../core/postgres/readdir.ts'
+import { isDirName, readdir as postgresReaddir } from '../../../core/postgres/readdir.ts'
 import { stat as postgresStat } from '../../../core/postgres/stat.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
 
@@ -24,5 +24,6 @@ export const POSTGRES_CMD_OPS: CommandIO<PostgresAccessor> = {
   readStream: postgresStream,
   stat: postgresStat,
   isMounted: () => true,
+  isDirName: (_accessor, child) => isDirName(child),
   local: false,
 }

@@ -1131,7 +1131,6 @@ export {
 export { readdir as databricksVolumeReaddir } from './core/databricks_volume/readdir.ts'
 export { stat as databricksVolumeStat } from './core/databricks_volume/stat.ts'
 export { exists as databricksVolumeExists } from './core/databricks_volume/exists.ts'
-export { find as databricksVolumeFind } from './core/databricks_volume/find.ts'
 export { resolveGlob as resolveDatabricksVolumeGlob } from './core/databricks_volume/glob.ts'
 export { writeBytes as databricksVolumeWrite } from './core/databricks_volume/write.ts'
 export { create as databricksVolumeCreate } from './core/databricks_volume/create.ts'
