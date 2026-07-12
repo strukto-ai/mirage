@@ -69,7 +69,7 @@ async def find(
     iname: str | None = None,
     path: str | None = None,
     mindepth: str | None = None,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
     cwd: PathSpec | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:

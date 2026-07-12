@@ -38,6 +38,8 @@ async def stat(accessor, path: PathSpec, index: IndexCacheStore) -> FileStat:
             type=FileType.DIRECTORY,
             extra={"children_count": 0},
         )
+    if resolved.entry is None:
+        raise enoent(path)
     detail = await get_document_detail(accessor.config, resolved.entry.id)
     size = extract_document_size(detail)
     if size is None:
