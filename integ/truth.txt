@@ -763,7 +763,6 @@ world
 /data/sub/nested.txt
 /data/tabbed.txt
 === find_size_gt ===
-/data
 /data/a.txt
 /data/abc.csv
 /data/anchors.txt
@@ -772,18 +771,11 @@ world
 /data/chat.jsonl
 /data/csv.csv
 /data/data.jsonl
-/data/disptree
-/data/disptree/d
 /data/disptree/x.txt
-/data/dup.txt
 /data/fields.txt
-/data/guard
-/data/guard/sub
 /data/mixed.txt
 /data/no_nl.txt
 /data/numbers.txt
-/data/oooo.txt
-/data/patterns.txt
 /data/poem.diff
 /data/poem.txt
 /data/prefix_dup.txt
@@ -793,8 +785,6 @@ world
 /data/sorted_b.txt
 /data/sorted_c.txt
 /data/spaced.txt
-/data/sub
-/data/sub/deep
 /data/sub/nested.txt
 /data/tabbed.txt
 /data/user.json
@@ -1419,7 +1409,6 @@ baz,
 /data
 /data/disptree
 /data/disptree/d
-/data/disptree/d/y.txt
 /data/empty.txt
 /data/guard
 /data/guard/sub
@@ -1427,7 +1416,6 @@ baz,
 /data/patterns2.txt
 /data/sub
 /data/sub/deep
-/data/sub/deep/deeper.txt
 === find_depth ===
 /data/a.txt
 /data/abc.csv
@@ -1513,6 +1501,32 @@ baz,
 /data/tabbed.txt
 /data/user.json
 /data/users.json
+=== find_size_gt_dirs ===
+/data/fs/sub/big.bin
+=== find_size_lt_dirs ===
+/data/fs
+/data/fs/small.bin
+/data/fs/sub
+=== find_size_gt_boundary ===
+/data/fs/sub/big.bin
+=== find_size_lt_boundary ===
+/data/fs
+/data/fs/small.bin
+/data/fs/sub
+=== find_size_eq_boundary ===
+/data/fs/four.bin
+=== find_size_round_k ===
+/data/fs
+/data/fs/sub
+=== find_path_glob ===
+/data/fs/sub
+/data/fs/sub/big.bin
+=== find_path_exact ===
+/data/fs/sub
+=== find_path_or_name ===
+/data/fs/small.bin
+/data/fs/sub
+/data/fs/sub/big.bin
 === xxd_c4 ===
 00000000: 6865 6c6c  hell
 00000004: 6f0a 776f  o.wo
@@ -1563,7 +1577,7 @@ diff -r /data/dr/x/sub/d.txt /data/dr/y/sub/d.txt
 === du_file ===
 24	/data/a.txt
 === du_dir ===
-881	/data
+894	/data
 === du_h ===
 24B	/data/a.txt
 === tree ===

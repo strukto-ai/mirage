@@ -99,16 +99,11 @@ export async function find(
       isEmpty = kind === 'f' ? (await store.fileLen(key)) === 0 : !nonempty.has(key)
     }
     if (!keep({ key, name: basename, kind, depth, isEmpty }, tree, options.minDepth)) continue
-    if (
-      kind === 'f' &&
-      ((options.minSize !== null && options.minSize !== undefined) ||
-        (options.maxSize !== null && options.maxSize !== undefined))
-    ) {
-      const size = await store.fileLen(key)
-      if (options.minSize !== null && options.minSize !== undefined && size < options.minSize)
-        continue
-      if (options.maxSize !== null && options.maxSize !== undefined && size > options.maxSize)
-        continue
+    if (options.minSize != null || options.maxSize != null) {
+      // Directories count as size 0 for -size (deliberate GNU divergence).
+      const size = kind === 'f' ? await store.fileLen(key) : 0
+      if (options.minSize != null && size < options.minSize) continue
+      if (options.maxSize != null && size > options.maxSize) continue
     }
     results.push(key)
   }

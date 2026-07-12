@@ -14,7 +14,6 @@
 
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.trello.find import find
 from mirage.commands.builtin.trello.trello_card_assign import \
     trello_card_assign
 from mirage.commands.builtin.trello.trello_card_comment_add import \
@@ -35,8 +34,8 @@ from mirage.core.trello.readdir import readdir as _readdir
 from mirage.core.trello.stat import stat as _stat
 from mirage.core.trello.stream import read_stream as _read_stream
 
-# Trello boards/lists/cards are read through the generic factory; find keeps a
-# wrapper for its bespoke readdir-walk filtering, and the trello_card_*
+# Trello boards/lists/cards are read through the generic factory (find
+# included); the trello_card_*
 # commands are the bespoke write/platform surface. The generic byte-mutation
 # commands are intentionally absent (mutations go through the platform
 # commands, no write op wired).
@@ -49,15 +48,11 @@ _TRELLO_CMD_OPS = CommandIO(
     local=False,
 )
 
-_TRELLO_OVERRIDES = {"find"}
-
 COMMANDS = [
     *make_generic_commands(
         "trello",
         _TRELLO_CMD_OPS,
-        overrides=_TRELLO_OVERRIDES,
     ),
-    find,
     trello_card_assign,
     trello_card_comment_add,
     trello_card_comment_update,

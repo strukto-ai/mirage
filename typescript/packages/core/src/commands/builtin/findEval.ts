@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { fnmatch } from '../../utils/fnmatch.ts'
-import { rstripSlash } from '../../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 
 export interface FindEntry {
   key: string
@@ -25,7 +25,10 @@ export interface FindEntry {
 
 export type PredNode =
   | { op: 'name'; pattern: string; icase: boolean }
-  | { op: 'path'; pattern: string }
+  // `-path` matches the display path as printed (mount prefix + key), so
+  // the tree is stamped with the mount prefix before evaluation
+  // (`prefixPathNodes`); entry keys stay mount-relative (#396).
+  | { op: 'path'; pattern: string; prefix?: string }
   | { op: 'type'; kind: string }
   | { op: 'empty' }
   | { op: 'not'; kid: PredNode }
@@ -44,7 +47,7 @@ export function evalPredicate(node: PredNode, entry: FindEntry): boolean {
         ? fnmatch(entry.name.toLowerCase(), node.pattern.toLowerCase())
         : fnmatch(entry.name, node.pattern)
     case 'path':
-      return fnmatch(entry.key, node.pattern)
+      return fnmatch(displayPath(node.prefix ?? '', entry.key), node.pattern)
     case 'type':
       return entry.kind === node.kind
     case 'not':
@@ -53,6 +56,35 @@ export function evalPredicate(node: PredNode, entry: FindEntry): boolean {
       return node.kids.every((kid) => evalPredicate(kid, entry))
     case 'or':
       return node.kids.some((kid) => evalPredicate(kid, entry))
+  }
+}
+
+// Display path for a mount-relative key, as `find` prints it. Mirrors
+// applyMountPrefix for a single key: the mount root maps to the bare
+// prefix, everything else joins with one slash.
+export function displayPath(prefix: string, key: string): string {
+  if (!prefix) return key
+  const rel = stripSlash(key)
+  return rel === '' ? prefix : `${prefix}/${rel}`
+}
+
+// Copy of a predicate tree with `path` nodes bound to a prefix. `-path`
+// matches the display path, but backend find ops evaluate entries by
+// mount-relative key; stamping the prefix onto the tree keeps the
+// evaluation site prefix-free (#396).
+export function prefixPathNodes(node: PredNode, prefix: string): PredNode {
+  if (!prefix) return node
+  switch (node.op) {
+    case 'path':
+      return { op: 'path', pattern: node.pattern, prefix }
+    case 'not':
+      return { op: 'not', kid: prefixPathNodes(node.kid, prefix) }
+    case 'and':
+      return { op: 'and', kids: node.kids.map((kid) => prefixPathNodes(kid, prefix)) }
+    case 'or':
+      return { op: 'or', kids: node.kids.map((kid) => prefixPathNodes(kid, prefix)) }
+    default:
+      return node
   }
 }
 
@@ -95,8 +127,11 @@ export interface EmitStartPathOptions {
 // Append the search start path to results when it matches. Shared by every
 // backend find op so the start path is emitted uniformly: bare `find <dir>`,
 // `-type d` on the root, `-maxdepth 0`, `-mindepth 0`, and `-name` against the
-// start's own basename all behave the same everywhere. Size filtering applies
-// only to a file start path; directory roots pass size undefined and skip it.
+// start's own basename all behave the same everywhere. A directory start path
+// contributes size 0 to `-size` filtering (mirage directories have no
+// meaningful content size; a documented divergence from GNU, which compares
+// the inode size), so `-size +N` excludes directory roots and `-size -N`
+// keeps them (#318). A file start with an unknown size skips the filter.
 export function emitStartPath(
   results: string[],
   startKey: string,
@@ -113,9 +148,16 @@ export function emitStartPath(
     isEmpty: opts.isEmpty ?? null,
   }
   if (!keep(entry, opts.tree, opts.minDepth)) return
-  if (opts.kind === 'f' && opts.size !== null && opts.size !== undefined) {
-    if (opts.minSize !== null && opts.minSize !== undefined && opts.size < opts.minSize) return
-    if (opts.maxSize !== null && opts.maxSize !== undefined && opts.size > opts.maxSize) return
+  if (
+    (opts.minSize !== null && opts.minSize !== undefined) ||
+    (opts.maxSize !== null && opts.maxSize !== undefined)
+  ) {
+    // Directories count as size 0 for -size: GNU compares the inode size (e.g. 4096 on ext4); see CLAUDE.md Rules.
+    const effective = opts.kind !== 'f' ? 0 : (opts.size ?? null)
+    if (effective !== null) {
+      if (opts.minSize !== null && opts.minSize !== undefined && effective < opts.minSize) return
+      if (opts.maxSize !== null && opts.maxSize !== undefined && effective > opts.maxSize) return
+    }
   }
   results.push(startKey)
 }
@@ -159,6 +201,33 @@ export function buildTree(opts: BuildTreeOptions): PredNode {
   if (first === undefined) return { op: 'true' }
   if (rest.length === 0) return first
   return { op: 'and', kids }
+}
+
+// The predicate tree for a FindOptions bag: the pre-built expression tree
+// when present, otherwise the flag-form fields. Single source of truth for
+// the fallback every backend find op used to hand-roll.
+export function optionsTree(options: {
+  name?: string | null
+  iname?: string | null
+  pathPattern?: string | null
+  type?: 'f' | 'd' | null
+  nameExclude?: string | null
+  orNames?: string[] | null
+  empty?: boolean | null
+  tree?: PredNode | null
+}): PredNode {
+  return (
+    options.tree ??
+    buildTree({
+      name: options.name,
+      iname: options.iname,
+      pathPattern: options.pathPattern,
+      type: options.type,
+      nameExclude: options.nameExclude,
+      orNames: options.orNames,
+      empty: options.empty,
+    })
+  )
 }
 
 export function computeNonemptyDirs(keys: string[]): Set<string> {

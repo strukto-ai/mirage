@@ -73,11 +73,16 @@ async function matches(
     depth: relativeDepth(item, root),
   }
   if (!keep(entry, tree, options.minDepth)) return false
+  // Directories count as size 0 for -size (deliberate GNU divergence).
   if (options.minSize != null || options.maxSize != null) {
-    const itemStat = await stat(accessor, spec, index)
-    if (itemStat.size === null) return false
-    if (options.minSize != null && itemStat.size < options.minSize) return false
-    if (options.maxSize != null && itemStat.size > options.maxSize) return false
+    let size = 0
+    if (kind === 'f') {
+      const itemStat = await stat(accessor, spec, index)
+      if (itemStat.size === null) return false
+      size = itemStat.size
+    }
+    if (options.minSize != null && size < options.minSize) return false
+    if (options.maxSize != null && size > options.maxSize) return false
   }
   if (options.mtimeMin != null || options.mtimeMax != null) {
     const itemStat = await stat(accessor, spec, index)
@@ -113,7 +118,7 @@ export async function find(
       nameExclude: options.nameExclude,
       orNames: options.orNames,
     })
-  const needsKind = treeHasType(tree)
+  const needsKind = treeHasType(tree) || options.minSize != null || options.maxSize != null
   const startName = startBasename(path.virtual)
   const filtered: string[] = []
   for (const item of results) {

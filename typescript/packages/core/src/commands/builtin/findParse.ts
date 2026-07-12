@@ -50,15 +50,20 @@ export interface FindExpr {
   usesEmpty: boolean
 }
 
-function parseSize(spec: string): [number | null, number | null] {
+// GNU rounds the file size up to whole units before comparing, and
+// +N / -N are strict: +N keeps ceil(size/unit) > N, -N keeps
+// ceil(size/unit) < N, N alone keeps ceil(size/unit) === N. Expressed
+// as inclusive byte bounds: +N -> [N*unit + 1, inf), -N ->
+// [0, (N-1)*unit], N -> [(N-1)*unit + 1, N*unit].
+export function parseSize(spec: string): [number | null, number | null] {
   const suffixes: Record<string, number> = { c: 1, k: 1024, M: 1024 ** 2, G: 1024 ** 3 }
   const raw = spec.startsWith('+') || spec.startsWith('-') ? spec.slice(1) : spec
   const last = raw[raw.length - 1] ?? ''
   const mult = suffixes[last] ?? 1
-  const num = Number.parseInt(raw.replace(/[ckMG]$/, ''), 10) * mult
-  if (spec.startsWith('+')) return [num, null]
-  if (spec.startsWith('-')) return [null, num]
-  return [num, num]
+  const n = Number.parseInt(raw.replace(/[ckMG]$/, ''), 10)
+  if (spec.startsWith('+')) return [n * mult + 1, null]
+  if (spec.startsWith('-')) return [null, (n - 1) * mult]
+  return [(n - 1) * mult + 1, n * mult]
 }
 
 function parseMtime(spec: string): [number | null, number | null] {

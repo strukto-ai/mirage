@@ -54,7 +54,6 @@ async def curl(
     L: bool = False,
     s: bool = False,
     S: bool = False,
-    jina: bool = False,
     dispatch: Callable | None = None,
     cwd: PathSpec | None = None,
     **_extra: object,
@@ -80,8 +79,7 @@ async def curl(
         result = _http_request(texts[0],
                                method=method,
                                headers=headers,
-                               data=body,
-                               jina=jina)
+                               data=body)
     if o is not None:
         o_str = o.virtual if isinstance(o, PathSpec) else o
         if dispatch is not None:

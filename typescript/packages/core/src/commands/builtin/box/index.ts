@@ -16,16 +16,14 @@ import type { BoxAccessor } from '../../../accessor/box.ts'
 import { ResourceName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { BOX_FIND } from './find.ts'
 import { BOX_CMD_OPS } from './ops.ts'
 import { BOX_SED } from './sed.ts'
 
-const BOX_OVERRIDES = new Set(['find', 'sed'])
+const BOX_OVERRIDES = new Set(['sed'])
 
 export const BOX_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<BoxAccessor>(ResourceName.BOX, BOX_CMD_OPS, {
     overrides: BOX_OVERRIDES,
   }),
-  ...BOX_FIND,
   ...BOX_SED,
 ]

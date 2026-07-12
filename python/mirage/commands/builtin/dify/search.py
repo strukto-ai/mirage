@@ -1,4 +1,5 @@
 from mirage.cache.index import IndexCacheStore
+from mirage.commands.builtin.utils.paths import default_paths
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.dify import search as search_core
@@ -6,15 +7,6 @@ from mirage.core.dify.glob import resolve_glob
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
-
-
-def default_paths(paths: list[PathSpec],
-                  cwd: PathSpec | None) -> list[PathSpec]:
-    if paths:
-        return paths
-    if cwd is not None:
-        return [cwd]
-    return [PathSpec(resource_path="", virtual="/", directory="/")]
 
 
 def is_mount_root(path: PathSpec) -> bool:

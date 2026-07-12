@@ -16,7 +16,6 @@ import type { PostgresAccessor } from '../../../accessor/postgres.ts'
 import { ResourceName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { POSTGRES_FIND } from './find.ts'
 import { POSTGRES_GREP } from './grep.ts'
 import { POSTGRES_HEAD } from './head.ts'
 import { POSTGRES_CMD_OPS } from './ops.ts'
@@ -24,13 +23,12 @@ import { POSTGRES_RG } from './rg.ts'
 import { POSTGRES_TAIL } from './tail.ts'
 import { POSTGRES_WC } from './wc.ts'
 
-const POSTGRES_OVERRIDES = new Set(['find', 'grep', 'head', 'rg', 'tail', 'wc'])
+const POSTGRES_OVERRIDES = new Set(['grep', 'head', 'rg', 'tail', 'wc'])
 
 export const POSTGRES_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<PostgresAccessor>(ResourceName.POSTGRES, POSTGRES_CMD_OPS, {
     overrides: POSTGRES_OVERRIDES,
   }),
-  ...POSTGRES_FIND,
   ...POSTGRES_GREP,
   ...POSTGRES_HEAD,
   ...POSTGRES_RG,

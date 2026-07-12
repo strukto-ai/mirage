@@ -105,8 +105,10 @@ async def find(
         if not keep(entry, tree, mindepth):
             continue
 
-        if kind == "f" and (min_size is not None or max_size is not None):
-            size = len(store.files[key])
+        if min_size is not None or max_size is not None:
+            # Directories count as size 0 for -size (deliberate GNU
+            # divergence).
+            size = len(store.files[key]) if kind == "f" else 0
             if min_size is not None and size < min_size:
                 continue
             if max_size is not None and size > max_size:

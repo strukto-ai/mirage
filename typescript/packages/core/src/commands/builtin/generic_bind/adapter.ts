@@ -80,6 +80,8 @@ type FindOp<A extends Accessor = Accessor> = (
   options: FindOptions,
 ) => Promise<string[]>
 
+type IsDirNameOp<A extends Accessor = Accessor> = (accessor: A, child: string) => boolean | null
+
 type DuTotalOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
@@ -126,6 +128,7 @@ export interface CommandIO<A extends Accessor = Accessor> {
   create?: PathOp<A>
   truncate?: PathOp<A>
   find?: FindOp<A>
+  isDirName?: IsDirNameOp<A>
   duTotal?: DuTotalOp<A>
   duAll?: DuAllOp<A>
 }

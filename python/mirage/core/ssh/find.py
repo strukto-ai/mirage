@@ -72,7 +72,10 @@ async def find(
                             exists=True,
                             tree=tree,
                             maxdepth=maxdepth,
-                            mindepth=mindepth)
+                            mindepth=mindepth,
+                            size=None if is_dir else (root_attrs.size or 0),
+                            min_size=min_size,
+                            max_size=max_size)
     await _walk(sftp, config, path, results, 0, maxdepth, mindepth, tree,
                 min_size, max_size, mtime_min, mtime_max)
     return sorted(results)
@@ -113,8 +116,9 @@ def _matches(entry, path, is_dir, depth, maxdepth, mindepth, tree, min_size,
                            (entry.attrs.size or 0) == 0)
     if not keep(find_entry, tree, mindepth):
         return False
-    if not is_dir:
-        size = entry.attrs.size or 0
+    if min_size is not None or max_size is not None:
+        # Directories count as size 0 for -size (deliberate GNU divergence).
+        size = 0 if is_dir else (entry.attrs.size or 0)
         if min_size is not None and size < min_size:
             return False
         if max_size is not None and size > max_size:

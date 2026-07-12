@@ -12,13 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-const JINA_READER_PREFIX = 'https://r.jina.ai/'
 const DEFAULT_USER_AGENT = 'Mozilla/5.0 (compatible; mirage/1.0)'
-
-function toJinaUrl(url: string): string {
-  if (url.startsWith(JINA_READER_PREFIX)) return url
-  return `${JINA_READER_PREFIX}${url}`
-}
 
 let httpProxyBase: string | null = null
 
@@ -38,7 +32,6 @@ export interface HttpRequestOptions {
   headers?: Record<string, string>
   body?: Uint8Array
   timeoutMs?: number
-  jina?: boolean
   followRedirects?: boolean
 }
 
@@ -76,9 +69,7 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<Uint8A
 
 export function httpRequest(url: string, options: HttpRequestOptions = {}): Promise<Uint8Array> {
   const method = options.method ?? 'GET'
-  const resolved =
-    options.jina === true && method === 'GET' && options.body === undefined ? toJinaUrl(url) : url
-  return doFetch(resolved, { ...options, method })
+  return doFetch(url, { ...options, method })
 }
 
 export function httpFormRequest(
@@ -109,11 +100,10 @@ export function httpFormRequest(
 
 export function httpGet(
   url: string,
-  opts: { headers?: Record<string, string>; timeoutMs?: number; jina?: boolean } = {},
+  opts: { headers?: Record<string, string>; timeoutMs?: number } = {},
 ): Promise<Uint8Array> {
   const options: HttpRequestOptions = { method: 'GET' }
   if (opts.headers !== undefined) options.headers = opts.headers
   if (opts.timeoutMs !== undefined) options.timeoutMs = opts.timeoutMs
-  if (opts.jina !== undefined) options.jina = opts.jina
   return httpRequest(url, options)
 }

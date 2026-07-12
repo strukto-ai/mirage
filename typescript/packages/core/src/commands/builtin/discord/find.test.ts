@@ -18,7 +18,7 @@ import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { FakeDiscordTransport, makeFakeResource, seedChannel, seedGuild } from './_test_util.ts'
-import { DISCORD_FIND } from './find.ts'
+import { DISCORD_COMMANDS } from './index.ts'
 
 const DEC = new TextDecoder()
 
@@ -27,7 +27,7 @@ async function runFind(
   flags: Record<string, string | boolean | string[]>,
   options: { index?: RAMIndexCacheStore; transport?: FakeDiscordTransport } = {},
 ): Promise<string> {
-  const cmd = DISCORD_FIND[0]
+  const cmd = DISCORD_COMMANDS.find((c) => c.name === 'find')
   if (cmd === undefined) throw new Error('find not registered')
   const transport = options.transport ?? new FakeDiscordTransport()
   const resource = makeFakeResource(transport)
@@ -74,7 +74,7 @@ describe('discord find', () => {
   })
 
   it('exits 1 with a clean error for an invalid -maxdepth', async () => {
-    const cmd = DISCORD_FIND[0]
+    const cmd = DISCORD_COMMANDS.find((c) => c.name === 'find')
     if (cmd === undefined) throw new Error('find not registered')
     const resource = makeFakeResource(new FakeDiscordTransport())
     const result = await cmd.fn(

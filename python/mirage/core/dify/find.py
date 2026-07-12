@@ -42,7 +42,8 @@ async def find(
                                                     type=type,
                                                     name_exclude=name_exclude,
                                                     or_names=or_names)
-    needs_kind = tree_has_type(tree)
+    needs_kind = (tree_has_type(tree) or min_size is not None
+                  or max_size is not None)
     start_name = start_basename(path)
     filtered: list[str] = []
     for item in results:
@@ -82,13 +83,18 @@ async def _matches(
                       depth=_relative_depth(item, root))
     if not keep(entry, tree, mindepth):
         return False
+    # Directories count as size 0 for -size (deliberate GNU divergence).
     if min_size is not None or max_size is not None:
-        item_stat = await stat(accessor, spec, index)
-        if item_stat.size is None:
+        if kind == "d":
+            size = 0
+        else:
+            item_stat = await stat(accessor, spec, index)
+            if item_stat.size is None:
+                return False
+            size = item_stat.size
+        if min_size is not None and size < min_size:
             return False
-        if min_size is not None and item_stat.size < min_size:
-            return False
-        if max_size is not None and item_stat.size > max_size:
+        if max_size is not None and size > max_size:
             return False
     return True
 

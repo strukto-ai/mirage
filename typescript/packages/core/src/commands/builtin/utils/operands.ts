@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult, materialize } from '../../../io/types.ts'
-import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
+import { FileType, PathSpec, type FileStat } from '../../../types.ts'
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { eisdir, fsErrorLine, isFsError } from '../../../utils/errors.ts'
 
 const ENC = new TextEncoder()
@@ -95,4 +96,12 @@ export function operandsIo(err: string, init?: { cache?: string[] }): IOResult {
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function* singleChunk(data: Uint8Array): AsyncIterable<Uint8Array> {
   if (data.byteLength > 0) yield data
+}
+
+// Default a command's path operands the way the shell would: explicit
+// operands pass through, otherwise the session cwd becomes the single
+// operand (keyed against the mount prefix when the caller knows it).
+export function defaultPaths(paths: PathSpec[], cwd: string, mountPrefix = ''): PathSpec[] {
+  if (paths.length > 0) return paths
+  return [PathSpec.fromStrPath(cwd, mountKey(cwd, mountPrefix))]
 }
