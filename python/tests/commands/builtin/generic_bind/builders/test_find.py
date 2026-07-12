@@ -91,3 +91,27 @@ async def test_is_dir_name_hint_skips_child_stats():
     assert "/mnt/table1/rows.jsonl" in lines
     # hint answers directory-ness by name; only the search root is stat'ed
     assert stat_calls == ["/mnt"]
+
+
+@pytest.mark.asyncio
+async def test_walk_honors_multiple_start_points():
+    stat_calls: list[str] = []
+    ops = _ops(stat_calls)
+    roots = [
+        PathSpec(virtual="/mnt/table1",
+                 directory="/mnt/table1",
+                 resolved=False,
+                 resource_path="table1"),
+        PathSpec(virtual="/mnt/notes.txt",
+                 directory="/mnt",
+                 resolved=False,
+                 resource_path="notes.txt"),
+    ]
+    stdout, _io = await find(ops, None, roots)
+    data = stdout if isinstance(stdout, bytes) else b""
+    lines = data.decode().splitlines()
+    # GNU find walks every start point in operand order
+    assert "/mnt/table1/rows.jsonl" in lines
+    assert "/mnt/notes.txt" in lines
+    assert lines.index("/mnt/table1/rows.jsonl") < lines.index(
+        "/mnt/notes.txt")
