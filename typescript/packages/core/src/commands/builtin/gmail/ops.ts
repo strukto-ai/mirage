@@ -13,25 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GmailAccessor } from '../../../accessor/gmail.ts'
-import type { IndexCacheStore } from '../../../cache/index/index.ts'
 import { read as gmailRead } from '../../../core/gmail/read.ts'
 import { isDirName, readdir as gmailReaddir } from '../../../core/gmail/readdir.ts'
 import { stat as gmailStat } from '../../../core/gmail/stat.ts'
-import type { PathSpec } from '../../../types.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
-
-async function* gmailReadStream(
-  accessor: GmailAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): AsyncIterable<Uint8Array> {
-  yield await gmailRead(accessor, path, index)
-}
+import { streamFromBytes } from '../utils/wrap.ts'
 
 export const GMAIL_CMD_OPS: CommandIO<GmailAccessor> = {
   readdir: gmailReaddir,
   readBytes: gmailRead,
-  readStream: gmailReadStream,
+  readStream: (a, p, i) => streamFromBytes(gmailRead, a, p, i),
   stat: gmailStat,
   isMounted: () => true,
   isDirName: (_accessor, child) => isDirName(child),

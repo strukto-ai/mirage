@@ -13,25 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { TrelloAccessor } from '../../../accessor/trello.ts'
-import type { IndexCacheStore } from '../../../cache/index/index.ts'
 import { read as trelloRead } from '../../../core/trello/read.ts'
 import { readdir as trelloReaddir } from '../../../core/trello/readdir.ts'
 import { stat as trelloStat } from '../../../core/trello/stat.ts'
-import type { PathSpec } from '../../../types.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
-
-async function* trelloReadStream(
-  accessor: TrelloAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): AsyncIterable<Uint8Array> {
-  yield await trelloRead(accessor, path, index)
-}
+import { streamFromBytes } from '../utils/wrap.ts'
 
 export const TRELLO_CMD_OPS: CommandIO<TrelloAccessor> = {
   readdir: trelloReaddir,
   readBytes: trelloRead,
-  readStream: trelloReadStream,
+  readStream: (a, p, i) => streamFromBytes(trelloRead, a, p, i),
   stat: trelloStat,
   isMounted: () => true,
   local: false,

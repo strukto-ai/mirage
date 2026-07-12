@@ -13,25 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SlackAccessor } from '../../../accessor/slack.ts'
-import type { IndexCacheStore } from '../../../cache/index/index.ts'
 import { read as slackRead } from '../../../core/slack/read.ts'
 import { isDirName, readdir as slackReaddir } from '../../../core/slack/readdir.ts'
 import { stat as slackStat } from '../../../core/slack/stat.ts'
-import type { PathSpec } from '../../../types.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
-
-async function* slackReadStream(
-  accessor: SlackAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): AsyncIterable<Uint8Array> {
-  yield await slackRead(accessor, path, index)
-}
+import { streamFromBytes } from '../utils/wrap.ts'
 
 export const SLACK_CMD_OPS: CommandIO<SlackAccessor> = {
   readdir: slackReaddir,
   readBytes: slackRead,
-  readStream: slackReadStream,
+  readStream: (a, p, i) => streamFromBytes(slackRead, a, p, i),
   stat: slackStat,
   isMounted: () => true,
   isDirName: (_accessor, child) => isDirName(child),

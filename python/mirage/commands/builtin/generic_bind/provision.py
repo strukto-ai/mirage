@@ -254,6 +254,62 @@ async def metadata_provision(
     )
 
 
+async def exact_zero_provision(command: str = "") -> ProvisionResult:
+    """Zero-cost EXACT estimate for backends whose listing is in memory.
+
+    Chat/KB backends materialize their virtual tree from state the mount
+    already fetched, so metadata commands cost no backend I/O at all
+    (unlike :func:`metadata_provision`, which charges one op per operand).
+
+    Args:
+        command (str): the shell line being estimated, for display.
+    """
+    return ProvisionResult(
+        command=command,
+        network_read_low=0,
+        network_read_high=0,
+        read_ops=0,
+        precision=Precision.EXACT,
+    )
+
+
+async def index_hit_read_provision(
+    accessor: Accessor,
+    paths: list[PathSpec],
+    command: str,
+    index: IndexCacheStore | None = None,
+) -> ProvisionResult:
+    """Charge one read op per index-cached operand, zero network bytes.
+
+    The chat backends (discord, slack, ...) rebuild file bytes from API
+    state, so a read costs ops rather than sized transfers; operands the
+    index has never seen leave the estimate UNKNOWN.
+
+    Args:
+        accessor (Accessor): backend handle, unused but part of the
+            provision call shape.
+        paths (list[PathSpec]): operand paths as parsed.
+        command (str): the shell line being estimated, for display.
+        index (IndexCacheStore | None): the per-call cache index.
+    """
+    if not paths:
+        return ProvisionResult(command=command, precision=Precision.UNKNOWN)
+    ops = 0
+    if index is not None:
+        for p in paths:
+            path_str = p.virtual if isinstance(p, PathSpec) else p
+            lookup = await index.get(path_str)
+            if lookup.entry is not None:
+                ops += 1
+    return ProvisionResult(
+        command=command,
+        network_read_low=0,
+        network_read_high=0,
+        read_ops=ops,
+        precision=Precision.EXACT,
+    )
+
+
 def make_jq_provision(stat: Callable) -> Callable:
     """Provision for jq: streamable jsonl reads a range, else whole file."""
 

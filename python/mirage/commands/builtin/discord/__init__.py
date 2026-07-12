@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.commands.builtin.discord.discord_add_reaction import \
     discord_add_reaction
 from mirage.commands.builtin.discord.discord_get_server_info import \
@@ -26,12 +28,12 @@ from mirage.commands.builtin.discord.rg import rg
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
+from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.core.discord.glob import resolve_glob as _ft_resolve_glob
 from mirage.core.discord.read import read as _read
 from mirage.core.discord.readdir import is_dir_name as _is_dir_name
 from mirage.core.discord.readdir import readdir as _readdir
 from mirage.core.discord.stat import stat as _stat
-from mirage.core.discord.stream import read_stream as _read_stream
 
 # Channel history is read through the generic factory (find walks readdir
 # with the is_dir_name hint); grep/rg/head are bespoke (channel search
@@ -40,7 +42,7 @@ from mirage.core.discord.stream import read_stream as _read_stream
 _DISCORD_CMD_OPS = CommandIO(
     readdir=_readdir,
     read_bytes=_read,
-    read_stream=_read_stream,
+    read_stream=partial(stream_from_bytes, _read),
     stat=_stat,
     is_mounted=lambda a: True,
     is_dir_name=lambda a, name: _is_dir_name(name),

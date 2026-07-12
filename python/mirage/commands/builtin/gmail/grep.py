@@ -45,7 +45,7 @@ async def grep_provision(
     return await file_read_provision(
         accessor,
         paths,
-        "grep " + " ".join(texts + tuple(str(p) for p in paths)),
+        command="grep " + " ".join(texts + tuple(str(p) for p in paths)),
         index=index)
 
 

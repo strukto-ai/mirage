@@ -12,15 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
 from mirage.commands.builtin.langfuse.grep import grep
 from mirage.commands.builtin.langfuse.rg import rg
+from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.core.langfuse.read import read as _read
 from mirage.core.langfuse.readdir import is_dir_name as _is_dir_name
 from mirage.core.langfuse.readdir import readdir as _readdir
 from mirage.core.langfuse.stat import stat as _stat
-from mirage.core.langfuse.stream import read_stream as _read_stream
 
 # Langfuse traces/observations/sessions/prompts are read through the generic
 # factory (find walks readdir with the is_dir_name hint); grep and rg keep
@@ -30,7 +32,7 @@ from mirage.core.langfuse.stream import read_stream as _read_stream
 _LANGFUSE_CMD_OPS = CommandIO(
     readdir=_readdir,
     read_bytes=_read,
-    read_stream=_read_stream,
+    read_stream=partial(stream_from_bytes, _read),
     stat=_stat,
     is_mounted=lambda a: True,
     is_dir_name=lambda a, name: _is_dir_name(name),

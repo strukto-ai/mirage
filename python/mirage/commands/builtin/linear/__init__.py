@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
 from mirage.commands.builtin.linear.linear_issue_add_label import \
@@ -33,10 +35,10 @@ from mirage.commands.builtin.linear.linear_issue_transition import \
 from mirage.commands.builtin.linear.linear_issue_update import \
     linear_issue_update
 from mirage.commands.builtin.linear.linear_search import linear_search
+from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.core.linear.read import read as _read
 from mirage.core.linear.readdir import readdir as _readdir
 from mirage.core.linear.stat import stat as _stat
-from mirage.core.linear.stream import read_stream as _read_stream
 
 # Linear issues/projects/teams are read through the generic factory (find
 # included); the linear_issue_* and
@@ -46,7 +48,7 @@ from mirage.core.linear.stream import read_stream as _read_stream
 _LINEAR_CMD_OPS = CommandIO(
     readdir=_readdir,
     read_bytes=_read,
-    read_stream=_read_stream,
+    read_stream=partial(stream_from_bytes, _read),
     stat=_stat,
     is_mounted=lambda a: True,
     local=False,

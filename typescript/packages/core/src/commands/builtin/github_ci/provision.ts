@@ -12,21 +12,4 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Accessor } from '../../../accessor/base.ts'
-import { Precision, ProvisionResult } from '../../../provision/types.ts'
-import type { PathSpec } from '../../../types.ts'
-import type { CommandOpts } from '../../config.ts'
-
-export function metadataProvision(
-  _accessor: Accessor,
-  _paths: PathSpec[],
-  _texts: string[],
-  _opts: CommandOpts,
-): ProvisionResult {
-  return new ProvisionResult({
-    networkReadLow: 0,
-    networkReadHigh: 0,
-    readOps: 0,
-    precision: Precision.EXACT,
-  })
-}
+export { exactZeroProvision as metadataProvision } from '../generic_bind/provision.ts'

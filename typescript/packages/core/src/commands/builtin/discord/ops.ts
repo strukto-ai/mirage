@@ -13,25 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiscordAccessor } from '../../../accessor/discord.ts'
-import type { IndexCacheStore } from '../../../cache/index/index.ts'
 import { read as discordRead } from '../../../core/discord/read.ts'
 import { isDirName, readdir as discordReaddir } from '../../../core/discord/readdir.ts'
 import { stat as discordStat } from '../../../core/discord/stat.ts'
-import type { PathSpec } from '../../../types.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
-
-async function* discordReadStream(
-  accessor: DiscordAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): AsyncIterable<Uint8Array> {
-  yield await discordRead(accessor, path, index)
-}
+import { streamFromBytes } from '../utils/wrap.ts'
 
 export const DISCORD_CMD_OPS: CommandIO<DiscordAccessor> = {
   readdir: discordReaddir,
   readBytes: discordRead,
-  readStream: discordReadStream,
+  readStream: (a, p, i) => streamFromBytes(discordRead, a, p, i),
   stat: discordStat,
   isMounted: () => true,
   isDirName: (_accessor, child) => isDirName(child),

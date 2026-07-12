@@ -12,46 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.gsheets import GSheetsAccessor
-from mirage.cache.context import invalidate_after_unlink
-from mirage.cache.index import IndexCacheStore
-from mirage.core.google.drive import delete_file
+from mirage.core.google.tree_ops import make_unlink
 from mirage.core.gsheets.readdir import readdir
-from mirage.types import PathSpec
-from mirage.utils.errors import enoent
-from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
-VIRTUAL_DIRS = {"", "owned", "shared"}
-
-
-async def unlink(
-    accessor: GSheetsAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = None,
-) -> None:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
-    prefix = mount_prefix_of(path.virtual, path.resource_path)
-    raw = path.virtual
-    stripped = raw[len(prefix):] if prefix and raw.startswith(prefix) else raw
-    key = stripped.strip("/")
-    if key in VIRTUAL_DIRS:
-        raise IsADirectoryError(raw)
-    if index is None:
-        raise enoent(path)
-    virtual_key = prefix + "/" + key if prefix else "/" + key
-    result = await index.get(virtual_key)
-    if result.entry is None:
-        parent = "/" + "/".join(key.split("/")[:-1])
-        parent_path = PathSpec.from_str_path(
-            prefix + parent, mount_key(prefix + parent, prefix))
-        await readdir(accessor, parent_path, index)
-        result = await index.get(virtual_key)
-    if result.entry is None:
-        raise enoent(path)
-    await delete_file(accessor.token_manager, result.entry.id)
-    parent_dir = "/".join(virtual_key.rsplit("/", 1)[:-1]) or "/"
-    await index.invalidate_dir(parent_dir)
-    await invalidate_after_unlink(virtual_key)
+unlink = make_unlink(readdir)

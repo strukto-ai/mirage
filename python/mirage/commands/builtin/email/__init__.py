@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.commands.builtin.email.email_forward import email_forward
 from mirage.commands.builtin.email.email_read import email_read
 from mirage.commands.builtin.email.email_reply import email_reply
@@ -24,11 +26,11 @@ from mirage.commands.builtin.email.rg import rg
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
+from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.core.email.glob import resolve_glob as _ft_resolve_glob
 from mirage.core.email.read import read as _read
 from mirage.core.email.readdir import readdir as _readdir
 from mirage.core.email.stat import stat as _stat
-from mirage.core.email.stream import read_stream as _read_stream
 
 # Email folders/messages/attachments are read through the generic factory
 # (with filetype commands for columnar attachments); find, grep and rg keep
@@ -38,7 +40,7 @@ from mirage.core.email.stream import read_stream as _read_stream
 _EMAIL_CMD_OPS = CommandIO(
     readdir=_readdir,
     read_bytes=_read,
-    read_stream=_read_stream,
+    read_stream=partial(stream_from_bytes, _read),
     stat=_stat,
     is_mounted=lambda a: True,
     local=False,
