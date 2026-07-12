@@ -12,8 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
+from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.builtin.trello.trello_card_assign import \
     trello_card_assign
 from mirage.commands.builtin.trello.trello_card_comment_add import \
@@ -32,7 +35,6 @@ from mirage.commands.builtin.trello.trello_card_update import \
 from mirage.core.trello.read import read as _read
 from mirage.core.trello.readdir import readdir as _readdir
 from mirage.core.trello.stat import stat as _stat
-from mirage.core.trello.stream import read_stream as _read_stream
 
 # Trello boards/lists/cards are read through the generic factory (find
 # included); the trello_card_*
@@ -42,7 +44,7 @@ from mirage.core.trello.stream import read_stream as _read_stream
 _TRELLO_CMD_OPS = CommandIO(
     readdir=_readdir,
     read_bytes=_read,
-    read_stream=_read_stream,
+    read_stream=partial(stream_from_bytes, _read),
     stat=_stat,
     is_mounted=lambda a: True,
     local=False,

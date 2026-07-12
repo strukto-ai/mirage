@@ -12,9 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
+from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.builtin.slack.grep import grep
 from mirage.commands.builtin.slack.rg import rg
 from mirage.commands.builtin.slack.slack_add_reaction import slack_react
@@ -29,7 +32,6 @@ from mirage.core.slack.read import read as _read
 from mirage.core.slack.readdir import is_dir_name as _is_dir_name
 from mirage.core.slack.readdir import readdir as _readdir
 from mirage.core.slack.stat import stat as _stat
-from mirage.core.slack.stream import read_stream as _read_stream
 
 # Messages are read through the generic factory (find walks readdir with the
 # is_dir_name hint); grep/rg are bespoke (search-API push-down) and writes go
@@ -38,7 +40,7 @@ from mirage.core.slack.stream import read_stream as _read_stream
 _SLACK_CMD_OPS = CommandIO(
     readdir=_readdir,
     read_bytes=_read,
-    read_stream=_read_stream,
+    read_stream=partial(stream_from_bytes, _read),
     stat=_stat,
     is_mounted=lambda a: True,
     is_dir_name=lambda a, name: _is_dir_name(name),
