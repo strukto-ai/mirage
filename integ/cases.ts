@@ -459,6 +459,12 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
       " && printf x > /data/fs/small.bin && find /data/fs -size +4c",
   ],
   ["find_size_lt_dirs", "find /data/fs -size -4c"],
+  // GNU +N / -N are strict (exactly-N is excluded by both) and non-c
+  // units round the size up before comparing (-1k keeps only size 0).
+  ["find_size_gt_boundary", "printf 1234 > /data/fs/four.bin && find /data/fs -size +4c"],
+  ["find_size_lt_boundary", "find /data/fs -size -4c"],
+  ["find_size_eq_boundary", "find /data/fs -size 4c"],
+  ["find_size_round_k", "find /data/fs -size -1k"],
   // -path matches the display path as printed (GNU), not the
   // mount-relative key.
   ["find_path_glob", "find /data/fs -path '*data/fs/sub*'"],
