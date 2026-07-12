@@ -16,7 +16,6 @@ from functools import partial
 
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.postgres.find import find
 from mirage.commands.builtin.postgres.grep import grep
 from mirage.commands.builtin.postgres.head import head
 from mirage.commands.builtin.postgres.rg import rg
@@ -24,11 +23,13 @@ from mirage.commands.builtin.postgres.tail import tail
 from mirage.commands.builtin.postgres.wc import wc
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.core.postgres.read import read as _read
+from mirage.core.postgres.readdir import is_dir_name as _is_dir_name
 from mirage.core.postgres.readdir import readdir as _readdir
 from mirage.core.postgres.stat import stat as _stat
 
-# Postgres rows are read through the generic factory; find, grep and rg push
-# down to SQL queries, and head, tail and wc push LIMIT/OFFSET/COUNT into the
+# Postgres rows are read through the generic factory (find walks readdir with
+# the is_dir_name hint); grep and rg push down to SQL queries, and head,
+# tail and wc push LIMIT/OFFSET/COUNT into the
 # query so they stay bounded on large tables instead of reading the whole
 # relation (kept bespoke). Postgres is read-only, so the generic byte-mutation
 # commands are intentionally absent (no write op wired). There is no native
@@ -39,10 +40,11 @@ _POSTGRES_CMD_OPS = CommandIO(
     read_stream=partial(stream_from_bytes, _read),
     stat=_stat,
     is_mounted=lambda a: True,
+    is_dir_name=lambda a, name: _is_dir_name(name),
     local=False,
 )
 
-_POSTGRES_OVERRIDES = {"find", "grep", "head", "rg", "tail", "wc"}
+_POSTGRES_OVERRIDES = {"grep", "head", "rg", "tail", "wc"}
 
 COMMANDS = [
     *make_generic_commands(
@@ -50,7 +52,6 @@ COMMANDS = [
         _POSTGRES_CMD_OPS,
         overrides=_POSTGRES_OVERRIDES,
     ),
-    find,
     grep,
     head,
     rg,

@@ -90,6 +90,7 @@ class CommandIO:
     create: Callable | None = None
     truncate: Callable | None = None
     find: Callable | None = None
+    is_dir_name: Callable | None = None
     du_total: Callable | None = None
     du_all: Callable | None = None
 

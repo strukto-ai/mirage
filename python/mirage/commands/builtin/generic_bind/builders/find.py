@@ -65,6 +65,10 @@ async def find(
                               empty=empty)
 
 
+def _no_dir_hint(_name: str) -> bool | None:
+    return None
+
+
 async def _find_walk(
     ops: CommandIO,
     accessor: Accessor,
@@ -93,10 +97,12 @@ async def _find_walk(
                            path=path,
                            mindepth=mindepth,
                            empty=empty)
+    hint = (partial(ops.is_dir_name, accessor)
+            if ops.is_dir_name is not None else _no_dir_hint)
     results = await walk_find(search,
                               readdir=partial(ops.readdir, accessor),
                               stat=partial(ops.stat, accessor),
-                              is_dir_name=lambda _name: None,
+                              is_dir_name=hint,
                               index=index,
                               args=args)
     return format_records(results), IOResult()
