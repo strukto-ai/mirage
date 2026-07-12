@@ -15,7 +15,6 @@
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.redis.sed import sed
 from mirage.core.redis.constants import SCOPE_ERROR
 from mirage.core.redis.copy import copy as _copy
 from mirage.core.redis.du import du as _du
@@ -59,5 +58,4 @@ _REDIS_CMD_OPS = CommandIO(
 COMMANDS = [
     *make_filetype_commands("redis", _ft_resolve_glob, _ft_read),
     *make_generic_commands("redis", _REDIS_CMD_OPS),
-    sed,
 ]

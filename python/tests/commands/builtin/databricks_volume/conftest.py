@@ -16,7 +16,6 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.cache.index import RAMIndexCacheStore
-from mirage.commands.builtin.databricks_volume import _helpers
 from mirage.types import PathSpec
 from mirage.utils.stream import collect_bytes
 from tests.resource.databricks_volume.test_databricks_volume import (
@@ -85,13 +84,6 @@ def databricks_text_workspace(databricks_text_files: FakeFiles) -> Workspace:
 @pytest.fixture
 def expected_index() -> RAMIndexCacheStore:
     return RAMIndexCacheStore(ttl=600)
-
-
-@pytest.fixture
-def index_tracker(monkeypatch) -> IndexTrackingReader:
-    tracker = IndexTrackingReader()
-    monkeypatch.setattr(_helpers, "_read_bytes", tracker.read_bytes)
-    return tracker
 
 
 @pytest.fixture

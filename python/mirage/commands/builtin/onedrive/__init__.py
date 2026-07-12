@@ -18,7 +18,6 @@ from mirage.commands.builtin.generic_bind import (CommandIO,
 from mirage.commands.builtin.onedrive._provision import \
     file_read_provision as _ft_provision
 from mirage.commands.builtin.onedrive.du import du
-from mirage.commands.builtin.onedrive.sed import sed
 from mirage.core.onedrive.copy import copy as _copy
 from mirage.core.onedrive.du import du as _du
 from mirage.core.onedrive.du import du_all as _du_all
@@ -57,7 +56,7 @@ _ONEDRIVE_CMD_OPS = CommandIO(
     du_all=_du_all,
 )
 
-# sed has no generic builder; du keeps a wrapper because OneDrive's du_all
+# du keeps a wrapper because OneDrive's du_all
 # returns a flat list (du_multi contract) rather than the generic (list,
 # total) tuple, matching the s3 override.
 _ONEDRIVE_OVERRIDES = {"du"}
@@ -71,5 +70,4 @@ COMMANDS = [
         overrides=_ONEDRIVE_OVERRIDES,
     ),
     du,
-    sed,
 ]
