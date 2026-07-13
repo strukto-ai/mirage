@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.fuse.fs import MirageFS
-from mirage.fuse.mount import _run_fuse
+from mirage.fuse.mount import _prepare_mountpoint, _run_fuse
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
@@ -48,3 +48,29 @@ def test_run_fuse_mount_options(monkeypatch, fs):
     # stale pre-open size.
     assert _CaptureFuse.kwargs["direct_io"] is True
     assert _CaptureFuse.kwargs["attr_timeout"] == 0
+
+
+def test_prepare_mountpoint_win32_removes_empty_dir(monkeypatch, tmp_path):
+    mp = tmp_path / "mnt"
+    mp.mkdir()
+    monkeypatch.setattr("sys.platform", "win32")
+    _prepare_mountpoint(str(mp))
+    assert not mp.exists()
+
+
+def test_prepare_mountpoint_win32_refuses_non_empty_dir(monkeypatch, tmp_path):
+    mp = tmp_path / "mnt"
+    mp.mkdir()
+    (mp / "keep.txt").write_text("data")
+    monkeypatch.setattr("sys.platform", "win32")
+    with pytest.raises(OSError):
+        _prepare_mountpoint(str(mp))
+    assert (mp / "keep.txt").exists()
+
+
+def test_prepare_mountpoint_posix_keeps_dir(monkeypatch, tmp_path):
+    mp = tmp_path / "mnt"
+    mp.mkdir()
+    monkeypatch.setattr("sys.platform", "linux")
+    _prepare_mountpoint(str(mp))
+    assert mp.is_dir()

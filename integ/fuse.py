@@ -62,7 +62,8 @@ def run_sizeless_probe() -> None:
         if sys.platform == "darwin":
             subprocess.run(["diskutil", "unmount", "force", mountpoint],
                            capture_output=True)
-        else:
+        elif sys.platform != "win32":
+            # win32 has no fusermount; WinFsp unmounts on process exit.
             subprocess.run(["fusermount", "-u", mountpoint],
                            capture_output=True)
 
