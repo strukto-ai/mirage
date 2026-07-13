@@ -47,3 +47,17 @@ def test_realpath_absolute():
     ws = _ws()
     stdout, _ = _run_raw(ws, "realpath /data/bar/../baz")
     assert _bytes(stdout).strip() == b"/data/baz"
+
+
+def test_realpath_e_dotdot_on_mount():
+    ws = _ws()
+    _run_raw(ws, "bash -c 'mkdir -p /data/sub && echo hi > /data/f.txt'")
+    stdout, io = _run_raw(ws, "realpath -e /data/sub/../f.txt")
+    assert io.exit_code == 0
+    assert _bytes(stdout).strip() == b"/data/f.txt"
+
+
+def test_realpath_e_missing_fails():
+    ws = _ws()
+    _, io = _run_raw(ws, "realpath -e /data/nope.txt")
+    assert io.exit_code != 0

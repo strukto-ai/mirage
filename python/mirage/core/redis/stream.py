@@ -37,7 +37,7 @@ async def stream(accessor: RedisAccessor,
     data = await store.get_file(key)
     if data is None:
         raise enoent(virtual)
-    rec = record_stream("read", path, "redis")
+    rec = record_stream("read", raw, "redis")
     if rec is not None:
         rec.bytes = len(data)
     yield data

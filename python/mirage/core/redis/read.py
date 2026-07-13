@@ -41,10 +41,7 @@ async def read(
     path: PathSpec,
     index: IndexCacheStore = None,
 ) -> bytes:
-    virtual = path.virtual if isinstance(path, PathSpec) else path
-    if isinstance(path, PathSpec):
-        path = path.mount_path
     try:
         return await read_bytes(accessor, path)
     except FileNotFoundError as exc:
-        raise enoent(virtual) from exc
+        raise enoent(path.virtual) from exc

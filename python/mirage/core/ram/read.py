@@ -39,8 +39,7 @@ async def read_bytes(accessor: RAMAccessor, path: PathSpec) -> bytes:
 async def read(accessor: RAMAccessor,
                path: PathSpec,
                index: IndexCacheStore = None) -> bytes:
-    virtual = path.virtual
     try:
-        return await read_bytes(accessor, path.mount_path)
+        return await read_bytes(accessor, path)
     except FileNotFoundError as exc:
-        raise enoent(virtual) from exc
+        raise enoent(path.virtual) from exc
