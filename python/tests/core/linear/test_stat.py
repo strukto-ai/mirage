@@ -19,7 +19,7 @@ from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.linear.stat import stat
 from mirage.resource.linear.config import LinearConfig
-from mirage.types import FileType
+from mirage.types import FileType, PathSpec
 
 
 @pytest.fixture
@@ -34,13 +34,13 @@ def index():
 
 @pytest.mark.asyncio
 async def test_stat_root(accessor, index):
-    result = await stat(accessor, "/", index)
+    result = await stat(accessor, PathSpec.from_str_path("/"), index)
     assert result.type == FileType.DIRECTORY
 
 
 @pytest.mark.asyncio
 async def test_stat_teams(accessor, index):
-    result = await stat(accessor, "/teams", index)
+    result = await stat(accessor, PathSpec.from_str_path("/teams"), index)
     assert result.type == FileType.DIRECTORY
 
 
@@ -56,7 +56,7 @@ async def test_stat_team_entry(accessor, index):
             vfs_name="ENG__Engineering__TEAM1",
         ),
     )
-    result = await stat(accessor, "/teams/ENG__Engineering__TEAM1", index)
+    result = await stat(accessor, PathSpec.from_str_path("/teams/ENG__Engineering__TEAM1"), index)
     assert result.type == FileType.DIRECTORY
     assert result.extra["team_id"] == "TEAM1"
     assert result.modified == "2026-04-05T00:00:00Z"
@@ -76,7 +76,7 @@ async def test_stat_issue_directory(accessor, index):
     )
     result = await stat(
         accessor,
-        "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1",
+        PathSpec.from_str_path("/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1"),
         index,
     )
     assert result.type == FileType.DIRECTORY
@@ -88,7 +88,7 @@ async def test_stat_issue_directory(accessor, index):
 async def test_stat_issue_json(accessor, index):
     result = await stat(
         accessor,
-        "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1/issue.json",
+        PathSpec.from_str_path("/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1/issue.json"),
         index,
     )
     assert result.type == FileType.JSON
@@ -98,7 +98,7 @@ async def test_stat_issue_json(accessor, index):
 async def test_stat_comments_jsonl(accessor, index):
     result = await stat(
         accessor,
-        "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1/comments.jsonl",
+        PathSpec.from_str_path("/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1/comments.jsonl"),
         index,
     )
     assert result.type == FileType.TEXT
@@ -107,4 +107,4 @@ async def test_stat_comments_jsonl(accessor, index):
 @pytest.mark.asyncio
 async def test_stat_missing_path(accessor, index):
     with pytest.raises(FileNotFoundError):
-        await stat(accessor, "/nonexistent/path", index)
+        await stat(accessor, PathSpec.from_str_path("/nonexistent/path"), index)

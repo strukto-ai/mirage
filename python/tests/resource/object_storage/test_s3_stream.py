@@ -17,6 +17,7 @@ from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from mirage.accessor.s3 import S3Accessor
+from mirage.types import PathSpec
 from mirage.resource.s3 import S3Config
 
 
@@ -61,7 +62,7 @@ def test_read_stream_returns_async_iterator():
 
     async def _run():
         chunks = []
-        async for chunk in read_stream(config, "test.txt"):
+        async for chunk in read_stream(config, PathSpec.from_str_path("test.txt")):
             chunks.append(chunk)
         return chunks
 
@@ -77,7 +78,7 @@ def test_read_stream_yields_chunks():
 
     async def _run():
         chunks = []
-        async for chunk in read_stream(config, "test.txt", chunk_size=30):
+        async for chunk in read_stream(config, PathSpec.from_str_path("test.txt"), chunk_size=30):
             chunks.append(chunk)
         return chunks
 
@@ -93,6 +94,6 @@ def test_read_bytes_returns_bytes():
     session = _mock_session(b"file content here")
 
     with patch("mirage.core.s3.read.async_session", return_value=session):
-        result = asyncio.run(read_bytes(config, "test.txt"))
+        result = asyncio.run(read_bytes(config, PathSpec.from_str_path("test.txt")))
     assert isinstance(result, bytes)
     assert result == b"file content here"

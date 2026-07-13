@@ -15,6 +15,7 @@
 import pytest
 
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.types import PathSpec
 from mirage.core.github.read import read as github_read
 from tests.fixtures.github_mock import MOCK_BLOBS
 
@@ -31,7 +32,7 @@ def _patch_read(monkeypatch):
 @pytest.mark.asyncio
 async def test_read_valid_blob(github_env):
     accessor, index = github_env
-    data = await github_read(accessor, "/README.md", index)
+    data = await github_read(accessor, PathSpec.from_str_path("/README.md"), index)
     assert isinstance(data, bytes)
     assert b"Mock Repo" in data
 
@@ -40,7 +41,7 @@ async def test_read_valid_blob(github_env):
 async def test_read_missing_path(github_env):
     accessor, index = github_env
     with pytest.raises(FileNotFoundError):
-        await github_read(accessor, "/nonexistent.txt", index)
+        await github_read(accessor, PathSpec.from_str_path("/nonexistent.txt"), index)
 
 
 @pytest.mark.asyncio
@@ -48,11 +49,11 @@ async def test_read_empty_index(github_env):
     accessor, _ = github_env
     empty_index = RAMIndexCacheStore()
     with pytest.raises(FileNotFoundError):
-        await github_read(accessor, "/README.md", empty_index)
+        await github_read(accessor, PathSpec.from_str_path("/README.md"), empty_index)
 
 
 @pytest.mark.asyncio
 async def test_read_directory_path(github_env):
     accessor, index = github_env
     with pytest.raises(IsADirectoryError):
-        await github_read(accessor, "/src", index)
+        await github_read(accessor, PathSpec.from_str_path("/src"), index)
