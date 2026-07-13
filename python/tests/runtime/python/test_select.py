@@ -12,10 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import sys
+
 import pytest
 
 from mirage.runtime.python import (LocalRuntime, MontyRuntime, WasiRuntime,
                                    select_python_runtime)
+from mirage.runtime.python.local import LOCAL_PYTHON_ENV
 from mirage.runtime.python.wasi import WASI_PYTHON_ENV
 
 
@@ -52,6 +55,17 @@ def test_select_wasi_explicit_path_beats_env(monkeypatch, tmp_path):
     assert isinstance(rt, WasiRuntime)
 
 
+def test_select_local_explicit_interpreter():
+    rt = select_python_runtime("local", local_python=sys.executable)
+    assert isinstance(rt, LocalRuntime)
+
+
+def test_select_local_unknown_interpreter_fails_loud(monkeypatch):
+    monkeypatch.delenv(LOCAL_PYTHON_ENV, raising=False)
+    with pytest.raises(FileNotFoundError, match="interpreter not found"):
+        select_python_runtime("local", local_python="no-such-python-xyz")
+
+
 def test_config_threads_wasi_python(monkeypatch, tmp_path):
     from mirage.config import WorkspaceConfig
     monkeypatch.delenv(WASI_PYTHON_ENV, raising=False)
@@ -71,6 +85,24 @@ def test_config_threads_wasi_python(monkeypatch, tmp_path):
     kwargs = cfg.to_workspace_kwargs()
     assert kwargs["python_runtime"] == "wasi"
     assert kwargs["wasi_python"] == str(tmp_path)
+
+
+def test_config_threads_local_python():
+    from mirage.config import WorkspaceConfig
+    cfg = WorkspaceConfig.model_validate({
+        "mounts": {
+            "/r": {
+                "resource": "ram"
+            }
+        },
+        "runtime": {
+            "python": "local",
+            "local_python": sys.executable
+        },
+    })
+    kwargs = cfg.to_workspace_kwargs()
+    assert kwargs["python_runtime"] == "local"
+    assert kwargs["local_python"] == sys.executable
 
 
 def test_unknown_name_raises():

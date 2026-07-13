@@ -77,6 +77,14 @@ describe('configToWorkspaceArgs', () => {
     await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/Python-only/)
   })
 
+  it('rejects the Python-only local_python runtime key', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      runtime: { python: 'pyodide', local_python: '/usr/bin/python3' },
+    })
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/Python-only/)
+  })
+
   it('builds a redis index config from an index block', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { resource: 'ram' } },

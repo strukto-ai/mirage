@@ -117,7 +117,7 @@ filesystem to keep runs from persisting files into the bundle.
 
 ## Local
 
-The `local` runtime runs `sys.executable -c` as a subprocess: full
+The `local` runtime runs a host interpreter as a subprocess: full
 CPython, host filesystem, host environment. Use it when the code needs
 stdin, third-party packages, or host files:
 
@@ -125,6 +125,16 @@ stdin, third-party packages, or host files:
 ws = Workspace({"/data": RAMResource()},
                mode=MountMode.EXEC,
                python_runtime="local")
+```
+
+It defaults to the interpreter running mirage; point `local_python`
+(or the MIRAGE_LOCAL_PYTHON environment variable) at another binary,
+e.g. a project venv whose packages the code needs:
+
+```yaml
+runtime:
+  python: local
+  local_python: /path/to/venv/bin/python
 ```
 
 Note that `local` code does **not** see workspace mounts; it sees the real

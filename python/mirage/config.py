@@ -163,6 +163,9 @@ class RuntimeBlock(BaseModel):
     # CPython WASI build directory for the `wasi` runtime; falls back to
     # the MIRAGE_WASI_PYTHON environment variable when unset.
     wasi_python: str | None = None
+    # Interpreter for the `local` runtime; falls back to
+    # MIRAGE_LOCAL_PYTHON, then the interpreter running mirage.
+    local_python: str | None = None
 
     @field_validator("python")
     @classmethod
@@ -223,6 +226,8 @@ class WorkspaceConfig(BaseModel):
             kwargs["python_runtime"] = self.runtime.python
             if self.runtime.wasi_python is not None:
                 kwargs["wasi_python"] = self.runtime.wasi_python
+            if self.runtime.local_python is not None:
+                kwargs["local_python"] = self.runtime.local_python
         return kwargs
 
     def fuse_mounts(self) -> dict[str, bool | str]:

@@ -209,6 +209,7 @@ interface RedisIndexBlock {
 interface RuntimeBlock {
   python?: string
   wasiPython?: string
+  localPython?: string
 }
 
 export interface WorkspaceConfigRaw {
@@ -311,10 +312,16 @@ function buildIndex(
 }
 
 export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<WorkspaceArgs> {
-  if (cfg.runtime?.wasiPython !== undefined) {
+  const pythonOnlyKey =
+    cfg.runtime?.wasiPython !== undefined
+      ? 'wasi_python'
+      : cfg.runtime?.localPython !== undefined
+        ? 'local_python'
+        : null
+  if (pythonOnlyKey !== null) {
     throw new Error(
-      "runtime key 'wasi_python' is Python-only (it locates the CPython WASI build " +
-        "for the 'wasi' runtime); TypeScript supports 'pyodide' (default) and 'monty'",
+      `runtime key '${pythonOnlyKey}' is Python-only (it configures a Python-only ` +
+        "runtime); TypeScript supports 'pyodide' (default) and 'monty'",
     )
   }
   const wsMode = coerceMountMode(cfg.mode, MountMode.WRITE)
