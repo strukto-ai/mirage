@@ -357,7 +357,7 @@ class Workspace:
             try:
                 await task
             except asyncio.CancelledError:
-                # drain tasks may already be cancelled at close; that is their end state
+                # drain tasks may already be cancelled at close
                 pass
         await self._cache.clear()
 

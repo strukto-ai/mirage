@@ -70,7 +70,7 @@ async def list_message_uids(
                     uid_val = rest.split(")")[0].split()[0]
                     uids.append(uid_val)
                 except (ValueError, IndexError):
-                    # tolerant IMAP parse: skip lines that do not match the shape
+                    # tolerant IMAP parse: skip lines that do not match
                     pass
     return uids
 

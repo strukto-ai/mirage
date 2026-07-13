@@ -431,7 +431,7 @@ class MirageFS(_FUSE_OPERATIONS):
                 try:
                     existing = self._run(self._ops.read(self._resolve(path)))
                 except FileNotFoundError:
-                    # missing file: start from empty and let the write create it
+                    # missing file: start from empty; the write creates it
                     pass
                 merged = bytearray(existing)
                 for off, chunk in ctx.write_buf:
