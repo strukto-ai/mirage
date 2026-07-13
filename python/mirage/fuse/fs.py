@@ -61,8 +61,11 @@ class MirageFS(_FUSE_OPERATIONS):
                  agent_id: str | None = None,
                  root_prefix: str = "") -> None:
         if fuse is None:
-            raise RuntimeError("FUSE support requires the 'fuse' extra: "
-                               'install "mirage-ai[fuse]"')
+            raise RuntimeError(
+                "FUSE support requires the 'fuse' extra: install "
+                '"mirage-ai[fuse]" plus the OS driver (macFUSE, fuse3, or '
+                "WinFsp). Setup and support matrix: "
+                "https://mirage.dev/home/setup/fuse")
         self._ops = ops
         self.agent_id = (agent_id or os.environ.get(_ENV_AGENT_ID)
                          or f"agent-{uuid.uuid4().hex[:8]}")

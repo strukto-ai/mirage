@@ -11,10 +11,18 @@ description: Set up FUSE support for MIRAGE with the TypeScript SDK.
 
 ## System FUSE
 
-Install the OS-level FUSE kernel support first:
+Install the OS-level FUSE kernel support first (see the
+[support matrix](/home/setup/fuse) for the full OS overview):
 
 - [macOS FUSE Setup](/home/setup/macos), macFUSE + kernel extension + Apple Silicon recovery mode steps.
 - [Linux FUSE Setup](/home/setup/linux), `fuse3` install and `/etc/fuse.conf`.
+
+<Note>
+  **No Windows support in TypeScript.** `@zkochan/fuse-native` targets macOS
+  and Linux only; its legacy Windows path builds against the unmaintained
+  Dokany-based `fuse-shared-library-win32`, not WinFsp. Python's FUSE mounts
+  run on Windows experimentally, see [Windows FUSE Setup](/home/setup/windows).
+</Note>
 
 ## Install the Node Binding
 

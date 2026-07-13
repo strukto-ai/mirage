@@ -1,0 +1,69 @@
+---
+title: Windows
+icon: windows
+description: Set up WinFsp on Windows for MIRAGE FUSE mounts (Python, experimental).
+---
+
+## FUSE on Windows
+
+Windows has no native FUSE. MIRAGE's Python FUSE mounts run on
+[WinFsp](https://winfsp.dev/), a maintained Windows file system driver with a
+FUSE-compatible layer. Support is **experimental**: the FUSE integration
+battery passes in CI on `windows-latest`, but Windows is not yet a fully
+supported platform. The TypeScript SDK has no Windows FUSE support at all
+(its binding only targets macOS and Linux).
+
+### Install WinFsp
+
+Requires Windows 10 (1809+) or Windows 11.
+
+<Tabs>
+  <Tab title="winget">
+    ```powershell
+    winget install -e --id WinFsp.WinFsp
+    ```
+  </Tab>
+  <Tab title="Chocolatey">
+    ```powershell
+    choco install winfsp -y
+    ```
+  </Tab>
+  <Tab title="Installer">
+    Download the MSI from the [WinFsp releases page](https://winfsp.dev/rel/)
+    and run it.
+  </Tab>
+</Tabs>
+
+No reboot or driver-signing steps are needed (unlike macFUSE on macOS).
+
+### Verify
+
+```powershell
+pip install "mirage-ai[fuse]"
+python -c "import mfusepy; print('WinFsp FUSE loaded')"
+```
+
+`mfusepy` locates `winfsp-x64.dll` through the registry; if the import
+succeeds, the driver is reachable.
+
+## Windows-specific behavior
+
+MIRAGE handles the WinFsp conventions automatically, but three behaviors
+differ from macOS/Linux and are worth knowing:
+
+- **Unmount happens at process exit.** There is no `fusermount` on Windows;
+  WinFsp releases the mount when the process serving it exits. Closing the
+  workspace does not actively unmount.
+- **Ownership is a mount-level mapping.** All files appear owned by the user
+  who mounted the filesystem (WinFsp's `uid=-1,gid=-1` mapping). Per-file
+  POSIX owners from backends are not represented.
+- **`stat` opens a handle.** Windows cannot query file attributes without
+  opening the file, so size-unknown API-backed files fetch their content on
+  the first per-file `stat` and immediately report the real size — where
+  macOS/Linux report 0 until first open. Directory listings stay cheap on
+  all platforms.
+
+Unlike macOS, multiple FUSE mounts per process work on Windows.
+
+See the [FUSE support matrix](/home/setup/fuse) for the full OS and language
+overview.
