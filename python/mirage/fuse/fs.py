@@ -19,7 +19,7 @@ import stat
 import threading
 import time
 import uuid
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, field
 
 try:
     import mfusepy as fuse
@@ -39,6 +39,17 @@ _NO_XATTR = getattr(errno, "ENOATTR", None) or errno.ENODATA
 # Base class only when mfusepy is installed; otherwise the module still imports
 # (FUSE is the optional [fuse] extra) but instantiating MirageFS raises.
 _FUSE_OPERATIONS = fuse.Operations if fuse is not None else object
+# How long prefetched bytes for size-unknown files outlive their handle, so a
+# release-then-stat burst (ls right after cat) neither refetches nor reports
+# an unknown size. Mirrors the TS PREFETCH_TTL_MS.
+PREFETCH_TTL = 30.0
+
+
+@dataclass(slots=True)
+class Handle:
+    path: str
+    data: bytes | None = None
+    write_buf: list[tuple[int, bytes]] = field(default_factory=list)
 
 
 class MirageFS(_FUSE_OPERATIONS):
@@ -46,13 +57,13 @@ class MirageFS(_FUSE_OPERATIONS):
     use_ns = True
 
     def __init__(self,
-                 ws_or_ops,
+                 ops: Ops,
                  agent_id: str | None = None,
                  root_prefix: str = "") -> None:
         if fuse is None:
             raise RuntimeError("FUSE support requires the 'fuse' extra: "
                                'install "mirage-ai[fuse]"')
-        self._ops = ws_or_ops if isinstance(ws_or_ops, Ops) else ws_or_ops.ops
+        self._ops = ops
         self.agent_id = (agent_id or os.environ.get(_ENV_AGENT_ID)
                          or f"agent-{uuid.uuid4().hex[:8]}")
         self._now = time.time_ns()
@@ -62,8 +73,10 @@ class MirageFS(_FUSE_OPERATIONS):
         if self._root:
             self._prefixes = []
         else:
-            self._prefixes = [m.prefix for m in self._ops._mounts]
-        self._handles: dict[int, dict] = {}
+            self._prefixes = self._ops.mount_prefixes()
+        self._handles: dict[int, Handle] = {}
+        # Prefetched content for size-unknown files: path -> (data, expiry).
+        self._prefetch: dict[str, tuple[bytes, float]] = {}
         # In-memory extended attributes, keyed by FUSE path. Backends have no
         # POSIX xattrs, so these are advisory, not persisted (see setxattr).
         self._xattrs: dict[str, dict[str, bytes]] = {}
@@ -85,7 +98,7 @@ class MirageFS(_FUSE_OPERATIONS):
         return self._root + path
 
     def _whoami_content(self) -> bytes:
-        mounts = [m.prefix for m in self._ops._mounts]
+        mounts = self._ops.mount_prefixes()
         lines = [
             f"agent: {self.agent_id}",
             "cwd: /",
@@ -140,14 +153,71 @@ class MirageFS(_FUSE_OPERATIONS):
         self._ops.records.clear()
         return records
 
-    def _cached_size(self, path: str) -> int | None:
-        """Return real size from prefetched data in open handles."""
+    def _cached_data(self, path: str) -> bytes | None:
+        """Return prefetched bytes from open handles or the TTL cache.
+
+        Args:
+            path (str): FUSE path to look up.
+
+        Returns:
+            bytes | None: cached content, or None when nothing fresh is held.
+        """
         for ctx in self._handles.values():
-            if ctx.get("path") == path and "data" in ctx:
-                return len(ctx["data"])
-        return None
+            if ctx.path == path and ctx.data is not None:
+                return ctx.data
+        entry = self._prefetch.get(path)
+        if entry is None:
+            return None
+        data, expires = entry
+        if time.monotonic() >= expires:
+            del self._prefetch[path]
+            return None
+        return data
+
+    def _cached_size(self, path: str) -> int | None:
+        """Return the real size of prefetched data, if any is cached.
+
+        Args:
+            path (str): FUSE path to look up.
+
+        Returns:
+            int | None: byte length of cached content, or None.
+        """
+        data = self._cached_data(path)
+        return len(data) if data is not None else None
+
+    def _prefetch_read(self, path: str) -> bytes | None:
+        """Fetch and cache the bytes of a size-unknown file.
+
+        Args:
+            path (str): FUSE path being opened.
+
+        Returns:
+            bytes | None: file content, or None when the backend read fails
+            (open() stays permissive; the subsequent read() surfaces the
+            error to the caller).
+        """
+        data = self._cached_data(path)
+        if data is not None:
+            return data
+        try:
+            data = self._run(self._ops.read(self._resolve(path)))
+        except (FileNotFoundError, ValueError):
+            return None
+        # No inflight dedup: the mount runs nothreads=True, so FUSE callbacks
+        # are serialized and two opens cannot race (TS needs the dedup map).
+        self._prefetch[path] = (data, time.monotonic() + PREFETCH_TTL)
+        return data
 
     def getattr(self, path: str, fh=None) -> dict:
+        # fstat(fd) after open: answer with the hydrated handle's real byte
+        # length. attr_timeout=0 on the mount makes the kernel actually ask
+        # here instead of trusting the cached pre-open size, which is what
+        # keeps wc -c, BSD cp, and tail -c correct for size-unknown files.
+        if fh is not None:
+            ctx = self._handles.get(fh)
+            if ctx is not None and ctx.path == path and ctx.data is not None:
+                return self._file_stat(len(ctx.data))
         if path == "/":
             return self._dir_stat()
         if path == _MIRAGE_DIR:
@@ -169,6 +239,12 @@ class MirageFS(_FUSE_OPERATIONS):
             if size is None:
                 size = self._cached_size(path)
             if size is None:
+                # Unopened size-unknown files stat as 0, matching mirage's own
+                # find semantics. Reads stay correct anyway: direct_io makes
+                # the kernel ignore st_size, and the fh branch above serves
+                # the real size to fstat-based tools after open. Never report
+                # a fake size and never fetch content here: getattr runs once
+                # per entry on every ls -l.
                 size = 0
             return self._file_stat(size)
         except (FileNotFoundError, ValueError):
@@ -196,23 +272,24 @@ class MirageFS(_FUSE_OPERATIONS):
         if path == _MIRAGE_WHOAMI:
             data = self._whoami_content()
             return data[offset:offset + size]
-        ctx = self._handles.get(fh, {})
+        ctx = self._handles.get(fh)
+        if ctx is not None and ctx.data is not None:
+            return ctx.data[offset:offset + size]
         try:
-            if "data" not in ctx:
-                ctx["data"] = self._run(self._ops.read(self._resolve(path)))
-            return ctx["data"][offset:offset + size]
+            data = self._cached_data(path)
+            if data is None:
+                data = self._run(self._ops.read(self._resolve(path)))
+            if ctx is not None:
+                ctx.data = data
+            return data[offset:offset + size]
         except (FileNotFoundError, ValueError):
             raise fuse.FuseOSError(errno.ENOENT)
 
     def write(self, path: str, data: bytes, offset: int, fh) -> int:
         ctx = self._handles.get(fh)
         if ctx is not None:
-            try:
-                buf = ctx.setdefault("write_buf", [])
-                buf.append((offset, data))
-                return len(data)
-            except PermissionError:
-                raise fuse.FuseOSError(errno.EACCES)
+            ctx.write_buf.append((offset, data))
+            return len(data)
         try:
             existing = b""
             try:
@@ -223,6 +300,7 @@ class MirageFS(_FUSE_OPERATIONS):
                 existing = existing + b"\0" * (offset - len(existing))
             new_data = existing[:offset] + data + existing[offset + len(data):]
             self._run(self._ops.write(self._resolve(path), new_data))
+            self._prefetch.pop(path, None)
             return len(data)
         except PermissionError:
             raise fuse.FuseOSError(errno.EACCES)
@@ -236,10 +314,10 @@ class MirageFS(_FUSE_OPERATIONS):
             raise fuse.FuseOSError(errno.EACCES)
         except ValueError:
             raise fuse.FuseOSError(errno.ENOENT)
-        ctx = {"path": path}
+        self._prefetch.pop(path, None)
         fh = self._next_fh
         self._next_fh += 1
-        self._handles[fh] = ctx
+        self._handles[fh] = Handle(path=path)
         return fh
 
     def mkdir(self, path: str, mode) -> None:
@@ -258,6 +336,7 @@ class MirageFS(_FUSE_OPERATIONS):
         except FileNotFoundError:
             raise fuse.FuseOSError(errno.ENOENT)
         self._xattrs.pop(path, None)
+        self._prefetch.pop(path, None)
 
     def rename(self, old: str, new: str, flags: int = 0) -> None:
         try:
@@ -269,6 +348,8 @@ class MirageFS(_FUSE_OPERATIONS):
         moved = self._xattrs.pop(old, None)
         if moved is not None:
             self._xattrs[new] = moved
+        self._prefetch.pop(old, None)
+        self._prefetch.pop(new, None)
 
     def rmdir(self, path: str) -> None:
         try:
@@ -341,8 +422,7 @@ class MirageFS(_FUSE_OPERATIONS):
     def flush(self, path: str, fh) -> None:
         ctx = self._handles.get(fh)
         if ctx is not None:
-            buf = ctx.get("write_buf")
-            if not buf:
+            if not ctx.write_buf:
                 return
             try:
                 existing = b""
@@ -351,13 +431,14 @@ class MirageFS(_FUSE_OPERATIONS):
                 except FileNotFoundError:
                     pass
                 merged = bytearray(existing)
-                for off, chunk in buf:
+                for off, chunk in ctx.write_buf:
                     end = off + len(chunk)
                     if end > len(merged):
                         merged.extend(b"\0" * (end - len(merged)))
                     merged[off:off + len(chunk)] = chunk
                 self._run(self._ops.write(self._resolve(path), bytes(merged)))
-                ctx["write_buf"] = []
+                ctx.write_buf = []
+                self._prefetch.pop(path, None)
             except PermissionError:
                 raise fuse.FuseOSError(errno.EACCES)
             return
@@ -369,21 +450,18 @@ class MirageFS(_FUSE_OPERATIONS):
         if path == _MIRAGE_WHOAMI:
             fh = self._next_fh
             self._next_fh += 1
-            self._handles[fh] = {"path": path}
+            self._handles[fh] = Handle(path=path)
             return fh
         try:
             s = self._run(self._ops.stat(self._resolve(path)))
         except (FileNotFoundError, ValueError):
             raise fuse.FuseOSError(errno.ENOENT)
-        ctx = {"path": path}
+        ctx = Handle(path=path)
         if s.size is None and s.type != FileType.DIRECTORY:
-            # Prefetch: API resources don't report size, so fetch content
-            # now. getattr() will find the cached data and return real size,
-            # allowing cat/read to exit cleanly instead of waiting for 1GB.
-            try:
-                ctx["data"] = self._run(self._ops.read(self._resolve(path)))
-            except (FileNotFoundError, ValueError):
-                pass
+            # API resources cannot size a file without fetching it, so hydrate
+            # now: getattr(fh) and read() then serve real bytes, and the TTL
+            # cache keeps release-then-stat bursts from refetching.
+            ctx.data = self._prefetch_read(path)
         fh = self._next_fh
         self._next_fh += 1
         self._handles[fh] = ctx
@@ -400,3 +478,4 @@ class MirageFS(_FUSE_OPERATIONS):
             raise fuse.FuseOSError(errno.EACCES)
         except ValueError:
             raise fuse.FuseOSError(errno.ENOENT)
+        self._prefetch.pop(path, None)
