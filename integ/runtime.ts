@@ -60,6 +60,10 @@ const CASES: [string, string][] = [
     `python3 -c "import json; from pathlib import Path; meta = json.loads(Path('/mongodb/${DB}/database.json').read_text()); print(meta['database'], len(meta['collections']))"`,
   ],
   [
+    "py3_mongodb_schema",
+    `python3 -c "import json; from pathlib import Path; s = json.loads(Path('/mongodb/${DB}/collections/books/schema.json').read_text()); print(s['name'], s['kind'], s['document_count'], [f['path'] for f in s['fields']])"`,
+  ],
+  [
     "py3_mongodb_docs",
     `python3 -c "from pathlib import Path; lines = Path('/mongodb/${DB}/collections/books/documents.jsonl').read_text().splitlines(); print('books:', len(lines))"`,
   ],
