@@ -172,6 +172,7 @@ class MirageFS(_FUSE_OPERATIONS):
                 size = 0
             return self._file_stat(size)
         except (FileNotFoundError, ValueError):
+            # unresolvable entry falls through to the canonical ENOENT below
             pass
         raise fuse.FuseOSError(errno.ENOENT)
 
@@ -218,6 +219,7 @@ class MirageFS(_FUSE_OPERATIONS):
             try:
                 existing = self._run(self._ops.read(self._resolve(path)))
             except FileNotFoundError:
+                # missing file: start from empty and let the write create it
                 pass
             if offset > len(existing):
                 existing = existing + b"\0" * (offset - len(existing))
@@ -349,6 +351,7 @@ class MirageFS(_FUSE_OPERATIONS):
                 try:
                     existing = self._run(self._ops.read(self._resolve(path)))
                 except FileNotFoundError:
+                    # missing file: start from empty and let the write create it
                     pass
                 merged = bytearray(existing)
                 for off, chunk in buf:
@@ -383,6 +386,7 @@ class MirageFS(_FUSE_OPERATIONS):
             try:
                 ctx["data"] = self._run(self._ops.read(self._resolve(path)))
             except (FileNotFoundError, ValueError):
+                # unreadable now: open lazily and let read() surface the error
                 pass
         fh = self._next_fh
         self._next_fh += 1

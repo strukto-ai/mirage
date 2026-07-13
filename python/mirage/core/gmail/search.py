@@ -49,6 +49,7 @@ def _build_query(pattern: str, label_name: str | None,
             dt = datetime.strptime(date_str, "%Y-%m-%d")
             parts.append(f"after:{dt.strftime('%Y/%m/%d')}")
         except ValueError:
+            # invalid date filter: skip the clause rather than fail the search
             pass
     return " ".join(parts)
 

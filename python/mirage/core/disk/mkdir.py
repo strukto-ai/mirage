@@ -44,5 +44,6 @@ async def mkdir(accessor: DiskAccessor,
         try:
             await aiofiles.os.mkdir(p)
         except FileExistsError:
+            # mkdir -p semantics: an existing directory is success
             pass
     await invalidate_after_write(path)

@@ -158,11 +158,13 @@ class PydanticAIWorkspace(SandboxProtocol):
             await ops.stat(path)
             return WriteResult(error=f"Error: file '{path}' already exists")
         except (FileNotFoundError, ValueError):
+            # missing file is the good path: the write may proceed
             pass
         parent = "/".join(path.rstrip("/").split("/")[:-1]) or "/"
         try:
             await ops.mkdir(parent)
         except (FileExistsError, ValueError):
+            # mkdir -p semantics: an existing parent is success
             pass
         data = content.encode("utf-8") if isinstance(content, str) else content
         await ops.write(path, data)

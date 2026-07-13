@@ -50,6 +50,7 @@ async def tee(
                 existing += chunk
             write_data = existing + raw
         except FileNotFoundError:
+            # appending to a missing object starts from empty
             pass
     await write_bytes(accessor, paths[0], write_data)
     return raw, IOResult(writes={paths[0].mount_path: write_data},

@@ -12,12 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
+
 from mirage.accessor.linear import LinearAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.core.linear.readdir import readdir as _readdir
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
+
+logger = logging.getLogger(__name__)
 
 VIRTUAL_DIRS = {"", "teams"}
 
@@ -38,9 +42,9 @@ async def _populate_via_parent(
                      resource_path=mount_key(parent_path, prefix)),
             index=index,
         )
-    # best-effort cache populate; canonical ENOENT raised below
-    except Exception:
-        pass
+    except Exception as exc:
+        # best-effort cache populate; canonical ENOENT raised below
+        logger.debug("stat populate failed for %s: %s", idx_key, exc)
 
 
 async def stat(

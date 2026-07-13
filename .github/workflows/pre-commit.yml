@@ -58,3 +58,9 @@ jobs:
 
       - name: Run pre-commit
         run: SKIP=no-commit-to-branch ./python/.venv/bin/pre-commit run --all-files
+
+      - name: Spec drift
+        run: |
+          ./python/.venv/bin/python scripts/gen_specs.py
+          node --experimental-strip-types typescript/scripts/gen-specs.ts
+          git diff --exit-code spec/

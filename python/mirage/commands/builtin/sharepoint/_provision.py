@@ -50,6 +50,8 @@ async def _resolve_sizes(
                 file_stat = await sharepoint_stat(accessor, p, index)
                 size = file_stat.size
             except (FileNotFoundError, ValueError):
+                # provision estimates degrade, never fail: unresolved
+                # sizes stay UNKNOWN
                 pass
         if size is not None:
             resolved.append((path_str, size))

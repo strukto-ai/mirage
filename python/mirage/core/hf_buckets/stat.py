@@ -74,5 +74,6 @@ async def stat(accessor: HfBucketsAccessor,
                 type=FileType.DIRECTORY,
             )
     except NotFound:
+        # NotFound maps to the canonical ENOENT raised below
         pass
     raise enoent(path)

@@ -63,5 +63,6 @@ async def stat(accessor: NextcloudAccessor,
                 type=FileType.DIRECTORY,
             )
     except NotFound:
+        # NotFound maps to the canonical ENOENT raised below
         pass
     raise enoent(path)
