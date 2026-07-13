@@ -42,6 +42,13 @@ class _MirageOS(OSAccess):
     and are then flushed back through the dispatch. Runs on Monty's
     worker thread, so async dispatch calls hop to the workspace loop via
     `run_coroutine_threadsafe`.
+
+    The binding only accepts sync callbacks (pydantic/monty#560), so
+    `_sync` parks the tokio worker for the whole I/O wait. That caps
+    concurrent I/O-waiting runs at Monty's worker pool size, which is
+    the core count by default; TOKIO_WORKER_THREADS raises it, and
+    parked workers cost stack pages, not CPU (measured: 100 concurrent
+    1s-I/O runs finish in ~2s at 64 workers versus ~8s at 14).
     """
 
     def __init__(self, loop: asyncio.AbstractEventLoop,

@@ -45,6 +45,19 @@ Monty requires the `monty` extra:
 pip install mirage-ai[monty]
 ```
 
+### Concurrency
+
+Runs execute on Monty's own worker pool and are fully async: the event
+loop stays free, and cancelling a run halts the interpreter. One
+ceiling to know about when a server runs many I/O-heavy scripts at
+once: each run waiting on workspace I/O holds one pool worker (the
+Python binding only takes synchronous OS callbacks,
+[pydantic/monty#560](https://github.com/pydantic/monty/issues/560)),
+and the pool defaults to the machine's core count. Set
+`TOKIO_WORKER_THREADS` to lift it; waiting workers cost kilobytes of
+stack and no CPU, so 100 parallel I/O-bound scripts on one core is a
+`TOKIO_WORKER_THREADS=100` away.
+
 Without it, `python3` exits with code 127 and an install hint; every other
 command keeps working.
 
