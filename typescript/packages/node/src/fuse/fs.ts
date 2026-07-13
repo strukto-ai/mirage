@@ -51,28 +51,6 @@ interface PrefetchEntry {
 
 const PREFETCH_TTL_MS = 30_000
 
-/**
- * Sentinel size reported by getattr for API-backed files where the resource
- * returns size=null up front (Trello, Linear, Slack…). Python uses libfuse's
- * `direct_io` flag to make the kernel ignore reported size and issue read()
- * regardless; @zkochan/fuse-native doesn't expose direct_io, so we instead
- * report a deliberately-large size. The read handler returns 0 once the
- * actual bytes are exhausted, which surfaces as EOF to userspace.
- *
- * Reporting a real size requires fetching the bytes — fine for `cat`, but
- * disastrous for `ls`/`ls -l` because macOS's FUSE layer calls getattr per
- * directory entry. Using a sentinel keeps `ls` cheap (no API calls) while
- * still letting `cat` work. Once a file has been opened (and its bytes
- * cached), subsequent getattrs return the real size via cachedSize().
- *
- * The cap is bounded by Node's `fs/promises` readFile path: it allocates a
- * buffer of the reported size and converts it to a utf-8 string at the end,
- * which fails with `RangeError: Invalid string length` past V8's ~512 MiB
- * string limit. 100 MiB sits well under that, covers very busy Slack
- * channels' daily history, and bounds Buffer allocation per stat.
- */
-const UNKNOWN_SIZE_SENTINEL = 100 * 1024 * 1024 // 100 MiB
-
 type Cb<T> = (code: number, result?: T) => void
 
 function classifyError(err: unknown): number {
@@ -215,11 +193,11 @@ export class MirageFS {
   }
 
   /**
-   * Fetch bytes for a size-unknown file and cache them so the immediate
-   * getattr → open → read burst (and subsequent stats within the TTL) reuse
-   * the same fetch. Required because @zkochan/fuse-native doesn't expose
-   * libfuse's `direct_io` flag — without a real size from getattr, the kernel
-   * decides the file is empty and never issues read().
+   * Fetch bytes for a size-unknown file and cache them so the open → read →
+   * fstat burst (and subsequent stats within the TTL) reuse the same fetch.
+   * With getattr reporting 0 pre-open, this hydration is what lets fgetattr
+   * answer with the real byte length after open (mirrors Python's
+   * `_prefetch_read`).
    */
   private async prefetch(path: string): Promise<Uint8Array | null> {
     const cached = this.cachedData(path)
@@ -315,8 +293,13 @@ export class MirageFS {
           cb(0, this.dirStat())
           return
         }
+        // Size-unknown API files stat as 0 before open (never a fake size):
+        // the mount's direct_io makes the kernel read to EOF regardless, and
+        // attrTimeout '0' routes the post-open fstat to fgetattr, which
+        // serves the real hydrated size. Mirrors Python's fs.py; see the
+        // CLAUDE.md FUSE section.
         let size = s.size
-        size ??= this.cachedSize(path) ?? UNKNOWN_SIZE_SENTINEL
+        size ??= this.cachedSize(path) ?? 0
         cb(0, this.fileStat(size))
       } catch (err) {
         cb(classifyError(err))
@@ -327,7 +310,7 @@ export class MirageFS {
   private fgetattr(path: string, fd: number, cb: Cb<FuseAttr>): void {
     // fstat(fd) after open: the open handler prefetched size-unknown files
     // into the handle, so answer with the real byte length instead of the
-    // sentinel that path-based getattr reported before open.
+    // 0 that path-based getattr reported before open.
     const ctx = this.handles.get(fd)
     if (ctx?.data !== undefined) {
       cb(0, this.fileStat(ctx.data.byteLength))
