@@ -25,9 +25,10 @@ async def main() -> None:
     r = await ws.execute('python3 -c "print(42)"')
     print(f"stdout: {(await r.stdout_str()).strip()}  (expected: 42)")
 
+    # The default monty runtime exposes command-line args as the `argv`
+    # global; `sys.argv` exists under the `local` runtime.
     print("\n=== python3 -c with argv (flag-conditional) ===")
-    r = await ws.execute(
-        'python3 -c "import sys; print(sys.argv[1:])" alpha beta')
+    r = await ws.execute('python3 -c "print(argv[1:])" alpha beta')
     print(f"argv after -c: {(await r.stdout_str()).strip()}  "
           f"(expected: ['alpha', 'beta'])")
 
@@ -38,7 +39,7 @@ async def main() -> None:
           f"(expected: hello from vfs)")
 
     print("\n=== python3 /abs/script.py arg1 arg2 (script + argv) ===")
-    await ws.execute("echo 'import sys; print(sys.argv[1:])' > /ram/argv.py")
+    await ws.execute("echo 'print(argv[1:])' > /ram/argv.py")
     r = await ws.execute("python3 /ram/argv.py one two")
     print(f"argv after script: {(await r.stdout_str()).strip()}  "
           f"(expected: ['one', 'two'])")

@@ -37,18 +37,18 @@ ws = Workspace(
         "/s3/": s3,
         "/work/": (mem, MountMode.WRITE)
     },
-    mode=MountMode.READ,
+    mode=MountMode.EXEC,
 )
 
+# Monty file handles are not iterable; readlines() works.
 SCRIPT = r"""
 import json
 
 with open("/s3/data/example.jsonl") as f:
-    for i, line in enumerate(f):
-        if i >= 5:
-            break
-        rec = json.loads(line)
-        print(f"[{i}] {json.dumps(rec)[:120]}...")
+    lines = f.readlines()
+for i, line in enumerate(lines[:5]):
+    rec = json.loads(line)
+    print(f"[{i}] {json.dumps(rec)[:120]}...")
 """
 
 

@@ -32,12 +32,15 @@ config = S3Config(
 
 s3 = S3Resource(config)
 mem = RAMResource()
+# The stdin-piping demos below need `sys.stdin`, which only the local
+# runtime provides; the default monty sandbox has no stdin.
 ws = Workspace(
     {
         "/s3/": s3,
         "/work/": (mem, MountMode.WRITE),
     },
-    mode=MountMode.READ,
+    mode=MountMode.EXEC,
+    python_runtime="local",
 )
 
 
