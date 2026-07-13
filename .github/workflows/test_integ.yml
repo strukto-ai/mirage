@@ -794,9 +794,12 @@ jobs:
 
       - name: Run Python FUSE mount and check (WinFsp)
         shell: bash
+        # Dump the raw output before checking: on failure the traceback is
+        # the whole point of this advisory job.
         run: |
-          ./python/.venv/Scripts/python integ/fuse.py 2>&1 \
-            | bash integ/check_lines.sh integ/truth_fuse.txt
+          ./python/.venv/Scripts/python integ/fuse.py > /tmp/fuse-win.out 2>&1 || true
+          cat /tmp/fuse-win.out
+          bash integ/check_lines.sh integ/truth_fuse.txt < /tmp/fuse-win.out
 
   runtime-py:
     needs: changes
