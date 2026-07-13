@@ -23,6 +23,7 @@ import {
   MountMode,
   PathSpec,
   ResourceName,
+  wordText,
 } from './types.ts'
 
 describe('MountMode', () => {
@@ -330,5 +331,21 @@ describe('PathSpec.mountPath / key', () => {
     })
     expect(p.mountPath).toBe('/x.txt')
     expect(p.resourcePath).toBe('x.txt')
+  })
+})
+
+describe('wordText', () => {
+  it('passes strings through', () => {
+    expect(wordText('plain')).toBe('plain')
+  })
+
+  it('renders paths as typed', () => {
+    const p = new PathSpec({
+      resourcePath: 'a.txt',
+      virtual: '/data/a.txt',
+      directory: '/data/',
+      rawPath: 'a.txt',
+    })
+    expect(wordText(p)).toBe('a.txt')
   })
 })

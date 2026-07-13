@@ -76,3 +76,38 @@ describe('catGeneric multi-file streaming', () => {
     expect(pulled).toEqual(['/a.txt'])
   })
 })
+
+describe('displayLines flags', () => {
+  async function run(text: string, flags: Record<string, boolean>): Promise<string> {
+    const result = await catGeneric(
+      [spec('/a.txt')],
+      [],
+      { ...opts(), flags } as CommandOpts,
+      statFn,
+      () =>
+        (async function* () {
+          await Promise.resolve()
+          yield ENC.encode(text)
+        })(),
+    )
+    const [stdout] = result ?? [null]
+    return DEC.decode(await materialize(stdout))
+  }
+
+  it('-E marks line ends', async () => {
+    expect(await run('a\tb\nx\n', { E: true })).toBe('a\tb$\nx$\n')
+  })
+
+  it('-T renders tabs as ^I', async () => {
+    expect(await run('a\tb\nx\n', { T: true })).toBe('a^Ib\nx\n')
+  })
+
+  it('-A combines -vET', async () => {
+    expect(await run('a\tb\nx\n', { A: true })).toBe('a^Ib$\nx$\n')
+  })
+
+  it('-v uses caret and meta notation', async () => {
+    // TextEncoder emits UTF-8, so \u00ff arrives as the two bytes C3 BF.
+    expect(await run('\x01\x7f\u00ff\n', { v: true })).toBe('^A^?M-CM-?\n')
+  })
+})

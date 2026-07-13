@@ -13,6 +13,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { DaemonConfigError } from '@struktoai/mirage-server'
 import { buildProgram } from '../main.ts'
 
 const ALIASES: Record<string, string> = {
@@ -33,6 +34,10 @@ function rewriteArgv(argv: string[]): string[] {
 buildProgram()
   .parseAsync(rewriteArgv(process.argv))
   .catch((err: unknown) => {
+    if (err instanceof DaemonConfigError) {
+      console.error(err.message)
+      process.exit(2)
+    }
     console.error(err)
     process.exit(1)
   })

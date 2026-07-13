@@ -42,7 +42,7 @@ export interface GDriveResourceState {
 export class GDriveResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.GDRIVE
   readonly cachesReads: boolean = true
-  readonly indexTtl: number = 86_400
+  override readonly indexTtl: number = 86_400
   readonly prompt: string = GDRIVE_PROMPT
   readonly config: GDriveConfig
   readonly accessor: GDriveAccessor

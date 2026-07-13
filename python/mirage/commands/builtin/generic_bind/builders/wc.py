@@ -20,8 +20,9 @@ from mirage.commands.builtin.aggregators import wc_aggregate
 from mirage.commands.builtin.generic.wc import format_multi, format_wc
 from mirage.commands.builtin.generic.wc import wc as generic_wc
 from mirage.commands.builtin.generic.wc import wc_lines as generic_wc_lines
-from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
-                                                          with_index)
+from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.builders.common import \
+    dir_refusing_read
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -43,15 +44,15 @@ async def wc(
 ) -> tuple[ByteSource | None, IOResult]:
     if paths and ops.is_mounted(accessor):
         paths = await ops.resolve_glob(accessor, paths, index)
-        body = await format_multi(paths,
-                                  read=with_index(ops.read_stream, index),
-                                  accessor=accessor,
-                                  args_l=args_l,
-                                  w=w,
-                                  c=c,
-                                  m=m,
-                                  L=L)
-        return body, IOResult()
+        body, err = await format_multi(paths,
+                                       read=dir_refusing_read(ops, index),
+                                       accessor=accessor,
+                                       args_l=args_l,
+                                       w=w,
+                                       c=c,
+                                       m=m,
+                                       L=L)
+        return body, IOResult(exit_code=1 if err else 0, stderr=err or None)
     source: AsyncIterator[bytes] = _resolve_source(stdin,
                                                    "wc: missing operand")
     if args_l and not (L or w or c or m):

@@ -28,7 +28,7 @@ export interface R2ConfigRedacted extends Omit<R2Config, 'presignedUrlProvider'>
   presignedUrlProvider: '<REDACTED>'
 }
 
-export const R2ConfigSchema = z.object({
+const R2ConfigSchema = z.object({
   bucket: z.string(),
   presignedUrlProvider: secretSchema(
     z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),

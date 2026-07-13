@@ -17,10 +17,8 @@ import {
   makeFileReadProvision,
   makeHeadTailProvision,
   makeSearchProvision,
-  metadataProvision,
 } from '../generic_bind/provision.ts'
 
 export const fileReadProvision = makeFileReadProvision(pgStat)
 export const headTailProvision = makeHeadTailProvision(pgStat)
 export const searchProvision = makeSearchProvision(pgStat)
-export { metadataProvision }

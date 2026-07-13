@@ -29,14 +29,14 @@ import {
 } from './_client.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
-export interface DatabaseTable {
+interface DatabaseTable {
   schema: string
   name: string
   row_count_estimate: number
   size_bytes_estimate: number
 }
 
-export interface DatabaseView {
+interface DatabaseView {
   schema: string
   name: string
   kind: 'view' | 'materialized'
@@ -50,7 +50,7 @@ export interface DatabaseJson {
   relationships: Relationship[]
 }
 
-export interface EntityColumn extends ColumnInfo {
+interface EntityColumn extends ColumnInfo {
   primary_key?: boolean
   references?: { schema: string; table: string; column: string }
 }

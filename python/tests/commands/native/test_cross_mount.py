@@ -226,27 +226,34 @@ def test_pipe_cross(cross):
     assert "hello" in result
 
 
-def test_cross_resource_no_aggregate_raises(cross):
+def test_cross_resource_md5_fans_out(cross):
     cross.create_file(1, "a.txt", b"hello\n")
     cross.create_file(2, "b.txt", b"world\n")
-    assert cross.exit("md5 /m1/a.txt /m2/b.txt") != 0
+    single = cross.run("md5 /m1/a.txt") + cross.run("md5 /m2/b.txt")
+    assert cross.run("md5 /m1/a.txt /m2/b.txt") == single
 
 
-def test_cross_resource_no_aggregate_error_message(cross):
+def test_cross_resource_du_fans_out(cross):
+    cross.create_file(1, "a.txt", b"hello\n")
+    cross.create_file(2, "b.txt", b"world!!\n")
+    out = cross.run("du -c /m1/a.txt /m2/b.txt")
+    assert "6\t/m1/a.txt" in out
+    assert "8\t/m2/b.txt" in out
+    assert "14\ttotal" in out
+
+
+def test_cross_resource_file_fans_out(cross):
     cross.create_file(1, "a.txt", b"hello\n")
     cross.create_file(2, "b.txt", b"world\n")
-
-    async def _inner():
-        io = await cross.ws.execute("md5 /m1/a.txt /m2/b.txt")
-        return await io.stderr_str()
-
-    stderr = asyncio.run(_inner())
-    assert "/m1" in stderr or "/m2" in stderr
+    out = cross.run("file /m1/a.txt /m2/b.txt")
+    assert "/m1/a.txt:" in out
+    assert "/m2/b.txt:" in out
 
 
-def test_plan_cross_resource_no_aggregate(cross):
+def test_plan_cross_resource_aggregate_sums(cross):
     cross.create_file(1, "a.txt", b"hello\n")
     cross.create_file(2, "b.txt", b"world\n")
     result = asyncio.run(
         cross.ws.execute("md5 /m1/a.txt /m2/b.txt", provision=True))
-    assert result.precision == Precision.UNKNOWN
+    assert result.precision == Precision.EXACT
+    assert result.network_read == "12"

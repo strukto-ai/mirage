@@ -34,14 +34,15 @@ def _disable_auth_for_legacy_tests(monkeypatch, request, tmp_path_factory):
     # Existing server tests don't send Authorization headers. With the
     # auth middleware now installed by build_app, we keep them passing
     # by forcing the daemon into mode=local with no token configured
-    # (env unset + token file pointed at a path that doesn't exist),
-    # which the middleware treats as "no auth" and lets every request
-    # through with a startup warning. Tests that exercise auth paths
+    # (env unset + MIRAGE_HOME pointed at an empty temp dir, so the
+    # default token file does not exist), which the middleware treats
+    # as "no auth" and lets every request through with a startup
+    # warning. Redirecting MIRAGE_HOME also keeps these tests from
+    # touching the real ~/.mirage tree. Tests that exercise auth paths
     # opt out with the @pytest.mark.no_auth_override marker.
     if "no_auth_override" in request.keywords:
         return
     monkeypatch.setenv("MIRAGE_AUTH_MODE", "local")
     monkeypatch.delenv("MIRAGE_AUTH_TOKEN", raising=False)
-    absent = tmp_path_factory.mktemp("notoken") / "absent"
-    monkeypatch.setattr("mirage.server.auth.storage.DEFAULT_TOKEN_FILE",
-                        absent)
+    monkeypatch.setenv("MIRAGE_HOME",
+                       str(tmp_path_factory.mktemp("mirage_home")))

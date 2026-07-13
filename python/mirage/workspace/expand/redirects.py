@@ -16,7 +16,7 @@ from typing import Any, Callable
 
 from mirage.shell.call_stack import CallStack
 from mirage.shell.types import Redirect, RedirectKind
-from mirage.workspace.expand.classify import classify_word
+from mirage.workspace.expand.classify import classify_bare_path
 from mirage.workspace.expand.node import expand_node
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import Session
@@ -72,7 +72,12 @@ async def expand_redirects(
         if target_node is not None:
             target_str = await expand_node(target_node, session, execute_fn,
                                            call_stack)
-            target_scope = classify_word(target_str, registry, session.cwd)
+            # A redirect target is a path by definition (the operator is
+            # the context), so force classification like a PATH-kind word;
+            # classify_word alone leaves extensionless relative targets as
+            # text. Mirrors the TS classifyBarePath call.
+            target_scope = classify_bare_path(target_str, registry,
+                                              session.cwd)
         else:
             target_scope = r.target
         expanded.append(

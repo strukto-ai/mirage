@@ -20,6 +20,7 @@ import {
   ConsistencyPolicy,
   MountMode,
   OnExceed,
+  PYTHON_RUNTIMES,
   RAMFileCacheStore,
   RedisFileCacheStore,
   type FileCache,
@@ -38,6 +39,22 @@ function coerceMountMode(value: string | undefined, fallback: MountMode): MountM
 }
 
 const VALID_CONSISTENCY = new Set<string>([ConsistencyPolicy.LAZY, ConsistencyPolicy.ALWAYS])
+
+const VALID_PYTHON_RUNTIMES = new Set<string>(PYTHON_RUNTIMES)
+
+function coercePythonRuntime(value: string): string {
+  const lower = value.toLowerCase()
+  if (!VALID_PYTHON_RUNTIMES.has(lower)) {
+    if (lower === 'local') {
+      throw new Error(
+        "python runtime 'local' is Python-only (the host CPython subprocess); " +
+          "TypeScript supports 'pyodide' (default) and 'monty'",
+      )
+    }
+    throw new Error(`invalid python runtime: ${value} (expected 'pyodide' or 'monty')`)
+  }
+  return lower
+}
 
 function coerceConsistency(value: string | undefined): ConsistencyPolicy {
   if (value === undefined) return ConsistencyPolicy.LAZY
@@ -147,7 +164,7 @@ export function interpolateEnv<T>(value: T, env: Record<string, string>): T {
   return out as T
 }
 
-export interface RawSafeguardBlock {
+interface RawSafeguardBlock {
   maxBytes?: number | null
   maxLines?: number | null
   timeoutSeconds?: number | null
@@ -162,13 +179,13 @@ export interface MountBlock {
   fuse?: boolean | string
 }
 
-export interface RamCacheBlock {
+interface RamCacheBlock {
   type?: 'ram'
   limit?: string | number
   maxDrainBytes?: number | null
 }
 
-export interface RedisCacheBlock {
+interface RedisCacheBlock {
   type: 'redis'
   limit?: string | number
   maxDrainBytes?: number | null
@@ -176,20 +193,25 @@ export interface RedisCacheBlock {
   keyPrefix?: string
 }
 
-export interface RamIndexBlock {
+interface RamIndexBlock {
   type?: 'ram'
   ttl?: number
 }
 
-export interface RedisIndexBlock {
+interface RedisIndexBlock {
   type: 'redis'
   ttl?: number
   url?: string
   keyPrefix?: string
+}
+
+interface RuntimeBlock {
+  python?: string
 }
 
 export interface WorkspaceConfigRaw {
   mounts: Record<string, MountBlock>
+  runtime?: RuntimeBlock | null
   mode?: string
   consistency?: string
   defaultSessionId?: string
@@ -247,6 +269,7 @@ export interface WorkspaceArgs {
     agentId: string
     cache?: FileCache & Resource
     index?: IndexConfig
+    pythonRuntime?: string
   }
   fuseMounts: Record<string, boolean | string>
 }
@@ -307,6 +330,9 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
       agentId: cfg.defaultAgentId ?? 'default',
       ...(cache !== undefined ? { cache } : {}),
       ...(index !== undefined ? { index } : {}),
+      ...(cfg.runtime?.python !== undefined
+        ? { pythonRuntime: coercePythonRuntime(cfg.runtime.python) }
+        : {}),
     },
     fuseMounts,
   }

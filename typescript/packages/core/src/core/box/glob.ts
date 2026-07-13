@@ -12,40 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { rekey } from '../../utils/key_prefix.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { fnmatch } from '../../utils/fnmatch.ts'
-import { PathSpec } from '../../types.ts'
+import type { PathSpec } from '../../types.ts'
+import { resolveGlobWith } from '../../utils/glob_walk.ts'
 import { SCOPE_ERROR } from '../github/constants.ts'
 import { readdir } from './readdir.ts'
-import { rstripSlash } from '../../utils/slash.ts'
 
 export async function resolveGlob(
   accessor: BoxAccessor,
   paths: readonly PathSpec[],
   index?: IndexCacheStore,
 ): Promise<PathSpec[]> {
-  const result: PathSpec[] = []
-  for (const p of paths) {
-    if (p.resolved) {
-      result.push(p)
-      continue
-    }
-    if (p.pattern !== null && p.pattern !== '') {
-      const entries = await readdir(accessor, p, index)
-      const matched: PathSpec[] = []
-      for (const entry of entries) {
-        const trimmed = rstripSlash(entry)
-        const base = trimmed.split('/').pop() ?? trimmed
-        if (!fnmatch(base, p.pattern)) continue
-        matched.push(PathSpec.fromStrPath(trimmed, rekey(p.virtual, p.resourcePath, trimmed)))
-      }
-      const truncated = matched.length > SCOPE_ERROR ? matched.slice(0, SCOPE_ERROR) : matched
-      result.push(...truncated)
-    } else {
-      result.push(p)
-    }
-  }
-  return result
+  return resolveGlobWith(readdir, accessor, paths, index, SCOPE_ERROR)
 }

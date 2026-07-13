@@ -93,6 +93,7 @@ def _adjust_depth_flags(
             mn = max(0, int(raw_mn) - delta)
             new["mindepth"] = str(mn)
         except (TypeError, ValueError):
+            # non-numeric mindepth is validated later by the command itself
             pass
     return new
 

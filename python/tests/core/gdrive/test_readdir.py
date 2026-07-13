@@ -330,3 +330,44 @@ async def test_readdir_workspace_files_get_extensions(accessor, index):
         assert "/My Document.gdoc.json" in result
         assert "/My Sheet.gsheet.json" in result
         assert "/My Slides.gslide.json" in result
+
+
+@pytest.mark.asyncio
+async def test_readdir_size_binary_kept_google_apps_in_extra(accessor, index):
+    files = [
+        {
+            "id": "f1",
+            "name": "report.pdf",
+            "mimeType": "application/pdf",
+            "modifiedTime": "2026-04-01T00:00:00.000Z",
+            "size": "2048",
+            "owners": [],
+            "capabilities": {},
+        },
+        {
+            "id": "d1",
+            "name": "My Document",
+            "mimeType": "application/vnd.google-apps.document",
+            "modifiedTime": "2026-04-01T00:00:00.000Z",
+            "quotaBytesUsed": "9999",
+            "owners": [],
+            "capabilities": {},
+        },
+    ]
+    with patch(
+            "mirage.core.gdrive.readdir.list_files",
+            new_callable=AsyncMock,
+            return_value=files,
+    ):
+        await readdir(accessor,
+                      PathSpec(resource_path="", virtual="/", directory="/"),
+                      index)
+
+    # Binary files download raw: Drive's size is the rendered byte length.
+    binary = (await index.get("/report.pdf")).entry
+    assert binary.size == 2048
+    # Google-apps files render to JSON: Drive's source size must not
+    # become the entry size, it lives in extra only.
+    doc = (await index.get("/My Document.gdoc.json")).entry
+    assert doc.size is None
+    assert doc.extra["source_size"] == 9999

@@ -40,11 +40,6 @@ export interface MCPNotionTransportOptions {
   serverUrl?: string
 }
 
-interface TextContent {
-  type: 'text'
-  text: string
-}
-
 interface ToolResult {
   content?: unknown
   isError?: boolean
@@ -229,5 +224,3 @@ export class HttpNotionTransport implements NotionTransport {
     return data
   }
 }
-
-export type { TextContent }

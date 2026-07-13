@@ -493,3 +493,54 @@ def test_parse_flags_struct_rejects_typos():
     assert f.hidden is True
     with pytest.raises(AttributeError):
         _ = f.hiden
+
+
+@pytest.mark.asyncio
+async def test_rg_with_filename_labels_single_file():
+    readdir, stat, rb, rs = _make_backend({"/a.txt": b"apple\nbanana\n"})
+    output, _ = await rg(
+        [_spec("/a.txt")],
+        ["ap"],
+        {"H": True},
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    assert (await _drain_async(output)).decode() == "/a.txt:apple\n"
+
+
+@pytest.mark.asyncio
+async def test_rg_with_filename_labels_single_file_count():
+    readdir, stat, rb, rs = _make_backend({"/a.txt": b"apple\napricot\n"})
+    output, _ = await rg(
+        [_spec("/a.txt")],
+        ["ap"],
+        {
+            "H": True,
+            "c": True
+        },
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    assert (await _drain_async(output)).decode() == "/a.txt:2\n"
+
+
+@pytest.mark.asyncio
+async def test_rg_no_filename_suppresses_multi_file_labels():
+    readdir, stat, rb, rs = _make_backend({
+        "/a.txt": b"apple\n",
+        "/b.txt": b"apricot\n",
+    })
+    output, _ = await rg(
+        [_spec("/a.txt"), _spec("/b.txt")],
+        ["ap"],
+        {"args_I": True},
+        readdir=readdir,
+        stat=stat,
+        read_bytes=rb,
+        read_stream=rs,
+    )
+    assert (await _drain_async(output)).decode() == "apple\napricot\n"

@@ -18,7 +18,6 @@ from mirage.commands.builtin.generic_bind import (CommandIO,
 from mirage.commands.builtin.sharepoint._provision import \
     file_read_provision as _ft_provision
 from mirage.commands.builtin.sharepoint.du import du
-from mirage.commands.builtin.sharepoint.sed import sed
 from mirage.core.sharepoint.copy import copy as _copy
 from mirage.core.sharepoint.create import create as _create
 from mirage.core.sharepoint.du import du as _du
@@ -39,8 +38,8 @@ from mirage.core.sharepoint.unlink import unlink as _unlink
 from mirage.core.sharepoint.write import write_bytes as _write
 
 # SharePoint files are read and written through the generic factory (with
-# filetype commands for columnar files); sed has no generic builder and du
-# keeps a wrapper because its du_all returns a flat list (du_multi contract)
+# filetype commands for columnar files); du keeps a wrapper because its
+# du_all returns a flat list (du_multi contract)
 # rather than the generic (list, total) tuple, matching OneDrive. Folder copy
 # is server-side via the dir_copy field.
 _SHAREPOINT_CMD_OPS = CommandIO(
@@ -77,5 +76,4 @@ COMMANDS = [
         overrides=_SHAREPOINT_OVERRIDES,
     ),
     du,
-    sed,
 ]

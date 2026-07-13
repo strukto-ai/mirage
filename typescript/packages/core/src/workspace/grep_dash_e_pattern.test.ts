@@ -113,13 +113,22 @@ describe('grep -e pattern flag', () => {
     await ws.close()
   })
 
-  it('unknown flag warns on stderr but the command still works', async () => {
+  it('--color=auto is accepted as a GNU no-op', async () => {
     const ws = await makeWs()
     const io = await ws.execute('grep --color=auto orange /data/a.txt')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('orange line\n')
     const stderr = io.stderr instanceof Uint8Array ? new TextDecoder().decode(io.stderr) : ''
-    expect(stderr).toContain('--color=auto')
+    expect(stderr).toBe('')
+    await ws.close()
+  })
+
+  it('unknown flags refuse with the GNU error and exit 2', async () => {
+    const ws = await makeWs()
+    const io = await ws.execute('grep --bogus orange /data/a.txt')
+    expect(io.exitCode).toBe(2)
+    const stderr = io.stderr instanceof Uint8Array ? new TextDecoder().decode(io.stderr) : ''
+    expect(stderr).toContain("grep: unrecognized option '--bogus'")
     await ws.close()
   })
 

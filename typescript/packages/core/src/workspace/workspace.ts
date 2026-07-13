@@ -37,6 +37,7 @@ import {
 import { resolveSafeguard } from '../commands/safeguard.ts'
 import { JobTable } from '../shell/job_table.ts'
 import { findSyntaxError, type ShellParser } from '../shell/parse.ts'
+import { UsageError } from '../commands/errors.ts'
 import { ContentDriftError } from './snapshot/drift.ts'
 import { snapshot as writeSnapshot } from './snapshot/api.ts'
 import { checkDrift } from './snapshot/drift.ts'
@@ -62,7 +63,8 @@ import type { MountEntry } from './mount/mount.ts'
 import { MountRegistry } from './mount/registry.ts'
 import { handlePythonRepl } from './executor/python/handle.ts'
 import type { BridgeDispatchFn, MirageEntry } from './executor/python/mirage_bridge.ts'
-import { PyodideRuntime } from './executor/python/runtime.ts'
+import { selectPythonRuntime } from './executor/python/runtimes/select.ts'
+import type { PythonRuntime } from './executor/python/runtimes/interface.ts'
 import type { PythonReplRunResult } from './executor/python/types.ts'
 import { makeAbortError } from './abort.ts'
 import { Dispatcher } from './dispatcher.ts'
@@ -110,6 +112,8 @@ export interface WorkspaceOptions {
     bootstrapCode?: string
     denyPackages?: readonly string[]
   }
+  /** Python runtime for `python3`: 'pyodide' (default) or 'monty'. */
+  pythonRuntime?: string
 }
 
 export class ExecuteResult {
@@ -193,7 +197,7 @@ export class Workspace {
   private closed = false
   private readonly workspaceId: string = `ws-${String(Date.now())}-${Math.random().toString(36).slice(2, 10)}`
   private readonly closers: (() => Promise<void>)[] = []
-  private readonly pythonRuntime: PyodideRuntime
+  private readonly pythonRuntime: PythonRuntime
   // True when the workspace auto-added an empty `/` anchor (no user `/` mount).
   // The anchor is internal and is not forwarded into the Pyodide filesystem.
   private syntheticRootAnchor = false
@@ -224,9 +228,10 @@ export class Workspace {
     this.shellParserFactory = options.shellParserFactory ?? null
     this.agentId = options.agentId ?? DEFAULT_AGENT_ID
     const userPython = options.python ?? {}
-    this.pythonRuntime = new PyodideRuntime({
+    this.pythonRuntime = selectPythonRuntime(options.pythonRuntime, {
       ...userPython,
       workspaceBridge: this.buildWorkspaceBridge(),
+      listMounts: () => this.pythonVisibleMounts(),
     })
     this.closers.push(() => this.pythonRuntime.close())
     this.observer = new Observer(options.observe)
@@ -238,7 +243,7 @@ export class Workspace {
     // The file cache is a hidden store (attached above), never a mount. Arg-less
     // commands and root listing resolve against a neutral root anchor: reuse the
     // user's `/` mount if they gave one, else add a plain empty RAM mount at `/`.
-    // A synthetic anchor is mirage-internal and must NOT be forwarded to Pyodide,
+    // A synthetic anchor is internal to Mirage and must NOT be forwarded to Pyodide,
     // whose own `/` filesystem (holding the Python stdlib) would be hijacked.
     if (this.registry.rootMount === null) {
       this.registry.mount('/', new RAMResource(), options.mode ?? MountMode.READ)
@@ -281,11 +286,21 @@ export class Workspace {
         await this.observer.logOp(rec, this.agentId, this.sessionManager.defaultId)
       },
     )
+  }
+
+  /**
+   * Mount prefixes the Python runtime may see. Excludes the history view
+   * and a synthetic `/` anchor: Pyodide's own `/` filesystem holds the
+   * Python stdlib and must not be hijacked by an internal anchor.
+   */
+  private pythonVisibleMounts(): string[] {
+    const prefixes: string[] = []
     for (const m of this.registry.allMounts()) {
       if (m.prefix === HISTORY_PREFIX || m.prefix === HISTORY_PREFIX + '/') continue
       if (this.syntheticRootAnchor && m.prefix === '/') continue
-      void this.forwardAddMountToPython(m.prefix)
+      prefixes.push(m.prefix)
     }
+    return prefixes
   }
 
   /**
@@ -450,19 +465,7 @@ export class Workspace {
     if (resourceOps !== undefined) {
       for (const op of resourceOps) this.opsRegistry.register(op)
     }
-    void this.forwardAddMountToPython(prefix)
     return m
-  }
-
-  private async forwardAddMountToPython(prefix: string): Promise<void> {
-    try {
-      await this.pythonRuntime.addMount(prefix)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      console.warn(
-        `workspace: Python mount preload failed for ${prefix} — subsequent python3 reads under this prefix may return empty/missing files: ${msg}`,
-      )
-    }
   }
 
   /**
@@ -485,12 +488,6 @@ export class Workspace {
       throw new Error(`cannot unmount history view: ${HISTORY_PREFIX}`)
     }
     const removed = this.registry.unmount(prefix)
-    try {
-      await this.pythonRuntime.removeMount(prefix)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      console.warn(`workspace: failed to remove Python mount for ${prefix}: ${msg}`)
-    }
     const resource = removed.resource
     const stillMounted = this.registry.allMounts().some((m) => m.resource === resource)
     if (!stillMounted) {
@@ -846,11 +843,15 @@ export class Workspace {
         targetSession.lastExitCode = 124
         return new ExecuteResult(new Uint8Array(), msg, 124)
       }
+      if (err instanceof UsageError) {
+        const msg = new TextEncoder().encode(`${err.message}\n`)
+        targetSession.lastExitCode = err.exitCode
+        return new ExecuteResult(new Uint8Array(), msg, err.exitCode)
+      }
       // Abort (cancellation) and content drift are control-flow signals that
       // must propagate, mirroring the Python workspace. Any other execution
-      // failure (e.g. an unsupported shell construct like the arithmetic
-      // command `(( ... ))`) is surfaced as a failed command rather than
-      // crashing the caller.
+      // failure (an unsupported shell construct) is surfaced as a failed
+      // command rather than crashing the caller.
       if (err instanceof ContentDriftError) throw err
       if (err instanceof DOMException && err.name === 'AbortError') throw err
       const msg = new TextEncoder().encode(`${err instanceof Error ? err.message : String(err)}\n`)

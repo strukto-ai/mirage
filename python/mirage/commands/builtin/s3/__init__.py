@@ -20,7 +20,6 @@ from mirage.commands.builtin.s3._provision import \
 from mirage.commands.builtin.s3.du import du
 from mirage.commands.builtin.s3.mkdir import mkdir
 from mirage.commands.builtin.s3.rm import rm
-from mirage.commands.builtin.s3.sed import sed
 from mirage.commands.builtin.s3.stat import stat
 from mirage.commands.builtin.s3.tee import tee
 from mirage.commands.builtin.s3.touch import touch
@@ -80,7 +79,6 @@ COMMANDS = [
     du,
     mkdir,
     rm,
-    sed,
     stat,
     tee,
     touch,

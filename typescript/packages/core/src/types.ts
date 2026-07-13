@@ -230,7 +230,7 @@ export interface PathSpecInit {
   resourcePath: string
   pattern?: string | null
   resolved?: boolean
-  rawPath?: string | null
+  rawPath?: string
 }
 
 export class PathSpec {
@@ -239,7 +239,9 @@ export class PathSpec {
   readonly resourcePath: string
   readonly pattern: string | null
   readonly resolved: boolean
-  readonly rawPath: string | null
+  // The word's spelling: as typed for relative words, the absolute path
+  // for everything else (defaults to `virtual`).
+  readonly rawPath: string
 
   constructor(init: PathSpecInit) {
     this.virtual = init.virtual
@@ -247,15 +249,8 @@ export class PathSpec {
     this.resourcePath = init.resourcePath
     this.pattern = init.pattern ?? null
     this.resolved = init.resolved ?? true
-    this.rawPath = init.rawPath ?? null
+    this.rawPath = init.rawPath ?? init.virtual
     Object.freeze(this)
-  }
-
-  // The path as the user typed it, for rendering in output. Falls back to
-  // `virtual` (the resolved absolute path) when no raw form was recorded,
-  // e.g. for absolute arguments.
-  get display(): string {
-    return this.rawPath ?? this.virtual
   }
 
   // Mount-relative path with a leading slash. Pure formatting of
@@ -296,4 +291,12 @@ export class PathSpec {
       resourcePath: resourcePath ?? stripSlash(path),
     })
   }
+}
+
+// Shell-text form of an argv word. Text words pass through; paths render
+// as spelled (`rawPath`). Use wherever a word re-enters string space (env
+// values, function args, the argv text view). Mount I/O keeps using
+// `virtual`.
+export function wordText(word: string | PathSpec): string {
+  return word instanceof PathSpec ? word.rawPath : word
 }

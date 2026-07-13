@@ -16,6 +16,7 @@ import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
+import { materialize, type ByteSource } from '../../../io/types.ts'
 import type { CommandFn, CommandOpts } from '../../config.ts'
 import { rgGeneric } from './rg.ts'
 
@@ -98,8 +99,8 @@ async function run(
     stat,
     readdir,
     stream,
-  )) as [Uint8Array, unknown]
-  return DEC.decode(out)
+  )) as [ByteSource, unknown]
+  return DEC.decode(await materialize(out))
 }
 
 const fakeFiletypeFn = (() => {
@@ -129,5 +130,19 @@ describe('rgGeneric columnar skip', () => {
 
   it('skips columnar files in the filetype folder walk', async () => {
     expect(await run(['/d1'], {}, { parquet: fakeFiletypeFn })).toBe('/d1/a.txt:hello a\n')
+  })
+})
+
+describe('rgGeneric -H/-I filename labels', () => {
+  it('-H labels a single file like ripgrep --with-filename', async () => {
+    expect(await run(['/top1.txt'], { H: true })).toBe('/top1.txt:hello one\n')
+  })
+
+  it('-H labels a single-file count', async () => {
+    expect(await run(['/top1.txt'], { H: true, c: true })).toBe('/top1.txt:1\n')
+  })
+
+  it('-I suppresses multi-file labels like ripgrep --no-filename', async () => {
+    expect(await run(['/top1.txt', '/top2.txt'], { args_I: true })).toBe('hello one\nhello two\n')
   })
 })

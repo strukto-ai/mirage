@@ -23,7 +23,6 @@ import {
   databricksVolumeCopy,
   databricksVolumeCreate,
   databricksVolumeExists,
-  databricksVolumeFind,
   databricksVolumeMkdir,
   databricksVolumeRangeRead,
   databricksVolumeRead,
@@ -43,6 +42,7 @@ import {
   type RegisteredCommand,
   type RegisteredOp,
   type Resource,
+  walkFind,
 } from '@struktoai/mirage-core'
 import {
   redactDatabricksVolumeConfig,
@@ -77,7 +77,7 @@ async function resolveAuth(config: DatabricksVolumeConfig): Promise<[string, str
 export class DatabricksVolumeResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.DATABRICKS_VOLUME
   readonly cachesReads: boolean = true
-  readonly indexTtl: number = 600
+  override readonly indexTtl: number = 600
   readonly prompt: string = DATABRICKS_VOLUME_PROMPT
   readonly config: DatabricksVolumeConfig
   readonly accessor: DatabricksVolumeAccessor
@@ -192,7 +192,18 @@ export class DatabricksVolumeResource extends BaseResource implements Resource {
   }
 
   find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {
-    return databricksVolumeFind(this.accessor, p, options, this.index)
+    // Databricks readdir returns slash-less paths, so classification always
+    // falls back to stat (which the walker resolves via the index cache).
+    return walkFind(
+      p,
+      {
+        readdir: (spec, idx) => databricksVolumeReaddir(this.accessor, spec, idx),
+        stat: (spec, idx) => databricksVolumeStat(this.accessor, spec, idx),
+        isDirName: () => null,
+      },
+      options,
+      this.index,
+    )
   }
 
   glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {

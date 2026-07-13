@@ -13,75 +13,87 @@
       "description": "Add a custom header to the request.",
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-H",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": "Set the User-Agent header.",
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-A",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": "Specify the HTTP request method.",
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-X",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": "Send the given data as the request body.",
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-d",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": "Submit a multipart/form-data field.",
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-F",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": "Write response body to the given file.",
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-o",
-      "value_kind": "path"
+      "value_kind": "path",
+      "value_optional": false
     },
     {
       "description": "Follow HTTP redirects.",
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-L",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": "Run silently with no progress or messages.",
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-s",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": "Show errors even when silent.",
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-S",
-      "value_kind": "none"
-    },
-    {
-      "description": "Fetch via the Jina Reader proxy.",
-      "long": "--jina",
-      "numeric_shorthand": false,
-      "short": null,
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     }
   ],
   "positional": [],
   "rest": {
-    "kind": "text"
+    "kind": "text",
+    "provided_by": []
   }
 }

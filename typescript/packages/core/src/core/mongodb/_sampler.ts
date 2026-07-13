@@ -66,7 +66,7 @@ function isRegexLike(v: unknown): boolean {
   return (v as { _bsontype?: string })._bsontype === 'BSONRegExp'
 }
 
-export function scalarTag(v: unknown): string {
+function scalarTag(v: unknown): string {
   if (typeof v === 'boolean') return BsonTypeTag.BOOL
   if (isLongLike(v)) return BsonTypeTag.LONG
   if (typeof v === 'number') return Number.isInteger(v) ? BsonTypeTag.INT : BsonTypeTag.DOUBLE
@@ -81,7 +81,7 @@ export function scalarTag(v: unknown): string {
   return BsonTypeTag.UNKNOWN
 }
 
-export function arrayTag(items: readonly unknown[]): string {
+function arrayTag(items: readonly unknown[]): string {
   if (items.length === 0) return BsonTypeTag.ARRAY
   if (items.every((x) => typeof x === 'number' && Number.isFinite(x))) {
     return `array<${BsonTypeTag.DOUBLE}>(${String(items.length)})`

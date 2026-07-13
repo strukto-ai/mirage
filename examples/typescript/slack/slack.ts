@@ -353,26 +353,31 @@ async function main(): Promise<void> {
       throw new Error('regression: workspace-wide find returned no matches')
     }
 
-    // ── glob expansion (KNOWN LIMITATION: only single-segment globs
-    // are supported; multi-level patterns like `path/*/file` do not
-    // walk intermediate `*` segments today).
-    console.log(`\n=== echo ${base}/*/chat.jsonl (multi-level glob — limitation) ===`)
-    r = await ws.execute(`echo "${base}/"*/chat.jsonl`)
-    console.log(
-      `  out=${JSON.stringify(r.stdoutText.trim().slice(0, 200))}  (multi-level globs are not expanded today)`,
-    )
+    // ── glob expansion: mid-path segments walk like bash, so
+    // channels/*/<date>/chat.jsonl lists channels once, then each
+    // channel's dates, keeping only channels that have that day.
+    console.log(`\n=== echo /slack/channels/*/${dateDir}/chat.jsonl ===`)
+    r = await ws.execute(`echo /slack/channels/*/${dateDir}/chat.jsonl`)
+    const globOut = r.stdoutText.trim()
+    console.log(`  ${globOut.slice(0, 200)}`)
+    if (!globOut.includes('/chat.jsonl')) {
+      throw new Error('regression: mid-path glob did not expand')
+    }
 
-    console.log(`\n=== for f in ${base}/*/chat.jsonl (glob loop — limitation) ===`)
-    r = await ws.execute(
-      `for f in "${base}/"*/chat.jsonl; do echo found:$f; done | head -n 3`,
-    )
-    const loopOut = r.stdoutText.trim()
-    if (loopOut !== '') {
-      for (const line of loopOut.split('\n')) {
-        console.log(`  ${line.slice(0, 120)}`)
-      }
-    } else {
-      console.log('  (no output — multi-level glob limitation)')
+    console.log(`\n=== for f in ${base}/* (date glob loop) ===`)
+    r = await ws.execute(`for f in "${base}/"*; do echo found:$f; done | head -n 3`)
+    for (const line of r.stdoutText.trim().split('\n')) {
+      console.log(`  ${line.slice(0, 120)}`)
+    }
+
+    // A glob that matches nothing stays the literal word (bash with
+    // nullglob off), so the command reports it like GNU coreutils.
+    console.log('\n=== cat /slack/channels/zz-none-*/chat.jsonl (no match) ===')
+    r = await ws.execute('cat /slack/channels/zz-none-*/chat.jsonl')
+    const globErr = r.stderrText.trim()
+    console.log(`  exit=${r.exitCode}  ${globErr.slice(0, 120)}`)
+    if (r.exitCode !== 1 || !globErr.includes('zz-none-*')) {
+      throw new Error('regression: zero-match glob did not keep the literal')
     }
   } finally {
     await ws.close()

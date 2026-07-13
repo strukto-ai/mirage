@@ -26,9 +26,9 @@ async def test_resolve_glob_matches_directory_pattern(monkeypatch,
                                                       dify_accessor,
                                                       dify_index):
     monkeypatch.setattr(tree, "list_all_documents", list_nested_documents)
-    path = PathSpec(resource_path=mount_key("/knowledge/guides/*.md",
+    path = PathSpec(resource_path=mount_key("/knowledge/guides/quick*",
                                             "/knowledge"),
-                    virtual="/knowledge/guides/*.md",
+                    virtual="/knowledge/guides/quick*",
                     directory="/knowledge/guides",
                     pattern="quick*",
                     resolved=False)

@@ -105,6 +105,9 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         ...(Object.keys(commandSafeguards).length > 0 ? { commandSafeguards } : {}),
         ...(args.options.cache !== undefined ? { cache: args.options.cache } : {}),
         ...(args.options.index !== undefined ? { index: args.options.index } : {}),
+        ...(args.options.pythonRuntime !== undefined
+          ? { pythonRuntime: args.options.pythonRuntime }
+          : {}),
       })
       let entry
       try {

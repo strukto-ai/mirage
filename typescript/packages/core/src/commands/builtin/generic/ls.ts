@@ -14,7 +14,7 @@
 
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { FileType, PathSpec, type FileStat } from '../../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { formatLsLong } from '../utils/formatting.ts'
 import { gnuStrerror } from '../../../utils/errors.ts'
@@ -84,10 +84,23 @@ function sortStats(
 async function fileEntry(stat: Stat, path: PathSpec): Promise<FileStat | null> {
   try {
     const s = await stat(path)
-    return s.type !== FileType.DIRECTORY ? s : null
+    return s.type !== FileType.DIRECTORY ? asOperand(s, path) : null
   } catch {
     return null
   }
+}
+
+// GNU ls prints a file operand as given (`ls sub/x.txt` shows sub/x.txt,
+// not x.txt); the row carries the operand spelling.
+function asOperand(s: FileStat, path: PathSpec): FileStat {
+  return new FileStat({
+    name: path.rawPath,
+    size: s.size,
+    modified: s.modified,
+    fingerprint: s.fingerprint,
+    type: s.type,
+    extra: s.extra,
+  })
 }
 
 async function listDir(
@@ -118,7 +131,7 @@ async function walkGrouped(
     const msg =
       gnuStrerror((err as { code?: string }).code) ??
       (err instanceof Error ? err.message : String(err))
-    warnings.push(`ls: cannot access '${dir.display}': ${msg}`)
+    warnings.push(`ls: cannot access '${dir.rawPath}': ${msg}`)
     return
   }
   const sorted = sortStats(stats, opts.sortBy, opts.reverse)
@@ -172,12 +185,13 @@ export async function lsGeneric(
     const collected: FileStat[] = []
     for (const p of targets) {
       try {
-        collected.push(await stat(p))
+        // GNU ls -d prints the operand as given.
+        collected.push(asOperand(await stat(p), p))
       } catch (err) {
         const msg =
           gnuStrerror((err as { code?: string }).code) ??
           (err instanceof Error ? err.message : String(err))
-        warnings.push(`ls: cannot access '${p.display}': ${msg}`)
+        warnings.push(`ls: cannot access '${p.rawPath}': ${msg}`)
       }
     }
     appendListing(collected, long, human, classify, lines)
@@ -206,7 +220,7 @@ export async function lsGeneric(
           const b = rstripSlash(t.virtual)
           return dirSpec.virtual === b || dirSpec.virtual.startsWith(b + '/')
         }) ?? dirSpec
-      lines.push(`${rebaseOne(dirSpec.virtual, owner.virtual, owner.display)}:`)
+      lines.push(`${rebaseOne(dirSpec.virtual, owner.virtual, owner.rawPath)}:`)
       appendListing(entries, long, human, classify, lines)
     }
     const out: ByteSource = formatRecords(lines)
@@ -224,12 +238,12 @@ export async function lsGeneric(
       stats = await listDir(readdir, stat, p, all)
     } catch (err) {
       try {
-        stats = [await stat(p)]
+        stats = [asOperand(await stat(p), p)]
       } catch {
         const msg =
           gnuStrerror((err as { code?: string }).code) ??
           (err instanceof Error ? err.message : String(err))
-        warnings.push(`ls: cannot access '${p.display}': ${msg}`)
+        warnings.push(`ls: cannot access '${p.rawPath}': ${msg}`)
         continue
       }
     }

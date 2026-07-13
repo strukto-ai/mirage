@@ -13,12 +13,15 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-c",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     }
   ],
   "positional": [],
   "rest": {
-    "kind": "text"
+    "kind": "text",
+    "provided_by": []
   }
 }

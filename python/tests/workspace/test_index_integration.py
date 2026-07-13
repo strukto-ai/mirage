@@ -77,7 +77,7 @@ def test_ram_glob_populates_index():
     assert io.exit_code == 0
     # ttl=0: entries were set but expired by the time we check
     # Index now stores virtual paths (with mount prefix)
-    listing = _run(prov.index.list_dir("/data/sub/"))
+    listing = _run(prov.index.list_dir("/data/sub"))
     assert listing.status == LookupStatus.EXPIRED
 
 
@@ -159,7 +159,7 @@ def test_index_expired_refetches():
     ws = Workspace(resources={"/data/": (p, MountMode.WRITE)}, )
     ws.get_session(DEFAULT_SESSION_ID).cwd = "/data"
     _run(ws.execute("cat /data/sub/*.txt"))
-    listing = _run(p.index.list_dir("/data/sub/"))
+    listing = _run(p.index.list_dir("/data/sub"))
     # RAM ttl=0 → expired immediately after set
     expired = listing.status == LookupStatus.EXPIRED
     assert expired or listing.entries is not None

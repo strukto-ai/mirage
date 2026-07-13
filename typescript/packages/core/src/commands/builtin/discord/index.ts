@@ -20,19 +20,17 @@ import { DISCORD_ADD_REACTION } from './discord_add_reaction.ts'
 import { DISCORD_GET_SERVER_INFO } from './discord_get_server_info.ts'
 import { DISCORD_LIST_MEMBERS } from './discord_list_members.ts'
 import { DISCORD_SEND_MESSAGE } from './discord_send_message.ts'
-import { DISCORD_FIND } from './find.ts'
 import { DISCORD_GREP } from './grep.ts'
 import { DISCORD_HEAD } from './head.ts'
 import { DISCORD_CMD_OPS } from './ops.ts'
 import { DISCORD_RG } from './rg.ts'
 
-const DISCORD_OVERRIDES = new Set(['grep', 'rg', 'find', 'head'])
+const DISCORD_OVERRIDES = new Set(['grep', 'rg', 'head'])
 
 export const DISCORD_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<DiscordAccessor>(ResourceName.DISCORD, DISCORD_CMD_OPS, {
     overrides: DISCORD_OVERRIDES,
   }),
-  ...DISCORD_FIND,
   ...DISCORD_GREP,
   ...DISCORD_RG,
   ...DISCORD_HEAD,

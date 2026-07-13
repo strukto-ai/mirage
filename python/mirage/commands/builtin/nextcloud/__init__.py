@@ -18,7 +18,6 @@ from mirage.commands.builtin.generic_bind import (CommandIO,
 from mirage.commands.builtin.nextcloud._provision import \
     file_read_provision as _ft_provision
 from mirage.commands.builtin.nextcloud.du import du
-from mirage.commands.builtin.nextcloud.sed import sed
 from mirage.core.nextcloud.constants import SCOPE_ERROR
 from mirage.core.nextcloud.copy import copy as _copy
 from mirage.core.nextcloud.du import du as _du
@@ -58,7 +57,7 @@ _NEXTCLOUD_CMD_OPS = CommandIO(
     du_all=_du_all,
 )
 
-# sed has no generic builder; du keeps a wrapper because Nextcloud's du_all
+# du keeps a wrapper because Nextcloud's du_all
 # returns a flat list (du_multi contract) rather than the generic (list,
 # total) tuple, matching the s3 override.
 _NEXTCLOUD_OVERRIDES = {"du"}
@@ -72,5 +71,4 @@ COMMANDS = [
         overrides=_NEXTCLOUD_OVERRIDES,
     ),
     du,
-    sed,
 ]

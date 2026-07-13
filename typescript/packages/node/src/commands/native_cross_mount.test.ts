@@ -135,24 +135,40 @@ describe.each(CROSS_MOUNT_PAIRS)('native cross mount (%s -> %s)', (p1, p2) => {
     }
   })
 
-  it('no-aggregate cross fails', async () => {
+  it('md5 fans out across mounts', async () => {
     const env = makeCrossEnv([p1, p2])
     try {
       env.createFile(1, 'a.txt', ENC.encode('hello\n'))
       env.createFile(2, 'b.txt', ENC.encode('world\n'))
-      expect(await env.exit('md5 /m1/a.txt /m2/b.txt')).not.toBe(0)
+      const single = (await env.run('md5 /m1/a.txt')) + (await env.run('md5 /m2/b.txt'))
+      expect(await env.run('md5 /m1/a.txt /m2/b.txt')).toBe(single)
     } finally {
       await env.cleanup()
     }
   })
 
-  it('no-aggregate cross error message', async () => {
+  it('du fans out across mounts', async () => {
+    const env = makeCrossEnv([p1, p2])
+    try {
+      env.createFile(1, 'a.txt', ENC.encode('hello\n'))
+      env.createFile(2, 'b.txt', ENC.encode('world!!\n'))
+      const out = await env.run('du -c /m1/a.txt /m2/b.txt')
+      expect(out).toContain('6\t/m1/a.txt')
+      expect(out).toContain('8\t/m2/b.txt')
+      expect(out).toContain('14\ttotal')
+    } finally {
+      await env.cleanup()
+    }
+  })
+
+  it('file fans out across mounts', async () => {
     const env = makeCrossEnv([p1, p2])
     try {
       env.createFile(1, 'a.txt', ENC.encode('hello\n'))
       env.createFile(2, 'b.txt', ENC.encode('world\n'))
-      const stderr = await env.stderr('md5 /m1/a.txt /m2/b.txt')
-      expect(stderr.includes('/m1') || stderr.includes('/m2')).toBe(true)
+      const out = await env.run('file /m1/a.txt /m2/b.txt')
+      expect(out).toContain('/m1/a.txt:')
+      expect(out).toContain('/m2/b.txt:')
     } finally {
       await env.cleanup()
     }

@@ -29,9 +29,30 @@ vi.mock('./stat.ts', async () => {
 import { GDocsAccessor } from '../../accessor/gdocs.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { TokenManager } from '../google/_client.ts'
-import { find } from './find.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { FindOptions } from '../../resource/base.ts'
+import { walkFind } from '../generic/find.ts'
+import { isDirName } from './readdir.ts'
 import * as readdirMod from './readdir.ts'
 import * as statMod from './stat.ts'
+
+async function find(
+  accessor: GDocsAccessor,
+  path: PathSpec,
+  options: FindOptions = {},
+  index?: IndexCacheStore,
+): Promise<string[]> {
+  return walkFind(
+    path,
+    {
+      readdir: (spec, idx) => readdirMod.readdir(accessor, spec, idx),
+      stat: (spec, idx) => statMod.stat(accessor, spec, idx),
+      isDirName: (child) => isDirName(child),
+    },
+    options,
+    index,
+  )
+}
 
 const STUB_TM = {} as TokenManager
 
@@ -101,9 +122,9 @@ describe('gdocs core find', () => {
     expect(vi.mocked(statMod.stat)).not.toHaveBeenCalled()
   })
 
-  it('treats a null size as 0 for size filters and lets dirs pass', async () => {
+  it('treats a null size as 0 for size filters, dirs contribute 0 too', async () => {
     const out = await find(makeAccessor(), ROOT, { minSize: 1024 })
-    expect(out).toEqual(['/owned', '/owned/Big__d2.gdoc.json', '/shared'])
+    expect(out).toEqual(['/owned/Big__d2.gdoc.json'])
   })
 
   it('filters by mtime, excluding dirs without a modified time', async () => {

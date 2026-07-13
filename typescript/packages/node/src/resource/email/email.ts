@@ -41,7 +41,7 @@ export interface EmailResourceState {
 export class EmailResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.EMAIL
   readonly cachesReads: boolean = true
-  readonly indexTtl: number = 86_400
+  override readonly indexTtl: number = 86_400
   readonly prompt: string = EMAIL_PROMPT
   readonly config: EmailConfig
   readonly accessor: EmailAccessor

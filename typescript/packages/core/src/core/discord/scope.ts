@@ -16,7 +16,7 @@ import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 
-export type DiscordLevel =
+type DiscordLevel =
   | 'root'
   | 'guild'
   | 'channel'

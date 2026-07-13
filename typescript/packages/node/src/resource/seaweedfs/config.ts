@@ -35,7 +35,7 @@ export interface SeaweedFSConfigRedacted {
   timeoutMs?: number
 }
 
-export const SeaweedFSConfigSchema = z.object({
+const SeaweedFSConfigSchema = z.object({
   bucket: z.string(),
   endpoint: z.string(),
   accessKeyId: secretStr(),

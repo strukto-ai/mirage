@@ -81,3 +81,13 @@ export async function readdir(
 
   throw enoent(spec.virtual)
 }
+
+export function isDirName(child: string, config: QdrantAccessor['config']): boolean {
+  // Row files are recognized by extension, so classification never
+  // needs the stat fallback.
+  const name = child.split('/').pop() ?? ''
+  if (name.endsWith('.json')) return false
+  if (config.textField !== null && name.endsWith('.txt')) return false
+  if (config.blobField !== null && name.endsWith(`.${config.blobExt}`)) return false
+  return true
+}

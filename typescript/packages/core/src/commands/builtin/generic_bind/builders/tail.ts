@@ -14,7 +14,7 @@
 
 import { headerAggregate } from '../../aggregators.ts'
 import { tailGeneric } from '../../generic/tail.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { type Builder, dirAwareStream, resolveGlobOf } from '../adapter.ts'
 
 export const TAIL_BUILDER: Builder = {
   name: 'tail',
@@ -23,6 +23,6 @@ export const TAIL_BUILDER: Builder = {
   fn: async (ops, accessor, paths, texts, opts) => {
     const idx = opts.index ?? undefined
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return tailGeneric(resolved, texts, opts, (p) => ops.readStream(accessor, p, idx))
+    return tailGeneric(resolved, texts, opts, dirAwareStream(ops, accessor, idx))
   },
 }

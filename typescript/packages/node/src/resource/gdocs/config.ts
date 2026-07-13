@@ -27,7 +27,7 @@ export interface GDocsConfigRedacted {
   refreshToken: '<REDACTED>'
 }
 
-export const GDocsConfigSchema = z.object({
+const GDocsConfigSchema = z.object({
   clientId: z.string(),
   clientSecret: secretStr(),
   refreshToken: secretStr(),

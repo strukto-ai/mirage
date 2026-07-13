@@ -26,7 +26,7 @@ config = GitHubConfig(token=os.environ["GITHUB_TOKEN"])
 resource = GitHubResource(
     config=config,
     owner="strukto-ai",
-    repo="mirage-internal",
+    repo="mirage",
     ref="main",
 )
 

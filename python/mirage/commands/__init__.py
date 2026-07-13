@@ -15,7 +15,6 @@
 from typing import Callable
 
 from mirage.commands.builtin.ram import COMMANDS as _RAM_COMMANDS
-from mirage.commands.spec import _resolve
 
 _BY_NAME: dict[str, Callable] = {}
 for _fn in _RAM_COMMANDS:
@@ -30,4 +29,4 @@ _GENERAL_NAMES = ("ls", "stat", "find", "tree", "du", "cat", "head", "tail",
 
 COMMANDS: dict[str, Callable] = {n: _BY_NAME[n] for n in _GENERAL_NAMES}
 
-__all__ = ["COMMANDS", "_resolve"]
+__all__ = ["COMMANDS"]

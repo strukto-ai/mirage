@@ -14,6 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 import type { Accessor } from '../../../accessor/base.ts'
+import { IndexEntry } from '../../../cache/index/config.ts'
+import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import type { ProvisionResult } from '../../../provision/types.ts'
 import { Precision } from '../../../provision/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
@@ -21,6 +23,8 @@ import { mountKey } from '../../../utils/key_prefix.ts'
 import type { CommandOpts } from '../../config.ts'
 import { RAM_COMMANDS } from '../ram/index.ts'
 import {
+  exactZeroProvision,
+  indexHitReadProvision,
   MAX_PLAN_WALK,
   defaultProvision,
   makeCopyProvision,
@@ -291,5 +295,40 @@ describe('glob and recursive estimates', () => {
 
   it('exports a walk cap', () => {
     expect(MAX_PLAN_WALK).toBeGreaterThan(0)
+  })
+})
+
+describe('chat/KB provision helpers', () => {
+  it('exactZeroProvision charges nothing', () => {
+    const result = exactZeroProvision(null as unknown as Accessor, [], [], opts('find /chat'))
+    expect(result.command).toBe('find /chat')
+    expect(result.networkReadHigh).toBe(0)
+    expect(result.readOps).toBe(0)
+    expect(result.precision).toBe(Precision.EXACT)
+  })
+
+  it('indexHitReadProvision counts cached operands', async () => {
+    const index = new RAMIndexCacheStore()
+    await index.put(
+      '/chat/a.jsonl',
+      new IndexEntry({ id: 'a', name: 'a.jsonl', resourceType: 'file' }),
+    )
+    const paths = [
+      PathSpec.fromStrPath('/chat/a.jsonl'),
+      PathSpec.fromStrPath('/chat/missing.jsonl'),
+    ]
+    const result = await indexHitReadProvision(null as unknown as Accessor, paths, [], {
+      command: 'cat',
+      flags: {},
+      index,
+    } as unknown as CommandOpts)
+    expect(result.readOps).toBe(1)
+    expect(result.networkReadHigh).toBe(0)
+    expect(result.precision).toBe(Precision.EXACT)
+  })
+
+  it('indexHitReadProvision without paths is unknown', async () => {
+    const result = await indexHitReadProvision(null as unknown as Accessor, [], [], opts('grep x'))
+    expect(result.precision).toBe(Precision.UNKNOWN)
   })
 })

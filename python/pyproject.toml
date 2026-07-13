@@ -58,7 +58,7 @@ Documentation = "https://docs.mirage.strukto.ai"
 Issues = "https://github.com/strukto-ai/mirage/issues"
 
 [project.scripts]
-mirage = "mirage.cli.main:app"
+mirage = "mirage.cli.main:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -68,6 +68,9 @@ build-backend = "setuptools.build_meta"
 include = ["mirage*"]
 
 [project.optional-dependencies]
+# --- python runtime (sandboxed python3 default) ---
+monty    = ["pydantic-monty>=0.0.18"]
+
 # --- storage / object stores ---
 s3       = ["aioboto3>=13.0"]
 r2       = ["aioboto3>=13.0"]

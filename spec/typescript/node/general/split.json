@@ -2,9 +2,10 @@
   "_meta": {
     "filetypes": [],
     "has_aggregate": false,
-    "has_provision": false,
+    "has_provision": true,
     "has_write": true,
     "resources": [
+      "databricks_volume",
       "disk",
       "hf_buckets",
       "hf_datasets",
@@ -23,40 +24,57 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-l",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-b",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-n",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-d",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-a",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     }
   ],
-  "positional": [],
-  "rest": {
-    "kind": "path"
-  }
+  "positional": [
+    {
+      "kind": "path",
+      "provided_by": []
+    },
+    {
+      "kind": "path",
+      "provided_by": []
+    }
+  ],
+  "rest": null
 }

@@ -15,7 +15,7 @@
 import type { EventDict } from '../../observe/observer.ts'
 import { EVENT_COMMAND } from '../../observe/log_entry.ts'
 
-export const HISTSIZE = 500
+const HISTSIZE = 500
 
 /**
  * Render command events as a GNU bash histfile: one `#<epoch-seconds>`

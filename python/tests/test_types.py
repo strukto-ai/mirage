@@ -15,7 +15,8 @@
 import pytest
 from pydantic import ValidationError
 
-from mirage.types import Aggr, CommandSafeguard, FileStat, OnExceed, PathSpec
+from mirage.types import (Aggr, CommandSafeguard, FileStat, OnExceed, PathSpec,
+                          word_text)
 
 
 def test_filestat_defaults():
@@ -92,19 +93,31 @@ def test_pathspec_requires_resource_path():
         PathSpec(virtual="/x.txt", directory="/")
 
 
-def test_pathspec_display_prefers_raw_path():
+def test_pathspec_raw_path_kept_when_given():
     p = PathSpec(virtual="/data/a.txt",
                  directory="/data/",
                  resource_path="a.txt",
                  raw_path="../a.txt")
-    assert p.display == "../a.txt"
+    assert p.raw_path == "../a.txt"
 
 
-def test_pathspec_display_falls_back_to_virtual():
+def test_pathspec_raw_path_defaults_to_virtual():
     p = PathSpec(virtual="/data/a.txt",
                  directory="/data/",
                  resource_path="a.txt")
-    assert p.display == "/data/a.txt"
+    assert p.raw_path == "/data/a.txt"
+
+
+def test_word_text_passes_strings_through():
+    assert word_text("plain") == "plain"
+
+
+def test_word_text_renders_paths_as_typed():
+    p = PathSpec(virtual="/data/a.txt",
+                 directory="/data/",
+                 resource_path="a.txt",
+                 raw_path="a.txt")
+    assert word_text(p) == "a.txt"
 
 
 def test_pathspec_dir_trims_resource_path():

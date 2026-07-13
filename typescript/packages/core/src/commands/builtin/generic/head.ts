@@ -17,6 +17,7 @@ import { IOResult } from '../../../io/types.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { numberFlagError } from '../tail_helper.ts'
+import { splitReadable } from '../utils/operands.ts'
 import { resolveSource } from '../utils/stream.ts'
 
 const ENC = new TextEncoder()
@@ -116,13 +117,14 @@ async function* headMulti(
   paths: readonly PathSpec[],
   lines: number,
   bytesMode: number | null,
+  showHeaders: boolean,
 ): AsyncIterable<Uint8Array> {
   for (let i = 0; i < paths.length; i++) {
     const p = paths[i]
     if (p === undefined) continue
-    if (paths.length > 1) {
+    if (showHeaders) {
       const prefix = i > 0 ? '\n' : ''
-      yield ENC.encode(`${prefix}==> ${p.display} <==\n`)
+      yield ENC.encode(`${prefix}==> ${p.rawPath} <==\n`)
     }
     const source = stream(p)
     for await (const chunk of headStream(source, lines, bytesMode)) yield chunk
@@ -144,8 +146,14 @@ export async function headGeneric(
   const lineCount = nRaw !== null ? Number.parseInt(nRaw, 10) : 10
   const byteCount = cRaw !== null ? Number.parseInt(cRaw, 10) : null
   if (paths.length > 0) {
-    for (const p of paths) await stat(p)
-    return [headMulti(stream, paths, lineCount, byteCount), new IOResult()]
+    const showHeaders = (opts.flags.v === true || paths.length > 1) && opts.flags.q !== true
+    const [readable, err] = await splitReadable(paths, stat, 'head')
+    const io = new IOResult({
+      exitCode: err === '' ? 0 : 1,
+      stderr: err === '' ? null : ENC.encode(err),
+    })
+    if (readable.length === 0) return [null, io]
+    return [headMulti(stream, readable, lineCount, byteCount, showHeaders), io]
   }
   try {
     const source = resolveSource(opts.stdin, 'head: missing operand')

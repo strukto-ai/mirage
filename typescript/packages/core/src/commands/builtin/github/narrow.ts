@@ -20,7 +20,7 @@ import { countScopeFiles, scopeRelativeKey, shouldUseSearch } from '../../../cor
 import { narrowPaths } from '../../../core/github/search.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import { rebaseDisplay } from '../../../utils/path.ts'
+import { rebaseRaw } from '../../../utils/path.ts'
 import { formatRecords } from '../utils/output.ts'
 import { classifyPattern, PatternType, searchQuery } from '../grep_helper.ts'
 
@@ -96,6 +96,6 @@ export function filesOnlyShortcircuit(
     .filter((p) => pathPredicate === undefined || pathPredicate(p.virtual))
     .map((p) => p.virtual)
   if (hits.length === 0) return [new Uint8Array(), new IOResult({ exitCode: 1 })]
-  const displays = rebaseDisplay(hits, scope.virtual, scope.display)
-  return [formatRecords([...displays].sort()), new IOResult()]
+  const spelled = rebaseRaw(hits, scope.virtual, scope.rawPath)
+  return [formatRecords([...spelled].sort()), new IOResult()]
 }

@@ -401,3 +401,45 @@ async def test_readdir_date_dir_without_attachments_omits_dir(accessor, index):
     assert date_listing == [
         "/gmail/INBOX/2026-04-27/No_Attach__m1.gmail.json",
     ]
+
+
+@pytest.mark.asyncio
+async def test_readdir_message_entry_size_none_estimate_in_extra(
+        accessor, index):
+    raw = _msg_stub("m1", "Sized", 1777291200000)
+    raw["sizeEstimate"] = 54321
+
+    async def fake_get_message_raw(_tm, mid):
+        return raw
+
+    async def fake_list_messages(_tm,
+                                 label_id=None,
+                                 query=None,
+                                 max_results=50):
+        return [{"id": "m1"}]
+
+    with (
+            patch("mirage.core.gmail.readdir.list_labels",
+                  new_callable=AsyncMock,
+                  return_value=[{
+                      "id": "INBOX",
+                      "type": "system"
+                  }]),
+            patch("mirage.core.gmail.readdir.list_messages",
+                  new=fake_list_messages),
+            patch("mirage.core.gmail.readdir.get_message_raw",
+                  new=fake_get_message_raw),
+    ):
+        await readdir(
+            accessor,
+            PathSpec(resource_path=mount_key("/gmail/INBOX/2026-04-27",
+                                             "/gmail"),
+                     virtual="/gmail/INBOX/2026-04-27",
+                     directory="/gmail/INBOX/2026-04-27"), index)
+
+    result = await index.get("/gmail/INBOX/2026-04-27/Sized__m1.gmail.json")
+    assert result.entry is not None
+    # sizeEstimate is the source message size, not the rendered
+    # .gmail.json length: it must land in extra, never in size.
+    assert result.entry.size is None
+    assert result.entry.extra["size_estimate"] == 54321

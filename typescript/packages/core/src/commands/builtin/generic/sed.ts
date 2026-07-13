@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
+import { fsErrorLine, isFsError } from '../../../utils/errors.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -79,6 +80,10 @@ export async function sedGeneric(
     !suppress
 
   if (paths.length > 0) {
+    // A failed operand is skipped and reported, and the remaining operands
+    // still process, per GNU sed (which keeps going on a missing file; the
+    // repo exits 1 where GNU exits 2).
+    let err = ''
     if (isSimpleSub) {
       // Run the substitution through the per-line engine rather than a single
       // whole-buffer `text.replace`: `^`/`$` must anchor per line and a
@@ -87,46 +92,94 @@ export async function sedGeneric(
       // touches the first match overall. See issue #326.
       if (inPlace) {
         const writes: Record<string, Uint8Array> = {}
+        const edited: string[] = []
         for (const p of paths) {
-          const data = await materialize(stream(p))
+          let data: Uint8Array
+          try {
+            data = await materialize(stream(p))
+          } catch (e) {
+            if (!isFsError(e)) throw e
+            err += fsErrorLine('sed', p, e)
+            continue
+          }
           const text = DEC.decode(data)
           const newText = executeProgram(text, commands, false, extended)
           const newData = ENC.encode(newText)
           await write(p, newData)
           writes[p.mountPath] = newData
+          edited.push(p.mountPath)
         }
-        return [null, new IOResult({ writes, cache: paths.map((p) => p.mountPath) })]
+        return [
+          null,
+          new IOResult({
+            writes,
+            cache: edited,
+            exitCode: err === '' ? 0 : 1,
+            stderr: err === '' ? null : ENC.encode(err),
+          }),
+        ]
       }
       const outputs: string[] = []
+      const readOk: string[] = []
       for (const p of paths) {
-        const data = await materialize(stream(p))
+        let data: Uint8Array
+        try {
+          data = await materialize(stream(p))
+        } catch (e) {
+          if (!isFsError(e)) throw e
+          err += fsErrorLine('sed', p, e)
+          continue
+        }
         const text = DEC.decode(data)
         outputs.push(executeProgram(text, commands, false, extended))
+        readOk.push(p.mountPath)
       }
       const out: ByteSource = ENC.encode(outputs.join(''))
-      return [out, new IOResult({ cache: paths.map((p) => p.mountPath) })]
+      return [
+        out,
+        new IOResult({
+          cache: readOk,
+          exitCode: err === '' ? 0 : 1,
+          stderr: err === '' ? null : ENC.encode(err),
+        }),
+      ]
     }
 
     const modifying = inPlace && commands.some((c) => c.cmd === 's' || c.cmd === 'd')
     const allOutputs: string[] = []
     const writes: Record<string, Uint8Array> = {}
+    const edited: string[] = []
     for (const p of paths) {
-      const data = await materialize(stream(p))
+      let data: Uint8Array
+      try {
+        data = await materialize(stream(p))
+      } catch (e) {
+        if (!isFsError(e)) throw e
+        err += fsErrorLine('sed', p, e)
+        continue
+      }
       const text = DEC.decode(data)
       const result = executeProgram(text, commands, suppress, extended)
       if (modifying) {
         const newData = ENC.encode(result)
         await write(p, newData)
         writes[p.mountPath] = newData
+        edited.push(p.mountPath)
       } else {
         allOutputs.push(result)
       }
     }
+    const io = new IOResult({
+      exitCode: err === '' ? 0 : 1,
+      stderr: err === '' ? null : ENC.encode(err),
+    })
     if (modifying) {
-      return [null, new IOResult({ writes, cache: paths.map((p) => p.mountPath) })]
+      io.writes = writes
+      io.cache = edited
+      return [null, io]
     }
     const out: ByteSource = ENC.encode(allOutputs.join('\n'))
-    return [out, new IOResult()]
+    return [out, io]
   }
 
   const raw = await readStdinAsync(opts.stdin)

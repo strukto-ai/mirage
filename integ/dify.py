@@ -20,7 +20,7 @@ from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
-from cases import run_not_found, run_provision_probe
+from cases import run_not_found, run_provision_probe, run_sed_readonly_probe
 
 from mirage import MountMode, Workspace
 from mirage.resource.dify import DifyConfig, DifyResource
@@ -224,7 +224,12 @@ PER_MOUNT_CASES: list[tuple[str, str]] = [
     ("find_type_f", "find {root} -type f | sort"),
     ("find_root_maxdepth0", "find {root} -maxdepth 0"),
     ("find_root_name", "find {root} -name knowledge"),
+    # Documents are sizeless (the API only knows the uploaded source size,
+    # kept in extra.source_size): stat prints 0 and -size counts them as 0,
+    # while content commands (cat/wc -c) see the real rendered bytes.
     ("stat_fmt", "stat -c '%s %n' {root}guides/auth"),
+    ("find_size_plus_1c", "find {root} -type f -size +1c"),
+    ("find_size_under_1k", "find {root} -type f -size -1k | sort"),
     ("cat_auth", "cat {root}guides/auth"),
     ("head_1", "head -n 1 {root}guides/quickstart"),
     ("tail_1", "tail -n 1 {root}guides/quickstart"),
@@ -332,6 +337,7 @@ async def main() -> None:
             await _warm_read(base_url, name, tmpl)
         await run_not_found(ws, MOUNT)
         await run_provision_probe(ws, f"{MOUNT}guides/auth")
+        await run_sed_readonly_probe(ws, f"{MOUNT}guides/auth")
     finally:
         server.shutdown()
 

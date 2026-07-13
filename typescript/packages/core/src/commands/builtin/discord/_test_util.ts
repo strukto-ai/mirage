@@ -144,24 +144,3 @@ export async function seedChannel(
     }
   }
 }
-
-export async function seedMember(
-  index: RAMIndexCacheStore,
-  prefix: string,
-  guildDirname: string,
-  memberFilename: string,
-  memberId: string,
-): Promise<void> {
-  const membersKey = `${prefix}/${guildDirname}/members`
-  await index.setDir(membersKey, [
-    [
-      memberFilename,
-      new IndexEntry({
-        id: memberId,
-        name: memberFilename.split('__')[0] ?? memberFilename,
-        resourceType: 'discord/member',
-        vfsName: memberFilename,
-      }),
-    ],
-  ])
-}

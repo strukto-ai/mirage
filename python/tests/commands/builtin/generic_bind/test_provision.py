@@ -14,10 +14,13 @@
 
 import pytest
 
+from mirage.cache.index import IndexEntry
+from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.generic_bind.provision import (
-    default_provision, make_copy_provision, make_file_read_provision,
-    make_head_tail_provision, make_search_provision, make_transform_provision,
-    metadata_provision, pure_provision, write_metadata_provision)
+    default_provision, exact_zero_provision, index_hit_read_provision,
+    make_copy_provision, make_file_read_provision, make_head_tail_provision,
+    make_search_provision, make_transform_provision, metadata_provision,
+    pure_provision, write_metadata_provision)
 from mirage.commands.builtin.ram import COMMANDS as RAM_COMMANDS
 from mirage.provision import Precision
 from mirage.types import FileStat, FileType, PathSpec
@@ -256,4 +259,39 @@ async def test_search_recursive_cap_degrades(monkeypatch):
                              "x",
                              command="grep",
                              r=True)
+    assert result.precision == Precision.UNKNOWN
+
+
+@pytest.mark.asyncio
+async def test_exact_zero_provision_charges_nothing():
+    result = await exact_zero_provision("find /chat")
+    assert result.command == "find /chat"
+    assert result.network_read_low == 0
+    assert result.network_read_high == 0
+    assert result.read_ops == 0
+    assert result.precision == Precision.EXACT
+
+
+@pytest.mark.asyncio
+async def test_index_hit_read_provision_counts_cached_operands():
+    index = RAMIndexCacheStore()
+    await index.put("/chat/a.jsonl",
+                    IndexEntry(id="a", name="a.jsonl", resource_type="file"))
+    paths = [
+        PathSpec(virtual="/chat/a.jsonl",
+                 directory="/chat",
+                 resource_path="a.jsonl"),
+        PathSpec(virtual="/chat/missing.jsonl",
+                 directory="/chat",
+                 resource_path="missing.jsonl"),
+    ]
+    result = await index_hit_read_provision(None, paths, "cat", index)
+    assert result.read_ops == 1
+    assert result.network_read_low == 0
+    assert result.precision == Precision.EXACT
+
+
+@pytest.mark.asyncio
+async def test_index_hit_read_provision_without_paths_is_unknown():
+    result = await index_hit_read_provision(None, [], "grep x", None)
     assert result.precision == Precision.UNKNOWN

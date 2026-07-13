@@ -12,9 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
-from mirage.commands.builtin.linear.find import find
 from mirage.commands.builtin.linear.linear_issue_add_label import \
     linear_issue_add_label
 from mirage.commands.builtin.linear.linear_issue_assign import \
@@ -34,34 +35,30 @@ from mirage.commands.builtin.linear.linear_issue_transition import \
 from mirage.commands.builtin.linear.linear_issue_update import \
     linear_issue_update
 from mirage.commands.builtin.linear.linear_search import linear_search
+from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.core.linear.read import read as _read
 from mirage.core.linear.readdir import readdir as _readdir
 from mirage.core.linear.stat import stat as _stat
-from mirage.core.linear.stream import read_stream as _read_stream
 
-# Linear issues/projects/teams are read through the generic factory; find keeps
-# a wrapper for its bespoke readdir-walk filtering, and the linear_issue_* and
+# Linear issues/projects/teams are read through the generic factory (find
+# included); the linear_issue_* and
 # linear_search commands are the bespoke write/search surface. The generic
 # byte-mutation commands are intentionally absent (mutations go through the
 # platform commands, no write op wired).
 _LINEAR_CMD_OPS = CommandIO(
     readdir=_readdir,
     read_bytes=_read,
-    read_stream=_read_stream,
+    read_stream=partial(stream_from_bytes, _read),
     stat=_stat,
     is_mounted=lambda a: True,
     local=False,
 )
 
-_LINEAR_OVERRIDES = {"find"}
-
 COMMANDS = [
     *make_generic_commands(
         "linear",
         _LINEAR_CMD_OPS,
-        overrides=_LINEAR_OVERRIDES,
     ),
-    find,
     linear_issue_add_label,
     linear_issue_assign,
     linear_issue_comment_add,

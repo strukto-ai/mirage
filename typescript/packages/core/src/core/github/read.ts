@@ -53,10 +53,6 @@ export async function read(
   return fetchBlob(accessor.transport, accessor.owner, accessor.repo, result.entry.id)
 }
 
-export async function readBytes(accessor: GitHubAccessor, sha: string): Promise<Uint8Array> {
-  return fetchBlob(accessor.transport, accessor.owner, accessor.repo, sha)
-}
-
 export async function* stream(
   accessor: GitHubAccessor,
   path: PathSpec,

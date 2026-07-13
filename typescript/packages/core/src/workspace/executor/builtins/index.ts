@@ -12,11 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export type { ExecuteStringFn, Result } from './scope.ts'
-export { scopePath, toScope } from './scope.ts'
+export type { ExecuteStringFn } from './scope.ts'
+
 export { handleCd } from './dirs.ts'
 export {
-  NO_FOLLOW_COMMANDS,
   followPaths,
   handleLn,
   handleReadlink,
@@ -41,4 +40,6 @@ export { handleMan } from './man.ts'
 export { handleHistory } from './history.ts'
 export { handleBash, handleEval, handleSleep, handleSource } from './script.ts'
 export { handleTest } from './condition.ts'
+export { handleTimeout } from './timeout.ts'
+export { handleXargs } from './xargs.ts'
 export { handleEcho, handlePrintf } from './text.ts'

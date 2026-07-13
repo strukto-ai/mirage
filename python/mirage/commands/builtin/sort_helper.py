@@ -67,11 +67,16 @@ def _sort_key(
     human_numeric: bool = False,
     version: bool = False,
     month: bool = False,
+    strip_blanks: bool = False,
 ) -> object:
     if key_field is not None:
         sep = field_sep if field_sep else None
         parts = line.split(sep)
         field = parts[key_field - 1] if key_field - 1 < len(parts) else ""
+        # GNU -b: ignore the key field's leading blanks; the default
+        # whitespace separator already strips them, -t does not.
+        if strip_blanks:
+            field = field.lstrip(" \t")
     else:
         field = line
     if ignore_case:

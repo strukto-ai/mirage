@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { readStdinAsync } from '../utils/stream.ts'
+import { operandsIo, readOperands } from '../utils/operands.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -56,15 +57,20 @@ export async function foldGeneric(
   const width = typeof opts.flags.w === 'string' ? Number.parseInt(opts.flags.w, 10) : 80
   const breakSpaces = opts.flags.s === true
   if (paths.length > 0) {
+    // A missing operand is reported and skipped; the remaining operands
+    // still fold (GNU fold).
+    const [ok, err] = await readOperands(paths, stream, 'fold')
+    const io = operandsIo(err)
+    if (ok.length === 0 && err !== '') return [null, io]
     const allLines: string[] = []
-    for (const p of paths) {
-      const data = DEC.decode(await materialize(stream(p)))
+    for (const o of ok) {
+      const data = DEC.decode(o.data)
       for (const line of splitLinesNoTrailing(data)) {
         allLines.push(foldLine(line, width, breakSpaces))
       }
     }
     const result: ByteSource = ENC.encode(allLines.join('\n') + '\n')
-    return [result, new IOResult()]
+    return [result, io]
   }
   const stdinData = await readStdinAsync(opts.stdin)
   if (stdinData === null) {

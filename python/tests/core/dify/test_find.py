@@ -56,12 +56,22 @@ async def test_find_filters_name_type_size_and_depth(monkeypatch,
                                   index=dify_index)
     assert directories == ["/", "/guides", "/guides/deep"]
 
+    # Documents are sizeless (the API only knows the uploaded source size,
+    # kept in extra), so -size treats them as 0: +100c matches nothing and
+    # an upper bound keeps them.
     large_files = await find.find(dify_accessor,
                                   knowledge_root,
                                   type=FindType.FILE,
                                   min_size=100,
                                   index=dify_index)
-    assert large_files == ["/guides/quickstart"]
+    assert large_files == []
+
+    small_files = await find.find(dify_accessor,
+                                  knowledge_root,
+                                  type=FindType.FILE,
+                                  max_size=0,
+                                  index=dify_index)
+    assert "/guides/quickstart" in small_files
 
     deep = await find.find(dify_accessor,
                            knowledge_root,

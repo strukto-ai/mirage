@@ -72,7 +72,9 @@ def _find_sync(
                         exists=True,
                         tree=tree,
                         maxdepth=maxdepth,
-                        mindepth=mindepth)
+                        mindepth=mindepth,
+                        min_size=min_size,
+                        max_size=max_size)
 
     for dirpath, dirnames, filenames in os.walk(p):
         dp = Path(dirpath)
@@ -117,14 +119,19 @@ def _find_sync(
             if not keep(entry, tree, mindepth):
                 continue
 
-            if kind == "f" and (min_size is not None or max_size is not None):
-                try:
-                    st = full.stat()
-                except OSError:
+            # Directories count as size 0 for -size (deliberate GNU
+            # divergence).
+            if min_size is not None or max_size is not None:
+                if kind == "f":
+                    try:
+                        size = full.stat().st_size
+                    except OSError:
+                        continue
+                else:
+                    size = 0
+                if min_size is not None and size < min_size:
                     continue
-                if min_size is not None and st.st_size < min_size:
-                    continue
-                if max_size is not None and st.st_size > max_size:
+                if max_size is not None and size > max_size:
                     continue
 
             if mtime_min is not None or mtime_max is not None:

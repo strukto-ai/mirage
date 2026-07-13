@@ -51,6 +51,14 @@ class Ops:
                 self._registry.register(ro)
         self.records: list[OpRecord] = []
 
+    def mount_prefixes(self) -> list[str]:
+        """Return the mount prefixes in resolution order.
+
+        Returns:
+            list[str]: mount prefixes, longest first.
+        """
+        return [m.prefix for m in self._mounts]
+
     def register_op(self, fn) -> None:
         if hasattr(fn, "_registered_ops"):
             for ro in fn._registered_ops:

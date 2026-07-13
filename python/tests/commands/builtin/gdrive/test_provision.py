@@ -65,7 +65,9 @@ async def test_plan_returns_read_ops(accessor, index):
 @pytest.mark.asyncio
 async def test_plan_no_paths(accessor, index):
     result = await file_read_provision(accessor, [], "cat", index=index)
-    assert result.precision == Precision.UNKNOWN
+    # Pathless invocations are stdin-driven: zero backend bytes, EXACT.
+    assert result.precision == Precision.EXACT
+    assert result.network_read_high == 0
     assert result.network_read_low == 0
     assert result.network_read_high == 0
 
@@ -80,4 +82,6 @@ async def test_plan_missing_entry(accessor, index):
     )
     assert result.network_read_low == 0
     assert result.network_read_high == 0
-    assert result.read_ops == 0
+    # Unresolvable operands are still charged as a read-op floor and the
+    # estimate degrades to UNKNOWN instead of claiming a free read.
+    assert result.read_ops == 1

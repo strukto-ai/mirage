@@ -124,6 +124,16 @@ async function runCases(ws: Workspace): Promise<void> {
         `hits=${String(result.cacheHits)} precision=${result.precision}\n`,
     );
   }
+
+  let result = await ws.execute(`sed -n 1p ${provTarget}`);
+  const out = new TextDecoder().decode(result.stdout);
+  process.stdout.write(`=== sed_stream_1p ===\n`);
+  process.stdout.write(out.endsWith("\n") ? out : `${out}\n`);
+  result = await ws.execute(`sed -i s/x/y/ ${provTarget}`);
+  const err = new TextDecoder().decode(result.stderr).trim();
+  process.stdout.write(`=== sed_i_readonly ===\n`);
+  process.stdout.write(`exit=${String(result.exitCode)}\n`);
+  if (err) process.stdout.write(`${err}\n`);
 }
 
 function client(): QdrantClient {

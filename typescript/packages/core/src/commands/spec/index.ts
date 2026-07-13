@@ -15,7 +15,7 @@
 export { BUILTIN_SPECS as SPECS, specOf } from './builtins.ts'
 
 export { AMBIGUOUS_NAMES } from './constants.ts'
-export { parseCommand, parseToKwargs, resolvePath } from './parser.ts'
+export { parseCommand, parseToKwargs } from './parser.ts'
 export {
   CommandSpec,
   type CommandSpecInit,

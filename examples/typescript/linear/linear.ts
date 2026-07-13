@@ -105,6 +105,26 @@ async function main(): Promise<void> {
 
     console.log(`\n=== rg -l title ${teamBase}/issues/ | head -n 3 ===`)
     await run(ws, `rg -l "title" "${teamBase}/issues/" | head -n 3`)
+
+    // ── mid-path glob: the team segment is the pattern, the literal
+    // tail keeps walking (lists teams once, then filters).
+    console.log('\n=== echo /linear/teams/*/issues (mid-path glob) ===')
+    const globR = await ws.execute('echo /linear/teams/*/issues')
+    const globOut = globR.stdoutText.trim()
+    console.log(`  ${globOut.slice(0, 200)}`)
+    if (!globOut.endsWith('/issues')) {
+      throw new Error('regression: mid-path glob did not expand')
+    }
+
+    // A glob that matches nothing stays the literal word, so the
+    // command reports it like GNU coreutils.
+    console.log('\n=== cat /linear/teams/zz-none-*/team.json (no match) ===')
+    const litR = await ws.execute('cat /linear/teams/zz-none-*/team.json')
+    const litErr = litR.stderrText.trim()
+    console.log(`  exit=${litR.exitCode}  ${litErr.slice(0, 120)}`)
+    if (litR.exitCode !== 1 || !litErr.includes('zz-none-*')) {
+      throw new Error('regression: zero-match glob did not keep the literal')
+    }
   } finally {
     await ws.close()
   }

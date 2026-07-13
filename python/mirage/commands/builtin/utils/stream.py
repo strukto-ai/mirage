@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 
 async def _read_stdin_async(
@@ -46,3 +46,32 @@ def _resolve_source(
         raise error_cls(error_msg)
     # GNU semantics: no stdin behaves like empty input (/dev/null)
     return _wrap_bytes(b"")
+
+
+async def resolve_text_input(
+    read_bytes: Callable,
+    config: object,
+    *,
+    inline_text: str | None,
+    file_path: str | None,
+    stdin: AsyncIterator[bytes] | bytes | None,
+    error_message: str,
+) -> str:
+    """Resolve a platform command's text from flag, file, or stdin.
+
+    Args:
+        read_bytes (Callable): backend read ``(config, path) -> bytes``.
+        config: the backend config passed through to ``read_bytes``.
+        inline_text (str | None): text given inline on the command line.
+        file_path (str | None): path operand to read the text from.
+        stdin (AsyncIterator[bytes] | bytes | None): piped input.
+        error_message (str): raised when no source provides text.
+    """
+    if inline_text:
+        return inline_text
+    if file_path:
+        return (await read_bytes(config, file_path)).decode(errors="replace")
+    raw = await _read_stdin_async(stdin)
+    if raw is not None:
+        return raw.decode(errors="replace")
+    raise ValueError(error_message)

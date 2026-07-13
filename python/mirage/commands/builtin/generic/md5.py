@@ -1,6 +1,7 @@
 import hashlib
 from collections.abc import AsyncIterator, Awaitable, Callable
 
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.io.types import ByteSource, IOResult
@@ -11,7 +12,7 @@ async def md5(
     paths: list[PathSpec],
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
-    accessor: object = None,
+    accessor: Accessor | None = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
@@ -24,7 +25,7 @@ async def md5(
     for p in paths:
         data = await read_bytes(accessor, p)
         digest = hashlib.md5(data).hexdigest()
-        outputs.append(f"{digest}  {p.display}")
+        outputs.append(f"{digest}  {p.raw_path}")
     return format_records(outputs), IOResult()
 
 

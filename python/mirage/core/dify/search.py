@@ -4,6 +4,7 @@ from typing import Any
 from mirage.cache.index import IndexCacheStore, IndexEntry
 from mirage.core.dify._client import dify_post
 from mirage.core.dify.path import resolve_path
+from mirage.core.dify.read import segment_text
 from mirage.core.dify.tree import normalize_slug
 from mirage.core.dify.walk import walk
 from mirage.types import PathSpec
@@ -156,7 +157,7 @@ def records_to_bytes(
         header = format_record_header(record, slug_metadata_name, mount_prefix)
         if header is None:
             continue
-        content = segment_content(segment)
+        content = segment_text(segment)
         contents.append(f"{header}\n{content}")
     if not contents:
         return b""
@@ -221,12 +222,3 @@ def document_path(
     if name is None:
         return None
     return str(name)
-
-
-def segment_content(segment: dict[str, Any]) -> str:
-    content = segment.get("content")
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content
-    return str(content)

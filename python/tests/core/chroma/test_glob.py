@@ -40,8 +40,10 @@ async def test_pattern_expands_against_readdir(chroma_accessor, chroma_index):
 
 
 @pytest.mark.asyncio
-async def test_pattern_without_match_expands_to_nothing(
-        chroma_accessor, chroma_index):
+async def test_pattern_without_match_stays_literal(chroma_accessor,
+                                                   chroma_index):
+    # bash with nullglob off: the unmatched glob word stays the literal so
+    # the command errors on it like GNU.
     pattern = PathSpec(resource_path=mount_key("/knowledge/guides/*.zip",
                                                "/knowledge"),
                        virtual="/knowledge/guides/*.zip",
@@ -49,4 +51,6 @@ async def test_pattern_without_match_expands_to_nothing(
                        pattern="*.zip",
                        resolved=False)
     result = await resolve_glob(chroma_accessor, [pattern], chroma_index)
-    assert result == []
+    assert [p.virtual for p in result] == ["/knowledge/guides/*.zip"]
+    assert result[0].resolved
+    assert result[0].pattern is None

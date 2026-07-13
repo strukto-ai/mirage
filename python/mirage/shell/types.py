@@ -108,6 +108,8 @@ class NodeType(StrEnum):
     NEGATION_EXPRESSION = "negation_expression"
     PARENTHESIZED_EXPRESSION = "parenthesized_expression"
     TERNARY_EXPRESSION = "ternary_expression"
+    POSTFIX_EXPRESSION = "postfix_expression"
+    ARITH_OPEN = "(("
     TEST_OPERATOR = "test_operator"
     SPECIAL_VARIABLE_NAME = "special_variable_name"
     COMMENT = "comment"

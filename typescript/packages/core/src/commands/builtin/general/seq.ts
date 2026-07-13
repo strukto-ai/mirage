@@ -18,6 +18,8 @@ import { IOResult } from '../../../io/types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { pureProvision } from '../generic_bind/provision.ts'
+import { extraOperandError } from '../../spec/usage.ts'
+import { CommandName } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -118,6 +120,7 @@ function seqCommand(
   texts: string[],
   opts: CommandOpts,
 ): CommandFnResult {
+  if (texts.length > 3) throw extraOperandError(CommandName.SEQ, texts[3] ?? '')
   const s = typeof opts.flags.s === 'string' ? opts.flags.s : null
   const w = typeof opts.flags.w === 'string' ? opts.flags.w : opts.flags.w === true ? '' : null
   const f = typeof opts.flags.f === 'string' ? opts.flags.f : null

@@ -18,3 +18,28 @@ export const AMBIGUOUS_NAMES: Readonly<Record<string, string>> = Object.freeze({
   I: 'args_I',
   '1': 'args_1',
 })
+
+// Numeric shorthand token like `-5` (head/tail count), never a flag
+// cluster or a path.
+export const NUMERIC_SHORT = /^-\d+$/
+
+// GNU usage-error exit codes, pinned against debian coreutils/grep/diffutils
+// (plus ripgrep and jq upstream docs). Everything else exits 1.
+// Commands whose `Try '--help'` hint line is prefixed with the command
+// name (GNU diffutils style: `diff: Try 'diff --help' ...`).
+export const USAGE_HINT_PREFIX: ReadonlySet<string> = new Set(['diff', 'cmp'])
+
+export const USAGE_EXIT: Readonly<Record<string, number>> = Object.freeze({
+  grep: 2,
+  egrep: 2,
+  fgrep: 2,
+  zgrep: 2,
+  rg: 2,
+  ls: 2,
+  sort: 2,
+  diff: 2,
+  cmp: 2,
+  awk: 2,
+  jq: 2,
+  tar: 64,
+})

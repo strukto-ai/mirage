@@ -14,7 +14,7 @@
 
 import { DiffOpTag } from './diff_types.ts'
 
-export type Opcode = readonly [DiffOpTag, number, number, number, number]
+type Opcode = readonly [DiffOpTag, number, number, number, number]
 
 interface Match {
   a: number
@@ -116,7 +116,7 @@ function getMatchingBlocks(a: readonly string[], b: readonly string[]): Match[] 
   return merged
 }
 
-export function getOpcodes(a: readonly string[], b: readonly string[]): Opcode[] {
+function getOpcodes(a: readonly string[], b: readonly string[]): Opcode[] {
   const matches = getMatchingBlocks(a, b)
   const opcodes: Opcode[] = []
   let i = 0

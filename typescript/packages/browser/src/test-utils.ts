@@ -143,7 +143,7 @@ export function makeMockRoot(name = 'root'): FileSystemDirectoryHandle {
   return new MockDirectoryHandle(node) as unknown as FileSystemDirectoryHandle
 }
 
-export function fakeOPFSResource(handle: FileSystemDirectoryHandle): {
+function fakeOPFSResource(handle: FileSystemDirectoryHandle): {
   requireHandle: () => FileSystemDirectoryHandle
 } {
   return { requireHandle: () => handle }

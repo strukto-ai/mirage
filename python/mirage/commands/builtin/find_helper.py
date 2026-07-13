@@ -37,6 +37,11 @@ def _validate_size_mtime(size: str | None, mtime: str | None) -> None:
 
 
 def _parse_size(spec: str) -> tuple[int | None, int | None]:
+    # GNU rounds the file size up to whole units before comparing, and
+    # +N / -N are strict: +N keeps ceil(size/unit) > N, -N keeps
+    # ceil(size/unit) < N, N alone keeps ceil(size/unit) == N. Expressed
+    # as inclusive byte bounds: +N -> [N*unit + 1, inf), -N ->
+    # [0, (N-1)*unit], N -> [(N-1)*unit + 1, N*unit].
     suffixes = {"c": 1, "k": 1024, "M": 1024**2, "G": 1024**3}
     if spec.startswith(("+", "-")):
         raw = spec[1:]
@@ -47,15 +52,15 @@ def _parse_size(spec: str) -> tuple[int | None, int | None]:
         raise FindParseError(f"find: invalid argument '{spec}' to '-size'")
     mult = suffixes.get(raw[-1], 1)
     try:
-        num = int(digits) * mult
+        n = int(digits)
     except ValueError:
         raise FindParseError(
             f"find: invalid argument '{spec}' to '-size'") from None
     if spec.startswith("+"):
-        return num, None
+        return n * mult + 1, None
     if spec.startswith("-"):
-        return None, num
-    return num, num
+        return None, (n - 1) * mult
+    return (n - 1) * mult + 1, n * mult
 
 
 def _parse_mtime(spec: str) -> tuple[float | None, float | None]:

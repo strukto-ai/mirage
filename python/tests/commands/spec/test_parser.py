@@ -130,13 +130,13 @@ def test_long_value_flag_equals_syntax_rg():
     assert parsed.paths() == ["/x"]
 
 
-def test_unknown_long_flag_dropped_with_warning():
-    parsed = parse_command(SPECS["grep"], ["--color=auto", "pat", "/a.txt"],
-                           "/")
-    assert "--color" not in parsed.flags
+def test_unknown_long_flag_reported_as_invalid():
+    parsed = parse_command(SPECS["grep"], ["--bogus=x", "pat", "/a.txt"], "/")
+    assert "--bogus" not in parsed.flags
     assert parsed.texts() == ["pat"]
     assert parsed.paths() == ["/a.txt"]
-    assert any("--color=auto" in w for w in parsed.warnings)
+    assert parsed.invalid_options == ["--bogus=x"]
+    assert parsed.warnings == []
 
 
 def test_cluster_ending_in_value_flag_consumes_next_arg():
@@ -162,19 +162,28 @@ def test_cluster_bool_then_count_flag_value():
     assert parsed.paths() == ["/a.txt"]
 
 
-def test_cluster_with_unknown_char_dropped_with_warning():
+def test_cluster_with_unknown_char_reports_offending_char():
     parsed = parse_command(SPECS["grep"], ["-nx", "pat", "/a.txt"], "/")
     assert "-n" not in parsed.flags
     assert parsed.texts() == ["pat"]
     assert parsed.paths() == ["/a.txt"]
-    assert any("-nx" in w for w in parsed.warnings)
+    assert parsed.invalid_options == ["x"]
 
 
-def test_unknown_short_flag_dropped_with_warning():
+def test_unknown_long_flag_reported_bare():
     parsed = parse_command(SPECS["grep"], ["--bogus", "pat", "/a.txt"], "/")
     assert parsed.texts() == ["pat"]
     assert parsed.paths() == ["/a.txt"]
-    assert any("--bogus" in w for w in parsed.warnings)
+    assert parsed.invalid_options == ["--bogus"]
+
+
+def test_missing_value_reported_short_and_long():
+    parsed = parse_command(SPECS["grep"], ["-m"], "/")
+    assert parsed.needs_value_options == ["m"]
+    parsed = parse_command(SPECS["du"], ["--max-depth"], "/")
+    assert parsed.needs_value_options == ["--max-depth"]
+    parsed = parse_command(SPECS["grep"], ["-ne"], "/")
+    assert parsed.needs_value_options == ["e"]
 
 
 def test_text_rest_keeps_unknown_dash_tokens():
@@ -217,3 +226,60 @@ def test_long_equals_and_separate_repeatable_accumulate():
     parsed = parse_command(spec, ["--tag=a", "--tag", "b", "/x"], "/")
     assert parsed.flags["--tag"] == ["a", "b"]
     assert parsed.paths() == ["/x"]
+
+
+def test_awk_repeated_dash_v_accumulates():
+    parsed = parse_command(
+        SPECS["awk"],
+        ["-v", "a=1", "-v", "b=2", "{print a, b}", "/data/x.txt"], "/")
+    assert parsed.flags["-v"] == ["a=1", "b=2"]
+    assert parsed.texts() == ["{print a, b}"]
+    assert parsed.paths() == ["/data/x.txt"]
+
+
+def test_awk_dash_f_frees_positional_slot_for_paths():
+    parsed = parse_command(SPECS["awk"],
+                           ["-f", "/prog.awk", "/data/a.txt", "/data/b.txt"],
+                           "/")
+    assert parsed.texts() == []
+    assert parsed.paths() == ["/data/a.txt", "/data/b.txt"]
+
+
+def test_awk_repeated_dash_f_accumulates_and_routes_each_file():
+    parsed = parse_command(SPECS["awk"],
+                           ["-f", "/p1.awk", "-f", "/p2.awk", "/data/a.txt"],
+                           "/")
+    assert parsed.flags["-f"] == ["/p1.awk", "/p2.awk"]
+    assert parsed.texts() == []
+    assert parsed.paths() == ["/data/a.txt"]
+
+
+def test_value_optional_bare_is_boolean():
+    parsed = parse_command(SPECS["grep"], ["--color", "world", "/a.txt"], "/")
+    assert parsed.flags["--color"] is True
+    assert parsed.texts() == ["world"]
+    assert parsed.paths() == ["/a.txt"]
+    assert parsed.warnings == []
+
+
+def test_value_optional_equals_form_carries_value():
+    parsed = parse_command(SPECS["grep"], ["--color=auto", "world", "/a.txt"],
+                           "/")
+    assert parsed.flags["--color"] == "auto"
+    assert parsed.texts() == ["world"]
+    assert parsed.warnings == []
+
+
+def test_value_optional_never_consumes_next_token():
+    parsed = parse_command(SPECS["ls"], ["--color", "/data"], "/")
+    assert parsed.flags["--color"] is True
+    assert parsed.paths() == ["/data"]
+
+
+def test_overflow_operands_pass_through_like_last_slot():
+    parsed = parse_command(SPECS["uniq"], ["a.txt", "b.txt", "c.txt"],
+                           cwd="/data")
+    assert [k for _, k in parsed.args] == [OperandKind.PATH] * 3
+
+    parsed = parse_command(SPECS["tr"], ["a", "b", "extra.txt"], cwd="/data")
+    assert [k for _, k in parsed.args] == [OperandKind.TEXT] * 3

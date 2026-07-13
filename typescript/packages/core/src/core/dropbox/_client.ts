@@ -15,7 +15,7 @@
 export const DROPBOX_TOKEN_URL = 'https://api.dropboxapi.com/oauth2/token'
 export const DROPBOX_API_BASE = 'https://api.dropboxapi.com/2'
 export const DROPBOX_CONTENT_BASE = 'https://content.dropboxapi.com/2'
-export const TOKEN_BUFFER_SECONDS = 300
+const TOKEN_BUFFER_SECONDS = 300
 
 export interface DropboxConfig {
   clientId: string

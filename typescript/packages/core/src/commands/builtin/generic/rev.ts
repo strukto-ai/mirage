@@ -17,6 +17,7 @@ import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { resolveSource } from '../utils/stream.ts'
+import { operandsIo, readOperands, singleChunk } from '../utils/operands.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -32,23 +33,24 @@ async function* revStream(source: AsyncIterable<Uint8Array>): AsyncIterable<Uint
   }
 }
 
-async function* revMulti(
-  paths: readonly PathSpec[],
-  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-): AsyncIterable<Uint8Array> {
-  for (const p of paths) {
-    for await (const chunk of revStream(stream(p))) yield chunk
+async function* revMulti(buffers: readonly Uint8Array[]): AsyncIterable<Uint8Array> {
+  for (const data of buffers) {
+    for await (const chunk of revStream(singleChunk(data))) yield chunk
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/require-await
 export async function revGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
   if (paths.length > 0) {
-    return [revMulti(paths, stream), new IOResult()]
+    // Operands read eagerly so a missing one is reported up front and the
+    // remaining operands still print (GNU rev).
+    const [ok, err] = await readOperands(paths, stream, 'rev')
+    const io = operandsIo(err)
+    if (ok.length === 0 && err !== '') return [null, io]
+    return [revMulti(ok.map((o) => o.data)), io]
   }
   try {
     const source = resolveSource(opts.stdin, 'rev: missing operand')

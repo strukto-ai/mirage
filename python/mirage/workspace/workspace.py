@@ -44,14 +44,15 @@ from mirage.provision import ProvisionResult
 from mirage.resource.base import BaseResource
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
 from mirage.resource.ram import RAMResource
+from mirage.runtime.python import select_python_runtime
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
 from mirage.types import (DEFAULT_AGENT_ID, DEFAULT_SESSION_ID,
                           ConsistencyPolicy, DriftPolicy, FileStat, MountMode,
                           PathSpec, StateKey)
+from mirage.utils.errors import format_fs_error
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.dispatcher import Dispatcher
-from mirage.workspace.executor.fs_error import format_fs_error
 from mirage.workspace.file_prompt import build_file_prompt
 from mirage.workspace.fuse import FuseManager
 from mirage.workspace.mount import MountEntry, MountRegistry
@@ -89,6 +90,7 @@ class Workspace:
         session_id: str = DEFAULT_SESSION_ID,
         agent_id: str = DEFAULT_AGENT_ID,
         observe: ObserverStore | None = None,
+        python_runtime: str | None = None,
     ) -> None:
         self._registry = MountRegistry()
         if isinstance(cache, RedisCacheConfig):
@@ -169,6 +171,18 @@ class Workspace:
                         observer=self.observer,
                         agent_id=agent_id,
                         session_id=session_id)
+
+        # Graceful default: without the 'monty' extra the default runtime
+        # cannot build; leave it unset so python3 reports the install hint
+        # per invocation. An explicitly requested runtime still fails loud.
+        try:
+            self._python_runtime = select_python_runtime(
+                python_runtime, self.dispatch)
+        except ImportError:
+            if python_runtime is not None:
+                raise
+            self._python_runtime = None
+        self._registry.python_runtime = self._python_runtime
 
         for prefix, fuse_target in fuse_targets:
             mountpoint = fuse_target if isinstance(fuse_target, str) else None
@@ -353,11 +367,14 @@ class Workspace:
 
     async def close(self) -> None:
         drain_tasks = list(self._cache._drain_tasks.values())
+        if self._python_runtime is not None:
+            await self._python_runtime.close()
         self._close_parts()
         for task in drain_tasks:
             try:
                 await task
             except asyncio.CancelledError:
+                # drain tasks may already be cancelled at close
                 pass
         await self._cache.clear()
 
@@ -776,7 +793,7 @@ class Workspace:
             return io
         except UsageError as exc:
             msg = f"{exc}\n".encode()
-            io = IOResult(exit_code=2, stderr=msg)
+            io = IOResult(exit_code=exc.exit_code, stderr=msg)
             return io
         except OSError as exc:
             cmd_name = command.split()[0] if command.split() else command

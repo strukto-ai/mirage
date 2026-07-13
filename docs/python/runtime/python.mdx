@@ -1,0 +1,88 @@
+---
+title: Python
+description: Choose the interpreter that runs python3 inside the workspace, monty (sandboxed, default) or the host interpreter.
+icon: /images/pydantic-logo.svg
+---
+
+Shell lines like `python3 script.py` need an interpreter. Mirage calls that
+interpreter a **runtime**, and you pick it per workspace. Two runtimes ship
+today:
+
+| Runtime | Engine | Filesystem | Default |
+| --- | --- | --- | --- |
+| `monty` | [Pydantic Monty](https://github.com/pydantic/monty), a sandboxed Python interpreter written in Rust | Workspace mounts only, bridged through Mirage | Yes |
+| `local` | The host `python` interpreter, as a subprocess | The host filesystem | No |
+
+## Monty (default)
+
+Monty is a minimal, secure Python interpreter built for running
+AI-generated code: microsecond startup, no host filesystem, environment,
+or network access. Mirage wires Monty's OS interface to the workspace
+dispatch, so code running under `python3` sees the workspace mounts, and
+nothing else:
+
+```python
+from mirage import MountMode, Workspace
+from mirage.resource.ram import RAMResource
+
+ws = Workspace({"/data": RAMResource()}, mode=MountMode.EXEC)
+await ws.execute("echo hello > /data/a.txt")
+
+# Reads a virtualized file; /etc/passwd would raise FileNotFoundError.
+io = await ws.execute(
+    "python3 -c \"print(open('/data/a.txt').read().strip())\"")
+```
+
+Reads, writes, `pathlib` traversal, and `os.environ` all route through the
+mounts. A `python3` write is immediately visible to `cat`, and works the
+same whether the mount is RAM, Redis, S3, or a virtual backend like
+MongoDB's `database.json`.
+
+Monty requires the `monty` extra:
+
+```bash
+pip install mirage-ai[monty]
+```
+
+Without it, `python3` exits with code 127 and an install hint; every other
+command keeps working.
+
+### Differences from CPython
+
+Monty implements a Python subset. Notably:
+
+- Command-line arguments are the `argv` global (`argv[0]` is the script
+  name); `sys.argv` does not exist.
+- No `sys.stdin`: piping into `python3` needs the `local` runtime.
+- No third-party imports (`numpy`, `requests`, ...).
+- File handles are not iterable (`for line in f` raises `TypeError`);
+  `f.read()`, `f.readline()`, and `f.readlines()` all work.
+- `os.environ` reflects the session env only, never the host's.
+
+## Local
+
+The `local` runtime runs `sys.executable -c` as a subprocess: full
+CPython, host filesystem, host environment. Use it when the code needs
+stdin, third-party packages, or host files:
+
+```python
+ws = Workspace({"/data": RAMResource()},
+               mode=MountMode.EXEC,
+               python_runtime="local")
+```
+
+Note that `local` code does **not** see workspace mounts; it sees the real
+host filesystem.
+
+## Selecting in YAML
+
+Workspace config files take a top-level `runtime` block:
+
+```yaml
+runtime:
+  python: monty   # or: local
+
+mounts:
+  /data:
+    resource: ram
+```

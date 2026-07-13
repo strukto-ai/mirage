@@ -71,6 +71,7 @@ async def du_all(accessor: HfBucketsAccessor,
             results.append(("/" + rel.lstrip("/"), sz))
             total += sz
     except NotFound:
+        # the listing raced a delete: report the entries we saw
         pass
     results.sort()
     results.append((target, total))

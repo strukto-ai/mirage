@@ -176,7 +176,8 @@ async def test_walk_list_dir_returns_only_self():
                             readdir=readdir,
                             stat=stat,
                             list_dir=True)
-    assert [e.name for e in entries] == ["dir"]
+    # GNU ls -d prints the operand as given.
+    assert [e.name for e in entries] == ["/dir"]
 
 
 @pytest.mark.asyncio
@@ -260,7 +261,8 @@ async def test_walk_single_file_lists_itself():
     entries, warnings = await walk(_spec("/dir/a.parquet"),
                                    readdir=readdir,
                                    stat=stat)
-    assert [e.name for e in entries] == ["a.parquet"]
+    # GNU ls prints a file operand as given.
+    assert [e.name for e in entries] == ["/dir/a.parquet"]
     assert warnings == []
 
 
@@ -280,7 +282,7 @@ async def test_walk_empty_readdir_falls_back_to_file():
     entries, warnings = await walk(_spec("/data/a.parquet"),
                                    readdir=readdir,
                                    stat=stat)
-    assert [e.name for e in entries] == ["a.parquet"]
+    assert [e.name for e in entries] == ["/data/a.parquet"]
     assert warnings == []
 
 
@@ -298,7 +300,7 @@ async def test_ls_file_argument_lists_the_file():
     tree = {"/dir/a.json": _file("a.json", 5)}
     readdir, stat = _make_fs_backend(tree)
     output, io = await ls([_spec("/dir/a.json")], readdir=readdir, stat=stat)
-    assert output == b"a.json\n"
+    assert output == b"/dir/a.json\n"
     assert io.exit_code == 0
 
 

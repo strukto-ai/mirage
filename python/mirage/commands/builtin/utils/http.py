@@ -12,14 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-JINA_READER_PREFIX = "https://r.jina.ai/"
 DEFAULT_USER_AGENT = "Mozilla/5.0 (compatible; mirage/1.0)"
-
-
-def _to_jina_url(url: str) -> str:
-    if url.startswith(JINA_READER_PREFIX):
-        return url
-    return f"{JINA_READER_PREFIX}{url}"
 
 
 def _with_default_ua(headers: dict[str, str] | None) -> dict[str, str]:
@@ -35,15 +28,12 @@ def _http_request(
     headers: dict[str, str] | None = None,
     data: bytes | None = None,
     timeout: int = 30,
-    jina: bool = False,
 ) -> bytes:
     try:
         import httpx
     except ImportError:
         raise ImportError(
             "httpx is required for curl/wget: pip install 'mirage[http]'")
-    if jina and method == "GET" and data is None:
-        url = _to_jina_url(url)
     with httpx.Client(timeout=timeout, follow_redirects=True) as client:
         resp = client.request(method,
                               url,
@@ -78,10 +68,5 @@ def _http_get(
     url: str,
     headers: dict[str, str] | None = None,
     timeout: int = 30,
-    jina: bool = False,
 ) -> bytes:
-    return _http_request(url,
-                         method="GET",
-                         headers=headers,
-                         timeout=timeout,
-                         jina=jina)
+    return _http_request(url, method="GET", headers=headers, timeout=timeout)

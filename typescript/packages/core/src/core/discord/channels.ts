@@ -24,7 +24,7 @@ export interface DiscordChannel {
 
 const TEXT_CHANNEL_TYPES: ReadonlySet<number> = new Set([0, 5, 15])
 
-export async function* listChannelsStream(
+async function* listChannelsStream(
   accessor: DiscordAccessor,
   guildId: string,
 ): AsyncIterableIterator<DiscordChannel[]> {

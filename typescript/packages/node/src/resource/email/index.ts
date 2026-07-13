@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { EmailResource, type EmailResourceState } from './email.ts'
 export {
   buildEmailConfig,
   normalizeEmailConfig,

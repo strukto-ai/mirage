@@ -20,8 +20,8 @@ from mirage.commands.builtin.generic.unexpand import \
     unexpand as generic_unexpand
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           with_index)
-from mirage.commands.builtin.generic_bind.builders.common import \
-    resolve_or_empty
+from mirage.commands.builtin.generic_bind.builders.common import (
+    merge_split_errors, resolve_readable)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -37,13 +37,17 @@ async def unexpand(
     index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
-    paths = await resolve_or_empty(ops, accessor, paths, index)
-    return await generic_unexpand(paths,
-                                  read_bytes=with_index(ops.read_bytes, index),
-                                  accessor=accessor,
-                                  stdin=stdin,
-                                  tabsize=int(t) if t is not None else 8,
-                                  all_spaces=a)
+    paths, err = await resolve_readable(ops, accessor, paths, index,
+                                        "unexpand")
+    if err and not paths:
+        return None, IOResult(exit_code=1, stderr=err)
+    return await merge_split_errors(
+        await generic_unexpand(paths,
+                               read_bytes=with_index(ops.read_bytes, index),
+                               accessor=accessor,
+                               stdin=stdin,
+                               tabsize=int(t) if t is not None else 8,
+                               all_spaces=a), err)
 
 
 BUILDER = Builder('unexpand', unexpand, None, False, None, read=True)

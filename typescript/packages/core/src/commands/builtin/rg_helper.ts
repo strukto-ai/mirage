@@ -47,12 +47,6 @@ export type AsyncReaddirFn = (path: string) => Promise<string[]>
 export type AsyncStatFn = (path: string) => Promise<FileStat>
 export type AsyncReadBytesFn = (path: string) => Promise<Uint8Array>
 
-export interface RgFilterOptions {
-  fileType: string | null
-  globPattern: string | null
-  hidden: boolean
-}
-
 export function rgMatchesFilter(
   entry: string,
   fileType: string | null,

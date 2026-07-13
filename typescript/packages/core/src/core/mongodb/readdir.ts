@@ -130,3 +130,9 @@ async function listKindDir(
   if (index !== undefined) await index.setDir(virtualKey, entries)
   return out
 }
+export function isDirName(child: string): boolean {
+  // Entries are recognized by extension, so classification never needs
+  // the stat fallback.
+  const name = child.split('/').pop() ?? ''
+  return !(name.endsWith('.json') || name.endsWith('.jsonl'))
+}

@@ -15,9 +15,8 @@
 import tree_sitter
 
 from mirage.shell import parse
-from mirage.shell.helpers import (_is_last_cmd_redirect, get_command_name,
-                                  get_for_parts, get_if_branches,
-                                  get_list_parts, get_parts,
+from mirage.shell.helpers import (get_command_name, get_for_parts,
+                                  get_if_branches, get_list_parts, get_parts,
                                   get_pipeline_commands, get_redirect_parts,
                                   get_redirects, get_text, get_while_parts)
 from mirage.shell.types import NodeType as NT
@@ -116,13 +115,17 @@ def test_redirect_stderr():
 
 
 def test_redirect_on_list_detected():
-    """tree-sitter parses 'a || echo x > file' with > on the list."""
+    """tree-sitter parses 'a || echo x > file' with > on the list.
+
+    The executor re-associates this shape to the last command
+    (execute_node NodeKind.REDIRECT), so the parse must keep exposing
+    the list body.
+    """
     node = parse("a || echo x > /out.txt").named_children[0]
     assert node.type == NT.REDIRECTED_STATEMENT
     body, redirects = get_redirects(node)
     assert body.type == NT.LIST
     assert len(redirects) == 1
-    assert _is_last_cmd_redirect(body, redirects)
 
 
 def test_redirect_on_and_chain_detected():
@@ -130,7 +133,7 @@ def test_redirect_on_and_chain_detected():
     node = parse("a && echo x > /out.txt").named_children[0]
     body, redirects = get_redirects(node)
     assert body.type == NT.LIST
-    assert _is_last_cmd_redirect(body, redirects)
+    assert len(redirects) == 1
 
 
 def test_redirect_on_simple_command_not_list():
@@ -138,7 +141,7 @@ def test_redirect_on_simple_command_not_list():
     node = parse("echo hello > /out.txt").named_children[0]
     body, redirects = get_redirects(node)
     assert body.type == NT.COMMAND
-    assert not _is_last_cmd_redirect(body, redirects)
+    assert len(redirects) == 1
 
 
 def test_subshell():

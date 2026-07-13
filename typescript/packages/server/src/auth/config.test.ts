@@ -17,7 +17,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { resolveAuthConfig, resolveLocalToken } from './config.ts'
+import { AuthMode, resolveAuthConfig, resolveLocalToken } from './config.ts'
+import { ALLOWED_KEYS } from '../daemon_config.ts'
 
 describe('resolveLocalToken', () => {
   let dir: string
@@ -159,5 +160,68 @@ describe('resolveAuthConfig', () => {
         tokenFile: join(dir, 'missing'),
       }),
     ).toThrow(/MIRAGE_AUTH_MODE/)
+  })
+})
+
+describe('resolveAuthConfig config table', () => {
+  it('auth_mode from the table with env winning', () => {
+    const cfg = resolveAuthConfig({
+      env: { MIRAGE_AUTH_TOKEN: 'tok' },
+      table: { auth_mode: 'token' },
+    })
+    expect(cfg.mode).toBe(AuthMode.Token)
+    expect(cfg.bearerToken).toBe('tok')
+    const envWins = resolveAuthConfig({
+      env: { MIRAGE_AUTH_MODE: 'local' },
+      tokenFile: '/nonexistent/token',
+      table: { auth_mode: 'token' },
+    })
+    expect(envWins.mode).toBe(AuthMode.Local)
+  })
+
+  it('jwt settings from the table', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mir-auth-'))
+    const keyFile = join(dir, 'pub.pem')
+    writeFileSync(keyFile, 'KEYDATA')
+    const cfg = resolveAuthConfig({
+      env: {},
+      table: {
+        auth_mode: 'jwt',
+        jwt_pubkey_file: keyFile,
+        jwt_alg: 'RS256',
+        jwt_issuer: 'https://issuer',
+        jwt_audience: 'aud',
+        jwt_authorized_parties: 'a,b',
+        jwt_clock_skew: '9',
+      },
+    })
+    expect(cfg.mode).toBe(AuthMode.Jwt)
+    expect(cfg.jwt?.key).toBe('KEYDATA')
+    expect(cfg.jwt?.algorithm).toBe('RS256')
+    expect(cfg.jwt?.issuer).toBe('https://issuer')
+    expect(cfg.jwt?.audience).toBe('aud')
+    expect(cfg.jwt?.authorizedParties).toEqual(['a', 'b'])
+    expect(cfg.jwt?.clockSkewSeconds).toBe(9)
+  })
+
+  it('env jwt_alg beats the table', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mir-auth-'))
+    const keyFile = join(dir, 'pub.pem')
+    writeFileSync(keyFile, 'KEYDATA')
+    const cfg = resolveAuthConfig({
+      env: {
+        MIRAGE_AUTH_MODE: 'jwt',
+        MIRAGE_JWT_PUBKEY_FILE: keyFile,
+        MIRAGE_JWT_ALG: 'ES256',
+      },
+      table: { jwt_alg: 'RS256' },
+    })
+    expect(cfg.jwt?.algorithm).toBe('ES256')
+  })
+
+  it('secret keys have no config counterpart', () => {
+    expect(ALLOWED_KEYS.has('jwt_pubkey')).toBe(false)
+    expect(ALLOWED_KEYS.has('auth_mode')).toBe(true)
+    expect(ALLOWED_KEYS.has('jwt_alg')).toBe(true)
   })
 })

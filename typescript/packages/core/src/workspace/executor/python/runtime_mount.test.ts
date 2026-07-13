@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { PyodideRuntime } from './runtime.ts'
+import { PyodideRuntime } from './runtimes/pyodide.ts'
 import type { BridgeDispatchFn } from './mirage_bridge.ts'
 
 function makeBridge(): {
@@ -48,12 +48,11 @@ function makeBridge(): {
   return { dispatch, calls, files }
 }
 
-describe('PyodideRuntime mount lifecycle', () => {
-  it('addMount preloads files into MEMFS so Python reads see them', async () => {
+describe('PyodideRuntime mount visibility', () => {
+  it('mounted prefixes are preloaded into MEMFS so Python reads see them', async () => {
     const { dispatch, files } = makeBridge()
     files.set('/ram/hello.txt', new TextEncoder().encode('world'))
-    const rt = new PyodideRuntime({ workspaceBridge: dispatch })
-    await rt.addMount('/ram/')
+    const rt = new PyodideRuntime({ workspaceBridge: dispatch, listMounts: () => ['/ram/'] })
     const result = await rt.run({
       code: `with open('/ram/hello.txt') as f: print(f.read())`,
       args: [],
@@ -65,10 +64,9 @@ describe('PyodideRuntime mount lifecycle', () => {
     await rt.close()
   }, 60_000)
 
-  it('writes after addMount flush via the bridge on close', async () => {
+  it('writes under a mounted prefix flush via the bridge on close', async () => {
     const { dispatch, calls } = makeBridge()
-    const rt = new PyodideRuntime({ workspaceBridge: dispatch })
-    await rt.addMount('/ram/')
+    const rt = new PyodideRuntime({ workspaceBridge: dispatch, listMounts: () => ['/ram/'] })
     await rt.run({
       code: `with open('/ram/out.txt', 'wb') as f: f.write(b'data')`,
       args: [],
@@ -84,11 +82,17 @@ describe('PyodideRuntime mount lifecycle', () => {
     await rt.close()
   }, 60_000)
 
-  it('removeMount stops flushing for the prefix', async () => {
+  it('removing a prefix from the live mount view stops flushing', async () => {
     const { dispatch, calls } = makeBridge()
-    const rt = new PyodideRuntime({ workspaceBridge: dispatch })
-    await rt.addMount('/ram/')
-    await rt.removeMount('/ram/')
+    const mounts: string[] = ['/ram/']
+    const rt = new PyodideRuntime({ workspaceBridge: dispatch, listMounts: () => mounts })
+    await rt.run({
+      code: 'pass',
+      args: [],
+      env: {},
+      stdin: new Uint8Array(),
+    })
+    mounts.length = 0
     await rt.run({
       code: `with open('/ram/x.txt', 'wb') as f: f.write(b'nope')`,
       args: [],
@@ -99,9 +103,26 @@ describe('PyodideRuntime mount lifecycle', () => {
     await rt.close()
   }, 60_000)
 
-  it('addMount throws when no workspaceBridge is configured', async () => {
-    const rt = new PyodideRuntime({})
-    await expect(rt.addMount('/ram/')).rejects.toThrow(/workspaceBridge/)
+  it('a prefix added to the live mount view after boot is backfilled on access', async () => {
+    const { dispatch, calls, files } = makeBridge()
+    files.set('/ram/lazy.txt', new TextEncoder().encode('lazy'))
+    const mounts: string[] = []
+    const rt = new PyodideRuntime({ workspaceBridge: dispatch, listMounts: () => mounts })
+    await rt.run({
+      code: 'pass',
+      args: [],
+      env: {},
+      stdin: new Uint8Array(),
+    })
+    mounts.push('/ram/')
+    const result = await rt.run({
+      code: `with open('/ram/lazy.txt') as f: print(f.read())`,
+      args: [],
+      env: {},
+      stdin: new Uint8Array(),
+    })
+    expect(new TextDecoder().decode(result.stdout)).toContain('lazy')
+    expect(calls.some((c) => c.op === 'LIST' && c.path === '/ram/')).toBe(true)
     await rt.close()
   }, 60_000)
 
@@ -115,43 +136,6 @@ describe('PyodideRuntime mount lifecycle', () => {
     })
     expect(new TextDecoder().decode(result.stdout)).toContain('hello')
     expect(result.exitCode).toBe(0)
-    await rt.close()
-  }, 60_000)
-
-  it('removeMount on a never-mounted prefix is a silent no-op', async () => {
-    const { dispatch, calls } = makeBridge()
-    const rt = new PyodideRuntime({ workspaceBridge: dispatch })
-    await rt.removeMount('/never-mounted/')
-    expect(calls).toHaveLength(0)
-    await rt.close()
-  }, 60_000)
-
-  it('addMount before run() is deferred and applied when Python first runs', async () => {
-    const { dispatch, calls, files } = makeBridge()
-    files.set('/ram/lazy.txt', new TextEncoder().encode('lazy'))
-    const rt = new PyodideRuntime({ workspaceBridge: dispatch })
-    await rt.addMount('/ram/')
-    expect(calls).toHaveLength(0)
-    const result = await rt.run({
-      code: `with open('/ram/lazy.txt') as f: print(f.read())`,
-      args: [],
-      env: {},
-      stdin: new Uint8Array(),
-    })
-    expect(new TextDecoder().decode(result.stdout)).toContain('lazy')
-    expect(calls.some((c) => c.op === 'LIST' && c.path === '/ram/')).toBe(true)
-    await rt.close()
-  }, 60_000)
-
-  it('addMount is idempotent — calling twice does not re-preload', async () => {
-    const { dispatch, calls, files } = makeBridge()
-    files.set('/ram/x.txt', new Uint8Array([1, 2, 3]))
-    const rt = new PyodideRuntime({ workspaceBridge: dispatch })
-    await rt.addMount('/ram/')
-    const initialReadCount = calls.filter((c) => c.op === 'READ').length
-    await rt.addMount('/ram/')
-    const finalReadCount = calls.filter((c) => c.op === 'READ').length
-    expect(finalReadCount).toBe(initialReadCount)
     await rt.close()
   }, 60_000)
 })

@@ -1,0 +1,28 @@
+=== py3_ram_read ===
+HELLO FROM RAM
+=== py3_redis_read ===
+redis says hi
+=== py3_s3_read ===
+hello from s3
+=== py3_mongodb_meta ===
+mirage_integ_runtime 2
+=== py3_mongodb_schema ===
+books collection 2 ['title']
+=== py3_mongodb_docs ===
+books: 2
+=== py3_script_argv ===
+ram: hello from ram
+s3: hello from s3
+argv sum: 42
+=== py3_write_back ===
+written-by-python3
+=== python_alias ===
+42
+=== py3_env ===
+hello-runtime
+=== py3_iterdir ===
+['analyze.py', 'data.txt', 'out.txt']
+=== py3_missing_file ===
+exit_code=1
+=== py3_host_fs_invisible ===
+exit_code=1

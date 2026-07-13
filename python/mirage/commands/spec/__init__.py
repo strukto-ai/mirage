@@ -14,8 +14,7 @@
 
 from mirage.commands.spec.builtin_specs import SPECS
 from mirage.commands.spec.constants import AMBIGUOUS_NAMES, flag_kwarg_name
-from mirage.commands.spec.parser import (_resolve, parse_command,
-                                         parse_to_kwargs)
+from mirage.commands.spec.parser import parse_command, parse_to_kwargs
 from mirage.commands.spec.types import (CommandSpec, FlagView, Operand,
                                         OperandKind, Option, ParsedArgs)
 
@@ -27,7 +26,6 @@ __all__ = [
     "Option",
     "ParsedArgs",
     "SPECS",
-    "_resolve",
     "FlagView",
     "flag_kwarg_name",
     "parse_command",

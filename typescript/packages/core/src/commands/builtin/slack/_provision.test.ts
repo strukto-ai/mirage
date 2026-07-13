@@ -73,10 +73,11 @@ describe('fileReadProvision', () => {
 })
 
 describe('metadataProvision', () => {
-  it('returns EXACT zero-cost result', async () => {
+  it('returns EXACT zero-cost result', () => {
     const transport = new FakeSlackTransport()
     const accessor = new SlackAccessor(transport)
-    const result = await metadataProvision(accessor, [], [], {
+    // metadataProvision is the shared exactZeroProvision, which is sync.
+    const result = metadataProvision(accessor, [], [], {
       stdin: null,
       flags: {},
       filetypeFns: null,

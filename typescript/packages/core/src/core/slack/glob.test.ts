@@ -126,7 +126,7 @@ describe('resolveSlackGlob', () => {
     }
   })
 
-  it('returns empty when pattern matches nothing', async () => {
+  it('keeps unmatched pattern word as literal', async () => {
     const t = new FakeSlackTransport()
     const idx = new RAMIndexCacheStore()
     await seedChannelDir(idx, '/mnt/slack', 'general__C1', 'C1', ['2026-04-24.jsonl', 'README.md'])
@@ -138,7 +138,10 @@ describe('resolveSlackGlob', () => {
       resolved: false,
     })
     const out = await resolveSlackGlob(new SlackAccessor(t), [spec], idx)
-    expect(out).toEqual([])
+    // bash nullglob off: the unmatched glob word stays the literal
+    expect(out.map((p) => p.virtual)).toEqual([spec.virtual])
+    expect(out[0]?.resolved).toBe(true)
+    expect(out[0]?.pattern).toBeNull()
   })
 
   it('truncates matched entries at SCOPE_ERROR', async () => {

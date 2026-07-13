@@ -24,7 +24,7 @@ function buildConfig(): { token: string; owner: string; repo: string } {
   const token = process.env.GITHUB_TOKEN
   if (token === undefined || token === '') throw new Error('GITHUB_TOKEN env var is required')
   const owner = process.env.GITHUB_OWNER ?? 'strukto-ai'
-  const repo = process.env.GITHUB_REPO ?? 'mirage-internal'
+  const repo = process.env.GITHUB_REPO ?? 'mirage'
   return { token, owner, repo }
 }
 

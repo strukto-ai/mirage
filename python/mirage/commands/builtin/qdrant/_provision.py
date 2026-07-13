@@ -12,14 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.provision.types import Precision, ProvisionResult
+from mirage.commands.builtin.generic_bind.provision import exact_zero_provision
 
+metadata_provision = exact_zero_provision
 
-async def metadata_provision(command: str) -> ProvisionResult:
-    return ProvisionResult(
-        command=command,
-        network_read_low=0,
-        network_read_high=0,
-        read_ops=0,
-        precision=Precision.EXACT,
-    )
+__all__ = ["metadata_provision"]

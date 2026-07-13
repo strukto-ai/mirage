@@ -34,7 +34,7 @@ async def _walk(
     try:
         entries = sorted(await readdir(path, index))
     except (FileNotFoundError, ValueError) as exc:
-        warnings.append(f"tree: '{path.display}': {exc}")
+        warnings.append(f"tree: '{path.raw_path}': {exc}")
         return lines
 
     filtered: list[tuple[PathSpec, FileStat]] = []

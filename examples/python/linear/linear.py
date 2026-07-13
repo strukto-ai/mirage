@@ -144,6 +144,19 @@ async def main() -> None:
                               " | head -n 5")
     print(await result.stdout_str())
 
+    # -path matches the display path; -size counts dirs and sizeless
+    # rendered files as 0 (so +0c drops them, -1k keeps them).
+    print("=== find team -path '*issues*' ===")
+    result = await ws.execute(f'find /linear/teams/{first_team}/'
+                              f' -path "*issues*" | head -n 5')
+    print(await result.stdout_str())
+
+    print("=== find team -maxdepth 1 -size +0c (dirs drop out) ===")
+    result = await ws.execute(
+        f"find /linear/teams/{first_team}/ -maxdepth 1 -size +0c")
+    print(f"  exit={result.exit_code}")
+    print(await result.stdout_str())
+
     print(f"=== du -s teams/{first_team} (walk fallback) ===")
     result = await ws.execute(f"du -s /linear/teams/{first_team}/")
     print(await result.stdout_str())
@@ -178,6 +191,22 @@ async def main() -> None:
     out = (await r.stdout_str()).strip()
     for line in out.splitlines():
         print(f"  {line[:120]}")
+
+    # ── mid-path glob: the team segment is the pattern, the literal
+    # tail keeps walking (lists teams once, then filters).
+    print("\n=== echo /linear/teams/*/issues (mid-path glob) ===")
+    r = await ws.execute("echo /linear/teams/*/issues")
+    out = (await r.stdout_str()).strip()
+    print(f"  {out[:200]}")
+    assert out.endswith("/issues"), "mid-path glob did not expand"
+
+    # A glob that matches nothing stays the literal word, so the
+    # command reports it like GNU coreutils.
+    print("\n=== cat /linear/teams/zz-none-*/team.json (no match) ===")
+    r = await ws.execute("cat /linear/teams/zz-none-*/team.json")
+    err = (await r.stderr_str()).strip()
+    print(f"  exit={r.exit_code}  {err[:120]}")
+    assert r.exit_code == 1 and "zz-none-*" in err
 
 
 if __name__ == "__main__":

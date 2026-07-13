@@ -15,6 +15,7 @@
 import {
   handleCrossMount as routeCrossMount,
   type DispatchFn,
+  type RunSingle,
 } from '../../commands/builtin/generic/crossmount/index.ts'
 import { materialize, type ByteSource, type IOResult } from '../../io/types.ts'
 import type { PathSpec } from '../../types.ts'
@@ -27,17 +28,28 @@ type Flags = Record<string, string | boolean | string[]>
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
 // Workspace-level adapter over the generic crossmount router: run the command
-// via the shared generics, then build the recorded execution node (with
-// materialized stderr) the executor expects.
+// via the strategy runners (STREAM/FANOUT through the injected single-mount
+// runner, RELAY through dispatch), then build the recorded execution node
+// (with materialized stderr) the executor expects.
 export async function handleCrossMount(
   cmdName: string,
   scopes: PathSpec[],
   textArgs: string[],
   flags: Flags,
   dispatch: DispatchFn,
+  runSingle: RunSingle,
+  stdin: ByteSource | null,
   cmdStr: string,
 ): Promise<Result> {
-  const [stdout, io] = await routeCrossMount(cmdName, scopes, textArgs, flags, dispatch)
+  const [stdout, io] = await routeCrossMount(
+    cmdName,
+    scopes,
+    textArgs,
+    flags,
+    dispatch,
+    runSingle,
+    stdin,
+  )
   const stderrBytes = await materialize(io.stderr)
   const exec = new ExecutionNode({ command: cmdStr, stderr: stderrBytes, exitCode: io.exitCode })
   return [stdout, io, exec]

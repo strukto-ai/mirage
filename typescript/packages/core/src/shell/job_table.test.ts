@@ -134,8 +134,10 @@ describe('JobTable.wait', () => {
       cwd: '/',
     })
     j.status = JobStatus.COMPLETED
-    const result = await jt.submit(j).task // does not matter
-    void result
+    jt.loadJob(j)
+    const result = await jt.wait(99)
+    expect(result).toBe(j)
+    expect(result.status).toBe(JobStatus.COMPLETED)
   })
 
   it('sets KILLED status on abort error', async () => {

@@ -380,11 +380,60 @@ mirage daemon kill                # SIGKILL via PID file -- last resort
 Most users never need to think about the daemon. If you do:
 
 - It listens on `http://127.0.0.1:8765` by default.
-- Override via `MIRAGE_DAEMON_URL` env var or `~/.mirage/config.toml`:
+- Override via env vars or `~/.mirage/config.toml`, edited with
+  `mirage config` (the `git config` of Mirage):
+  ```bash
+  mirage config set port 9100
+  mirage config set version_root /data/repos
+  mirage config get version_root          # one key, exit 1 if unset
+  mirage config list                      # everything written in the file
+  mirage config unset port                # remove a key
+  mirage config list --resolved           # effective values + where each came from
+  ```
   ```toml
   [daemon]
   url                = "http://127.0.0.1:8765"
   idle_grace_seconds = 30
+  port               = 9100
+  version_root       = "/data/repos"
   ```
+- Per key the precedence is: env var > `config.toml` > default.
+  Because env vars silently beat the file, `mirage config list`
+  (which shows only the file) can look right while the daemon uses
+  something else. `--resolved` shows the value each key will
+  actually get and which source won:
+
+  ```bash
+  $ mirage config set version_root /data/repos
+  $ export MIRAGE_VERSION_ROOT=/tmp/other        # e.g. left over in your shell profile
+
+  $ mirage config list          # the file looks correct...
+  version_root = /data/repos
+
+  $ mirage config list --resolved   # ...but the env var wins
+  version_root = /tmp/other  (env MIRAGE_VERSION_ROOT)
+  port         = 8765        (default)
+  url          = http://127.0.0.1:8765  (default)
+  auth_token   = ***         (env MIRAGE_TOKEN)
+  ```
+
+  Use it whenever a setting seems ignored: the origin column names
+  the exact env var overriding you. Secrets are masked, and piped
+  output is JSON (`{"version_root": {"value": ..., "origin": ...}}`)
+  so it works with `jq`.
+- Allowed keys: `url`, `socket`, `auth_token`, `auth_mode`,
+  `allowed_hosts`, `idle_grace_seconds`, `port`, `pid_file`,
+  `version_root`, `snapshot_root`, and the `jwt_*` family
+  (`jwt_alg`, `jwt_issuer`, `jwt_audience`, `jwt_pubkey_file`,
+  `jwt_clock_skew`, `jwt_authorized_parties`). `MIRAGE_HOME` and raw
+  secrets (`MIRAGE_AUTH_TOKEN`, `MIRAGE_JWT_PUBKEY`) stay env-only.
+- Like `dockerd` with a bad `daemon.json`, the daemon refuses to
+  start on unknown keys or malformed TOML, naming the offender.
+  `mirage config unset <key>` accepts unknown keys so you can repair
+  the file; `mirage config list` warns about them.
+- Path settings (`pid_file`, `version_root`, `snapshot_root`, `port`)
+  take effect on the next daemon start; there is no hot reload.
+- `mirage config set` chmods the file to `0600` since it may hold
+  `auth_token`.
 - Logs go to `~/.mirage/daemon.log` when the CLI auto-spawns it.
 - It exits 30 seconds after the workspace count hits zero (configurable).

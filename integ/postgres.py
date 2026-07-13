@@ -16,7 +16,7 @@ import asyncio
 import os
 
 import asyncpg
-from cases import run_not_found, run_provision_probe
+from cases import run_not_found, run_provision_probe, run_sed_readonly_probe
 
 from mirage import MountMode, Workspace
 from mirage.resource.postgres import PostgresConfig, PostgresResource
@@ -59,10 +59,20 @@ CASES: list[tuple[str, str]] = [
     ("grep_ada", f"grep ada {MOUNT}/public/tables/books/rows.jsonl"),
     ("grep_e_multi",
      f"grep -n -e ada -e ben {MOUNT}/public/tables/books/rows.jsonl"),
+    ("rg_e_multi",
+     f"rg -n -e ada -e ben {MOUNT}/public/tables/books/rows.jsonl"),
     ("grep_schema_scope", f"grep ada {MOUNT}/public/tables/"),
     ("rg_schema_scope", f"rg ben {MOUNT}/public/"),
     ("find_rows", f"find {MOUNT}/public/ -name rows.jsonl"),
     ("find_schema", f"find {MOUNT}/public/ -name schema.json"),
+    # rows.jsonl is sizeless (table_size_bytes lives in extra.size_bytes):
+    # stat prints size 0, -size counts it as 0, wc -c sees rendered bytes.
+    ("stat_size_rows",
+     f"stat -c '%s %n' {MOUNT}/public/tables/books/rows.jsonl"),
+    ("find_size_plus_rows",
+     f"find {MOUNT}/public/tables/ -name rows.jsonl -size +1c"),
+    ("find_size_under_rows",
+     f"find {MOUNT}/public/tables/books/ -name rows.jsonl -size -1k"),
     ("jq_titles", f"jq '.title' {MOUNT}/public/tables/books/rows.jsonl"),
     ("pipe_grep_c",
      f"cat {MOUNT}/public/tables/books/rows.jsonl | grep -c ada"),
@@ -133,6 +143,7 @@ async def main() -> None:
         await _run(ws, name, cmd)
     await run_not_found(ws, MOUNT)
     await run_provision_probe(ws, f"{MOUNT}/public/tables/books/rows.jsonl")
+    await run_sed_readonly_probe(ws, f"{MOUNT}/public/tables/books/rows.jsonl")
     await resource.accessor.close()
 
 

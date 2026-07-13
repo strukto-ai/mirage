@@ -18,7 +18,7 @@ from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
 from mirage.shell.types import NodeType as NT
-from mirage.workspace.executor.fs_error import format_fs_error
+from mirage.utils.errors import format_fs_error
 from mirage.workspace.executor.jobs import handle_background
 from mirage.workspace.types import ExecutionNode
 
@@ -69,11 +69,12 @@ async def execute_program(
                 stdout = await materialize(stdout)
             except OSError as exc:
                 # Lazy reads (head/tail opening the stream mid-pipeline) can
-                # fail on the first pull; format as a GNU coreutils line with
-                # the virtual path, mirroring the eager executor chokepoint.
+                # fail on the first pull; format as a GNU coreutils line,
+                # respelling the path as typed via the operands the leaf
+                # node carries, mirroring the eager executor chokepoint.
                 cmd_name = (last_exec.command.split()[0]
                             if last_exec.command else "")
-                drain_err = format_fs_error(cmd_name, exc)
+                drain_err = format_fs_error(cmd_name, exc, last_exec.paths)
                 stdout = None
             except Exception as exc:
                 drain_err = f"{exc}\n".encode()

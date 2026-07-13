@@ -40,7 +40,7 @@ export interface HfBucketsConfigRedacted {
   keyPrefix?: string
 }
 
-export const HfBucketsConfigSchema = z.object({
+const HfBucketsConfigSchema = z.object({
   bucket: z.string(),
   token: secretStr().optional(),
   endpoint: z.string(),
@@ -87,7 +87,7 @@ export interface HfRepoConfigRedacted {
   revision?: string
 }
 
-export const HfRepoConfigSchema = z.object({
+const HfRepoConfigSchema = z.object({
   repoId: z.string(),
   token: secretStr().optional(),
   endpoint: z.string(),

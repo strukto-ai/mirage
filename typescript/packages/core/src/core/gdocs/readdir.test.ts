@@ -194,4 +194,47 @@ describe('gdocs readdir', () => {
     )
     expect(result.extra.doc_id).toBe('may1')
   })
+
+  it('keeps entry size null, Drive source size lands in extra', async () => {
+    vi.mocked(drive.listAllFiles).mockResolvedValue([
+      {
+        id: 'doc1',
+        name: 'My Doc',
+        modifiedTime: '2026-04-01T00:00:00.000Z',
+        size: '1234',
+        owners: [{ me: true }],
+      },
+    ])
+
+    const accessor = makeAccessor()
+    const index = new RAMIndexCacheStore()
+    const listed = await readdir(
+      accessor,
+      new PathSpec({
+        virtual: '/gdocs/owned',
+        directory: '/gdocs/owned',
+        resourcePath: mountKey('/gdocs/owned', '/gdocs'),
+      }),
+      index,
+    )
+
+    // Drive's source size never becomes the entry size: the rendered
+    // JSON length is unknown until read.
+    const listedPath = listed[0]
+    if (listedPath === undefined) throw new Error('expected one entry')
+    const entry = (await index.get(listedPath)).entry
+    expect(entry?.size).toBeNull()
+    expect(entry?.extra.source_size).toBe(1234)
+    const result = await stat(
+      accessor,
+      new PathSpec({
+        virtual: listedPath,
+        directory: listedPath,
+        resourcePath: mountKey(listedPath, '/gdocs'),
+      }),
+      index,
+    )
+    expect(result.size).toBeNull()
+    expect(result.extra.source_size).toBe(1234)
+  })
 })

@@ -13,5 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export { isCrossMount } from './detect.ts'
+
 export { handleCrossMount } from './route.ts'
-export type { CrossResult, DispatchFn } from './primitives.ts'
+export type { DispatchFn, RunSingle } from './types.ts'

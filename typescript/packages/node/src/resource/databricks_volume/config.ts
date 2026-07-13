@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export {
-  DatabricksVolumeConfigSchema,
   normalizeDatabricksVolumeConfig,
   redactDatabricksVolumeConfig,
   type DatabricksVolumeConfig,

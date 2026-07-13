@@ -118,7 +118,7 @@ export class RedisFileCacheStore extends RedisResource implements FileCache {
     await pipe.exec()
   }
 
-  async exists(key: string | PathSpec): Promise<boolean> {
+  override async exists(key: string | PathSpec): Promise<boolean> {
     const k = typeof key === 'string' ? key : key.mountPath
     const c = await this.cacheClient()
     return (await c.exists(`${this.dataPrefix}${k}`)) > 0

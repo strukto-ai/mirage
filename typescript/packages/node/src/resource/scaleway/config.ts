@@ -33,7 +33,7 @@ export interface ScalewayConfigRedacted {
   timeoutMs?: number
 }
 
-export const ScalewayConfigSchema = z.object({
+const ScalewayConfigSchema = z.object({
   bucket: z.string(),
   accessKeyId: secretStr(),
   secretAccessKey: secretStr(),

@@ -20,7 +20,6 @@ from mirage.commands.builtin.github.du import du
 from mirage.commands.builtin.github.find import find
 from mirage.commands.builtin.github.grep import grep
 from mirage.commands.builtin.github.rg import rg
-from mirage.commands.builtin.github.sed import sed
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.core.github.read import read as _read
 from mirage.core.github.readdir import readdir as _readdir
@@ -29,7 +28,7 @@ from mirage.core.github.stat import stat as _stat
 # GitHub repo files are read through the generic factory; find keeps a wrapper
 # for the "no tree loaded" guard and native tree-backed walk, grep and rg push
 # down to the GitHub code-search API, du uses du_multi (flat-list contract) and
-# sed has no generic builder. GitHub is read-only, so the generic byte-mutation
+# GitHub is read-only, so the generic byte-mutation
 # commands are intentionally absent (no write op wired). There is no native
 # streaming read, so the stream op is synthesized from the whole-blob read.
 _GITHUB_CMD_OPS = CommandIO(
@@ -41,7 +40,7 @@ _GITHUB_CMD_OPS = CommandIO(
     local=False,
 )
 
-_GITHUB_OVERRIDES = {"du", "find", "grep", "rg", "sed"}
+_GITHUB_OVERRIDES = {"du", "find", "grep", "rg"}
 
 COMMANDS = [
     *make_generic_commands(
@@ -53,5 +52,4 @@ COMMANDS = [
     find,
     grep,
     rg,
-    sed,
 ]

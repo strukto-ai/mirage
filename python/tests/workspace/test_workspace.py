@@ -15,6 +15,7 @@
 import asyncio
 
 from mirage.resource.ram import RAMResource
+from mirage.runtime.python import select_python_runtime
 from mirage.types import DEFAULT_SESSION_ID, MountMode
 from mirage.workspace import Workspace
 
@@ -1388,7 +1389,10 @@ def test_python3_c_multiline():
 
 
 def test_python3_c_with_stdin():
+    # sys.stdin is a host feature: monty has no stdin, so piping into
+    # python3 is a local-runtime capability.
     ws = _ws()
+    ws._registry.python_runtime = select_python_runtime("local")
     io = _exec(
         ws, 'echo hello | python3 -c "import sys; '
         'print(sys.stdin.read().strip().upper())"')
@@ -1437,6 +1441,8 @@ def test_python3_no_args():
 def test_python3_c_with_argv():
     """python3 -c "code" arg1 arg2 → arg1/arg2 reach sys.argv as bare text."""
     ws = _ws()
+    # sys.argv is a host feature; monty exposes `argv` instead.
+    ws._registry.python_runtime = select_python_runtime("local")
     io = _exec(ws, 'python3 -c "import sys; print(sys.argv[1:])" alpha beta')
     assert io.exit_code == 0
     assert _stdout(io) == b"['alpha', 'beta']\n"
@@ -1445,6 +1451,8 @@ def test_python3_c_with_argv():
 def test_python3_c_with_abs_path_argv():
     """python3 -c "code" /abs/path → abs path stays text argv (not script)."""
     ws = _ws()
+    # sys.argv is a host feature; monty exposes `argv` instead.
+    ws._registry.python_runtime = select_python_runtime("local")
     io = _exec(ws,
                'python3 -c "import sys; print(sys.argv[1:])" /disk/some_file')
     assert io.exit_code == 0
@@ -1454,6 +1462,8 @@ def test_python3_c_with_abs_path_argv():
 def test_python3_script_with_argv():
     """python3 /abs/script.py arg1 arg2 → script reads, argv passed through."""
     ws = _ws()
+    # sys.argv is a host feature; monty exposes `argv` instead.
+    ws._registry.python_runtime = select_python_runtime("local")
     _exec(ws, "echo 'import sys; print(sys.argv[1:])' > /disk/argv.py")
     io = _exec(ws, "python3 /disk/argv.py alpha beta")
     assert io.exit_code == 0
@@ -1472,6 +1482,8 @@ def test_python3_bare_name_script_via_cwd():
 def test_python3_bare_name_script_with_argv():
     """python3 script.py one two (bare + argv) → cwd-resolved + argv passes."""
     ws = _ws()
+    # sys.argv is a host feature; monty exposes `argv` instead.
+    ws._registry.python_runtime = select_python_runtime("local")
     _exec(ws, "echo 'import sys; print(sys.argv[1:])' > /disk/with_argv.py")
     io = _exec(ws, "cd /disk && python3 with_argv.py one two")
     assert io.exit_code == 0
@@ -2190,6 +2202,13 @@ def test_timeout_runs_command():
     assert _stdout(io) == b"hello\n"
 
 
+def test_timeout_preserves_quoted_arg():
+    """timeout N cmd 'a  b' keeps the quoted word as one argument."""
+    ws = _ws()
+    io = _exec(ws, "timeout 5 echo 'a  b'")
+    assert _stdout(io) == b"a  b\n"
+
+
 # ── xargs ───────────────────────────────────────────────────────────────
 
 
@@ -2198,6 +2217,89 @@ def test_xargs_basic():
     ws = _ws()
     io = _exec(ws, 'echo "a b c" | xargs echo')
     assert _stdout(io) == b"a b c\n"
+
+
+def test_xargs_keeps_initial_args():
+    """xargs cmd initial-args appends stdin words after them (GNU)."""
+    ws = _ws()
+    io = _exec(ws, "echo c | xargs echo a b")
+    assert _stdout(io) == b"a b c\n"
+
+
+def test_xargs_input_words_stay_literal():
+    """Input words are argv tokens, not shell source (GNU execs argv)."""
+    ws = _ws()
+    io = _exec(ws, "echo '$(echo pwned)' | xargs echo")
+    assert _stdout(io) == b"$(echo pwned)\n"
+
+
+def test_xargs_input_quote_char():
+    """A quote character in input does not break the inner command."""
+    ws = _ws()
+    io = _exec(ws, 'echo "don\'t" | xargs echo')
+    assert _stdout(io) == b"don't\n"
+
+
+def test_variable_command_name():
+    """$E hi runs the expanded command name (bash expands, then runs)."""
+    ws = _ws()
+    io = _exec(ws, "E=echo; $E hi")
+    assert _stdout(io) == b"hi\n"
+
+
+def test_quoted_command_name():
+    """A quoted command name expands like any other word."""
+    ws = _ws()
+    io = _exec(ws, '"echo" hi')
+    assert _stdout(io) == b"hi\n"
+
+
+# ── glob rule: resolved by whoever consumes the word, exactly once ──────
+
+
+def test_glob_unmatched_keeps_literal():
+    """Zero-match glob stays the literal word (bash nullglob off)."""
+    ws = _ws()
+    io = _exec(ws, "echo /ram/*.nope")
+    assert _stdout(io) == b"/ram/*.nope\n"
+
+
+def test_glob_test_f_resolves():
+    """test -f sees the shell-resolved match, not the pattern."""
+    ws = _ws()
+    io = _exec(ws, "test -f /ram/note* && echo yes")
+    assert _stdout(io) == b"yes\n"
+
+
+def test_glob_function_args_resolve():
+    """Function positional args receive matches, not the pattern."""
+    ws = _ws()
+    io = _exec(ws, "f() { echo $1 $#; }; f /ram/*.txt")
+    assert _stdout(io) == b"/ram/notes.txt 3\n"
+
+
+def test_ln_multi_source_is_error():
+    """GNU ln: multiple sources need a directory target."""
+    ws = _ws()
+    io = _exec(ws, "ln -s /ram/*.txt /ram/lnk")
+    assert io.exit_code == 1
+    assert b"is not a directory" in io.stderr
+
+
+def test_ln_single_match_resolves():
+    """ln -s links to the glob's match, not the literal pattern."""
+    ws = _ws()
+    _exec(ws, "ln -s /ram/note* /ram/l2")
+    io = _exec(ws, "readlink /ram/l2")
+    assert _stdout(io) == b"/ram/notes.txt\n"
+
+
+def test_unknown_command_not_found():
+    """A name nobody registers fails 127 without backend errors."""
+    ws = _ws()
+    io = _exec(ws, "nosuchcmd /ram/*.txt")
+    assert io.exit_code == 127
+    assert io.stderr == b"nosuchcmd: command not found\n"
 
 
 # ── additional fixes ────────────────────────────────────────────────────

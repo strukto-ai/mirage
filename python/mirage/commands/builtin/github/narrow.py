@@ -27,7 +27,7 @@ from mirage.core.github.scope import (count_scope_files, scope_relative_key,
 from mirage.core.github.search import narrow_paths
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-from mirage.utils.path import rebase_display
+from mirage.utils.path import rebase_raw
 
 
 async def narrow_scope(
@@ -123,5 +123,5 @@ def files_only_shortcircuit(
     ]
     if not hits:
         return b"", IOResult(exit_code=1)
-    displays = rebase_display(hits, scope.virtual, scope.display)
-    return format_records(sorted(displays)), IOResult()
+    spelled = rebase_raw(hits, scope.virtual, scope.raw_path)
+    return format_records(sorted(spelled)), IOResult()

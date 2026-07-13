@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
+
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.core.gdrive import DIRECTORY_RESOURCE_TYPES
@@ -20,6 +22,8 @@ from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.filetype import guess_type
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
+
+logger = logging.getLogger(__name__)
 
 
 async def stat(
@@ -50,9 +54,9 @@ async def stat(
                          resource_path=mount_key(parent_virtual, prefix)),
                 index=index,
             )
-        # best-effort cache populate; canonical ENOENT raised below
-        except Exception:
-            pass
+        except Exception as exc:
+            # best-effort cache populate; canonical ENOENT raised below
+            logger.debug("stat populate failed for %s: %s", virtual, exc)
         result = await index.get(virtual_key)
         if result.entry is None:
             raise enoent(virtual)
