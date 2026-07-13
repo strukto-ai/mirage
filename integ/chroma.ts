@@ -49,6 +49,10 @@ const PATH_TREE: Record<string, Record<string, unknown>> = {
   "CHANGELOG.md": {
     size: 90,
   },
+  // No size metadata: sizeless files count as 0 for -size/du, never dropped.
+  "policies/archived.md": {
+    created_at: "2026-03-01T00:00:00Z",
+  },
 };
 
 interface SeedChunk {
@@ -57,6 +61,12 @@ interface SeedChunk {
 }
 
 const CHUNKS: Record<string, SeedChunk[]> = {
+  "policies/archived.md": [
+    {
+      document: "Archived policy retained for records.",
+      metadata: { page_slug: "policies/archived.md", chunk_index: 0 },
+    },
+  ],
   "guides/quickstart.md": [
     {
       document: "Welcome to Acme. This quickstart gets you running fast.",
@@ -127,6 +137,8 @@ const CASES: ReadonlyArray<readonly [string, string]> = [
   ["find_type_f", "find {root} -type f | sort"],
   ["find_root_maxdepth0", "find {root} -maxdepth 0"],
   ["find_root_name", "find {root} -name knowledge"],
+  ["find_size_plus_100c", "find {root} -type f -size +100c | sort"],
+  ["find_size_archived_kept", "find {root}policies/ -name 'archived*' -size -1k"],
   // cold (bespoke) then warm (cache-mount generic) must be identical
   ["grep_cold_single", "grep bearer {root}guides/auth.md"],
   ["grep_warm_single", "grep bearer {root}guides/auth.md"],

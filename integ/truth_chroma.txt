@@ -11,24 +11,34 @@ quickstart.md
 │   ├── auth.md
 │   └── quickstart.md
 └── policies
+    ├── archived.md
     ├── privacy.md
     └── refunds.md
 === find_md ===
 /knowledge/CHANGELOG.md
 /knowledge/guides/auth.md
 /knowledge/guides/quickstart.md
+/knowledge/policies/archived.md
 /knowledge/policies/privacy.md
 /knowledge/policies/refunds.md
 === find_type_f ===
 /knowledge/CHANGELOG.md
 /knowledge/guides/auth.md
 /knowledge/guides/quickstart.md
+/knowledge/policies/archived.md
 /knowledge/policies/privacy.md
 /knowledge/policies/refunds.md
 === find_root_maxdepth0 ===
 /knowledge
 === find_root_name ===
 /knowledge
+=== find_size_plus_100c ===
+/knowledge/guides/auth.md
+/knowledge/guides/quickstart.md
+/knowledge/policies/privacy.md
+/knowledge/policies/refunds.md
+=== find_size_archived_kept ===
+/knowledge/policies/archived.md
 === grep_cold_single ===
 Authentication uses bearer tokens via the Authorization header.
 === grep_warm_single ===

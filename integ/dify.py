@@ -224,7 +224,12 @@ PER_MOUNT_CASES: list[tuple[str, str]] = [
     ("find_type_f", "find {root} -type f | sort"),
     ("find_root_maxdepth0", "find {root} -maxdepth 0"),
     ("find_root_name", "find {root} -name knowledge"),
+    # Documents are sizeless (the API only knows the uploaded source size,
+    # kept in extra.source_size): stat prints 0 and -size counts them as 0,
+    # while content commands (cat/wc -c) see the real rendered bytes.
     ("stat_fmt", "stat -c '%s %n' {root}guides/auth"),
+    ("find_size_plus_1c", "find {root} -type f -size +1c"),
+    ("find_size_under_1k", "find {root} -type f -size -1k | sort"),
     ("cat_auth", "cat {root}guides/auth"),
     ("head_1", "head -n 1 {root}guides/quickstart"),
     ("tail_1", "tail -n 1 {root}guides/quickstart"),
