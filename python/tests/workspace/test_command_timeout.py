@@ -329,3 +329,34 @@ async def test_cross_mount_cat_aggregates_tightest_safeguard():
     r = await ws.execute("cat /a/x.txt /b/y.txt")
     assert r.safeguard.max_lines == 1
     assert r.safeguard.on_exceed is OnExceed.ERROR
+
+
+@pytest.mark.asyncio
+async def test_python3_default_safeguard_fires_like_any_command(
+        restore_defaults):
+    sg.DEFAULT_COMMAND_SAFEGUARDS["python3"] = CommandSafeguard(
+        timeout_seconds=0.2)
+    ws = Workspace({"/data": RAMResource()},
+                   mode=MountMode.EXEC,
+                   python_runtime="local")
+    r = await ws.execute('python3 -c "import time; time.sleep(5)"')
+    assert r.exit_code == 124
+    assert "python3: timed out after 0.2s" in (await r.stderr_str())
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_python3_mount_safeguard_fires_like_any_command(
+        restore_defaults):
+    ws = Workspace(
+        {
+            "/data": (RAMResource(), MountMode.EXEC, {
+                "python3": CommandSafeguard(timeout_seconds=0.2)
+            })
+        },
+        mode=MountMode.EXEC,
+        python_runtime="local")
+    r = await ws.execute('cd /data && python3 -c "import time; time.sleep(5)"')
+    assert r.exit_code == 124
+    assert "python3: timed out after 0.2s" in (await r.stderr_str())
+    await ws.close()

@@ -601,7 +601,7 @@ async def handle_command(
             target = registry.mount_for(ps.virtual)
             assert_mount_allowed(target.prefix)
     except PermissionError as exc:
-        err = f"{exc}\n".encode()
+        err = f"{cmd_name}: {exc}\n".encode()
         return None, IOResult(exit_code=1,
                               stderr=err), ExecutionNode(command=cmd_str,
                                                          exit_code=1,

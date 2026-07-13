@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Session } from './session.ts'
+import type { MountMode } from '../../types.ts'
 
 export class SessionManager {
   private readonly sessions = new Map<string, Session>()
@@ -39,13 +40,16 @@ export class SessionManager {
     this.defaultSession().env = value
   }
 
-  create(sessionId: string, options: { allowedMounts?: ReadonlySet<string> | null } = {}): Session {
+  create(
+    sessionId: string,
+    options: { mountGrants?: ReadonlyMap<string, MountMode> | null } = {},
+  ): Session {
     if (this.sessions.has(sessionId)) {
       throw new Error(`Session ${sessionId} already exists`)
     }
     const session = new Session({
       sessionId,
-      allowedMounts: options.allowedMounts ?? null,
+      mountGrants: options.mountGrants ?? null,
     })
     this.sessions.set(sessionId, session)
     return session

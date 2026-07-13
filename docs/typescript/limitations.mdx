@@ -4,7 +4,7 @@ icon: triangle-exclamation
 description: Runtime-specific constraints in the TypeScript SDK (Node and Browser) and how to work around them.
 ---
 
-Most of Mirage's behavior is identical across Python and TypeScript. The two TS runtimes (Node and Browser) each impose a handful of constraints that don't exist in Python. All are documented here so you can plan around them before they surprise you in production.
+Most of Mirage's behavior is identical across Python and TypeScript. The two TS runtimes (Node and Browser) each impose a handful of constraints, most of which don't exist in Python (the one shared design property, size-unknown stat, is included because it is the most common surprise). All are documented here so you can plan around them before they surprise you in production.
 
 <Note>
   `python3` has its own set of WASM-runtime-level divergences from Python Mirage's subprocess model. See [Python](/typescript/python#limitations) for the full list.
@@ -72,58 +72,46 @@ readFileSync('/data/x.txt')  // hits the real filesystem, throws ENOENT
 
 ---
 
-### 2. FUSE files from API-backed resources cap at 100 MiB
+### 2. The FUSE mount is served by your process's event loop
 
-**The problem.** API-backed resources (Trello, Linear, Slack, MongoDB, etc.) return `stat.size = null` because the byte size isn't known until the API has been called. Python passes `direct_io=True` to libfuse at mount time so the kernel ignores reported size and issues `read()` until it returns 0 (Slack's daily history can be tens of MB and it just works).
-
-`@zkochan/fuse-native` doesn't expose `direct_io`. There's no per-file flag (the `open` C bridge can only return `fh`, not modify `fuse_file_info.direct_io`), and the `-o direct_io` mount option is rejected by macFUSE/libosxfuse and crashes the channel. So when Mirage's FUSE layer hits a `size=null` file, it has to report **some** non-zero size to make the kernel issue reads, otherwise `cat board.json` would print empty.
-
-We report a 100 MiB sentinel. The read handler returns 0 past the actual data length, so `cat`, `wc -c`, and friends correctly see EOF for files smaller than the sentinel. **Files larger than 100 MiB get truncated.**
-
-**What this means in practice.**
+**The problem.** `@zkochan/fuse-native` dispatches every FUSE request (`getattr`, `read`, …) as a callback on the mounting process's Node event loop. Any *synchronous* access to your own mountpoint from that same process (`readFileSync`, `statSync`, `execFileSync('cat', …)`) blocks the loop that must answer the request: the call deadlocks, the kernel eventually times the filesystem out, and later operations fail with `Device not configured` / `ENOTCONN`.
 
 ```ts
-const ws = new Workspace({ '/slack': new Mount(new SlackResource({ apiKey }), { fuse: true }) })
+const ws = new Workspace({ '/data': new Mount(new RAMResource(), { fuse: true }) })
 await ws.fuseReady()
-// The `/slack` subtree is exposed at the mountpoint root, so paths are relative to it.
-const slackMp = ws.fuseMountpoint
-// ✅ Works, most channels have <100 MiB of daily history
-await readFile(`${slackMp}/channels/general__C123/2026-04-12/chat.jsonl`)
+const mp = ws.fuseMountpoint
 
-// ⚠️ Truncated to 100 MiB if the actual day exceeds it
-await readFile(`${slackMp}/channels/super-busy-channel__C456/2026-04-12/chat.jsonl`)
+// ✅ async APIs interleave with the FUSE callbacks
+await readFile(`${mp}/x.txt`)
+await promisify(execFile)('cat', [`${mp}/x.txt`])
+
+// ❌ sync APIs deadlock the mount this process is serving
+readFileSync(`${mp}/x.txt`)
+execFileSync('cat', [`${mp}/x.txt`])
 ```
 
-`ls -l` shows `100M` for any unfetched API-backed file. Once a file has been opened, the real size is cached and subsequent `ls -l` shows the actual byte count.
+**Why Python doesn't hit this.** Python's FUSE loop runs on a dedicated thread, so the main thread can block on the mount freely.
 
-The cap exists because Node's `fs/promises.readFile` allocates a Buffer of the reported size and decodes it as utf-8 at the end; V8's string length limit is ~512 MiB, so a larger sentinel throws `RangeError: Invalid string length` (which is what you'd hit before any real read).
+**Workarounds.** Use async `fs` APIs and async subprocess spawns from the mounting process, or dedicate a child process to owning the mount (see `examples/typescript/fuse/helper.ts` for the pattern). External processes (a sandbox runtime, another terminal, your shell) are unaffected — the constraint only binds the process that created the mount.
 
-**Knock-on effect for JSON files.** Because the kernel zero-pads the unread tail of the 100 MiB buffer, `JSON.parse(readFile(...))` on a FUSE-mounted JSON file fails at the first ` ` byte right after the real payload with `SyntaxError: Unexpected non-whitespace character after JSON`. Streaming tools (`cat`, `grep`, `head`, `wc -c`, `jq`) stop at EOF and are unaffected; only consumers that decode the full buffer as UTF-8 and then parse it choke on the padding. MongoDB's FUSE-exposed `schema.json`, `database.json`, and `documents.jsonl` are the most visible cases, see [TS MongoDB → FUSE caveat](/typescript/setup/mongodb#fuse-caveat-padded-reads-of-schemajson-documentsjsonl) for workarounds.
+---
 
-**Why Python doesn't hit this.** Python's `mfusepy` accepts `direct_io=True` and passes it to libfuse2 as a mount option. macFUSE supports it through that path even though it rejects the same option from `@zkochan/fuse-native`'s option string. With direct_io enabled, the kernel doesn't care what size getattr reports.
+### 3. Size-unknown API files stat as 0 bytes until first open
 
-**Workarounds.**
+**The behavior.** API-backed resources (Trello, Linear, Slack, MongoDB, …) return `stat.size = null` because the byte size isn't known until the API has been called. Over the FUSE mount these files behave like Linux `/proc` files: they stat as **0 bytes until first open**, and become fully readable the moment anything opens them. Mirage mounts with `direct_io` (the kernel reads to EOF regardless of the reported size; `@zkochan/fuse-native` doesn't expose the option, so Mirage appends it to the mount option string itself) and `attr_timeout=0` (post-open `fstat` returns the real size of the now-fetched content, kept warm in a 30-second cache).
 
-<Tabs>
-  <Tab title="Read via the VFS API">
-    The Mirage VFS doesn't go through FUSE at all (no sentinel, no truncation). Use this for any file that might exceed 100 MiB.
+What that means per tool:
 
-    ```ts
-    const bytes = await ws.fs.readFile('/slack/channels/super-busy-channel__C456/2026-04-12/chat.jsonl')
-    // Or via shell:
-    const res = await ws.execute('cat /slack/channels/super-busy-channel__C456/2026-04-12/chat.jsonl')
-    ```
-  </Tab>
-  <Tab title="Process incrementally">
-    For Slack history specifically, narrow the date or use a more targeted command (`grep`, `jq`, line-count stats) so the result fits well under the cap.
+| Tools | Behavior |
+| --- | --- |
+| `cat`, `grep`, `head`, `cp`, `md5sum`, `sed`, `sort` | correct content, always |
+| `wc -c`, `tail -c` | correct (they fstat after open, which serves the real size) |
+| `ls -l`, `du`, `find -size`, `test -s` | report 0 until the file has been opened recently |
+| `tar`, `rsync`, `scp` | see 0 at stat time and copy empty content, exactly like `tar` over `/proc`; read the file first or use `cat`/`cp` based flows |
 
-    ```ts
-    await ws.execute('jq -r ".[] | .text" /slack/channels/general__C123/2026-04-12/chat.jsonl')
-    ```
-  </Tab>
-</Tabs>
+Mirage never reports a fake size and never fetches content during `stat`: returning real sizes eagerly would fire one API call per file on every `ls -l`. Earlier TS versions instead reported a fake 100 MiB size with zero-padded reads (`JSON.parse` of a FUSE-read file failed on the padding); that sentinel is gone and reads are byte-exact.
 
-**Possible future fix.** Patch `@zkochan/fuse-native`'s C bridge to set `info->direct_io = 1` in the `open` callback (a one-line change applied via `pnpm patch`). That achieves Python parity and removes the 100 MiB cap entirely. Tracked but not yet implemented.
+**Why Python behaves the same.** Unlike the other entries on this page, this one is not TS-specific: it is a design property of API-backed mounts, and Python's FUSE layer has identical semantics (see [Python FUSE setup](/python/setup/fuse#size-semantics-for-api-backed-files)). It is listed here because the stat-time zeros are the most common FUSE surprise in practice.
 
 ---
 
@@ -160,9 +148,16 @@ The Python FS shim (`open()` against mounted paths) flushes writes back through 
 
 See [Python FS shim](/typescript/python-fs#runtime-requirements) for the full matrix.
 
-### 5. No SSH, Postgres, MongoDB, LanceDB, Email, FUSE peers
+### 5. Some resource drivers remain Node-only
 
-These resources are only exposed by `@struktoai/mirage-node` because their drivers are Node-only. Importing them from `@struktoai/mirage-browser` is a build error. For browser apps, route those reads through your backend (or use the HTTP-driver variants where they exist, e.g. MongoDB via the bundled mongo-proxy in the examples).
+SSH, LanceDB, Email, Disk, Redis, and the Hugging Face resources are only exposed by `@struktoai/mirage-node` because their drivers need Node APIs or raw TCP. Importing them from `@struktoai/mirage-browser` is a build error.
+
+Postgres and MongoDB do have browser implementations:
+
+- Postgres uses `NeonPgDriver` over HTTP.
+- MongoDB uses `HttpMongoDriver` and an HTTP proxy such as the bundled mongo-proxy example.
+
+Those HTTP drivers still need a browser-reachable endpoint with the correct CORS policy. They are not drop-in replacements for raw Postgres or MongoDB socket connections.
 
 ---
 
@@ -172,14 +167,17 @@ These resources are only exposed by `@struktoai/mirage-node` because their drive
 |---|---|---|
 | `patchNodeFs()` with `require('fs')` (CJS) | Node | ✅ works |
 | `patchNodeFs()` with `import from 'node:fs'` (ESM) | Node | ❌ silently bypassed; use FUSE or the VFS API |
-| FUSE `cat` of a Trello/Linear/Slack file ≤ 100 MiB | Node | ✅ works |
-| FUSE `cat` of an API-backed file > 100 MiB | Node | ❌ truncated; use `ws.fs.readFile` or `ws.execute('cat …')` |
+| FUSE `cat`/`readFile` of API-backed size-unknown files | Node | ✅ works (stats 0 until opened, like `/proc`) |
+| `tar`/`rsync` of an unopened size-unknown file | Node | ❌ copies 0 bytes (stat-only tools; same in Python) — read the file first or use `cp` |
+| Synchronous access to your own mount from the mounting process | Node | ❌ deadlocks; use async APIs or a child process |
 | `ws.execute(...)` virtual builtins | Browser | ✅ works |
 | `Workspace` with a fuse `Mount` | Browser | ❌ throws; not supported |
 | OPFS reads/writes within quota | Browser | ✅ works |
 | OPFS over quota | Browser | ❌ `QuotaExceededError`; check `navigator.storage.estimate()` |
 | HTTP-backed resources without CORS allow-list | Browser | ❌ blocked; use PKCE, presigned URLs, or a same-origin proxy |
 | Python `open()` writes back through mount | Browser | ✅ with JSPI (Chrome 137+); ❌ otherwise |
-| `@struktoai/mirage-node`-only resources (SSH, Postgres, MongoDB, LanceDB, Email, FUSE) | Browser | ❌ Node-only drivers |
+| Postgres through `NeonPgDriver` | Browser | ✅ over HTTP; endpoint must allow the browser origin |
+| MongoDB through `HttpMongoDriver` | Browser | ✅ through an HTTP proxy; direct MongoDB sockets are unavailable |
+| Node-only resources (SSH, LanceDB, Email, Disk, Redis, Hugging Face, FUSE) | Browser | ❌ Node APIs or raw TCP required |
 
 The Node limitations are runtime-level, not Mirage design decisions. Python's equivalent behavior is strictly better in each case, so if a workflow absolutely requires ESM-level `fs` patching or large API-backed FUSE reads, consider whether the Python SDK fits better for that specific piece. The Browser limitations are by design (no kernel, no subprocess), so the workarounds there are about choosing the right runtime for the task.

@@ -34,7 +34,7 @@ flowchart TD
 <CodeGroup>
 
 ```python Python
-# capture — async, stats every touched path on a SUPPORTS_SNAPSHOT mount
+# capture — async; serializes state plus fingerprints recorded during reads
 await ws.snapshot("run.tar")
 await ws.snapshot("run.tar.gz", compress="gz")
 
@@ -47,13 +47,28 @@ cp = await ws.copy()
 ```
 
 ```typescript TypeScript
-// TODO(snapshot-ts): API not implemented yet.
-// Tracking parity with Python's Workspace.snapshot / Workspace.load.
+import { DriftPolicy, Workspace } from '@struktoai/mirage-node'
+
+// capture to a tar file
+await ws.snapshot('run.tar')
+
+// replay with strict drift detection (default)
+const restored = await Workspace.load('run.tar')
+
+// or restore the structure while reading current remote content
+const current = await Workspace.load('run.tar', {
+  driftPolicy: DriftPolicy.OFF,
+})
+
+// in-process duplicate
+const copy = await ws.copy()
 ```
 
 </CodeGroup>
 
-Both `snapshot` and `copy` are `async` because fingerprint capture stats each touched path on a `SUPPORTS_SNAPSHOT` mount.
+TypeScript file-path snapshot I/O is available in Node. In the browser, `Workspace.load(snapshotBytes)` accepts a `Uint8Array`, and `Workspace.fromState(...)` restores a state object; writing the tar to a file or download target is the application's responsibility.
+
+Both `snapshot` and `copy` are async because they serialize workspace state and collect recorded fingerprints.
 
 ## Versioning: commit, checkout, clone
 
@@ -146,29 +161,25 @@ The cache is the optimization, the fingerprint is the verifier, and the pin is t
 
 ## Resource Support Matrix
 
-Snapshot support is **opt-in per resource** via `SUPPORTS_SNAPSHOT = True`. Resources without it surface in a load-time warning and serve current state with no drift detection.
+Remote drift detection is opt-in per resource through `SUPPORTS_SNAPSHOT` in Python and `supportsSnapshot` in TypeScript. A working adapter must also attach a fingerprint to each read record; a revision is optional and enables pinned replay.
 
-Legend: ✅ = supported · 🟡 = adapter needed (no work in flight) · 📝 = planned · ❌ = not applicable.
+Legend: ✅ = implemented · 🟡 = resource opts in, but recorded reads do not yet carry the fingerprint · ❌ = live-only · — = unavailable in that runtime.
 
-### Object Storage
+### Remote Resources
 
-| Resource | Drift detection (Py) | Revision pin (Py) | Drift detection (TS) | Revision pin (TS) | Marker | Notes |
-| --- | :---: | :---: | :---: | :---: | --- | --- |
-| S3 | ✅ | ✅ | 📝 | 📝 | `ETag` + `VersionId` | Pin requires bucket versioning. |
-| R2 | ✅ | ✅ | 📝 | 📝 | `ETag` + `VersionId` | Inherits S3 path; pin requires R2 versioning (GA 2024). |
-| GCS | ✅ | 🟡 | 📝 | 🟡 | `ETag` + `x-goog-generation` | TODO(snapshot-gcs): map generation → `ContentVersion(kind="revision")` in `core/s3/stat.py`. |
-| OCI | ✅ | 🟡 | 📝 | 🟡 | `ETag` + `versionId` header | TODO(snapshot-oci): same shape as GCS adapter. |
-| Supabase | ✅ | ❌ | 📝 | ❌ | `ETag` only | Inherits `S3Resource`. Supabase's S3-compat endpoint does not surface object `VersionId`, so drift detection works but pinning is not available. |
+| Resource family | Python | TS Node | TS Browser | Revision pin | Notes |
+| --- | :---: | :---: | :---: | :---: | --- |
+| S3 and S3-compatible object stores | ✅ | ✅ | ✅ | When `VersionId` is available | Uses `ETag`; compatible providers without object versions still get drift detection. |
+| OneDrive | ✅ | — | — | ✅ | Uses Microsoft Graph `cTag` plus the current version id. |
+| SharePoint | ✅ | — | — | ✅ | Same Microsoft Graph version flow as OneDrive. |
+| Hugging Face resources | 🟡 | 🟡 | — | ❌ | Resources opt in, but read records do not yet include the stat fingerprint. |
+| Nextcloud | 🟡 | — | — | ❌ | The resource opts in, but read records do not yet include the WebDAV ETag. |
+| GitHub and Google Drive | ❌ | ❌ | ❌ | ❌ | Current reads are live-only; revision-aware replay is not wired yet. |
+| Other remote resources | ❌ | ❌ | ❌ | ❌ | Snapshot restores their config/state, then reads current remote content. |
 
-### Files & Code
+### Local State
 
-| Resource | Drift detection (Py) | Revision pin (Py) | Drift detection (TS) | Revision pin (TS) | Marker | Notes |
-| --- | :---: | :---: | :---: | :---: | --- | --- |
-| Disk | ✅ | ❌ | 📝 | ❌ | content hash | Bytes travel inside the tar; pin not meaningful. |
-| RAM | ✅ | ❌ | 📝 | ❌ | content hash | Same as Disk. |
-| Redis | ✅ | ❌ | 📝 | ❌ | content hash | Bytes restored via `resources=` override. |
-| GitHub | 📝 | 📝 | 📝 | 📝 | commit SHA | TODO(snapshot-github): `stat → revision=sha`, read via `repos.get_contents(path, ref=sha)`. |
-| Google Drive | 📝 | 📝 | 📝 | 📝 | `md5Checksum` + `revisionId` | TODO(snapshot-gdrive): `stat → revision=revisionId`, read via `revisions().get_media`. |
+RAM, Disk, and Redis serialize their resource state into the snapshot. They do not need a remote drift check or revision pin: replay restores the captured state directly. Credentials and connection details remain redacted and may require a resource override at load time.
 
 ## Extending To A New Backend
 

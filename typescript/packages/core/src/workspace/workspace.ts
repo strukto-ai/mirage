@@ -24,7 +24,7 @@ import { type EventDict, Observer } from '../observe/observer.ts'
 import type { OpRecord } from '../observe/record.ts'
 import type { ObserverStore } from '../observe/store.ts'
 import { type OpKwargs, OpsRegistry } from '../ops/registry.ts'
-import { assertMountAllowed, runWithSession } from '../runtime/session_context.ts'
+import { assertMountAllowed, runWithSession } from '../context/session_context.ts'
 import type { Resource } from '../resource/base.ts'
 import { HISTORY_PREFIX, HistoryViewResource } from '../resource/history/history.ts'
 import { resourceStateRequiresOverride } from '../resource/secrets.ts'
@@ -52,6 +52,7 @@ import {
   DriftPolicy,
   FileType,
   MountMode,
+  mountRole,
   type PathSpec,
 } from '../types.ts'
 import type { TSNodeLike } from './expand/variable.ts'
@@ -77,6 +78,7 @@ import type { Session } from './session/session.ts'
 import type { ExecutionNode } from './types.ts'
 import { errorVirtualPath, gnuStrerror } from '../utils/errors.ts'
 import { stripSlash } from '../utils/slash.ts'
+import { effectiveMountMode } from '../context/session_context.ts'
 
 const NOOP_ACCESSOR_INSTANCE = new NOOPAccessor()
 
@@ -371,32 +373,58 @@ export class Workspace {
     this.sessionManager.env = value
   }
 
+  /**
+   * Create a session, optionally restricted to per-mount roles.
+   *
+   * `mounts` as a map assigns each prefix a role ceiling ('read',
+   * 'write', 'exec', or the filesystem aliases 'r', 'rw', 'rwx'); an
+   * array of prefixes grants each mount its own configured mode (the
+   * previous allowlist behavior). Omitting it leaves the session
+   * unrestricted.
+   */
   createSession(
     sessionId: string,
-    options: { allowedMounts?: ReadonlySet<string> | null } = {},
+    options: {
+      mounts?: ReadonlyMap<string, string> | Record<string, string> | readonly string[] | null
+    } = {},
   ): Session {
-    let allowed = options.allowedMounts ?? null
-    if (allowed !== null) {
-      const normalized = new Set<string>()
-      for (const m of allowed) normalized.add('/' + stripSlash(m))
-      for (const p of this.infrastructureMountPrefixes()) normalized.add(p)
-      allowed = normalized
+    const mounts = options.mounts ?? null
+    let grants: Map<string, MountMode> | null = null
+    if (mounts !== null) {
+      grants = new Map<string, MountMode>()
+      if (Array.isArray(mounts)) {
+        for (const p of mounts as readonly string[]) {
+          grants.set('/' + stripSlash(p), MountMode.EXEC)
+        }
+      } else {
+        const entries: [string, string][] =
+          mounts instanceof Map
+            ? [...(mounts as ReadonlyMap<string, string>).entries()]
+            : Object.entries(mounts as Record<string, string>)
+        for (const [p, role] of entries) {
+          grants.set('/' + stripSlash(p), mountRole(role))
+        }
+      }
+      for (const p of this.infrastructureMountPrefixes()) {
+        if (!grants.has(p)) grants.set(p, MountMode.EXEC)
+      }
     }
-    return this.sessionManager.create(sessionId, { allowedMounts: allowed })
+    return this.sessionManager.create(sessionId, { mountGrants: grants })
   }
 
   /**
    * Mount prefixes a session is always allowed to touch.
    *
-   * The root mount (where text-processing commands like `wc` without a
-   * path argument resolve), the device mount, and the history view are
-   * infrastructure: they hold no user credentials, and rejecting them
-   * would break common shell idioms or the history builtin.
+   * The synthetic scratch root (where text-processing commands like `wc`
+   * without a path argument resolve), the device mount, and the history
+   * view are infrastructure: they hold no user credentials, and
+   * rejecting them would break common shell idioms or the history
+   * builtin. A user-defined root mount is NOT infrastructure; sessions
+   * must be granted `/` explicitly to touch it.
    */
   private infrastructureMountPrefixes(): Set<string> {
     const prefixes = new Set<string>(['/dev', HISTORY_PREFIX])
-    const root = this.registry.rootMount
-    if (root !== null) prefixes.add('/' + stripSlash(root.prefix))
+    if (this.syntheticRootAnchor) prefixes.add('/')
     return prefixes
   }
 
@@ -622,7 +650,11 @@ export class Workspace {
       await this.runPendingDriftCheck()
     }
     const [resource, spec, mode] = await this.resolve(path)
-    if (mode === MountMode.READ && this.opsRegistry.find(opName, resource.kind)?.write === true) {
+    const grantPrefix = this.registry.mountFor(path)?.prefix ?? '/'
+    if (
+      effectiveMountMode(grantPrefix, mode) === MountMode.READ &&
+      this.opsRegistry.find(opName, resource.kind)?.write === true
+    ) {
       throw new Error(`mount at '${path}' is read-only`)
     }
     const fullKwargs: OpKwargs =

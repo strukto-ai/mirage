@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.types import MountMode
 from mirage.workspace.session import Session
 
 
@@ -104,17 +105,18 @@ def test_session_independent_envs():
     assert "X" not in s2.env
 
 
-def test_session_allowed_mounts_default_none():
+def test_session_mount_grants_default_none():
     s = Session(session_id="s")
-    assert s.allowed_mounts is None
+    assert s.mount_grants is None
 
 
-def test_session_allowed_mounts_set():
-    s = Session(session_id="s", allowed_mounts=frozenset({"/s3", "/slack"}))
-    assert s.allowed_mounts == frozenset({"/s3", "/slack"})
+def test_session_mount_grants_set():
+    grants = {"/s3": MountMode.READ, "/slack": MountMode.WRITE}
+    s = Session(session_id="s", mount_grants=grants)
+    assert s.mount_grants == grants
 
 
-def test_fork_copies_every_field_including_allowed_mounts():
+def test_fork_copies_every_field_including_mount_grants():
     original = Session(
         session_id="orig",
         cwd="/disk",
@@ -124,17 +126,49 @@ def test_fork_copies_every_field_including_allowed_mounts():
         shell_options={"errexit": True},
         readonly_vars={"HOME"},
         arrays={"ARGV": ["a", "b"]},
-        allowed_mounts=frozenset({"/s3", "/dev", "/"}),
+        mount_grants={
+            "/s3": MountMode.READ,
+            "/dev": MountMode.EXEC,
+            "/": MountMode.EXEC,
+        },
     )
     forked = original.fork()
     assert forked.session_id == "orig"
     assert forked.cwd == "/disk"
     assert forked.env == {"FOO": "bar"}
-    assert forked.allowed_mounts == frozenset({"/s3", "/dev", "/"})
+    assert forked.mount_grants == {
+        "/s3": MountMode.READ,
+        "/dev": MountMode.EXEC,
+        "/": MountMode.EXEC,
+    }
+    assert forked.mount_grants is not original.mount_grants
     assert forked.shell_options == {"errexit": True}
     assert "HOME" in forked.readonly_vars
     assert forked.arrays == {"ARGV": ["a", "b"]}
     assert forked.last_exit_code == 7
+
+
+def test_to_dict_round_trips_mount_grants():
+    s = Session(session_id="s",
+                mount_grants={
+                    "/s3": MountMode.READ,
+                    "/scratch": MountMode.WRITE,
+                })
+    data = s.to_dict()
+    assert data["mount_grants"] == {"/s3": "read", "/scratch": "write"}
+    restored = Session.from_dict(data)
+    assert restored.mount_grants == {
+        "/s3": MountMode.READ,
+        "/scratch": MountMode.WRITE,
+    }
+    assert isinstance(next(iter(restored.mount_grants.values())), MountMode)
+
+
+def test_to_dict_omits_grants_when_unrestricted():
+    s = Session(session_id="s")
+    data = s.to_dict()
+    assert "mount_grants" not in data
+    assert Session.from_dict(data).mount_grants is None
 
 
 def test_fork_overrides_apply_without_mutating_original():

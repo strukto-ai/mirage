@@ -91,3 +91,57 @@ describe('command timeout', () => {
     }
   })
 })
+
+// python3 is guarded like any other command: the same safeguard surface,
+// the same enforcement point, exit 124. ~2s of interpreter work against a
+// 0.25s budget; monty's worker finishes in the background before close.
+const SLOW_SCRIPT = "printf 'n = 0\\nfor i in range(100000000):\\n    n = n + 1\\n' > /data/slow.py"
+
+describe('python3 command timeout', () => {
+  afterEach(() => {
+    delete DEFAULT_COMMAND_SAFEGUARDS.python3
+  })
+
+  function buildPyWs(safeguards?: Record<string, Record<string, CommandSafeguard>>): Workspace {
+    const ram = new RAMResource()
+    const registry = new OpsRegistry()
+    registry.registerResource(ram)
+    return new Workspace(
+      { '/data': ram },
+      {
+        mode: MountMode.EXEC,
+        ops: registry,
+        shellParser: parser,
+        pythonRuntime: 'monty',
+        ...(safeguards !== undefined ? { commandSafeguards: safeguards } : {}),
+      },
+    )
+  }
+
+  it('default safeguard fires like any other command', async () => {
+    DEFAULT_COMMAND_SAFEGUARDS.python3 = new CommandSafeguard({ timeoutSeconds: 0.25 })
+    const ws = buildPyWs()
+    try {
+      await ws.execute(SLOW_SCRIPT)
+      const r = await ws.execute('python3 /data/slow.py')
+      expect(r.exitCode).toBe(124)
+      expect(DEC.decode(r.stderr)).toContain('python3: timed out after 0.25s')
+    } finally {
+      await ws.close()
+    }
+  }, 60_000)
+
+  it('mount-level safeguard fires like any other command', async () => {
+    const ws = buildPyWs({
+      '/data': { python3: new CommandSafeguard({ timeoutSeconds: 0.25 }) },
+    })
+    try {
+      await ws.execute(SLOW_SCRIPT)
+      const r = await ws.execute('cd /data && python3 /data/slow.py')
+      expect(r.exitCode).toBe(124)
+      expect(DEC.decode(r.stderr)).toContain('python3: timed out after 0.25s')
+    } finally {
+      await ws.close()
+    }
+  }, 60_000)
+})

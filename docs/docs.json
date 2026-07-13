@@ -88,14 +88,6 @@
             "group": "Setup",
             "pages": [
               {
-                "group": "FUSE",
-                "icon": "hard-drive",
-                "pages": [
-                  "home/setup/macos",
-                  "home/setup/linux"
-                ]
-              },
-              {
                 "group": "Object Storage",
                 "icon": "cloud",
                 "pages": [
@@ -202,6 +194,16 @@
                   "home/setup/trello"
                 ]
               }
+            ]
+          },
+          {
+            "group": "FUSE",
+            "icon": "hard-drive",
+            "pages": [
+              "home/setup/fuse",
+              "home/setup/macos",
+              "home/setup/linux",
+              "home/setup/windows"
             ]
           }
         ]

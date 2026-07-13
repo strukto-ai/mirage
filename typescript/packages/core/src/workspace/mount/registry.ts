@@ -305,13 +305,8 @@ export class MountRegistry {
 
   isExecAllowed(): boolean {
     for (const m of this.mountList) {
-      const prefixNoTrail = rstripSlash(m.prefix) || '/'
-      if (prefixNoTrail === '/') return m.mode === MountMode.EXEC
-    }
-    if (this.defaultMode === MountMode.EXEC) return true
-    for (const m of this.mountList) {
       if (m.prefix === DEV_PREFIX) continue
-      if (m.mode === MountMode.EXEC) return true
+      if (m.effectiveMode() === MountMode.EXEC) return true
     }
     return false
   }

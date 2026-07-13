@@ -32,3 +32,5 @@ hello from ram
 written-by-open
 === py3_local_runtime_argv ===
 ['alpha', 'beta']
+=== py3_safeguard_timeout ===
+exit_code=124

@@ -14,6 +14,7 @@
 
 import asyncio
 
+from mirage.types import MountMode
 from mirage.workspace.session.session import Session
 
 
@@ -49,10 +50,10 @@ class SessionManager:
 
     def create(self,
                session_id: str,
-               allowed_mounts: frozenset[str] | None = None) -> Session:
+               mount_grants: dict[str, MountMode] | None = None) -> Session:
         if session_id in self._sessions:
             raise ValueError(f"Session {session_id!r} already exists")
-        session = Session(session_id=session_id, allowed_mounts=allowed_mounts)
+        session = Session(session_id=session_id, mount_grants=mount_grants)
         self._sessions[session_id] = session
         self._locks[session_id] = asyncio.Lock()
         return session

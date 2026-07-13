@@ -33,11 +33,18 @@ from mirage.resource.mongodb import MongoDBResource  # noqa: E402
 from mirage.resource.ram import RAMResource  # noqa: E402
 from mirage.resource.redis import RedisResource  # noqa: E402
 from mirage.resource.s3 import S3Config, S3Resource  # noqa: E402
+from mirage.types import CommandSafeguard  # noqa: E402
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb://localhost:27017")
 DB = "mirage_integ_runtime"
 BUCKET = "mirage-integ-runtime"
+
+SLOW_SCRIPT = """\
+n = 0
+for i in range(300000000):
+    n = n + 1
+"""
 
 ANALYZE_SCRIPT = """\
 from pathlib import Path
@@ -197,6 +204,20 @@ async def main() -> None:
         print("=== py3_local_runtime_argv ===")
         print(await result.stdout_str(), end="")
         await ws_local.close()
+
+        slow_ram = RAMResource()
+        slow_ram._store.files["/slow.py"] = SLOW_SCRIPT.encode()
+        ws_sg = Workspace(
+            {
+                "/ram": (slow_ram, MountMode.EXEC, {
+                    "python3": CommandSafeguard(timeout_seconds=1)
+                })
+            },
+            mode=MountMode.EXEC)
+        result = await ws_sg.execute("cd /ram && python3 /ram/slow.py")
+        print("=== py3_safeguard_timeout ===")
+        print(f"exit_code={result.exit_code}")
+        await ws_sg.close()
         await ws.close()
     finally:
         server.stop()

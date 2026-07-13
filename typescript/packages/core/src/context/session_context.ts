@@ -15,6 +15,7 @@
 import { createAsyncContext } from '../utils/async_context.ts'
 import type { Session } from '../workspace/session/session.ts'
 import { stripSlash } from '../utils/slash.ts'
+import { MountMode, weakerMode } from '../types.ts'
 
 const sessionStorage = createAsyncContext<Session>()
 
@@ -37,17 +38,41 @@ export class MountNotAllowedError extends Error {
   }
 }
 
-export function assertMountAllowed(mountPrefix: string): void {
-  const sess = getCurrentSession()
-  if (sess?.allowedMounts == null) return
+function normPrefix(mountPrefix: string): string {
   const stripped = stripSlash(mountPrefix)
-  const norm = stripped === '' ? '/' : '/' + stripped
-  // A user-defined root mount (`{"/": resource}`) currently bypasses the
-  // allowlist entirely. This is an undocumented escape hatch: a session
-  // restricted to `/s3` but with a workspace mounted at root would still
-  // expose every path under `/`. Behaviour-changing fix is out of scope
-  // for this refactor — flagged for separate discussion.
-  if (norm === '/') return
-  if (sess.allowedMounts.has(norm)) return
-  throw new MountNotAllowedError(sess.sessionId, norm)
+  return stripped === '' ? '/' : '/' + stripped
+}
+
+/**
+ * The current session's grant for this mount: EXEC (no narrowing) when no
+ * session is bound or the session is unrestricted, undefined when the
+ * session has grants but none for this mount.
+ */
+function sessionGrant(mountPrefix: string): MountMode | undefined {
+  const sess = getCurrentSession()
+  if (sess?.mountGrants == null) return MountMode.EXEC
+  return sess.mountGrants.get(normPrefix(mountPrefix))
+}
+
+/**
+ * Throw if the current session may not touch this mount. A user-defined
+ * root mount is governed like any other: a session must be granted `/`
+ * to touch it.
+ */
+export function assertMountAllowed(mountPrefix: string): void {
+  if (sessionGrant(mountPrefix) !== undefined) return
+  const sess = getCurrentSession()
+  throw new MountNotAllowedError(sess?.sessionId ?? '', normPrefix(mountPrefix))
+}
+
+/**
+ * The mount mode after narrowing by the current session's grant. The
+ * mount's own mode is the ceiling; a grant can only weaken it. A mount
+ * absent from the grants map narrows to READ here; visibility denial is
+ * `assertMountAllowed`'s job at the dispatch entry points.
+ */
+export function effectiveMountMode(mountPrefix: string, mountMode: MountMode): MountMode {
+  const grant = sessionGrant(mountPrefix)
+  if (grant === undefined) return MountMode.READ
+  return weakerMode(mountMode, grant)
 }

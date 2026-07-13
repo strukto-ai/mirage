@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { AsyncLineIterator } from '../../io/async_line_iterator.ts'
+import type { MountMode } from '../../types.ts'
 
 export interface SessionInit {
   sessionId: string
@@ -26,14 +27,15 @@ export interface SessionInit {
   readonlyVars?: Set<string>
   arrays?: Record<string, string[]>
   /**
-   * Mount prefixes this session is allowed to touch. `null` (the default)
-   * means no restriction — every mount in the workspace is reachable.
-   * When provided, dispatch / handle_command / Ops all reject paths that
-   * resolve to mounts outside this set with a capability error. The
-   * workspace always implicitly grants access to its own infrastructure
-   * mounts (cache root, observer, /dev) regardless of this allowlist.
+   * Per-mount role grants for this session. `null` (the default) means
+   * no restriction: every mount in the workspace is reachable at its own
+   * mode. When provided, a mount absent from the map is invisible
+   * (dispatch / handle_command / Ops reject it with a capability error)
+   * and a present mount is narrowed to the weaker of its own mode and
+   * the granted role. The workspace always implicitly grants its own
+   * infrastructure mounts (implicit scratch root, observer, /dev).
    */
-  allowedMounts?: ReadonlySet<string> | null
+  mountGrants?: ReadonlyMap<string, MountMode> | null
   pipelineTimeoutSeconds?: number | null
 }
 
@@ -50,7 +52,7 @@ export class Session {
   arrays: Record<string, string[]>
   stdinBuffer: AsyncLineIterator | null = null
   localVars: Map<string, string | null> | null = null
-  readonly allowedMounts: ReadonlySet<string> | null
+  readonly mountGrants: ReadonlyMap<string, MountMode> | null
   pipelineTimeoutSeconds: number | null
 
   constructor(init: SessionInit) {
@@ -64,7 +66,7 @@ export class Session {
     this.shellOptions = init.shellOptions ?? {}
     this.readonlyVars = init.readonlyVars ?? new Set()
     this.arrays = init.arrays ?? {}
-    this.allowedMounts = init.allowedMounts ?? null
+    this.mountGrants = init.mountGrants ?? null
     this.pipelineTimeoutSeconds = init.pipelineTimeoutSeconds ?? null
   }
 
@@ -73,7 +75,7 @@ export class Session {
    * containers (env, functions, readonlyVars, arrays, positionalArgs)
    * are shallow-copied so mutations on the fork do not leak back into
    * the source. Every field — including capability fields like
-   * `allowedMounts` — is propagated, so callers cannot accidentally
+   * `mountGrants` — is propagated, so callers cannot accidentally
    * forget one when adding new fields.
    */
   fork(overrides: Partial<SessionInit> = {}): Session {
@@ -90,18 +92,22 @@ export class Session {
       arrays:
         overrides.arrays ??
         Object.fromEntries(Object.entries(this.arrays).map(([k, v]) => [k, [...v]])),
-      allowedMounts: overrides.allowedMounts ?? this.allowedMounts,
+      mountGrants: overrides.mountGrants ?? this.mountGrants,
       pipelineTimeoutSeconds: overrides.pipelineTimeoutSeconds ?? this.pipelineTimeoutSeconds,
     })
   }
 
   toJSON(): Record<string, unknown> {
-    return {
+    const data: Record<string, unknown> = {
       sessionId: this.sessionId,
       cwd: this.cwd,
       env: this.env,
       createdAt: this.createdAt,
     }
+    if (this.mountGrants !== null) {
+      data.mountGrants = Object.fromEntries(this.mountGrants)
+    }
+    return data
   }
 
   static fromJSON(data: {
@@ -109,7 +115,12 @@ export class Session {
     cwd?: string
     env?: Record<string, string>
     createdAt?: number
+    mountGrants?: Record<string, MountMode> | null
   }): Session {
-    return new Session(data)
+    const { mountGrants, ...rest } = data
+    return new Session({
+      ...rest,
+      mountGrants: mountGrants != null ? new Map(Object.entries(mountGrants)) : null,
+    })
   }
 }

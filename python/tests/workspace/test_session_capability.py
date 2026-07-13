@@ -32,7 +32,7 @@ def test_session_outside_allowlist_is_denied():
     a = _seed("x.txt", b"public")
     b = _seed("secret.txt", b"SECRET")
     ws = Workspace({"/a": a, "/b": b})
-    ws.create_session("agent", allowed_mounts=frozenset({"/a"}))
+    ws.create_session("agent", mounts=["/a"])
 
     async def run():
         ok = await ws.execute("cat /a/x.txt", session_id="agent")
@@ -63,7 +63,7 @@ def test_default_session_unrestricted():
 def test_allowed_session_can_write_to_its_mount():
     a = _seed("x.txt", b"hi")
     ws = Workspace({"/a": (a, MountMode.WRITE)}, mode=MountMode.WRITE)
-    ws.create_session("agent", allowed_mounts=frozenset({"/a"}))
+    ws.create_session("agent", mounts=["/a"])
 
     async def run():
         return await ws.execute("echo new > /a/y.txt", session_id="agent")
@@ -76,7 +76,7 @@ def test_allowed_session_can_write_to_its_mount():
 def test_history_view_always_allowed():
     a = _seed("x.txt", b"hi")
     ws = Workspace({"/a": a})
-    ws.create_session("agent", allowed_mounts=frozenset({"/a"}))
+    ws.create_session("agent", mounts=["/a"])
 
     async def run():
         await ws.execute("ls /a", session_id="agent")
@@ -91,7 +91,7 @@ def test_ops_blocks_programmatic_read_outside_allowlist():
     a = _seed("x.txt", b"public")
     b = _seed("secret.txt", b"SECRET")
     ws = Workspace({"/a": a, "/b": b})
-    sess = ws.create_session("agent", allowed_mounts=frozenset({"/a"}))
+    sess = ws.create_session("agent", mounts=["/a"])
 
     async def run():
         token = set_current_session(sess)
@@ -114,7 +114,7 @@ def _two_mounts_with_secret() -> Workspace:
         "/b": (b, MountMode.WRITE)
     },
                    mode=MountMode.WRITE)
-    ws.create_session("agent", allowed_mounts=frozenset({"/a"}))
+    ws.create_session("agent", mounts=["/a"])
     return ws
 
 
@@ -220,8 +220,8 @@ def test_concurrent_sessions_isolated():
     a = _seed("x.txt", b"A-only\n")
     b = _seed("y.txt", b"B-only\n")
     ws = Workspace({"/a": a, "/b": b})
-    ws.create_session("agent_a", allowed_mounts=frozenset({"/a"}))
-    ws.create_session("agent_b", allowed_mounts=frozenset({"/b"}))
+    ws.create_session("agent_a", mounts=["/a"])
+    ws.create_session("agent_b", mounts=["/b"])
 
     async def run():
         results = await asyncio.gather(
@@ -254,3 +254,151 @@ def test_background_job_inherits_capability():
     out = (io.stdout or b"") + (io.stderr or b"")
     assert b"SECRET" not in out, (
         f"background job must not leak forbidden read, got {io}")
+
+
+def test_read_grant_blocks_command_write():
+    a = _seed("x.txt", b"hi")
+    ws = Workspace({"/a": (a, MountMode.WRITE)}, mode=MountMode.WRITE)
+    ws.create_session("agent", mounts={"/a": "read"})
+
+    async def run():
+        ok = await ws.execute("cat /a/x.txt", session_id="agent")
+        denied = await ws.execute("rm /a/x.txt", session_id="agent")
+        return ok, denied
+
+    ok, denied = asyncio.run(run())
+    assert ok.exit_code == 0 and b"hi" in (ok.stdout or b"")
+    assert denied.exit_code != 0
+    assert b"read-only mount at /a/" in (denied.stderr or b"")
+    assert a._store.files.get("/x.txt") == b"hi"
+
+
+def test_read_grant_blocks_redirect_write():
+    a = _seed("x.txt", b"hi")
+    ws = Workspace({"/a": (a, MountMode.WRITE)}, mode=MountMode.WRITE)
+    ws.create_session("agent", mounts={"/a": "read"})
+
+    async def run():
+        return await ws.execute("echo leaked > /a/y.txt", session_id="agent")
+
+    io = asyncio.run(run())
+    assert io.exit_code != 0
+    assert b"read-only" in (io.stderr or b"")
+    assert "/y.txt" not in a._store.files
+
+
+def test_write_grant_allows_write():
+    a = _seed("x.txt", b"hi")
+    ws = Workspace({"/a": (a, MountMode.WRITE)}, mode=MountMode.WRITE)
+    ws.create_session("agent", mounts={"/a": MountMode.WRITE})
+
+    async def run():
+        return await ws.execute("echo new > /a/y.txt", session_id="agent")
+
+    io = asyncio.run(run())
+    assert io.exit_code == 0
+    assert a._store.files.get("/y.txt") == b"new\n"
+
+
+def test_grant_cannot_widen_read_mount():
+    a = _seed("x.txt", b"hi")
+    ws = Workspace({"/a": (a, MountMode.READ)})
+    ws.create_session("agent", mounts={"/a": "write"})
+
+    async def run():
+        return await ws.execute("echo up > /a/y.txt", session_id="agent")
+
+    io = asyncio.run(run())
+    assert io.exit_code != 0
+    assert b"read-only" in (io.stderr or b"")
+
+
+def test_user_root_mount_governed_by_grants():
+    root = _seed("root.txt", b"top\n")
+    a = _seed("x.txt", b"hi")
+    ws = Workspace({
+        "/": (root, MountMode.WRITE),
+        "/a": (a, MountMode.WRITE)
+    },
+                   mode=MountMode.WRITE)
+    ws.create_session("no_root", mounts={"/a": "write"})
+    ws.create_session("root_ro", mounts={"/a": "write", "/": "read"})
+
+    async def run():
+        denied = await ws.execute("cat /root.txt", session_id="no_root")
+        read_ok = await ws.execute("cat /root.txt", session_id="root_ro")
+        write_denied = await ws.execute("echo x > /root.txt",
+                                        session_id="root_ro")
+        return denied, read_ok, write_denied
+
+    denied, read_ok, write_denied = asyncio.run(run())
+    assert denied.exit_code != 0
+    assert b"not allowed" in (denied.stderr or b"")
+    assert read_ok.exit_code == 0 and b"top" in (read_ok.stdout or b"")
+    assert write_denied.exit_code != 0
+    assert b"read-only" in (write_denied.stderr or b"")
+
+
+def test_implicit_root_keeps_pathless_commands_working():
+    a = _seed("x.txt", b"hi")
+    ws = Workspace({"/a": a})
+    ws.create_session("agent", mounts={"/a": "read"})
+
+    async def run():
+        return await ws.execute("echo hi | wc -l", session_id="agent")
+
+    io = asyncio.run(run())
+    assert io.exit_code == 0
+    assert (io.stdout or b"").strip() == b"1"
+
+
+def test_exec_gate_is_per_session():
+    a = _seed("x.txt", b"hi")
+    ws = Workspace({"/e": (a, MountMode.EXEC)})
+    ws.create_session("no_exec", mounts={"/e": "write"})
+    ws.create_session("with_exec", mounts={"/e": "exec"})
+
+    async def run():
+        denied = await ws.execute("python -c 'print(1)'", session_id="no_exec")
+        ok = await ws.execute("python -c 'print(1)'", session_id="with_exec")
+        return denied, ok
+
+    denied, ok = asyncio.run(run())
+    assert denied.exit_code != 0
+    assert ok.exit_code == 0 and b"1" in (ok.stdout or b"")
+
+
+def test_ops_facade_respects_read_grant():
+    a = _seed("x.txt", b"hi")
+    ws = Workspace({"/a": (a, MountMode.WRITE)}, mode=MountMode.WRITE)
+    sess = ws.create_session("agent", mounts={"/a": "read"})
+
+    async def run():
+        token = set_current_session(sess)
+        try:
+            assert await ws.ops.read("/a/x.txt") == b"hi"
+            with pytest.raises(PermissionError, match="read-only"):
+                await ws.ops.write("/a/y.txt", b"leaked")
+            with pytest.raises(PermissionError, match="read-only"):
+                await ws.ops.rename("/a/x.txt", "/a/z.txt")
+        finally:
+            reset_current_session(token)
+
+    asyncio.run(run())
+
+
+def test_invalid_role_rejected():
+    a = _seed("x.txt", b"hi")
+    ws = Workspace({"/a": a})
+    with pytest.raises(ValueError):
+        ws.create_session("agent", mounts={"/a": "admin"})
+
+
+def test_filesystem_alias_roles():
+    a = _seed("x.txt", b"hi")
+    ws = Workspace({"/a": a})
+    sess = ws.create_session("agent", mounts={"/a": "rw"})
+    assert sess.mount_grants is not None
+    assert sess.mount_grants["/a"] == MountMode.WRITE
+    with pytest.raises(ValueError):
+        ws.create_session("bits", mounts={"/a": "w"})
