@@ -28,14 +28,25 @@ description: Set up a Slack Bot Token for the Slack resource.
 1. Authorize the requested permissions
 1. Copy the **Bot User OAuth Token** (`xoxb-...`)
 
-### 4. Set Environment Variables
+### 4. Optional: Enable Workspace Search
+
+Slack's `search.messages` API does not accept bot tokens. To use `slack-search` or workspace-level search push-down:
+
+1. Add `search:read` under **User Token Scopes**.
+1. Reinstall or reauthorize the app.
+1. Copy the resulting **User OAuth Token** (`xoxp-...`).
+
+Keep using the bot token for normal reads and writes. Mirage uses the optional user token only for Slack search endpoints.
+
+### 5. Set Environment Variables
 
 ```bash
 # .env.development
 SLACK_BOT_TOKEN=xoxb-xxxx...
+SLACK_USER_TOKEN=xoxp-xxxx...  # optional, only needed for workspace search
 ```
 
-### 5. Invite the Bot
+### 6. Invite the Bot
 
 The bot must be invited to channels it needs to read:
 

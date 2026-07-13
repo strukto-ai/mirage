@@ -760,6 +760,47 @@ jobs:
           pnpm exec tsx fuse.ts 2>&1 \
             | bash check_lines.sh truth_fuse.txt
 
+  integ-fuse-windows:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.fuse == 'true') }}
+    runs-on: windows-latest
+    # Advisory only: WinFsp support is experimental, this job is not in the
+    # gate and never blocks a merge. It exists to surface what actually
+    # breaks on Windows. Python only: mfusepy is ctypes and ships a WinFsp
+    # registry loader, so this is a real experiment; the TS binding's
+    # Windows path targets Dokany via an unmaintained 2019 dependency (the
+    # @zkochan/fuse-native fork claims macOS/Linux only), so a TS leg would
+    # die at build time and measure nothing.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install WinFsp
+        run: choco install winfsp -y
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies (base + fuse only)
+        working-directory: python
+        run: uv sync --extra fuse
+
+      - name: Run Python FUSE mount and check (WinFsp)
+        shell: bash
+        # Dump the raw output before checking: on failure the traceback is
+        # the whole point of this advisory job.
+        run: |
+          ./python/.venv/Scripts/python integ/fuse.py > /tmp/fuse-win.out 2>&1 || true
+          cat /tmp/fuse-win.out
+          bash integ/check_lines.sh integ/truth_fuse.txt < /tmp/fuse-win.out
+
   runtime-py:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true') }}

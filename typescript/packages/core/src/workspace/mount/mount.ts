@@ -412,7 +412,8 @@ export class MountEntry {
                   ? opts.safeguardOverride
                   : (this.commandSafeguards.get(cmdName) ?? null),
               )
-              const cmdTimeout = resolvedSafeguard !== null ? resolvedSafeguard.timeoutSeconds : null
+              const cmdTimeout =
+                resolvedSafeguard !== null ? resolvedSafeguard.timeoutSeconds : null
               const result = await runWithTimeout(
                 Promise.resolve(cmd.fn(accessor, expandedPaths, texts, cmdOpts)),
                 cmdTimeout,

@@ -148,9 +148,16 @@ The Python FS shim (`open()` against mounted paths) flushes writes back through 
 
 See [Python FS shim](/typescript/python-fs#runtime-requirements) for the full matrix.
 
-### 5. No SSH, Postgres, MongoDB, LanceDB, Email, FUSE peers
+### 5. Some resource drivers remain Node-only
 
-These resources are only exposed by `@struktoai/mirage-node` because their drivers are Node-only. Importing them from `@struktoai/mirage-browser` is a build error. For browser apps, route those reads through your backend (or use the HTTP-driver variants where they exist, e.g. MongoDB via the bundled mongo-proxy in the examples).
+SSH, LanceDB, Email, Disk, Redis, and the Hugging Face resources are only exposed by `@struktoai/mirage-node` because their drivers need Node APIs or raw TCP. Importing them from `@struktoai/mirage-browser` is a build error.
+
+Postgres and MongoDB do have browser implementations:
+
+- Postgres uses `NeonPgDriver` over HTTP.
+- MongoDB uses `HttpMongoDriver` and an HTTP proxy such as the bundled mongo-proxy example.
+
+Those HTTP drivers still need a browser-reachable endpoint with the correct CORS policy. They are not drop-in replacements for raw Postgres or MongoDB socket connections.
 
 ---
 
@@ -169,6 +176,8 @@ These resources are only exposed by `@struktoai/mirage-node` because their drive
 | OPFS over quota | Browser | ❌ `QuotaExceededError`; check `navigator.storage.estimate()` |
 | HTTP-backed resources without CORS allow-list | Browser | ❌ blocked; use PKCE, presigned URLs, or a same-origin proxy |
 | Python `open()` writes back through mount | Browser | ✅ with JSPI (Chrome 137+); ❌ otherwise |
-| `@struktoai/mirage-node`-only resources (SSH, Postgres, MongoDB, LanceDB, Email, FUSE) | Browser | ❌ Node-only drivers |
+| Postgres through `NeonPgDriver` | Browser | ✅ over HTTP; endpoint must allow the browser origin |
+| MongoDB through `HttpMongoDriver` | Browser | ✅ through an HTTP proxy; direct MongoDB sockets are unavailable |
+| Node-only resources (SSH, LanceDB, Email, Disk, Redis, Hugging Face, FUSE) | Browser | ❌ Node APIs or raw TCP required |
 
-The first two Node limitations are runtime-level, not Mirage design decisions, and Python's equivalent behavior is strictly better there — if a workflow absolutely requires ESM-level `fs` patching or blocking reads of your own mount, consider whether the Python SDK fits better for that specific piece. Size-unknown stat is identical in both SDKs by design. The Browser limitations are by design (no kernel, no subprocess), so the workarounds there are about choosing the right runtime for the task.
+The Node limitations are runtime-level, not Mirage design decisions. Python's equivalent behavior is strictly better in each case, so if a workflow absolutely requires ESM-level `fs` patching or large API-backed FUSE reads, consider whether the Python SDK fits better for that specific piece. The Browser limitations are by design (no kernel, no subprocess), so the workarounds there are about choosing the right runtime for the task.

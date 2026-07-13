@@ -1,205 +1,134 @@
 ---
 title: Adding a New Resource
 icon: plus
-description: Step-by-step guide for implementing a new MIRAGE resource.
+description: Implement and register a Python resource using Mirage's current VFS, command, and snapshot conventions.
 ---
 
-This guide covers what you need to implement when adding a new resource
-to MIRAGE. Use the Discord or Slack resources as reference.
+A resource maps an external system to Mirage's filesystem operations and shell commands. Keep the core I/O layer independent from command parsing, and check whether the same resource or behavior should also be added to TypeScript.
+
+Use a recent resource such as Dify or Databricks Volume as the structural reference. Paths are always `PathSpec` values inside the VFS; do not pass filesystem paths as raw strings.
 
 ## File Structure
 
 ```text
-mirage/
+python/mirage/
   resource/<name>/
-    __init__.py          # lazy-loading exports
-    config.py            # Pydantic config (credentials)
-    <name>.py            # BaseResource subclass
-  accessor/<name>.py     # Accessor wrapping config
-  core/<name>/
     __init__.py
-    _client.py           # HTTP client (get/post with rate limiting)
-    readdir.py           # directory listing
-    read.py              # file reading
-    stat.py              # file metadata
-    scope.py             # scope detection
-    glob.py              # glob pattern resolution
-    ...                  # data fetching modules (history, search, post, etc.)
+    config.py
+    <name>.py
+  accessor/<name>.py
+  core/<name>/
+    read.py
+    readdir.py
+    stat.py
+    glob.py
   ops/<name>/
-    __init__.py           # exports OPS list
-    read.py               # @op wrapper
-    readdir.py            # @op wrapper
-    stat.py               # @op wrapper
+    __init__.py
+    read.py
+    readdir.py
+    stat.py
   commands/builtin/<name>/
-    __init__.py           # exports COMMANDS list
-    _plan.py              # cost estimation helpers
-    cat.py, ls.py, ...    # standard commands
-    <name>_send.py, ...   # resource-specific commands
+    __init__.py
+    <resource-specific commands>.py
 ```
 
-## Implementation Steps
+Add matching tests under `python/tests/` without creating `__init__.py` files in the test tree.
 
-### 1. Config, Accessor, ResourceName
+## 1. Config, Accessor, and Registry
 
-Create a Pydantic config model to hold credentials and an accessor
-class that wraps it.
+Define a typed Pydantic config and keep secrets in `SecretStr` fields.
 
 ```python
-# mirage/resource/<name>/config.py
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 
 
 class MyConfig(BaseModel):
-    token: str
+    token: SecretStr
 ```
 
+Create an `Accessor` that owns the client or transport. Add the resource name to `ResourceName`, export the config/resource from `resource/<name>/__init__.py`, and add a lazy `ResourceEntry` to `mirage/resource/registry.py`. The registry entry is required for YAML, snapshots, and the daemon to construct the resource.
+
+Keep every import at module scope. If that creates a cycle, change the dependency direction instead of adding a function-local import.
+
+## 2. Core VFS Operations
+
+Implement only the operations the backend supports. Read-only API resources usually start with:
+
+- `readdir(accessor, path, index)` returning child names.
+- `read_bytes(accessor, path, index)` returning bytes.
+- `stat(accessor, path, index)` returning `FileStat`.
+- `resolve_glob(accessor, paths, index)` returning resolved `PathSpec` values.
+
+Use explicit types:
+
 ```python
-# mirage/accessor/<name>.py
 from mirage.accessor.base import Accessor
-from mirage.resource.<name>.config import MyConfig
+from mirage.cache.index import IndexCacheStore
+from mirage.types import FileStat, PathSpec
 
 
-class MyAccessor(Accessor):
-
-    def __init__(self, config: MyConfig) -> None:
-        self.config = config
-```
-
-Add `MY_RESOURCE = "<name>"` to the `ResourceName` enum in `mirage/types.py`.
-
-### 2. HTTP Client
-
-Wrap the resource's API with rate-limit handling. All resources follow
-the same pattern: async get/post functions with retry on 429.
-
-```python
-# mirage/core/<name>/_client.py
-async def my_get(config, endpoint, params=None) -> dict: ...
-async def my_post(config, endpoint, body=None) -> dict: ...
-```
-
-### 3. Core VFS
-
-Implement the three VFS operations that map API data to a filesystem:
-
-- **`readdir.py`** -- Returns `list[str]` of child paths for a directory.
-- **`read.py`** -- Returns `bytes` content of a file.
-- **`stat.py`** -- Returns `FileStat` with name, type, and extras (e.g., IDs).
-
-All three accept `(accessor, path, index, prefix)` and use `IndexCacheStore`
-to cache name-to-ID mappings.
-
-### 4. Scope Detection and GlobScope Optimization
-
-`GlobScope` carries the raw path and pattern **before** expansion. This
-lets commands decide how to resolve paths efficiently -- skipping
-expensive glob expansion when the resource has a native API for the
-operation.
-
-**`scope.py`** parses the unexpanded path to determine the level:
-
-```python
-@dataclass
-class MyScope:
-    level: str  # "root", "category", "item", "file"
-    item_id: str | None = None
-```
-
-**How commands use scope for optimization:**
-
-```python
-# Example: grep at different scopes
-
-@command("grep", resource="my_resource", spec=SPECS["grep"])
-async def grep(accessor, paths, *texts, **_extra):
-    pattern = texts[0]
-    scope = detect_scope(paths[0], index)
-
-    if scope.level in ("category", "item"):
-        # CHEAP: use native search API (1 API call)
-        results = await search_api(accessor.config, scope.item_id, pattern)
-        return format_results(results), IOResult()
-
-    # EXPENSIVE fallback: expand glob, download each file, grep locally
-    paths = await resolve_glob(accessor, paths, index=index)
-    for p in paths:
-        data = await read(accessor, p.original, index, prefix=p.prefix)
-        # ... grep the bytes ...
-```
-
-**When to use this pattern:**
-
-| Scenario                                   | Approach                                                  |
-| ------------------------------------------ | --------------------------------------------------------- |
-| Resource has a search API (Discord, Slack) | Use scope to route to native API at directory level       |
-| Resource has no search API                 | Always fall through to file-level reads; scope is a noop  |
-| `head`/`tail` with direct message fetch    | Use scope to detect file level, fetch N messages directly |
-
-**When the resource has no search API**, keep `scope.py` as a noop for
-structural consistency. The file still parses path parts but does not
-trigger any API calls:
-
-```python
-# Noop scope -- no search API, no resource-relative paths
-def detect_scope(path: str | GlobScope) -> MyScope:
-    key = path.strip("/")
-    parts = key.split("/")
-    # Just parse path structure, no index lookups
+async def stat(
+    accessor: Accessor,
+    path: PathSpec,
+    index: IndexCacheStore | None,
+) -> FileStat:
     ...
 ```
 
-### 5. Glob Resolution
+Add write, append, create, unlink, rename, or directory operations only when the backend has matching semantics. I/O should remain async-native.
+
+## 3. Ops Layer
+
+Ops are thin typed adapters from the workspace dispatcher to core functions. Declare dispatcher-injected arguments explicitly and keep `**flags: object` opaque.
 
 ```python
-# mirage/core/<name>/glob.py
-async def resolve_glob(accessor, paths, index=None) -> list[GlobScope]:
-    # Expand patterns via readdir + fnmatch
+from mirage.accessor.base import Accessor
+from mirage.cache.index import IndexCacheStore
+from mirage.core.my_resource.read import read_bytes
+from mirage.ops.registry import op
+from mirage.types import PathSpec
+
+
+@op("read", resource="my_resource")
+async def read(
+    accessor: Accessor,
+    path: PathSpec,
+    *,
+    index: IndexCacheStore | None,
+    **flags: object,
+) -> bytes:
+    return await read_bytes(accessor, path, index)
 ```
 
-### 6. Ops Layer
+Mark mutation ops with `write=True`. Export the decorated functions as `OPS` from `ops/<name>/__init__.py`.
 
-Thin wrappers that bridge core functions to the command framework:
+## 4. Commands
 
-```python
-@op("read", resource="<name>")
-async def read(accessor, scope, **kwargs) -> bytes:
-    return await core_read(accessor, scope.original,
-                           kwargs.get("index"), prefix=scope.prefix)
-```
+Build standard commands with `CommandIO` and `make_generic_commands`; the generic command owns flag interpretation. Backend wrappers should only connect glob resolution and I/O functions.
 
-### 7. Commands
+For a resource-specific command:
 
-Copy from an existing resource (Discord/Slack), then:
+- Use the shared command spec.
+- Mark every mutation with `write=True` so `MountMode.READ` remains a real boundary.
+- Declare injected parameters such as `stdin`, `index`, and `prefix` explicitly.
+- Use `FlagView(flags, spec=...)` when the command itself must read a flag; never use `flags.get(...)`.
+- Add a provision estimator when a useful estimate is possible. Otherwise the planner reports `precision=unknown`.
 
-1. Replace accessor and core imports.
-1. Set `resource="<name>"` in decorators.
-1. Add or remove scope-based optimizations depending on API capabilities.
-1. Add resource-specific commands (send message, etc.).
+Export the final list as `COMMANDS` from `commands/builtin/<name>/__init__.py`.
 
-**Provision (dry-run estimates).** Factory-built commands
-(`make_generic_commands`) get family-default estimators for free, so
-`ws.execute(cmd, provision=True)` works without extra wiring. For
-bespoke commands, pass `provision=` to the decorator, reusing the
-shared helpers from `mirage.commands.builtin.generic_bind`:
+## 5. Resource Class
+
+Import commands and ops at module scope, then register them in the constructor:
 
 ```python
-from mirage.commands.builtin.generic_bind.provision import (
-    make_file_read_provision, metadata_provision)
-from mirage.core.<name>.stat import stat as my_stat
+from mirage.accessor.my_resource import MyAccessor
+from mirage.commands.builtin.my_resource import COMMANDS
+from mirage.ops.my_resource import OPS as MY_RESOURCE_OPS
+from mirage.resource.base import BaseResource
+from mirage.resource.my_resource.config import MyConfig
+from mirage.types import ResourceName
 
-@command("cat", resource="<name>", spec=SPECS["cat"],
-         provision=make_file_read_provision(my_stat))
-async def cat(...): ...
-```
 
-Omit `provision=` and the planner honestly reports
-`precision=unknown`. If your resource renders virtual files (a
-`chat.jsonl` built from messages), have `stat` report `size=None`
-rather than 0 so estimates degrade to floors instead of lying.
-
-### 8. Resource Class
-
-```python
 class MyResource(BaseResource):
     name: str = ResourceName.MY_RESOURCE
     caches_reads: bool = True
@@ -207,12 +136,25 @@ class MyResource(BaseResource):
     def __init__(self, config: MyConfig) -> None:
         super().__init__()
         self.config = config
-        self.accessor = MyAccessor(self.config)
-        from mirage.commands.builtin.<name> import COMMANDS
-        from mirage.ops.<name> import OPS
-
+        self.accessor = MyAccessor(config)
         for fn in COMMANDS:
             self.register(fn)
-        for fn in OPS:
+        for fn in MY_RESOURCE_OPS:
             self.register_op(fn)
 ```
+
+Set `caches_reads=True` only for stable, read-mostly content. Implement `get_state()` with credentials redacted and close any network clients in `close()`.
+
+## 6. Snapshot Support
+
+Leave `SUPPORTS_SNAPSHOT=False` unless the complete drift contract is implemented:
+
+1. `stat()` returns a stable `FileStat.fingerprint`.
+1. Every read record includes the fingerprint that produced those bytes.
+1. If the backend supports immutable revisions, reads consult `revision_for(path.virtual)` and record the resolved revision.
+
+Setting the flag without recording fingerprints does not provide drift detection.
+
+## 7. Verification
+
+Add tests for config validation, path layout, every VFS op, command behavior, read-only enforcement, state redaction, and cleanup. For major features, add or update integration coverage under `integ/` and check Python/TypeScript parity before opening the PR.

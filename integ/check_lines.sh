@@ -12,11 +12,15 @@ set -euo pipefail
 truth="$1"
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
-cat >"$tmp"
+# Strip CR on both sides: Windows runners check the truth file out with
+# CRLF (core.autocrlf) and Windows Python writes CRLF output, either of
+# which would make every fixed-substring probe carry a stray \r.
+tr -d '\r' >"$tmp"
 
 rc=0
 matched=0
 while IFS= read -r line || [ -n "$line" ]; do
+  line="${line%$'\r'}"
   [ -z "$line" ] && continue
   case "$line" in \#*) continue ;; esac
   if grep -aqF -- "$line" "$tmp"; then

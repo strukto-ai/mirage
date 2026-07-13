@@ -155,4 +155,4 @@ if [ "$fail" != "0" ]; then
   exit 1
 fi
 echo
-echo "CLI runtime battery OK (default runtime, explicit yaml default, yaml selection, cross-language rejection; py + ts)."
+echo "CLI runtime battery OK (default runtime, explicit yaml default, yaml selection, safeguard timeout, cross-language rejection; py + ts)."

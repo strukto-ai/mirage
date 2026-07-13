@@ -356,8 +356,7 @@ async def test_python3_mount_safeguard_fires_like_any_command(
         },
         mode=MountMode.EXEC,
         python_runtime="local")
-    r = await ws.execute(
-        'cd /data && python3 -c "import time; time.sleep(5)"')
+    r = await ws.execute('cd /data && python3 -c "import time; time.sleep(5)"')
     assert r.exit_code == 124
     assert "python3: timed out after 0.2s" in (await r.stderr_str())
     await ws.close()
