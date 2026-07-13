@@ -237,17 +237,17 @@ describe('MirageFS — ops() registers access', () => {
 
 describe('MirageFS — size=null resources (API-backed)', () => {
   // Simulates Trello/Linear/Slack: stat() returns size=null because the bytes
-  // aren't known until the API is called. Without libfuse's `direct_io` flag
-  // (which @zkochan/fuse-native doesn't expose), getattr must report a
-  // non-zero size or the kernel short-circuits read(). We can't prefetch on
-  // getattr — that makes `ls` issue an API call per directory entry — so we
-  // report a sentinel size and let read() return EOF naturally.
+  // aren't known until the API is called. getattr reports 0 pre-open (never a
+  // fake size); the mount's direct_io makes the kernel read to EOF anyway,
+  // and attrTimeout '0' routes the post-open fstat to fgetattr, which serves
+  // the real hydrated size. We can't prefetch on getattr — that would make
+  // `ls` issue an API call per directory entry.
 
   function mkSizeNullWs(): Workspace {
     return new Workspace({ '/data/': new RAMResource() }, { mode: MountMode.WRITE })
   }
 
-  it('getattr reports the sentinel size (no API fetch) when stat returns size=null', async () => {
+  it('getattr reports size 0 (no API fetch) when stat returns size=null', async () => {
     const ws = mkSizeNullWs()
     await ws.fs.writeFile('/data/api.json', new TextEncoder().encode('content'))
     vi.spyOn(ws.fs, 'stat').mockResolvedValue(
@@ -257,8 +257,8 @@ describe('MirageFS — size=null resources (API-backed)', () => {
     const mfs = new MirageFS(ws)
     const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'getattr', '/data/api.json')
     expect(code).toBe(0)
-    expect(attr.size).toBeGreaterThan(0)
-    // The point of the sentinel: getattr stays cheap.
+    expect(attr.size).toBe(0)
+    // The point of reporting 0: getattr stays cheap.
     expect(readSpy).not.toHaveBeenCalled()
   })
 
@@ -279,7 +279,7 @@ describe('MirageFS — size=null resources (API-backed)', () => {
     expect(buf.subarray(0, n).toString('utf-8')).toBe('payload from API')
   })
 
-  it('read returns 0 past the actual data length (sentinel-driven read past EOF)', async () => {
+  it('read returns 0 past the actual data length (direct_io read past EOF)', async () => {
     const ws = mkSizeNullWs()
     const bytes = new TextEncoder().encode('short')
     await ws.fs.writeFile('/data/api.json', bytes)
@@ -311,6 +311,20 @@ describe('MirageFS — size=null resources (API-backed)', () => {
     const mfs = new MirageFS(ws)
     await callOp<[number, number]>(mfs, 'open', '/data/api.json', 0)
     const [, attr] = await callOp<[number, FuseAttr]>(mfs, 'getattr', '/data/api.json')
+    expect(attr.size).toBe(bytes.byteLength)
+  })
+
+  it('fgetattr serves the real size from the open-hydrated handle', async () => {
+    const ws = mkSizeNullWs()
+    const bytes = new TextEncoder().encode('hydrated bytes')
+    await ws.fs.writeFile('/data/api.json', bytes)
+    vi.spyOn(ws.fs, 'stat').mockResolvedValue(
+      new FileStat({ name: 'api.json', type: FileType.JSON }),
+    )
+    const mfs = new MirageFS(ws)
+    const [, fh] = await callOp<[number, number]>(mfs, 'open', '/data/api.json', 0)
+    const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'fgetattr', '/data/api.json', fh)
+    expect(code).toBe(0)
     expect(attr.size).toBe(bytes.byteLength)
   })
 })

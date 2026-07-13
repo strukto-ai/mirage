@@ -105,8 +105,17 @@ mounts:
 Programmatically, set `fuse` per mount: `{ '/data': new Mount(dataResource, { fuse: '/tmp/data-repo' }), '/s3': new Mount(s3Resource, { fuse: true }) }`.
 `ws.fuseMountpoints` returns a `{ prefix: path }` map of the live mountpoints.
 
+## Size semantics for API-backed files
+
+Some resources (Linear, Trello, Slack, ...) cannot report a file's size
+without fetching its content, so over the FUSE mount those files behave like
+Linux `/proc` files: they stat as **0 bytes until first open** and become
+fully readable the moment anything opens them. See
+[Limitations → Size-unknown API files](/typescript/limitations#3-size-unknown-api-files-stat-as-0-bytes-until-first-open)
+for the per-tool table and the mechanics (`direct_io` + `attr_timeout=0`).
+
 <Note>
-  FUSE on Node has a runtime constraint worth knowing, `fs-monkey` can't patch ESM `node:fs` imports. See [TypeScript Limitations](/typescript/limitations) for details and workarounds.
+  FUSE on Node has two runtime constraints worth knowing: `fs-monkey` can't patch ESM `node:fs` imports, and synchronous access to your own mount from the mounting process deadlocks the event loop that serves it. See [TypeScript Limitations](/typescript/limitations) for details and workarounds.
 </Note>
 
 <Warning>

@@ -59,6 +59,10 @@ class FuseManager:
         if sys.platform == "darwin":
             subprocess.run(["diskutil", "unmount", "force", self._mountpoint],
                            capture_output=True)
+        elif sys.platform == "win32":
+            # No fusermount equivalent: WinFsp tears the mount down when the
+            # serving process exits.
+            pass
         else:
             subprocess.run(["fusermount", "-u", self._mountpoint],
                            capture_output=True)

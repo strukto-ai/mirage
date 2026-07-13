@@ -14,16 +14,21 @@ For credential setup, see the [Slack Setup](/home/setup/slack) guide.
 
 ```python
 import os
-from mirage import Workspace, MountMode
+
+from mirage import MountMode, Workspace
 from mirage.resource.slack import SlackConfig, SlackResource
 
-config = SlackConfig(token=os.environ["SLACK_BOT_TOKEN"])
+config = SlackConfig(
+    token=os.environ["SLACK_BOT_TOKEN"],
+    search_token=os.environ.get("SLACK_USER_TOKEN"),
+)
 resource = SlackResource(config=config)
 ws = Workspace({"/slack/": resource}, mode=MountMode.READ)
 ```
 
 ## Config Reference
 
-| Field   | Required | Description                             |
-| ------- | -------- | --------------------------------------- |
-| `token` | Yes      | Slack Bot User OAuth Token (`xoxb-...`) |
+| Field          | Required | Description                                                   |
+| -------------- | -------- | ------------------------------------------------------------- |
+| `token`        | Yes      | Slack Bot User OAuth Token (`xoxb-...`)                       |
+| `search_token` | No       | User OAuth Token (`xoxp-...`) with `search:read`; search only |
