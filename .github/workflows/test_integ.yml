@@ -766,7 +766,11 @@ jobs:
     runs-on: windows-latest
     # Advisory only: WinFsp support is experimental, this job is not in the
     # gate and never blocks a merge. It exists to surface what actually
-    # breaks on Windows.
+    # breaks on Windows. Python only: mfusepy is ctypes and ships a WinFsp
+    # registry loader, so this is a real experiment; the TS binding's
+    # Windows path targets Dokany via an unmaintained 2019 dependency (the
+    # @zkochan/fuse-native fork claims macOS/Linux only), so a TS leg would
+    # die at build time and measure nothing.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v7
