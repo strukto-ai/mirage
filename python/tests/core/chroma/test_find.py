@@ -80,3 +80,24 @@ async def test_find_iname_case_insensitive(chroma_accessor, chroma_index,
 async def test_find_missing_index_raises(chroma_accessor, knowledge_root):
     with pytest.raises(ValueError, match="missing index"):
         await find(chroma_accessor, knowledge_root, index=None)
+
+
+@pytest.mark.asyncio
+async def test_find_size_counts_sizeless_files_as_zero(chroma_accessor,
+                                                       chroma_index,
+                                                       knowledge_root):
+    # quickstart carries metadata size 12; reference has no size and counts
+    # as 0 (never dropped), matching dirs and the FUSE view.
+    large = await find(chroma_accessor,
+                       knowledge_root,
+                       type=FindType.FILE,
+                       min_size=1,
+                       index=chroma_index)
+    assert large == ["/guides/quickstart"]
+
+    empty = await find(chroma_accessor,
+                       knowledge_root,
+                       type=FindType.FILE,
+                       max_size=0,
+                       index=chroma_index)
+    assert empty == ["/api/reference"]

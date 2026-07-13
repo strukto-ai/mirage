@@ -78,8 +78,9 @@ async function matches(
     let size = 0
     if (kind === 'f') {
       const itemStat = await stat(accessor, spec, index)
-      if (itemStat.size === null) return false
-      size = itemStat.size
+      // Sizeless rendered files count as size 0, same as dirs and the FUSE
+      // view (CLAUDE.md find -size rules); never drop them.
+      size = itemStat.size ?? 0
     }
     if (options.minSize != null && size < options.minSize) return false
     if (options.maxSize != null && size > options.maxSize) return false
