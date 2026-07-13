@@ -15,6 +15,7 @@
 import { CreateBucketCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { MongoClient } from "mongodb";
 import {
+  CommandSafeguard,
   MongoDBResource,
   MountMode,
   RAMResource,
@@ -33,6 +34,8 @@ const BUCKET = "mirage-integ-runtime-ts";
 
 const ENC = new TextEncoder();
 const DEC = new TextDecoder();
+
+const SLOW_SCRIPT = "n = 0\nfor i in range(300000000):\n    n = n + 1\n";
 
 const ANALYZE_SCRIPT = `from pathlib import Path
 ram = Path('/ram/data.txt').read_text().strip()
@@ -178,6 +181,23 @@ async function main(): Promise<void> {
   await ws.execute("echo redis says hi > /redis/notes.txt");
   for (const [name, cmd] of CASES) await run(ws, name, cmd);
   for (const [name, cmd] of ERROR_CASES) await runError(ws, name, cmd);
+
+  const slowRam = new RAMResource();
+  slowRam.store.files.set("/slow.py", ENC.encode(SLOW_SCRIPT));
+  const wsSg = new Workspace(
+    { "/ram": slowRam },
+    {
+      mode: MountMode.EXEC,
+      pythonRuntime: "monty",
+      commandSafeguards: {
+        "/ram": { python3: new CommandSafeguard({ timeoutSeconds: 1 }) },
+      },
+    },
+  );
+  // cd first: the per-mount safeguard guards commands dispatched on
+  // that mount, and python3 dispatches via the working directory.
+  await runError(wsSg, "py3_safeguard_timeout", "cd /ram && python3 /ram/slow.py");
+  await wsSg.close();
   await ws.close();
 }
 

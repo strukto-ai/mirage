@@ -44,7 +44,7 @@ import {
   findExprTail,
   parseFindExpression,
 } from '../../commands/builtin/findParse.ts'
-import { maybeWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
+import { CommandTimeoutError, maybeWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
 import { resolveAcrossMounts, resolveSafeguard } from '../../commands/safeguard.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
 import { handleJobs, handleKill, handlePs, handleWait } from './jobs.ts'
@@ -198,6 +198,9 @@ async function runOnMount(
         }),
       ]
     }
+    // A safeguard timeout is not a filesystem failure: let it reach the
+    // workspace-level handler that answers with exit 124.
+    if (err instanceof CommandTimeoutError) throw err
     return [null, new IOResult({ exitCode: 1, stderr: formatFsError(cmdName, err, paths) })]
   }
 }

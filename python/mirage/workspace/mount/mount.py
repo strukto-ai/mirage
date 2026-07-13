@@ -470,16 +470,25 @@ class MountEntry:
                         exit_code=1,
                         stderr=(f"{cmd_name}: read-only mount "
                                 f"at {self.prefix}".encode()))
-                result = await cmd.fn(self.resource.accessor, paths, *texts,
-                                      **kw)
+                # The dispatch-level guard only sees default safeguards
+                # (the mount is unknown before routing), so the
+                # mount-resolved timeout must also bound the command
+                # body: eager commands do their work inside cmd.fn,
+                # where the stream-consumption guard never runs.
+                resolved_safeguard = resolve_safeguard(
+                    cmd_name, cmd.safeguard,
+                    self.command_safeguards.get(cmd_name))
+                cmd_timeout = (resolved_safeguard.timeout_seconds
+                               if resolved_safeguard is not None else None)
+                result = await run_with_timeout(
+                    cmd.fn(self.resource.accessor, paths, *texts, **kw),
+                    cmd_timeout, cmd_name)
                 if result is not None:
                     stream, io = _wrap_cmd_streams(result, mount_prefix,
                                                    self.revisions or None)
                     # TODO: hand back a finalization context separately
                     # instead of stamping policy onto io.safeguard.
-                    io.safeguard = resolve_safeguard(
-                        cmd_name, cmd.safeguard,
-                        self.command_safeguards.get(cmd_name))
+                    io.safeguard = resolved_safeguard
                     return stream, io
             return None, IOResult()
         finally:

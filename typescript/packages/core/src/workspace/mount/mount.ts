@@ -400,17 +400,28 @@ export class MountEntry {
                   }),
                 ]
               }
-              const result = await cmd.fn(accessor, expandedPaths, texts, cmdOpts)
+              // The dispatch-level guard only sees default safeguards
+              // (the mount is unknown before routing), so the
+              // mount-resolved timeout must also bound the command
+              // body: eager commands do their work inside cmd.fn,
+              // where the stream-consumption guard never runs.
+              const resolvedSafeguard = resolveSafeguard(
+                cmdName,
+                cmd.safeguard,
+                opts.safeguardOverride !== undefined
+                  ? opts.safeguardOverride
+                  : (this.commandSafeguards.get(cmdName) ?? null),
+              )
+              const cmdTimeout = resolvedSafeguard !== null ? resolvedSafeguard.timeoutSeconds : null
+              const result = await runWithTimeout(
+                Promise.resolve(cmd.fn(accessor, expandedPaths, texts, cmdOpts)),
+                cmdTimeout,
+                cmdName,
+              )
               if (result !== null) {
                 // TODO: hand back a finalization context separately
                 // instead of stamping policy onto io.safeguard.
-                result[1].safeguard = resolveSafeguard(
-                  cmdName,
-                  cmd.safeguard,
-                  opts.safeguardOverride !== undefined
-                    ? opts.safeguardOverride
-                    : (this.commandSafeguards.get(cmdName) ?? null),
-                )
+                result[1].safeguard = resolvedSafeguard
                 return result
               }
             }
