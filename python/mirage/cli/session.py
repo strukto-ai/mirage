@@ -19,15 +19,17 @@ from mirage.cli.output import emit, handle_response
 
 app = typer.Typer(no_args_is_help=True, help="Manage workspace sessions.")
 
-_ROLES = ("read", "write", "exec")
+_ROLES = ("read", "write", "exec", "r", "rw", "rwx")
 
 
 def _parse_mount_grants(mounts: list[str]) -> dict[str, str]:
     """Parse ``-m`` values like ``/data:read`` into a grants mapping.
 
-    A bare prefix (no role suffix) grants the mount its own configured
-    mode. The role is taken from the last ``:`` so mount prefixes that
-    contain colons still parse.
+    Roles are the words ("read", "write", "exec") or their cumulative
+    filesystem aliases ("r", "rw", "rwx"). A bare prefix (no role
+    suffix) grants the mount its own configured mode. The role is taken
+    from the last ``:`` so mount prefixes that contain colons still
+    parse.
 
     Args:
         mounts (list[str]): raw ``-m`` option values.
@@ -53,9 +55,9 @@ def create_cmd(
         "--mount",
         "-m",
         help=("Restrict this session to a mount, optionally capping its "
-              "role: '/data:read', '/scratch:write', or a bare '/data' to "
-              "keep the mount's own mode. Repeat for multiple mounts; "
-              "omit for unrestricted."),
+              "role: '/data:read' (alias '/data:r'), '/scratch:rw', "
+              "'/bin:rwx', or a bare '/data' to keep the mount's own "
+              "mode. Repeat for multiple mounts; omit for unrestricted."),
     ),
 ) -> None:
     body: dict = {}

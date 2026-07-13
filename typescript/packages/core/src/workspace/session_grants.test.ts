@@ -156,4 +156,11 @@ describe('per-session mount grants', () => {
       'invalid mount role',
     )
   })
+
+  it('accepts filesystem alias roles, rejects bit-style forms', async () => {
+    const { ws } = await makeGrantsWorkspace()
+    const sess = ws.createSession('agent', { mounts: { '/a': 'rw' } })
+    expect(sess.mountGrants?.get('/a')).toBe(MountMode.WRITE)
+    expect(() => ws.createSession('bits', { mounts: { '/a': 'w' } })).toThrow('invalid mount role')
+  })
 })

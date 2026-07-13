@@ -100,6 +100,26 @@ def test_session_create_parses_role_suffix():
     }
 
 
+def test_session_create_parses_alias_role_suffix():
+    fake = _FakeClient()
+    with _patched_client(fake):
+        result = CliRunner().invoke(
+            session_cli.app,
+            [
+                "create", "demo", "-m", "/data:r", "-m", "/scratch:rw", "-m",
+                "/bin:rwx"
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    assert fake.last_body == {
+        "mounts": {
+            "/data": "r",
+            "/scratch": "rw",
+            "/bin": "rwx"
+        },
+    }
+
+
 def test_session_create_no_mount_flag_omits_field():
     fake = _FakeClient()
     with _patched_client(fake):

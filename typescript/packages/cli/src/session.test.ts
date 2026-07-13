@@ -24,6 +24,14 @@ describe('parseMountGrants', () => {
     })
   })
 
+  it('parses filesystem alias role suffixes', () => {
+    expect(parseMountGrants(['/data:r', '/scratch:rw', '/bin:rwx'])).toEqual({
+      '/data': 'r',
+      '/scratch': 'rw',
+      '/bin': 'rwx',
+    })
+  })
+
   it('keeps colons that are not role suffixes in the prefix', () => {
     expect(parseMountGrants(['/weird:name'])).toEqual({ '/weird:name': 'exec' })
   })

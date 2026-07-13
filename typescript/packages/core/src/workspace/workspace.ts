@@ -52,6 +52,7 @@ import {
   DriftPolicy,
   FileType,
   MountMode,
+  mountRole,
   type PathSpec,
 } from '../types.ts'
 import type { TSNodeLike } from './expand/variable.ts'
@@ -376,14 +377,15 @@ export class Workspace {
    * Create a session, optionally restricted to per-mount roles.
    *
    * `mounts` as a map assigns each prefix a role ceiling ('read',
-   * 'write', 'exec'); an array of prefixes grants each mount its own
-   * configured mode (the previous allowlist behavior). Omitting it
-   * leaves the session unrestricted.
+   * 'write', 'exec', or the filesystem aliases 'r', 'rw', 'rwx'); an
+   * array of prefixes grants each mount its own configured mode (the
+   * previous allowlist behavior). Omitting it leaves the session
+   * unrestricted.
    */
   createSession(
     sessionId: string,
     options: {
-      mounts?: ReadonlyMap<string, MountMode> | Record<string, MountMode> | readonly string[] | null
+      mounts?: ReadonlyMap<string, string> | Record<string, string> | readonly string[] | null
     } = {},
   ): Session {
     const mounts = options.mounts ?? null
@@ -395,15 +397,12 @@ export class Workspace {
           grants.set('/' + stripSlash(p), MountMode.EXEC)
         }
       } else {
-        const entries: [string, MountMode][] =
+        const entries: [string, string][] =
           mounts instanceof Map
-            ? [...(mounts as ReadonlyMap<string, MountMode>).entries()]
-            : (Object.entries(mounts) as [string, MountMode][])
+            ? [...(mounts as ReadonlyMap<string, string>).entries()]
+            : Object.entries(mounts as Record<string, string>)
         for (const [p, role] of entries) {
-          if (!Object.values(MountMode).includes(role)) {
-            throw new Error(`invalid mount role: '${role}'`)
-          }
-          grants.set('/' + stripSlash(p), role)
+          grants.set('/' + stripSlash(p), mountRole(role))
         }
       }
       for (const p of this.infrastructureMountPrefixes()) {

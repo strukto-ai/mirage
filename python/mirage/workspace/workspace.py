@@ -49,7 +49,7 @@ from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
 from mirage.types import (DEFAULT_AGENT_ID, DEFAULT_SESSION_ID,
                           ConsistencyPolicy, DriftPolicy, FileStat, MountMode,
-                          PathSpec, StateKey)
+                          PathSpec, StateKey, mount_role)
 from mirage.utils.errors import format_fs_error
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.dispatcher import Dispatcher
@@ -538,7 +538,8 @@ class Workspace:
             session_id (str): unique id for the session.
             mounts (Mapping[str, MountMode | str] | Iterable[str] | None):
                 per-mount grants. A mapping assigns each prefix a role
-                ceiling ("read", "write", "exec"); a plain iterable of
+                ceiling ("read", "write", "exec", or the filesystem
+                aliases "r", "rw", "rwx"); a plain iterable of
                 prefixes grants each mount its own configured mode (the
                 previous allowlist behavior). ``None`` leaves the
                 session unrestricted.
@@ -549,7 +550,7 @@ class Workspace:
                 mounts = [mounts]
             if isinstance(mounts, Mapping):
                 grants = {
-                    ("/" + p.strip("/")): MountMode(m)
+                    ("/" + p.strip("/")): mount_role(m)
                     for p, m in mounts.items()
                 }
             else:

@@ -392,3 +392,13 @@ def test_invalid_role_rejected():
     ws = Workspace({"/a": a})
     with pytest.raises(ValueError):
         ws.create_session("agent", mounts={"/a": "admin"})
+
+
+def test_filesystem_alias_roles():
+    a = _seed("x.txt", b"hi")
+    ws = Workspace({"/a": a})
+    sess = ws.create_session("agent", mounts={"/a": "rw"})
+    assert sess.mount_grants is not None
+    assert sess.mount_grants["/a"] == MountMode.WRITE
+    with pytest.raises(ValueError):
+        ws.create_session("bits", mounts={"/a": "w"})

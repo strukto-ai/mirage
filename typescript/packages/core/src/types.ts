@@ -33,6 +33,26 @@ export function weakerMode(a: MountMode, b: MountMode): MountMode {
   return MOUNT_MODE_RANK[a] <= MOUNT_MODE_RANK[b] ? a : b
 }
 
+const MOUNT_ROLE_ALIASES: Readonly<Record<string, MountMode>> = Object.freeze({
+  r: MountMode.READ,
+  rw: MountMode.WRITE,
+  rwx: MountMode.EXEC,
+})
+
+/**
+ * Coerce a grant role, accepting cumulative filesystem aliases.
+ *
+ * The grant ladder is cumulative (exec implies write implies read), so
+ * only the cumulative spellings `r`, `rw`, `rwx` alias the roles;
+ * bit-style forms like `w` or `x` are rejected.
+ */
+export function mountRole(value: string): MountMode {
+  const alias = MOUNT_ROLE_ALIASES[value]
+  if (alias !== undefined) return alias
+  if ((Object.values(MountMode) as string[]).includes(value)) return value as MountMode
+  throw new Error(`invalid mount role: '${value}'`)
+}
+
 export const ConsistencyPolicy = Object.freeze({
   LAZY: 'lazy',
   ALWAYS: 'always',

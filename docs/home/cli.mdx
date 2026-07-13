@@ -300,7 +300,7 @@ mirage workspace clone demo --at <version> --id demo_at_v1
 | `mirage workspace checkout ID REF` | Restore the live state in place to a version id or branch. |
 | `mirage workspace snapshot ID PATH.tar` | Snapshot to a tar file. |
 | `mirage workspace load PATH.tar [CONFIG] [--id NAME]` | Restore from tar; optional config re-supplies redacted creds. |
-| `mirage session create WS [--id NAME]` | Add a named session (own cwd + env). |
+| `mirage session create WS [--id NAME] [-m /prefix[:role]]...` | Add a named session (own cwd + env), optionally granting mounts with a role ceiling (`read`/`write`/`exec` or `r`/`rw`/`rwx`). |
 | `mirage session list WS` | List sessions for a workspace. |
 | `mirage session delete WS SESSION` | Close a session. |
 | `mirage execute --workspace_id WS [--session_id S] [--background] --command "..."` | Run a command. Pipes stdin automatically when stdout is not a TTY. |

@@ -15,8 +15,8 @@
 import pytest
 from pydantic import ValidationError
 
-from mirage.types import (Aggr, CommandSafeguard, FileStat, OnExceed, PathSpec,
-                          word_text)
+from mirage.types import (Aggr, CommandSafeguard, FileStat, MountMode,
+                          OnExceed, PathSpec, mount_role, word_text)
 
 
 def test_filestat_defaults():
@@ -147,3 +147,17 @@ def test_pathspec_from_str_path_defaults_to_root_mounted():
 def test_pathspec_from_str_path_explicit_resource_path():
     p = PathSpec.from_str_path("/mnt/s3/data/x.json", "data/x.json")
     assert p.resource_path == "data/x.json"
+
+
+def test_mount_role_words_and_aliases():
+    assert mount_role("read") == MountMode.READ
+    assert mount_role("r") == MountMode.READ
+    assert mount_role("rw") == MountMode.WRITE
+    assert mount_role("rwx") == MountMode.EXEC
+    assert mount_role(MountMode.EXEC) == MountMode.EXEC
+
+
+def test_mount_role_rejects_bit_style_forms():
+    for bad in ("w", "x", "wx", "rx", "admin"):
+        with pytest.raises(ValueError):
+            mount_role(bad)

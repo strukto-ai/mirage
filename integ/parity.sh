@@ -123,7 +123,7 @@ probe() {
   $cli execute -w gw -c 'echo hello > /data/a.txt' </dev/null >/dev/null
   $cli execute -w gw -c 'echo aside > /side/s.txt' </dev/null >/dev/null
   $cli session create gw --id reader -m /data:read </dev/null >/dev/null
-  $cli session create gw --id writer -m /data:write </dev/null >/dev/null
+  $cli session create gw --id writer -m /data:rw </dev/null >/dev/null
   $cli session create gw --id lister -m /data </dev/null >/dev/null
   $cli session create gw --id capped -m /ro:write </dev/null >/dev/null
   echo "grant.reader_cat=$($cli execute -w gw -s reader -c 'cat /data/a.txt' </dev/null | sout)"
@@ -139,7 +139,7 @@ probe() {
   $cli workspace delete gx >/dev/null 2>&1 </dev/null || true
   $cli workspace create "$EXEC_YAML" --id gx >/dev/null </dev/null
   $cli session create gx --id noexec -m /data:write </dev/null >/dev/null
-  $cli session create gx --id withexec -m /data:exec </dev/null >/dev/null
+  $cli session create gx --id withexec -m /data:rwx </dev/null >/dev/null
   echo "grant.exec_denied_err=$($cli execute -w gx -s noexec -c 'python3 -c "print(1)"' </dev/null | serr)"
   echo "grant.exec_allowed=$($cli execute -w gx -s withexec -c 'python3 -c "print(1)"' </dev/null | sout)"
   $cli workspace delete gx >/dev/null 2>&1 </dev/null || true

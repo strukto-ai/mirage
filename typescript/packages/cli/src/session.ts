@@ -21,13 +21,14 @@ function buildClient() {
   return makeClient(loadDaemonSettings())
 }
 
-const ROLES = new Set(['read', 'write', 'exec'])
+const ROLES = new Set(['read', 'write', 'exec', 'r', 'rw', 'rwx'])
 
 /**
- * Parse `-m` values like `/data:read` into a grants mapping. A bare
- * prefix (no role suffix) grants the mount its own configured mode. The
- * role is taken from the last `:` so mount prefixes that contain colons
- * still parse.
+ * Parse `-m` values like `/data:read` into a grants mapping. Roles are
+ * the words ('read', 'write', 'exec') or their cumulative filesystem
+ * aliases ('r', 'rw', 'rwx'). A bare prefix (no role suffix) grants
+ * the mount its own configured mode. The role is taken from the last
+ * `:` so mount prefixes that contain colons still parse.
  */
 export function parseMountGrants(mounts: string[]): Record<string, string> {
   const grants: Record<string, string> = {}
@@ -52,8 +53,9 @@ export function registerSessionCommands(program: Command): void {
     .option('--id <sessionId>')
     .option(
       '-m, --mount <prefix>',
-      "restrict session to a mount, optionally capping its role: '/data:read', " +
-        "'/scratch:write', or a bare '/data' to keep the mount's own mode; repeatable",
+      "restrict session to a mount, optionally capping its role: '/data:read' " +
+        "(alias '/data:r'), '/scratch:rw', '/bin:rwx', or a bare '/data' to keep " +
+        "the mount's own mode; repeatable",
       (value: string, prev: string[]) => prev.concat([value]),
       [] as string[],
     )
