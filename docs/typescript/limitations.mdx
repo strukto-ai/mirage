@@ -4,7 +4,7 @@ icon: triangle-exclamation
 description: Runtime-specific constraints in the TypeScript SDK (Node and Browser) and how to work around them.
 ---
 
-Most of Mirage's behavior is identical across Python and TypeScript. The two TS runtimes (Node and Browser) each impose a handful of constraints that don't exist in Python. All are documented here so you can plan around them before they surprise you in production.
+Most of Mirage's behavior is identical across Python and TypeScript. The two TS runtimes (Node and Browser) each impose a handful of constraints, most of which don't exist in Python (the one shared design property, size-unknown stat, is included because it is the most common surprise). All are documented here so you can plan around them before they surprise you in production.
 
 <Note>
   `python3` has its own set of WASM-runtime-level divergences from Python Mirage's subprocess model. See [Python](/typescript/python#limitations) for the full list.
@@ -94,17 +94,24 @@ execFileSync('cat', [`${mp}/x.txt`])
 
 **Workarounds.** Use async `fs` APIs and async subprocess spawns from the mounting process, or dedicate a child process to owning the mount (see `examples/typescript/fuse/helper.ts` for the pattern). External processes (a sandbox runtime, another terminal, your shell) are unaffected — the constraint only binds the process that created the mount.
 
-<Note>
-  **Size-unknown API files behave like `/proc`.** API-backed resources
-  (Trello, Linear, Slack, MongoDB, …) return `stat.size = null` until their
-  content is fetched, so over FUSE those files stat as **0 bytes until first
-  open** and read correctly the moment anything opens them — the same recipe
-  as Python (`direct_io` + `attr_timeout=0` + post-open `fstat` serving the
-  real size). Earlier TS versions reported a fake 100 MiB size with
-  zero-padded reads; that sentinel is gone, and `JSON.parse` on FUSE-read
-  API files works. See [FUSE setup → Size semantics](/typescript/setup/fuse#size-semantics-for-api-backed-files)
-  for the per-tool table.
-</Note>
+---
+
+### 3. Size-unknown API files stat as 0 bytes until first open
+
+**The behavior.** API-backed resources (Trello, Linear, Slack, MongoDB, …) return `stat.size = null` because the byte size isn't known until the API has been called. Over the FUSE mount these files behave like Linux `/proc` files: they stat as **0 bytes until first open**, and become fully readable the moment anything opens them. Mirage mounts with `direct_io` (the kernel reads to EOF regardless of the reported size; `@zkochan/fuse-native` doesn't expose the option, so Mirage appends it to the mount option string itself) and `attr_timeout=0` (post-open `fstat` returns the real size of the now-fetched content, kept warm in a 30-second cache).
+
+What that means per tool:
+
+| Tools | Behavior |
+| --- | --- |
+| `cat`, `grep`, `head`, `cp`, `md5sum`, `sed`, `sort` | correct content, always |
+| `wc -c`, `tail -c` | correct (they fstat after open, which serves the real size) |
+| `ls -l`, `du`, `find -size`, `test -s` | report 0 until the file has been opened recently |
+| `tar`, `rsync`, `scp` | see 0 at stat time and copy empty content, exactly like `tar` over `/proc`; read the file first or use `cat`/`cp` based flows |
+
+Mirage never reports a fake size and never fetches content during `stat`: returning real sizes eagerly would fire one API call per file on every `ls -l`. Earlier TS versions instead reported a fake 100 MiB size with zero-padded reads (`JSON.parse` of a FUSE-read file failed on the padding); that sentinel is gone and reads are byte-exact.
+
+**Why Python behaves the same.** Unlike the other entries on this page, this one is not TS-specific: it is a design property of API-backed mounts, and Python's FUSE layer has identical semantics (see [Python FUSE setup](/python/setup/fuse#size-semantics-for-api-backed-files)). It is listed here because the stat-time zeros are the most common FUSE surprise in practice.
 
 ---
 
@@ -154,6 +161,7 @@ These resources are only exposed by `@struktoai/mirage-node` because their drive
 | `patchNodeFs()` with `require('fs')` (CJS) | Node | ✅ works |
 | `patchNodeFs()` with `import from 'node:fs'` (ESM) | Node | ❌ silently bypassed; use FUSE or the VFS API |
 | FUSE `cat`/`readFile` of API-backed size-unknown files | Node | ✅ works (stats 0 until opened, like `/proc`) |
+| `tar`/`rsync` of an unopened size-unknown file | Node | ❌ copies 0 bytes (stat-only tools; same in Python) — read the file first or use `cp` |
 | Synchronous access to your own mount from the mounting process | Node | ❌ deadlocks; use async APIs or a child process |
 | `ws.execute(...)` virtual builtins | Browser | ✅ works |
 | `Workspace` with a fuse `Mount` | Browser | ❌ throws; not supported |
@@ -163,4 +171,4 @@ These resources are only exposed by `@struktoai/mirage-node` because their drive
 | Python `open()` writes back through mount | Browser | ✅ with JSPI (Chrome 137+); ❌ otherwise |
 | `@struktoai/mirage-node`-only resources (SSH, Postgres, MongoDB, LanceDB, Email, FUSE) | Browser | ❌ Node-only drivers |
 
-The Node limitations are runtime-level, not Mirage design decisions. Python's equivalent behavior is strictly better in each case, so if a workflow absolutely requires ESM-level `fs` patching or blocking reads of your own mount, consider whether the Python SDK fits better for that specific piece. The Browser limitations are by design (no kernel, no subprocess), so the workarounds there are about choosing the right runtime for the task.
+The first two Node limitations are runtime-level, not Mirage design decisions, and Python's equivalent behavior is strictly better there — if a workflow absolutely requires ESM-level `fs` patching or blocking reads of your own mount, consider whether the Python SDK fits better for that specific piece. Size-unknown stat is identical in both SDKs by design. The Browser limitations are by design (no kernel, no subprocess), so the workarounds there are about choosing the right runtime for the task.

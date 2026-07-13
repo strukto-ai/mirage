@@ -108,27 +108,11 @@ Programmatically, set `fuse` per mount: `{ '/data': new Mount(dataResource, { fu
 ## Size semantics for API-backed files
 
 Some resources (Linear, Trello, Slack, ...) cannot report a file's size
-without fetching its content, so `stat` returns an unknown size. Over the
-FUSE mount these files behave like Linux `/proc` files: they stat as **0
-bytes until first open**, and become fully readable the moment anything opens
-them. Mirage mounts with `direct_io` (the kernel reads to EOF regardless of
-the reported size; `@zkochan/fuse-native` doesn't expose the option, so
-Mirage appends it to the mount option string itself) and `attr_timeout=0`
-(post-open `fstat` returns the real size of the now-fetched content, kept
-warm in a 30-second cache).
-
-What that means per tool:
-
-| Tools | Behavior |
-| --- | --- |
-| `cat`, `grep`, `head`, `cp`, `md5sum`, `sed`, `sort` | correct content, always |
-| `wc -c`, `tail -c` | correct (they fstat after open, which serves the real size) |
-| `ls -l`, `du`, `find -size`, `test -s` | report 0 until the file has been opened recently |
-| `tar`, `rsync`, `scp` | see 0 at stat time and copy empty content, exactly like `tar` over `/proc`; read the file first or use `cat`/`cp` based flows |
-
-Mirage never reports a fake size and never fetches content during `stat`:
-returning real sizes eagerly would fire one API call per file on every
-`ls -l`.
+without fetching its content, so over the FUSE mount those files behave like
+Linux `/proc` files: they stat as **0 bytes until first open** and become
+fully readable the moment anything opens them. See
+[Limitations → Size-unknown API files](/typescript/limitations#3-size-unknown-api-files-stat-as-0-bytes-until-first-open)
+for the per-tool table and the mechanics (`direct_io` + `attr_timeout=0`).
 
 <Note>
   FUSE on Node has two runtime constraints worth knowing: `fs-monkey` can't patch ESM `node:fs` imports, and synchronous access to your own mount from the mounting process deadlocks the event loop that serves it. See [TypeScript Limitations](/typescript/limitations) for details and workarounds.
