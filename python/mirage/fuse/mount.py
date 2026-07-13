@@ -28,11 +28,19 @@ from mirage.ops import Ops
 
 
 def _run_fuse(fs: MirageFS, mountpoint: str, foreground: bool) -> None:
+    # direct_io: the kernel ignores st_size and keeps issuing reads until the
+    # backend returns EOF, which is what makes size-unknown (API-backed) files
+    # readable by tools that never fstat (cat, grep).
+    # attr_timeout=0: the kernel re-stats through fgetattr after open instead
+    # of trusting the cached pre-open size; without it fstat-based tools see
+    # a stale 0 (wc -c prints 0, BSD cp copies 0 bytes, tail -c dumps the
+    # whole file). mfusepy forwards unknown kwargs as -o mount options.
     fuse.FUSE(fs,
               mountpoint,
               nothreads=True,
               foreground=foreground,
-              direct_io=True)
+              direct_io=True,
+              attr_timeout=0)
 
 
 def _await_ready(thread: threading.Thread,

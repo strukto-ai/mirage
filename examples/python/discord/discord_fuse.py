@@ -14,6 +14,7 @@
 
 import json
 import os
+import subprocess
 
 from dotenv import load_dotenv
 
@@ -33,7 +34,8 @@ with Workspace({"/discord/": Mount(resource, mode=MountMode.READ,
 
     # ── list guilds ──────────────────────────────
     print("--- os.listdir() guilds ---")
-    guilds = os.listdir(mp)
+    # Skip the virtual /.mirage dir (agent metadata), it is not a guild.
+    guilds = [g for g in os.listdir(mp) if not g.startswith(".")]
     for g in guilds:
         print(f"  {g}")
 
@@ -68,6 +70,21 @@ with Workspace({"/discord/": Mount(resource, mode=MountMode.READ,
                 target = dates[-1]
                 date_dir = f"{mp}/{guild}/channels/{ch}/{target}"
                 chat_path = f"{date_dir}/chat.jsonl"
+                # chat.jsonl has no size until fetched: unopened it stats as
+                # 0 bytes; any open (cat/wc/cp) hydrates it, and stat then
+                # reports the real size (see docs/python/setup/fuse.mdx).
+                print(
+                    f"\n--- size-unknown semantics on {target}/chat.jsonl ---")
+                print(
+                    f"  stat before open: {os.stat(chat_path).st_size} bytes")
+                wc = subprocess.run(["wc", "-lc", chat_path],
+                                    capture_output=True,
+                                    text=True)
+                n_lines, n_bytes = wc.stdout.split()[:2]
+                print(
+                    f"  wc -lc          : {n_lines} messages, {n_bytes} bytes")
+                print(
+                    f"  stat after read : {os.stat(chat_path).st_size} bytes")
                 print(f"\n--- open() + read {target}/chat.jsonl ---")
                 with open(chat_path) as f:
                     text = f.read().strip()
