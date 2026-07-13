@@ -14,6 +14,7 @@
 
 import json
 import os
+import subprocess
 
 from dotenv import load_dotenv
 
@@ -57,10 +58,24 @@ with Workspace({"/slack/": Mount(resource, mode=MountMode.READ,
                 path = f"{mp}/channels/{ch}/{d}/chat.jsonl"
                 if not os.path.exists(path):
                     continue
+                # chat.jsonl has no size until fetched: unopened it stats as
+                # 0 bytes; the open below hydrates it, and stat/wc then
+                # report the real size (see docs/python/setup/fuse.mdx).
+                pre_size = os.stat(path).st_size
                 with open(path) as f:
                     text = f.read().strip()
                 if text:
                     lines = [ln for ln in text.splitlines() if ln.strip()]
+                    print(
+                        f"\n--- size-unknown semantics on {d}/chat.jsonl ---")
+                    print(f"  stat before open: {pre_size} bytes")
+                    wc = subprocess.run(["wc", "-lc", path],
+                                        capture_output=True,
+                                        text=True)
+                    n_lines, n_bytes = wc.stdout.split()[:2]
+                    print(f"  wc -lc          : {n_lines} messages, "
+                          f"{n_bytes} bytes")
+                    print(f"  stat after read : {os.stat(path).st_size} bytes")
                     print(f"\n--- open() + read {d}/chat.jsonl ---")
                     print(f"  messages: {len(lines)}")
                     for line in lines[:3]:

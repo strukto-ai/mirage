@@ -14,6 +14,7 @@
 
 import json
 import os
+import subprocess
 
 from dotenv import load_dotenv
 
@@ -44,6 +45,18 @@ with Workspace({"/linear/": Mount(resource, mode=MountMode.READ,
         contents = os.listdir(team_path)
         for c in contents:
             print(f"  {c}")
+
+        # Linear cannot report a file size before fetching, so an unopened
+        # team.json stats as 0 bytes; any open (cat/wc/cp) hydrates it, and
+        # stat then reports the real size (see docs/python/setup/fuse.mdx).
+        team_json = f"{team_path}/team.json"
+        print("\n--- size-unknown semantics on team.json ---")
+        print(f"  stat before open: {os.stat(team_json).st_size} bytes")
+        wc = subprocess.run(["wc", "-c", team_json],
+                            capture_output=True,
+                            text=True)
+        print(f"  wc -c           : {wc.stdout.split()[0]} bytes")
+        print(f"  stat after read : {os.stat(team_json).st_size} bytes")
 
         print("\n--- open() team.json ---")
         with open(f"{team_path}/team.json") as f:
