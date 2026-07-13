@@ -29,13 +29,13 @@ mode: "frame"
     ```python
     import os
 
-    from mirage import MountMode, Workspace
+    from mirage import Mount, MountMode, Workspace
     from mirage.resource.ram import RAMResource
     from mirage.resource.s3 import S3Config, S3Resource
     from mirage.resource.slack import SlackConfig, SlackResource
 
     ws = Workspace({
-        "/data": (RAMResource(), MountMode.WRITE),
+        "/data": Mount(RAMResource(), mode=MountMode.WRITE),
         "/s3": S3Resource(S3Config(bucket="my-bucket")),
         "/slack": SlackResource(SlackConfig(token=os.environ["SLACK_BOT_TOKEN"])),
     })
@@ -50,24 +50,19 @@ mode: "frame"
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
     import {
+      Mount,
+      MountMode,
       RAMResource,
       S3Resource,
       SlackResource,
-      MountMode,
       Workspace,
     } from '@struktoai/mirage-node'
 
-    const ws = new Workspace(
-      {
-        '/data': new RAMResource(),
-        '/s3': new S3Resource({ bucket: 'my-bucket' }),
-        '/slack': new SlackResource({ token: process.env.SLACK_BOT_TOKEN! }),
-      },
-      {
-        mode: MountMode.READ,
-        modeOverrides: { '/data': MountMode.WRITE },
-      },
-    )
+    const ws = new Workspace({
+      '/data': new Mount(new RAMResource(), { mode: MountMode.WRITE }),
+      '/s3': new S3Resource({ bucket: 'my-bucket' }),
+      '/slack': new SlackResource({ token: process.env.SLACK_BOT_TOKEN! }),
+    })
 
     // Same shell vocabulary, three different backends.
     await ws.execute('echo "hello mirage" > /data/hello.txt')
@@ -173,7 +168,7 @@ grep -r "mirage" /slack /gmail /github
     from agents.run import RunConfig
     from agents.sandbox import SandboxAgent, SandboxRunConfig
 
-    from mirage import MountMode, Workspace
+    from mirage import Mount, MountMode, Workspace
     from mirage.agents.openai_agents import MirageSandboxClient
     from mirage.resource.github import GitHubConfig, GitHubResource
     from mirage.resource.linear import LinearConfig, LinearResource
@@ -188,9 +183,9 @@ grep -r "mirage" /slack /gmail /github
     linear = LinearResource(LinearConfig(api_key="lin_api_..."))
 
     ws = Workspace({
-        "/slack": (slack, MountMode.READ),
-        "/github": (github, MountMode.READ),
-        "/linear": (linear, MountMode.WRITE),
+        "/slack": slack,
+        "/github": github,
+        "/linear": Mount(linear, mode=MountMode.WRITE),
     })
 
     agent = SandboxAgent(
@@ -222,6 +217,7 @@ grep -r "mirage" /slack /gmail /github
     import {
       GitHubResource,
       LinearResource,
+      Mount,
       MountMode,
       SlackResource,
       Workspace,
@@ -237,13 +233,11 @@ grep -r "mirage" /slack /gmail /github
     })
     const linear = new LinearResource({ apiKey: process.env.LINEAR_API_KEY! })
 
-    const ws = new Workspace(
-      { '/slack': slack, '/github': github, '/linear': linear },
-      {
-        mode: MountMode.READ,
-        modeOverrides: { '/linear': MountMode.WRITE },
-      },
-    )
+    const ws = new Workspace({
+      '/slack': slack,
+      '/github': github,
+      '/linear': new Mount(linear, { mode: MountMode.WRITE }),
+    })
 
     const agent = new Agent({
       name: 'Design feedback triage',
