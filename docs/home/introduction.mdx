@@ -29,13 +29,13 @@ mode: "frame"
     ```python
     import os
 
-    from mirage import Workspace
+    from mirage import MountMode, Workspace
     from mirage.resource.ram import RAMResource
     from mirage.resource.s3 import S3Config, S3Resource
     from mirage.resource.slack import SlackConfig, SlackResource
 
     ws = Workspace({
-        "/data": RAMResource(),
+        "/data": (RAMResource(), MountMode.WRITE),
         "/s3": S3Resource(S3Config(bucket="my-bucket")),
         "/slack": SlackResource(SlackConfig(token=os.environ["SLACK_BOT_TOKEN"])),
     })
@@ -53,14 +53,21 @@ mode: "frame"
       RAMResource,
       S3Resource,
       SlackResource,
+      MountMode,
       Workspace,
     } from '@struktoai/mirage-node'
 
-    const ws = new Workspace({
-      '/data': new RAMResource(),
-      '/s3': new S3Resource({ bucket: 'my-bucket' }),
-      '/slack': new SlackResource({ token: process.env.SLACK_BOT_TOKEN! }),
-    })
+    const ws = new Workspace(
+      {
+        '/data': new RAMResource(),
+        '/s3': new S3Resource({ bucket: 'my-bucket' }),
+        '/slack': new SlackResource({ token: process.env.SLACK_BOT_TOKEN! }),
+      },
+      {
+        mode: MountMode.READ,
+        modeOverrides: { '/data': MountMode.WRITE },
+      },
+    )
 
     // Same shell vocabulary, three different backends.
     await ws.execute('echo "hello mirage" > /data/hello.txt')
@@ -168,13 +175,17 @@ grep -r "mirage" /slack /gmail /github
 
     from mirage import MountMode, Workspace
     from mirage.agents.openai_agents import MirageSandboxClient
-    from mirage.resource.github import GitHubResource
-    from mirage.resource.linear import LinearResource
-    from mirage.resource.slack import SlackResource
+    from mirage.resource.github import GitHubConfig, GitHubResource
+    from mirage.resource.linear import LinearConfig, LinearResource
+    from mirage.resource.slack import SlackConfig, SlackResource
 
-    slack = SlackResource(...)
-    github = GitHubResource(repo="strukto-ai/mirage")
-    linear = LinearResource(...)
+    slack = SlackResource(SlackConfig(token="xoxb-..."))
+    github = GitHubResource(
+        GitHubConfig(token="github_pat_..."),
+        owner="strukto-ai",
+        repo="mirage",
+    )
+    linear = LinearResource(LinearConfig(api_key="lin_api_..."))
 
     ws = Workspace({
         "/slack": (slack, MountMode.READ),
