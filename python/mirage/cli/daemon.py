@@ -146,6 +146,7 @@ def stop_cmd(
                  human=_format_stop)
             return
         except ProcessLookupError:
+            # the daemon exited between checks: that is the success condition
             pass
     fail(f"daemon did not exit within {timeout}s and no live PID found",
          exit_code=2)
@@ -170,6 +171,7 @@ def restart_cmd(
         try:
             client.request("POST", "/v1/shutdown")
         except httpx.RequestError:
+            # daemon not listening: fall through to the signal-based stop
             pass
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -183,6 +185,7 @@ def restart_cmd(
             try:
                 os.kill(pid, signal.SIGTERM)
             except ProcessLookupError:
+                # the process exited on its own before the signal
                 pass
     if eager:
         with make_client() as client:

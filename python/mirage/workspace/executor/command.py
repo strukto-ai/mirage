@@ -555,6 +555,7 @@ async def handle_command(
             try:
                 mounts.append(registry.mount_for(s.virtual))
             except ValueError:
+                # a scope outside any mount contributes nothing here
                 pass
         io.safeguard = (resolve_across_mounts(cmd_name, mounts)
                         if mounts else resolve_safeguard(cmd_name))
@@ -568,6 +569,7 @@ async def handle_command(
             try:
                 mount_prefixes.add(registry.mount_for(s.virtual).prefix)
             except ValueError:
+                # a scope outside any mount contributes nothing here
                 pass
         if len(mount_prefixes) > 1:
             prefixes_str = ", ".join(sorted(mount_prefixes))
