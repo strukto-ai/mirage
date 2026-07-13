@@ -30,7 +30,7 @@ import type { MountEntry } from '../mount/mount.ts'
 import type { Namespace } from '../mount/namespace.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { Consumer, JOB_BUILTINS, route } from '../route/index.ts'
-import type { PyodideRuntime } from './python/runtime.ts'
+import type { PythonRuntime } from './python/runtimes/interface.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import { asyncChain } from '../../io/stream.ts'
@@ -61,7 +61,7 @@ interface RunOnMountCtx {
   dispatch: DispatchFn
   namespace?: Namespace
   ensureOpen?: (resource: Resource) => Promise<void>
-  pythonRuntime?: PyodideRuntime
+  pythonRuntime?: PythonRuntime
 }
 
 interface RunOnMountOpts {
@@ -224,7 +224,7 @@ export async function handleCommand(
   jobTable: JobTable | null = null,
   ensureOpen?: (resource: Resource) => Promise<void>,
   unmount?: (prefix: string) => Promise<void>,
-  pythonRuntime?: PyodideRuntime,
+  pythonRuntime?: PythonRuntime,
   namespace?: Namespace,
 ): Promise<Result> {
   if (parts.length === 0) {

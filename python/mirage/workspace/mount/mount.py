@@ -30,6 +30,7 @@ from mirage.observe.context import (push_mount_prefix, push_revisions,
                                     with_revisions)
 from mirage.ops.registry import RegisteredOp
 from mirage.resource.base import BaseResource
+from mirage.runtime.python.base import PythonRuntime
 from mirage.types import ConsistencyPolicy, MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -382,6 +383,7 @@ class MountEntry:
         session_id: str | None = None,
         env: dict[str, str] | None = None,
         exec_allowed: bool = True,
+        python_runtime: PythonRuntime | None = None,
     ) -> tuple[ByteSource | None, IOResult]:
         """Execute a command on this mount's resource.
 
@@ -455,6 +457,8 @@ class MountEntry:
         if env is not None:
             kw["env"] = env
         kw["exec_allowed"] = exec_allowed
+        if python_runtime is not None:
+            kw["python_runtime"] = python_runtime
 
         prev_prefix = push_mount_prefix(mount_prefix)
         revs_token = push_revisions(self.revisions or None)

@@ -68,6 +68,9 @@ build-backend = "setuptools.build_meta"
 include = ["mirage*"]
 
 [project.optional-dependencies]
+# --- python runtime (sandboxed python3 default) ---
+monty    = ["pydantic-monty>=0.0.18"]
+
 # --- storage / object stores ---
 s3       = ["aioboto3>=13.0"]
 r2       = ["aioboto3>=13.0"]

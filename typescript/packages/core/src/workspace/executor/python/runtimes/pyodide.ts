@@ -12,22 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { loadPyodideRuntime, type PyodideInterface } from './loader.ts'
+import { loadPyodideRuntime, type PyodideInterface } from '../loader.ts'
 import {
   createMirageBridge,
   preloadInto,
   type BridgeDispatchFn,
   type MirageBridge,
-} from './mirage_bridge.ts'
-import { MIRAGE_FS_SHIM_PY } from './mirage_fs_shim.ts'
-import { PYTHON_REPL_WRAPPER, PYTHON_WRAPPER } from './wrapper.ts'
+} from '../mirage_bridge.ts'
+import { MIRAGE_FS_SHIM_PY } from '../mirage_fs_shim.ts'
+import { PYTHON_REPL_WRAPPER, PYTHON_WRAPPER } from '../wrapper.ts'
+import { PYODIDE_RUNTIME, type PythonRuntime, type PythonRuntimeOptions } from './interface.ts'
 import type {
   PythonReplRunArgs,
   PythonReplRunResult,
   PythonRunArgs,
   PythonRunResult,
   ReplStatus,
-} from './types.ts'
+} from '../types.ts'
 
 function runtimeEnv(): Record<string, string> {
   const env: Record<string, string> = {}
@@ -37,10 +38,6 @@ function runtimeEnv(): Record<string, string> {
     if (typeof v === 'string') env[k] = v
   }
   return env
-}
-
-function normalizePrefix(prefix: string): string {
-  return prefix.endsWith('/') ? prefix : prefix + '/'
 }
 
 /**
@@ -68,14 +65,14 @@ export function stripDeniedImports(code: string, denyPackages: ReadonlySet<strin
   )
 }
 
-export interface PyodideRuntimeOptions {
+export interface PyodideRuntimeOptions extends PythonRuntimeOptions {
   autoLoadFromImports?: boolean
   bootstrapCode?: string
-  workspaceBridge?: BridgeDispatchFn
   denyPackages?: readonly string[]
 }
 
-export class PyodideRuntime {
+export class PyodideRuntime implements PythonRuntime {
+  readonly name = PYODIDE_RUNTIME
   private pyodide: PyodideInterface | null = null
   private initPromise: Promise<PyodideInterface> | null = null
   private bootstrapPromise: Promise<void> | null = null
@@ -84,65 +81,15 @@ export class PyodideRuntime {
   private readonly bootstrapCode: string | null
   private readonly workspaceBridge: BridgeDispatchFn | null
   private readonly denyPackages: ReadonlySet<string>
+  private readonly listMounts: () => string[]
   private bridge: MirageBridge | null = null
-  private readonly mountedPrefixes = new Set<string>()
 
   constructor(options: PyodideRuntimeOptions = {}) {
     this.autoLoadFromImports = options.autoLoadFromImports ?? true
     this.bootstrapCode = options.bootstrapCode ?? null
     this.workspaceBridge = options.workspaceBridge ?? null
     this.denyPackages = new Set(options.denyPackages ?? [])
-  }
-
-  async addMount(prefix: string): Promise<void> {
-    if (this.workspaceBridge === null) {
-      throw new Error('PyodideRuntime: addMount requires workspaceBridge option')
-    }
-    const norm = normalizePrefix(prefix)
-    const task = (): Promise<void> => this.addMountOne(norm)
-    const next = this.queue.then(task, task)
-    this.queue = next.catch(() => undefined)
-    return next
-  }
-
-  async removeMount(prefix: string): Promise<void> {
-    if (this.workspaceBridge === null) {
-      throw new Error('PyodideRuntime: removeMount requires workspaceBridge option')
-    }
-    const norm = normalizePrefix(prefix)
-    const task = (): Promise<void> => this.removeMountOne(norm)
-    const next = this.queue.then(task, task)
-    this.queue = next.catch(() => undefined)
-    return next
-  }
-
-  private async addMountOne(prefix: string): Promise<void> {
-    if (this.mountedPrefixes.has(prefix)) return
-    if (this.pyodide === null && this.initPromise === null) {
-      this.mountedPrefixes.add(prefix)
-      return
-    }
-    const pyodide = await this.ensureLoaded()
-    if (this.bridge === null) {
-      throw new Error('PyodideRuntime: bridge missing after ensureLoaded')
-    }
-    await preloadInto(pyodide.FS, this.bridge, prefix)
-    await pyodide.runPythonAsync(
-      `import _mirage_fs_shim; _mirage_fs_shim.register(${JSON.stringify(prefix)})`,
-    )
-    this.mountedPrefixes.add(prefix)
-  }
-
-  private async removeMountOne(prefix: string): Promise<void> {
-    if (!this.mountedPrefixes.has(prefix)) return
-    if (this.pyodide === null) {
-      this.mountedPrefixes.delete(prefix)
-      return
-    }
-    await this.pyodide.runPythonAsync(
-      `import _mirage_fs_shim; _mirage_fs_shim.unregister(${JSON.stringify(prefix)})`,
-    )
-    this.mountedPrefixes.delete(prefix)
+    this.listMounts = options.listMounts ?? ((): string[] => [])
   }
 
   async run(args: PythonRunArgs): Promise<PythonRunResult> {
@@ -168,7 +115,6 @@ export class PyodideRuntime {
     this.pyodide = null
     this.initPromise = null
     this.bridge = null
-    this.mountedPrefixes.clear()
   }
 
   private async ensureLoaded(): Promise<PyodideInterface> {
@@ -200,15 +146,12 @@ export class PyodideRuntime {
 
   private async wireBridgeIfNeeded(pyodide: PyodideInterface): Promise<void> {
     if (this.workspaceBridge === null || this.bridge !== null) return
-    const bridge = createMirageBridge(this.workspaceBridge)
+    const bridge = createMirageBridge(this.workspaceBridge, this.listMounts)
     pyodide.registerJsModule('_mirage_bridge', bridge)
     await pyodide.runPythonAsync(MIRAGE_FS_SHIM_PY)
     this.bridge = bridge
-    for (const prefix of this.mountedPrefixes) {
+    for (const prefix of bridge.prefixes()) {
       await preloadInto(pyodide.FS, bridge, prefix)
-      await pyodide.runPythonAsync(
-        `import _mirage_fs_shim; _mirage_fs_shim.register(${JSON.stringify(prefix)})`,
-      )
     }
   }
 

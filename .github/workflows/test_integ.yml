@@ -760,10 +760,134 @@ jobs:
           pnpm exec tsx fuse.ts 2>&1 \
             | bash check_lines.sh truth_fuse.txt
 
+  runtime-py:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true') }}
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      mongodb:
+        image: mongo:8
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1}).ok'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      REDIS_URL: redis://localhost:6379/0
+      MONGODB_URI: mongodb://localhost:27017
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        working-directory: python
+        run: uv sync --all-extras --no-extra camel
+
+      - name: Run python3 across ram/redis/s3/mongodb mounts and diff against truth
+        run: |
+          ./python/.venv/bin/python integ/runtime.py > /tmp/runtime_py.out
+          diff integ/truth_runtime_py.txt /tmp/runtime_py.out
+
+  runtime-ts:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.ts == 'true') }}
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      mongodb:
+        image: mongo:8
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1}).ok'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      REDIS_URL: redis://localhost:6379/0
+      MONGODB_URI: mongodb://localhost:27017
+      S3_ENDPOINT: http://localhost:9000
+      AWS_ACCESS_KEY_ID: minio
+      AWS_SECRET_ACCESS_KEY: minio123
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.32.1
+
+      - name: Install dependencies
+        working-directory: typescript
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Build mirage-core
+        working-directory: typescript
+        run: pnpm --filter @struktoai/mirage-core build
+
+      - name: Build mirage-node
+        working-directory: typescript
+        run: pnpm --filter @struktoai/mirage-node build
+
+      - name: Start MinIO
+        run: |
+          for i in $(seq 1 5); do
+            docker pull minio/minio:latest && break
+            echo "docker pull failed (attempt $i), retrying"; sleep 10
+          done
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio123 \
+            minio/minio:latest server /data
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:9000/minio/health/live && break
+            sleep 1
+          done
+
+      - name: Run python3 across ram/redis/s3/mongodb mounts and check against truth
+        shell: bash
+        working-directory: integ
+        run: |
+          set -o pipefail
+          pnpm exec tsx runtime.ts 2>&1 \
+            | bash check_lines.sh truth_runtime.txt
+
   gate:
     name: integ-gate
     runs-on: ubuntu-latest
-    needs: [changes, integ, integ-ts, integ-database, integ-database-ts, integ-data, integ-ssh, integ-ssh-ts, integ-fuse]
+    needs: [changes, integ, integ-ts, integ-database, integ-database-ts, integ-data, integ-ssh, integ-ssh-ts, integ-fuse, runtime-py, runtime-ts]
     if: always()
     steps:
       - name: Check required jobs
