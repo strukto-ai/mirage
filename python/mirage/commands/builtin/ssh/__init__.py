@@ -17,7 +17,6 @@ from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
 from mirage.commands.builtin.ssh._provision import \
     file_read_provision as _ft_provision
-from mirage.commands.builtin.ssh.sed import sed
 from mirage.core.ssh.constants import SCOPE_ERROR
 from mirage.core.ssh.copy import copy as _copy
 from mirage.core.ssh.du import du as _du
@@ -57,7 +56,6 @@ _SSH_CMD_OPS = CommandIO(
     du_all=_du_all,
 )
 
-# sed is the only command with no generic builder; kept as an ssh wrapper.
 COMMANDS = [
     *make_filetype_commands(
         "ssh", _ft_resolve_glob, _read, provision=_ft_provision),
@@ -65,5 +63,4 @@ COMMANDS = [
         "ssh",
         _SSH_CMD_OPS,
     ),
-    sed,
 ]

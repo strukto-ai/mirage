@@ -18,13 +18,9 @@ import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { DROPBOX_CMD_OPS } from './ops.ts'
 import { fileReadProvision, metadataProvision } from './provision.ts'
-import { DROPBOX_SED } from './sed.ts'
-
-const DROPBOX_OVERRIDES = new Set(['sed'])
 
 export const DROPBOX_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<DropboxAccessor>(ResourceName.DROPBOX, DROPBOX_CMD_OPS, {
-    overrides: DROPBOX_OVERRIDES,
     provisionOverrides: {
       grep: fileReadProvision as ProvisionFn,
       rg: fileReadProvision as ProvisionFn,
@@ -32,5 +28,4 @@ export const DROPBOX_COMMANDS: readonly RegisteredCommand[] = [
       du: metadataProvision as ProvisionFn,
     },
   }),
-  ...DROPBOX_SED,
 ]

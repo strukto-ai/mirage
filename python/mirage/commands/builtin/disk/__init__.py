@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.disk.sed import sed
 from mirage.commands.builtin.filetype_factory import make_filetype_commands
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
@@ -58,5 +57,4 @@ _DISK_CMD_OPS = CommandIO(
 COMMANDS = [
     *make_filetype_commands("disk", _ft_resolve_glob, _read),
     *make_generic_commands("disk", _DISK_CMD_OPS),
-    sed,
 ]

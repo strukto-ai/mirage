@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as lancedb from "@lancedb/lancedb";
 import { LanceDBResource, MountMode, Workspace } from "@struktoai/mirage-node";
-import { runNotFound, runProvisionProbe } from "./cases.ts";
+import { runNotFound, runProvisionProbe, runSedReadonlyProbe } from "./cases.ts";
 
 const MOUNT = "/db/";
 
@@ -116,6 +116,7 @@ async function main(): Promise<void> {
       await runCases(ws);
       await runNotFound(ws, MOUNT);
       await runProvisionProbe(ws, `${MOUNT}animals/cat/big/1.md`);
+      await runSedReadonlyProbe(ws, `${MOUNT}animals/cat/big/1.md`);
     } finally {
       await ws.close();
     }

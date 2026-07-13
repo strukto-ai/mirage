@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.databricks_volume.head import head
-from mirage.commands.builtin.databricks_volume.sed import sed
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
 from mirage.core.databricks_volume.copy import copy as _copy
@@ -32,8 +31,7 @@ from mirage.core.databricks_volume.write import write_bytes as _write
 
 # Databricks Volume files are read and written through the generic factory;
 # head keeps a wrapper because -c fetches only the first N bytes via a single
-# range request instead of streaming the whole file, and sed has no generic
-# builder.
+# range request instead of streaming the whole file.
 _DATABRICKS_CMD_OPS = CommandIO(
     readdir=_readdir,
     read_bytes=_read,
@@ -52,7 +50,7 @@ _DATABRICKS_CMD_OPS = CommandIO(
     create=_create,
 )
 
-_DATABRICKS_OVERRIDES = {"head", "sed"}
+_DATABRICKS_OVERRIDES = {"head"}
 
 COMMANDS = [
     *make_generic_commands(
@@ -61,5 +59,4 @@ COMMANDS = [
         overrides=_DATABRICKS_OVERRIDES,
     ),
     head,
-    sed,
 ]

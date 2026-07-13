@@ -24,7 +24,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 import chromadb  # noqa: E402
-from cases import run_not_found, run_provision_probe  # noqa: E402
+from cases import run_provision_probe  # noqa: E402
+from cases import run_not_found, run_sed_readonly_probe  # noqa: E402
 
 from mirage import MountMode, Workspace  # noqa: E402
 from mirage.resource.chroma import ChromaConfig, ChromaResource  # noqa: E402
@@ -282,6 +283,7 @@ async def main() -> None:
         await run_case(ws, name, tmpl.format(root=MOUNT))
     await run_not_found(ws, MOUNT)
     await run_provision_probe(ws, f"{MOUNT}guides/auth.md")
+    await run_sed_readonly_probe(ws, f"{MOUNT}guides/auth.md")
 
 
 if __name__ == "__main__":

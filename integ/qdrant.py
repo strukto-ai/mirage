@@ -119,6 +119,16 @@ async def run_cases(ws: Workspace) -> None:
               f"cache={result.cache_read} ops={result.read_ops} "
               f"hits={result.cache_hits} "
               f"precision={result.precision.value}")
+    result = await ws.execute(f"sed -n 1p {prov_target}")
+    out = await result.stdout_str()
+    print("=== sed_stream_1p ===")
+    print(out, end="" if out.endswith("\n") else "\n")
+    result = await ws.execute(f"sed -i s/x/y/ {prov_target}")
+    err = (await result.stderr_str()).strip()
+    print("=== sed_i_readonly ===")
+    print(f"exit={result.exit_code}")
+    if err:
+        print(err)
 
 
 def _client() -> AsyncQdrantClient:

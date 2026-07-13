@@ -18,9 +18,8 @@ import { HF_DU } from './du.ts'
 import { HF_FIND } from './find.ts'
 import { HF_CMD_OPS } from './ops.ts'
 import { HF_RM } from './rm.ts'
-import { HF_SED } from './sed.ts'
 
-const HF_OVERRIDES = new Set(['cp', 'mv', 'rm', 'du', 'sed', 'find'])
+const HF_OVERRIDES = new Set(['cp', 'mv', 'rm', 'du', 'find'])
 
 export const HF_COMMANDS: readonly RegisteredCommand[] = [
   ...HF_RESOURCES.flatMap((resource) =>
@@ -31,5 +30,4 @@ export const HF_COMMANDS: readonly RegisteredCommand[] = [
   ...HF_DU,
   ...HF_FIND,
   ...HF_RM,
-  ...HF_SED,
 ]

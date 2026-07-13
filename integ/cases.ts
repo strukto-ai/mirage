@@ -1422,6 +1422,19 @@ export async function runProvisionProbe(ws: Workspace, filePath: string): Promis
   }
 }
 
+export async function runSedReadonlyProbe(ws: Workspace, filePath: string): Promise<void> {
+  // Sed on a read-only backend: streaming works, in-place is rejected.
+  let result = await ws.execute(`sed -n 1p ${filePath}`);
+  const out = new TextDecoder().decode(result.stdout);
+  process.stdout.write(`=== sed_stream_1p ===\n`);
+  process.stdout.write(out.endsWith("\n") ? out : `${out}\n`);
+  result = await ws.execute(`sed -i s/x/y/ ${filePath}`);
+  const err = new TextDecoder().decode(result.stderr).trim();
+  process.stdout.write(`=== sed_i_readonly ===\n`);
+  process.stdout.write(`exit=${String(result.exitCode)}\n`);
+  if (err) process.stdout.write(`${err}\n`);
+}
+
 async function backendBytes(ws: Workspace, cmd: string): Promise<number> {
   const before = ws.records.reduce((sum, r) => sum + r.bytes, 0);
   await ws.execute(cmd);

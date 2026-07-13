@@ -14,10 +14,18 @@
 
 import pytest
 
-from mirage.cache.index import RAMIndexCacheStore
-from mirage.commands.builtin.databricks_volume import sed as sed_command
-from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_key
+from mirage.commands.builtin.databricks_volume import COMMANDS
+
+
+def _sed_command():
+    for cmd in COMMANDS:
+        for rc in cmd._registered_commands:
+            if rc.name == "sed":
+                return cmd
+    raise LookupError("sed not registered for databricks_volume")
+
+
+sed_command = _sed_command()
 
 
 @pytest.mark.asyncio
@@ -41,32 +49,12 @@ async def test_workspace_execute_databricks_volume_sed_resolves_glob(
 
 
 @pytest.mark.asyncio
-async def test_databricks_volume_sed_forwards_index(
-    index_tracker,
-    expected_index: RAMIndexCacheStore,
-    materialize_output,
-):
-    source, _io = await sed_command(
-        object(),
-        [
-            PathSpec.from_str_path("/dbx/sample.txt",
-                                   mount_key("/dbx/sample.txt", "/dbx"))
-        ],
-        "s/alpha/ALPHA/g",
-        index=expected_index,
-    )
-
-    await materialize_output(source)
-
-    assert index_tracker.seen_indexes
-    assert all(index is expected_index for index in index_tracker.seen_indexes)
-
-
-@pytest.mark.asyncio
-async def test_databricks_volume_sed_in_place_is_not_supported(
+async def test_databricks_volume_sed_in_place_writes_back(
         databricks_text_workspace):
+    # The volume has a write op, so -i edits in place through the shared
+    # builder (the old bespoke wrapper refused it unconditionally, #382).
     io = await databricks_text_workspace.execute(
         "sed -i s/alpha/ALPHA/g /dbx/words.txt")
 
-    assert io.exit_code == 1
-    assert b"-i is not supported" in io.stderr
+    assert io.exit_code == 0
+    assert io.writes.get("/dbx/words.txt") == b"beta\nALPHA\nALPHA\n"

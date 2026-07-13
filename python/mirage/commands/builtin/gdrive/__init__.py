@@ -22,7 +22,6 @@ from mirage.commands.builtin.gdocs.gws_docs_documents_create import \
 from mirage.commands.builtin.gdocs.gws_docs_write import gws_docs_write
 from mirage.commands.builtin.gdrive._provision import \
     file_read_provision as _ft_provision
-from mirage.commands.builtin.gdrive.sed import sed
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
 from mirage.commands.builtin.gsheets.gws_sheets_append import gws_sheets_append
@@ -44,8 +43,8 @@ from mirage.core.gdrive.stat import stat as _stat
 
 # Drive holds real byte files (read via the generic factory) but is written
 # only through the bespoke gws_* Workspace commands, so the generic
-# byte-mutation commands (cp/mv/tee/...) are intentionally absent. sed has no
-# generic builder and is kept as a wrapper. gdrive's native read_stream is a
+# byte-mutation commands (cp/mv/tee/...) are intentionally absent.
+# gdrive's native read_stream is a
 # coroutine returning bytes-or-iterator (Workspace-aware), so the stream op is
 # synthesized from the whole-file read instead.
 _GDRIVE_CMD_OPS = CommandIO(
@@ -67,7 +66,6 @@ COMMANDS = [
         "gdrive",
         _GDRIVE_CMD_OPS,
     ),
-    sed,
     gws_docs_documents_create,
     gws_docs_documents_batchUpdate,
     gws_docs_write,
