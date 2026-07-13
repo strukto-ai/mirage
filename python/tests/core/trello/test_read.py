@@ -18,10 +18,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.trello import TrelloAccessor
-from mirage.types import PathSpec
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.trello.read import read
 from mirage.resource.trello.config import TrelloConfig
+from mirage.types import PathSpec
 
 
 @pytest.fixture
@@ -42,7 +42,8 @@ async def test_read_workspace_json(accessor, index):
                return_value=workspaces):
         result = await read(
             accessor,
-            PathSpec.from_str_path("/workspaces/Engineering__ws1/workspace.json"),
+            PathSpec.from_str_path(
+                "/workspaces/Engineering__ws1/workspace.json"),
             index,
         )
     payload = json.loads(result)
@@ -77,8 +78,9 @@ async def test_read_card_json(accessor, index):
                return_value=card):
         result = await read(
             accessor,
-            PathSpec.from_str_path("/workspaces/Engineering__ws1/boards/Product_Roadmap__b1"
-            "/lists/Backlog__l1/cards/Fix_login__c1/card.json"),
+            PathSpec.from_str_path(
+                "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1"
+                "/lists/Backlog__l1/cards/Fix_login__c1/card.json"),
             index,
         )
     payload = json.loads(result)
@@ -104,8 +106,9 @@ async def test_read_comments_jsonl(accessor, index):
                return_value=comments):
         result = await read(
             accessor,
-            PathSpec.from_str_path("/workspaces/Engineering__ws1/boards/Product_Roadmap__b1"
-            "/lists/Backlog__l1/cards/Fix_login__c1/comments.jsonl"),
+            PathSpec.from_str_path(
+                "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1"
+                "/lists/Backlog__l1/cards/Fix_login__c1/comments.jsonl"),
             index,
         )
     line = json.loads(result.decode().strip())
@@ -116,4 +119,5 @@ async def test_read_comments_jsonl(accessor, index):
 @pytest.mark.asyncio
 async def test_read_missing_path(accessor, index):
     with pytest.raises(FileNotFoundError):
-        await read(accessor, PathSpec.from_str_path("/nonexistent/path"), index)
+        await read(accessor, PathSpec.from_str_path("/nonexistent/path"),
+                   index)

@@ -16,6 +16,9 @@ import pytest
 
 from mirage.accessor import NOOPAccessor
 from mirage.commands import COMMANDS as _CMDS
+from mirage.types import PathSpec
+
+_ps = PathSpec.from_str_path
 
 cat = _CMDS["cat"]
 cut = _CMDS["cut"]
@@ -39,8 +42,8 @@ async def _chunks(parts: list[bytes]):
 
 @pytest.mark.asyncio
 async def test_cat_file_returns_async_iterator(backend):
-    await backend.write("/tmp/f.txt", data=b"hello world")
-    stdout, io = await cat(backend.accessor, ["/tmp/f.txt"])
+    await backend.write(_ps("/tmp/f.txt"), data=b"hello world")
+    stdout, io = await cat(backend.accessor, [_ps("/tmp/f.txt")])
     assert hasattr(stdout, "__aiter__")
     collected = b"".join([chunk async for chunk in stdout])
     assert collected == b"hello world"
@@ -65,8 +68,8 @@ async def test_cat_bytes_stdin():
 
 @pytest.mark.asyncio
 async def test_cat_number_lines(backend):
-    await backend.write("/tmp/f.txt", data=b"aaa\nbbb\n")
-    stdout, io = await cat(backend.accessor, ["/tmp/f.txt"], n=True)
+    await backend.write(_ps("/tmp/f.txt"), data=b"aaa\nbbb\n")
+    stdout, io = await cat(backend.accessor, [_ps("/tmp/f.txt")], n=True)
     assert hasattr(stdout, "__aiter__")
     collected = b"".join([chunk async for chunk in stdout])
     assert b"1" in collected
@@ -80,8 +83,9 @@ async def test_cat_number_lines(backend):
 
 @pytest.mark.asyncio
 async def test_grep_file_returns_async_iterator(backend):
-    await backend.write("/tmp/f.txt", data=b"apple\nbanana\napricot\ncherry\n")
-    stdout, io = await grep(backend.accessor, ["/tmp/f.txt"], "ap")
+    await backend.write(_ps("/tmp/f.txt"),
+                        data=b"apple\nbanana\napricot\ncherry\n")
+    stdout, io = await grep(backend.accessor, [_ps("/tmp/f.txt")], "ap")
     assert hasattr(stdout, "__aiter__")
     collected = b"".join([chunk async for chunk in stdout])
     assert b"apple" in collected
@@ -159,8 +163,8 @@ async def test_grep_count_only():
 @pytest.mark.asyncio
 async def test_head_file_returns_async_iterator(backend):
     lines = b"\n".join(f"line{i}".encode() for i in range(20))
-    await backend.write("/tmp/f.txt", data=lines)
-    stdout, io = await head(backend.accessor, ["/tmp/f.txt"], n="3")
+    await backend.write(_ps("/tmp/f.txt"), data=lines)
+    stdout, io = await head(backend.accessor, [_ps("/tmp/f.txt")], n="3")
     assert hasattr(stdout, "__aiter__")
     collected = b"".join([chunk async for chunk in stdout])
     assert collected == b"line0\nline1\nline2\n"
@@ -224,8 +228,8 @@ async def test_cut_stdin_streaming():
 
 @pytest.mark.asyncio
 async def test_cut_file_returns_async_iterator(backend):
-    await backend.write("/tmp/f.txt", data=b"a,b,c\nd,e,f\n")
-    stdout, io = await cut(backend.accessor, ["/tmp/f.txt"], d=",", f="2")
+    await backend.write(_ps("/tmp/f.txt"), data=b"a,b,c\nd,e,f\n")
+    stdout, io = await cut(backend.accessor, [_ps("/tmp/f.txt")], d=",", f="2")
     assert hasattr(stdout, "__aiter__")
     collected = b"".join([chunk async for chunk in stdout])
     assert collected == b"b\ne\n"

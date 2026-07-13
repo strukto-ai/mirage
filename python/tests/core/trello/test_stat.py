@@ -56,7 +56,9 @@ async def test_stat_workspace_entry(accessor, index):
             vfs_name="Engineering__ws1",
         ),
     )
-    result = await stat(accessor, PathSpec.from_str_path("/workspaces/Engineering__ws1"), index)
+    result = await stat(accessor,
+                        PathSpec.from_str_path("/workspaces/Engineering__ws1"),
+                        index)
     assert result.type == FileType.DIRECTORY
     assert result.extra["workspace_id"] == "ws1"
 
@@ -75,7 +77,8 @@ async def test_stat_board_entry(accessor, index):
     )
     result = await stat(
         accessor,
-        PathSpec.from_str_path("/workspaces/Engineering__ws1/boards/Product_Roadmap__b1"),
+        PathSpec.from_str_path(
+            "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1"),
         index,
     )
     assert result.type == FileType.DIRECTORY
@@ -87,8 +90,9 @@ async def test_stat_board_entry(accessor, index):
 async def test_stat_card_json(accessor, index):
     result = await stat(
         accessor,
-        PathSpec.from_str_path("/workspaces/Engineering__ws1/boards/Product_Roadmap__b1"
-        "/lists/Backlog__l1/cards/Fix_login__c1/card.json"),
+        PathSpec.from_str_path(
+            "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1"
+            "/lists/Backlog__l1/cards/Fix_login__c1/card.json"),
         index,
     )
     assert result.type == FileType.JSON
@@ -98,8 +102,9 @@ async def test_stat_card_json(accessor, index):
 async def test_stat_comments_jsonl(accessor, index):
     result = await stat(
         accessor,
-        PathSpec.from_str_path("/workspaces/Engineering__ws1/boards/Product_Roadmap__b1"
-        "/lists/Backlog__l1/cards/Fix_login__c1/comments.jsonl"),
+        PathSpec.from_str_path(
+            "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1"
+            "/lists/Backlog__l1/cards/Fix_login__c1/comments.jsonl"),
         index,
     )
     assert result.type == FileType.TEXT
@@ -108,4 +113,5 @@ async def test_stat_comments_jsonl(accessor, index):
 @pytest.mark.asyncio
 async def test_stat_missing_path(accessor, index):
     with pytest.raises(FileNotFoundError):
-        await stat(accessor, PathSpec.from_str_path("/nonexistent/path"), index)
+        await stat(accessor, PathSpec.from_str_path("/nonexistent/path"),
+                   index)

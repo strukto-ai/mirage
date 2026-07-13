@@ -12,8 +12,6 @@ from mirage.utils.key_prefix import mount_prefix_of
 async def stat(accessor: NextcloudAccessor,
                path: PathSpec,
                index: IndexCacheStore = None) -> FileStat:
-    if isinstance(path, str):
-        path = PathSpec.from_str_path(path)
     original_prefix = mount_prefix_of(path.virtual, path.resource_path)
     raw = path.virtual
     if original_prefix and raw.startswith(original_prefix):

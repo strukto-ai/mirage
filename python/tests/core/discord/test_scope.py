@@ -213,7 +213,8 @@ def test_guild_no_index():
 
 
 def test_channel_no_index():
-    scope = _run(detect_scope(PathSpec.from_str_path("TestGuild/channels/general")))
+    scope = _run(
+        detect_scope(PathSpec.from_str_path("TestGuild/channels/general")))
     assert scope.level == "channel"
     assert scope.guild_id is None
     assert scope.channel_id is None

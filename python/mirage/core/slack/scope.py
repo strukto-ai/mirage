@@ -40,10 +40,6 @@ def _split_dirname(dirname: str) -> tuple[str, str | None]:
 
 
 def detect_scope(path: PathSpec) -> SlackScope:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
 
     if path.pattern:

@@ -49,10 +49,6 @@ async def read_stream(
     index: IndexCacheStore = None,
     chunk_size: int = 8192,
 ) -> AsyncIterator[bytes]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive")
     rec = record_stream("read", path.virtual, "databricks_volume")

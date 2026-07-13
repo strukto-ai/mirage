@@ -28,8 +28,6 @@ from mirage.utils.errors import enoent
 async def unlink(accessor: HfBucketsAccessor,
                  path: PathSpec,
                  index: IndexCacheStore | None = None) -> None:
-    if isinstance(path, str):
-        path = PathSpec.from_str_path(path)
     file_stat = await stat(accessor, path, index)
     if file_stat.type == FileType.DIRECTORY:
         raise IsADirectoryError(path.mount_path)

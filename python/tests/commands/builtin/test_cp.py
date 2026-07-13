@@ -15,8 +15,8 @@
 import asyncio
 
 from mirage.commands import COMMANDS as _CMDS
-from mirage.types import PathSpec
 from mirage.core.ram.write import write_bytes
+from mirage.types import PathSpec
 
 cp_cmd = _CMDS["cp"]
 
@@ -34,8 +34,19 @@ def test_cp_recursive(backend):
     accessor = backend.accessor
     store.dirs.add("/tmp/src")
     store.dirs.add("/tmp/src/sub")
-    asyncio.run(write_bytes(accessor, PathSpec.from_str_path("/tmp/src/a.txt"), b"aaa"))
-    asyncio.run(write_bytes(accessor, PathSpec.from_str_path("/tmp/src/sub/b.txt"), b"bbb"))
-    asyncio.run(cp_cmd(accessor, ["/tmp/src/", "/tmp/dst/"], r=True))
-    assert _cat_sync(backend, "/tmp/dst/a.txt") == b"aaa"
-    assert _cat_sync(backend, "/tmp/dst/sub/b.txt") == b"bbb"
+    asyncio.run(
+        write_bytes(accessor, PathSpec.from_str_path("/tmp/src/a.txt"),
+                    b"aaa"))
+    asyncio.run(
+        write_bytes(accessor, PathSpec.from_str_path("/tmp/src/sub/b.txt"),
+                    b"bbb"))
+    asyncio.run(
+        cp_cmd(accessor, [
+            PathSpec.from_str_path("/tmp/src/"),
+            PathSpec.from_str_path("/tmp/dst/"),
+        ],
+               r=True))
+    assert _cat_sync(backend,
+                     PathSpec.from_str_path("/tmp/dst/a.txt")) == b"aaa"
+    assert _cat_sync(backend,
+                     PathSpec.from_str_path("/tmp/dst/sub/b.txt")) == b"bbb"

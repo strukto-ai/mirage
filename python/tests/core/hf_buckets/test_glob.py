@@ -46,12 +46,3 @@ async def test_resolve_glob_expands_basename_pattern(make_acc):
     out = await resolve_glob(acc, [pattern], index)
     paths = sorted(p.virtual for p in out)
     assert paths == ["/data/a.txt"]
-
-
-@pytest.mark.asyncio
-async def test_resolve_glob_string_input_passthrough(make_acc):
-    acc = make_acc({})
-    index = RAMIndexCacheStore(ttl=60)
-    out = await resolve_glob(acc, ["/data/a.txt"], index)
-    assert len(out) == 1
-    assert out[0].virtual == "/data/a.txt"

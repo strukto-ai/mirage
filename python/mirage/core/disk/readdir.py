@@ -32,10 +32,6 @@ def _resolve(root: Path, path: str) -> Path:
 
 async def readdir(accessor: DiskAccessor, path: PathSpec,
                   index: IndexCacheStore) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     if isinstance(path, PathSpec):
         prefix = mount_prefix_of(path.virtual, path.resource_path)
         path = path.directory if path.pattern else path.virtual

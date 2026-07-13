@@ -49,10 +49,6 @@ def _date_range(end_date: str, days: int = 30) -> list[str]:
 
 def _normalize_path(path: PathSpec | str) -> tuple[str, str, str]:
     """Reduce input to (prefix, key, virtual_key)."""
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     raw = path.directory if path.pattern else path.virtual
     if prefix and raw.startswith(prefix):

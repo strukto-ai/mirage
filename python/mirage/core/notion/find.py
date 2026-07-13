@@ -62,8 +62,6 @@ async def find(
     tree: PredNode | None = None,
     index: IndexCacheStore | None = None,
 ) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec.from_str_path(path)
     start_name = start_basename(path)
     base = path.mount_path
     base = "/" + base.strip("/") if base.strip("/") else "/"

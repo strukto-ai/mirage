@@ -23,10 +23,6 @@ from mirage.utils.path import norm
 
 
 async def read_bytes(accessor: RAMAccessor, path: PathSpec) -> bytes:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual if isinstance(path, PathSpec) else path
     if isinstance(path, PathSpec):
         path = path.mount_path
@@ -43,10 +39,6 @@ async def read_bytes(accessor: RAMAccessor, path: PathSpec) -> bytes:
 async def read(accessor: RAMAccessor,
                path: PathSpec,
                index: IndexCacheStore = None) -> bytes:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     try:
         return await read_bytes(accessor, path.mount_path)

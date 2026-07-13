@@ -28,10 +28,6 @@ logger = logging.getLogger(__name__)
 
 async def readdir(accessor: HfBucketsAccessor, path: PathSpec,
                   index: IndexCacheStore) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     target = path.directory if path.pattern else path.virtual
     if prefix and target.startswith(prefix):

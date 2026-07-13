@@ -241,13 +241,3 @@ async def test_resolve_glob_with_no_cap_keeps_all_matches():
     result = await resolve_glob_with(fake_readdir, NOOPAccessor(), [spec],
                                      None)
     assert len(result) == 2
-
-
-@pytest.mark.asyncio
-async def test_resolve_glob_with_coerces_str_path():
-    result = await resolve_glob_with(fake_readdir, NOOPAccessor(),
-                                     ["/alpha/b.txt"], None)
-    assert len(result) == 1
-    assert result[0].virtual == "/alpha/b.txt"
-    assert result[0].resource_path == "alpha/b.txt"
-    assert result[0].directory == "/alpha"

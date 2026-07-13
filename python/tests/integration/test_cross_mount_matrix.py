@@ -135,7 +135,8 @@ async def _populate_file_async(state: _MountState, name: str,
                     await mem_mkdir(state.accessor, d)
                 except (FileExistsError, ValueError):
                     pass
-        await mem_write(state.accessor, PathSpec.from_str_path("/" + name), content)
+        await mem_write(state.accessor, PathSpec.from_str_path("/" + name),
+                        content)
     elif state.ptype == "disk":
         full = state.disk_root / name
         full.parent.mkdir(parents=True, exist_ok=True)
@@ -148,7 +149,8 @@ async def _populate_file_async(state: _MountState, name: str,
                 await redis_mkdir(state.resource.accessor, d)
             except (FileExistsError, ValueError):
                 pass
-        await redis_write(state.resource.accessor, PathSpec.from_str_path("/" + name), content)
+        await redis_write(state.resource.accessor,
+                          PathSpec.from_str_path("/" + name), content)
 
 
 def _populate_file(state: _MountState, name: str, content: bytes,

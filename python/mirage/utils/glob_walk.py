@@ -15,7 +15,6 @@
 import dataclasses
 import fnmatch
 import logging
-import posixpath
 from collections.abc import Callable
 
 from mirage.accessor.base import Accessor
@@ -163,12 +162,6 @@ async def resolve_glob_with(
     """
     result: list[PathSpec] = []
     for p in paths:
-        if isinstance(p, str):
-            result.append(
-                PathSpec(virtual=p,
-                         directory=posixpath.dirname(p),
-                         resource_path=p.strip("/")))
-            continue
         if p.resolved:
             result.append(p)
         elif p.pattern:

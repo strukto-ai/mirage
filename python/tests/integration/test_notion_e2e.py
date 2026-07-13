@@ -18,8 +18,8 @@ import os
 import pytest
 
 from mirage.resource.notion.config import NotionConfig
-from mirage.types import PathSpec
 from mirage.resource.notion.notion import NotionResource
+from mirage.types import PathSpec
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("NOTION_API_KEY"),
@@ -40,14 +40,16 @@ def resource(config):
 @pytest.mark.asyncio
 async def test_readdir_root(resource):
     from mirage.core.notion.readdir import readdir
-    entries = await readdir(resource.accessor, PathSpec.from_str_path("/"), resource.index)
+    entries = await readdir(resource.accessor, PathSpec.from_str_path("/"),
+                            resource.index)
     assert any("pages" in e for e in entries)
 
 
 @pytest.mark.asyncio
 async def test_readdir_pages(resource):
     from mirage.core.notion.readdir import readdir
-    entries = await readdir(resource.accessor, PathSpec.from_str_path("/pages"), resource.index)
+    entries = await readdir(resource.accessor,
+                            PathSpec.from_str_path("/pages"), resource.index)
     assert len(entries) > 0
 
 
@@ -55,11 +57,13 @@ async def test_readdir_pages(resource):
 async def test_read_page_json(resource):
     from mirage.core.notion.read import read
     from mirage.core.notion.readdir import readdir
-    pages = await readdir(resource.accessor, PathSpec.from_str_path("/pages"), resource.index)
+    pages = await readdir(resource.accessor, PathSpec.from_str_path("/pages"),
+                          resource.index)
     if not pages:
         pytest.skip("No pages found")
     first_page = pages[0]
-    data = await read(resource.accessor, PathSpec.from_str_path(f"{first_page}/page.json"),
+    data = await read(resource.accessor,
+                      PathSpec.from_str_path(f"{first_page}/page.json"),
                       resource.index)
     page = json.loads(data)
     assert "page_id" in page

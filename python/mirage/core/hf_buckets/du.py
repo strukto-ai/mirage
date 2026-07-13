@@ -20,8 +20,6 @@ from mirage.types import FileType, PathSpec
 
 
 async def du(accessor: HfBucketsAccessor, path: PathSpec) -> int:
-    if isinstance(path, str):
-        path = PathSpec.from_str_path(path)
     try:
         info = await stat(accessor, path)
     except FileNotFoundError:
@@ -47,8 +45,6 @@ async def du(accessor: HfBucketsAccessor, path: PathSpec) -> int:
 
 async def du_all(accessor: HfBucketsAccessor,
                  path: PathSpec) -> list[tuple[str, int]]:
-    if isinstance(path, str):
-        path = PathSpec.from_str_path(path)
     try:
         info = await stat(accessor, path)
     except FileNotFoundError:

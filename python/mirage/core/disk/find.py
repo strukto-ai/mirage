@@ -169,10 +169,6 @@ async def find(
     empty: bool = False,
     tree: PredNode | None = None,
 ) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     start_name = start_basename(path)
     path = path.mount_path
     return await asyncio.to_thread(

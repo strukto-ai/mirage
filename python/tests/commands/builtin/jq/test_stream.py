@@ -165,7 +165,8 @@ class TestJqStreamingVerification:
         scope = RecordingScope()
         records = scope.records
         accessor = mem.accessor
-        asyncio.run(read_bytes(accessor, PathSpec.from_str_path("/data.jsonl")))
+        asyncio.run(read_bytes(accessor,
+                               PathSpec.from_str_path("/data.jsonl")))
         scope.close()
         assert len(records) == 1
         assert records[0].bytes == len(data)

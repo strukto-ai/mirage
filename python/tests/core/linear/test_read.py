@@ -18,10 +18,13 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.linear import LinearAccessor
-from mirage.types import PathSpec
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.linear.read import read
 from mirage.resource.linear.config import LinearConfig
+from mirage.types import PathSpec
+
+_ISSUE_PATH = ("/teams/ENG__Engineering__TEAM1/issues"
+               "/ENG-123__ISSUE1/issue.json")
 
 
 @pytest.fixture
@@ -116,7 +119,7 @@ async def test_read_issue_json(accessor, index):
                return_value=issue):
         result = await read(
             accessor,
-            PathSpec.from_str_path("/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1/issue.json"),
+            PathSpec.from_str_path(_ISSUE_PATH),
             index,
         )
     payload = json.loads(result)
@@ -171,7 +174,7 @@ async def test_read_comments_jsonl(accessor, index):
         result = await read(
             accessor,
             PathSpec.from_str_path("/teams/ENG__Engineering__TEAM1"
-            "/issues/ENG-123__ISSUE1/comments.jsonl"),
+                                   "/issues/ENG-123__ISSUE1/comments.jsonl"),
             index,
         )
     line = json.loads(result.decode().strip())
@@ -226,7 +229,7 @@ async def test_read_project_json_includes_issue_refs(accessor, index):
         result = await read(
             accessor,
             PathSpec.from_str_path("/teams/ENG__Engineering__TEAM1"
-            "/projects/Agent-Data-Plane__PROJ1.json"),
+                                   "/projects/Agent-Data-Plane__PROJ1.json"),
             index,
         )
     payload = json.loads(result)
