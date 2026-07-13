@@ -86,7 +86,7 @@ async def gzip(
             out_data = zlib.compress(raw,
                                      level=level,
                                      wbits=zlib.MAX_WBITS | 16)
-        await write_bytes(accessor, out_path, out_data)
+        await write_bytes(accessor, PathSpec.from_str_path(out_path), out_data)
         writes[out_path] = out_data
         if not keep:
             await unlink(accessor, p)

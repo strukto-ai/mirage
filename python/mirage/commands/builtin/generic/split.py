@@ -61,7 +61,7 @@ async def split(
             if not part:
                 break
             out_path = prefix_name + suffix_fn(i, suffix_len)
-            await write_bytes(accessor, out_path, part)
+            await write_bytes(accessor, PathSpec.from_str_path(out_path), part)
             writes[out_path] = part
             offset += chunk_size
     elif byte_limit > 0:
@@ -71,14 +71,15 @@ async def split(
             while len(buf) >= byte_limit:
                 out_path = prefix_name + suffix_fn(file_idx, suffix_len)
                 data = bytes(buf[:byte_limit])
-                await write_bytes(accessor, out_path, data)
+                await write_bytes(accessor, PathSpec.from_str_path(out_path),
+                                  data)
                 writes[out_path] = data
                 buf = buf[byte_limit:]
                 file_idx += 1
         if buf:
             out_path = prefix_name + suffix_fn(file_idx, suffix_len)
             data = bytes(buf)
-            await write_bytes(accessor, out_path, data)
+            await write_bytes(accessor, PathSpec.from_str_path(out_path), data)
             writes[out_path] = data
     else:
         line_buf: list[bytes] = []
@@ -87,14 +88,15 @@ async def split(
             if len(line_buf) >= lines_per_file:
                 out_path = prefix_name + suffix_fn(file_idx, suffix_len)
                 data = b"\n".join(line_buf) + b"\n"
-                await write_bytes(accessor, out_path, data)
+                await write_bytes(accessor, PathSpec.from_str_path(out_path),
+                                  data)
                 writes[out_path] = data
                 line_buf = []
                 file_idx += 1
         if line_buf:
             out_path = prefix_name + suffix_fn(file_idx, suffix_len)
             data = b"\n".join(line_buf) + b"\n"
-            await write_bytes(accessor, out_path, data)
+            await write_bytes(accessor, PathSpec.from_str_path(out_path), data)
             writes[out_path] = data
 
     return None, IOResult(writes=writes)

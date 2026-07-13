@@ -65,7 +65,7 @@ async def csplit(
         for idx, part in enumerate(parts):
             filename = prefix + (suffix_fmt % idx)
             data = ("\n".join(part) + "\n").encode() if part else b""
-            await write_bytes(accessor, filename, data)
+            await write_bytes(accessor, PathSpec.from_str_path(filename), data)
             writes[filename] = data
             sizes.append(str(len(data)))
     except Exception:
