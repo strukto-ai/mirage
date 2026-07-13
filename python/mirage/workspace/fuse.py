@@ -68,6 +68,7 @@ class FuseManager:
                 # the directory has contents, leave it for the caller/admin.
                 os.rmdir(self._mountpoint)
             except OSError:
+                # non-empty or busy mountpoint: leave it for the caller/admin
                 pass
         self._mountpoint = None
         self._owns_mountpoint = False

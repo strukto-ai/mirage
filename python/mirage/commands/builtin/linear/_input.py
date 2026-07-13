@@ -14,7 +14,8 @@
 
 from collections.abc import AsyncIterator
 
-from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.builtin.utils.stream import \
+    resolve_text_input as _resolve_text_input
 from mirage.core.linear.read import read_bytes
 from mirage.resource.linear.config import LinearConfig
 
@@ -27,11 +28,9 @@ async def resolve_text_input(
     stdin: AsyncIterator[bytes] | bytes | None,
     error_message: str,
 ) -> str:
-    if inline_text:
-        return inline_text
-    if file_path:
-        return (await read_bytes(config, file_path)).decode(errors="replace")
-    raw = await _read_stdin_async(stdin)
-    if raw is not None:
-        return raw.decode(errors="replace")
-    raise ValueError(error_message)
+    return await _resolve_text_input(read_bytes,
+                                     config,
+                                     inline_text=inline_text,
+                                     file_path=file_path,
+                                     stdin=stdin,
+                                     error_message=error_message)

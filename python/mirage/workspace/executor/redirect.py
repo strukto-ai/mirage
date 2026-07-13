@@ -136,6 +136,7 @@ async def _append_existing(dispatch, scope, data):
         if isinstance(existing, bytes):
             return existing + data
     except FileNotFoundError:
+        # appending to a missing file starts from empty
         pass
     return data
 

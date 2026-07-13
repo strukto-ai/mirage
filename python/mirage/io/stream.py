@@ -12,10 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from collections.abc import AsyncIterator
 
 from mirage.io import CachableAsyncIterator, IOResult
 from mirage.io.types import ByteSource, materialize
+
+logger = logging.getLogger(__name__)
 
 
 async def merge_stdout_stderr(
@@ -97,8 +100,10 @@ async def close_quietly(stream: ByteSource | None) -> None:
         return
     try:
         await closer()
-    except Exception:
-        pass
+    except Exception as exc:
+        # closing a drained stream is cleanup; failures must not mask the
+        # consumer's own result
+        logger.debug("stream closer failed: %s", exc)
 
 
 async def async_chain(*streams: ByteSource | None, ) -> AsyncIterator[bytes]:

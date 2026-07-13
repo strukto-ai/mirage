@@ -92,6 +92,7 @@ class _MirageTools:
         try:
             await ops.stat(path)
         except FileNotFoundError:
+            # missing file is the good path: creation may proceed
             pass
         else:
             return _error(f"Error: file '{path}' already exists")

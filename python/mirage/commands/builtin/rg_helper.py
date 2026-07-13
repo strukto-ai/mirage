@@ -199,6 +199,7 @@ async def rg_full(
             await readdir_fn(path)
             is_dir = True
         except (FileNotFoundError, ValueError):
+            # not a directory (or vanished): treat the operand as a file
             pass
 
     if not is_dir:

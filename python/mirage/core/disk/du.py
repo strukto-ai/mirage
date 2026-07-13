@@ -37,6 +37,7 @@ def _du_sync(root: Path, path: str) -> int:
             try:
                 total += os.path.getsize(os.path.join(dirpath, f))
             except OSError:
+                # unreadable entry: GNU du skips it and totals the rest
                 pass
     return total
 
