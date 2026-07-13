@@ -43,10 +43,13 @@ class SizelessOps:
         return result.model_copy(update={"size": None})
 
 
+API_CONTENT = b'{"messages": 2}\n'
+
+
 def run_sizeless_probe() -> None:
     api = RAMResource()
     api._store.dirs.add("/")
-    api._store.files["/api.json"] = b'{"messages": 2}\n'
+    api._store.files["/api.json"] = API_CONTENT
     ws = Workspace({"/api": Mount(api, mode=MountMode.READ)})
     mountpoint = tempfile.mkdtemp(prefix="mirage-fuse-api-")
     mount_background(SizelessOps(ws.ops), mountpoint)
@@ -54,7 +57,11 @@ def run_sizeless_probe() -> None:
     try:
         # Size-unknown semantics (see the CLAUDE.md FUSE section): stat 0
         # before open, full content on read, real size served after open.
-        print(f"api_stat_preopen={os.path.getsize(api_file)}")
+        # Windows cannot query attributes without opening a handle, so
+        # hydrate-on-open runs and even the pre-open stat sees the real size.
+        pre = os.path.getsize(api_file)
+        expected_pre = len(API_CONTENT) if sys.platform == "win32" else 0
+        print(f"api_stat_preopen_ok={'yes' if pre == expected_pre else 'no'}")
         with open(api_file, "rb") as fh:
             print(f"api_cat={fh.read().decode().strip()}")
         print(f"api_size_postread={os.path.getsize(api_file)}")

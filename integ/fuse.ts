@@ -30,11 +30,13 @@ import {
 // Slack, Trello, ...) whose byte size is unknown until the content is
 // fetched. Over FUSE such files must stat as 0 until first open and read
 // fully afterwards (see the CLAUDE.md FUSE section).
+const API_CONTENT = '{"messages": 2}\n';
+
 async function runSizelessProbe(): Promise<void> {
   const enc = new TextEncoder();
   const api = new RAMResource();
   api.store.dirs.add("/");
-  api.store.files.set("/api.json", enc.encode('{"messages": 2}\n'));
+  api.store.files.set("/api.json", enc.encode(API_CONTENT));
   const ws = new Workspace({
     "/api": new Mount(api, { mode: MountMode.READ }),
   });
@@ -47,7 +49,13 @@ async function runSizelessProbe(): Promise<void> {
   const handle = await fuseMount(ws);
   const apiFile = join(handle.mountpoint, "api", "api.json");
   try {
-    process.stdout.write(`api_stat_preopen=${(await stat(apiFile)).size}\n`);
+    // Windows cannot query attributes without opening a handle, so
+    // hydrate-on-open runs and even the pre-open stat sees the real size.
+    const pre = (await stat(apiFile)).size;
+    const expectedPre = process.platform === "win32" ? API_CONTENT.length : 0;
+    process.stdout.write(
+      `api_stat_preopen_ok=${pre === expectedPre ? "yes" : "no"}\n`,
+    );
     process.stdout.write(
       `api_cat=${(await readFile(apiFile, "utf8")).trim()}\n`,
     );
