@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # CLI runtime battery. Verifies the yaml `runtime:` block end to end
 # through each daemon: the default python runtime executes python3 against
-# a mounted file, an explicitly selected runtime is honored, and a
-# cross-language runtime name ('pyodide' on Python, 'local' on TypeScript)
-# is rejected at workspace create with a helpful message.
+# a mounted file, the default named explicitly in yaml works, a
+# non-default runtime is honored, and a cross-language runtime name
+# ('pyodide' on Python, 'local' on TypeScript) is rejected at workspace
+# create with a helpful message.
 #
 # Usage: cli_runtime.sh "<py-cli>" "<ts-cli>"
 set -uo pipefail
@@ -13,7 +14,7 @@ TS_CLI="${2:?typescript mirage cli command}"
 fail=0
 
 probe() {
-  local cli="$1" lang="$2" port="$3" selected="$4" invalid="$5"
+  local cli="$1" lang="$2" port="$3" explicit="$4" selected="$5" invalid="$6"
   local home work
   home="$(mktemp -d "/tmp/cli-runtime-$lang-home.XXXXXX")"
   work="$(mktemp -d "/tmp/cli-runtime-$lang-work.XXXXXX")"
@@ -35,6 +36,18 @@ YML
   $cli workspace create "$work/default.yaml" --id rt1 >/dev/null </dev/null
   $cli execute -w rt1 -c 'echo hi-from-vfs > /data/f.txt' </dev/null >/dev/null
   echo "default_py3=$($cli execute -w rt1 -c "python3 -c \"from pathlib import Path; print(Path('/data/f.txt').read_text().strip())\"" </dev/null | grep -o hi-from-vfs | head -1)"
+
+  # --- the language's default runtime configured explicitly in yaml ---
+  cat > "$work/explicit.yaml" <<YML
+mode: EXEC
+runtime:
+  python: $explicit
+mounts:
+  /data:
+    resource: ram
+YML
+  $cli workspace create "$work/explicit.yaml" --id rt-explicit >/dev/null </dev/null
+  echo "explicit_py3=$($cli execute -w rt-explicit -c "python3 -c \"print('explicit-runtime-ok')\"" </dev/null | grep -o 'explicit-runtime-ok' | head -1)"
 
   # --- explicitly selected runtime ---
   cat > "$work/selected.yaml" <<YML
@@ -73,10 +86,10 @@ YML
 }
 
 echo "===== python cli ====="
-probe "$PY_CLI" py 9430 local pyodide | tee /tmp/cli-runtime-py.txt
+probe "$PY_CLI" py 9430 monty local pyodide | tee /tmp/cli-runtime-py.txt
 echo
 echo "===== typescript cli ====="
-probe "$TS_CLI" ts 9440 monty local | tee /tmp/cli-runtime-ts.txt
+probe "$TS_CLI" ts 9440 pyodide monty local | tee /tmp/cli-runtime-ts.txt
 
 echo
 echo "===== expected values ====="
@@ -93,9 +106,11 @@ expect() {
 }
 
 expect /tmp/cli-runtime-py.txt "default_py3" "hi-from-vfs"
+expect /tmp/cli-runtime-py.txt "explicit_py3" "explicit-runtime-ok"
 expect /tmp/cli-runtime-py.txt "selected_py3" "argv-len 1"
 expect /tmp/cli-runtime-py.txt "invalid_msg" "TypeScript-only"
 expect /tmp/cli-runtime-ts.txt "default_py3" "hi-from-vfs"
+expect /tmp/cli-runtime-ts.txt "explicit_py3" "explicit-runtime-ok"
 expect /tmp/cli-runtime-ts.txt "selected_py3" "hi-from-vfs"
 expect /tmp/cli-runtime-ts.txt "invalid_msg" "Python-only"
 
@@ -116,4 +131,4 @@ if [ "$fail" != "0" ]; then
   exit 1
 fi
 echo
-echo "CLI runtime battery OK (default runtime, yaml selection, cross-language rejection; py + ts)."
+echo "CLI runtime battery OK (default runtime, explicit yaml default, yaml selection, cross-language rejection; py + ts)."
