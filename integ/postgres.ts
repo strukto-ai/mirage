@@ -64,6 +64,11 @@ const CASES: ReadonlyArray<readonly [string, string]> = [
   ["rg_schema_scope", `rg ben ${MOUNT}/public/`],
   ["find_rows", `find ${MOUNT}/public/ -name rows.jsonl`],
   ["find_schema", `find ${MOUNT}/public/ -name schema.json`],
+  // rows.jsonl is sizeless (tableSizeBytes lives in extra.size_bytes):
+  // stat prints size 0, -size counts it as 0, wc -c sees rendered bytes.
+  ["stat_size_rows", `stat -c '%s %n' ${MOUNT}/public/tables/books/rows.jsonl`],
+  ["find_size_plus_rows", `find ${MOUNT}/public/tables/ -name rows.jsonl -size +1c`],
+  ["find_size_under_rows", `find ${MOUNT}/public/tables/books/ -name rows.jsonl -size -1k`],
   ["jq_titles", `jq '.title' ${MOUNT}/public/tables/books/rows.jsonl`],
   ["pipe_grep_c", `cat ${MOUNT}/public/tables/books/rows.jsonl | grep -c ada`],
   ["cat_view_rows", `cat ${MOUNT}/public/views/recent_books/rows.jsonl`],

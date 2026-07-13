@@ -65,6 +65,14 @@ CASES: list[tuple[str, str]] = [
     ("rg_schema_scope", f"rg ben {MOUNT}/public/"),
     ("find_rows", f"find {MOUNT}/public/ -name rows.jsonl"),
     ("find_schema", f"find {MOUNT}/public/ -name schema.json"),
+    # rows.jsonl is sizeless (table_size_bytes lives in extra.size_bytes):
+    # stat prints size 0, -size counts it as 0, wc -c sees rendered bytes.
+    ("stat_size_rows",
+     f"stat -c '%s %n' {MOUNT}/public/tables/books/rows.jsonl"),
+    ("find_size_plus_rows",
+     f"find {MOUNT}/public/tables/ -name rows.jsonl -size +1c"),
+    ("find_size_under_rows",
+     f"find {MOUNT}/public/tables/books/ -name rows.jsonl -size -1k"),
     ("jq_titles", f"jq '.title' {MOUNT}/public/tables/books/rows.jsonl"),
     ("pipe_grep_c",
      f"cat {MOUNT}/public/tables/books/rows.jsonl | grep -c ada"),

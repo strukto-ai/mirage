@@ -106,10 +106,10 @@ async def test_depth_window():
 
 
 @pytest.mark.asyncio
-async def test_size_filter_uses_table_size():
+async def test_size_filter_counts_rows_jsonl_as_size_zero():
+    # rows.jsonl is sizeless (table_size_bytes is storage, not the rendered
+    # JSONL length, and lives in extra), so -size treats it as 0.
     hits = await _run([_spec(MOUNT)], type="f", size="+1k")
-    assert hits == [
-        f"{MOUNT}/public/tables/users/rows.jsonl",
-    ]
-    misses = await _run([_spec(MOUNT)], type="f", size="+1M")
-    assert misses == []
+    assert hits == []
+    kept = await _run([_spec(MOUNT)], type="f", size="-1k")
+    assert f"{MOUNT}/public/tables/users/rows.jsonl" in kept

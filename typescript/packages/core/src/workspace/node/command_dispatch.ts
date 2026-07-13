@@ -23,7 +23,7 @@ import {
   getText,
   splitEnvPrefix,
 } from '../../shell/helpers.ts'
-import type { PyodideRuntime } from '../executor/python/runtime.ts'
+import type { PythonRuntime } from '../executor/python/runtimes/interface.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { NodeType as NT, ShellBuiltin as SB } from '../../shell/types.ts'
 import { PathSpec } from '../../types.ts'
@@ -135,7 +135,7 @@ export async function executeCommand(
   jobTable: JobTable | null,
   ensureOpen?: (resource: Resource) => Promise<void>,
   unmount?: (prefix: string) => Promise<void>,
-  pythonRuntime?: PyodideRuntime,
+  pythonRuntime?: PythonRuntime,
   signal?: AbortSignal,
 ): Promise<Result> {
   const name = getCommandName(node)
@@ -230,7 +230,7 @@ async function runCommandBody(
   jobTable: JobTable | null,
   ensureOpen?: (resource: Resource) => Promise<void>,
   unmount?: (prefix: string) => Promise<void>,
-  pythonRuntime?: PyodideRuntime,
+  pythonRuntime?: PythonRuntime,
   signal?: AbortSignal,
 ): Promise<Result> {
   let stdin = stdinIn
@@ -329,7 +329,7 @@ async function runArgv(
   jobTable: JobTable | null,
   ensureOpen?: (resource: Resource) => Promise<void>,
   unmount?: (prefix: string) => Promise<void>,
-  pythonRuntime?: PyodideRuntime,
+  pythonRuntime?: PythonRuntime,
   signal?: AbortSignal,
 ): Promise<Result> {
   const name = argv.name

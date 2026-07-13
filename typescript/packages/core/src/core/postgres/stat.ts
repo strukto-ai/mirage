@@ -123,10 +123,13 @@ async function rowsStat(
   const fingerprint = await sha256Hex(
     new TextEncoder().encode(JSON.stringify({ columns: cols, rows })),
   )
+  // size stays null: tableSizeBytes is the on-disk storage size, not the
+  // rendered JSONL length (FileStat.size must be render-derived or null,
+  // see the CLAUDE.md FUSE rules). The storage size remains in extra.
   return new FileStat({
     name: 'rows.jsonl',
     type: FileType.TEXT,
-    size,
+    size: null,
     fingerprint,
     extra: {
       schema,

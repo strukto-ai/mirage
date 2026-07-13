@@ -127,10 +127,13 @@ async def _rows_stat(accessor: PostgresAccessor, schema: str, kind: str,
         size = await _client.table_size_bytes(conn, schema, entity)
     fp_payload = orjson.dumps({"columns": cols, "rows": rows})
     fingerprint = hashlib.sha256(fp_payload).hexdigest()
+    # size stays None: table_size_bytes is the on-disk storage size, not the
+    # rendered JSONL length (FileStat.size must be render-derived or None,
+    # see the CLAUDE.md FUSE rules). The storage size remains in extra.
     return FileStat(
         name="rows.jsonl",
         type=FileType.TEXT,
-        size=size,
+        size=None,
         fingerprint=fingerprint,
         extra={
             "schema": schema,

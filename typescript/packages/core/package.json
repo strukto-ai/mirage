@@ -55,7 +55,8 @@
     "tree-sitter-bash": "^0.25.1",
     "tsup": "^8.5.0",
     "typescript": "^6.0.0",
-    "vitest": "^3.2.6"
+    "vitest": "^3.2.6",
+    "@pydantic/monty": "0.0.19-beta.4"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.0.0",
@@ -72,7 +73,8 @@
     "@qdrant/js-client-rest": "^1.18.0",
     "chromadb": "^3.4.3",
     "pyodide": "^0.29.0",
-    "redis": "^5.0.0"
+    "redis": "^5.0.0",
+    "@pydantic/monty": ">=0.0.19-beta.4"
   },
   "peerDependenciesMeta": {
     "@qdrant/js-client-rest": {
@@ -85,6 +87,9 @@
       "optional": true
     },
     "redis": {
+      "optional": true
+    },
+    "@pydantic/monty": {
       "optional": true
     }
   }

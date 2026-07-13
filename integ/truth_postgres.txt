@@ -105,10 +105,19 @@ grep: /pg/__nf_missing__.txt: No such file or directory
 === sym_ls ===
 meta_link@
 === sym_rm ===
+# ---- sizeless rows.jsonl (storage size lives in extra.size_bytes) ----
+=== stat_size_rows ===
+0 /pg/public/tables/books/rows.jsonl
+=== find_size_plus_rows ===
+=== find_size_under_rows ===
+/pg/public/tables/books/rows.jsonl
+
+# rows.jsonl is sizeless (storage size lives in extra.size_bytes), so read
+# provisions are honestly unknown instead of quoting the 49x-off table size.
 === prov_probe_cat ===
-net=32768 write=0 cache=0 ops=1 hits=0 precision=exact
+net=0 write=0 cache=0 ops=1 hits=0 precision=unknown
 === prov_probe_grep ===
-net=32768 write=0 cache=0 ops=1 hits=0 precision=exact
+net=0 write=0 cache=0 ops=1 hits=0 precision=unknown
 === prov_probe_ls ===
 net=0 write=0 cache=0 ops=1 hits=0 precision=exact
 

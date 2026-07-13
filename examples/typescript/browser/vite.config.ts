@@ -52,6 +52,11 @@ export default defineConfig({
   build: {
     target: 'esnext',
     rollupOptions: {
+      // Optional monty runtime: its browser entry imports
+      // @bjorn3/browser_wasi_shim without declaring it, so bundling it
+      // breaks. Left external, selecting monty fails into the exit-127
+      // "runtime unavailable" path at runtime instead.
+      external: ['@pydantic/monty'],
       input: {
         main: resolve(here, 'index.html'),
         mongodb: resolve(here, 'mongodb.html'),

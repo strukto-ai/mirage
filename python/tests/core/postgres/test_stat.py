@@ -165,7 +165,7 @@ async def test_stat_entity_rows_jsonl(accessor, index):
                      directory="/public/tables/users/rows.jsonl"), index)
     assert result.type == FileType.TEXT
     assert result.name == "rows.jsonl"
-    assert result.size == 4096
+    assert result.size is None
     assert result.fingerprint is not None
     assert len(result.fingerprint) == 64
     assert result.extra["row_count"] == 42

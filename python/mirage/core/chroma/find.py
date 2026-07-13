@@ -89,9 +89,9 @@ async def _matches(
             size = 0
         else:
             item_stat = await stat(accessor, spec, index)
-            if item_stat.size is None:
-                return False
-            size = item_stat.size
+            # Sizeless rendered files count as size 0, same as dirs and the
+            # FUSE view (CLAUDE.md find -size rules); never drop them.
+            size = item_stat.size if item_stat.size is not None else 0
         if min_size is not None and size < min_size:
             return False
         if max_size is not None and size > max_size:

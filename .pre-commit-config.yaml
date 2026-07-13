@@ -130,7 +130,7 @@ repos:
         pass_filenames: true
       - id: ts-eslint
         name: ESLint (typescript)
-        entry: typescript/scripts/precommit-run.sh eslint --fix
+        entry: typescript/scripts/precommit-run.sh eslint --fix --no-warn-ignored
         language: system
         files: ^typescript/.*\.(ts|tsx|js|mjs|cjs)$
         pass_filenames: true

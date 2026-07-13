@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type * as ClientModule from './_client.ts'
 import type * as StatModule from './stat.ts'
 import type * as WalkModule from './walk.ts'
 
@@ -26,9 +27,16 @@ vi.mock('./stat.ts', async () => {
   return { ...actual, stat: vi.fn() }
 })
 
+vi.mock('./_client.ts', async () => {
+  const actual = await vi.importActual<typeof ClientModule>('./_client.ts')
+  return { ...actual, fetchPathTree: vi.fn() }
+})
+
 import type { ChromaAccessor } from '../../accessor/chroma.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
+import * as clientMod from './_client.ts'
 import { find } from './find.ts'
 import * as statMod from './stat.ts'
 import * as walkMod from './walk.ts'
@@ -37,7 +45,7 @@ const ACCESSOR = {} as ChromaAccessor
 const INDEX = {} as IndexCacheStore
 const ROOT = new PathSpec({ resourcePath: '', virtual: '/', directory: '/' })
 
-function mockStats(stats: Record<string, { size?: number; modified?: string }>): void {
+function mockStats(stats: Record<string, { size?: number | null; modified?: string }>): void {
   vi.mocked(statMod.stat).mockImplementation((_accessor, spec) => {
     const key = typeof spec === 'string' ? spec : spec.virtual
     const entry = stats[key]
@@ -80,6 +88,18 @@ describe('chroma core find', () => {
     mockStats({ '/junk.txt': { size: 1, modified: 'not-a-date' } })
     const out = await find(ACCESSOR, ROOT, { mtimeMin: 0 }, INDEX)
     expect(out).toEqual([])
+  })
+
+  it('counts sizeless files as size 0 under -size filters', async () => {
+    vi.mocked(walkMod.walk).mockResolvedValue(['/sized.txt', '/sizeless.txt'])
+    vi.mocked(clientMod.fetchPathTree).mockResolvedValue(
+      JSON.stringify({ 'sized.txt': { size: 12 }, 'sizeless.txt': { size: null } }),
+    )
+    mockStats({ '/sized.txt': { size: 12 }, '/sizeless.txt': { size: null } })
+    const large = await find(ACCESSOR, ROOT, { type: 'f', minSize: 1 }, new RAMIndexCacheStore())
+    expect(large).toEqual(['/sized.txt'])
+    const empty = await find(ACCESSOR, ROOT, { type: 'f', maxSize: 0 }, new RAMIndexCacheStore())
+    expect(empty).toEqual(['/sizeless.txt'])
   })
 
   it('keeps timezone-aware timestamps unchanged', async () => {

@@ -1,0 +1,75 @@
+---
+title: Python
+description: Choose the interpreter that runs python3 inside the workspace, pyodide (default) or the sandboxed monty runtime.
+icon: /images/pydantic-logo.svg
+---
+
+Shell lines like `python3 script.py` need an interpreter. Mirage calls that
+interpreter a **runtime**, and you pick it per workspace. The TypeScript
+packages ship two:
+
+| Runtime | Engine | Filesystem | Default |
+| --- | --- | --- | --- |
+| `pyodide` | CPython compiled to WebAssembly ([Pyodide](https://pyodide.org)) | Workspace mounts, preloaded into the WASM filesystem and lazily backfilled | Yes |
+| `monty` | [Pydantic Monty](https://github.com/pydantic/monty), a sandboxed Python interpreter written in Rust | Workspace mounts only, bridged through Mirage | No |
+
+## Pyodide (default)
+
+Pyodide is full CPython in WebAssembly: real stdlib, `sys.argv`, stdin,
+and auto-loaded scientific packages. Mirage mirrors the workspace mounts
+into Pyodide's in-memory filesystem, so `open()` and `os.listdir` work on
+mounted paths.
+
+```ts
+import { MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
+
+const ws = new Workspace({ '/data': new RAMResource() }, { mode: MountMode.EXEC })
+await ws.execute('echo hello > /data/a.txt')
+const io = await ws.execute(`python3 -c "print(open('/data/a.txt').read().strip())"`)
+```
+
+## Monty
+
+Monty runs each execution in a crash-isolated worker with microsecond
+startup and no host filesystem, environment, or network access. `pathlib`
+I/O and `os.getenv` route through the workspace mounts:
+
+```ts
+const ws = new Workspace(
+  { '/data': new RAMResource() },
+  { mode: MountMode.EXEC, pythonRuntime: 'monty' },
+)
+const io = await ws.execute(
+  `python3 -c "from pathlib import Path; print(Path('/data/a.txt').read_text())"`,
+)
+```
+
+Monty requires the optional `@pydantic/monty` package:
+
+```bash
+pnpm add @pydantic/monty
+```
+
+Without it, selecting monty makes `python3` exit with code 127 and an
+install hint.
+
+### Differences from CPython
+
+- Command-line arguments are the `argv` global; `sys.argv` does not exist.
+- The builtin `open()` is not bridged yet in the JS binding; use
+  `pathlib` (`Path(...).read_text()`, `.write_text()`, `.iterdir()`).
+- No `sys.stdin` and no third-party imports.
+- `os.environ` reflects the session env only.
+
+## Selecting in YAML
+
+Server workspace config files take a top-level `runtime` block:
+
+```yaml
+runtime:
+  python: monty   # or: pyodide
+
+mounts:
+  /data:
+    resource: ram
+```

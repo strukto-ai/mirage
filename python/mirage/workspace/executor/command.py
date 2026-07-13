@@ -220,6 +220,7 @@ async def run_on_mount(
             session_id=session.session_id,
             env=session.env,
             exec_allowed=registry.is_exec_allowed(),
+            python_runtime=registry.python_runtime,
         )
     except UsageError as exc:
         # Command-owned usage errors (extra operands, missing patterns)
