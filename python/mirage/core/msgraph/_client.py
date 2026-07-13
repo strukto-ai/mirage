@@ -27,10 +27,6 @@ MAX_BACKOFF = 30.0
 
 
 def split_path(path: PathSpec | str) -> tuple[str, str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
     raw = path.virtual
     if prefix and raw.startswith(prefix):

@@ -23,10 +23,6 @@ from mirage.utils.key_prefix import mount_prefix_of
 
 async def readdir(accessor: OneDriveAccessor, path: PathSpec,
                   index: IndexCacheStore) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     original = path
     prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
     raw = path.directory if path.pattern else path.virtual

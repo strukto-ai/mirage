@@ -117,7 +117,7 @@ async def _load_patch_data(
     accessor: Accessor,
 ) -> bytes:
     if i is not None and has_resource:
-        return await read_bytes(accessor, i.mount_path)
+        return await read_bytes(accessor, i)
     if paths and has_resource:
         return await read_bytes(accessor, paths[0])
     data = await _read_stdin_async(stdin)
@@ -148,9 +148,10 @@ async def patch(
     file_hunks = _parse_patch(patch_text, strip_count)
     writes: dict[str, bytes] = {}
     for file_path, hunks in file_hunks.items():
+        file_spec = PathSpec.from_str_path(file_path)
         try:
             original = (await read_bytes(accessor,
-                                         file_path)).decode(errors="replace")
+                                         file_spec)).decode(errors="replace")
         except FileNotFoundError:
             original = ""
         original_lines = split_lines(original)
@@ -158,7 +159,7 @@ async def patch(
             hunks = _reverse_hunks(hunks)
         patched_lines = _apply_hunks(original_lines, hunks, forward_only=N)
         patched_data = ("\n".join(patched_lines) + "\n").encode()
-        await write_bytes(accessor, file_path, patched_data)
+        await write_bytes(accessor, file_spec, patched_data)
         writes[file_path] = patched_data
     return None, IOResult(writes=writes)
 

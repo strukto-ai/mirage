@@ -43,10 +43,6 @@ async def read(
     path: PathSpec,
     index: IndexCacheStore = None,
 ) -> bytes:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual if isinstance(path, PathSpec) else path
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     key = path.resource_path

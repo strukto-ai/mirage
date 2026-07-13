@@ -14,8 +14,6 @@ async def read_bytes(accessor: NextcloudAccessor,
                      index: IndexCacheStore = None,
                      offset: int = 0,
                      size: int | None = None) -> bytes:
-    if isinstance(path, str):
-        path = PathSpec.from_str_path(path)
     raw = path.mount_path
     key = raw.lstrip("/")
     op = accessor.operator()

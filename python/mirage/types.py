@@ -90,6 +90,47 @@ class MountMode(str, Enum):
     EXEC = "exec"
 
 
+MOUNT_MODE_RANK: dict[MountMode, int] = {
+    MountMode.READ: 1,
+    MountMode.WRITE: 2,
+    MountMode.EXEC: 3,
+}
+
+
+def weaker_mode(a: MountMode, b: MountMode) -> MountMode:
+    """The weaker of two mount modes on the READ < WRITE < EXEC lattice.
+
+    Args:
+        a (MountMode): first mode.
+        b (MountMode): second mode.
+    """
+    return a if MOUNT_MODE_RANK[a] <= MOUNT_MODE_RANK[b] else b
+
+
+MOUNT_MODE_ALIASES: dict[str, MountMode] = {
+    "r": MountMode.READ,
+    "rw": MountMode.WRITE,
+    "rwx": MountMode.EXEC,
+}
+
+
+def parse_mount_mode(value: MountMode | str) -> MountMode:
+    """Coerce a mount mode, accepting cumulative filesystem aliases.
+
+    The mode ladder is cumulative (exec implies write implies read),
+    so only the cumulative spellings ``r``, ``rw``, ``rwx`` alias the
+    modes; bit-style forms like ``w`` or ``x`` are rejected.
+
+    Args:
+        value (MountMode | str): a mode name ("read", "write", "exec")
+            or its filesystem alias ("r", "rw", "rwx").
+    """
+    if isinstance(value, MountMode):
+        return value
+    alias = MOUNT_MODE_ALIASES.get(value)
+    return alias if alias is not None else MountMode(value)
+
+
 class ConsistencyPolicy(str, Enum):
     LAZY = "lazy"
     ALWAYS = "always"

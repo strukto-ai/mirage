@@ -40,10 +40,6 @@ async def readdir(
     path: PathSpec,
     index: IndexCacheStore,
 ) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     list_path = path.dir if path.pattern else path
     virtual_key = list_path.virtual.rstrip("/") or "/"
     listing = await index.list_dir(virtual_key)

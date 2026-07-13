@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { Session } from './session.ts'
+import { MountMode } from '../../types.ts'
 
 describe('Session', () => {
   it('defaults cwd=/ and empty env', () => {
@@ -59,15 +60,42 @@ describe('Session', () => {
     expect(restored.cwd).toBe('/a')
     expect(restored.env).toEqual({ K: 'V' })
   })
+
+  it('round-trips mountModes through toJSON/fromJSON', () => {
+    const original = new Session({
+      sessionId: 'x',
+      mountModes: new Map([
+        ['/s3', MountMode.READ],
+        ['/scratch', MountMode.WRITE],
+      ]),
+    })
+    const json = original.toJSON()
+    expect(json.mountModes).toEqual({ '/s3': 'read', '/scratch': 'write' })
+    const restored = Session.fromJSON(
+      json as { sessionId: string; mountModes?: Record<string, MountMode> | null },
+    )
+    expect(restored.mountModes?.get('/s3')).toBe(MountMode.READ)
+    expect(restored.mountModes?.get('/scratch')).toBe(MountMode.WRITE)
+  })
+
+  it('toJSON omits mountModes when unrestricted', () => {
+    const s = new Session({ sessionId: 'x' })
+    expect('mountModes' in s.toJSON()).toBe(false)
+    expect(Session.fromJSON({ sessionId: 'x' }).mountModes).toBeNull()
+  })
 })
 
 describe('Session.fork', () => {
-  it('copies every field, including allowedMounts and shellOptions', () => {
+  it('copies every field, including mountModes and shellOptions', () => {
     const original = new Session({
       sessionId: 'orig',
       cwd: '/disk',
       env: { FOO: 'bar' },
-      allowedMounts: new Set(['/s3', '/dev', '/']),
+      mountModes: new Map([
+        ['/s3', MountMode.READ],
+        ['/dev', MountMode.EXEC],
+        ['/', MountMode.EXEC],
+      ]),
       shellOptions: { errexit: true },
       readonlyVars: new Set(['HOME']),
       arrays: { ARGV: ['a', 'b'] },
@@ -78,7 +106,7 @@ describe('Session.fork', () => {
     expect(forked.sessionId).toBe('orig')
     expect(forked.cwd).toBe('/disk')
     expect(forked.env).toEqual({ FOO: 'bar' })
-    expect(forked.allowedMounts).toBe(original.allowedMounts)
+    expect(forked.mountModes).toBe(original.mountModes)
     expect(forked.shellOptions).toEqual({ errexit: true })
     expect(forked.readonlyVars.has('HOME')).toBe(true)
     expect(forked.arrays).toEqual({ ARGV: ['a', 'b'] })

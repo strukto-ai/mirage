@@ -40,8 +40,6 @@ async def find(
     empty: bool = False,
     tree: PredNode | None = None,
 ) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec.from_str_path(path)
     start_name = start_basename(path)
     target = path.mount_path
     pfx = target.strip("/")

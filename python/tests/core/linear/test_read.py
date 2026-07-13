@@ -21,6 +21,10 @@ from mirage.accessor.linear import LinearAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.linear.read import read
 from mirage.resource.linear.config import LinearConfig
+from mirage.types import PathSpec
+
+_ISSUE_PATH = ("/teams/ENG__Engineering__TEAM1/issues"
+               "/ENG-123__ISSUE1/issue.json")
 
 
 @pytest.fixture
@@ -55,7 +59,7 @@ async def test_read_team_json(accessor, index):
                return_value=teams):
         result = await read(
             accessor,
-            "/teams/ENG__Engineering__TEAM1/team.json",
+            PathSpec.from_str_path("/teams/ENG__Engineering__TEAM1/team.json"),
             index,
         )
     payload = json.loads(result)
@@ -115,7 +119,7 @@ async def test_read_issue_json(accessor, index):
                return_value=issue):
         result = await read(
             accessor,
-            "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1/issue.json",
+            PathSpec.from_str_path(_ISSUE_PATH),
             index,
         )
     payload = json.loads(result)
@@ -169,8 +173,8 @@ async def test_read_comments_jsonl(accessor, index):
                    return_value=comments):
         result = await read(
             accessor,
-            "/teams/ENG__Engineering__TEAM1"
-            "/issues/ENG-123__ISSUE1/comments.jsonl",
+            PathSpec.from_str_path("/teams/ENG__Engineering__TEAM1"
+                                   "/issues/ENG-123__ISSUE1/comments.jsonl"),
             index,
         )
     line = json.loads(result.decode().strip())
@@ -224,8 +228,8 @@ async def test_read_project_json_includes_issue_refs(accessor, index):
                        return_value=issues):
         result = await read(
             accessor,
-            "/teams/ENG__Engineering__TEAM1"
-            "/projects/Agent-Data-Plane__PROJ1.json",
+            PathSpec.from_str_path("/teams/ENG__Engineering__TEAM1"
+                                   "/projects/Agent-Data-Plane__PROJ1.json"),
             index,
         )
     payload = json.loads(result)

@@ -45,10 +45,6 @@ async def read_stream(
         index: Index cache store.
         chunk_size (int): Size of each chunk in bytes.
     """
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     path = path.mount_path
     pinned_revision = revision_for(virtual)
@@ -85,10 +81,6 @@ async def range_read(accessor: S3Accessor, path: PathSpec, start: int,
         start (int): Start byte offset.
         end (int): End byte offset (exclusive).
     """
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual if isinstance(path, PathSpec) else path
     if isinstance(path, PathSpec):
         path = path.mount_path

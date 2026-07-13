@@ -7,8 +7,6 @@ from mirage.types import PathSpec
 
 async def truncate(accessor: NextcloudAccessor, path: PathSpec,
                    length: int) -> None:
-    if isinstance(path, str):
-        path = PathSpec.from_str_path(path)
     key = path.mount_path.lstrip("/")
     op = accessor.operator()
     try:

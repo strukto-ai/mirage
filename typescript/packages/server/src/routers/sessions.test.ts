@@ -44,6 +44,30 @@ describe('sessions router', () => {
     await app.close()
   })
 
+  it('accepts mount role grants and rejects bad roles', async () => {
+    const app = buildApp()
+    await createWs(app, 'grants-ws')
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces/grants-ws/sessions',
+      payload: { sessionId: 'agent_r', mounts: { '/': 'read' } },
+    })
+    expect(created.statusCode).toBe(201)
+    const listForm = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces/grants-ws/sessions',
+      payload: { sessionId: 'agent_l', mounts: ['/'] },
+    })
+    expect(listForm.statusCode).toBe(201)
+    const bad = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces/grants-ws/sessions',
+      payload: { sessionId: 'agent_x', mounts: { '/': 'admin' } },
+    })
+    expect(bad.statusCode).toBe(422)
+    await app.close()
+  })
+
   it('returns 409 on duplicate session id', async () => {
     const app = buildApp()
     await createWs(app, 'dup-ws')

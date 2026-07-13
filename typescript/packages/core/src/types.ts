@@ -22,6 +22,37 @@ export const MountMode = Object.freeze({
 
 export type MountMode = (typeof MountMode)[keyof typeof MountMode]
 
+const MOUNT_MODE_RANK: Readonly<Record<MountMode, number>> = Object.freeze({
+  [MountMode.READ]: 1,
+  [MountMode.WRITE]: 2,
+  [MountMode.EXEC]: 3,
+})
+
+/** The weaker of two mount modes on the READ < WRITE < EXEC lattice. */
+export function weakerMode(a: MountMode, b: MountMode): MountMode {
+  return MOUNT_MODE_RANK[a] <= MOUNT_MODE_RANK[b] ? a : b
+}
+
+const MOUNT_MODE_ALIASES: Readonly<Record<string, MountMode>> = Object.freeze({
+  r: MountMode.READ,
+  rw: MountMode.WRITE,
+  rwx: MountMode.EXEC,
+})
+
+/**
+ * Coerce a mount mode, accepting cumulative filesystem aliases.
+ *
+ * The mode ladder is cumulative (exec implies write implies read), so
+ * only the cumulative spellings `r`, `rw`, `rwx` alias the modes;
+ * bit-style forms like `w` or `x` are rejected.
+ */
+export function parseMountMode(value: string): MountMode {
+  const alias = MOUNT_MODE_ALIASES[value]
+  if (alias !== undefined) return alias
+  if ((Object.values(MountMode) as string[]).includes(value)) return value as MountMode
+  throw new Error(`invalid mount mode: '${value}'`)
+}
+
 export const ConsistencyPolicy = Object.freeze({
   LAZY: 'lazy',
   ALWAYS: 'always',

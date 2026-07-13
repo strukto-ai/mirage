@@ -31,10 +31,6 @@ def is_dir_name(child: str) -> bool:
 async def readdir(accessor: PostgresAccessor,
                   path: PathSpec,
                   index: IndexCacheStore = None) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     raw = path.directory if path.pattern else path.virtual
     if prefix and raw.startswith(prefix):

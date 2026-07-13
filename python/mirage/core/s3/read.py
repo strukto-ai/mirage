@@ -55,10 +55,6 @@ async def read_bytes(accessor: S3Accessor,
         offset (int): Byte offset for range reads.
         size (int | None): Number of bytes for range reads.
     """
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     path = path.mount_path
     config = accessor.config

@@ -25,10 +25,6 @@ class EmailScope:
 
 
 def detect_scope(path: PathSpec) -> EmailScope:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     key = path.mount_path.strip("/")
     if not key:
         return EmailScope(use_native=False, resource_path="/")

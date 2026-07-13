@@ -24,7 +24,7 @@ import { type EventDict, Observer } from '../observe/observer.ts'
 import type { OpRecord } from '../observe/record.ts'
 import type { ObserverStore } from '../observe/store.ts'
 import { type OpKwargs, OpsRegistry } from '../ops/registry.ts'
-import { assertMountAllowed, runWithSession } from '../runtime/session_context.ts'
+import { assertMountAllowed, runWithSession } from '../context/session_context.ts'
 import type { Resource } from '../resource/base.ts'
 import { HISTORY_PREFIX, HistoryViewResource } from '../resource/history/history.ts'
 import { resourceStateRequiresOverride } from '../resource/secrets.ts'
@@ -52,6 +52,7 @@ import {
   DriftPolicy,
   FileType,
   MountMode,
+  parseMountMode,
   type PathSpec,
 } from '../types.ts'
 import type { TSNodeLike } from './expand/variable.ts'
@@ -77,12 +78,23 @@ import type { Session } from './session/session.ts'
 import type { ExecutionNode } from './types.ts'
 import { errorVirtualPath, gnuStrerror } from '../utils/errors.ts'
 import { stripSlash } from '../utils/slash.ts'
+import { effectiveMountMode } from '../context/session_context.ts'
 
 const NOOP_ACCESSOR_INSTANCE = new NOOPAccessor()
 
+/**
+ * One mount entry: a bare resource takes the workspace default mode, a
+ * `[resource, mode]` pair pins the mount's own mode, and an optional
+ * third element attaches per-command safeguards (mirrors the Python
+ * `(resource, mode, safeguards)` tuple form).
+ */
+export type MountSpec =
+  | Resource
+  | readonly [Resource, MountMode]
+  | readonly [Resource, MountMode, Record<string, CommandSafeguard>]
+
 export interface WorkspaceOptions {
   mode?: MountMode
-  modeOverrides?: Record<string, MountMode>
   consistency?: ConsistencyPolicy
   commandSafeguards?: Record<string, Record<string, CommandSafeguard>>
   /**
@@ -210,14 +222,29 @@ export class Workspace {
   // FUSE lives entirely in the node Workspace (FUSE needs the OS; the browser
   // can't mount), so the core Workspace carries no FUSE state.
 
-  constructor(resources: Record<string, Resource>, options: WorkspaceOptions = {}) {
-    this.registry = new MountRegistry(resources, options.mode ?? MountMode.READ, {
-      ...(options.modeOverrides ?? {}),
-    })
+  constructor(resources: Record<string, MountSpec>, options: WorkspaceOptions = {}) {
+    const bareResources: Record<string, Resource> = {}
+    const mountModes: Record<string, MountMode> = {}
+    const mountSafeguards: Record<string, Record<string, CommandSafeguard>> = {}
+    for (const [prefix, spec] of Object.entries(resources)) {
+      if (Array.isArray(spec)) {
+        const [resource, mode, safeguards] = spec as readonly [
+          Resource,
+          MountMode,
+          Record<string, CommandSafeguard>?,
+        ]
+        bareResources[prefix] = resource
+        mountModes[prefix] = mode
+        if (safeguards !== undefined) mountSafeguards[prefix] = safeguards
+      } else {
+        bareResources[prefix] = spec as Resource
+      }
+    }
+    this.registry = new MountRegistry(bareResources, options.mode ?? MountMode.READ, mountModes)
     const consistency = options.consistency ?? ConsistencyPolicy.LAZY
     this.registry.setConsistency(consistency)
     if (options.index !== undefined) {
-      for (const resource of Object.values(resources)) {
+      for (const resource of Object.values(bareResources)) {
         resource.setIndex?.(options.index)
       }
     }
@@ -268,7 +295,10 @@ export class Workspace {
         mount.registerGeneral(cmd)
       }
     }
-    for (const [prefix, safeguards] of Object.entries(options.commandSafeguards ?? {})) {
+    for (const [prefix, safeguards] of Object.entries({
+      ...mountSafeguards,
+      ...(options.commandSafeguards ?? {}),
+    })) {
       const mount = this.registry.mountForPrefix(prefix)
       if (mount === null) {
         throw new Error(`commandSafeguards references unknown mount prefix: ${prefix}`)
@@ -371,32 +401,58 @@ export class Workspace {
     this.sessionManager.env = value
   }
 
+  /**
+   * Create a session, optionally restricted to per-mount modes.
+   *
+   * `mounts` as a map assigns each prefix a mode ceiling ('read',
+   * 'write', 'exec', or the filesystem aliases 'r', 'rw', 'rwx'); an
+   * array of prefixes keeps each mount at its own configured mode (the
+   * previous allowlist behavior). Omitting it leaves the session
+   * unrestricted.
+   */
   createSession(
     sessionId: string,
-    options: { allowedMounts?: ReadonlySet<string> | null } = {},
+    options: {
+      mounts?: ReadonlyMap<string, string> | Record<string, string> | readonly string[] | null
+    } = {},
   ): Session {
-    let allowed = options.allowedMounts ?? null
-    if (allowed !== null) {
-      const normalized = new Set<string>()
-      for (const m of allowed) normalized.add('/' + stripSlash(m))
-      for (const p of this.infrastructureMountPrefixes()) normalized.add(p)
-      allowed = normalized
+    const mounts = options.mounts ?? null
+    let modes: Map<string, MountMode> | null = null
+    if (mounts !== null) {
+      modes = new Map<string, MountMode>()
+      if (Array.isArray(mounts)) {
+        for (const p of mounts as readonly string[]) {
+          modes.set('/' + stripSlash(p), MountMode.EXEC)
+        }
+      } else {
+        const entries: [string, string][] =
+          mounts instanceof Map
+            ? [...(mounts as ReadonlyMap<string, string>).entries()]
+            : Object.entries(mounts as Record<string, string>)
+        for (const [p, mode] of entries) {
+          modes.set('/' + stripSlash(p), parseMountMode(mode))
+        }
+      }
+      for (const p of this.infrastructureMountPrefixes()) {
+        if (!modes.has(p)) modes.set(p, MountMode.EXEC)
+      }
     }
-    return this.sessionManager.create(sessionId, { allowedMounts: allowed })
+    return this.sessionManager.create(sessionId, { mountModes: modes })
   }
 
   /**
    * Mount prefixes a session is always allowed to touch.
    *
-   * The root mount (where text-processing commands like `wc` without a
-   * path argument resolve), the device mount, and the history view are
-   * infrastructure: they hold no user credentials, and rejecting them
-   * would break common shell idioms or the history builtin.
+   * The synthetic scratch root (where text-processing commands like `wc`
+   * without a path argument resolve), the device mount, and the history
+   * view are infrastructure: they hold no user credentials, and
+   * rejecting them would break common shell idioms or the history
+   * builtin. A user-defined root mount is NOT infrastructure; sessions
+   * must be granted `/` explicitly to touch it.
    */
   private infrastructureMountPrefixes(): Set<string> {
     const prefixes = new Set<string>(['/dev', HISTORY_PREFIX])
-    const root = this.registry.rootMount
-    if (root !== null) prefixes.add('/' + stripSlash(root.prefix))
+    if (this.syntheticRootAnchor) prefixes.add('/')
     return prefixes
   }
 
@@ -622,7 +678,11 @@ export class Workspace {
       await this.runPendingDriftCheck()
     }
     const [resource, spec, mode] = await this.resolve(path)
-    if (mode === MountMode.READ && this.opsRegistry.find(opName, resource.kind)?.write === true) {
+    const capPrefix = this.registry.mountFor(path)?.prefix ?? '/'
+    if (
+      effectiveMountMode(capPrefix, mode) === MountMode.READ &&
+      this.opsRegistry.find(opName, resource.kind)?.write === true
+    ) {
       throw new Error(`mount at '${path}' is read-only`)
     }
     const fullKwargs: OpKwargs =
@@ -913,17 +973,14 @@ export class Workspace {
     overrides: Record<string, Resource> = {},
   ): Promise<InstanceType<T>> {
     const args = buildMountArgs(state, overrides)
-    const resources: Record<string, Resource> = {}
-    const snapshotModes: Record<string, MountMode> = {}
+    const resources: Record<string, MountSpec> = {}
     for (const [prefix, [resource, mode]] of Object.entries(args.mountArgs)) {
-      resources[prefix] = resource
-      snapshotModes[prefix] = mode
+      resources[prefix] = [resource, mode]
     }
     const mergedOptions: WorkspaceOptions = {
       sessionId: args.defaultSessionId,
       agentId: args.defaultAgentId,
       ...options,
-      modeOverrides: { ...(options.modeOverrides ?? {}), ...snapshotModes },
     }
     const ws = new this(resources, mergedOptions) as InstanceType<T>
     await applyStateDict(ws, state)

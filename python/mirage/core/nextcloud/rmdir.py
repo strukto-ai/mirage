@@ -7,8 +7,6 @@ from mirage.utils.errors import enoent
 
 
 async def rmdir(accessor: NextcloudAccessor, path: PathSpec) -> None:
-    if isinstance(path, str):
-        path = PathSpec.from_str_path(path)
     raw = path.mount_path
     key = raw.strip("/") + "/"
     op = accessor.operator()

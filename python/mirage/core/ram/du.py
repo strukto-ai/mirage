@@ -18,10 +18,6 @@ from mirage.utils.path import norm
 
 
 async def du(accessor: RAMAccessor, path: PathSpec) -> int:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     if isinstance(path, PathSpec):
         path = path.mount_path
     store = accessor.store
@@ -36,10 +32,6 @@ async def du(accessor: RAMAccessor, path: PathSpec) -> int:
 
 async def du_all(accessor: RAMAccessor,
                  path: PathSpec) -> tuple[list[tuple[str, int]], int]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     if isinstance(path, PathSpec):
         path = path.mount_path
     store = accessor.store

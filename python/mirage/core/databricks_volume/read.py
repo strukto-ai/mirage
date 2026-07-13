@@ -87,10 +87,6 @@ async def read_bytes(
     offset: int = 0,
     size: int | None = None,
 ) -> bytes:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     remote_path = backend_path(accessor.config, path)
     start_ms = int(time.monotonic() * 1000)

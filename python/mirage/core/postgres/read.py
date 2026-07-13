@@ -33,10 +33,6 @@ async def read(
     limit: int | None = None,
     offset: int | None = None,
 ) -> bytes:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     raw = path.virtual
     if prefix and raw.startswith(prefix):

@@ -24,16 +24,8 @@ async def copy(
     src: PathSpec,
     dst: PathSpec,
 ) -> None:
-    if isinstance(src, str):
-        src = PathSpec(virtual=src,
-                       directory=src,
-                       resource_path=src.strip("/"))
     if isinstance(src, PathSpec):
         src = src.mount_path
-    if isinstance(dst, str):
-        dst = PathSpec(virtual=dst,
-                       directory=dst,
-                       resource_path=dst.strip("/"))
     if isinstance(dst, PathSpec):
         dst = dst.mount_path
     store = accessor.store

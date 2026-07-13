@@ -25,10 +25,6 @@ logger = logging.getLogger(__name__)
 
 
 async def stat(accessor, path: PathSpec, index: IndexCacheStore) -> FileStat:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     if isinstance(path, PathSpec):
         prefix = mount_prefix_of(path.virtual, path.resource_path)

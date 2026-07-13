@@ -69,8 +69,11 @@ async def unzip(
             out_path = dest.rstrip("/") + "/" + entry_name
             parent = out_path.rsplit("/", 1)[0] or "/"
             if parent != "/":
-                await mkdir_fn(accessor, parent, parents=True)
-            await write_bytes(accessor, out_path, content)
+                await mkdir_fn(accessor,
+                               PathSpec.from_str_path(parent),
+                               parents=True)
+            await write_bytes(accessor, PathSpec.from_str_path(out_path),
+                              content)
             report_path = (mount_prefix +
                            out_path) if mount_prefix else out_path
             writes[out_path] = content

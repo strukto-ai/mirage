@@ -57,10 +57,6 @@ async def find(
         path_pattern (str | None): Glob pattern to match full path.
         mindepth (int | None): Minimum depth to include.
     """
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     start_name = start_basename(path)
     path = path.mount_path
     config = accessor.config

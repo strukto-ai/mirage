@@ -37,10 +37,6 @@ async def readdir(
     path: PathSpec,
     index: IndexCacheStore = None,
 ) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
     scope = detect_scope(path)
     virtual_key = (prefix + scope.resource_path).rstrip("/") or "/"

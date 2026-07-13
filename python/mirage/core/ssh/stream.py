@@ -24,10 +24,6 @@ async def read_stream(accessor: SSHAccessor,
                       path: PathSpec,
                       index=None,
                       chunk_size: int = 8192):
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     if isinstance(path, PathSpec):
         path = path.mount_path

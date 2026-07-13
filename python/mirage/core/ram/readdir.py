@@ -21,10 +21,6 @@ from mirage.utils.path import norm
 
 async def readdir(accessor: RAMAccessor, path: PathSpec,
                   index: IndexCacheStore) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     target = path.dir if path.pattern else path
     prefix = mount_prefix_of(target.virtual, target.resource_path)
     # Canonical key: no trailing slash (except root), or the same dir

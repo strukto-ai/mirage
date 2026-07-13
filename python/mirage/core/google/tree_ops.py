@@ -44,10 +44,6 @@ def make_stat(readdir: Callable) -> Callable:
         path: PathSpec,
         index: IndexCacheStore = None,
     ) -> FileStat:
-        if isinstance(path, str):
-            path = PathSpec(virtual=path,
-                            directory=path,
-                            resource_path=path.strip("/"))
         virtual = path.virtual
         prefix = mount_prefix_of(path.virtual, path.resource_path)
         key = path.resource_path
@@ -103,10 +99,6 @@ def make_unlink(readdir: Callable) -> Callable:
         path: PathSpec,
         index: IndexCacheStore = None,
     ) -> None:
-        if isinstance(path, str):
-            path = PathSpec(virtual=path,
-                            directory=path,
-                            resource_path=path.strip("/"))
         prefix = mount_prefix_of(path.virtual, path.resource_path)
         raw = path.virtual
         stripped = raw[len(prefix

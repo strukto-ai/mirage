@@ -35,10 +35,6 @@ async def read_stream(
     index: IndexCacheStore = None,
     chunk_size: int = 8192,
 ) -> AsyncIterator[bytes] | bytes:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     if isinstance(path, PathSpec):
         prefix = mount_prefix_of(path.virtual, path.resource_path)

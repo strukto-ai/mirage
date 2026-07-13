@@ -24,10 +24,6 @@ async def mkdir(
     path: PathSpec,
     parents: bool = False,
 ) -> None:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     if isinstance(path, PathSpec):
         path = path.mount_path
     store = accessor.store
