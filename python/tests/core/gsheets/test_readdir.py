@@ -250,3 +250,34 @@ async def test_readdir_owned_non_date_pattern_omits_range(accessor, index):
 
     assert captured.get("modified_after") is None
     assert captured.get("modified_before") is None
+
+
+@pytest.mark.asyncio
+async def test_readdir_entry_size_none_source_size_in_extra(accessor, index):
+    files = [
+        {
+            "id": "x1",
+            "name": "My File",
+            "modifiedTime": "2026-04-01T00:00:00.000Z",
+            "size": "1234",
+            "owners": [{
+                "me": True
+            }],
+        },
+    ]
+    with patch(
+            "mirage.core.gsheets.readdir.list_all_files",
+            new_callable=AsyncMock,
+            return_value=files,
+    ):
+        result = await readdir(
+            accessor,
+            PathSpec(resource_path=mount_key("/gsheets/owned", "/gsheets"),
+                     virtual="/gsheets/owned",
+                     directory="/gsheets/owned"), index)
+
+    # Drive's source size never becomes the entry size: the rendered
+    # JSON length is unknown until read.
+    entry = (await index.get(result[0])).entry
+    assert entry.size is None
+    assert entry.extra["source_size"] == 1234

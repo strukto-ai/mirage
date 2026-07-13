@@ -361,3 +361,34 @@ async def test_readdir_owned_newest_first_across_cache(accessor, index):
     assert "new" in first[0]
     assert "mid" in first[1]
     assert "old" in first[-1]
+
+
+@pytest.mark.asyncio
+async def test_readdir_entry_size_none_source_size_in_extra(accessor, index):
+    files = [
+        {
+            "id": "doc1",
+            "name": "My Doc",
+            "modifiedTime": "2026-04-01T00:00:00.000Z",
+            "size": "1234",
+            "owners": [{
+                "me": True
+            }],
+        },
+    ]
+    with patch(
+            "mirage.core.gdocs.readdir.list_all_files",
+            new_callable=AsyncMock,
+            return_value=files,
+    ):
+        result = await readdir(
+            accessor,
+            PathSpec(resource_path=mount_key("/gdocs/owned", "/gdocs"),
+                     virtual="/gdocs/owned",
+                     directory="/gdocs/owned"), index)
+
+    # Drive's source size never becomes the entry size: the rendered
+    # JSON length is unknown until read.
+    entry = (await index.get(result[0])).entry
+    assert entry.size is None
+    assert entry.extra["source_size"] == 1234

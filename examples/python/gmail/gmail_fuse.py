@@ -58,12 +58,25 @@ with Workspace({"/gmail/": Mount(resource, mode=MountMode.READ,
             if json_msgs:
                 first = json_msgs[0]
                 path = f"{date_path}/{first}"
-                print(f"\n--- open() + read {first[:60]} ---")
+
+                # Size-unknown semantics: rendered .gmail.json length is not
+                # knowable without rendering (Gmail's sizeEstimate is the
+                # source message, not the render), so stat before open
+                # reports 0; after a read the real size is served from the
+                # hydrated handle.
+                print("\n--- stat before open (expect size 0) ---")
+                print(f"  st_size: {os.stat(path).st_size}")
+
+                print(f"--- open() + read {first[:60]} ---")
                 with open(path) as f:
                     content = f.read()
                 parsed = json.loads(content)
                 print(f"  subject: {parsed.get('subject', 'N/A')}")
                 print(f"  from: {parsed.get('from', 'N/A')}")
+                print(f"  rendered bytes: {len(content)}")
+
+                print("--- stat after read (real rendered size) ---")
+                print(f"  st_size: {os.stat(path).st_size}")
 
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> Open another terminal and run:")

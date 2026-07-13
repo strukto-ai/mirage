@@ -90,7 +90,10 @@ async def stat(
             name=result.entry.vfs_name,
             type=FileType.JSON,
             size=result.entry.size,
-            extra={"message_id": result.entry.id},
+            extra={
+                "message_id": result.entry.id,
+                **result.entry.extra
+            },
         )
     if rt == "gmail/attachment_dir":
         return FileStat(

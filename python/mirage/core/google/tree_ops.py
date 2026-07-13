@@ -83,6 +83,7 @@ def make_stat(readdir: Callable) -> Callable:
             extra={
                 "doc_id": result.entry.id,
                 "doc_name": result.entry.name,
+                **result.entry.extra,
             },
         )
 
