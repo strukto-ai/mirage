@@ -18,9 +18,9 @@ from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.local import LocalRuntime
 from mirage.runtime.python.monty import MontyRuntime
 
-DEFAULT_PYTHON_RUNTIME = "monty"
+DEFAULT_PYTHON_RUNTIME = MontyRuntime.name
 
-PYTHON_RUNTIMES = ("monty", "local")
+PYTHON_RUNTIMES = (MontyRuntime.name, LocalRuntime.name)
 
 
 def validate_python_runtime_name(name: str) -> str:
@@ -57,6 +57,6 @@ def select_python_runtime(name: str | None,
         ValueError: unknown runtime name.
     """
     resolved = validate_python_runtime_name(name or DEFAULT_PYTHON_RUNTIME)
-    if resolved == "monty":
+    if resolved == MontyRuntime.name:
         return MontyRuntime(dispatch)
     return LocalRuntime()

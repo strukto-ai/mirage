@@ -20,6 +20,20 @@ import type {
   PythonRunResult,
 } from '../types.ts'
 
+export const PYODIDE_RUNTIME = 'pyodide'
+export const MONTY_RUNTIME = 'monty'
+
+/** Runtime names the TypeScript packages can build. */
+export const PYTHON_RUNTIMES = [PYODIDE_RUNTIME, MONTY_RUNTIME] as const
+
+/**
+ * Pyodide stays the TypeScript default until `@pydantic/monty` can answer
+ * builtin `open()` calls (its JS binding cannot return a file handle from
+ * an `os` callback yet); the Python implementation already defaults to
+ * monty.
+ */
+export const DEFAULT_PYTHON_RUNTIME = PYTHON_RUNTIMES[0]
+
 /**
  * Options every Python runtime understands. `workspaceBridge` routes the
  * sandbox's file I/O through the workspace dispatch; `listMounts` is the

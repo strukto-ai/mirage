@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BridgeDispatchFn } from '../mirage_bridge.ts'
-import type { PythonRuntime, PythonRuntimeOptions } from './interface.ts'
+import { MONTY_RUNTIME, type PythonRuntime, type PythonRuntimeOptions } from './interface.ts'
 import type {
   PythonReplRunArgs,
   PythonReplRunResult,
@@ -78,7 +78,7 @@ export type MontyRuntimeOptions = PythonRuntimeOptions
  * `os` callback) — use `pathlib` for file I/O, or the pyodide runtime.
  */
 export class MontyRuntime implements PythonRuntime {
-  readonly name = 'monty'
+  readonly name = MONTY_RUNTIME
   private readonly workspaceBridge: BridgeDispatchFn | null
   private readonly listMounts: () => string[]
   private module: MontyModuleLike | null = null

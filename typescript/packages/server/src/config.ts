@@ -20,6 +20,7 @@ import {
   ConsistencyPolicy,
   MountMode,
   OnExceed,
+  PYTHON_RUNTIMES,
   RAMFileCacheStore,
   RedisFileCacheStore,
   type FileCache,
@@ -39,7 +40,7 @@ function coerceMountMode(value: string | undefined, fallback: MountMode): MountM
 
 const VALID_CONSISTENCY = new Set<string>([ConsistencyPolicy.LAZY, ConsistencyPolicy.ALWAYS])
 
-const VALID_PYTHON_RUNTIMES = new Set(['pyodide', 'monty'])
+const VALID_PYTHON_RUNTIMES = new Set<string>(PYTHON_RUNTIMES)
 
 function coercePythonRuntime(value: string): string {
   const lower = value.toLowerCase()

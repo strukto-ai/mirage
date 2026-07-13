@@ -12,17 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PythonRuntime } from './interface.ts'
+import {
+  DEFAULT_PYTHON_RUNTIME,
+  MONTY_RUNTIME,
+  PYODIDE_RUNTIME,
+  type PythonRuntime,
+} from './interface.ts'
 import { PyodideRuntime, type PyodideRuntimeOptions } from './pyodide.ts'
 import { MontyRuntime } from './monty.ts'
-
-/**
- * Pyodide stays the TypeScript default until `@pydantic/monty` can answer
- * builtin `open()` calls (its JS binding cannot return a file handle from
- * an `os` callback yet); the Python implementation already defaults to
- * monty.
- */
-const DEFAULT_PYTHON_RUNTIME = 'pyodide'
 
 /**
  * Build the Python runtime for a workspace.
@@ -35,8 +32,8 @@ export function selectPythonRuntime(
   options: PyodideRuntimeOptions = {},
 ): PythonRuntime {
   const resolved = name ?? DEFAULT_PYTHON_RUNTIME
-  if (resolved === 'pyodide') return new PyodideRuntime(options)
-  if (resolved === 'monty') {
+  if (resolved === PYODIDE_RUNTIME) return new PyodideRuntime(options)
+  if (resolved === MONTY_RUNTIME) {
     return new MontyRuntime({
       ...(options.workspaceBridge !== undefined
         ? { workspaceBridge: options.workspaceBridge }

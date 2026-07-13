@@ -21,7 +21,7 @@ import {
 } from '../mirage_bridge.ts'
 import { MIRAGE_FS_SHIM_PY } from '../mirage_fs_shim.ts'
 import { PYTHON_REPL_WRAPPER, PYTHON_WRAPPER } from '../wrapper.ts'
-import type { PythonRuntime, PythonRuntimeOptions } from './interface.ts'
+import { PYODIDE_RUNTIME, type PythonRuntime, type PythonRuntimeOptions } from './interface.ts'
 import type {
   PythonReplRunArgs,
   PythonReplRunResult,
@@ -72,7 +72,7 @@ export interface PyodideRuntimeOptions extends PythonRuntimeOptions {
 }
 
 export class PyodideRuntime implements PythonRuntime {
-  readonly name = 'pyodide'
+  readonly name = PYODIDE_RUNTIME
   private pyodide: PyodideInterface | null = null
   private initPromise: Promise<PyodideInterface> | null = null
   private bootstrapPromise: Promise<void> | null = null

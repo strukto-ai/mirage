@@ -23,7 +23,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.resource.registry import build_resource
-from mirage.runtime.python.select import validate_python_runtime_name
+from mirage.runtime.python.select import (DEFAULT_PYTHON_RUNTIME,
+                                          validate_python_runtime_name)
 from mirage.types import CommandSafeguard, ConsistencyPolicy, MountMode
 
 
@@ -158,7 +159,7 @@ class MountBlock(BaseModel):
 class RuntimeBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    python: str = "monty"
+    python: str = DEFAULT_PYTHON_RUNTIME
 
     @field_validator("python")
     @classmethod
