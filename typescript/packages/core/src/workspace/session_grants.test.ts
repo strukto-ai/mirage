@@ -49,7 +49,7 @@ async function makeGrantsWorkspace(
   for (const r of Object.values(resources)) registry.registerResource(r)
   const ws = new Workspace(resources, {
     mode: MountMode.WRITE,
-    modeOverrides: options.modes,
+    modeOverrides: options.modes ?? {},
     ops: registry,
     shellParser: parser,
   })
