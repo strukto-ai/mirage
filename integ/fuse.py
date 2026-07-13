@@ -14,10 +14,57 @@
 
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
 
 from mirage import Mount, MountMode, Workspace
+from mirage.fuse.mount import mount_background
 from mirage.resource.ram import RAMResource
+from mirage.types import FileStat
+
+
+class SizelessOps:
+    """Ops proxy that strips stat sizes.
+
+    Simulates API-backed resources (Linear, Slack, Trello, ...) whose byte
+    size is unknown until the content is fetched: over FUSE such files must
+    stat as 0 until first open and read fully afterwards.
+    """
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+
+    def __getattr__(self, name: str):
+        return getattr(self._inner, name)
+
+    async def stat(self, path: str) -> FileStat:
+        result = await self._inner.stat(path)
+        return result.model_copy(update={"size": None})
+
+
+def run_sizeless_probe() -> None:
+    api = RAMResource()
+    api._store.dirs.add("/")
+    api._store.files["/api.json"] = b'{"messages": 2}\n'
+    ws = Workspace({"/api": Mount(api, mode=MountMode.READ)})
+    mountpoint = tempfile.mkdtemp(prefix="mirage-fuse-api-")
+    mount_background(SizelessOps(ws.ops), mountpoint)
+    api_file = f"{mountpoint}/api/api.json"
+    try:
+        # Size-unknown semantics (see the CLAUDE.md FUSE section): stat 0
+        # before open, full content on read, real size served after open.
+        print(f"api_stat_preopen={os.path.getsize(api_file)}")
+        with open(api_file, "rb") as fh:
+            print(f"api_cat={fh.read().decode().strip()}")
+        print(f"api_size_postread={os.path.getsize(api_file)}")
+    finally:
+        if sys.platform == "darwin":
+            subprocess.run(["diskutil", "unmount", "force", mountpoint],
+                           capture_output=True)
+        else:
+            subprocess.run(["fusermount", "-u", mountpoint],
+                           capture_output=True)
 
 
 def main() -> None:
@@ -67,6 +114,8 @@ def main() -> None:
         except ValueError:
             collision = "yes"
         print(f"collision_rejected={collision}")
+
+    run_sizeless_probe()
 
 
 if __name__ == "__main__":

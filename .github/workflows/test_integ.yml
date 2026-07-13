@@ -760,6 +760,40 @@ jobs:
           pnpm exec tsx fuse.ts 2>&1 \
             | bash check_lines.sh truth_fuse.txt
 
+  integ-fuse-windows:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.fuse == 'true') }}
+    runs-on: windows-latest
+    # Advisory only: WinFsp support is experimental, this job is not in the
+    # gate and never blocks a merge. It exists to surface what actually
+    # breaks on Windows.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install WinFsp
+        run: choco install winfsp -y
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies (base + fuse only)
+        working-directory: python
+        run: uv sync --extra fuse
+
+      - name: Run Python FUSE mount and check (WinFsp)
+        shell: bash
+        run: |
+          ./python/.venv/Scripts/python integ/fuse.py 2>&1 \
+            | bash integ/check_lines.sh integ/truth_fuse.txt
+
   runtime-py:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true') }}

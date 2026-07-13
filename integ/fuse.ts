@@ -17,11 +17,45 @@ import { readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  FileStat,
+  FileType,
+  fuseMount,
   Mount,
   MountMode,
   RAMResource,
   Workspace,
 } from "@struktoai/mirage-node";
+
+// Size-unknown probe: a stat wrapper simulates API-backed resources (Linear,
+// Slack, Trello, ...) whose byte size is unknown until the content is
+// fetched. Over FUSE such files must stat as 0 until first open and read
+// fully afterwards (see the CLAUDE.md FUSE section).
+async function runSizelessProbe(): Promise<void> {
+  const enc = new TextEncoder();
+  const api = new RAMResource();
+  api.store.dirs.add("/");
+  api.store.files.set("/api.json", enc.encode('{"messages": 2}\n'));
+  const ws = new Workspace({
+    "/api": new Mount(api, { mode: MountMode.READ }),
+  });
+  const realStat = ws.fs.stat.bind(ws.fs);
+  ws.fs.stat = async (path) => {
+    const s = await realStat(path);
+    if (s.type === FileType.DIRECTORY) return s;
+    return new FileStat({ name: s.name, type: s.type, size: null });
+  };
+  const handle = await fuseMount(ws);
+  const apiFile = join(handle.mountpoint, "api", "api.json");
+  try {
+    process.stdout.write(`api_stat_preopen=${(await stat(apiFile)).size}\n`);
+    process.stdout.write(
+      `api_cat=${(await readFile(apiFile, "utf8")).trim()}\n`,
+    );
+    process.stdout.write(`api_size_postread=${(await stat(apiFile)).size}\n`);
+  } finally {
+    await handle.unmount();
+  }
+}
 
 // Per-mount FUSE: two mounts exposed at distinct OS paths simultaneously. Reads
 // go through the real kernel -> FUSE handler. Async fs APIs are required: the
@@ -92,6 +126,7 @@ async function main(): Promise<void> {
   } finally {
     await ws.close();
   }
+  await runSizelessProbe();
 }
 
 main().catch((err: unknown) => {
