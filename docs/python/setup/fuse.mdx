@@ -11,10 +11,12 @@ description: Set up FUSE support for MIRAGE in Python.
 
 ## System FUSE
 
-Install the OS-level FUSE kernel extension first:
+Install the OS-level FUSE driver first (see the
+[support matrix](/home/setup/fuse) for the full OS overview):
 
 - [macOS FUSE Setup](/home/setup/macos), macFUSE + kernel extension + Apple Silicon recovery mode steps.
 - [Linux FUSE Setup](/home/setup/linux), `fuse3` install and `/etc/fuse.conf`.
+- [Windows FUSE Setup](/home/setup/windows), WinFsp install; experimental.
 
 ## Install Mirage with the FUSE Extra
 
@@ -92,10 +94,18 @@ Mirage never reports a fake size and never fetches content during `stat`:
 returning real sizes eagerly would fire one API call per file on every
 `ls -l`.
 
+<Note>
+  **Windows differs**: it cannot query attributes without opening a handle,
+  so a per-file `stat` of a size-unknown file fetches the content and shows
+  the real size immediately. Directory listings stay cheap. See
+  [Windows FUSE Setup](/home/setup/windows) for the other Windows-specific
+  behaviors (unmount at process exit, mount-level ownership).
+</Note>
+
 <Warning>
   **macOS allows only one in-process FUSE mount.** macFUSE registers a
   process-global signal source, so a second simultaneous mount in the same
   process fails with `fuse: cannot register signal source`. Multiple per-mount
-  FUSE mounts work on Linux; on macOS, enable `fuse` on a single mount per
-  workspace (or run additional mounts in separate processes).
+  FUSE mounts work on Linux and Windows; on macOS, enable `fuse` on a single
+  mount per workspace (or run additional mounts in separate processes).
 </Warning>

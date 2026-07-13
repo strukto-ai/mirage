@@ -26,3 +26,5 @@ hello-runtime
 exit_code=1
 === py3_host_fs_invisible ===
 exit_code=1
+=== py3_safeguard_timeout ===
+exit_code=124

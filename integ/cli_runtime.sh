@@ -2,9 +2,10 @@
 # CLI runtime battery. Verifies the yaml `runtime:` block end to end
 # through each daemon: the default python runtime executes python3 against
 # a mounted file, the default named explicitly in yaml works, a
-# non-default runtime is honored, and a cross-language runtime name
+# non-default runtime is honored, a cross-language runtime name
 # ('pyodide' on Python, 'local' on TypeScript) is rejected at workspace
-# create with a helpful message.
+# create with a helpful message, and a per-mount command_safeguards
+# timeout guards python3 like any other command (exit 124).
 #
 # Usage: cli_runtime.sh "<py-cli>" "<ts-cli>"
 set -uo pipefail
@@ -67,6 +68,25 @@ YML
     echo "selected_py3=$($cli execute -w rt2 -c "python3 -c \"from pathlib import Path; print(Path('/data/g.txt').read_text().strip())\"" </dev/null | grep -o hi-from-vfs | head -1)"
   fi
 
+  # --- command_safeguards timeout guards python3 like any command ---
+  cat > "$work/safeguard.yaml" <<YML
+mode: EXEC
+runtime:
+  python: monty
+mounts:
+  /data:
+    resource: ram
+    command_safeguards:
+      python3:
+        timeout_seconds: 1
+YML
+  $cli workspace create "$work/safeguard.yaml" --id rtsg >/dev/null </dev/null
+  $cli execute -w rtsg -c "echo 'n = 0' > /data/slow.py && echo 'for i in range(300000000):' >> /data/slow.py && echo '    n = n + 1' >> /data/slow.py" </dev/null >/dev/null
+  $cli execute -w rtsg -c "cd /data && python3 /data/slow.py" \
+    >/tmp/cli-runtime-$lang-sg.txt 2>&1 </dev/null
+  echo "sg_exec=exit$?"
+  echo "sg_msg=$(grep -o 'python3: timed out after' /tmp/cli-runtime-$lang-sg.txt | head -1)"
+
   # --- the other language's runtime name is rejected with a hint ---
   cat > "$work/invalid.yaml" <<YML
 mode: EXEC
@@ -109,10 +129,14 @@ expect /tmp/cli-runtime-py.txt "default_py3" "hi-from-vfs"
 expect /tmp/cli-runtime-py.txt "explicit_py3" "explicit-runtime-ok"
 expect /tmp/cli-runtime-py.txt "selected_py3" "argv-len 1"
 expect /tmp/cli-runtime-py.txt "invalid_msg" "TypeScript-only"
+expect /tmp/cli-runtime-py.txt "sg_exec" "exit124"
+expect /tmp/cli-runtime-py.txt "sg_msg" "python3: timed out after"
 expect /tmp/cli-runtime-ts.txt "default_py3" "hi-from-vfs"
 expect /tmp/cli-runtime-ts.txt "explicit_py3" "explicit-runtime-ok"
 expect /tmp/cli-runtime-ts.txt "selected_py3" "hi-from-vfs"
 expect /tmp/cli-runtime-ts.txt "invalid_msg" "Python-only"
+expect /tmp/cli-runtime-ts.txt "sg_exec" "exit124"
+expect /tmp/cli-runtime-ts.txt "sg_msg" "python3: timed out after"
 
 py_invalid="$(grep -F 'invalid_create=' /tmp/cli-runtime-py.txt | head -1 | cut -d= -f2-)"
 ts_invalid="$(grep -F 'invalid_create=' /tmp/cli-runtime-ts.txt | head -1 | cut -d= -f2-)"
@@ -131,4 +155,4 @@ if [ "$fail" != "0" ]; then
   exit 1
 fi
 echo
-echo "CLI runtime battery OK (default runtime, explicit yaml default, yaml selection, cross-language rejection; py + ts)."
+echo "CLI runtime battery OK (default runtime, explicit yaml default, yaml selection, safeguard timeout, cross-language rejection; py + ts)."

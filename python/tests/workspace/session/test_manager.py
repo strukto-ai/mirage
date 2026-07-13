@@ -16,6 +16,7 @@ import asyncio
 
 import pytest
 
+from mirage.types import MountMode
 from mirage.workspace.session import SessionManager
 
 
@@ -124,13 +125,14 @@ def test_manager_lock_for():
     assert lock2 is not lock
 
 
-def test_manager_create_with_allowed_mounts():
+def test_manager_create_with_mount_grants():
     mgr = SessionManager("default")
-    s = mgr.create("agent", allowed_mounts=frozenset({"/s3", "/slack"}))
-    assert s.allowed_mounts == frozenset({"/s3", "/slack"})
+    grants = {"/s3": MountMode.READ, "/slack": MountMode.WRITE}
+    s = mgr.create("agent", mount_grants=grants)
+    assert s.mount_grants == grants
 
 
 def test_manager_create_default_unrestricted():
     mgr = SessionManager("default")
     s = mgr.create("worker")
-    assert s.allowed_mounts is None
+    assert s.mount_grants is None

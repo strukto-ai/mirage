@@ -1,6 +1,6 @@
 ---
 title: Resource Matrix
-description: Compare Mirage resources by mount mode and setup path, organized by category.
+description: Compare Mirage resources by access, runtime, and setup path.
 icon: grid-2
 ---
 
@@ -8,7 +8,7 @@ icon: grid-2
 
 Use this page to pick the first resource to try. If you want the fastest path, start with RAM or disk. If you need real integrations, jump from the setup guide to the resource docs.
 
-The **Mount Mode** column shows which `MountMode` values the resource supports (`read`, `write`, and `exec`, the last makes a mount executable so commands can launch binaries from it; typically used with Disk or RAM). The **Docs** column shows where each resource is available, with one icon per supported runtime: <Icon icon="python" /> Python, <Icon icon="node-js" /> TypeScript (Node), and <Icon icon="globe" /> TypeScript (Browser). Click an icon to jump to that runtime's docs.
+The **Access** column separates filesystem access from API actions. `read`, `write`, and `exec` are `MountMode` values; `exec` allows commands to launch binaries from the mount and is typically used with Disk or RAM. `actions` means the resource also exposes mutating commands such as sending a message or creating an issue; run those commands on a `WRITE` mount. The **Docs** column shows where each resource is available, with one icon per supported runtime: <Icon icon="python" /> Python, <Icon icon="node-js" /> TypeScript (Node), and <Icon icon="globe" /> TypeScript (Browser). Click an icon to jump to that runtime's docs.
 
 Sections below mirror the **Setup** sidebar so you can pick a category and follow the same path through credentials → resource docs.
 
@@ -16,7 +16,7 @@ Sections below mirror the **Setup** sidebar so you can pick a category and follo
 
 No external setup, these run locally or against a connection string you already have.
 
-| Resource | Mount Mode | Docs | Notes |
+| Resource | Access | Docs | Notes |
 | --- | --- | --- | --- |
 | RAM | read, write, exec | [<Icon icon="python" />](/python/resource/ram) [<Icon icon="node-js" />](/typescript/quickstart) [<Icon icon="globe" />](/typescript/quickstart) | Best first-run option |
 | Disk | read, write, exec | [<Icon icon="python" />](/python/resource/disk) [<Icon icon="node-js" />](/typescript/setup/disk) | Local filesystem bridge |
@@ -26,7 +26,7 @@ No external setup, these run locally or against a connection string you already 
 
 ## Object Storage
 
-| Resource | Mount Mode | Setup | Docs | Notes |
+| Resource | Access | Setup | Docs | Notes |
 | --- | --- | --- | --- | --- |
 | S3 | read, write | [S3](/home/setup/s3) | [<Icon icon="python" />](/python/resource/s3) [<Icon icon="node-js" />](/typescript/setup/s3) [<Icon icon="globe" />](/typescript/setup/s3) | Common cloud object store |
 | R2 | read, write | [R2](/home/setup/r2) | [<Icon icon="python" />](/python/resource/r2) [<Icon icon="node-js" />](/typescript/setup/r2) [<Icon icon="globe" />](/typescript/setup/r2) | S3-style API |
@@ -50,17 +50,24 @@ No external setup, these run locally or against a connection string you already 
 
 ## Google Workspace
 
-| Resource | Mount Mode | Setup | Docs | Notes |
+| Resource | Access | Setup | Docs | Notes |
 | --- | --- | --- | --- | --- |
-| Gmail | read, partial write | [Google](/home/setup/google) | [<Icon icon="python" />](/python/resource/gmail) [<Icon icon="node-js" />](/typescript/setup/gmail) [<Icon icon="globe" />](/typescript/setup/gmail) | Mailbox access |
-| Drive | read, partial write | [Google](/home/setup/google) | [<Icon icon="python" />](/python/resource/gdrive) [<Icon icon="node-js" />](/typescript/setup/gdrive) [<Icon icon="globe" />](/typescript/setup/gdrive) | File tree and metadata |
-| Docs | read, partial write | [Google](/home/setup/google) | [<Icon icon="python" />](/python/resource/gdocs) [<Icon icon="node-js" />](/typescript/setup/gdocs) [<Icon icon="globe" />](/typescript/setup/gdocs) | Document content |
-| Sheets | read, partial write | [Google](/home/setup/google) | [<Icon icon="python" />](/python/resource/gsheets) [<Icon icon="node-js" />](/typescript/setup/gsheets) [<Icon icon="globe" />](/typescript/setup/gsheets) | Spreadsheet data |
-| Slides | read, partial write | [Google](/home/setup/google) | [<Icon icon="python" />](/python/resource/gslides) [<Icon icon="node-js" />](/typescript/setup/gslides) [<Icon icon="globe" />](/typescript/setup/gslides) | Presentation content |
+| Gmail | read, actions | [Google](/home/setup/google) | [<Icon icon="python" />](/python/resource/gmail) [<Icon icon="node-js" />](/typescript/setup/gmail) [<Icon icon="globe" />](/typescript/setup/gmail) | Read, send, reply, forward, and triage mail |
+| Drive | read, actions | [Google](/home/setup/google) | [<Icon icon="python" />](/python/resource/gdrive) [<Icon icon="node-js" />](/typescript/setup/gdrive) [<Icon icon="globe" />](/typescript/setup/gdrive) | File tree plus Google-native create/update commands |
+| Docs | read, actions | [Google](/home/setup/google) | [<Icon icon="python" />](/python/resource/gdocs) [<Icon icon="node-js" />](/typescript/setup/gdocs) [<Icon icon="globe" />](/typescript/setup/gdocs) | Read plus document create/update commands |
+| Sheets | read, actions | [Google](/home/setup/google) | [<Icon icon="python" />](/python/resource/gsheets) [<Icon icon="node-js" />](/typescript/setup/gsheets) [<Icon icon="globe" />](/typescript/setup/gsheets) | Read plus spreadsheet create/update commands |
+| Slides | read, actions | [Google](/home/setup/google) | [<Icon icon="python" />](/python/resource/gslides) [<Icon icon="node-js" />](/typescript/setup/gslides) [<Icon icon="globe" />](/typescript/setup/gslides) | Read plus presentation create/update commands |
+
+## Microsoft
+
+| Resource | Access | Setup | Docs | Notes |
+| --- | --- | --- | --- | --- |
+| OneDrive | read, write | [OneDrive](/home/setup/onedrive) | [<Icon icon="python" />](/python/resource/onedrive) | Files and folders through Microsoft Graph |
+| SharePoint | read, write | [SharePoint](/home/setup/sharepoint) | [<Icon icon="python" />](/python/resource/sharepoint) | Document libraries through Microsoft Graph |
 
 ## Cloud Files
 
-| Resource | Mount Mode | Setup | Docs | Notes |
+| Resource | Access | Setup | Docs | Notes |
 | --- | --- | --- | --- | --- |
 | Databricks Volume | read, write | [Databricks Volume](/home/setup/databricks) | [<Icon icon="python" />](/python/resource/databricks_volume) [<Icon icon="node-js" />](/typescript/setup/databricks_volume) | Unity Catalog volume subtree; mv/cp are non-atomic copies |
 | Dropbox | read | [Dropbox](/home/setup/dropbox) | [<Icon icon="node-js" />](/typescript/dropbox) [<Icon icon="globe" />](/typescript/dropbox) | OAuth2 + PKCE; Node and browser |
@@ -69,24 +76,24 @@ No external setup, these run locally or against a connection string you already 
 
 ## Code & DevOps
 
-| Resource | Mount Mode | Setup | Docs | Notes |
+| Resource | Access | Setup | Docs | Notes |
 | --- | --- | --- | --- | --- |
 | GitHub | read | [GitHub](/home/setup/github) | [<Icon icon="python" />](/python/resource/github) [<Icon icon="node-js" />](/typescript/setup/github) [<Icon icon="globe" />](/typescript/setup/github) | Repository browsing |
 | GitHub CI | read | [GitHub CI](/home/setup/github_ci) | [<Icon icon="python" />](/python/resource/github_ci) [<Icon icon="node-js" />](/typescript/setup/github_ci) [<Icon icon="globe" />](/typescript/setup/github_ci) | Runs, logs, artifacts |
-| Linear | read | [Linear](/home/setup/linear) | [<Icon icon="python" />](/python/resource/linear) [<Icon icon="node-js" />](/typescript/setup/linear) [<Icon icon="globe" />](/typescript/setup/linear) | Issues and projects |
+| Linear | read, actions | [Linear](/home/setup/linear) | [<Icon icon="python" />](/python/resource/linear) [<Icon icon="node-js" />](/typescript/setup/linear) [<Icon icon="globe" />](/typescript/setup/linear) | Read, create, update, comment on, and organize issues |
 | Langfuse | read | [Langfuse](/home/setup/langfuse) | [<Icon icon="python" />](/python/resource/langfuse) [<Icon icon="node-js" />](/typescript/setup/langfuse) [<Icon icon="globe" />](/typescript/setup/langfuse) | Trace exploration |
 
 ## Messaging
 
-| Resource | Mount Mode | Setup | Docs | Notes |
+| Resource | Access | Setup | Docs | Notes |
 | --- | --- | --- | --- | --- |
-| Slack | read | [Slack](/home/setup/slack) | [<Icon icon="python" />](/python/resource/slack) [<Icon icon="node-js" />](/typescript/slack) [<Icon icon="globe" />](/typescript/slack) | Channels, messages, files |
-| Discord | read | [Discord](/home/setup/discord) | [<Icon icon="python" />](/python/resource/discord) [<Icon icon="node-js" />](/typescript/discord) [<Icon icon="globe" />](/typescript/discord) | Guild and channel history |
-| Email | read, write | [Email](/home/setup/email) | [<Icon icon="python" />](/python/resource/email) [<Icon icon="node-js" />](/typescript/setup/email) | Mailbox workflows; browser blocked by raw TCP requirement |
+| Slack | read, actions | [Slack](/home/setup/slack) | [<Icon icon="python" />](/python/resource/slack) [<Icon icon="node-js" />](/typescript/slack) [<Icon icon="globe" />](/typescript/slack) | Read, post, reply, react, and search |
+| Discord | read, actions | [Discord](/home/setup/discord) | [<Icon icon="python" />](/python/resource/discord) [<Icon icon="node-js" />](/typescript/discord) [<Icon icon="globe" />](/typescript/discord) | Read history, send messages, and add reactions |
+| Email | read, actions | [Email](/home/setup/email) | [<Icon icon="python" />](/python/resource/email) [<Icon icon="node-js" />](/typescript/setup/email) | Read, send, reply, forward, and triage; browser blocked by raw TCP |
 
 ## Database
 
-| Resource | Mount Mode | Setup | Docs | Notes |
+| Resource | Access | Setup | Docs | Notes |
 | --- | --- | --- | --- | --- |
 | MongoDB | read | [MongoDB](/home/setup/mongodb) | [<Icon icon="python" />](/python/resource/mongodb) [<Icon icon="node-js" />](/typescript/setup/mongodb) [<Icon icon="globe" />](/typescript/setup/mongodb) | Collection-backed views |
 | Postgres | read | [Postgres](/home/setup/postgres) | [<Icon icon="python" />](/python/resource/postgres) [<Icon icon="node-js" />](/typescript/setup/postgres) [<Icon icon="globe" />](/typescript/setup/postgres) | SQL tables exposed as paths |
@@ -95,22 +102,22 @@ No external setup, these run locally or against a connection string you already 
 
 ## Knowledge
 
-| Resource | Mount Mode | Setup | Docs | Notes |
+| Resource | Access | Setup | Docs | Notes |
 | --- | --- | --- | --- | --- |
 | Dify | read | [Dify](/home/setup/dify) | [<Icon icon="python" />](/python/resource/dify) | Knowledge documents and retrieval search |
 | Chroma | read | [Chroma](/home/setup/chroma) | [<Icon icon="python" />](/python/resource/chroma) [<Icon icon="node-js" />](/typescript/setup/chroma) | ChromaDB collection exposed as files and vector search |
 
 ## Notes
 
-| Resource | Mount Mode | Setup | Docs | Notes |
+| Resource | Access | Setup | Docs | Notes |
 | --- | --- | --- | --- | --- |
-| Notion | read, write | [Notion](/home/setup/notion) | [<Icon icon="python" />](/python/resource/notion) [<Icon icon="node-js" />](/typescript/setup/notion) [<Icon icon="globe" />](/typescript/setup/notion) | Pages and blocks |
+| Notion | read, actions | [Notion](/home/setup/notion) | [<Icon icon="python" />](/python/resource/notion) [<Icon icon="node-js" />](/typescript/setup/notion) [<Icon icon="globe" />](/typescript/setup/notion) | Read pages; create pages, append blocks, and add comments |
 
 ## Others
 
-| Resource | Mount Mode | Setup | Docs | Notes |
+| Resource | Access | Setup | Docs | Notes |
 | --- | --- | --- | --- | --- |
-| Trello | read | [Trello](/home/setup/trello) | [<Icon icon="python" />](/python/resource/trello) [<Icon icon="node-js" />](/typescript/setup/trello) [<Icon icon="globe" />](/typescript/setup/trello) | Boards and cards |
+| Trello | read, actions | [Trello](/home/setup/trello) | [<Icon icon="python" />](/python/resource/trello) [<Icon icon="node-js" />](/typescript/setup/trello) [<Icon icon="globe" />](/typescript/setup/trello) | Read, create, update, move, label, and comment on cards |
 
 ## Agent Frameworks
 
@@ -120,7 +127,7 @@ Mirage drops into the major agent application frameworks. Each adapter exposes a
 | --- | --- | --- |
 | OpenAI Agents SDK | [<Icon icon="python" />](/python/agents/openai-agents) [<Icon icon="node-js" />](/typescript/agents/openai) [<Icon icon="globe" />](/typescript/agents/openai) | `MirageShell` and `MirageEditor` plug into `shellTool` and `applyPatchTool`. |
 | Vercel AI SDK | [<Icon icon="node-js" />](/typescript/agents/vercel) [<Icon icon="globe" />](/typescript/agents/vercel) | `mirageTools()` returns five typed tools for `generateText` / `streamText`. |
-| LangChain (deepagents) | [<Icon icon="python" />](/python/agents/langchain) [<Icon icon="node-js" />](/typescript/agents/langchain) | `LangchainWorkspace` backend for deepagents. Node only. |
+| LangChain (deepagents) | [<Icon icon="python" />](/python/agents/langchain) [<Icon icon="node-js" />](/typescript/agents/langchain) | `LangchainWorkspace` backend for Python and Node deepagents. |
 | Pi Coding Agent | [<Icon icon="node-js" />](/typescript/agents/pi) | Mirage extension for `@mariozechner/pi-coding-agent`. Node only. |
 | Mastra | [<Icon icon="node-js" />](/typescript/agents/mastra) | `mirageTools()` for Mastra `Agent` definitions. Node only. |
 | Pydantic AI | [<Icon icon="python" />](/python/agents/pydantic-ai) | For pydantic-ai and pydantic-deepagents. |

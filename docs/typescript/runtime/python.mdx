@@ -72,4 +72,23 @@ runtime:
 mounts:
   /data:
     resource: ram
+    command_safeguards:
+      python3:
+        timeout_seconds: 30
 ```
+
+## Resource limits
+
+`python3` is a command like any other: the same `command_safeguards`
+blocks that guard `cat` or `grep` guard it, enforced at the same
+central point. A run that exceeds `timeout_seconds` answers with exit
+124 and `python3: timed out after Ns` on stderr, exactly like any
+other command; `max_bytes` and `max_lines` cap its output the same
+way. There is no python3-specific limit surface.
+
+One caveat: the guard bounds how long a run may *answer*, not the
+interpreter itself. A run that ignores the deadline keeps its
+interpreter busy in the background until it finishes (monty runs on a
+crash-isolated worker; pyodide shares the event loop, so prefer monty
+for untrusted code). Give untrusted code a finite workload, or run it
+behind a sandboxed deployment.

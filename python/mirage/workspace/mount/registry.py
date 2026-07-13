@@ -224,7 +224,7 @@ class MountRegistry:
         for m in self._mounts:
             if m.prefix == DEV_PREFIX:
                 continue
-            if m.mode == MountMode.EXEC:
+            if m.effective_mode() == MountMode.EXEC:
                 return True
         return False
 

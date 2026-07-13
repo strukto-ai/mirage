@@ -16,7 +16,7 @@ import asyncio
 import builtins
 import logging
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable, Mapping
 from functools import partial
 from typing import Any
 
@@ -49,7 +49,7 @@ from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
 from mirage.types import (DEFAULT_AGENT_ID, DEFAULT_SESSION_ID,
                           ConsistencyPolicy, DriftPolicy, FileStat, MountMode,
-                          PathSpec, StateKey)
+                          PathSpec, StateKey, mount_role)
 from mirage.utils.errors import format_fs_error
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.dispatcher import Dispatcher
@@ -154,7 +154,8 @@ class Workspace:
             if mount_fuse:
                 fuse_targets.append((prefix, mount_fuse))
 
-        if self._registry.root_mount is None:
+        self._implicit_root = self._registry.root_mount is None
+        if self._implicit_root:
             self._registry.mount("/", RAMResource(), mode)
 
         self._fuse_mountpoints: dict[str, str] = {}
@@ -527,29 +528,51 @@ class Workspace:
     # ── session lifecycle ──────────────────────────────────────────────────
 
     def create_session(
-            self,
-            session_id: str,
-            allowed_mounts: frozenset[str] | None = None) -> Session:
-        if allowed_mounts is not None:
-            normalized = {("/" + m.strip("/")) for m in allowed_mounts}
-            normalized.update(self._infrastructure_mount_prefixes())
-            allowed_mounts = frozenset(normalized)
-        return self._session_mgr.create(session_id,
-                                        allowed_mounts=allowed_mounts)
+        self,
+        session_id: str,
+        mounts: Mapping[str, MountMode | str] | Iterable[str] | None = None,
+    ) -> Session:
+        """Create a session, optionally restricted to per-mount roles.
+
+        Args:
+            session_id (str): unique id for the session.
+            mounts (Mapping[str, MountMode | str] | Iterable[str] | None):
+                per-mount grants. A mapping assigns each prefix a role
+                ceiling ("read", "write", "exec", or the filesystem
+                aliases "r", "rw", "rwx"); a plain iterable of
+                prefixes grants each mount its own configured mode (the
+                previous allowlist behavior). ``None`` leaves the
+                session unrestricted.
+        """
+        grants: dict[str, MountMode] | None = None
+        if mounts is not None:
+            if isinstance(mounts, str):
+                mounts = [mounts]
+            if isinstance(mounts, Mapping):
+                grants = {
+                    ("/" + p.strip("/")): mount_role(m)
+                    for p, m in mounts.items()
+                }
+            else:
+                grants = {("/" + p.strip("/")): MountMode.EXEC for p in mounts}
+            for prefix in self._infrastructure_mount_prefixes():
+                grants.setdefault(prefix, MountMode.EXEC)
+        return self._session_mgr.create(session_id, mount_grants=grants)
 
     def _infrastructure_mount_prefixes(self) -> set[str]:
         """Mount prefixes a session is always allowed to touch.
 
-        The virtual root (where text-processing commands like ``wc``
-        without a path argument resolve), the device mount, and the
-        history view are infrastructure: they hold no user
+        The implicit scratch root (where text-processing commands like
+        ``wc`` without a path argument resolve), the device mount, and
+        the history view are infrastructure: they hold no user
         credentials, and rejecting them would break common shell
-        idioms or the history builtin.
+        idioms or the history builtin. A user-defined root mount is
+        NOT infrastructure; sessions must be granted ``/`` explicitly
+        to touch it.
         """
         prefixes = {"/dev", HISTORY_PREFIX}
-        root_mount = self._registry.root_mount
-        if root_mount is not None:
-            prefixes.add("/" + root_mount.prefix.strip("/"))
+        if self._implicit_root:
+            prefixes.add("/")
         return prefixes
 
     def get_session(self, session_id: str) -> Session:

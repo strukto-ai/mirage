@@ -20,11 +20,11 @@ from typing import Any
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.resolve import COMPOUND_EXTENSIONS
+from mirage.context import assert_mount_allowed, effective_mount_mode
 from mirage.observe import OpRecord
 from mirage.observe.context import push_mount_prefix
 from mirage.ops.config import OpsMount
 from mirage.ops.registry import OpsRegistry, RegisteredOp
-from mirage.runtime import assert_mount_allowed
 from mirage.types import FileStat, MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -142,7 +142,8 @@ class Ops:
         resource_type, rel_path, accessor, index, mode = self._resolve(path)
         mount_prefix = self._mount_prefix(path)
         assert_mount_allowed(mount_prefix)
-        if write and mode == MountMode.READ:
+        if write and effective_mount_mode(mount_prefix,
+                                          mode) == MountMode.READ:
             raise PermissionError(f"mount at {path!r} is read-only")
         prev_prefix = push_mount_prefix(mount_prefix)
         filetype = self._get_filetype(rel_path)
@@ -237,9 +238,10 @@ class Ops:
         """
         start = int(time.monotonic() * 1000)
         resource_type, _, accessor, _, mode = self._resolve(src)
-        if mode == MountMode.READ:
-            raise PermissionError(f"mount at {src!r} is read-only")
         mount_prefix = self._mount_prefix(src)
+        assert_mount_allowed(mount_prefix)
+        if effective_mount_mode(mount_prefix, mode) == MountMode.READ:
+            raise PermissionError(f"mount at {src!r} is read-only")
         src_scope = PathSpec(
             virtual=src,
             directory=src.rsplit("/", 1)[0] or "/",

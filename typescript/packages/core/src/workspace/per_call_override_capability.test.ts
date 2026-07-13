@@ -16,17 +16,17 @@ import { describe, expect, it } from 'vitest'
 import { makeWorkspace, stdoutStr } from './fixtures/workspace_fixture.ts'
 
 // `Workspace.execute({cwd, env})` constructs a new Session via
-// `targetSession.fork({...})`. fork() must propagate allowedMounts so
+// `targetSession.fork({...})`. fork() must propagate mountGrants so
 // the per-call override session cannot bypass the parent's allowlist.
-// Without fork() (or without manually copying allowedMounts in the old
+// Without fork() (or without manually copying mountGrants in the old
 // inline `new Session({...})` ctor) this test would fail because the
-// override session would have allowedMounts === null and assertMountAllowed
-// would short-circuit on the `if (sess?.allowedMounts == null) return`
-// branch in runtime/session_context.ts.
-describe('per-call cwd/env override preserves allowedMounts', () => {
+// override session would have mountGrants === null and assertMountAllowed
+// would short-circuit on the `if (sess?.mountGrants == null) return`
+// branch in context/session_context.ts.
+describe('per-call cwd/env override preserves mountGrants', () => {
   it('execute({cwd}) on a restricted session still rejects out-of-allowlist mounts', async () => {
     const { ws } = await makeWorkspace()
-    ws.createSession('restricted', { allowedMounts: new Set(['/disk']) })
+    ws.createSession('restricted', { mounts: ['/disk'] })
     const io = await ws.execute('cat /ram/notes.txt', {
       sessionId: 'restricted',
       cwd: '/disk',
@@ -38,7 +38,7 @@ describe('per-call cwd/env override preserves allowedMounts', () => {
 
   it('execute({env}) on a restricted session still rejects out-of-allowlist mounts', async () => {
     const { ws } = await makeWorkspace()
-    ws.createSession('restricted', { allowedMounts: new Set(['/disk']) })
+    ws.createSession('restricted', { mounts: ['/disk'] })
     const io = await ws.execute('cat /ram/notes.txt', {
       sessionId: 'restricted',
       env: { EXTRA: '1' },
@@ -50,7 +50,7 @@ describe('per-call cwd/env override preserves allowedMounts', () => {
 
   it('execute({cwd}) on a restricted session can still reach allowed mounts', async () => {
     const { ws } = await makeWorkspace()
-    ws.createSession('restricted', { allowedMounts: new Set(['/disk']) })
+    ws.createSession('restricted', { mounts: ['/disk'] })
     const io = await ws.execute('cat /disk/readme.txt', {
       sessionId: 'restricted',
       cwd: '/disk',

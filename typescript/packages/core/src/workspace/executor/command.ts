@@ -21,7 +21,7 @@ import type { CommandSpec } from '../../commands/spec/types.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
-import { assertMountAllowed, MountNotAllowedError } from '../../runtime/session_context.ts'
+import { assertMountAllowed, MountNotAllowedError } from '../../context/session_context.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/types.ts'
@@ -44,7 +44,7 @@ import {
   findExprTail,
   parseFindExpression,
 } from '../../commands/builtin/findParse.ts'
-import { maybeWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
+import { CommandTimeoutError, maybeWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
 import { resolveAcrossMounts, resolveSafeguard } from '../../commands/safeguard.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
 import { handleJobs, handleKill, handlePs, handleWait } from './jobs.ts'
@@ -198,6 +198,9 @@ async function runOnMount(
         }),
       ]
     }
+    // A safeguard timeout is not a filesystem failure: let it reach the
+    // workspace-level handler that answers with exit 124.
+    if (err instanceof CommandTimeoutError) throw err
     return [null, new IOResult({ exitCode: 1, stderr: formatFsError(cmdName, err, paths) })]
   }
 }

@@ -1,0 +1,39 @@
+=== grants:seed_data ===
+failed=False
+=== grants:seed_side ===
+failed=False
+=== grants:reader_cat ===
+hello
+failed=False
+=== grants:reader_rm_denied ===
+rm: read-only mount at /data/
+failed=True
+=== grants:reader_redirect_denied ===
+failed=True
+=== grants:reader_no_partial_write ===
+a.txt
+failed=False
+=== grants:reader_side_denied ===
+cat: session 'reader' not allowed to access mount '/side'
+failed=True
+=== grants:writer_write ===
+w
+failed=False
+=== grants:lister_inherits_write ===
+l
+failed=False
+=== grants:widen_attempt_denied ===
+failed=True
+=== grants:reader_pathless_wc ===
+1
+failed=False
+=== root:root_seed ===
+failed=False
+=== root:root_ungranted_denied ===
+cat: session 'no_root' not allowed to access mount '/'
+failed=True
+=== root:root_read_grant ===
+top
+failed=False
+=== root:root_write_denied ===
+failed=True

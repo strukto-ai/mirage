@@ -7,3 +7,6 @@ data_mode_is_write=yes
 logs_mode_is_read=yes
 singular_raises_multi=yes
 collision_rejected=yes
+api_stat_preopen_ok=yes
+api_cat={"messages": 2}
+api_size_postread=16

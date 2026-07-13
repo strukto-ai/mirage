@@ -16,7 +16,10 @@ import os
 from mirage import MountMode, Workspace
 from mirage.resource.slack import SlackConfig, SlackResource
 
-config = SlackConfig(token=os.environ["SLACK_BOT_TOKEN"])
+config = SlackConfig(
+    token=os.environ["SLACK_BOT_TOKEN"],
+    search_token=os.environ.get("SLACK_USER_TOKEN"),
+)
 resource = SlackResource(config=config)
 ws = Workspace({"/slack": resource}, mode=MountMode.READ)
 ```
@@ -120,7 +123,10 @@ from mirage.resource.slack import SlackConfig, SlackResource
 
 load_dotenv(".env.development")
 
-config = SlackConfig(token=os.environ["SLACK_BOT_TOKEN"])
+config = SlackConfig(
+    token=os.environ["SLACK_BOT_TOKEN"],
+    search_token=os.environ.get("SLACK_USER_TOKEN"),
+)
 resource = SlackResource(config=config)
 
 
@@ -319,6 +325,9 @@ filenames under `/slack/users/` (e.g., `alice__U04K21SEVR9.json`).
 ### `slack-search`
 
 Search messages across the workspace.
+
+This command requires `search_token`, a Slack User OAuth Token (`xoxp-...`)
+with the `search:read` scope. Bot tokens cannot call `search.messages`.
 
 ```bash
 slack-search --query "incident report"

@@ -1,0 +1,59 @@
+---
+title: Support Matrix
+icon: table
+description: Which OS and SDK combinations support MIRAGE FUSE mounts, and how well.
+---
+
+FUSE mode exposes a mount as a real OS directory so any tool (editors,
+sandbox runtimes, plain `cat`) can read it, not just MIRAGE commands. OS
+support depends on the SDK's FUSE binding: Python uses
+[mfusepy](https://github.com/mxmlnkn/mfusepy) (ctypes over libfuse), Node
+uses [@zkochan/fuse-native](https://www.npmjs.com/package/@zkochan/fuse-native)
+(a native addon), and browsers cannot mount filesystems at all.
+
+## Matrix
+
+| OS | Python | TypeScript (Node) | Notes |
+| --- | --- | --- | --- |
+| Linux | ✅ supported, CI-gated | ✅ supported, CI-gated | `fuse3`; multiple mounts per process |
+| macOS | ✅ supported | ✅ supported | macFUSE kernel extension; **one mount per process** |
+| Windows | 🧪 experimental | ❌ not supported | Python via [WinFsp](/home/setup/windows); advisory CI job passes |
+| Browser | ❌ | ❌ | no kernel; use the virtual executor instead |
+
+Per-OS install guides: [macOS](/home/setup/macos), [Linux](/home/setup/linux),
+[Windows](/home/setup/windows). SDK wiring:
+[Python FUSE setup](/python/setup/fuse),
+[TypeScript FUSE setup](/typescript/setup/fuse).
+
+## What the labels mean
+
+- **Supported, CI-gated (Linux).** The FUSE integration battery (both SDKs,
+  real kernel mounts, including size-unknown API files) runs on every change
+  and gates merges.
+- **Supported (macOS).** Same code paths, verified on real macFUSE kext
+  mounts; hosted CI runners cannot approve kernel extensions, so macOS
+  coverage is local rather than gated. Remember the one-mount-per-process
+  limit.
+- **Experimental (Windows, Python only).** The full battery passes over
+  WinFsp in an advisory CI job (not merge-gating). Windows conventions
+  (unmount at process exit, mount-level ownership, stat-opens-a-handle) are
+  documented on the [Windows page](/home/setup/windows). Write-heavy flows
+  and symlinks are not yet exercised there.
+- **Not supported (Windows, TypeScript).** `@zkochan/fuse-native` only
+  targets macOS and Linux; its legacy Windows path builds against the
+  unmaintained Dokany-based `fuse-shared-library-win32` rather than WinFsp.
+
+## Platform quirks at a glance
+
+| Quirk | Linux | macOS | Windows |
+| --- | --- | --- | --- |
+| Mounts per process | many | **one** (Python and Node) | many |
+| Unmount | `fusermount -u` / `ws.close()` | `diskutil unmount` / `ws.close()` | at process exit only |
+| Size-unknown files pre-open | stat 0 | stat 0 | stat fetches, shows real size |
+| Mountpoint directory | must exist | must exist | must **not** exist (auto-created) |
+
+The size-unknown semantics themselves (stat 0 until open, full content on
+read, real size after open) are identical across SDKs; see
+[Python](/python/setup/fuse#size-semantics-for-api-backed-files) or
+[TypeScript](/typescript/limitations#3-size-unknown-api-files-stat-as-0-bytes-until-first-open)
+for the per-tool table.
