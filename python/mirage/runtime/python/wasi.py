@@ -35,8 +35,9 @@ _BUILD_HINT = (
     "the wasi runtime needs a CPython WASI build directory (python.wasm "
     "plus lib/): download one from "
     "https://github.com/brettcannon/cpython-wasi-build/releases, unzip it, "
-    f"and point the {WASI_PYTHON_ENV} environment variable (or the "
-    "runtime's python_wasm argument) at the directory")
+    "and point the yaml `runtime: wasi_python:` key, the Workspace "
+    f"`wasi_python` argument, or the {WASI_PYTHON_ENV} environment "
+    "variable at the directory")
 
 
 def _epoch_engine() -> "wasmtime.Engine":
@@ -61,25 +62,26 @@ class WasiRuntime(PythonRuntime):
     bumps the epoch, which traps the guest and reclaims the thread, so a
     safeguard timeout stops the interpreter instead of leaking it.
 
-    The build directory comes from the `python_wasm` argument or the
+    The build directory comes from the `wasi_python` argument (the
+    yaml `runtime: wasi_python:` key ends up here) or the
     MIRAGE_WASI_PYTHON environment variable. CPython requires the
     preopen to be rights-complete, so the directory is mounted
     read-write into the guest; make it read-only on the host filesystem
     to keep runs from persisting files into the bundle.
 
     Args:
-        python_wasm (str | None): path to the unzipped CPython WASI
+        wasi_python (str | None): path to the unzipped CPython WASI
             build directory. None reads MIRAGE_WASI_PYTHON.
     """
 
     name = "wasi"
 
-    def __init__(self, python_wasm: str | None = None) -> None:
+    def __init__(self, wasi_python: str | None = None) -> None:
         if wasmtime is None:
             raise ImportError(
                 "the wasi runtime requires the 'wasi' extra. Install with: "
                 "pip install mirage-ai[wasi], or select another runtime")
-        root = python_wasm or os.environ.get(WASI_PYTHON_ENV)
+        root = wasi_python or os.environ.get(WASI_PYTHON_ENV)
         if not root:
             raise FileNotFoundError(_BUILD_HINT)
         self._root = Path(root)

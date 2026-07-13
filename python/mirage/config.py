@@ -160,6 +160,9 @@ class RuntimeBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     python: str = DEFAULT_PYTHON_RUNTIME
+    # CPython WASI build directory for the `wasi` runtime; falls back to
+    # the MIRAGE_WASI_PYTHON environment variable when unset.
+    wasi_python: str | None = None
 
     @field_validator("python")
     @classmethod
@@ -218,6 +221,8 @@ class WorkspaceConfig(BaseModel):
             kwargs["index"] = _build_index_config(self.index)
         if self.runtime is not None:
             kwargs["python_runtime"] = self.runtime.python
+            if self.runtime.wasi_python is not None:
+                kwargs["wasi_python"] = self.runtime.wasi_python
         return kwargs
 
     def fuse_mounts(self) -> dict[str, bool | str]:

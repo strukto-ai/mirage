@@ -84,19 +84,29 @@ still work (`python3 /data/script.py` reads the script through the
 workspace before the run), but file I/O *inside* the code cannot reach
 mounts; use `monty` for that.
 
-It needs the `wasi` extra plus a CPython WASI build:
+It needs the `wasi` extra plus a CPython WASI build (download and
+unzip a release from
+[cpython-wasi-build](https://github.com/brettcannon/cpython-wasi-build/releases)):
 
 ```bash
 pip install mirage-ai[wasi]
-# download and unzip a release from
-# https://github.com/brettcannon/cpython-wasi-build/releases
-export MIRAGE_WASI_PYTHON=/path/to/unzipped/build
 ```
+
+Point mirage at the build directory with the `wasi_python` argument, the
+yaml `runtime: wasi_python:` key, or the MIRAGE_WASI_PYTHON environment
+variable:
 
 ```python
 ws = Workspace({"/data": RAMResource()},
                mode=MountMode.EXEC,
-               python_runtime="wasi")
+               python_runtime="wasi",
+               wasi_python="/path/to/unzipped/build")
+```
+
+```yaml
+runtime:
+  python: wasi
+  wasi_python: /path/to/unzipped/build
 ```
 
 The first run compiles `python.wasm` (a few hundred milliseconds) and

@@ -91,6 +91,7 @@ class Workspace:
         agent_id: str = DEFAULT_AGENT_ID,
         observe: ObserverStore | None = None,
         python_runtime: str | None = None,
+        wasi_python: str | None = None,
     ) -> None:
         self._registry = MountRegistry()
         if isinstance(cache, RedisCacheConfig):
@@ -177,7 +178,7 @@ class Workspace:
         # per invocation. An explicitly requested runtime still fails loud.
         try:
             self._python_runtime = select_python_runtime(
-                python_runtime, self.dispatch)
+                python_runtime, self.dispatch, wasi_python=wasi_python)
         except ImportError:
             if python_runtime is not None:
                 raise

@@ -44,6 +44,35 @@ def test_select_wasi_without_build_fails_loud(monkeypatch):
         select_python_runtime("wasi")
 
 
+def test_select_wasi_explicit_path_beats_env(monkeypatch, tmp_path):
+    monkeypatch.delenv(WASI_PYTHON_ENV, raising=False)
+    (tmp_path / "python.wasm").write_bytes(b"\0asm")
+    (tmp_path / "lib" / "python3.14").mkdir(parents=True)
+    rt = select_python_runtime("wasi", wasi_python=str(tmp_path))
+    assert isinstance(rt, WasiRuntime)
+
+
+def test_config_threads_wasi_python(monkeypatch, tmp_path):
+    from mirage.config import WorkspaceConfig
+    monkeypatch.delenv(WASI_PYTHON_ENV, raising=False)
+    (tmp_path / "python.wasm").write_bytes(b"\0asm")
+    (tmp_path / "lib" / "python3.14").mkdir(parents=True)
+    cfg = WorkspaceConfig.model_validate({
+        "mounts": {
+            "/r": {
+                "resource": "ram"
+            }
+        },
+        "runtime": {
+            "python": "wasi",
+            "wasi_python": str(tmp_path)
+        },
+    })
+    kwargs = cfg.to_workspace_kwargs()
+    assert kwargs["python_runtime"] == "wasi"
+    assert kwargs["wasi_python"] == str(tmp_path)
+
+
 def test_unknown_name_raises():
     with pytest.raises(ValueError, match="unknown python runtime"):
         select_python_runtime("docker")

@@ -69,6 +69,14 @@ describe('configToWorkspaceArgs', () => {
     await expect(configToWorkspaceArgs(bad)).rejects.toThrow(/invalid mount mode/)
   })
 
+  it('rejects the Python-only wasi_python runtime key', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      runtime: { python: 'pyodide', wasi_python: '/opt/wasi-build' },
+    })
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/Python-only/)
+  })
+
   it('builds a redis index config from an index block', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { resource: 'ram' } },

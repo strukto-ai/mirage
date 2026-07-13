@@ -46,7 +46,8 @@ def validate_python_runtime_name(name: str) -> str:
 
 
 def select_python_runtime(name: str | None,
-                          dispatch: Callable | None = None) -> PythonRuntime:
+                          dispatch: Callable | None = None,
+                          wasi_python: str | None = None) -> PythonRuntime:
     """Build the Python runtime for a workspace.
 
     Args:
@@ -54,6 +55,9 @@ def select_python_runtime(name: str | None,
         dispatch (Callable | None): workspace dispatch the sandboxed
             runtime bridges file I/O through. Ignored by `wasi` and
             `local`, which never see workspace mounts.
+        wasi_python (str | None): CPython WASI build directory for the
+            `wasi` runtime; None falls back to MIRAGE_WASI_PYTHON.
+            Ignored by the other runtimes.
 
     Raises:
         ValueError: unknown runtime name.
@@ -62,5 +66,5 @@ def select_python_runtime(name: str | None,
     if resolved == MontyRuntime.name:
         return MontyRuntime(dispatch)
     if resolved == WasiRuntime.name:
-        return WasiRuntime()
+        return WasiRuntime(wasi_python=wasi_python)
     return LocalRuntime()

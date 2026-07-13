@@ -44,13 +44,13 @@ def test_missing_build_dir_raises_hint(monkeypatch):
 
 def test_dir_without_wasm_raises_hint(tmp_path):
     with pytest.raises(FileNotFoundError, match="no python.wasm"):
-        WasiRuntime(python_wasm=str(tmp_path))
+        WasiRuntime(wasi_python=str(tmp_path))
 
 
 def test_dir_without_stdlib_raises_hint(tmp_path):
     (tmp_path / "python.wasm").write_bytes(b"\0asm")
     with pytest.raises(FileNotFoundError, match="no lib/python3"):
-        WasiRuntime(python_wasm=str(tmp_path))
+        WasiRuntime(wasi_python=str(tmp_path))
 
 
 @live

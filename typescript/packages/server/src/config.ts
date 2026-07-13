@@ -106,6 +106,7 @@ function normalizeConfigKeys(raw: Record<string, unknown>): Record<string, unkno
   const out = camelizeKeys(raw)
   if (isPlainObject(out.cache)) out.cache = camelizeKeys(out.cache)
   if (isPlainObject(out.index)) out.index = camelizeKeys(out.index)
+  if (isPlainObject(out.runtime)) out.runtime = camelizeKeys(out.runtime)
   return out
 }
 
@@ -207,6 +208,7 @@ interface RedisIndexBlock {
 
 interface RuntimeBlock {
   python?: string
+  wasiPython?: string
 }
 
 export interface WorkspaceConfigRaw {
@@ -309,6 +311,12 @@ function buildIndex(
 }
 
 export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<WorkspaceArgs> {
+  if (cfg.runtime?.wasiPython !== undefined) {
+    throw new Error(
+      "runtime key 'wasi_python' is Python-only (it locates the CPython WASI build " +
+        "for the 'wasi' runtime); TypeScript supports 'pyodide' (default) and 'monty'",
+    )
+  }
   const wsMode = coerceMountMode(cfg.mode, MountMode.WRITE)
   const consistency = coerceConsistency(cfg.consistency)
   const resources: Record<string, [Resource, MountMode, Record<string, CommandSafeguard>]> = {}
