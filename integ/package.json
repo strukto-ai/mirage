@@ -18,7 +18,8 @@
     "chroma": "tsx chroma.ts",
     "lancedb": "tsx lancedb.ts",
     "qdrant": "tsx qdrant.ts",
-    "ssh": "tsx ssh.ts"
+    "ssh": "tsx ssh.ts",
+    "runtime": "tsx runtime.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.0.0",
@@ -31,7 +32,8 @@
     "@struktoai/mirage-node": "workspace:*",
     "mongodb": "^6.0.0",
     "pg": "^8.0.0",
-    "ssh2": "^1.16.0"
+    "ssh2": "^1.16.0",
+    "@pydantic/monty": "0.0.19-beta.4"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

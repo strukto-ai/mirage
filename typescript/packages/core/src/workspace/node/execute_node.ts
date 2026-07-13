@@ -34,7 +34,7 @@ import {
   getUnsetNames,
   getWhileParts,
 } from '../../shell/helpers.ts'
-import type { PyodideRuntime } from '../executor/python/runtime.ts'
+import type { PythonRuntime } from '../executor/python/runtimes/interface.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { ERREXIT_EXEMPT_TYPES, NodeType as NT } from '../../shell/types.ts'
 import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
@@ -84,7 +84,7 @@ export interface ExecuteNodeDeps {
   registerCloser: (fn: () => Promise<void>) => void
   ensureOpen?: (resource: Resource) => Promise<void>
   unmount?: (prefix: string) => Promise<void>
-  pythonRuntime?: PyodideRuntime
+  pythonRuntime?: PythonRuntime
   signal?: AbortSignal
 }
 

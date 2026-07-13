@@ -171,6 +171,74 @@ jobs:
           print(f"OK: imported ${{ matrix.module }} cleanly without ${{ matrix.blocked }}")
           PY
 
+  runtime-no-monty:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install base package without the monty extra
+        working-directory: python
+        run: |
+          uv venv .venv-nomonty
+          uv pip install --python .venv-nomonty/bin/python .
+
+      - name: Verify pydantic-monty is absent
+        working-directory: python
+        run: |
+          if .venv-nomonty/bin/python -c "import pydantic_monty" 2>/dev/null; then
+            echo "FAIL: pydantic_monty should not be installed"
+            exit 1
+          fi
+          echo "OK: pydantic_monty is absent"
+
+      - name: python3 degrades with an install hint; local runtime still works
+        working-directory: python
+        run: |
+          .venv-nomonty/bin/python - <<'PY'
+          import asyncio
+
+          from mirage.resource.ram import RAMResource
+          from mirage.types import MountMode
+          from mirage.workspace import Workspace
+
+
+          async def main():
+              ws = Workspace({"/data": RAMResource()}, mode=MountMode.EXEC)
+              io = await ws.execute("python3 -c 'print(1)'")
+              assert io.exit_code == 127, io.exit_code
+              assert b"monty' extra" in io.stderr, io.stderr
+              ws2 = Workspace({"/data": RAMResource()},
+                              mode=MountMode.EXEC,
+                              python_runtime="local")
+              io2 = await ws2.execute("python3 -c 'print(41 + 1)'")
+              assert io2.exit_code == 0, io2.stderr
+              assert io2.stdout.strip() == b"42", io2.stdout
+              try:
+                  Workspace({"/d": RAMResource()}, python_runtime="monty")
+              except ImportError:
+                  pass
+              else:
+                  raise AssertionError("explicit monty must fail loud")
+              await ws.close()
+              await ws2.close()
+
+
+          asyncio.run(main())
+          print("OK: no-monty degradation verified")
+          PY
+
   audit:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
@@ -196,7 +264,7 @@ jobs:
   gate:
     name: test-python-gate
     runs-on: ubuntu-latest
-    needs: [changes, test, import-isolation]
+    needs: [changes, test, import-isolation, runtime-no-monty]
     if: always()
     steps:
       - name: Check required jobs

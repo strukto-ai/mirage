@@ -15,6 +15,7 @@
 import asyncio
 
 from mirage.resource.ram import RAMResource
+from mirage.runtime.python import select_python_runtime
 from mirage.types import DEFAULT_SESSION_ID, MountMode
 from mirage.workspace import Workspace
 
@@ -1388,7 +1389,10 @@ def test_python3_c_multiline():
 
 
 def test_python3_c_with_stdin():
+    # sys.stdin is a host feature: monty has no stdin, so piping into
+    # python3 is a local-runtime capability.
     ws = _ws()
+    ws._registry.python_runtime = select_python_runtime("local")
     io = _exec(
         ws, 'echo hello | python3 -c "import sys; '
         'print(sys.stdin.read().strip().upper())"')
@@ -1437,6 +1441,8 @@ def test_python3_no_args():
 def test_python3_c_with_argv():
     """python3 -c "code" arg1 arg2 → arg1/arg2 reach sys.argv as bare text."""
     ws = _ws()
+    # sys.argv is a host feature; monty exposes `argv` instead.
+    ws._registry.python_runtime = select_python_runtime("local")
     io = _exec(ws, 'python3 -c "import sys; print(sys.argv[1:])" alpha beta')
     assert io.exit_code == 0
     assert _stdout(io) == b"['alpha', 'beta']\n"
@@ -1445,6 +1451,8 @@ def test_python3_c_with_argv():
 def test_python3_c_with_abs_path_argv():
     """python3 -c "code" /abs/path → abs path stays text argv (not script)."""
     ws = _ws()
+    # sys.argv is a host feature; monty exposes `argv` instead.
+    ws._registry.python_runtime = select_python_runtime("local")
     io = _exec(ws,
                'python3 -c "import sys; print(sys.argv[1:])" /disk/some_file')
     assert io.exit_code == 0
@@ -1454,6 +1462,8 @@ def test_python3_c_with_abs_path_argv():
 def test_python3_script_with_argv():
     """python3 /abs/script.py arg1 arg2 → script reads, argv passed through."""
     ws = _ws()
+    # sys.argv is a host feature; monty exposes `argv` instead.
+    ws._registry.python_runtime = select_python_runtime("local")
     _exec(ws, "echo 'import sys; print(sys.argv[1:])' > /disk/argv.py")
     io = _exec(ws, "python3 /disk/argv.py alpha beta")
     assert io.exit_code == 0
@@ -1472,6 +1482,8 @@ def test_python3_bare_name_script_via_cwd():
 def test_python3_bare_name_script_with_argv():
     """python3 script.py one two (bare + argv) → cwd-resolved + argv passes."""
     ws = _ws()
+    # sys.argv is a host feature; monty exposes `argv` instead.
+    ws._registry.python_runtime = select_python_runtime("local")
     _exec(ws, "echo 'import sys; print(sys.argv[1:])' > /disk/with_argv.py")
     io = _exec(ws, "cd /disk && python3 with_argv.py one two")
     assert io.exit_code == 0

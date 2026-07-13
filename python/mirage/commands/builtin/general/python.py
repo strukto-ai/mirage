@@ -12,10 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-import os
 import posixpath
-import sys
 from typing import Callable
 
 from mirage.accessor.base import Accessor, NOOPAccessor
@@ -23,6 +20,7 @@ from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
+from mirage.runtime.python import MontyRuntime, PythonRunArgs, PythonRuntime
 from mirage.types import PathSpec
 
 
@@ -40,29 +38,6 @@ def _resolve_script(name: str, cwd: PathSpec | None) -> PathSpec:
                     resolved=True)
 
 
-async def _run_python_subprocess(
-    code: str,
-    stdin_data: bytes | None,
-    args: list[str],
-    env: dict[str, str] | None,
-) -> tuple[bytes, bytes | None, int]:
-    proc = await asyncio.create_subprocess_exec(
-        sys.executable,
-        "-c",
-        code,
-        *args,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env={
-            **os.environ,
-            **(env or {})
-        },
-    )
-    stdout, stderr = await proc.communicate(input=stdin_data)
-    return stdout, stderr or None, proc.returncode
-
-
 async def _python3(
     accessor: Accessor = NOOPAccessor(),
     paths: list[PathSpec] | None = None,
@@ -73,6 +48,7 @@ async def _python3(
     cwd: PathSpec | None = None,
     env: dict[str, str] | None = None,
     exec_allowed: bool = True,
+    python_runtime: PythonRuntime | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not exec_allowed:
@@ -115,11 +91,22 @@ async def _python3(
         else:
             return None, IOResult(exit_code=1, stderr=b"python3: no input\n")
 
-    stdout, stderr, exit_code = await _run_python_subprocess(
-        code, stdin_data, arg_strs, env)
-    return stdout if stdout else None, IOResult(
-        exit_code=exit_code,
-        stderr=stderr,
+    if python_runtime is not None:
+        runtime = python_runtime
+    else:
+        try:
+            runtime = MontyRuntime(dispatch)
+        except ImportError as exc:
+            return None, IOResult(exit_code=127,
+                                  stderr=f"python3: {exc}\n".encode())
+    result = await runtime.run(
+        PythonRunArgs(code=code,
+                      args=arg_strs,
+                      env=env or {},
+                      stdin=stdin_data))
+    return result.stdout if result.stdout else None, IOResult(
+        exit_code=result.exit_code,
+        stderr=result.stderr,
     )
 
 

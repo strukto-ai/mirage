@@ -39,6 +39,7 @@ jobs:
               - 'integ/parity.sh'
               - 'integ/cli_fuse.sh'
               - 'integ/cli_config.sh'
+              - 'integ/cli_runtime.sh'
               - '.github/workflows/test_cli.yml'
 
   python:
@@ -709,6 +710,12 @@ jobs:
       - name: Run CLI config battery (relocation, validation, resolved view)
         run: |
           bash integ/cli_config.sh \
+            "python/.venv/bin/mirage" \
+            "node typescript/packages/cli/dist/bin/mirage.js"
+
+      - name: Run CLI runtime battery (yaml runtime selection, cross-language rejection)
+        run: |
+          bash integ/cli_runtime.sh \
             "python/.venv/bin/mirage" \
             "node typescript/packages/cli/dist/bin/mirage.js"
 

@@ -44,6 +44,7 @@ from mirage.provision import ProvisionResult
 from mirage.resource.base import BaseResource
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
 from mirage.resource.ram import RAMResource
+from mirage.runtime.python import select_python_runtime
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
 from mirage.types import (DEFAULT_AGENT_ID, DEFAULT_SESSION_ID,
@@ -89,6 +90,7 @@ class Workspace:
         session_id: str = DEFAULT_SESSION_ID,
         agent_id: str = DEFAULT_AGENT_ID,
         observe: ObserverStore | None = None,
+        python_runtime: str | None = None,
     ) -> None:
         self._registry = MountRegistry()
         if isinstance(cache, RedisCacheConfig):
@@ -168,6 +170,18 @@ class Workspace:
                         observer=self.observer,
                         agent_id=agent_id,
                         session_id=session_id)
+
+        # Graceful default: without the 'monty' extra the default runtime
+        # cannot build; leave it unset so python3 reports the install hint
+        # per invocation. An explicitly requested runtime still fails loud.
+        try:
+            self._python_runtime = select_python_runtime(
+                python_runtime, self.dispatch)
+        except ImportError:
+            if python_runtime is not None:
+                raise
+            self._python_runtime = None
+        self._registry.python_runtime = self._python_runtime
 
         for prefix, fuse_target in fuse_targets:
             mountpoint = fuse_target if isinstance(fuse_target, str) else None
@@ -352,6 +366,8 @@ class Workspace:
 
     async def close(self) -> None:
         drain_tasks = list(self._cache._drain_tasks.values())
+        if self._python_runtime is not None:
+            await self._python_runtime.close()
         self._close_parts()
         for task in drain_tasks:
             try:

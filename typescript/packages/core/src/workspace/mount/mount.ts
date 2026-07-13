@@ -35,7 +35,7 @@ import { runWithRevisions, setVirtualPrefix } from '../../observe/context.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
 import type { Resource } from '../../resource/base.ts'
 import { type CommandSafeguard, ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
-import type { PyodideRuntime } from '../executor/python/runtime.ts'
+import type { PythonRuntime } from '../executor/python/runtimes/interface.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
 type CmdKey = string
@@ -328,7 +328,7 @@ export class MountEntry {
       sessionId?: string
       env?: Record<string, string>
       execAllowed?: boolean
-      pythonRuntime?: PyodideRuntime
+      pythonRuntime?: PythonRuntime
       safeguardOverride?: CommandSafeguard | null
     } = {},
   ): Promise<[ByteSource | null, IOResult]> {

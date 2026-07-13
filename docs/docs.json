@@ -359,6 +359,12 @@
               },
               "python/resource/new"
             ]
+          },
+          {
+            "group": "Runtimes",
+            "pages": [
+              "python/runtime/python"
+            ]
           }
         ]
       },
@@ -502,6 +508,12 @@
                   "typescript/setup/trello"
                 ]
               }
+            ]
+          },
+          {
+            "group": "Runtimes",
+            "pages": [
+              "typescript/runtime/python"
             ]
           }
         ]

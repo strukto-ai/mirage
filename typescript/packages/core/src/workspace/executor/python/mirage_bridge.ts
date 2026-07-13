@@ -33,10 +33,23 @@ export interface MirageBridge {
   fetch(path: string): Promise<Uint8Array>
   flush(path: string, bytes: Uint8Array): Promise<void>
   list(path: string): Promise<MirageEntry[]>
+  /**
+   * Live view of the workspace mount prefixes (trailing-slash normalized).
+   * The fs shim consults this on every intercepted call, so the mount
+   * registry stays the single source of truth: nothing is pushed into the
+   * interpreter when mounts are added or removed.
+   */
+  prefixes(): string[]
 }
 
-export function createMirageBridge(dispatch: BridgeDispatchFn): MirageBridge {
+export function createMirageBridge(
+  dispatch: BridgeDispatchFn,
+  listMounts: () => string[] = () => [],
+): MirageBridge {
   return {
+    prefixes() {
+      return listMounts().map((p) => (p.endsWith('/') ? p : p + '/'))
+    },
     async fetch(path) {
       const out = await dispatch('READ', path)
       if (!(out instanceof Uint8Array)) {
