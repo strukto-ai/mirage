@@ -50,10 +50,10 @@ class SessionManager:
 
     def create(self,
                session_id: str,
-               mount_grants: dict[str, MountMode] | None = None) -> Session:
+               mount_modes: dict[str, MountMode] | None = None) -> Session:
         if session_id in self._sessions:
             raise ValueError(f"Session {session_id!r} already exists")
-        session = Session(session_id=session_id, mount_grants=mount_grants)
+        session = Session(session_id=session_id, mount_modes=mount_modes)
         self._sessions[session_id] = session
         self._locks[session_id] = asyncio.Lock()
         return session

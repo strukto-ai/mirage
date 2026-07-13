@@ -85,13 +85,13 @@ function scalarFindFlags(flagKwargs: Flags): Flags {
 }
 
 // Run one already-parsed command on the mount that owns its paths. The shared
-// single-mount execution tail: mount resolution, grant checks, executeCmd,
+// single-mount execution tail: mount resolution, session-mode checks, executeCmd,
 // filesystem-error formatting, ls/find post-processing, and read/write key
 // prefixing. handleCommand uses it for the normal path, and passes it (bound)
 // to the cross-mount runners so each operand executes natively on its owning
 // mount. `resolveHint` resolves the mount when `paths` is empty (a stream
 // command running in stdin mode); a pre-resolved `mount` skips resolution and
-// grant checks, which the caller already performed.
+// session-mode checks, which the caller already performed.
 async function runOnMount(
   ctx: RunOnMountCtx,
   cmdName: string,

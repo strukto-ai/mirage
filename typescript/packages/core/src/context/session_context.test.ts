@@ -25,7 +25,7 @@ import { Session } from '../workspace/session/session.ts'
 function grantedSession(): Session {
   return new Session({
     sessionId: 'agent',
-    mountGrants: new Map([
+    mountModes: new Map([
       ['/ro', MountMode.READ],
       ['/rw', MountMode.WRITE],
       ['/ex', MountMode.EXEC],

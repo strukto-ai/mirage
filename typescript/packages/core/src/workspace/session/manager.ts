@@ -42,14 +42,14 @@ export class SessionManager {
 
   create(
     sessionId: string,
-    options: { mountGrants?: ReadonlyMap<string, MountMode> | null } = {},
+    options: { mountModes?: ReadonlyMap<string, MountMode> | null } = {},
   ): Session {
     if (this.sessions.has(sessionId)) {
       throw new Error(`Session ${sessionId} already exists`)
     }
     const session = new Session({
       sessionId,
-      mountGrants: options.mountGrants ?? null,
+      mountModes: options.mountModes ?? null,
     })
     this.sessions.set(sessionId, session)
     return session

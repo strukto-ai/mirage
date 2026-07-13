@@ -30,7 +30,7 @@ class Session:
     shell_options: dict[str, bool] = field(default_factory=dict)
     readonly_vars: set[str] = field(default_factory=set)
     arrays: dict[str, list[str]] = field(default_factory=dict)
-    mount_grants: dict[str, MountMode] | None = None
+    mount_modes: dict[str, MountMode] | None = None
     pipeline_timeout_seconds: float | None = None
     _stdin_buffer: AsyncLineIterator | None = field(default=None, repr=False)
 
@@ -41,21 +41,21 @@ class Session:
             "env": self.env,
             "created_at": self.created_at,
         }
-        if self.mount_grants is not None:
-            data["mount_grants"] = {
+        if self.mount_modes is not None:
+            data["mount_modes"] = {
                 prefix: mode.value
-                for prefix, mode in self.mount_grants.items()
+                for prefix, mode in self.mount_modes.items()
             }
         return data
 
     @classmethod
     def from_dict(cls, data: dict) -> "Session":
-        grants = data.get("mount_grants")
-        if grants is not None:
+        modes = data.get("mount_modes")
+        if modes is not None:
             data = dict(data)
-            data["mount_grants"] = {
+            data["mount_modes"] = {
                 prefix: MountMode(mode)
-                for prefix, mode in grants.items()
+                for prefix, mode in modes.items()
             }
         return cls(**data)
 
@@ -65,7 +65,7 @@ class Session:
         Mutable containers (env, functions, readonly_vars, arrays,
         shell_options) are shallow-copied so mutations on the fork do
         not leak back into the source. Every field, including
-        capability fields like ``mount_grants``, is propagated, so
+        capability fields like ``mount_modes``, is propagated, so
         callers cannot accidentally forget one when adding new fields.
 
         Args:
@@ -92,8 +92,8 @@ class Session:
                 k: list(v)
                 for k, v in self.arrays.items()
             },
-            "mount_grants": (dict(self.mount_grants)
-                             if self.mount_grants is not None else None),
+            "mount_modes":
+            (dict(self.mount_modes) if self.mount_modes is not None else None),
             "pipeline_timeout_seconds":
             self.pipeline_timeout_seconds,
         }

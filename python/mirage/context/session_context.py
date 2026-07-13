@@ -46,27 +46,27 @@ def _norm_prefix(mount_prefix: str) -> str:
     return "/" + stripped if stripped else "/"
 
 
-def _session_grant(mount_prefix: str) -> "MountMode | None":
-    """The current session's grant for this mount.
+def _session_mode(mount_prefix: str) -> "MountMode | None":
+    """The current session's mode cap for this mount.
 
     Returns ``MountMode.EXEC`` (no narrowing) when no session is bound or
-    the session is unrestricted, ``None`` when the session has grants but
+    the session is unrestricted, ``None`` when the session has mount modes but
     none for this mount.
 
     Args:
         mount_prefix (str): the mount's prefix, e.g. ``/s3``.
     """
     sess = _current_session.get()
-    if sess is None or sess.mount_grants is None:
+    if sess is None or sess.mount_modes is None:
         return MountMode.EXEC
-    return sess.mount_grants.get(_norm_prefix(mount_prefix))
+    return sess.mount_modes.get(_norm_prefix(mount_prefix))
 
 
 def assert_mount_allowed(mount_prefix: str) -> None:
     """Raise PermissionError if the current session may not touch this mount.
 
     No-op when no session is bound or the session is unrestricted
-    (``mount_grants is None``). The session's ``mount_grants`` is
+    (``mount_modes is None``). The session's ``mount_modes`` is
     expected to already include any infrastructure prefixes (observer,
     ``/dev``) added at session-creation time. A user-defined root mount
     is governed like any other: a session must be granted ``/`` to
@@ -77,9 +77,9 @@ def assert_mount_allowed(mount_prefix: str) -> None:
             cache root.
 
     Raises:
-        PermissionError: the mount lies outside the session's grants.
+        PermissionError: the mount lies outside the session's mounts.
     """
-    if _session_grant(mount_prefix) is not None:
+    if _session_mode(mount_prefix) is not None:
         return
     sess = _current_session.get()
     raise PermissionError(f"session {sess.session_id!r} not allowed to "
@@ -88,18 +88,18 @@ def assert_mount_allowed(mount_prefix: str) -> None:
 
 def effective_mount_mode(mount_prefix: str,
                          mount_mode: MountMode) -> MountMode:
-    """The mount mode after narrowing by the current session's grant.
+    """The mount mode after narrowing by the current session's cap.
 
-    The mount's own mode is the ceiling; a session grant can only weaken
-    it (a READ mount stays read-only whatever the grant says). A mount
-    absent from the grants map narrows to READ here; visibility denial
+    The mount's own mode is the ceiling; a session's mode can only weaken
+    it (a READ mount stays read-only whatever the session says). A mount
+    absent from the modes map narrows to READ here; visibility denial
     is ``assert_mount_allowed``'s job at the dispatch entry points.
 
     Args:
         mount_prefix (str): the mount's prefix, e.g. ``/s3``.
         mount_mode (MountMode): the mount's configured mode.
     """
-    grant = _session_grant(mount_prefix)
-    if grant is None:
+    cap = _session_mode(mount_prefix)
+    if cap is None:
         return MountMode.READ
-    return weaker_mode(mount_mode, grant)
+    return weaker_mode(mount_mode, cap)

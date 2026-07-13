@@ -44,14 +44,14 @@ function normPrefix(mountPrefix: string): string {
 }
 
 /**
- * The current session's grant for this mount: EXEC (no narrowing) when no
+ * The current session's mode cap for this mount: EXEC (no narrowing) when no
  * session is bound or the session is unrestricted, undefined when the
- * session has grants but none for this mount.
+ * session has mount modes but none for this mount.
  */
-function sessionGrant(mountPrefix: string): MountMode | undefined {
+function sessionMode(mountPrefix: string): MountMode | undefined {
   const sess = getCurrentSession()
-  if (sess?.mountGrants == null) return MountMode.EXEC
-  return sess.mountGrants.get(normPrefix(mountPrefix))
+  if (sess?.mountModes == null) return MountMode.EXEC
+  return sess.mountModes.get(normPrefix(mountPrefix))
 }
 
 /**
@@ -60,19 +60,19 @@ function sessionGrant(mountPrefix: string): MountMode | undefined {
  * to touch it.
  */
 export function assertMountAllowed(mountPrefix: string): void {
-  if (sessionGrant(mountPrefix) !== undefined) return
+  if (sessionMode(mountPrefix) !== undefined) return
   const sess = getCurrentSession()
   throw new MountNotAllowedError(sess?.sessionId ?? '', normPrefix(mountPrefix))
 }
 
 /**
- * The mount mode after narrowing by the current session's grant. The
- * mount's own mode is the ceiling; a grant can only weaken it. A mount
- * absent from the grants map narrows to READ here; visibility denial is
+ * The mount mode after narrowing by the current session's cap. The
+ * mount's own mode is the ceiling; the session's mode can only weaken
+ * it. A mount absent from the modes map narrows to READ here; visibility denial is
  * `assertMountAllowed`'s job at the dispatch entry points.
  */
 export function effectiveMountMode(mountPrefix: string, mountMode: MountMode): MountMode {
-  const grant = sessionGrant(mountPrefix)
-  if (grant === undefined) return MountMode.READ
-  return weakerMode(mountMode, grant)
+  const cap = sessionMode(mountPrefix)
+  if (cap === undefined) return MountMode.READ
+  return weakerMode(mountMode, cap)
 }

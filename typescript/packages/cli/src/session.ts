@@ -21,27 +21,27 @@ function buildClient() {
   return makeClient(loadDaemonSettings())
 }
 
-const ROLES = new Set(['read', 'write', 'exec', 'r', 'rw', 'rwx'])
+const MODES = new Set(['read', 'write', 'exec', 'r', 'rw', 'rwx'])
 
 /**
- * Parse `-m` values like `/data:read` into a grants mapping. Roles are
+ * Parse `-m` values like `/data:read` into a modes mapping. Modes are
  * the words ('read', 'write', 'exec') or their cumulative filesystem
- * aliases ('r', 'rw', 'rwx'). A bare prefix (no role suffix) grants
- * the mount its own configured mode. The role is taken from the last
+ * aliases ('r', 'rw', 'rwx'). A bare prefix (no mode suffix) keeps
+ * the mount's own configured mode. The mode is taken from the last
  * `:` so mount prefixes that contain colons still parse.
  */
-export function parseMountGrants(mounts: string[]): Record<string, string> {
-  const grants: Record<string, string> = {}
+export function parseMountModes(mounts: string[]): Record<string, string> {
+  const modes: Record<string, string> = {}
   for (const item of mounts) {
     const idx = item.lastIndexOf(':')
-    const role = idx >= 0 ? item.slice(idx + 1) : ''
-    if (idx >= 0 && ROLES.has(role)) {
-      grants[item.slice(0, idx)] = role
+    const mode = idx >= 0 ? item.slice(idx + 1) : ''
+    if (idx >= 0 && MODES.has(mode)) {
+      modes[item.slice(0, idx)] = mode
     } else {
-      grants[item] = 'exec'
+      modes[item] = 'exec'
     }
   }
-  return grants
+  return modes
 }
 
 export function registerSessionCommands(program: Command): void {
@@ -53,7 +53,7 @@ export function registerSessionCommands(program: Command): void {
     .option('--id <sessionId>')
     .option(
       '-m, --mount <prefix>',
-      "restrict session to a mount, optionally capping its role: '/data:read' " +
+      "restrict session to a mount, optionally capping its mode: '/data:read' " +
         "(alias '/data:r'), '/scratch:rw', '/bin:rwx', or a bare '/data' to keep " +
         "the mount's own mode; repeatable",
       (value: string, prev: string[]) => prev.concat([value]),
@@ -65,7 +65,7 @@ export function registerSessionCommands(program: Command): void {
       const body: Record<string, unknown> = {}
       if (opts.id !== undefined) body.sessionId = opts.id
       if (opts.mount !== undefined && opts.mount.length > 0) {
-        body.mounts = parseMountGrants(opts.mount)
+        body.mounts = parseMountModes(opts.mount)
       }
       emit(
         await handleResponse(

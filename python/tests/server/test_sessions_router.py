@@ -119,12 +119,12 @@ async def test_create_session_with_mount_list():
 
         registry = app.state.registry
         sess = registry.get(wid).runner.ws.get_session("agent_a")
-        assert sess.mount_grants is not None
-        assert sess.mount_grants.get("/") == MountMode.EXEC
+        assert sess.mount_modes is not None
+        assert sess.mount_modes.get("/") == MountMode.EXEC
 
 
 @pytest.mark.asyncio
-async def test_create_session_with_mount_roles():
+async def test_create_session_with_mount_modes():
     app = build_app(idle_grace_seconds=10.0)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport,
@@ -143,8 +143,8 @@ async def test_create_session_with_mount_roles():
 
         registry = app.state.registry
         sess = registry.get(wid).runner.ws.get_session("agent_b")
-        assert sess.mount_grants is not None
-        assert sess.mount_grants.get("/") == MountMode.READ
+        assert sess.mount_modes is not None
+        assert sess.mount_modes.get("/") == MountMode.READ
 
 
 @pytest.mark.asyncio

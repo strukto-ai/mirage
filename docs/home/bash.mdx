@@ -141,13 +141,15 @@ Commands the parser cannot make sense of return `exit_code 2` with stderr `mirag
 
 The daemon's `--background` flag detaches a job and returns a job id. It is not the same as the bash `&` operator, which the shell does support inline (`sleep 30 &`). Use `&` for in-shell job parallelism, `--background` (or `mirage job`) for long-lived work that should outlive the request.
 
-## Per-session mount grants
+## Per-session mount modes
 
-A session can be created with per-mount role grants. Each granted prefix carries a role ceiling on the `read < write < exec` ladder, written as the words `read`/`write`/`exec` or the cumulative filesystem aliases `r`/`rw`/`rwx` (exec implies write implies read, so bit-style forms like a bare `w` are rejected). A command touching a mount the session was not granted is rejected with `mirage: session 'agent' not allowed to access mount '/X'` and exit code 1; a command exceeding the granted role fails exactly like it would on a read-only mount. Default sessions (no grants) keep their unrestricted behavior, so existing code is unaffected.
+A session can be created with its own per-mount modes, like a container that mounts the same volume `ro` while another mounts it `rw`. Each listed prefix carries a mode ceiling on the `read < write < exec` ladder, written as the words `read`/`write`/`exec` or the cumulative filesystem aliases `r`/`rw`/`rwx` (exec implies write implies read, so bit-style forms like a bare `w` are rejected). A command touching a mount the session was not given is rejected with `mirage: session 'agent' not allowed to access mount '/X'` and exit code 1; a command exceeding the session's mode fails exactly like it would on a read-only mount.
 
-A grant can only narrow: the effective permission is the weaker of the mount's own mode and the granted role, so a `rw` grant on a `READ` mount is still read-only. This is a soft boundary, enforced inside the daemon process, not an OS or process-level isolation. Use it to shrink the blast radius of prompt-injection in multi-agent workspaces: a Slack-only agent cannot pivot to read `/linear`, `/github`, or any other mount it was not given.
+If a session is created without `mounts`, it is unrestricted: every mount behaves per its own configured mode. A list of prefixes (instead of a mapping) restricts the session to those mounts but keeps each at its own mode, and a bare `-m /data` on the CLI does the same for one mount. A session's mode can only narrow, never widen: the effective permission is the weaker of the mount's own mode and the session's mode, so `rw` on a `READ` mount is still read-only.
 
-The check fires for every code path that reaches a mount: shell commands (`cat`, `ls`, ...), redirects (`>`, `<`), cross-mount `cp`/`mv`, `wget -O`, `curl -o`, command substitution `$(...)`, subshells `(...)`, pipes, `&&`/`||` chains, background jobs, and the programmatic `ws.ops.read/write/...` API. Infrastructure prefixes are always granted: the history view (`/.bash_history`, which the `history` builtin and the GNU histfile render from) and the implicit scratch root (`/`, where stateless text-processing commands like `wc` resolve when given no path). A user-defined `/` mount is not infrastructure; sessions must be granted `/` explicitly to touch it.
+This is a soft boundary, enforced inside the daemon process, not an OS or process-level isolation. Use it to shrink the blast radius of prompt-injection in multi-agent workspaces: a Slack-only agent cannot pivot to read `/linear`, `/github`, or any other mount it was not given. Note that FUSE mounts are not scoped by session modes: a FUSE mount is a host-level surface served under the default unrestricted view (mount modes still apply, session narrowing does not).
+
+The check fires for every code path that reaches a mount: shell commands (`cat`, `ls`, ...), redirects (`>`, `<`), cross-mount `cp`/`mv`, `wget -O`, `curl -o`, command substitution `$(...)`, subshells `(...)`, pipes, `&&`/`||` chains, background jobs, and the programmatic `ws.ops.read/write/...` API. Infrastructure prefixes are always accessible: the history view (`/.bash_history`, which the `history` builtin and the GNU histfile render from) and the implicit scratch root (`/`, where stateless text-processing commands like `wc` resolve when given no path). A user-defined `/` mount is not infrastructure; sessions must be given `/` explicitly to touch it.
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -170,7 +172,7 @@ The check fires for every code path that reaches a mount: shell commands (`cat`,
   </Tab>
   <Tab title="CLI" icon="terminal">
     ```bash
-    # Repeat --mount (or -m) per granted prefix; cap the role with
+    # Repeat --mount (or -m) per allowed prefix; cap the mode with
     # :read/:write/:exec or the aliases :r/:rw/:rwx
     mirage session create demo --id slack-agent --mount /slack
     mirage session create demo --id data-agent  -m /s3:rw -m /github:r
@@ -181,7 +183,7 @@ The check fires for every code path that reaches a mount: shell commands (`cat`,
   </Tab>
 </Tabs>
 
-Grants are a property of the session, so they cover every command issued under that `session_id`, including subshells, pipelines, and recursive `bash -c '...'`. They do not change `MountMode`: a write to a granted mount is still rejected if the mount is `READ`. The two checks compose.
+The modes are a property of the session, so they cover every command issued under that `session_id`, including subshells, pipelines, and recursive `bash -c '...'`. They do not change the mount's own `MountMode`: a write to a session-writable mount is still rejected if the mount itself is `READ`. The two checks compose.
 
 ## Agent Pattern
 

@@ -16,14 +16,14 @@ import { describe, expect, it } from 'vitest'
 import { makeWorkspace, stdoutStr } from './fixtures/workspace_fixture.ts'
 
 // `Workspace.execute({cwd, env})` constructs a new Session via
-// `targetSession.fork({...})`. fork() must propagate mountGrants so
+// `targetSession.fork({...})`. fork() must propagate mountModes so
 // the per-call override session cannot bypass the parent's allowlist.
-// Without fork() (or without manually copying mountGrants in the old
+// Without fork() (or without manually copying mountModes in the old
 // inline `new Session({...})` ctor) this test would fail because the
-// override session would have mountGrants === null and assertMountAllowed
-// would short-circuit on the `if (sess?.mountGrants == null) return`
+// override session would have mountModes === null and assertMountAllowed
+// would short-circuit on the `if (sess?.mountModes == null) return`
 // branch in context/session_context.ts.
-describe('per-call cwd/env override preserves mountGrants', () => {
+describe('per-call cwd/env override preserves mountModes', () => {
   it('execute({cwd}) on a restricted session still rejects out-of-allowlist mounts', async () => {
     const { ws } = await makeWorkspace()
     ws.createSession('restricted', { mounts: ['/disk'] })

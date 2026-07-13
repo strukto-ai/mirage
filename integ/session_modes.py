@@ -24,19 +24,19 @@ from mirage.resource.ram import RAMResource
 CASES: list[tuple[str, str, str, str]] = [
     ("seed_data", "default", "echo hello > /data/a.txt", "exit"),
     ("seed_side", "default", "echo aside > /side/s.txt", "exit"),
-    # ----- read grant: reads pass, writes refuse like a READ mount -----
+    # ----- read mode: reads pass, writes refuse like a READ mount -----
     ("reader_cat", "reader", "cat /data/a.txt", "out"),
     ("reader_rm_denied", "reader", "rm /data/a.txt", "err"),
     ("reader_redirect_denied", "reader", "echo leak > /data/new.txt", "exit"),
     ("reader_no_partial_write", "reader", "ls /data", "out"),
-    # ----- ungranted mount: invisible -----
+    # ----- unlisted mount: invisible -----
     ("reader_side_denied", "reader", "cat /side/s.txt", "err"),
-    # ----- write grant and list-form inherit -----
+    # ----- write mode and list-form inherit -----
     ("writer_write", "writer", "echo w > /data/w.txt && cat /data/w.txt", "out"
      ),
     ("lister_inherits_write", "lister",
      "echo l > /data/l.txt && cat /data/l.txt", "out"),
-    # ----- a grant cannot widen a READ mount -----
+    # ----- a session mode cannot widen a READ mount -----
     ("widen_attempt_denied", "capped", "echo up > /ro/y.txt", "exit"),
     # ----- restricted sessions keep pure text pipelines -----
     ("reader_pathless_wc", "reader", "echo hi | wc -l", "out"),
@@ -44,8 +44,8 @@ CASES: list[tuple[str, str, str, str]] = [
 
 ROOT_CASES: list[tuple[str, str, str, str]] = [
     ("root_seed", "default", "echo top > /root.txt", "exit"),
-    ("root_ungranted_denied", "no_root", "cat /root.txt", "err"),
-    ("root_read_grant", "root_ro", "cat /root.txt", "out"),
+    ("root_unlisted_denied", "no_root", "cat /root.txt", "err"),
+    ("root_read_mode", "root_ro", "cat /root.txt", "out"),
     ("root_write_denied", "root_ro", "echo x > /root.txt", "exit"),
 ]
 
@@ -77,7 +77,7 @@ async def main() -> None:
     ws.create_session("writer", mounts={"/data": "write"})
     ws.create_session("lister", mounts=["/data"])
     ws.create_session("capped", mounts={"/ro": "write"})
-    await run(ws, "grants", CASES)
+    await run(ws, "modes", CASES)
 
     ws_root = Workspace(
         {

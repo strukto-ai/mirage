@@ -13,26 +13,26 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { parseMountGrants } from './session.ts'
+import { parseMountModes } from './session.ts'
 
-describe('parseMountGrants', () => {
-  it('parses role suffixes and defaults bare prefixes to exec', () => {
-    expect(parseMountGrants(['/data:read', '/scratch:write', '/tools'])).toEqual({
+describe('parseMountModes', () => {
+  it('parses mode suffixes and defaults bare prefixes to exec', () => {
+    expect(parseMountModes(['/data:read', '/scratch:write', '/tools'])).toEqual({
       '/data': 'read',
       '/scratch': 'write',
       '/tools': 'exec',
     })
   })
 
-  it('parses filesystem alias role suffixes', () => {
-    expect(parseMountGrants(['/data:r', '/scratch:rw', '/bin:rwx'])).toEqual({
+  it('parses filesystem alias mode suffixes', () => {
+    expect(parseMountModes(['/data:r', '/scratch:rw', '/bin:rwx'])).toEqual({
       '/data': 'r',
       '/scratch': 'rw',
       '/bin': 'rwx',
     })
   })
 
-  it('keeps colons that are not role suffixes in the prefix', () => {
-    expect(parseMountGrants(['/weird:name'])).toEqual({ '/weird:name': 'exec' })
+  it('keeps colons that are not mode suffixes in the prefix', () => {
+    expect(parseMountModes(['/weird:name'])).toEqual({ '/weird:name': 'exec' })
   })
 })

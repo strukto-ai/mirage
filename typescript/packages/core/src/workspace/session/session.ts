@@ -27,15 +27,15 @@ export interface SessionInit {
   readonlyVars?: Set<string>
   arrays?: Record<string, string[]>
   /**
-   * Per-mount role grants for this session. `null` (the default) means
+   * Per-mount mode caps for this session. `null` (the default) means
    * no restriction: every mount in the workspace is reachable at its own
    * mode. When provided, a mount absent from the map is invisible
    * (dispatch / handle_command / Ops reject it with a capability error)
    * and a present mount is narrowed to the weaker of its own mode and
-   * the granted role. The workspace always implicitly grants its own
+   * the session's mode. The workspace always implicitly grants its own
    * infrastructure mounts (implicit scratch root, observer, /dev).
    */
-  mountGrants?: ReadonlyMap<string, MountMode> | null
+  mountModes?: ReadonlyMap<string, MountMode> | null
   pipelineTimeoutSeconds?: number | null
 }
 
@@ -52,7 +52,7 @@ export class Session {
   arrays: Record<string, string[]>
   stdinBuffer: AsyncLineIterator | null = null
   localVars: Map<string, string | null> | null = null
-  readonly mountGrants: ReadonlyMap<string, MountMode> | null
+  readonly mountModes: ReadonlyMap<string, MountMode> | null
   pipelineTimeoutSeconds: number | null
 
   constructor(init: SessionInit) {
@@ -66,7 +66,7 @@ export class Session {
     this.shellOptions = init.shellOptions ?? {}
     this.readonlyVars = init.readonlyVars ?? new Set()
     this.arrays = init.arrays ?? {}
-    this.mountGrants = init.mountGrants ?? null
+    this.mountModes = init.mountModes ?? null
     this.pipelineTimeoutSeconds = init.pipelineTimeoutSeconds ?? null
   }
 
@@ -75,7 +75,7 @@ export class Session {
    * containers (env, functions, readonlyVars, arrays, positionalArgs)
    * are shallow-copied so mutations on the fork do not leak back into
    * the source. Every field — including capability fields like
-   * `mountGrants` — is propagated, so callers cannot accidentally
+   * `mountModes` — is propagated, so callers cannot accidentally
    * forget one when adding new fields.
    */
   fork(overrides: Partial<SessionInit> = {}): Session {
@@ -92,7 +92,7 @@ export class Session {
       arrays:
         overrides.arrays ??
         Object.fromEntries(Object.entries(this.arrays).map(([k, v]) => [k, [...v]])),
-      mountGrants: overrides.mountGrants ?? this.mountGrants,
+      mountModes: overrides.mountModes ?? this.mountModes,
       pipelineTimeoutSeconds: overrides.pipelineTimeoutSeconds ?? this.pipelineTimeoutSeconds,
     })
   }
@@ -104,8 +104,8 @@ export class Session {
       env: this.env,
       createdAt: this.createdAt,
     }
-    if (this.mountGrants !== null) {
-      data.mountGrants = Object.fromEntries(this.mountGrants)
+    if (this.mountModes !== null) {
+      data.mountModes = Object.fromEntries(this.mountModes)
     }
     return data
   }
@@ -115,12 +115,12 @@ export class Session {
     cwd?: string
     env?: Record<string, string>
     createdAt?: number
-    mountGrants?: Record<string, MountMode> | null
+    mountModes?: Record<string, MountMode> | null
   }): Session {
-    const { mountGrants, ...rest } = data
+    const { mountModes, ...rest } = data
     return new Session({
       ...rest,
-      mountGrants: mountGrants != null ? new Map(Object.entries(mountGrants)) : null,
+      mountModes: mountModes != null ? new Map(Object.entries(mountModes)) : null,
     })
   }
 }

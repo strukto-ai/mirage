@@ -24,7 +24,7 @@ from mirage.workspace.session import Session
 @pytest.fixture
 def bound_session():
     sess = Session(session_id="agent",
-                   mount_grants={
+                   mount_modes={
                        "/ro": MountMode.READ,
                        "/rw": MountMode.WRITE,
                        "/ex": MountMode.EXEC,

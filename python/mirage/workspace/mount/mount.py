@@ -128,9 +128,9 @@ class MountEntry:
         self._cross_cmds: dict[tuple, RegisteredCommand] = {}
 
     def effective_mode(self) -> MountMode:
-        """This mount's mode narrowed by the current session's grant.
+        """This mount's mode narrowed by the current session's cap.
 
-        The configured mode is the ceiling; a session grant can only
+        The configured mode is the ceiling; a session's mode can only
         weaken it.
         """
         return effective_mount_mode(self.prefix, self.mode)

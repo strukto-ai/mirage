@@ -3,7 +3,7 @@
 # Python CLI and the TypeScript CLI, records normalized results per language,
 # then asserts (1) the two languages produce identical results and (2) the
 # results match the expected values. Covers subshell isolation, sessions,
-# per-session mount grants, git-backed versioning, and fuse config wiring.
+# per-session mount modes, git-backed versioning, and fuse config wiring.
 # Uses RAM mounts only (no redis/minio/fuse kernel deps), so it runs
 # anywhere both CLIs are built.
 #
@@ -32,8 +32,8 @@ mounts:
     fuse: true
 YML
 
-GRANTS_YAML=/tmp/parity-grants.yaml
-cat > "$GRANTS_YAML" <<'YML'
+MODES_YAML=/tmp/parity-modes.yaml
+cat > "$MODES_YAML" <<'YML'
 mode: WRITE
 mounts:
   /data:
@@ -117,31 +117,31 @@ probe() {
 
   $cli workspace delete pw >/dev/null 2>&1 </dev/null || true
 
-  # ── grants: -m /mount:role caps what a session may do per mount ──
+  # ── session modes: -m /mount:mode caps what a session may do per mount ──
   $cli workspace delete gw >/dev/null 2>&1 </dev/null || true
-  $cli workspace create "$GRANTS_YAML" --id gw >/dev/null </dev/null
+  $cli workspace create "$MODES_YAML" --id gw >/dev/null </dev/null
   $cli execute -w gw -c 'echo hello > /data/a.txt' </dev/null >/dev/null
   $cli execute -w gw -c 'echo aside > /side/s.txt' </dev/null >/dev/null
   $cli session create gw --id reader -m /data:read </dev/null >/dev/null
   $cli session create gw --id writer -m /data:rw </dev/null >/dev/null
   $cli session create gw --id lister -m /data </dev/null >/dev/null
   $cli session create gw --id capped -m /ro:write </dev/null >/dev/null
-  echo "grant.reader_cat=$($cli execute -w gw -s reader -c 'cat /data/a.txt' </dev/null | sout)"
-  echo "grant.reader_rm_err=$($cli execute -w gw -s reader -c 'rm /data/a.txt' </dev/null | serr)"
-  echo "grant.reader_redirect=$($cli execute -w gw -s reader -c 'echo leak > /data/new.txt' </dev/null | verdict)"
-  echo "grant.reader_side_err=$($cli execute -w gw -s reader -c 'cat /side/s.txt' </dev/null | serr)"
-  echo "grant.writer_write=$($cli execute -w gw -s writer -c 'echo w > /data/w.txt && cat /data/w.txt' </dev/null | sout)"
-  echo "grant.lister_inherits=$($cli execute -w gw -s lister -c 'echo l > /data/l.txt && cat /data/l.txt' </dev/null | sout)"
-  echo "grant.capped_ro=$($cli execute -w gw -s capped -c 'echo up > /ro/y.txt' </dev/null | verdict)"
+  echo "mode.reader_cat=$($cli execute -w gw -s reader -c 'cat /data/a.txt' </dev/null | sout)"
+  echo "mode.reader_rm_err=$($cli execute -w gw -s reader -c 'rm /data/a.txt' </dev/null | serr)"
+  echo "mode.reader_redirect=$($cli execute -w gw -s reader -c 'echo leak > /data/new.txt' </dev/null | verdict)"
+  echo "mode.reader_side_err=$($cli execute -w gw -s reader -c 'cat /side/s.txt' </dev/null | serr)"
+  echo "mode.writer_write=$($cli execute -w gw -s writer -c 'echo w > /data/w.txt && cat /data/w.txt' </dev/null | sout)"
+  echo "mode.lister_inherits=$($cli execute -w gw -s lister -c 'echo l > /data/l.txt && cat /data/l.txt' </dev/null | sout)"
+  echo "mode.capped_ro=$($cli execute -w gw -s capped -c 'echo up > /ro/y.txt' </dev/null | verdict)"
   $cli workspace delete gw >/dev/null 2>&1 </dev/null || true
 
-  # ── grants: the exec gate is per session on an EXEC mount ──
+  # ── session modes: the exec gate is per session on an EXEC mount ──
   $cli workspace delete gx >/dev/null 2>&1 </dev/null || true
   $cli workspace create "$EXEC_YAML" --id gx >/dev/null </dev/null
   $cli session create gx --id noexec -m /data:write </dev/null >/dev/null
   $cli session create gx --id withexec -m /data:rwx </dev/null >/dev/null
-  echo "grant.exec_denied_err=$($cli execute -w gx -s noexec -c 'python3 -c "print(1)"' </dev/null | serr)"
-  echo "grant.exec_allowed=$($cli execute -w gx -s withexec -c 'python3 -c "print(1)"' </dev/null | sout)"
+  echo "mode.exec_denied_err=$($cli execute -w gx -s noexec -c 'python3 -c "print(1)"' </dev/null | serr)"
+  echo "mode.exec_allowed=$($cli execute -w gx -s withexec -c 'python3 -c "print(1)"' </dev/null | sout)"
   $cli workspace delete gx >/dev/null 2>&1 </dev/null || true
 
   # ── versioning: commit/branch/log/clone/checkout/diff (git-backed) ──
@@ -235,15 +235,15 @@ expect "cwd.rel_cat" "hi"
 expect "cwd.wc_disp" "1 f.txt"
 expect "session.default_pwd" "/data"
 expect "session.s2_pwd" "/"
-expect "grant.reader_cat" "hello"
-expect "grant.reader_rm_err" "rm: read-only mount at /data/"
-expect "grant.reader_redirect" "denied"
-expect "grant.reader_side_err" "cat: session 'reader' not allowed to access mount '/side'"
-expect "grant.writer_write" "w"
-expect "grant.lister_inherits" "l"
-expect "grant.capped_ro" "denied"
-expect "grant.exec_denied_err" "python3: root mount '/' is not in EXEC mode"
-expect "grant.exec_allowed" "1"
+expect "mode.reader_cat" "hello"
+expect "mode.reader_rm_err" "rm: read-only mount at /data/"
+expect "mode.reader_redirect" "denied"
+expect "mode.reader_side_err" "cat: session 'reader' not allowed to access mount '/side'"
+expect "mode.writer_write" "w"
+expect "mode.lister_inherits" "l"
+expect "mode.capped_ro" "denied"
+expect "mode.exec_denied_err" "python3: root mount '/' is not in EXEC mode"
+expect "mode.exec_allowed" "1"
 expect "version.log" "second,first"
 expect "version.branch_log" "first"
 expect "ws.get_mounts" "/"
@@ -268,4 +268,4 @@ if [ "$fail" != "0" ]; then
   exit 1
 fi
 echo
-echo "CLI feature parity OK (subshell, sessions, grants, versioning, fuse; py == ts)."
+echo "CLI feature parity OK (subshell, sessions, session modes, versioning, fuse; py == ts)."

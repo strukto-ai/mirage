@@ -33,13 +33,13 @@ interface WsSessionParams {
 interface CreateSessionBody {
   sessionId?: string
   /**
-   * Optional per-mount grants for this session. A map assigns each
+   * Optional per-mount modes for this session. A map assigns each
    * prefix a role ceiling ('read', 'write', 'exec'); an array of
-   * prefixes grants each mount its own configured mode. When omitted
+   * prefixes keeps each mount at its own configured mode. When omitted
    * (or null), the session can reach every mount on the workspace.
-   * A mount outside the grants is rejected with a capability error;
-   * a granted mount is narrowed to the weaker of its own mode and the
-   * granted role. Infrastructure mounts (implicit scratch root,
+   * A mount outside the granted set is rejected with a capability error;
+   * a listed mount is narrowed to the weaker of its own mode and the
+   * session's mode. Infrastructure mounts (implicit scratch root,
    * observer, /dev) are always implicitly allowed.
    */
   mounts?: Record<string, string> | string[] | null

@@ -164,8 +164,9 @@ async def run_on_mount(
 ) -> tuple[ByteSource | None, IOResult]:
     """Run one already-parsed command on the mount that owns its paths.
 
-    The shared single-mount execution tail: mount resolution, grant checks,
-    ``execute_cmd``, filesystem-error formatting, ls/find post-processing,
+    The shared single-mount execution tail: mount resolution, session
+    mode checks, ``execute_cmd``, filesystem-error formatting, ls/find
+    post-processing,
     and read/write key prefixing. ``handle_command`` uses it for the normal
     path, and passes it (bound) to the cross-mount runners so each operand
     executes natively on its owning mount.
@@ -183,8 +184,8 @@ async def run_on_mount(
         stdin (ByteSource | None): Standard input for the command.
         resolve_hint (PathSpec | None): Mount-resolution path when ``paths``
             is empty (a stream command running in stdin mode).
-        mount: Pre-resolved mount; skips resolution and grant checks, which
-            the caller already performed.
+        mount: Pre-resolved mount; skips resolution and session mode
+            checks, which the caller already performed.
     """
     if mount is None:
         resolve_paths = paths or ([resolve_hint] if resolve_hint else [])

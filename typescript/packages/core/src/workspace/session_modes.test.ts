@@ -47,9 +47,15 @@ async function makeGrantsWorkspace(
   }
   const registry = new OpsRegistry()
   for (const r of Object.values(resources)) registry.registerResource(r)
-  const ws = new Workspace(resources, {
+  const modes = options.modes ?? {}
+  const specs = Object.fromEntries(
+    Object.entries(resources).map(([prefix, r]) => [
+      prefix,
+      modes[prefix] !== undefined ? ([r, modes[prefix]] as const) : r,
+    ]),
+  )
+  const ws = new Workspace(specs, {
     mode: MountMode.WRITE,
-    modeOverrides: options.modes ?? {},
     ops: registry,
     shellParser: parser,
   })
@@ -153,14 +159,14 @@ describe('per-session mount grants', () => {
   it('rejects invalid roles', async () => {
     const { ws } = await makeGrantsWorkspace()
     expect(() => ws.createSession('agent', { mounts: { '/a': 'admin' as MountMode } })).toThrow(
-      'invalid mount role',
+      'invalid mount mode',
     )
   })
 
   it('accepts filesystem alias roles, rejects bit-style forms', async () => {
     const { ws } = await makeGrantsWorkspace()
     const sess = ws.createSession('agent', { mounts: { '/a': 'rw' } })
-    expect(sess.mountGrants?.get('/a')).toBe(MountMode.WRITE)
-    expect(() => ws.createSession('bits', { mounts: { '/a': 'w' } })).toThrow('invalid mount role')
+    expect(sess.mountModes?.get('/a')).toBe(MountMode.WRITE)
+    expect(() => ws.createSession('bits', { mounts: { '/a': 'w' } })).toThrow('invalid mount mode')
   })
 })

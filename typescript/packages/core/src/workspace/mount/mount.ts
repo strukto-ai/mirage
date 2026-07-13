@@ -108,8 +108,8 @@ export class MountEntry {
   }
 
   /**
-   * This mount's mode narrowed by the current session's grant. The
-   * configured mode is the ceiling; a session grant can only weaken it.
+   * This mount's mode narrowed by the current session's cap. The
+   * configured mode is the ceiling; a session's mode can only weaken it.
    */
   effectiveMode(): MountMode {
     return effectiveMountMode(this.prefix, this.mode)

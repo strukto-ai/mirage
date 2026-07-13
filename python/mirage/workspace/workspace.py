@@ -49,7 +49,7 @@ from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
 from mirage.types import (DEFAULT_AGENT_ID, DEFAULT_SESSION_ID,
                           ConsistencyPolicy, DriftPolicy, FileStat, MountMode,
-                          PathSpec, StateKey, mount_role)
+                          PathSpec, StateKey, parse_mount_mode)
 from mirage.utils.errors import format_fs_error
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.dispatcher import Dispatcher
@@ -532,32 +532,32 @@ class Workspace:
         session_id: str,
         mounts: Mapping[str, MountMode | str] | Iterable[str] | None = None,
     ) -> Session:
-        """Create a session, optionally restricted to per-mount roles.
+        """Create a session, optionally restricted to per-mount modes.
 
         Args:
             session_id (str): unique id for the session.
             mounts (Mapping[str, MountMode | str] | Iterable[str] | None):
-                per-mount grants. A mapping assigns each prefix a role
+                per-mount modes. A mapping assigns each prefix a mode
                 ceiling ("read", "write", "exec", or the filesystem
                 aliases "r", "rw", "rwx"); a plain iterable of
-                prefixes grants each mount its own configured mode (the
+                prefixes keeps each mount at its own configured mode (the
                 previous allowlist behavior). ``None`` leaves the
                 session unrestricted.
         """
-        grants: dict[str, MountMode] | None = None
+        modes: dict[str, MountMode] | None = None
         if mounts is not None:
             if isinstance(mounts, str):
                 mounts = [mounts]
             if isinstance(mounts, Mapping):
-                grants = {
-                    ("/" + p.strip("/")): mount_role(m)
+                modes = {
+                    ("/" + p.strip("/")): parse_mount_mode(m)
                     for p, m in mounts.items()
                 }
             else:
-                grants = {("/" + p.strip("/")): MountMode.EXEC for p in mounts}
+                modes = {("/" + p.strip("/")): MountMode.EXEC for p in mounts}
             for prefix in self._infrastructure_mount_prefixes():
-                grants.setdefault(prefix, MountMode.EXEC)
-        return self._session_mgr.create(session_id, mount_grants=grants)
+                modes.setdefault(prefix, MountMode.EXEC)
+        return self._session_mgr.create(session_id, mount_modes=modes)
 
     def _infrastructure_mount_prefixes(self) -> set[str]:
         """Mount prefixes a session is always allowed to touch.

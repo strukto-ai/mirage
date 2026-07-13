@@ -701,7 +701,7 @@ jobs:
             "python/.venv/bin/mirage" \
             "node typescript/packages/cli/dist/bin/mirage.js"
 
-      - name: Run CLI feature parity (subshell, sessions, grants, versioning, fuse)
+      - name: Run CLI feature parity (subshell, sessions, session modes, versioning, fuse)
         run: |
           bash integ/parity.sh \
             "python/.venv/bin/mirage" \

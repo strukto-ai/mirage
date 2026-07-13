@@ -52,7 +52,7 @@ import {
   DriftPolicy,
   FileType,
   MountMode,
-  mountRole,
+  parseMountMode,
   type PathSpec,
 } from '../types.ts'
 import type { TSNodeLike } from './expand/variable.ts'
@@ -82,9 +82,19 @@ import { effectiveMountMode } from '../context/session_context.ts'
 
 const NOOP_ACCESSOR_INSTANCE = new NOOPAccessor()
 
+/**
+ * One mount entry: a bare resource takes the workspace default mode, a
+ * `[resource, mode]` pair pins the mount's own mode, and an optional
+ * third element attaches per-command safeguards (mirrors the Python
+ * `(resource, mode, safeguards)` tuple form).
+ */
+export type MountSpec =
+  | Resource
+  | readonly [Resource, MountMode]
+  | readonly [Resource, MountMode, Record<string, CommandSafeguard>]
+
 export interface WorkspaceOptions {
   mode?: MountMode
-  modeOverrides?: Record<string, MountMode>
   consistency?: ConsistencyPolicy
   commandSafeguards?: Record<string, Record<string, CommandSafeguard>>
   /**
@@ -212,14 +222,29 @@ export class Workspace {
   // FUSE lives entirely in the node Workspace (FUSE needs the OS; the browser
   // can't mount), so the core Workspace carries no FUSE state.
 
-  constructor(resources: Record<string, Resource>, options: WorkspaceOptions = {}) {
-    this.registry = new MountRegistry(resources, options.mode ?? MountMode.READ, {
-      ...(options.modeOverrides ?? {}),
-    })
+  constructor(resources: Record<string, MountSpec>, options: WorkspaceOptions = {}) {
+    const bareResources: Record<string, Resource> = {}
+    const mountModes: Record<string, MountMode> = {}
+    const mountSafeguards: Record<string, Record<string, CommandSafeguard>> = {}
+    for (const [prefix, spec] of Object.entries(resources)) {
+      if (Array.isArray(spec)) {
+        const [resource, mode, safeguards] = spec as readonly [
+          Resource,
+          MountMode,
+          Record<string, CommandSafeguard>?,
+        ]
+        bareResources[prefix] = resource
+        mountModes[prefix] = mode
+        if (safeguards !== undefined) mountSafeguards[prefix] = safeguards
+      } else {
+        bareResources[prefix] = spec as Resource
+      }
+    }
+    this.registry = new MountRegistry(bareResources, options.mode ?? MountMode.READ, mountModes)
     const consistency = options.consistency ?? ConsistencyPolicy.LAZY
     this.registry.setConsistency(consistency)
     if (options.index !== undefined) {
-      for (const resource of Object.values(resources)) {
+      for (const resource of Object.values(bareResources)) {
         resource.setIndex?.(options.index)
       }
     }
@@ -270,7 +295,10 @@ export class Workspace {
         mount.registerGeneral(cmd)
       }
     }
-    for (const [prefix, safeguards] of Object.entries(options.commandSafeguards ?? {})) {
+    for (const [prefix, safeguards] of Object.entries({
+      ...mountSafeguards,
+      ...(options.commandSafeguards ?? {}),
+    })) {
       const mount = this.registry.mountForPrefix(prefix)
       if (mount === null) {
         throw new Error(`commandSafeguards references unknown mount prefix: ${prefix}`)
@@ -374,11 +402,11 @@ export class Workspace {
   }
 
   /**
-   * Create a session, optionally restricted to per-mount roles.
+   * Create a session, optionally restricted to per-mount modes.
    *
-   * `mounts` as a map assigns each prefix a role ceiling ('read',
+   * `mounts` as a map assigns each prefix a mode ceiling ('read',
    * 'write', 'exec', or the filesystem aliases 'r', 'rw', 'rwx'); an
-   * array of prefixes grants each mount its own configured mode (the
+   * array of prefixes keeps each mount at its own configured mode (the
    * previous allowlist behavior). Omitting it leaves the session
    * unrestricted.
    */
@@ -389,27 +417,27 @@ export class Workspace {
     } = {},
   ): Session {
     const mounts = options.mounts ?? null
-    let grants: Map<string, MountMode> | null = null
+    let modes: Map<string, MountMode> | null = null
     if (mounts !== null) {
-      grants = new Map<string, MountMode>()
+      modes = new Map<string, MountMode>()
       if (Array.isArray(mounts)) {
         for (const p of mounts as readonly string[]) {
-          grants.set('/' + stripSlash(p), MountMode.EXEC)
+          modes.set('/' + stripSlash(p), MountMode.EXEC)
         }
       } else {
         const entries: [string, string][] =
           mounts instanceof Map
             ? [...(mounts as ReadonlyMap<string, string>).entries()]
             : Object.entries(mounts as Record<string, string>)
-        for (const [p, role] of entries) {
-          grants.set('/' + stripSlash(p), mountRole(role))
+        for (const [p, mode] of entries) {
+          modes.set('/' + stripSlash(p), parseMountMode(mode))
         }
       }
       for (const p of this.infrastructureMountPrefixes()) {
-        if (!grants.has(p)) grants.set(p, MountMode.EXEC)
+        if (!modes.has(p)) modes.set(p, MountMode.EXEC)
       }
     }
-    return this.sessionManager.create(sessionId, { mountGrants: grants })
+    return this.sessionManager.create(sessionId, { mountModes: modes })
   }
 
   /**
@@ -650,9 +678,9 @@ export class Workspace {
       await this.runPendingDriftCheck()
     }
     const [resource, spec, mode] = await this.resolve(path)
-    const grantPrefix = this.registry.mountFor(path)?.prefix ?? '/'
+    const capPrefix = this.registry.mountFor(path)?.prefix ?? '/'
     if (
-      effectiveMountMode(grantPrefix, mode) === MountMode.READ &&
+      effectiveMountMode(capPrefix, mode) === MountMode.READ &&
       this.opsRegistry.find(opName, resource.kind)?.write === true
     ) {
       throw new Error(`mount at '${path}' is read-only`)
@@ -945,17 +973,14 @@ export class Workspace {
     overrides: Record<string, Resource> = {},
   ): Promise<InstanceType<T>> {
     const args = buildMountArgs(state, overrides)
-    const resources: Record<string, Resource> = {}
-    const snapshotModes: Record<string, MountMode> = {}
+    const resources: Record<string, MountSpec> = {}
     for (const [prefix, [resource, mode]] of Object.entries(args.mountArgs)) {
-      resources[prefix] = resource
-      snapshotModes[prefix] = mode
+      resources[prefix] = [resource, mode]
     }
     const mergedOptions: WorkspaceOptions = {
       sessionId: args.defaultSessionId,
       agentId: args.defaultAgentId,
       ...options,
-      modeOverrides: { ...(options.modeOverrides ?? {}), ...snapshotModes },
     }
     const ws = new this(resources, mergedOptions) as InstanceType<T>
     await applyStateDict(ws, state)

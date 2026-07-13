@@ -19,29 +19,29 @@ from mirage.cli.output import emit, handle_response
 
 app = typer.Typer(no_args_is_help=True, help="Manage workspace sessions.")
 
-_ROLES = ("read", "write", "exec", "r", "rw", "rwx")
+_MODES = ("read", "write", "exec", "r", "rw", "rwx")
 
 
-def _parse_mount_grants(mounts: list[str]) -> dict[str, str]:
-    """Parse ``-m`` values like ``/data:read`` into a grants mapping.
+def _parse_mount_modes(mounts: list[str]) -> dict[str, str]:
+    """Parse ``-m`` values like ``/data:read`` into a modes mapping.
 
-    Roles are the words ("read", "write", "exec") or their cumulative
-    filesystem aliases ("r", "rw", "rwx"). A bare prefix (no role
-    suffix) grants the mount its own configured mode. The role is taken
+    Modes are the words ("read", "write", "exec") or their cumulative
+    filesystem aliases ("r", "rw", "rwx"). A bare prefix (no mode
+    suffix) keeps the mount's own configured mode. The mode is taken
     from the last ``:`` so mount prefixes that contain colons still
     parse.
 
     Args:
         mounts (list[str]): raw ``-m`` option values.
     """
-    grants: dict[str, str] = {}
+    modes: dict[str, str] = {}
     for item in mounts:
-        prefix, sep, role = item.rpartition(":")
-        if sep and role in _ROLES:
-            grants[prefix] = role
+        prefix, sep, mode = item.rpartition(":")
+        if sep and mode in _MODES:
+            modes[prefix] = mode
         else:
-            grants[item] = "exec"
-    return grants
+            modes[item] = "exec"
+    return modes
 
 
 @app.command("create")
@@ -55,7 +55,7 @@ def create_cmd(
         "--mount",
         "-m",
         help=("Restrict this session to a mount, optionally capping its "
-              "role: '/data:read' (alias '/data:r'), '/scratch:rw', "
+              "mode: '/data:read' (alias '/data:r'), '/scratch:rw', "
               "'/bin:rwx', or a bare '/data' to keep the mount's own "
               "mode. Repeat for multiple mounts; omit for unrestricted."),
     ),
@@ -64,7 +64,7 @@ def create_cmd(
     if session_id:
         body["session_id"] = session_id
     if mount:
-        body["mounts"] = _parse_mount_grants(mount)
+        body["mounts"] = _parse_mount_modes(mount)
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
         r = client.request("POST",

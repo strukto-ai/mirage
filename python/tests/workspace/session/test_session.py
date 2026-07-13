@@ -105,18 +105,18 @@ def test_session_independent_envs():
     assert "X" not in s2.env
 
 
-def test_session_mount_grants_default_none():
+def test_session_mount_modes_default_none():
     s = Session(session_id="s")
-    assert s.mount_grants is None
+    assert s.mount_modes is None
 
 
-def test_session_mount_grants_set():
+def test_session_mount_modes_set():
     grants = {"/s3": MountMode.READ, "/slack": MountMode.WRITE}
-    s = Session(session_id="s", mount_grants=grants)
-    assert s.mount_grants == grants
+    s = Session(session_id="s", mount_modes=grants)
+    assert s.mount_modes == grants
 
 
-def test_fork_copies_every_field_including_mount_grants():
+def test_fork_copies_every_field_including_mount_modes():
     original = Session(
         session_id="orig",
         cwd="/disk",
@@ -126,7 +126,7 @@ def test_fork_copies_every_field_including_mount_grants():
         shell_options={"errexit": True},
         readonly_vars={"HOME"},
         arrays={"ARGV": ["a", "b"]},
-        mount_grants={
+        mount_modes={
             "/s3": MountMode.READ,
             "/dev": MountMode.EXEC,
             "/": MountMode.EXEC,
@@ -136,39 +136,39 @@ def test_fork_copies_every_field_including_mount_grants():
     assert forked.session_id == "orig"
     assert forked.cwd == "/disk"
     assert forked.env == {"FOO": "bar"}
-    assert forked.mount_grants == {
+    assert forked.mount_modes == {
         "/s3": MountMode.READ,
         "/dev": MountMode.EXEC,
         "/": MountMode.EXEC,
     }
-    assert forked.mount_grants is not original.mount_grants
+    assert forked.mount_modes is not original.mount_modes
     assert forked.shell_options == {"errexit": True}
     assert "HOME" in forked.readonly_vars
     assert forked.arrays == {"ARGV": ["a", "b"]}
     assert forked.last_exit_code == 7
 
 
-def test_to_dict_round_trips_mount_grants():
+def test_to_dict_round_trips_mount_modes():
     s = Session(session_id="s",
-                mount_grants={
+                mount_modes={
                     "/s3": MountMode.READ,
                     "/scratch": MountMode.WRITE,
                 })
     data = s.to_dict()
-    assert data["mount_grants"] == {"/s3": "read", "/scratch": "write"}
+    assert data["mount_modes"] == {"/s3": "read", "/scratch": "write"}
     restored = Session.from_dict(data)
-    assert restored.mount_grants == {
+    assert restored.mount_modes == {
         "/s3": MountMode.READ,
         "/scratch": MountMode.WRITE,
     }
-    assert isinstance(next(iter(restored.mount_grants.values())), MountMode)
+    assert isinstance(next(iter(restored.mount_modes.values())), MountMode)
 
 
 def test_to_dict_omits_grants_when_unrestricted():
     s = Session(session_id="s")
     data = s.to_dict()
-    assert "mount_grants" not in data
-    assert Session.from_dict(data).mount_grants is None
+    assert "mount_modes" not in data
+    assert Session.from_dict(data).mount_modes is None
 
 
 def test_fork_overrides_apply_without_mutating_original():

@@ -65,6 +65,7 @@ export { DevStore, DevFiles } from './resource/dev/store.ts'
 export {
   type ExecuteOptions,
   ExecuteResult,
+  type MountSpec,
   Workspace,
   type WorkspaceOptions,
 } from './workspace/workspace.ts'

@@ -125,14 +125,14 @@ def test_manager_lock_for():
     assert lock2 is not lock
 
 
-def test_manager_create_with_mount_grants():
+def test_manager_create_with_mount_modes():
     mgr = SessionManager("default")
     grants = {"/s3": MountMode.READ, "/slack": MountMode.WRITE}
-    s = mgr.create("agent", mount_grants=grants)
-    assert s.mount_grants == grants
+    s = mgr.create("agent", mount_modes=grants)
+    assert s.mount_modes == grants
 
 
 def test_manager_create_default_unrestricted():
     mgr = SessionManager("default")
     s = mgr.create("worker")
-    assert s.mount_grants is None
+    assert s.mount_modes is None
