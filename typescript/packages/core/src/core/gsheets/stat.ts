@@ -65,6 +65,6 @@ export async function stat(
     type: FileType.JSON,
     modified: result.entry.remoteTime,
     size: result.entry.size,
-    extra: { doc_id: result.entry.id, doc_name: result.entry.name },
+    extra: { doc_id: result.entry.id, doc_name: result.entry.name, ...result.entry.extra },
   })
 }

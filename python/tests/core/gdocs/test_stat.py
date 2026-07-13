@@ -76,7 +76,7 @@ async def test_stat_doc(accessor, index):
                     resource_type="gdocs/file",
                     remote_time="2026-04-01T00:00:00.000Z",
                     vfs_name="2026-04-01_My_Doc__doc1.gdoc.json",
-                    size=1000)),
+                    extra={"source_size": 1000})),
     ])
     result = await stat(
         accessor,
@@ -91,6 +91,10 @@ async def test_stat_doc(accessor, index):
     assert result.modified == "2026-04-01T00:00:00.000Z"
     assert result.extra["doc_id"] == "doc1"
     assert result.extra["doc_name"] == "My Doc"
+    # rendered JSON length is unknown until read; the Drive source size
+    # is surfaced via extra only
+    assert result.size is None
+    assert result.extra["source_size"] == 1000
 
 
 @pytest.mark.asyncio
@@ -142,6 +146,8 @@ async def test_stat_cache_miss_falls_back_via_readdir(accessor, index):
                      directory=target), index)
     assert result.type == FileType.JSON
     assert result.extra["doc_id"] == "doc1"
+    assert result.size is None
+    assert result.extra["source_size"] == 1234
     assert mock_list.call_count == 1
 
 

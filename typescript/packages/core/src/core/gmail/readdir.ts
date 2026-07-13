@@ -144,12 +144,16 @@ export async function readdir(
         const headers = rawMsg.payload?.headers ?? []
         const subject = extractHeader(headers, 'Subject') || 'No Subject'
         const filename = msgFilename(subject, mid)
+        // size stays null: sizeEstimate is the source message size, not the
+        // rendered .gmail.json length (FileStat.size must be render-derived
+        // or null, see the CLAUDE.md FUSE rules). The estimate lives in
+        // extra.
         const msgEntry = new IndexEntry({
           id: mid,
           name: subject,
           resourceType: 'gmail/message',
           vfsName: filename,
-          size: rawMsg.sizeEstimate ?? null,
+          extra: rawMsg.sizeEstimate != null ? { size_estimate: rawMsg.sizeEstimate } : {},
         })
         msgEntries.push([filename, msgEntry])
         const attachments = extractAttachments(rawMsg.payload)

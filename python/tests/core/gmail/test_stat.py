@@ -59,6 +59,7 @@ async def _populate_index(idx):
              name="Test Email",
              resource_type="gmail/message",
              vfs_name="Test_Email__msg1.gmail.json",
+             extra={"size_estimate": 4321},
          )),
         ("Test_Email__msg1",
          IndexEntry(
@@ -132,6 +133,10 @@ async def test_stat_message(accessor, index):
     assert result.name == "Test_Email__msg1.gmail.json"
     assert result.type == FileType.JSON
     assert result.extra["message_id"] == "msg1"
+    # rendered .gmail.json length is unknown until read; the source
+    # estimate is surfaced via extra only
+    assert result.size is None
+    assert result.extra["size_estimate"] == 4321
 
 
 @pytest.mark.asyncio
