@@ -45,9 +45,9 @@ const VALID_PYTHON_RUNTIMES = new Set<string>(PYTHON_RUNTIMES)
 function coercePythonRuntime(value: string): string {
   const lower = value.toLowerCase()
   if (!VALID_PYTHON_RUNTIMES.has(lower)) {
-    if (lower === 'local') {
+    if (lower === 'local' || lower === 'wasi') {
       throw new Error(
-        "python runtime 'local' is Python-only (the host CPython subprocess); " +
+        `python runtime '${lower}' is Python-only; ` +
           "TypeScript supports 'pyodide' (default) and 'monty'",
       )
     }

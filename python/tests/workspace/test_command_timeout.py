@@ -360,3 +360,21 @@ async def test_python3_mount_safeguard_fires_like_any_command(
     assert r.exit_code == 124
     assert "python3: timed out after 0.2s" in (await r.stderr_str())
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_python3_mount_safeguard_follows_script_path(restore_defaults):
+    ram = RAMResource()
+    ram._store.files["/slow.py"] = b"import time; time.sleep(5)\n"
+    ws = Workspace(
+        {
+            "/data": (ram, MountMode.EXEC, {
+                "python3": CommandSafeguard(timeout_seconds=0.2)
+            })
+        },
+        mode=MountMode.EXEC,
+        python_runtime="local")
+    r = await ws.execute("python3 /data/slow.py")
+    assert r.exit_code == 124
+    assert "python3: timed out after 0.2s" in (await r.stderr_str())
+    await ws.close()

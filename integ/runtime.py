@@ -214,7 +214,7 @@ async def main() -> None:
                 })
             },
             mode=MountMode.EXEC)
-        result = await ws_sg.execute("cd /ram && python3 /ram/slow.py")
+        result = await ws_sg.execute("python3 /ram/slow.py")
         print("=== py3_safeguard_timeout ===")
         print(f"exit_code={result.exit_code}")
         await ws_sg.close()

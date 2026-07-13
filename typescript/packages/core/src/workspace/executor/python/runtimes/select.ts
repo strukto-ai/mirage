@@ -41,9 +41,9 @@ export function selectPythonRuntime(
       ...(options.listMounts !== undefined ? { listMounts: options.listMounts } : {}),
     })
   }
-  if (resolved === 'local') {
+  if (resolved === 'local' || resolved === 'wasi') {
     throw new Error(
-      "python runtime 'local' is Python-only (the host CPython subprocess); " +
+      `python runtime '${resolved}' is Python-only; ` +
         "TypeScript supports 'pyodide' (WASM CPython, default) and 'monty' (sandboxed)",
     )
   }

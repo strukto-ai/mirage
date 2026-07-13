@@ -17,10 +17,11 @@ from typing import Callable
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.local import LocalRuntime
 from mirage.runtime.python.monty import MontyRuntime
+from mirage.runtime.python.wasi import WasiRuntime
 
 DEFAULT_PYTHON_RUNTIME = MontyRuntime.name
 
-PYTHON_RUNTIMES = (MontyRuntime.name, LocalRuntime.name)
+PYTHON_RUNTIMES = (MontyRuntime.name, WasiRuntime.name, LocalRuntime.name)
 
 
 def validate_python_runtime_name(name: str) -> str:
@@ -38,9 +39,10 @@ def validate_python_runtime_name(name: str) -> str:
         raise ValueError(
             "python runtime 'pyodide' is TypeScript-only (a WASM CPython "
             "for runtimes without a host Python); Python supports 'monty' "
-            "(sandboxed, default) and 'local' (the host CPython)")
+            "(sandboxed, default), 'wasi' (sandboxed full CPython), and "
+            "'local' (the host CPython)")
     raise ValueError(f"unknown python runtime: {name!r} "
-                     "(expected 'monty' or 'local')")
+                     "(expected 'monty', 'wasi', or 'local')")
 
 
 def select_python_runtime(name: str | None,
@@ -50,8 +52,8 @@ def select_python_runtime(name: str | None,
     Args:
         name (str | None): runtime name; None means the default (monty).
         dispatch (Callable | None): workspace dispatch the sandboxed
-            runtime bridges file I/O through. Ignored by `local`, which
-            runs against the host filesystem.
+            runtime bridges file I/O through. Ignored by `wasi` and
+            `local`, which never see workspace mounts.
 
     Raises:
         ValueError: unknown runtime name.
@@ -59,4 +61,6 @@ def select_python_runtime(name: str | None,
     resolved = validate_python_runtime_name(name or DEFAULT_PYTHON_RUNTIME)
     if resolved == MontyRuntime.name:
         return MontyRuntime(dispatch)
+    if resolved == WasiRuntime.name:
+        return WasiRuntime()
     return LocalRuntime()

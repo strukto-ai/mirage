@@ -82,7 +82,7 @@ mounts:
 YML
   $cli workspace create "$work/safeguard.yaml" --id rtsg >/dev/null </dev/null
   $cli execute -w rtsg -c "echo 'n = 0' > /data/slow.py && echo 'for i in range(300000000):' >> /data/slow.py && echo '    n = n + 1' >> /data/slow.py" </dev/null >/dev/null
-  $cli execute -w rtsg -c "cd /data && python3 /data/slow.py" \
+  $cli execute -w rtsg -c "python3 /data/slow.py" \
     >/tmp/cli-runtime-$lang-sg.txt 2>&1 </dev/null
   echo "sg_exec=exit$?"
   echo "sg_msg=$(grep -o 'python3: timed out after' /tmp/cli-runtime-$lang-sg.txt | head -1)"

@@ -14,8 +14,9 @@
 
 import pytest
 
-from mirage.runtime.python import (LocalRuntime, MontyRuntime,
+from mirage.runtime.python import (LocalRuntime, MontyRuntime, WasiRuntime,
                                    select_python_runtime)
+from mirage.runtime.python.wasi import WASI_PYTHON_ENV
 
 
 def test_default_is_monty():
@@ -28,6 +29,19 @@ def test_select_local():
 
 def test_select_monty_explicit():
     assert isinstance(select_python_runtime("monty"), MontyRuntime)
+
+
+def test_select_wasi(monkeypatch, tmp_path):
+    (tmp_path / "python.wasm").write_bytes(b"\0asm")
+    (tmp_path / "lib" / "python3.14").mkdir(parents=True)
+    monkeypatch.setenv(WASI_PYTHON_ENV, str(tmp_path))
+    assert isinstance(select_python_runtime("wasi"), WasiRuntime)
+
+
+def test_select_wasi_without_build_fails_loud(monkeypatch):
+    monkeypatch.delenv(WASI_PYTHON_ENV, raising=False)
+    with pytest.raises(FileNotFoundError, match="cpython-wasi-build"):
+        select_python_runtime("wasi")
 
 
 def test_unknown_name_raises():
