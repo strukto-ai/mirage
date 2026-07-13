@@ -24,7 +24,8 @@ class LocalRuntime(PythonRuntime):
     """Run Python code on the host interpreter as a subprocess.
 
     Each run spawns `sys.executable -c <code>`; the code sees the host
-    filesystem and environment, not the workspace mounts.
+    filesystem and environment, not the workspace mounts. Cancelling the
+    run kills the subprocess, so a safeguard timeout reclaims it.
     """
 
     name = "local"
@@ -43,7 +44,12 @@ class LocalRuntime(PythonRuntime):
                 **args.env
             },
         )
-        stdout, stderr = await proc.communicate(input=args.stdin)
+        try:
+            stdout, stderr = await proc.communicate(input=args.stdin)
+        except asyncio.CancelledError:
+            proc.kill()
+            await proc.wait()
+            raise
         return PythonRunResult(
             stdout=stdout,
             stderr=stderr or None,

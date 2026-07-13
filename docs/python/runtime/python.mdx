@@ -132,8 +132,8 @@ central point. A run that exceeds `timeout_seconds` answers with exit
 other command; `max_bytes` and `max_lines` cap its output the same
 way. There is no python3-specific limit surface.
 
-One caveat: the guard bounds how long a run may *answer*, not the
-interpreter itself. A run that ignores the deadline keeps its
-interpreter busy in the background until it finishes (monty and wasi
-run on a worker thread, `local` on a host subprocess). Give untrusted
-code a finite workload, or run it behind a sandboxed deployment.
+Firing the guard also cancels the run, and every runtime honors
+cancellation: monty halts its interpreter, wasi traps the guest
+through wasmtime's epoch interruption, and local kills the
+subprocess. A timed-out `python3` run is reclaimed at the deadline,
+not left burning in the background.

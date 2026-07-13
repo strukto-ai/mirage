@@ -233,11 +233,12 @@ class MontyRuntime(PythonRuntime):
         self._workspace_dispatch = dispatch
 
     async def run(self, args: PythonRunArgs) -> PythonRunResult:
+        # run_async executes on Monty's own tokio pool and returns an
+        # asyncio-compatible future: the loop stays free, and cancelling
+        # the future halts the interpreter (verified: CPU drops to zero),
+        # so a safeguard timeout reclaims the run instead of leaking a
+        # burning thread.
         loop = asyncio.get_running_loop()
-        return await asyncio.to_thread(self._run_sync, args, loop)
-
-    def _run_sync(self, args: PythonRunArgs,
-                  loop: asyncio.AbstractEventLoop) -> PythonRunResult:
         collector = pydantic_monty.CollectStreams()
         bridge = _MirageOS(loop, self._workspace_dispatch, args.env)
         try:
@@ -249,9 +250,9 @@ class MontyRuntime(PythonRuntime):
                                    exit_code=1)
         argv = ["main.py", *args.args]
         try:
-            monty.run(inputs={"argv": argv},
-                      print_callback=collector,
-                      os=bridge)
+            await monty.run_async(inputs={"argv": argv},
+                                  print_callback=collector,
+                                  os=bridge)
         except pydantic_monty.MontyRuntimeError as exc:
             stdout, stderr = _split_streams(collector)
             trace = exc.display(format="traceback") + "\n"

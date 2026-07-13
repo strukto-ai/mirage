@@ -121,6 +121,23 @@ async def test_wasi_python3_command_end_to_end():
 
 
 @live
+@pytest.mark.asyncio
+async def test_wasi_cancellation_stops_the_guest():
+    rt = WasiRuntime()
+    hot = "n = 0\nwhile True:\n    n = n + 1"
+    task = asyncio.ensure_future(rt.run(PythonRunArgs(code=hot)))
+    await asyncio.sleep(0.5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    # The epoch bump traps the guest; a healthy follow-up run proves the
+    # runtime survived and the worker thread was reclaimed.
+    result = await rt.run(PythonRunArgs(code="print('alive')"))
+    assert result.exit_code == 0
+    assert result.stdout == b"alive\n"
+
+
+@live
 def test_wasi_reuses_compiled_module():
     rt = WasiRuntime()
     first = asyncio.run(rt.run(PythonRunArgs(code="print(1)")))

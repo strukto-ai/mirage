@@ -16,6 +16,7 @@ import asyncio
 import logging
 import os
 import tempfile
+import threading
 from pathlib import Path
 
 try:
@@ -38,6 +39,12 @@ _BUILD_HINT = (
     "runtime's python_wasm argument) at the directory")
 
 
+def _epoch_engine() -> "wasmtime.Engine":
+    config = wasmtime.Config()
+    config.epoch_interruption = True
+    return wasmtime.Engine(config)
+
+
 class WasiRuntime(PythonRuntime):
     """Run Python code on a WASI CPython under wasmtime, in-process.
 
@@ -48,6 +55,11 @@ class WasiRuntime(PythonRuntime):
     command still resolves script files through the workspace before the
     run, but file I/O inside the code cannot reach mounts. Use the
     `monty` runtime for workspace file I/O.
+
+    Runs execute on a worker thread with the GIL released, and each run
+    gets its own epoch-interruption engine: cancelling the `run` task
+    bumps the epoch, which traps the guest and reclaims the thread, so a
+    safeguard timeout stops the interpreter instead of leaking it.
 
     The build directory comes from the `python_wasm` argument or the
     MIRAGE_WASI_PYTHON environment variable. CPython requires the
@@ -79,42 +91,62 @@ class WasiRuntime(PythonRuntime):
             raise FileNotFoundError(
                 f"no lib/python3.* under {self._root}; {_BUILD_HINT}")
         self._pythonhome = f"/lib/{stdlibs[-1].name}"
-        self._engine = wasmtime.Engine()
-        self._module: "wasmtime.Module | None" = None
+        self._compile_lock = threading.Lock()
+        self._serialized: bytes | None = None
 
-    def _ensure_module(self) -> "wasmtime.Module":
+    def _ensure_serialized(self) -> bytes:
         """Compile python.wasm once, caching the compilation on disk.
 
         The precompiled artifact (python.cwasm next to python.wasm)
-        deserializes in milliseconds versus a fresh compile; a stale or
-        unwritable cache falls back to compiling in memory.
+        deserializes in milliseconds versus a fresh compile. Epoch
+        checks are compiled in, so a cache produced with different
+        engine settings fails deserialization and is recompiled; an
+        unwritable directory just skips the disk cache.
         """
-        if self._module is not None:
-            return self._module
-        wasm = self._root / "python.wasm"
-        cache = self._root / "python.cwasm"
-        if cache.is_file() and cache.stat().st_mtime >= wasm.stat().st_mtime:
+        with self._compile_lock:
+            if self._serialized is not None:
+                return self._serialized
+            wasm = self._root / "python.wasm"
+            cache = self._root / "python.cwasm"
+            engine = _epoch_engine()
+            if (cache.is_file()
+                    and cache.stat().st_mtime >= wasm.stat().st_mtime):
+                try:
+                    wasmtime.Module.deserialize_file(engine, str(cache))
+                    self._serialized = cache.read_bytes()
+                    return self._serialized
+                except wasmtime.WasmtimeError as exc:
+                    logger.debug("stale python.cwasm cache, recompiling: %s",
+                                 exc)
+            module = wasmtime.Module.from_file(engine, str(wasm))
+            self._serialized = module.serialize()
             try:
-                self._module = wasmtime.Module.deserialize_file(
-                    self._engine, str(cache))
-                return self._module
-            except wasmtime.WasmtimeError as exc:
-                logger.debug("stale python.cwasm cache, recompiling: %s", exc)
-        self._module = wasmtime.Module.from_file(self._engine, str(wasm))
-        try:
-            cache.write_bytes(self._module.serialize())
-        except OSError as exc:
-            logger.debug("cannot write python.cwasm cache: %s", exc)
-        return self._module
+                cache.write_bytes(self._serialized)
+            except OSError as exc:
+                logger.debug("cannot write python.cwasm cache: %s", exc)
+            return self._serialized
 
     async def run(self, args: PythonRunArgs) -> PythonRunResult:
-        return await asyncio.to_thread(self._run_sync, args)
+        serialized = await asyncio.to_thread(self._ensure_serialized)
+        engine = _epoch_engine()
+        try:
+            return await asyncio.to_thread(self._run_sync, engine, serialized,
+                                           args)
+        except asyncio.CancelledError:
+            # The worker thread is still inside the guest; bumping the
+            # epoch trips the store's deadline, traps the guest, and
+            # lets the thread exit. Per-run engines keep the bump from
+            # reaching concurrent runs.
+            engine.increment_epoch()
+            raise
 
-    def _run_sync(self, args: PythonRunArgs) -> PythonRunResult:
-        module = self._ensure_module()
-        linker = wasmtime.Linker(self._engine)
+    def _run_sync(self, engine: "wasmtime.Engine", serialized: bytes,
+                  args: PythonRunArgs) -> PythonRunResult:
+        module = wasmtime.Module.deserialize(engine, serialized)
+        linker = wasmtime.Linker(engine)
         linker.define_wasi()
-        store = wasmtime.Store(self._engine)
+        store = wasmtime.Store(engine)
+        store.set_epoch_deadline(1)
         wasi = wasmtime.WasiConfig()
         # sys.argv becomes ['-c', *args.args], matching the local runtime.
         wasi.argv = ["python", "-c", args.code, *args.args]
