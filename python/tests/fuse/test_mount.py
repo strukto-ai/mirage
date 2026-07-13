@@ -74,3 +74,21 @@ def test_prepare_mountpoint_posix_keeps_dir(monkeypatch, tmp_path):
     monkeypatch.setattr("sys.platform", "linux")
     _prepare_mountpoint(str(mp))
     assert mp.is_dir()
+
+
+def test_run_fuse_win32_adds_winfsp_owner_mapping(monkeypatch, fs):
+    monkeypatch.setattr("mirage.fuse.mount.fuse.FUSE", _CaptureFuse)
+    monkeypatch.setattr("sys.platform", "win32")
+    _run_fuse(fs, "/tmp/mp", foreground=True)
+    # WinFsp builtin: uid=-1/gid=-1 presents files as owned by the
+    # mounting user (POSIX ids have no meaningful SID mapping).
+    assert _CaptureFuse.kwargs["uid"] == -1
+    assert _CaptureFuse.kwargs["gid"] == -1
+
+
+def test_run_fuse_posix_omits_owner_mapping(monkeypatch, fs):
+    monkeypatch.setattr("mirage.fuse.mount.fuse.FUSE", _CaptureFuse)
+    monkeypatch.setattr("sys.platform", "linux")
+    _run_fuse(fs, "/tmp/mp", foreground=True)
+    assert "uid" not in _CaptureFuse.kwargs
+    assert "gid" not in _CaptureFuse.kwargs

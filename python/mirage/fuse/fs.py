@@ -81,6 +81,11 @@ class MirageFS(_FUSE_OPERATIONS):
         # POSIX xattrs, so these are advisory, not persisted (see setxattr).
         self._xattrs: dict[str, dict[str, bytes]] = {}
         self._next_fh = 1
+        # Windows has no getuid/getgid; the values are irrelevant there
+        # because the mount passes uid=-1,gid=-1 and WinFsp presents files
+        # as owned by the mounting user (see mount.py). Mirrors fs.ts.
+        self._uid = os.getuid() if hasattr(os, "getuid") else 0
+        self._gid = os.getgid() if hasattr(os, "getgid") else 0
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(target=self._loop.run_forever,
                                              daemon=True)
@@ -110,8 +115,8 @@ class MirageFS(_FUSE_OPERATIONS):
         return {
             "st_mode": stat.S_IFDIR | 0o755,
             "st_nlink": 2,
-            "st_uid": os.getuid(),
-            "st_gid": os.getgid(),
+            "st_uid": self._uid,
+            "st_gid": self._gid,
             "st_size": 0,
             "st_atime": self._now,
             "st_mtime": self._now,
@@ -122,8 +127,8 @@ class MirageFS(_FUSE_OPERATIONS):
         return {
             "st_mode": stat.S_IFREG | 0o644,
             "st_nlink": 1,
-            "st_uid": os.getuid(),
-            "st_gid": os.getgid(),
+            "st_uid": self._uid,
+            "st_gid": self._gid,
             "st_size": size,
             "st_atime": self._now,
             "st_mtime": self._now,

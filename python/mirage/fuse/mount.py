@@ -45,12 +45,17 @@ def _run_fuse(fs: MirageFS, mountpoint: str, foreground: bool) -> None:
     # of trusting the cached pre-open size; without it fstat-based tools see
     # a stale 0 (wc -c prints 0, BSD cp copies 0 bytes, tail -c dumps the
     # whole file). mfusepy forwards unknown kwargs as -o mount options.
+    # uid=-1/gid=-1 (win32): the WinFsp-FUSE builtin that presents all files
+    # as owned by the mounting user; POSIX uid/gid values reported by getattr
+    # have no meaningful SID mapping on Windows (see the WinFsp FAQ).
+    win_opts = {"uid": -1, "gid": -1} if sys.platform == "win32" else {}
     fuse.FUSE(fs,
               mountpoint,
               nothreads=True,
               foreground=foreground,
               direct_io=True,
-              attr_timeout=0)
+              attr_timeout=0,
+              **win_opts)
 
 
 def _await_ready(thread: threading.Thread,
