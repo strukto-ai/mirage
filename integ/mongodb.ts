@@ -19,7 +19,7 @@ import {
   MountMode,
   Workspace,
 } from "@struktoai/mirage-node";
-import { runNotFound, runProvisionProbe } from "./cases.ts";
+import { runNotFound, runProvisionProbe, runSedReadonlyProbe } from "./cases.ts";
 
 const MONGODB_URI = process.env.MONGODB_URI ?? "mongodb://localhost:27017";
 const DB = "mirage_integ";
@@ -166,6 +166,10 @@ async function main(): Promise<void> {
     }
     await runNotFound(ws, MOUNT);
     await runProvisionProbe(
+      ws,
+      `${MOUNT}/${DB}/collections/books/documents.jsonl`,
+    );
+    await runSedReadonlyProbe(
       ws,
       `${MOUNT}/${DB}/collections/books/documents.jsonl`,
     );

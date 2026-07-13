@@ -54,6 +54,7 @@ from mirage.commands.builtin.generic_bind.builders import realpath
 from mirage.commands.builtin.generic_bind.builders import rev
 from mirage.commands.builtin.generic_bind.builders import rg
 from mirage.commands.builtin.generic_bind.builders import rm
+from mirage.commands.builtin.generic_bind.builders import sed
 from mirage.commands.builtin.generic_bind.builders import sha256sum
 from mirage.commands.builtin.generic_bind.builders import shuf
 from mirage.commands.builtin.generic_bind.builders import sort
@@ -119,6 +120,7 @@ _BUILDERS = (
     rev.BUILDER,
     rg.BUILDER,
     rm.BUILDER,
+    sed.BUILDER,
     sha256sum.BUILDER,
     shuf.BUILDER,
     sort.BUILDER,

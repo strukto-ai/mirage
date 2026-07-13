@@ -19,7 +19,7 @@ import {
   PostgresResource,
   Workspace,
 } from "@struktoai/mirage-node";
-import { runNotFound, runProvisionProbe } from "./cases.ts";
+import { runNotFound, runProvisionProbe, runSedReadonlyProbe } from "./cases.ts";
 
 const DSN =
   process.env.POSTGRES_DSN ?? "postgres://mirage:mirage@localhost:55432/mirage_integ";
@@ -137,6 +137,7 @@ async function main(): Promise<void> {
     }
     await runNotFound(ws, MOUNT);
     await runProvisionProbe(ws, `${MOUNT}/public/tables/books/rows.jsonl`);
+    await runSedReadonlyProbe(ws, `${MOUNT}/public/tables/books/rows.jsonl`);
   } finally {
     await ws.close();
     await resource.close();

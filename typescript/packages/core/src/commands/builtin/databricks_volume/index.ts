@@ -20,10 +20,9 @@ import { DATABRICKS_VOLUME_HEAD } from './head.ts'
 import { DATABRICKS_VOLUME_MKDIR } from './mkdir.ts'
 import { DATABRICKS_VOLUME_CMD_OPS } from './ops.ts'
 import { DATABRICKS_VOLUME_RM } from './rm.ts'
-import { DATABRICKS_VOLUME_SED } from './sed.ts'
 import { DATABRICKS_VOLUME_TOUCH } from './touch.ts'
 
-const DATABRICKS_VOLUME_OVERRIDES = new Set(['head', 'sed', 'mkdir', 'touch', 'rm'])
+const DATABRICKS_VOLUME_OVERRIDES = new Set(['head', 'mkdir', 'touch', 'rm'])
 
 export const DATABRICKS_VOLUME_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<DatabricksVolumeAccessor>(
@@ -37,5 +36,4 @@ export const DATABRICKS_VOLUME_COMMANDS: readonly RegisteredCommand[] = [
   ...DATABRICKS_VOLUME_MKDIR,
   ...DATABRICKS_VOLUME_TOUCH,
   ...DATABRICKS_VOLUME_RM,
-  ...DATABRICKS_VOLUME_SED,
 ]

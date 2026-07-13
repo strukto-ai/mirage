@@ -14,7 +14,6 @@
 
 from mirage.commands.builtin.chroma.find import find
 from mirage.commands.builtin.chroma.search import search
-from mirage.commands.builtin.chroma.sed import sed
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
 from mirage.core.chroma.read import read_bytes as _read
@@ -23,9 +22,9 @@ from mirage.core.chroma.readdir import readdir as _readdir
 from mirage.core.chroma.stat import stat as _stat
 
 # Chroma records are read through the generic factory; find normalises paths,
-# search pushes down to the Chroma query API, and sed has no generic builder,
-# so the three stay bespoke. Chroma is read-only, so the generic byte-mutation
-# commands are intentionally absent (no write op wired).
+# search pushes down to the Chroma query API, so the two stay bespoke.
+# Chroma is read-only, so the generic byte-mutation commands are
+# intentionally absent (no write op wired).
 _CHROMA_CMD_OPS = CommandIO(
     readdir=_readdir,
     read_bytes=_read,
@@ -35,7 +34,7 @@ _CHROMA_CMD_OPS = CommandIO(
     local=False,
 )
 
-_CHROMA_OVERRIDES = {"find", "search", "sed"}
+_CHROMA_OVERRIDES = {"find", "search"}
 
 COMMANDS = [
     *make_generic_commands(
@@ -45,5 +44,4 @@ COMMANDS = [
     ),
     find,
     search,
-    sed,
 ]

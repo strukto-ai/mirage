@@ -53,6 +53,7 @@ import { REALPATH_BUILDER } from './realpath.ts'
 import { REV_BUILDER } from './rev.ts'
 import { RG_BUILDER } from './rg.ts'
 import { RM_BUILDER } from './rm.ts'
+import { SED_BUILDER } from './sed.ts'
 import { SHA256SUM_BUILDER } from './sha256sum.ts'
 import { SHUF_BUILDER } from './shuf.ts'
 import { SORT_BUILDER } from './sort.ts'
@@ -117,6 +118,7 @@ export const BUILDERS: readonly Builder[] = [
   REV_BUILDER,
   RG_BUILDER,
   RM_BUILDER,
+  SED_BUILDER,
   SHA256SUM_BUILDER,
   SHUF_BUILDER,
   SORT_BUILDER,

@@ -111,3 +111,9 @@ net=32768 write=0 cache=0 ops=1 hits=0 precision=exact
 net=32768 write=0 cache=0 ops=1 hits=0 precision=exact
 === prov_probe_ls ===
 net=0 write=0 cache=0 ops=1 hits=0 precision=exact
+
+# ---- sed (streaming works on the read-only mount; -i is rejected) ----
+=== sed_stream_1p ===
+{"id":1,"title":"alpha","author":"ada","year":2020,
+=== sed_i_readonly ===
+sed: -i not supported on this backend: Permission denied

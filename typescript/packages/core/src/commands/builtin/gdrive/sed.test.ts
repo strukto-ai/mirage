@@ -29,7 +29,9 @@ import { materialize } from '../../../io/types.ts'
 import type { Resource } from '../../../resource/base.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { GDRIVE_SED } from './sed.ts'
+import { GDRIVE_COMMANDS } from './index.ts'
+
+const GDRIVE_SED = GDRIVE_COMMANDS.filter((c) => c.name === 'sed' && c.filetype == null)
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -147,6 +149,6 @@ describe('gdrive sed', () => {
     const [out, io] = result
     expect(out).toBeNull()
     expect(io.exitCode).toBe(1)
-    expect(await io.stderrStr()).toContain('read-only Google Drive mount')
+    expect(await io.stderrStr()).toContain('sed: -i not supported on this backend')
   })
 })
