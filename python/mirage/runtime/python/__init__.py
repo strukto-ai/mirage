@@ -18,6 +18,7 @@ from mirage.runtime.python.local import LocalRuntime
 from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.python.select import (DEFAULT_PYTHON_RUNTIME,
                                           select_python_runtime)
+from mirage.runtime.python.wasi import WasiRuntime
 
 __all__ = [
     "DEFAULT_PYTHON_RUNTIME",
@@ -26,5 +27,6 @@ __all__ = [
     "PythonRunArgs",
     "PythonRunResult",
     "PythonRuntime",
+    "WasiRuntime",
     "select_python_runtime",
 ]

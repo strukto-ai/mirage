@@ -427,6 +427,7 @@ export {
 } from './workspace/executor/cross_mount.ts'
 export { handleCommand, ReturnSignal } from './workspace/executor/command.ts'
 export { PYTHON_RUNTIMES } from './workspace/executor/python/runtimes/interface.ts'
+export { validateRuntimeOptions } from './workspace/executor/python/runtimes/select.ts'
 export { applyBarrier, BarrierPolicy } from './shell/barrier.ts'
 export { handleConnection, handlePipe, handleSubshell } from './workspace/executor/pipes.ts'
 export { handleRedirect } from './workspace/executor/redirect.ts'

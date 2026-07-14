@@ -126,6 +126,14 @@ export interface WorkspaceOptions {
   }
   /** Python runtime for `python3`: 'pyodide' (default) or 'monty'. */
   pythonRuntime?: string
+  /**
+   * Per-runtime option blocks (the yaml `runtime:` sibling blocks end
+   * up here); the selected runtime consumes its own block, e.g.
+   * `{ pyodide: { home: 'https://cdn.example.com/pyodide/' } }` for
+   * self-hosted pyodide assets (`home` falls back to
+   * MIRAGE_PYODIDE_HOME). Blocks for other runtimes are ignored.
+   */
+  runtimeOptions?: Record<string, Record<string, unknown>>
 }
 
 export class ExecuteResult {
@@ -255,11 +263,15 @@ export class Workspace {
     this.shellParserFactory = options.shellParserFactory ?? null
     this.agentId = options.agentId ?? DEFAULT_AGENT_ID
     const userPython = options.python ?? {}
-    this.pythonRuntime = selectPythonRuntime(options.pythonRuntime, {
-      ...userPython,
-      workspaceBridge: this.buildWorkspaceBridge(),
-      listMounts: () => this.pythonVisibleMounts(),
-    })
+    this.pythonRuntime = selectPythonRuntime(
+      options.pythonRuntime,
+      {
+        ...userPython,
+        workspaceBridge: this.buildWorkspaceBridge(),
+        listMounts: () => this.pythonVisibleMounts(),
+      },
+      options.runtimeOptions,
+    )
     this.closers.push(() => this.pythonRuntime.close())
     this.observer = new Observer(options.observe)
     this.registry.mount(HISTORY_PREFIX, new HistoryViewResource(this.observer), MountMode.READ)

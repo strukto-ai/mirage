@@ -144,4 +144,18 @@ describe('python3 command timeout', () => {
       await ws.close()
     }
   }, 60_000)
+
+  it('mount-level safeguard follows the script path, not cwd', async () => {
+    const ws = buildPyWs({
+      '/data': { python3: new CommandSafeguard({ timeoutSeconds: 0.25 }) },
+    })
+    try {
+      await ws.execute(SLOW_SCRIPT)
+      const r = await ws.execute('python3 /data/slow.py')
+      expect(r.exitCode).toBe(124)
+      expect(DEC.decode(r.stderr)).toContain('python3: timed out after 0.25s')
+    } finally {
+      await ws.close()
+    }
+  }, 60_000)
 })

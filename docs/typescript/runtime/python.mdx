@@ -68,6 +68,8 @@ Server workspace config files take a top-level `runtime` block:
 ```yaml
 runtime:
   python: monty   # or: pyodide
+  pyodide:        # optional per-runtime blocks
+    home: https://assets.example.com/pyodide/
 
 mounts:
   /data:
@@ -75,6 +77,25 @@ mounts:
     command_safeguards:
       python3:
         timeout_seconds: 30
+```
+
+Each runtime can have its own option block under its name. The `home`
+option locates the runtime's interpreter or distribution, in the
+spirit of JAVA_HOME. For `pyodide` that is where the distribution
+loads from: it defaults to the installed package in Node and the
+pinned CDN in the browser; point it at self-hosted assets to pin or
+air-gap the runtime (falls back to the MIRAGE_PYODIDE_HOME environment
+variable). Blocks for the Python-only runtimes (`wasi`, `local`) are
+accepted and ignored, so one config stays portable across languages;
+the selected runtime rejects option keys it does not know. `monty`
+embeds its interpreter and has no options yet. In application code the
+same blocks are the `runtimeOptions` workspace option:
+
+```ts
+const ws = new Workspace(resources, {
+  pythonRuntime: 'pyodide',
+  runtimeOptions: { pyodide: { home: 'https://assets.example.com/pyodide/' } },
+})
 ```
 
 ## Resource limits

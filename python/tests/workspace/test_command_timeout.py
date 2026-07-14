@@ -14,6 +14,7 @@
 
 import asyncio
 import logging
+import time
 
 import pytest
 
@@ -357,6 +358,42 @@ async def test_python3_mount_safeguard_fires_like_any_command(
         mode=MountMode.EXEC,
         python_runtime="local")
     r = await ws.execute('cd /data && python3 -c "import time; time.sleep(5)"')
+    assert r.exit_code == 124
+    assert "python3: timed out after 0.2s" in (await r.stderr_str())
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_python3_timeout_reclaims_monty_interpreter(restore_defaults):
+    sg.DEFAULT_COMMAND_SAFEGUARDS["python3"] = CommandSafeguard(
+        timeout_seconds=0.2)
+    ram = RAMResource()
+    ram._store.files["/spin.py"] = b"n = 0\nwhile True:\n    n = n + 1\n"
+    ws = Workspace({"/data": ram}, mode=MountMode.EXEC)
+    start = time.monotonic()
+    r = await ws.execute("python3 /data/spin.py")
+    assert r.exit_code == 124
+    assert "python3: timed out after 0.2s" in (await r.stderr_str())
+    # Cancellation halts the interpreter: the answer comes at the
+    # deadline and the run does not linger as a burning thread (a leak
+    # would hang pytest at loop shutdown).
+    assert time.monotonic() - start < 5
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_python3_mount_safeguard_follows_script_path(restore_defaults):
+    ram = RAMResource()
+    ram._store.files["/slow.py"] = b"import time; time.sleep(5)\n"
+    ws = Workspace(
+        {
+            "/data": (ram, MountMode.EXEC, {
+                "python3": CommandSafeguard(timeout_seconds=0.2)
+            })
+        },
+        mode=MountMode.EXEC,
+        python_runtime="local")
+    r = await ws.execute("python3 /data/slow.py")
     assert r.exit_code == 124
     assert "python3: timed out after 0.2s" in (await r.stderr_str())
     await ws.close()
