@@ -69,6 +69,11 @@ export interface PyodideRuntimeOptions extends PythonRuntimeOptions {
   autoLoadFromImports?: boolean
   bootstrapCode?: string
   denyPackages?: readonly string[]
+  // Where the pyodide distribution loads from (the yaml
+  // `runtime: pyodide: home:` entry ends up here); falls back to
+  // MIRAGE_PYODIDE_HOME, then the installed package in Node or the
+  // pinned CDN in the browser. Override for self-hosted assets.
+  home?: string
 }
 
 export class PyodideRuntime implements PythonRuntime {
@@ -82,6 +87,7 @@ export class PyodideRuntime implements PythonRuntime {
   private readonly workspaceBridge: BridgeDispatchFn | null
   private readonly denyPackages: ReadonlySet<string>
   private readonly listMounts: () => string[]
+  private readonly home: string | null
   private bridge: MirageBridge | null = null
 
   constructor(options: PyodideRuntimeOptions = {}) {
@@ -90,6 +96,7 @@ export class PyodideRuntime implements PythonRuntime {
     this.workspaceBridge = options.workspaceBridge ?? null
     this.denyPackages = new Set(options.denyPackages ?? [])
     this.listMounts = options.listMounts ?? ((): string[] => [])
+    this.home = options.home ?? null
   }
 
   async run(args: PythonRunArgs): Promise<PythonRunResult> {
@@ -123,7 +130,7 @@ export class PyodideRuntime implements PythonRuntime {
       await this.wireBridgeIfNeeded(this.pyodide)
       return this.pyodide
     }
-    this.initPromise ??= loadPyodideRuntime()
+    this.initPromise ??= loadPyodideRuntime(this.home ?? undefined)
     this.pyodide = await this.initPromise
     if (this.bootstrapCode !== null) {
       const code = this.bootstrapCode

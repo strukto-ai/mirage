@@ -14,24 +14,52 @@
 
 import asyncio
 import os
+import shutil
 import sys
 
 from mirage.runtime.python.base import (PythonRunArgs, PythonRunResult,
                                         PythonRuntime)
 
+LOCAL_HOME_ENV = "MIRAGE_LOCAL_HOME"
+
 
 class LocalRuntime(PythonRuntime):
-    """Run Python code on the host interpreter as a subprocess.
+    """Run Python code on a host interpreter as a subprocess.
 
-    Each run spawns `sys.executable -c <code>`; the code sees the host
-    filesystem and environment, not the workspace mounts.
+    Each run spawns `<interpreter> -c <code>`; the code sees the host
+    filesystem and environment, not the workspace mounts. Cancelling the
+    run kills the subprocess, so a safeguard timeout reclaims it.
+
+    The interpreter defaults to the one running mirage; point the
+    `home` argument (the yaml `runtime: local: home:` entry ends up
+    here) or the MIRAGE_LOCAL_HOME environment variable at another
+    binary, e.g. a project venv whose packages the code needs.
+
+    Args:
+        home (str | None): interpreter path or command name. None
+            reads MIRAGE_LOCAL_HOME, then falls back to
+            `sys.executable`.
     """
 
     name = "local"
 
+    def __init__(self, home: str | None = None) -> None:
+        chosen = home or os.environ.get(LOCAL_HOME_ENV)
+        if chosen:
+            resolved = shutil.which(chosen)
+            if resolved is None:
+                raise FileNotFoundError(
+                    f"local python interpreter not found: {chosen!r} "
+                    "(from the yaml `runtime: local: home:` entry, the "
+                    "Workspace `runtime_options` argument, or "
+                    f"{LOCAL_HOME_ENV})")
+            self._python = resolved
+        else:
+            self._python = sys.executable
+
     async def run(self, args: PythonRunArgs) -> PythonRunResult:
         proc = await asyncio.create_subprocess_exec(
-            sys.executable,
+            self._python,
             "-c",
             args.code,
             *args.args,
@@ -43,7 +71,12 @@ class LocalRuntime(PythonRuntime):
                 **args.env
             },
         )
-        stdout, stderr = await proc.communicate(input=args.stdin)
+        try:
+            stdout, stderr = await proc.communicate(input=args.stdin)
+        except asyncio.CancelledError:
+            proc.kill()
+            await proc.wait()
+            raise
         return PythonRunResult(
             stdout=stdout,
             stderr=stderr or None,

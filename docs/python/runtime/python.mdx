@@ -1,16 +1,17 @@
 ---
 title: Python
-description: Choose the interpreter that runs python3 inside the workspace, monty (sandboxed, default) or the host interpreter.
+description: Choose the interpreter that runs python3 inside the workspace, monty (sandboxed, default), wasi (sandboxed full CPython), or the host interpreter.
 icon: /images/pydantic-logo.svg
 ---
 
 Shell lines like `python3 script.py` need an interpreter. Mirage calls that
-interpreter a **runtime**, and you pick it per workspace. Two runtimes ship
-today:
+interpreter a **runtime**, and you pick it per workspace. Three runtimes
+ship today:
 
 | Runtime | Engine | Filesystem | Default |
 | --- | --- | --- | --- |
 | `monty` | [Pydantic Monty](https://github.com/pydantic/monty), a sandboxed Python interpreter written in Rust | Workspace mounts only, bridged through Mirage | Yes |
+| `wasi` | Full CPython compiled to WebAssembly, run in-process on [wasmtime](https://wasmtime.dev) | None: no host filesystem, no mounts, no network | No |
 | `local` | The host `python` interpreter, as a subprocess | The host filesystem | No |
 
 ## Monty (default)
@@ -44,6 +45,19 @@ Monty requires the `monty` extra:
 pip install mirage-ai[monty]
 ```
 
+### Concurrency
+
+Runs execute on Monty's own worker pool and are fully async: the event
+loop stays free, and cancelling a run halts the interpreter. One
+ceiling to know about when a server runs many I/O-heavy scripts at
+once: each run waiting on workspace I/O holds one pool worker (the
+Python binding only takes synchronous OS callbacks,
+[pydantic/monty#560](https://github.com/pydantic/monty/issues/560)),
+and the pool defaults to the machine's core count. Set
+`TOKIO_WORKER_THREADS` to lift it; waiting workers cost kilobytes of
+stack and no CPU, so 100 parallel I/O-bound scripts on one core is a
+`TOKIO_WORKER_THREADS=100` away.
+
 Without it, `python3` exits with code 127 and an install hint; every other
 command keeps working.
 
@@ -53,15 +67,58 @@ Monty implements a Python subset. Notably:
 
 - Command-line arguments are the `argv` global (`argv[0]` is the script
   name); `sys.argv` does not exist.
-- No `sys.stdin`: piping into `python3` needs the `local` runtime.
+- No `sys.stdin`: piping into `python3` needs the `wasi` or `local` runtime.
 - No third-party imports (`numpy`, `requests`, ...).
 - File handles are not iterable (`for line in f` raises `TypeError`);
   `f.read()`, `f.readline()`, and `f.readlines()` all work.
 - `os.environ` reflects the session env only, never the host's.
 
+## WASI
+
+The `wasi` runtime runs a real CPython, compiled to WebAssembly, inside
+your process on wasmtime. It fills monty's gaps (classes, the complete
+stdlib, `sys.argv`, `sys.stdin`) while staying fully sandboxed: the
+guest sees only the interpreter's own build directory, so host files,
+network sockets, and workspace mounts are all invisible. Script files
+still work (`python3 /data/script.py` reads the script through the
+workspace before the run), but file I/O *inside* the code cannot reach
+mounts; use `monty` for that.
+
+It needs the `wasi` extra plus a CPython WASI build (download and
+unzip a release from
+[cpython-wasi-build](https://github.com/brettcannon/cpython-wasi-build/releases)):
+
+```bash
+pip install mirage-ai[wasi]
+```
+
+Point mirage at the build directory with the `home` option in the
+wasi runtime's block (the `runtime_options` argument, the yaml
+`runtime: wasi:` block, or the MIRAGE_WASI_HOME environment variable):
+
+```python
+ws = Workspace({"/data": RAMResource()},
+               mode=MountMode.EXEC,
+               python_runtime="wasi",
+               runtime_options={"wasi": {"home": "/path/to/unzipped/build"}})
+```
+
+```yaml
+runtime:
+  python: wasi
+  wasi:
+    home: /path/to/unzipped/build
+```
+
+The first run compiles `python.wasm` (a few hundred milliseconds) and
+caches the compilation as `python.cwasm` next to it; runs after that
+boot in milliseconds. The build directory is mounted read-write into
+the guest (CPython requires it); make it read-only on the host
+filesystem to keep runs from persisting files into the bundle.
+
 ## Local
 
-The `local` runtime runs `sys.executable -c` as a subprocess: full
+The `local` runtime runs a host interpreter as a subprocess: full
 CPython, host filesystem, host environment. Use it when the code needs
 stdin, third-party packages, or host files:
 
@@ -69,6 +126,18 @@ stdin, third-party packages, or host files:
 ws = Workspace({"/data": RAMResource()},
                mode=MountMode.EXEC,
                python_runtime="local")
+```
+
+It defaults to the interpreter running mirage; point the `home` option
+in the local runtime's block (or the MIRAGE_LOCAL_HOME environment
+variable) at another binary, e.g. a project venv whose packages the
+code needs:
+
+```yaml
+runtime:
+  python: local
+  local:
+    home: /path/to/venv/bin/python
 ```
 
 Note that `local` code does **not** see workspace mounts; it sees the real
@@ -80,7 +149,11 @@ Workspace config files take a top-level `runtime` block:
 
 ```yaml
 runtime:
-  python: monty   # or: local
+  python: monty   # or: wasi, local
+  wasi:           # optional per-runtime blocks
+    home: /opt/cpython-wasi
+  local:
+    home: /usr/bin/python3.12
 
 mounts:
   /data:
@@ -89,6 +162,15 @@ mounts:
       python3:
         timeout_seconds: 30
 ```
+
+Each runtime can have its own option block under its name. The `home`
+option locates the runtime's interpreter or distribution, in the
+spirit of JAVA_HOME: a build directory for `wasi`, an interpreter path
+for `local`, a distribution URL for `pyodide` (TypeScript); it also
+falls back to a MIRAGE_&lt;RUNTIME&gt;_HOME environment variable. Only
+the selected runtime consumes its block and it rejects option keys it
+does not know, so one config stays portable across runtimes and
+languages. `monty` embeds its interpreter and has no options yet.
 
 ## Resource limits
 
@@ -99,8 +181,8 @@ central point. A run that exceeds `timeout_seconds` answers with exit
 other command; `max_bytes` and `max_lines` cap its output the same
 way. There is no python3-specific limit surface.
 
-One caveat: the guard bounds how long a run may *answer*, not the
-interpreter itself. A run that ignores the deadline keeps its
-interpreter busy in the background until it finishes (monty runs on a
-worker thread, `local` on a host subprocess). Give untrusted code a
-finite workload, or run it behind a sandboxed deployment.
+Firing the guard also cancels the run, and every runtime honors
+cancellation: monty halts its interpreter, wasi traps the guest
+through wasmtime's epoch interruption, and local kills the
+subprocess. A timed-out `python3` run is reclaimed at the deadline,
+not left burning in the background.
