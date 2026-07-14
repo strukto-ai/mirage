@@ -115,18 +115,20 @@ class WasiRuntime(PythonRuntime):
                     and cache.stat().st_mtime >= wasm.stat().st_mtime):
                 try:
                     wasmtime.Module.deserialize_file(engine, str(cache))
-                    self._serialized = cache.read_bytes()
-                    return self._serialized
+                    cached = cache.read_bytes()
+                    self._serialized = cached
+                    return cached
                 except wasmtime.WasmtimeError as exc:
                     logger.debug("stale python.cwasm cache, recompiling: %s",
                                  exc)
             module = wasmtime.Module.from_file(engine, str(wasm))
-            self._serialized = module.serialize()
+            serialized = bytes(module.serialize())
+            self._serialized = serialized
             try:
-                cache.write_bytes(self._serialized)
+                cache.write_bytes(serialized)
             except OSError as exc:
                 logger.debug("cannot write python.cwasm cache: %s", exc)
-            return self._serialized
+            return serialized
 
     async def run(self, args: PythonRunArgs) -> PythonRunResult:
         serialized = await asyncio.to_thread(self._ensure_serialized)
