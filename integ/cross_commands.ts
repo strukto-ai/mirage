@@ -392,6 +392,48 @@ async function checkSymlinks(
   [out] = await run(ws, `cat ${dst}/copied/a.txt`);
   check(`${label}: target intact after rm links`, out === "aaa\n");
   await run(ws, "rm /ram/xl_copy.txt");
+
+  let err = "";
+  await run(ws, `ln -s ${dst}/copied/a.txt /ram/sl.txt`);
+  [, err, code] = await run(ws, `ln -s ${dst}/copied/sub/b.txt /ram/sl.txt`);
+  check(
+    `${label}: ln onto existing link fails`,
+    code === 1 && err.includes("File exists"),
+  );
+  [, , code] = await run(ws, `ln -sf ${dst}/copied/sub/b.txt /ram/sl.txt`);
+  [out] = await run(ws, "readlink /ram/sl.txt");
+  check(
+    `${label}: ln -sf re-points link`,
+    code === 0 && out.trim() === `${dst}/copied/sub/b.txt`,
+  );
+  [out, , code] = await run(ws, `readlink ${dst}/copied/a.txt`);
+  check(`${label}: readlink non-link exits 1`, code === 1 && out === "");
+  [out] = await run(ws, "ls -l /ram");
+  check(
+    `${label}: ls -l shows link arrow`,
+    out.includes(`sl.txt -> ${dst}/copied/sub/b.txt`),
+  );
+  [out] = await run(ws, "ls -F /ram");
+  check(`${label}: ls -F marks link with @`, out.includes("sl.txt@"));
+  await run(ws, "ln -s /ram/sl.txt /ram/sl2.txt");
+  [out] = await run(ws, "cat /ram/sl2.txt");
+  check(`${label}: link chain resolves across mounts`, out === "bbb\n");
+  await run(ws, `mv /ram/sl2.txt ${dst}/slmoved.txt`);
+  [out] = await run(ws, `readlink ${dst}/slmoved.txt`);
+  check(
+    `${label}: mv link across mounts keeps target`,
+    out.trim() === "/ram/sl.txt",
+  );
+  await run(ws, `ln -s ${dst}/copied/nope.txt /ram/dl.txt`);
+  [, , code] = await run(ws, "cat /ram/dl.txt");
+  check(`${label}: dangling link read fails`, code !== 0);
+  [out] = await run(ws, "ls -l /ram");
+  check(
+    `${label}: dangling link still listed`,
+    out.includes(`dl.txt -> ${dst}/copied/nope.txt`),
+  );
+  [, , code] = await run(ws, `rm /ram/sl.txt /ram/dl.txt ${dst}/slmoved.txt`);
+  check(`${label}: rm link surface exits 0`, code === 0);
 }
 
 // Reads through a link must share the target's cache entry: warming via the
@@ -405,6 +447,7 @@ async function checkMetadata(
   ws: Workspace,
   dst: string,
   label: string,
+  nativeAttrs: boolean,
 ): Promise<void> {
   // setattr is resolve-then-act: chmod/chown/touch on a dst-homed file,
   // directly and through links homed on another mount, must land on the
@@ -454,6 +497,63 @@ async function checkMetadata(
     ws,
     `rm /ram/ml.txt /ram/mdir ${dst}/copied/m.txt ${dst}/copied/created.txt`,
   );
+
+  await run(ws, `printf 'nnn\n' > ${dst}/copied/n.txt`);
+  await run(ws, `chmod g+w ${dst}/copied/n.txt`);
+  st = await statOf(ws, `${dst}/copied/n.txt`);
+  check(
+    `${label}: symbolic chmod applies against 644 base`,
+    st.mode === 0o664,
+  );
+  await run(ws, `chown 500:dev ${dst}/copied/n.txt`);
+  await run(ws, `touch -t 202603041200 ${dst}/copied/n.txt`);
+  // ls builds rows from the backend stat, which carries chmod/chown/touch
+  // only when the backend applies setattr natively. Pure-overlay backends
+  // (s3) render defaults here: known display gap, dispatch-stat is checked
+  // above either way.
+  if (nativeAttrs) {
+    const [lsOut] = await run(ws, `ls -l ${dst}/copied`);
+    check(`${label}: ls -l renders overlay bits`, lsOut.includes("-rw-rw-r--"));
+    check(`${label}: ls -l renders overlay owner`, lsOut.includes(" 500 dev "));
+    check(
+      `${label}: ls -l renders touched mtime`,
+      lsOut.includes("Mar  4 12:00"),
+    );
+  }
+  await run(ws, `touch -r ${dst}/copied/n.txt /ram/tref.txt`);
+  st = await statOf(ws, "/ram/tref.txt");
+  check(
+    `${label}: touch -r copies mtime across mounts`,
+    (st.modified ?? "").startsWith("2026-03-04T12:00"),
+  );
+  let code = 0;
+  [, , code] = await run(ws, `touch -c ${dst}/copied/absent.txt`);
+  const [lsAll] = await run(ws, `ls ${dst}/copied`);
+  check(
+    `${label}: touch -c does not create`,
+    code === 0 && !lsAll.includes("absent.txt"),
+  );
+  await run(ws, `ln -s ${dst}/copied/n.txt /ram/nl.txt`);
+  await run(ws, "chown -h 501:ops /ram/nl.txt");
+  st = await statOf(ws, `${dst}/copied/n.txt`);
+  check(
+    `${label}: chown -h leaves target owner`,
+    st.uid === 500 && st.gid === "dev",
+  );
+  await run(ws, "printf 'x\n' >> /ram/nl.txt");
+  st = await statOf(ws, `${dst}/copied/n.txt`);
+  check(
+    `${label}: append via link clears times keeps mode`,
+    st.mode === 0o664 && !(st.modified ?? "").startsWith("2026-03-04T12:00"),
+  );
+  await run(ws, `rm ${dst}/copied/n.txt`);
+  await run(ws, `printf 'nnn\n' > ${dst}/copied/n.txt`);
+  st = await statOf(ws, `${dst}/copied/n.txt`);
+  check(
+    `${label}: rm drops meta for recreated file`,
+    st.mode === null || st.mode === undefined,
+  );
+  await run(ws, `rm /ram/nl.txt /ram/tref.txt ${dst}/copied/n.txt`);
 }
 
 async function checkSymlinkCache(
@@ -555,6 +655,7 @@ async function exercise(
   dst: string,
   label: string,
   expectDirs: boolean,
+  nativeAttrs = true,
 ): Promise<void> {
   process.stdout.write(`===== ram -> ${label} =====\n`);
   await checkRecursive(ws, dst, label, expectDirs);
@@ -566,7 +667,7 @@ async function exercise(
   await checkOmitDirectory(ws, dst, label);
   await checkMove(ws, dst, label);
   await checkSymlinks(ws, dst, label);
-  await checkMetadata(ws, dst, label);
+  await checkMetadata(ws, dst, label, nativeAttrs);
 }
 
 async function main(): Promise<void> {
@@ -604,7 +705,7 @@ async function main(): Promise<void> {
     await exercise(ws, "/ram2", "ram", true);
     if (redisUrl) await exercise(ws, "/redis", "redis", true);
     else process.stdout.write("SKIP redis (REDIS_URL unset)\n");
-    await exercise(ws, "/s3", "s3", false);
+    await exercise(ws, "/s3", "s3", false, false);
     await checkCrossMountCache(ws, client, "s3");
     await checkGlobCache(ws, client, "s3");
     await checkSymlinkCache(ws, client, "s3");

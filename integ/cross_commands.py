@@ -352,13 +352,45 @@ async def check_symlinks(ws: Workspace, dst: str, label: str) -> None:
     check(f"{label}: target intact after rm links", out == "aaa\n")
     await run(ws, "rm /ram/xl_copy.txt")
 
+    await run(ws, f"ln -s {dst}/copied/a.txt /ram/sl.txt")
+    _, err, code = await run(ws, f"ln -s {dst}/copied/sub/b.txt /ram/sl.txt")
+    check(f"{label}: ln onto existing link fails", code == 1
+          and "File exists" in err)
+    _, _, code = await run(ws, f"ln -sf {dst}/copied/sub/b.txt /ram/sl.txt")
+    out, _, _ = await run(ws, "readlink /ram/sl.txt")
+    check(f"{label}: ln -sf re-points link", code == 0
+          and out.strip() == f"{dst}/copied/sub/b.txt")
+    out, _, code = await run(ws, f"readlink {dst}/copied/a.txt")
+    check(f"{label}: readlink non-link exits 1", code == 1 and out == "")
+    out, _, _ = await run(ws, "ls -l /ram")
+    check(f"{label}: ls -l shows link arrow",
+          f"sl.txt -> {dst}/copied/sub/b.txt" in out)
+    out, _, _ = await run(ws, "ls -F /ram")
+    check(f"{label}: ls -F marks link with @", "sl.txt@" in out)
+    await run(ws, "ln -s /ram/sl.txt /ram/sl2.txt")
+    out, _, _ = await run(ws, "cat /ram/sl2.txt")
+    check(f"{label}: link chain resolves across mounts", out == "bbb\n")
+    await run(ws, f"mv /ram/sl2.txt {dst}/slmoved.txt")
+    out, _, _ = await run(ws, f"readlink {dst}/slmoved.txt")
+    check(f"{label}: mv link across mounts keeps target",
+          out.strip() == "/ram/sl.txt")
+    await run(ws, f"ln -s {dst}/copied/nope.txt /ram/dl.txt")
+    _, _, code = await run(ws, "cat /ram/dl.txt")
+    check(f"{label}: dangling link read fails", code != 0)
+    out, _, _ = await run(ws, "ls -l /ram")
+    check(f"{label}: dangling link still listed",
+          f"dl.txt -> {dst}/copied/nope.txt" in out)
+    _, _, code = await run(ws, f"rm /ram/sl.txt /ram/dl.txt {dst}/slmoved.txt")
+    check(f"{label}: rm link surface exits 0", code == 0)
+
 
 async def stat_of(ws: Workspace, path: str):
     st, _ = await ws.dispatch("stat", PathSpec.from_str_path(path))
     return st
 
 
-async def check_metadata(ws: Workspace, dst: str, label: str) -> None:
+async def check_metadata(ws: Workspace, dst: str, label: str,
+                         native_attrs: bool) -> None:
     # setattr is resolve-then-act: chmod/chown/touch on a dst-homed file,
     # directly and through links homed on another mount, must land on the
     # target mount (natively or in the namespace overlay) and read back
@@ -393,6 +425,46 @@ async def check_metadata(ws: Workspace, dst: str, label: str) -> None:
         ws, f"rm /ram/ml.txt /ram/mdir {dst}/copied/m.txt"
         f" {dst}/copied/created.txt")
 
+    await run(ws, f"printf 'nnn\n' > {dst}/copied/n.txt")
+    await run(ws, f"chmod g+w {dst}/copied/n.txt")
+    st = await stat_of(ws, f"{dst}/copied/n.txt")
+    check(f"{label}: symbolic chmod applies against 644 base",
+          st.mode == 0o664)
+    await run(ws, f"chown 500:dev {dst}/copied/n.txt")
+    await run(ws, f"touch -t 202603041200 {dst}/copied/n.txt")
+    # ls builds rows from the backend stat, which carries chmod/chown/touch
+    # only when the backend applies setattr natively. Pure-overlay backends
+    # (s3) render defaults here: known display gap, dispatch-stat is checked
+    # above either way.
+    if native_attrs:
+        out, _, _ = await run(ws, f"ls -l {dst}/copied")
+        check(f"{label}: ls -l renders overlay bits", "-rw-rw-r--" in out)
+        check(f"{label}: ls -l renders overlay owner", " 500 dev " in out)
+        check(f"{label}: ls -l renders touched mtime", "Mar  4 12:00" in out)
+    await run(ws, f"touch -r {dst}/copied/n.txt /ram/tref.txt")
+    st = await stat_of(ws, "/ram/tref.txt")
+    check(f"{label}: touch -r copies mtime across mounts",
+          (st.modified or "").startswith("2026-03-04T12:00"))
+    _, _, code = await run(ws, f"touch -c {dst}/copied/absent.txt")
+    out, _, _ = await run(ws, f"ls {dst}/copied")
+    check(f"{label}: touch -c does not create", code == 0
+          and "absent.txt" not in out)
+    await run(ws, f"ln -s {dst}/copied/n.txt /ram/nl.txt")
+    await run(ws, "chown -h 501:ops /ram/nl.txt")
+    st = await stat_of(ws, f"{dst}/copied/n.txt")
+    check(f"{label}: chown -h leaves target owner",
+          (st.uid, st.gid) == (500, "dev"))
+    await run(ws, "printf 'x\n' >> /ram/nl.txt")
+    st = await stat_of(ws, f"{dst}/copied/n.txt")
+    check(
+        f"{label}: append via link clears times keeps mode", st.mode == 0o664
+        and not (st.modified or "").startswith("2026-03-04T12:00"))
+    await run(ws, f"rm {dst}/copied/n.txt")
+    await run(ws, f"printf 'nnn\n' > {dst}/copied/n.txt")
+    st = await stat_of(ws, f"{dst}/copied/n.txt")
+    check(f"{label}: rm drops meta for recreated file", st.mode is None)
+    await run(ws, f"rm /ram/nl.txt /ram/tref.txt {dst}/copied/n.txt")
+
 
 async def check_symlink_cache(ws: Workspace, s3_client, label: str) -> None:
     # Reads through a link must share the target's cache entry: warming via
@@ -416,8 +488,11 @@ async def check_symlink_cache(ws: Workspace, s3_client, label: str) -> None:
     await run(ws, "rm /ram/cl.txt")
 
 
-async def exercise(ws: Workspace, dst: str, label: str,
-                   expect_dirs: bool) -> None:
+async def exercise(ws: Workspace,
+                   dst: str,
+                   label: str,
+                   expect_dirs: bool,
+                   native_attrs: bool = True) -> None:
     print(f"===== ram -> {label} =====")
     await check_recursive(ws, dst, label, expect_dirs)
     await check_cd_cross_mount(ws, dst, label)
@@ -428,7 +503,7 @@ async def exercise(ws: Workspace, dst: str, label: str,
     await check_omit_directory(ws, dst, label)
     await check_move(ws, dst, label)
     await check_symlinks(ws, dst, label)
-    await check_metadata(ws, dst, label)
+    await check_metadata(ws, dst, label, native_attrs)
 
 
 async def main() -> None:
@@ -462,7 +537,7 @@ async def main() -> None:
             await exercise(ws, "/redis", "redis", expect_dirs=True)
         else:
             print("SKIP redis (REDIS_URL unset)")
-        await exercise(ws, "/s3", "s3", expect_dirs=False)
+        await exercise(ws, "/s3", "s3", expect_dirs=False, native_attrs=False)
         await check_cross_mount_cache(ws, s3_client, "s3")
         await check_glob_cache(ws, s3_client, "s3")
         await check_symlink_cache(ws, s3_client, "s3")
