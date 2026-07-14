@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 import aiohttp
 
 from mirage.accessor.sharepoint import SharePointAccessor
+from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
                                                emit_start_path, keep,
                                                start_basename)
@@ -100,8 +101,9 @@ async def find(
     dir_exists = saw_descendant
     if not dir_exists:
         try:
-            dir_exists = (await stat(accessor,
-                                     path)).type == FileType.DIRECTORY
+            dir_exists = (await
+                          stat(accessor, path,
+                               index=NULL_INDEX)).type == FileType.DIRECTORY
         except FileNotFoundError:
             dir_exists = False
     if dir_exists:

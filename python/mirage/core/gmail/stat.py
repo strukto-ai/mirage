@@ -16,7 +16,7 @@ import logging
 from mimetypes import guess_type as _guess_mime
 
 from mirage.accessor.gmail import GmailAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gmail.labels import list_labels
 from mirage.core.gmail.readdir import readdir as _readdir
 from mirage.types import FileStat, FileType, PathSpec
@@ -35,15 +35,13 @@ def _guess_filetype(filename: str) -> FileType:
 async def stat(
     accessor: GmailAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> FileStat:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     key = path.resource_path
     if not key:
         return FileStat(name="/", type=FileType.DIRECTORY)
-    if index is None:
-        raise enoent(virtual)
     virtual_key = prefix + "/" + key if prefix else "/" + key
     result = await index.get(virtual_key)
     if result.entry is None and "/" not in key:

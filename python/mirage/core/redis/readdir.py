@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_prefix_of
@@ -23,7 +23,7 @@ from mirage.utils.path import norm
 async def readdir(
     accessor: RedisAccessor,
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
     virtual = path.virtual
     if isinstance(path, PathSpec):

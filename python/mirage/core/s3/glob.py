@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.s3 import S3Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.s3.constants import SCOPE_ERROR
 from mirage.core.s3.readdir import readdir
 from mirage.types import PathSpec
@@ -23,7 +23,7 @@ from mirage.utils.glob_walk import resolve_glob_with
 async def resolve_glob(
     accessor: S3Accessor,
     paths: list[PathSpec],
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[PathSpec]:
     return await resolve_glob_with(readdir, accessor, paths, index,
                                    SCOPE_ERROR)

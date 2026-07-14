@@ -44,7 +44,7 @@ async def find(
     path: str | None = None,
     mindepth: str | None = None,
     empty: bool = False,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     return await generic_find(

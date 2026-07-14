@@ -15,7 +15,8 @@
 import logging
 
 from mirage.accessor.s3 import S3Accessor
-from mirage.cache.index import IndexCacheStore, IndexEntry, ResourceType
+from mirage.cache.index import (NULL_INDEX, IndexCacheStore, IndexEntry,
+                                ResourceType)
 from mirage.core.s3._client import (_client_kwargs, _prefix, _strip_prefix,
                                     async_session)
 from mirage.core.s3.constants import SCOPE_ERROR
@@ -26,8 +27,9 @@ from mirage.utils.key_prefix import mount_prefix_of
 logger = logging.getLogger(__name__)
 
 
-async def readdir(accessor: S3Accessor, path: PathSpec,
-                  index: IndexCacheStore) -> list[str]:
+async def readdir(accessor: S3Accessor,
+                  path: PathSpec,
+                  index: IndexCacheStore = NULL_INDEX) -> list[str]:
     if isinstance(path, PathSpec):
         prefix = mount_prefix_of(path.virtual, path.resource_path)
         # When called from resolve_glob with a pattern (e.g. *.txt),

@@ -1,15 +1,18 @@
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.chroma.path import resolve_path
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 
 
-async def stat_light(accessor, path: PathSpec,
-                     index: IndexCacheStore) -> FileStat:
+async def stat_light(accessor,
+                     path: PathSpec,
+                     index: IndexCacheStore = NULL_INDEX) -> FileStat:
     return await stat(accessor, path, index)
 
 
-async def stat(accessor, path: PathSpec, index: IndexCacheStore) -> FileStat:
+async def stat(accessor,
+               path: PathSpec,
+               index: IndexCacheStore = NULL_INDEX) -> FileStat:
     resolved = await resolve_path(accessor, path, index)
     if resolved.is_dir:
         return FileStat(

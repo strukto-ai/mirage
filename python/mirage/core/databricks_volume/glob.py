@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.constants import SCOPE_ERROR
 from mirage.core.databricks_volume.readdir import readdir
 from mirage.types import PathSpec
@@ -23,7 +23,7 @@ from mirage.utils.glob_walk import resolve_glob_with
 async def resolve_glob(
     accessor: DatabricksVolumeAccessor,
     paths: list[PathSpec],
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[PathSpec]:
     return await resolve_glob_with(readdir, accessor, paths, index,
                                    SCOPE_ERROR)

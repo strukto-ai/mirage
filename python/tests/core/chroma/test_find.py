@@ -77,12 +77,6 @@ async def test_find_iname_case_insensitive(chroma_accessor, chroma_index,
 
 
 @pytest.mark.asyncio
-async def test_find_missing_index_raises(chroma_accessor, knowledge_root):
-    with pytest.raises(ValueError, match="missing index"):
-        await find(chroma_accessor, knowledge_root, index=None)
-
-
-@pytest.mark.asyncio
 async def test_find_size_counts_sizeless_files_as_zero(chroma_accessor,
                                                        chroma_index,
                                                        knowledge_root):

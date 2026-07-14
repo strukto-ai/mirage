@@ -128,14 +128,3 @@ async def test_stat_not_found_after_fallback(accessor, index):
                     "/gsheets/owned/nope.gsheet.json", "/gsheets"),
                          virtual="/gsheets/owned/nope.gsheet.json",
                          directory="/gsheets/owned/nope.gsheet.json"), index)
-
-
-@pytest.mark.asyncio
-async def test_stat_index_none_raises(accessor):
-    with pytest.raises(FileNotFoundError):
-        await stat(
-            accessor,
-            PathSpec(resource_path=mount_key("/gsheets/owned/x.gsheet.json",
-                                             "/gsheets"),
-                     virtual="/gsheets/owned/x.gsheet.json",
-                     directory="/gsheets/owned/x.gsheet.json"), None)

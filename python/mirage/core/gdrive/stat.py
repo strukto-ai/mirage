@@ -15,7 +15,7 @@
 import logging
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gdrive import DIRECTORY_RESOURCE_TYPES
 from mirage.core.gdrive.readdir import readdir as _readdir
 from mirage.types import FileStat, FileType, PathSpec
@@ -29,15 +29,13 @@ logger = logging.getLogger(__name__)
 async def stat(
     accessor: GDriveAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> FileStat:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     key = path.resource_path
     if not key:
         return FileStat(name="/", type=FileType.DIRECTORY)
-    if index is None:
-        raise enoent(virtual)
     virtual_key = prefix + "/" + key if prefix else "/" + key
     result = await index.get(virtual_key)
     if result.entry is None:

@@ -23,7 +23,7 @@ async def search(
     method: str = "semantic",
     top_k: str | int = 10,
     threshold: str | float = 0.0,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
     cwd: PathSpec | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:

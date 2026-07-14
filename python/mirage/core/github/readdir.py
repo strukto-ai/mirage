@@ -14,7 +14,8 @@
 
 import logging
 
-from mirage.cache.index import IndexCacheStore, IndexEntry, LookupStatus
+from mirage.cache.index import (NULL_INDEX, IndexCacheStore, IndexEntry,
+                                LookupStatus)
 from mirage.core.github.tree import fetch_dir_tree
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
@@ -23,8 +24,9 @@ from mirage.utils.key_prefix import mount_prefix_of
 log = logging.getLogger(__name__)
 
 
-async def readdir(accessor, path: PathSpec,
-                  index: IndexCacheStore) -> list[str]:
+async def readdir(accessor,
+                  path: PathSpec,
+                  index: IndexCacheStore = NULL_INDEX) -> list[str]:
     virtual = path.virtual
     if isinstance(path, PathSpec):
         prefix = mount_prefix_of(path.virtual, path.resource_path)

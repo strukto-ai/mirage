@@ -63,12 +63,15 @@ def index():
 
 
 def test_root_empty():
-    scope = _run(detect_scope(PathSpec.from_str_path("/")))
+    scope = _run(
+        detect_scope(PathSpec.from_str_path("/"), RAMIndexCacheStore()))
     assert scope.level == "root"
 
 
 def test_root_prefix():
-    scope = _run(detect_scope(_gs("/discord/", prefix="/discord")))
+    scope = _run(
+        detect_scope(_gs("/discord/", prefix="/discord"),
+                     RAMIndexCacheStore()))
     assert scope.level == "root"
 
 
@@ -199,25 +202,8 @@ def test_glob_non_jsonl():
         pattern="*.json",
         resolved=False,
     )
-    scope = _run(detect_scope(gs))
+    scope = _run(detect_scope(gs, RAMIndexCacheStore()))
     assert scope.level != "channel"
-
-
-# ── no index ──────────────────────────────────
-
-
-def test_guild_no_index():
-    scope = _run(detect_scope(PathSpec.from_str_path("TestGuild")))
-    assert scope.level == "guild"
-    assert scope.guild_id is None
-
-
-def test_channel_no_index():
-    scope = _run(
-        detect_scope(PathSpec.from_str_path("TestGuild/channels/general")))
-    assert scope.level == "channel"
-    assert scope.guild_id is None
-    assert scope.channel_id is None
 
 
 def _spec(path: str, prefix: str = "/discord") -> PathSpec:

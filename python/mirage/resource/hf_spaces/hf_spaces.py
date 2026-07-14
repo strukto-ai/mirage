@@ -80,7 +80,7 @@ class HfSpacesResource(BaseResource):
 
     async def fingerprint(self, path: str) -> str | None:
         try:
-            s = await hf_stat(self.accessor, path)
+            s = await hf_stat(self.accessor, path, index=self._index)
             return s.fingerprint
         except FileNotFoundError:
             return None

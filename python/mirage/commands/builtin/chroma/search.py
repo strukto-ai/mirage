@@ -21,7 +21,7 @@ async def search(
     paths: list[PathSpec],
     *texts: str,
     top_k: str | int = 10,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
     cwd: PathSpec | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:

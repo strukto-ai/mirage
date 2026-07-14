@@ -54,7 +54,9 @@ class NextcloudResource(BaseResource):
 
     async def fingerprint(self, path: str) -> str | None:
         try:
-            remote = await nextcloud_stat(self.accessor, path)
+            remote = await nextcloud_stat(self.accessor,
+                                          path,
+                                          index=self._index)
             return remote.extra.get("etag")
         except FileNotFoundError:
             return None

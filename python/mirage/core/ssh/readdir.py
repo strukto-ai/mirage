@@ -17,7 +17,7 @@ import logging
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.ssh._client import _abs
 from mirage.core.ssh.constants import SCOPE_ERROR
 from mirage.types import PathSpec
@@ -27,8 +27,9 @@ from mirage.utils.key_prefix import mount_prefix_of
 logger = logging.getLogger(__name__)
 
 
-async def readdir(accessor: SSHAccessor, path: PathSpec,
-                  index: IndexCacheStore) -> list[str]:
+async def readdir(accessor: SSHAccessor,
+                  path: PathSpec,
+                  index: IndexCacheStore = NULL_INDEX) -> list[str]:
     virtual = path.virtual
     if isinstance(path, PathSpec):
         prefix = mount_prefix_of(path.virtual, path.resource_path)

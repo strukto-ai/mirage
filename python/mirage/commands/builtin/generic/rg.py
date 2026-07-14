@@ -92,7 +92,7 @@ async def rg(
     flags: Mapping[str, object] | None = None,
     *,
     readdir: Callable[..., Awaitable[list[str]]],
-    stat: Callable[[PathSpec], Awaitable[FileStat]],
+    stat: Callable[..., Awaitable[FileStat]],
     read_bytes: Callable[..., Awaitable[bytes]],
     read_stream: Callable[..., AsyncIterator[bytes]] | None,
     accessor: Accessor | None = None,

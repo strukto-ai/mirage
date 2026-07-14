@@ -217,14 +217,3 @@ async def test_stat_real_label_via_api(accessor, index):
                      directory="/gmail/STARRED"), index)
     assert result.type == FileType.DIRECTORY
     assert result.name == "STARRED"
-
-
-@pytest.mark.asyncio
-async def test_stat_index_none_raises(accessor):
-    with pytest.raises(FileNotFoundError):
-        await stat(
-            accessor,
-            PathSpec(resource_path=mount_key("/gmail/INBOX/x.gmail.json",
-                                             "/gmail"),
-                     virtual="/gmail/INBOX/x.gmail.json",
-                     directory="/gmail/INBOX/x.gmail.json"), None)

@@ -46,7 +46,7 @@ async def ls(
     R: bool = False,
     d: bool = False,
     F: bool = False,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     sort_by = LsSortBy.TIME if t else LsSortBy.SIZE if S else LsSortBy.NAME

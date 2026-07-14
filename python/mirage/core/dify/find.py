@@ -1,4 +1,4 @@
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
                                                keep, start_basename,
                                                tree_has_type)
@@ -26,10 +26,9 @@ async def find(
     mindepth: int | None = None,
     empty: bool = False,
     tree: PredNode | None = None,
-    index: IndexCacheStore | None = None,
+    *,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
-    if index is None:
-        raise ValueError("find: missing index")
     results = await walk(accessor,
                          path,
                          index,

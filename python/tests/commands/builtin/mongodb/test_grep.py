@@ -18,6 +18,7 @@ import pytest
 from bson import ObjectId
 
 from mirage.accessor.mongodb import MongoDBAccessor
+from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.mongodb.grep import grep
 from mirage.resource.mongodb.config import MongoDBConfig
 from mirage.types import FileStat, FileType, PathSpec
@@ -59,7 +60,9 @@ async def test_grep_streams_and_finds_match(accessor):
                 "mirage.commands.builtin.mongodb.grep._stat",
                 new=AsyncMock(return_value=FileStat(name="documents.jsonl",
                                                     type=FileType.TEXT))):
-        source, io = await grep(accessor, [_path()], "target")
+        source, io = await grep(accessor, [_path()],
+                                "target",
+                                index=NULL_INDEX)
         data = await _drain(source)
     text = data.decode()
     assert "target-2" in text
@@ -82,7 +85,10 @@ async def test_grep_m1_short_circuits_after_first_match(accessor):
                 "mirage.commands.builtin.mongodb.grep._stat",
                 new=AsyncMock(return_value=FileStat(name="documents.jsonl",
                                                     type=FileType.TEXT))):
-        source, _ = await grep(accessor, [_path()], "FOUND", m="1")
+        source, _ = await grep(accessor, [_path()],
+                               "FOUND",
+                               index=NULL_INDEX,
+                               m="1")
         data = await _drain(source)
     assert b"FOUND" in data
     assert len(consumed) < 100
@@ -102,6 +108,8 @@ async def test_grep_no_match_returns_exit_code_1(accessor):
                 "mirage.commands.builtin.mongodb.grep._stat",
                 new=AsyncMock(return_value=FileStat(name="documents.jsonl",
                                                     type=FileType.TEXT))):
-        source, io = await grep(accessor, [_path()], "absent_pattern_xyz")
+        source, io = await grep(accessor, [_path()],
+                                "absent_pattern_xyz",
+                                index=NULL_INDEX)
         _ = await _drain(source)
     assert io.exit_code == 1

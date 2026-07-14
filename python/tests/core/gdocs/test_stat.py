@@ -149,14 +149,3 @@ async def test_stat_cache_miss_falls_back_via_readdir(accessor, index):
     assert result.size is None
     assert result.extra["source_size"] == 1234
     assert mock_list.call_count == 1
-
-
-@pytest.mark.asyncio
-async def test_stat_cache_miss_with_index_none_raises(accessor):
-    with pytest.raises(FileNotFoundError):
-        await stat(
-            accessor,
-            PathSpec(resource_path=mount_key("/gdocs/owned/doc.gdoc.json",
-                                             "/gdocs"),
-                     virtual="/gdocs/owned/doc.gdoc.json",
-                     directory="/gdocs/owned/doc.gdoc.json"), None)

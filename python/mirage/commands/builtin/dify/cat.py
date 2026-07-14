@@ -30,7 +30,7 @@ def make_cat(ops: CommandIO):
         paths: list[PathSpec],
         *texts: str,
         n: bool = False,
-        index: IndexCacheStore | None = None,
+        index: IndexCacheStore,
         **_extra: object,
     ) -> tuple[ByteSource | None, IOResult]:
         paths = await resolve_glob(accessor, paths, index)

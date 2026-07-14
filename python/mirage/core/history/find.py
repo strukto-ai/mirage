@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.history import HistoryAccessor
+from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
                                                keep)
 from mirage.core.history.read import VIEW_KEYS, VIEW_NAME, read
@@ -69,7 +70,7 @@ async def find(
         return []
     is_empty: bool | None = None
     if min_size is not None or max_size is not None or empty:
-        size = len(await read(accessor, path))
+        size = len(await read(accessor, path, index=NULL_INDEX))
         if min_size is not None and size < min_size:
             return []
         if max_size is not None and size > max_size:

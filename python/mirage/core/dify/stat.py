@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.dify._client import get_document_detail
 from mirage.core.dify.path import resolve_path
 from mirage.core.dify.tree import extract_document_size
@@ -8,8 +8,9 @@ from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 
 
-async def stat_light(accessor, path: PathSpec,
-                     index: IndexCacheStore) -> FileStat:
+async def stat_light(accessor,
+                     path: PathSpec,
+                     index: IndexCacheStore = NULL_INDEX) -> FileStat:
     resolved = await resolve_path(accessor, path, index)
     if resolved.is_dir:
         return FileStat(
@@ -37,7 +38,9 @@ async def stat_light(accessor, path: PathSpec,
     )
 
 
-async def stat(accessor, path: PathSpec, index: IndexCacheStore) -> FileStat:
+async def stat(accessor,
+               path: PathSpec,
+               index: IndexCacheStore = NULL_INDEX) -> FileStat:
     resolved = await resolve_path(accessor, path, index)
     if resolved.is_dir:
         return FileStat(

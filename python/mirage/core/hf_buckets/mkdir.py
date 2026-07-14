@@ -13,13 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.hf_buckets import HfBucketsAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.types import PathSpec
 
 
 async def mkdir(accessor: HfBucketsAccessor,
                 path: PathSpec,
-                index: IndexCacheStore | None = None,
+                index: IndexCacheStore = NULL_INDEX,
                 parents: bool = False) -> None:
     # Object stores don't have real directories; mkdir is a no-op.
     return None

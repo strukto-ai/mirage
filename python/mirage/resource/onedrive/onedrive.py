@@ -90,7 +90,9 @@ class OneDriveResource(BaseResource):
 
     async def fingerprint(self, path: str) -> str | None:
         try:
-            remote = await onedrive_stat(self.accessor, path)
+            remote = await onedrive_stat(self.accessor,
+                                         path,
+                                         index=self._index)
             return remote.fingerprint
         except FileNotFoundError:
             return None

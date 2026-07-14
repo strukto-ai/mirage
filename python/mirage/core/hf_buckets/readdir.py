@@ -17,7 +17,7 @@ import logging
 from opendal.exceptions import NotFound
 
 from mirage.accessor.hf_buckets import HfBucketsAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.hf_buckets.constants import SCOPE_ERROR
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
@@ -26,8 +26,9 @@ from mirage.utils.key_prefix import mount_prefix_of
 logger = logging.getLogger(__name__)
 
 
-async def readdir(accessor: HfBucketsAccessor, path: PathSpec,
-                  index: IndexCacheStore) -> list[str]:
+async def readdir(accessor: HfBucketsAccessor,
+                  path: PathSpec,
+                  index: IndexCacheStore = NULL_INDEX) -> list[str]:
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     target = path.directory if path.pattern else path.virtual
     if prefix and target.startswith(prefix):

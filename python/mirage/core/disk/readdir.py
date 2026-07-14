@@ -18,7 +18,7 @@ import aiofiles.os
 from aiofiles.os import path as aio_path
 
 from mirage.accessor.disk import DiskAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 
@@ -30,8 +30,9 @@ def _resolve(root: Path, path: str) -> Path:
     return resolved
 
 
-async def readdir(accessor: DiskAccessor, path: PathSpec,
-                  index: IndexCacheStore) -> list[str]:
+async def readdir(accessor: DiskAccessor,
+                  path: PathSpec,
+                  index: IndexCacheStore = NULL_INDEX) -> list[str]:
     if isinstance(path, PathSpec):
         prefix = mount_prefix_of(path.virtual, path.resource_path)
         path = path.directory if path.pattern else path.virtual
