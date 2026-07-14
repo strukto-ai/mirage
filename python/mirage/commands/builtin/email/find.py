@@ -72,7 +72,7 @@ async def find(
     mindepth: str | None = None,
     empty: bool = False,
     prefix: str = "",
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     paths = await resolve_glob(accessor, paths, index)

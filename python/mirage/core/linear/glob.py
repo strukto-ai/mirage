@@ -23,7 +23,7 @@ from mirage.utils.glob_walk import resolve_glob_with
 async def resolve_glob(
     accessor: LinearAccessor,
     paths: list[PathSpec],
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
 ) -> list[PathSpec]:
     return await resolve_glob_with(readdir, accessor, paths, index,
                                    SCOPE_ERROR)

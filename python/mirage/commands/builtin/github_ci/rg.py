@@ -33,7 +33,7 @@ async def rg(
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
     **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
     resolved = await resolve_glob(accessor, paths, index) if paths else []

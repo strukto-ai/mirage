@@ -38,13 +38,11 @@ async def read_presentation(token_manager: TokenManager,
 async def read(
     accessor: GSlidesAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
 ) -> bytes:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     key = path.resource_path
-    if index is None:
-        raise enoent(virtual)
     virtual_key = prefix + "/" + key if prefix else "/" + key
     result = await index.get(virtual_key)
     if result.entry is None:

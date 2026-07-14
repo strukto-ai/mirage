@@ -96,7 +96,7 @@ async def _readdir_channels(
     accessor: SlackAccessor,
     prefix: str,
     virtual_key: str,
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
 ) -> list[str]:
     if index is not None:
         listing = await index.list_dir(virtual_key)
@@ -125,7 +125,7 @@ async def _readdir_dms(
     accessor: SlackAccessor,
     prefix: str,
     virtual_key: str,
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
 ) -> list[str]:
     if index is not None:
         listing = await index.list_dir(virtual_key)
@@ -157,7 +157,7 @@ async def _readdir_users(
     accessor: SlackAccessor,
     prefix: str,
     virtual_key: str,
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
 ) -> list[str]:
     if index is not None:
         listing = await index.list_dir(virtual_key)
@@ -188,10 +188,8 @@ async def _readdir_channel_dates(
     key: str,
     virtual_key: str,
     container: str,
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
 ) -> list[str]:
-    if index is None:
-        raise enoent(path)
     lookup = await index.get(virtual_key)
     if lookup.entry is None:
         parent_str = prefix + "/" + container
@@ -237,10 +235,8 @@ async def _readdir_date_contents(
     container: str,
     chan_seg: str,
     date_str: str,
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
 ) -> list[str]:
-    if index is None:
-        raise enoent(path)
     cached = await index.list_dir(virtual_key)
     if cached.entries is not None:
         return cached.entries
@@ -272,10 +268,8 @@ async def _readdir_files_dir(
     container: str,
     chan_seg: str,
     date_str: str,
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
 ) -> list[str]:
-    if index is None:
-        raise enoent(path)
     cached = await index.list_dir(virtual_key)
     if cached.entries is not None:
         return cached.entries
@@ -293,7 +287,7 @@ async def _readdir_files_dir(
 async def readdir(
     accessor: SlackAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
 ) -> list[str]:
     path, prefix, key, virtual_key = _normalize_path(path)
 

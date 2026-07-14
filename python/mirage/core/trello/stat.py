@@ -54,7 +54,7 @@ async def _lookup_with_fallback(
 async def stat(
     accessor: TrelloAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
 ) -> FileStat:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)
@@ -67,8 +67,6 @@ async def stat(
     parts = key.split("/")
 
     if len(parts) == 2 and parts[0] == "workspaces":
-        if index is None:
-            raise enoent(virtual)
         result = await _lookup_with_fallback(accessor, idx_key, prefix, index)
         if result.entry is None:
             raise enoent(virtual)
@@ -96,8 +94,6 @@ async def stat(
             return FileStat(name="boards", type=FileType.DIRECTORY)
 
     if len(parts) == 4 and parts[0] == "workspaces" and parts[2] == "boards":
-        if index is None:
-            raise enoent(virtual)
         result = await _lookup_with_fallback(accessor, idx_key, prefix, index)
         if result.entry is None:
             raise enoent(virtual)
@@ -126,8 +122,6 @@ async def stat(
 
     if (len(parts) == 6 and parts[0] == "workspaces" and parts[2] == "boards"
             and parts[4] == "members"):
-        if index is None:
-            raise enoent(virtual)
         result = await _lookup_with_fallback(accessor, idx_key, prefix, index)
         if result.entry is None:
             raise enoent(virtual)
@@ -140,8 +134,6 @@ async def stat(
 
     if (len(parts) == 6 and parts[0] == "workspaces" and parts[2] == "boards"
             and parts[4] == "labels"):
-        if index is None:
-            raise enoent(virtual)
         result = await _lookup_with_fallback(accessor, idx_key, prefix, index)
         if result.entry is None:
             raise enoent(virtual)
@@ -154,8 +146,6 @@ async def stat(
 
     if (len(parts) == 6 and parts[0] == "workspaces" and parts[2] == "boards"
             and parts[4] == "lists"):
-        if index is None:
-            raise enoent(virtual)
         result = await _lookup_with_fallback(accessor, idx_key, prefix, index)
         if result.entry is None:
             raise enoent(virtual)
@@ -185,8 +175,6 @@ async def stat(
 
     if (len(parts) == 8 and parts[0] == "workspaces" and parts[2] == "boards"
             and parts[4] == "lists" and parts[6] == "cards"):
-        if index is None:
-            raise enoent(virtual)
         result = await _lookup_with_fallback(accessor, idx_key, prefix, index)
         if result.entry is None:
             raise enoent(virtual)

@@ -56,7 +56,7 @@ def _strip_prefix(raw: str, prefix: str) -> str:
 
 async def detect_scope(
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
 ) -> DiscordScope:
     """Determine scope from a path.
 
@@ -184,7 +184,7 @@ async def detect_scope(
 
 async def coalesce_scopes(
     paths: list[PathSpec],
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
 ) -> DiscordScope | None:
     if not paths:
         return None
@@ -206,11 +206,9 @@ async def coalesce_scopes(
 
 async def _resolve_guild_id(
     guild_name: str,
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
     prefix: str,
 ) -> str | None:
-    if index is None:
-        return None
     virtual_key = prefix + "/" + guild_name if prefix else "/" + guild_name
     lookup = await index.get(virtual_key)
     if lookup.entry is not None:
@@ -221,7 +219,7 @@ async def _resolve_guild_id(
 async def _resolve_ids(
     guild_name: str,
     channel_path: str,
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
     prefix: str,
 ) -> tuple[str | None, str | None]:
     guild_id = await _resolve_guild_id(guild_name, index, prefix)

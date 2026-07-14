@@ -35,7 +35,7 @@ def is_cross_run_root(path: PathSpec) -> bool:
 async def resolve_glob(
     accessor: GitHubCIAccessor,
     paths: list[PathSpec],
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
 ) -> list[PathSpec]:
     return await resolve_glob_with(readdir, accessor, paths, index,
                                    SCOPE_ERROR)

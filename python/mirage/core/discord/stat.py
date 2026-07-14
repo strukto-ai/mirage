@@ -53,7 +53,7 @@ async def _populate_via_parent(
 async def stat(
     accessor: DiscordAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
 ) -> FileStat:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)
@@ -66,8 +66,6 @@ async def stat(
     virtual_key = prefix + "/" + key
 
     if len(parts) == 1:
-        if index is None:
-            raise enoent(virtual)
         lookup = await index.get(virtual_key)
         if lookup.entry is None:
             await _populate_via_parent(accessor, virtual_key, prefix, index)
@@ -84,8 +82,6 @@ async def stat(
         return FileStat(name=parts[1], type=FileType.DIRECTORY)
 
     if len(parts) == 3 and parts[1] == "channels":
-        if index is None:
-            raise enoent(virtual)
         lookup = await index.get(virtual_key)
         if lookup.entry is None:
             await _populate_via_parent(accessor, virtual_key, prefix, index)
@@ -100,8 +96,6 @@ async def stat(
         )
 
     if len(parts) == 3 and parts[1] == "members":
-        if index is None:
-            raise enoent(virtual)
         lookup = await index.get(virtual_key)
         if lookup.entry is None:
             await _populate_via_parent(accessor, virtual_key, prefix, index)
@@ -132,8 +126,6 @@ async def stat(
     # <guild>/channels/<ch>/<date>/files/<blob>
     if (len(parts) == 6 and parts[1] == "channels" and _DATE_RE.match(parts[3])
             and parts[4] == "files"):
-        if index is None:
-            raise enoent(virtual)
         lookup = await index.get(virtual_key)
         if lookup.entry is None:
             await _populate_via_parent(accessor, virtual_key, prefix, index)

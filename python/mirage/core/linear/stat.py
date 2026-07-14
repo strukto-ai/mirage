@@ -50,7 +50,7 @@ async def _populate_via_parent(
 async def stat(
     accessor: LinearAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
 ) -> FileStat:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)
@@ -63,8 +63,6 @@ async def stat(
     parts = key.split("/")
 
     if len(parts) == 2 and parts[0] == "teams":
-        if index is None:
-            raise enoent(virtual)
         result = await index.get(idx_key)
         if result.entry is None:
             await _populate_via_parent(accessor, idx_key, prefix, index)
@@ -96,8 +94,6 @@ async def stat(
         return FileStat(name=parts[2], type=FileType.DIRECTORY)
 
     if len(parts) == 4 and parts[0] == "teams" and parts[2] == "members":
-        if index is None:
-            raise enoent(virtual)
         result = await index.get(idx_key)
         if result.entry is None:
             await _populate_via_parent(accessor, idx_key, prefix, index)
@@ -112,8 +108,6 @@ async def stat(
         )
 
     if len(parts) == 4 and parts[0] == "teams" and parts[2] == "issues":
-        if index is None:
-            raise enoent(virtual)
         result = await index.get(idx_key)
         if result.entry is None:
             await _populate_via_parent(accessor, idx_key, prefix, index)
@@ -156,8 +150,6 @@ async def stat(
     if len(parts) == 4 and parts[0] == "teams" and parts[2] in {
             "projects", "cycles"
     }:
-        if index is None:
-            raise enoent(virtual)
         result = await index.get(idx_key)
         if result.entry is None:
             await _populate_via_parent(accessor, idx_key, prefix, index)

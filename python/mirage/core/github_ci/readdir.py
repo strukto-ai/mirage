@@ -31,7 +31,7 @@ def _safe_name(name: str) -> str:
 async def readdir(
     accessor: GitHubCIAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
 ) -> list[str]:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

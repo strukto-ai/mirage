@@ -26,10 +26,9 @@ async def find(
     mindepth: int | None = None,
     empty: bool = False,
     tree: PredNode | None = None,
-    index: IndexCacheStore | None = None,
+    *,
+    index: IndexCacheStore,
 ) -> list[str]:
-    if index is None:
-        raise ValueError("find: missing index")
     results = await walk(accessor,
                          path,
                          index,

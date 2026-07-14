@@ -65,7 +65,7 @@ async def _populate_via_parent(
 async def stat(
     accessor: SlackAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
 ) -> FileStat:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path) if isinstance(
@@ -83,8 +83,6 @@ async def stat(
     virtual_key = prefix + "/" + key
 
     if len(parts) == 2 and parts[0] in ("channels", "dms"):
-        if index is None:
-            raise enoent(virtual)
         lookup = await index.get(virtual_key)
         if lookup.entry is None:
             await _populate_via_parent(accessor, virtual_key, prefix, index)
@@ -99,8 +97,6 @@ async def stat(
         )
 
     if len(parts) == 2 and parts[0] == "users":
-        if index is None:
-            raise enoent(virtual)
         lookup = await index.get(virtual_key)
         if lookup.entry is None:
             await _populate_via_parent(accessor, virtual_key, prefix, index)
@@ -127,8 +123,6 @@ async def stat(
 
     if (len(parts) == 5 and parts[0] in ("channels", "dms")
             and _DATE_RE.match(parts[2]) and parts[3] == "files"):
-        if index is None:
-            raise enoent(virtual)
         lookup = await index.get(virtual_key)
         if lookup.entry is None:
             await _populate_via_parent(accessor, virtual_key, prefix, index)

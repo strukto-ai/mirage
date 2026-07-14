@@ -53,7 +53,7 @@ async def grep_provision(
     *texts: str,
     r: bool = False,
     R: bool = False,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
     **_extra: object,
 ) -> ProvisionResult:
     if not paths or index is None:
@@ -95,7 +95,7 @@ async def grep(
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
     **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["grep"])

@@ -45,7 +45,7 @@ def unique_shared_drive_name(name: str, existing_names: set[str]) -> str:
 async def readdir(
     accessor: GDriveAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
 ) -> list[str]:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)
@@ -65,8 +65,6 @@ async def readdir(
         folder_id = "root"
         drive_id = None
     else:
-        if index is None:
-            raise enoent(virtual)
         result = await index.get(virtual_key)
         if result.entry is None:
             parent_virtual = virtual_key.rstrip("/").rsplit("/", 1)[0] or "/"

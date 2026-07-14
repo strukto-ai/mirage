@@ -37,15 +37,13 @@ async def read_bytes(config: GitHubConfig, owner: str, repo: str,
 async def read(
     accessor: GitHubAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
 ) -> bytes:
     virtual = path.virtual
     if isinstance(path, PathSpec):
         path = path.mount_path
 
     key = "/" + path.strip("/")
-    if index is None:
-        raise enoent(virtual)
     result = await index.get(key)
     if result.status == LookupStatus.NOT_FOUND or result.entry is None:
         raise enoent(virtual)

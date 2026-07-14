@@ -26,13 +26,11 @@ from mirage.utils.key_prefix import mount_prefix_of
 async def read(
     accessor: EmailAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
 ) -> bytes:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     key = path.resource_path
-    if index is None:
-        raise enoent(virtual)
     virtual_key = prefix + "/" + key if prefix else "/" + key
     result = await index.get(virtual_key)
     if result.entry is None:

@@ -37,10 +37,9 @@ async def find(
     path_pattern: str | None = None,
     empty: bool = False,
     tree: PredNode | None = None,
-    index: IndexCacheStore | None = None,
+    *,
+    index: IndexCacheStore,
 ) -> list[str]:
-    if index is None:
-        raise ValueError("find: no tree loaded")
     base = path.mount_path.strip("/")
     base_depth = 0 if base == "" else base.count("/") + 1
     start_name = start_basename(path)

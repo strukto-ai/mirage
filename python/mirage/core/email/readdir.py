@@ -53,7 +53,7 @@ def _date_from_header(date_str: str) -> str:
 async def readdir(
     accessor: EmailAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
 ) -> list[str]:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)
@@ -88,8 +88,6 @@ async def readdir(
             cached = await index.list_dir(virtual_key)
             if cached.entries is not None:
                 return cached.entries
-        if index is None:
-            raise enoent(virtual)
         max_msgs = accessor.config.max_messages
         uids = await list_message_uids(accessor,
                                        folder_name,
@@ -149,8 +147,6 @@ async def readdir(
         return [f"{prefix}/{key}/{name}" for name, _ in date_entries]
 
     if depth == 2:
-        if index is None:
-            raise enoent(virtual)
         cached = await index.list_dir(virtual_key)
         if cached.entries is not None:
             return cached.entries
@@ -166,8 +162,6 @@ async def readdir(
         raise enoent(virtual)
 
     if depth == 3:
-        if index is None:
-            raise enoent(virtual)
         cached = await index.list_dir(virtual_key)
         if cached.entries is not None:
             return cached.entries

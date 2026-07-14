@@ -42,7 +42,7 @@ def make_stat(readdir: Callable) -> Callable:
     async def stat(
         accessor: Accessor,
         path: PathSpec,
-        index: IndexCacheStore | None = None,
+        index: IndexCacheStore,
     ) -> FileStat:
         virtual = path.virtual
         prefix = mount_prefix_of(path.virtual, path.resource_path)
@@ -50,8 +50,6 @@ def make_stat(readdir: Callable) -> Callable:
         if key in VIRTUAL_DIRS:
             name = key if key else "/"
             return FileStat(name=name, type=FileType.DIRECTORY)
-        if index is None:
-            raise enoent(virtual)
         virtual_key = prefix + "/" + key if prefix else "/" + key
         result = await index.get(virtual_key)
         if result.entry is None:
@@ -97,7 +95,7 @@ def make_unlink(readdir: Callable) -> Callable:
     async def unlink(
         accessor: Accessor,
         path: PathSpec,
-        index: IndexCacheStore | None = None,
+        index: IndexCacheStore,
     ) -> None:
         prefix = mount_prefix_of(path.virtual, path.resource_path)
         raw = path.virtual
@@ -106,8 +104,6 @@ def make_unlink(readdir: Callable) -> Callable:
         key = stripped.strip("/")
         if key in VIRTUAL_DIRS:
             raise IsADirectoryError(raw)
-        if index is None:
-            raise enoent(path)
         virtual_key = prefix + "/" + key if prefix else "/" + key
         result = await index.get(virtual_key)
         if result.entry is None:

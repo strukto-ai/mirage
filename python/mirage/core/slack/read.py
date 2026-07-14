@@ -27,7 +27,7 @@ from mirage.utils.key_prefix import mount_prefix_of
 async def read(
     accessor: SlackAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
 ) -> bytes:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path) if isinstance(
@@ -41,8 +41,6 @@ async def read(
     if (len(parts) == 4 and parts[0] in ("channels", "dms")
             and parts[3] == "chat.jsonl"):
         parent_key = f"{parts[0]}/{parts[1]}"
-        if index is None:
-            raise enoent(virtual)
         virtual_key = prefix + "/" + parent_key
         lookup = await index.get(virtual_key)
         if lookup.entry is None:
@@ -53,8 +51,6 @@ async def read(
 
     if (len(parts) == 5 and parts[0] in ("channels", "dms")
             and parts[3] == "files"):
-        if index is None:
-            raise enoent(virtual)
         virtual_key = prefix + "/" + key
         lookup = await index.get(virtual_key)
         if lookup.entry is None or not lookup.entry.extra:
@@ -65,8 +61,6 @@ async def read(
         return await slack_files.download_file(accessor.config, url)
 
     if len(parts) == 2 and parts[0] == "users":
-        if index is None:
-            raise enoent(virtual)
         virtual_key = prefix + "/" + key
         lookup = await index.get(virtual_key)
         if lookup.entry is None:

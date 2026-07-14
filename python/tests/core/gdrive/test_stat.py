@@ -173,13 +173,3 @@ async def test_stat_cache_miss_falls_back_via_readdir(accessor, index):
     # binary files download raw, so Drive's size is the rendered length
     assert result.size == 2048
     assert mock_list.call_count == 1
-
-
-@pytest.mark.asyncio
-async def test_stat_index_none_raises(accessor):
-    with pytest.raises(FileNotFoundError):
-        await stat(
-            accessor,
-            PathSpec(resource_path="x.pdf",
-                     virtual="/x.pdf",
-                     directory="/x.pdf"), None)

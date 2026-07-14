@@ -32,7 +32,7 @@ from mirage.utils.key_prefix import mount_key, mount_prefix_of
 async def read_stream(
     accessor: GDriveAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
     chunk_size: int = 8192,
 ) -> AsyncIterator[bytes] | bytes:
     virtual = path.virtual
@@ -45,8 +45,6 @@ async def read_stream(
         if prefix.endswith("/") or rest == "" or rest.startswith("/"):
             path = rest or "/"
     key = path.strip("/")
-    if index is None:
-        raise enoent(virtual)
     virtual_key = prefix + "/" + key if prefix else "/" + key
     result = await index.get(virtual_key)
     if result.entry is None:
@@ -79,7 +77,7 @@ async def read_stream(
 async def stream(
     accessor: GDriveAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
     chunk_size: int = 8192,
 ) -> AsyncIterator[bytes]:
     result = await read_stream(accessor, path, index, chunk_size)
@@ -93,7 +91,7 @@ async def stream(
 async def _stream_file(
     accessor: GDriveAccessor,
     file_id: str,
-    path: PathSpec,
+    path: str,
     chunk_size: int,
 ) -> AsyncIterator[bytes]:
     rec = record_stream("read", path, "gdrive")

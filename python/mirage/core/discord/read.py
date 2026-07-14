@@ -41,7 +41,7 @@ async def _ensure_channel(
 async def read(
     accessor: DiscordAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
 ) -> bytes:
     virtual = path.virtual if isinstance(path, PathSpec) else path
     prefix = mount_prefix_of(path.virtual, path.resource_path)
@@ -51,8 +51,6 @@ async def read(
     # <guild>/channels/<ch>/<date>/chat.jsonl
     if (len(parts) == 5 and parts[1] == "channels"
             and parts[4] == "chat.jsonl"):
-        if index is None:
-            raise enoent(virtual)
         ch_key = f"{parts[0]}/{parts[1]}/{parts[2]}"
         ch_lookup = await _ensure_channel(index, prefix, ch_key, virtual)
         return await get_history_jsonl(accessor.config, ch_lookup.entry.id,
@@ -60,8 +58,6 @@ async def read(
 
     # <guild>/channels/<ch>/<date>/files/<blob>
     if (len(parts) == 6 and parts[1] == "channels" and parts[4] == "files"):
-        if index is None:
-            raise enoent(virtual)
         virtual_key = prefix + "/" + key
         lookup = await index.get(virtual_key)
         if lookup.entry is None:
@@ -85,8 +81,6 @@ async def read(
 
     # <guild>/members/<user>.json
     if len(parts) == 3 and parts[1] == "members":
-        if index is None:
-            raise enoent(virtual)
         virtual_key = prefix + "/" + key
         entry_lookup = await index.get(virtual_key)
         if entry_lookup.entry is None:

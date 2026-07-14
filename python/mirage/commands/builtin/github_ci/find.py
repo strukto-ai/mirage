@@ -59,7 +59,7 @@ async def find(
     mindepth: str | None = None,
     empty: bool = False,
     prefix: str = "",
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     # The wrapper only exists for the cross-run guard: walking every run

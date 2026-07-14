@@ -32,7 +32,7 @@ def is_dir_name(child: str) -> bool:
 async def readdir(
     accessor: GDocsAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
 ) -> list[str]:
     virtual = path.virtual
     modified_range = None

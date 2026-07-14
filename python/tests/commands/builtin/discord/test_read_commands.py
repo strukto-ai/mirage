@@ -150,7 +150,10 @@ async def test_head(accessor):
                   new_callable=AsyncMock,
                   return_value=FAKE_JSONL),
     ):
-        stream, io = await head(accessor, _make_glob(ABS_FILE), n="1")
+        stream, io = await head(accessor,
+                                _make_glob(ABS_FILE),
+                                index=RAMIndexCacheStore(ttl=600),
+                                n="1")
     data = await _collect(stream)
     assert b"hello world" in data
     assert b"goodbye moon" not in data
@@ -166,7 +169,9 @@ async def test_head_default(accessor):
                   new_callable=AsyncMock,
                   return_value=FAKE_JSONL),
     ):
-        stream, io = await head(accessor, _make_glob(ABS_FILE))
+        stream, io = await head(accessor,
+                                _make_glob(ABS_FILE),
+                                index=RAMIndexCacheStore(ttl=600))
     data = await _collect(stream)
     assert b"hello world" in data
     assert b"goodbye moon" in data
@@ -183,7 +188,10 @@ async def test_grep(accessor):
                   new_callable=AsyncMock,
                   return_value=FAKE_JSONL),
     ):
-        stream, io = await grep(accessor, _make_glob(ABS_FILE), "hello")
+        stream, io = await grep(accessor,
+                                _make_glob(ABS_FILE),
+                                "hello",
+                                index=RAMIndexCacheStore(ttl=600))
     data = await _collect(stream)
     assert b"hello world" in data
     assert b"hello again" in data
@@ -203,6 +211,7 @@ async def test_grep_invert(accessor):
         stream, io = await grep(accessor,
                                 _make_glob(ABS_FILE),
                                 "hello",
+                                index=RAMIndexCacheStore(ttl=600),
                                 v=True)
     data = await _collect(stream)
     assert b"goodbye moon" in data

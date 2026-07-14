@@ -118,9 +118,3 @@ async def test_find_size_filters_file_start():
                             min_size=100,
                             index=_index())
     assert big_enough == ["/src/main.py"]
-
-
-@pytest.mark.asyncio
-async def test_find_no_index_raises():
-    with pytest.raises(ValueError):
-        await find(None, _spec("/"), index=None)

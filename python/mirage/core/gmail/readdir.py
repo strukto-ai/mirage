@@ -70,7 +70,7 @@ def _date_from_internal(internal_date: str) -> str:
 async def _build_date_groups(
     accessor: GmailAccessor,
     msg_ids: list[dict],
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
     virtual_key: str,
     write_dates: bool,
 ) -> list[tuple[str, IndexEntry]]:
@@ -143,7 +143,7 @@ async def _build_date_groups(
 async def readdir(
     accessor: GmailAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
 ) -> list[str]:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)
@@ -182,8 +182,6 @@ async def readdir(
             cached = await index.list_dir(virtual_key)
             if cached.entries is not None:
                 return cached.entries
-        if index is None:
-            raise enoent(virtual)
         label_key = prefix + "/" + label_name if prefix else "/" + label_name
         result = await index.get(label_key)
         if result.entry is None:
@@ -222,8 +220,6 @@ async def readdir(
         return [f"{prefix}/{key}/{name}" for name, _ in date_entries]
 
     if depth == 2:
-        if index is None:
-            raise enoent(virtual)
         cached = await index.list_dir(virtual_key)
         if cached.entries is not None:
             return cached.entries
@@ -282,8 +278,6 @@ async def readdir(
         raise enoent(virtual)
 
     if depth == 3:
-        if index is None:
-            raise enoent(virtual)
         cached = await index.list_dir(virtual_key)
         if cached.entries is not None:
             return cached.entries

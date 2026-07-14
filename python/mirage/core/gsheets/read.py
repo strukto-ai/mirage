@@ -64,13 +64,11 @@ async def read_values(token_manager: TokenManager, spreadsheet_id: str,
 async def read(
     accessor: GSheetsAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
 ) -> bytes:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     key = path.resource_path
-    if index is None:
-        raise enoent(virtual)
     virtual_key = prefix + "/" + key if prefix else "/" + key
     result = await index.get(virtual_key)
     if result.entry is None:

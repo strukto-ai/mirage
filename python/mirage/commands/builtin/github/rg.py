@@ -40,7 +40,7 @@ async def rg(
     paths: list[PathSpec],
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
     **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["rg"])

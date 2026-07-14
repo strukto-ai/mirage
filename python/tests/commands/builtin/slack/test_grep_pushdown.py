@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.slack.grep import grep
 from mirage.commands.builtin.slack.rg import rg
 from mirage.types import PathSpec
@@ -46,7 +47,11 @@ async def test_grep_with_many_concrete_paths_uses_native_search():
             "mirage.commands.builtin.slack.grep.search_messages",
             new=AsyncMock(return_value=fake_payload),
     ) as fake_search:
-        out, io = await grep(accessor, _concrete_paths(7), "hello", i=True)
+        out, io = await grep(accessor,
+                             _concrete_paths(7),
+                             "hello",
+                             index=RAMIndexCacheStore(),
+                             i=True)
     assert fake_search.await_count == 1
     assert io.exit_code == 0
     assert b"hello there" in out
@@ -62,7 +67,11 @@ async def test_rg_with_many_concrete_paths_uses_native_search():
             "mirage.commands.builtin.slack.rg.search_messages",
             new=AsyncMock(return_value=fake_payload),
     ) as fake_search:
-        out, io = await rg(accessor, _concrete_paths(7), "hello", i=True)
+        out, io = await rg(accessor,
+                           _concrete_paths(7),
+                           "hello",
+                           index=RAMIndexCacheStore(),
+                           i=True)
     assert fake_search.await_count == 1
     assert io.exit_code == 0
     assert b"hello rg" in out
@@ -96,7 +105,11 @@ async def test_grep_falls_back_when_native_search_raises():
             "mirage.commands.builtin.slack.grep.slack_read",
             new=AsyncMock(return_value=b""),
     ):
-        out, io = await grep(accessor, paths, "hello", i=True)
+        out, io = await grep(accessor,
+                             paths,
+                             "hello",
+                             index=RAMIndexCacheStore(),
+                             i=True)
     assert io.exit_code in (0, 1)
 
 
@@ -112,7 +125,10 @@ async def test_grep_native_empty_does_not_trigger_fallback():
             "mirage.commands.builtin.slack.grep.slack_read",
             new=AsyncMock(return_value=b""),
     ) as fake_read:
-        out, io = await grep(accessor, _concrete_paths(7), "missing")
+        out, io = await grep(accessor,
+                             _concrete_paths(7),
+                             "missing",
+                             index=RAMIndexCacheStore())
     assert fake_search.await_count == 1
     assert fake_read.await_count == 0
     assert io.exit_code == 1

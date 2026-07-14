@@ -241,6 +241,7 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 
 
+
 # Ratchet baseline: modules with pre-existing mypy errors. Shrink this
 # list, never grow it: when a module is cleaned, delete its entry so
 # regressions in it fail CI. New modules must not be added here.
@@ -261,19 +262,10 @@ module = [
     "mirage.cache.index.redis",
     "mirage.cli.workspace",
     "mirage.commands",
-    "mirage.commands.builtin.chroma.find",
-    "mirage.commands.builtin.chroma.search",
     "mirage.commands.builtin.databricks_volume.head",
-    "mirage.commands.builtin.dify.cat",
-    "mirage.commands.builtin.dify.find",
-    "mirage.commands.builtin.dify.search",
     "mirage.commands.builtin.discord.grep",
     "mirage.commands.builtin.discord.head",
-    "mirage.commands.builtin.discord.rg",
     "mirage.commands.builtin.email.email_triage",
-    "mirage.commands.builtin.email.find",
-    "mirage.commands.builtin.email.grep",
-    "mirage.commands.builtin.email.rg",
     "mirage.commands.builtin.general.bc",
     "mirage.commands.builtin.general.wget",
     "mirage.commands.builtin.generic.awk",
@@ -365,20 +357,10 @@ module = [
     "mirage.commands.builtin.generic_bind.builders.zip_cmd",
     "mirage.commands.builtin.generic_bind.factory",
     "mirage.commands.builtin.github.du",
-    "mirage.commands.builtin.github.grep",
     "mirage.commands.builtin.github.narrow",
-    "mirage.commands.builtin.github.rg",
-    "mirage.commands.builtin.github_ci.grep",
-    "mirage.commands.builtin.github_ci.rg",
-    "mirage.commands.builtin.gmail.grep",
     "mirage.commands.builtin.gmail.gws_gmail_triage",
-    "mirage.commands.builtin.gmail.rg",
     "mirage.commands.builtin.hf_buckets.du",
     "mirage.commands.builtin.history.cat",
-    "mirage.commands.builtin.history.grep",
-    "mirage.commands.builtin.history.rg",
-    "mirage.commands.builtin.langfuse.grep",
-    "mirage.commands.builtin.langfuse.rg",
     "mirage.commands.builtin.linear.linear_issue_add_label",
     "mirage.commands.builtin.linear.linear_issue_assign",
     "mirage.commands.builtin.linear.linear_issue_comment_add",
@@ -404,8 +386,6 @@ module = [
     "mirage.commands.builtin.s3.tee",
     "mirage.commands.builtin.s3.touch",
     "mirage.commands.builtin.sharepoint.du",
-    "mirage.commands.builtin.slack.grep",
-    "mirage.commands.builtin.slack.rg",
     "mirage.commands.builtin.trello.trello_card_comment_add",
     "mirage.commands.builtin.trello.trello_card_comment_update",
     "mirage.commands.builtin.trello.trello_card_create",

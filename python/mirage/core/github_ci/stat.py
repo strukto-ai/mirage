@@ -53,7 +53,7 @@ async def _lookup_with_fallback(
 async def stat(
     accessor: GitHubCIAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
 ) -> FileStat:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)
@@ -70,8 +70,6 @@ async def stat(
 
     if len(parts) == 2 and parts[0] == "workflows" and parts[1].endswith(
             ".json"):
-        if index is None:
-            raise enoent(virtual)
         lookup = await _lookup_with_fallback(accessor, virtual_key, prefix,
                                              index)
         if lookup.entry is None:
@@ -84,8 +82,6 @@ async def stat(
         )
 
     if len(parts) == 2 and parts[0] == "runs":
-        if index is None:
-            raise enoent(virtual)
         lookup = await _lookup_with_fallback(accessor, virtual_key, prefix,
                                              index)
         if lookup.entry is None:
@@ -109,8 +105,6 @@ async def stat(
 
     if (len(parts) == 4 and parts[0] == "runs" and parts[2] == "jobs"
             and parts[3].endswith(".json")):
-        if index is None:
-            raise enoent(virtual)
         lookup = await _lookup_with_fallback(accessor, virtual_key, prefix,
                                              index)
         if lookup.entry is None:
@@ -124,8 +118,6 @@ async def stat(
 
     if (len(parts) == 4 and parts[0] == "runs" and parts[2] == "jobs"
             and parts[3].endswith(".log")):
-        if index is None:
-            raise enoent(virtual)
         lookup = await _lookup_with_fallback(accessor, virtual_key, prefix,
                                              index)
         if lookup.entry is None:
@@ -138,8 +130,6 @@ async def stat(
         )
 
     if (len(parts) == 4 and parts[0] == "runs" and parts[2] == "artifacts"):
-        if index is None:
-            raise enoent(virtual)
         lookup = await _lookup_with_fallback(accessor, virtual_key, prefix,
                                              index)
         if lookup.entry is None:
