@@ -128,25 +128,48 @@ async def _closable_source(events: list[str]):
         events.append("closed")
 
 
+async def _tracked_source(events: list[str]):
+    try:
+        events.append("first")
+        yield b"x" * 100
+        events.append("second")
+        yield b"y" * 100
+    finally:
+        events.append("closed")
+
+
 async def _run_drain_bounded_closes_source_on_exceed():
     events: list[str] = []
     ci = CachableAsyncIterator(_closable_source(events))
-    data, fully_drained = await ci.drain_bounded(150)
-    assert fully_drained is False
-    assert data == b"x" * 100 + b"y" * 100
+    data = await ci.drain_bounded(150)
+    assert data is None
+    assert ci.buffered_chunks == []
     assert events == ["closed"]
+
+
+async def _run_drain_bounded_checks_existing_buffer():
+    events: list[str] = []
+    ci = CachableAsyncIterator(_tracked_source(events))
+    assert await ci.__anext__() == b"x" * 100
+    data = await ci.drain_bounded(50)
+    assert data is None
+    assert ci.buffered_chunks == []
+    assert events == ["first", "closed"]
 
 
 async def _run_drain_bounded_within_budget_drains_fully():
     events: list[str] = []
     ci = CachableAsyncIterator(_closable_source(events))
-    data, fully_drained = await ci.drain_bounded(1000)
-    assert fully_drained is True
+    data = await ci.drain_bounded(1000)
     assert data == b"x" * 100 + b"y" * 100 + b"z" * 100
 
 
 def test_cachable_async_iterator_drain_bounded_closes_source_on_exceed():
     asyncio.run(_run_drain_bounded_closes_source_on_exceed())
+
+
+def test_cachable_async_iterator_drain_bounded_checks_existing_buffer():
+    asyncio.run(_run_drain_bounded_checks_existing_buffer())
 
 
 def test_cachable_async_iterator_drain_bounded_within_budget():

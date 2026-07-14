@@ -60,26 +60,31 @@ class CachableAsyncIterator:
             self._exhausted = True
         return b"".join(self._buffer)
 
-    async def drain_bounded(self, max_bytes: int) -> tuple[bytes, bool]:
+    async def drain_bounded(self, max_bytes: int) -> bytes | None:
         """Drain remaining chunks but stop if buffer exceeds max_bytes.
 
-        Returns (accumulated_bytes, fully_drained). When fully_drained
-        is False, the source still had unread chunks; it is closed so
-        streaming backends release their connection instead of holding
-        it until GC, and the partial buffer is returned to the caller
-        so it can decide whether to use or discard it.
+        Returns the accumulated bytes when fully drained. When the
+        budget is exceeded, closes the source, releases the partial
+        buffer, and returns None.
         """
         total = sum(len(c) for c in self._buffer)
         try:
+            if total > max_bytes:
+                await self._close_and_discard()
+                return None
             async for chunk in self._source:
                 self._buffer.append(chunk)
                 total += len(chunk)
                 if total > max_bytes:
-                    await self._close_source()
-                    return b"".join(self._buffer), False
+                    await self._close_and_discard()
+                    return None
         finally:
             self._exhausted = True
-        return b"".join(self._buffer), True
+        return b"".join(self._buffer)
+
+    async def _close_and_discard(self) -> None:
+        self._buffer.clear()
+        await self._close_source()
 
     async def _close_source(self) -> None:
         """Close the underlying source iterator if it supports aclose.

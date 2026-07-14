@@ -61,24 +61,33 @@ export class CachableAsyncIterator implements AsyncIterableIterator<Uint8Array> 
     return concat(this.buffer)
   }
 
-  async drainBounded(maxBytes: number): Promise<[Uint8Array, boolean]> {
+  async drainBounded(maxBytes: number): Promise<Uint8Array | null> {
     let total = 0
     for (const c of this.buffer) total += c.byteLength
     try {
+      if (total > maxBytes) {
+        await this.closeAndDiscard()
+        return null
+      }
       for (;;) {
         const result = await this.source.next()
         if (result.done === true) break
         this.buffer.push(result.value)
         total += result.value.byteLength
         if (total > maxBytes) {
-          await this.source.return?.(undefined)
-          return [concat(this.buffer), false]
+          await this.closeAndDiscard()
+          return null
         }
       }
     } finally {
       this.exhaustedFlag = true
     }
-    return [concat(this.buffer), true]
+    return concat(this.buffer)
+  }
+
+  private async closeAndDiscard(): Promise<void> {
+    this.buffer.length = 0
+    await this.source.return?.(undefined)
   }
 }
 

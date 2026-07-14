@@ -116,8 +116,8 @@ async function backgroundDrain(
   records?: readonly OpRecord[],
 ): Promise<void> {
   try {
-    const [materialized, fullyDrained] = await it.drainBounded(maxBytes)
-    if (!fullyDrained) return
+    const materialized = await it.drainBounded(maxBytes)
+    if (materialized === null) return
     if (tasks.has(path)) {
       await cache.add(path, materialized, { fingerprint: readFingerprint(records, path) })
     }

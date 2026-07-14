@@ -18,6 +18,7 @@ from unittest.mock import patch
 import pytest
 
 from mirage.cache.file.ram import RAMFileCacheStore
+from mirage.cache.file.redis import RedisFileCacheStore
 
 
 class TestGetSet:
@@ -221,9 +222,35 @@ class TestDrainBudget:
         cache = RAMFileCacheStore(cache_limit="1KB", max_drain_bytes=100)
         assert cache.drain_budget == 100
 
-    def test_explicit_above_limit_honored(self):
-        cache = RAMFileCacheStore(cache_limit="1KB", max_drain_bytes=4096)
-        assert cache.drain_budget == 4096
+    def test_explicit_at_limit_honored(self):
+        cache = RAMFileCacheStore(cache_limit="1KB", max_drain_bytes=1024)
+        assert cache.drain_budget == 1024
+
+    def test_zero_is_valid(self):
+        cache = RAMFileCacheStore(cache_limit="1KB", max_drain_bytes=0)
+        assert cache.drain_budget == 0
+
+    def test_explicit_above_limit_rejected(self):
+        with pytest.raises(ValueError,
+                           match="max_drain_bytes cannot exceed cache_limit"):
+            RAMFileCacheStore(cache_limit="1KB", max_drain_bytes=1025)
+
+    def test_negative_explicit_value_rejected(self):
+        with pytest.raises(ValueError,
+                           match="max_drain_bytes must be non-negative"):
+            RAMFileCacheStore(cache_limit="1KB", max_drain_bytes=-1)
+
+    def test_invalid_setter_preserves_previous_value(self):
+        cache = RAMFileCacheStore(cache_limit="1KB", max_drain_bytes=100)
+        with pytest.raises(ValueError,
+                           match="max_drain_bytes cannot exceed cache_limit"):
+            cache.max_drain_bytes = 1025
+        assert cache.max_drain_bytes == 100
+
+    def test_redis_rejects_invalid_budget_before_connecting(self):
+        with pytest.raises(ValueError,
+                           match="max_drain_bytes cannot exceed cache_limit"):
+            RedisFileCacheStore(cache_limit="1KB", max_drain_bytes=1025)
 
 
 class TestEviction:

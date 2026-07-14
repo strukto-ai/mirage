@@ -227,17 +227,16 @@ describe('maxDrainBytes (cancellable cache drain)', () => {
     expect(await cache.get('/huge.txt')).toBeNull()
   })
 
-  it('honors an explicit maxDrainBytes above cacheLimit', async () => {
-    // Advisory stores (Redis) have no client-side eviction, so a user
-    // raising the budget past the limit must be obeyed; the drain runs
-    // to the end of the source instead of stopping at the limit.
-    const cache = new RAMFileCacheStore({ limit: 500, maxDrainBytes: 100_000 })
+  it('releases an over-budget buffer without evicting warm data', async () => {
+    const cache = new RAMFileCacheStore({ limit: 500, maxDrainBytes: 300 })
+    await cache.set('/warm.txt', new Uint8Array(200).fill(119))
     const stream = makeChunkedStream(Array.from({ length: 10 }, () => new Uint8Array(100).fill(99)))
     const io = new IOResult({ reads: { '/big.txt': stream }, cache: ['/big.txt'] })
     await applyIo(cache, io)
     await sleep(50)
-    const buffered = stream.bufferedChunks.reduce((n, c) => n + c.byteLength, 0)
-    expect(buffered).toBe(1000)
+    expect((await cache.get('/warm.txt'))?.byteLength).toBe(200)
+    expect(await cache.get('/big.txt')).toBeNull()
+    expect(stream.bufferedChunks).toHaveLength(0)
   })
 
   it('drain completes below threshold', async () => {

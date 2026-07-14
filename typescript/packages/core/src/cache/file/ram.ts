@@ -16,7 +16,7 @@ import { RAMResource } from '../../resource/ram/ram.ts'
 import type { PathSpec } from '../../types.ts'
 import { KeyLock } from '../lock.ts'
 import { CacheEntry } from './entry.ts'
-import type { FileCache } from './mixin.ts'
+import { type FileCache, validateMaxDrainBytes } from './mixin.ts'
 import { defaultFingerprint, parseLimit } from './utils.ts'
 
 export class RAMFileCacheStore extends RAMResource implements FileCache {
@@ -24,7 +24,7 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
   private readonly lock = new KeyLock()
   private readonly limit: number
   private size = 0
-  maxDrainBytes: number | null
+  private maxDrainBytesValue: number | null = null
   // Promises cannot be cancelled; clearing the map makes the drain's
   // completion check fail so the result is discarded instead.
   readonly drainTasks = new Map<string, Promise<void>>()
@@ -33,6 +33,15 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
     super()
     this.limit = parseLimit(options.limit ?? '512MB')
     this.maxDrainBytes = options.maxDrainBytes ?? null
+  }
+
+  get maxDrainBytes(): number | null {
+    return this.maxDrainBytesValue
+  }
+
+  set maxDrainBytes(value: number | null) {
+    validateMaxDrainBytes(this.limit, value)
+    this.maxDrainBytesValue = value
   }
 
   get cacheSize(): number {

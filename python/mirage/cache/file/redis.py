@@ -15,7 +15,7 @@
 import asyncio
 from collections.abc import Iterable
 
-from mirage.cache.file.mixin import FileCacheMixin
+from mirage.cache.file.mixin import FileCacheMixin, validate_max_drain_bytes
 from mirage.cache.file.utils import default_fingerprint, parse_limit
 from mirage.resource.redis.redis import RedisResource
 
@@ -29,12 +29,14 @@ class RedisFileCacheStore(RedisResource, FileCacheMixin):
         key_prefix: str = "mirage:cache:",
         max_drain_bytes: int | None = None,
     ) -> None:
+        parsed_limit = parse_limit(cache_limit)
+        validate_max_drain_bytes(parsed_limit, max_drain_bytes)
         super().__init__(url=url, key_prefix=key_prefix)
         # Advisory only: unlike the RAM store there is no client-side
         # LRU, so nothing evicts on overflow. Cap memory on the Redis
         # server instead (maxmemory + maxmemory-policy allkeys-lru) to
         # approximate the RAM store's eviction behavior.
-        self._cache_limit: int = parse_limit(cache_limit)
+        self._cache_limit: int = parsed_limit
         self._cache_client = self._store._client
         self._data_prefix = f"{key_prefix}data:"
         self._meta_prefix = f"{key_prefix}meta:"

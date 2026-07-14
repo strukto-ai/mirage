@@ -118,8 +118,8 @@ async def _background_drain(
     arrives.
     """
     try:
-        materialized, fully_drained = await it.drain_bounded(max_bytes)
-        if fully_drained:
+        materialized = await it.drain_bounded(max_bytes)
+        if materialized is not None:
             await cache.add(path,
                             materialized,
                             fingerprint=read_fingerprint(records, path))

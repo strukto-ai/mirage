@@ -287,20 +287,16 @@ async def test_drain_default_budget_is_cache_limit():
 
 
 @pytest.mark.asyncio
-async def test_drain_explicit_budget_above_limit_honored():
-    """An explicit max_drain_bytes above cache_limit is not clamped.
-
-    Advisory stores (Redis) have no client-side eviction, so a user
-    raising the budget past the limit must be obeyed. On the RAM store
-    the drained entry is added then LRU-evicted, but the drain itself
-    runs to the end of the source instead of stopping at the limit.
-    """
-    cache = RAMFileCacheStore(cache_limit=500, max_drain_bytes=100_000)
+async def test_drain_over_budget_releases_buffer_and_preserves_cache():
+    cache = RAMFileCacheStore(cache_limit=500, max_drain_bytes=300)
+    await cache.set("/warm.txt", b"w" * 200)
     stream = _make_chunked_stream([b"c" * 100 for _ in range(10)])
     io = IOResult(reads={"/big.txt": stream}, cache=["/big.txt"])
     await cache_io.apply_io(cache, io)
     await asyncio.sleep(0.05)
-    assert len(b"".join(stream.buffered_chunks)) == 1000
+    assert await cache.get("/warm.txt") == b"w" * 200
+    assert await cache.get("/big.txt") is None
+    assert stream.buffered_chunks == []
 
 
 @pytest.mark.asyncio

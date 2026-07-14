@@ -28,8 +28,33 @@ describe('drainBudget', () => {
     expect(drainBudget(cache)).toBe(100)
   })
 
-  it('honors an explicit maxDrainBytes above the limit', () => {
-    const cache = new RAMFileCacheStore({ limit: 1024, maxDrainBytes: 4096 })
-    expect(drainBudget(cache)).toBe(4096)
+  it('honors an explicit maxDrainBytes equal to the limit', () => {
+    const cache = new RAMFileCacheStore({ limit: 1024, maxDrainBytes: 1024 })
+    expect(drainBudget(cache)).toBe(1024)
+  })
+
+  it('accepts zero', () => {
+    const cache = new RAMFileCacheStore({ limit: 1024, maxDrainBytes: 0 })
+    expect(drainBudget(cache)).toBe(0)
+  })
+
+  it('rejects maxDrainBytes above the limit', () => {
+    expect(() => new RAMFileCacheStore({ limit: 1024, maxDrainBytes: 1025 })).toThrow(
+      'maxDrainBytes cannot exceed cacheLimit',
+    )
+  })
+
+  it('rejects negative maxDrainBytes', () => {
+    expect(() => new RAMFileCacheStore({ limit: 1024, maxDrainBytes: -1 })).toThrow(
+      'maxDrainBytes must be a non-negative safe integer',
+    )
+  })
+
+  it('preserves the previous value when a setter update is invalid', () => {
+    const cache = new RAMFileCacheStore({ limit: 1024, maxDrainBytes: 100 })
+    expect(() => {
+      cache.maxDrainBytes = 1025
+    }).toThrow('maxDrainBytes cannot exceed cacheLimit')
+    expect(cache.maxDrainBytes).toBe(100)
   })
 })
