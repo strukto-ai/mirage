@@ -69,41 +69,41 @@ describe('configToWorkspaceArgs', () => {
     await expect(configToWorkspaceArgs(bad)).rejects.toThrow(/invalid mount mode/)
   })
 
-  it('threads the runtime home map into workspace options', async () => {
+  it('threads per-runtime option blocks into workspace options', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { resource: 'ram' } },
-      runtime: { python: 'pyodide', home: { pyodide: 'https://assets.example.com/pyodide/' } },
+      runtime: { python: 'pyodide', pyodide: { home: 'https://assets.example.com/pyodide/' } },
     })
     const args = await configToWorkspaceArgs(cfg)
-    expect(args.options.runtimeHome).toEqual({ pyodide: 'https://assets.example.com/pyodide/' })
+    expect(args.options.runtimeOptions).toEqual({
+      pyodide: { home: 'https://assets.example.com/pyodide/' },
+    })
   })
 
-  it('accepts home entries for Python-only runtimes (portable config)', async () => {
+  it('accepts blocks for Python-only runtimes (portable config)', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { resource: 'ram' } },
-      runtime: { python: 'pyodide', home: { wasi: '/opt/wasi-build', local: '/usr/bin/python3' } },
+      runtime: {
+        python: 'pyodide',
+        wasi: { home: '/opt/wasi-build' },
+        local: { home: '/usr/bin/python3' },
+      },
     })
     const args = await configToWorkspaceArgs(cfg)
-    expect(args.options.runtimeHome).toEqual({
-      wasi: '/opt/wasi-build',
-      local: '/usr/bin/python3',
+    expect(args.options.runtimeOptions).toEqual({
+      wasi: { home: '/opt/wasi-build' },
+      local: { home: '/usr/bin/python3' },
     })
   })
 
-  it('rejects a home entry for monty', async () => {
+  it('rejects an unknown runtime name block', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { resource: 'ram' } },
-      runtime: { python: 'monty', home: { monty: '/somewhere' } },
+      runtime: { python: 'pyodide', docker: { home: '/somewhere' } },
     })
-    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/embeds its interpreter/)
-  })
-
-  it('rejects an unknown runtime name in home', async () => {
-    const cfg = loadWorkspaceConfig({
-      mounts: { '/': { resource: 'ram' } },
-      runtime: { python: 'pyodide', home: { docker: '/somewhere' } },
-    })
-    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/unknown runtime name in home/)
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(
+      /unknown runtime name in runtime options/,
+    )
   })
 
   it('builds a redis index config from an index block', async () => {

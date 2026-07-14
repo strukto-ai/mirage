@@ -101,16 +101,19 @@ YML
   echo "invalid_create=exit$?"
   echo "invalid_msg=$(grep -oE 'TypeScript-only|Python-only' /tmp/cli-runtime-$lang-invalid.txt | head -1)"
 
-  # --- the runtime home map: py validates the wasi build dir at
-  # create; ts accepts the portable wasi entry but rejects a monty
-  # entry (monty embeds its interpreter) ---
+  # --- per-runtime option blocks: py validates the wasi build dir at
+  # create (portable pyodide block ignored); ts ignores the portable
+  # wasi block but rejects an unknown option key on the selected
+  # runtime ---
   if [ "$lang" == "py" ]; then
     cat > "$work/wasip.yaml" <<YML
 mode: EXEC
 runtime:
   python: wasi
-  home:
-    wasi: /nonexistent-wasi-build
+  wasi:
+    home: /nonexistent-wasi-build
+  pyodide:
+    home: https://assets.example.com/pyodide/
 mounts:
   /data:
     resource: ram
@@ -120,9 +123,10 @@ YML
 mode: EXEC
 runtime:
   python: pyodide
-  home:
-    wasi: /nonexistent-wasi-build
-    monty: /nonexistent-monty
+  wasi:
+    home: /nonexistent-wasi-build
+  pyodide:
+    homee: /typo-key
 mounts:
   /data:
     resource: ram
@@ -131,7 +135,7 @@ YML
   $cli workspace create "$work/wasip.yaml" --id rtwp \
     >/tmp/cli-runtime-$lang-wasip.txt 2>&1 </dev/null
   echo "wasip_create=exit$?"
-  echo "wasip_msg=$(grep -oE 'cpython-wasi-build|embeds its interpreter' /tmp/cli-runtime-$lang-wasip.txt | head -1)"
+  echo "wasip_msg=$(grep -oE 'cpython-wasi-build|unknown pyodide runtime option' /tmp/cli-runtime-$lang-wasip.txt | head -1)"
 
   $cli daemon stop >/dev/null 2>&1 </dev/null || true
   sleep 1
@@ -170,7 +174,7 @@ expect /tmp/cli-runtime-ts.txt "selected_py3" "hi-from-vfs"
 expect /tmp/cli-runtime-ts.txt "invalid_msg" "Python-only"
 expect /tmp/cli-runtime-ts.txt "sg_exec" "exit124"
 expect /tmp/cli-runtime-ts.txt "sg_msg" "python3: timed out after"
-expect /tmp/cli-runtime-ts.txt "wasip_msg" "embeds its interpreter"
+expect /tmp/cli-runtime-ts.txt "wasip_msg" "unknown pyodide runtime option"
 
 py_invalid="$(grep -F 'invalid_create=' /tmp/cli-runtime-py.txt | head -1 | cut -d= -f2-)"
 ts_invalid="$(grep -F 'invalid_create=' /tmp/cli-runtime-ts.txt | head -1 | cut -d= -f2-)"

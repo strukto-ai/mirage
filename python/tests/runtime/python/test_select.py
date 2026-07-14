@@ -20,7 +20,6 @@ from mirage.config import WorkspaceConfig
 from mirage.runtime.python import (LocalRuntime, MontyRuntime, WasiRuntime,
                                    select_python_runtime)
 from mirage.runtime.python.local import LOCAL_HOME_ENV
-from mirage.runtime.python.select import validate_runtime_home
 from mirage.runtime.python.wasi import WASI_HOME_ENV
 
 
@@ -49,46 +48,65 @@ def test_select_wasi_without_build_fails_loud(monkeypatch):
         select_python_runtime("wasi")
 
 
-def test_select_wasi_home_entry_beats_env(monkeypatch, tmp_path):
+def test_select_wasi_home_option_beats_env(monkeypatch, tmp_path):
     monkeypatch.delenv(WASI_HOME_ENV, raising=False)
     (tmp_path / "python.wasm").write_bytes(b"\0asm")
     (tmp_path / "lib" / "python3.14").mkdir(parents=True)
-    rt = select_python_runtime("wasi", home={"wasi": str(tmp_path)})
+    rt = select_python_runtime("wasi",
+                               options={"wasi": {
+                                   "home": str(tmp_path)
+                               }})
     assert isinstance(rt, WasiRuntime)
 
 
-def test_select_local_home_entry():
-    rt = select_python_runtime("local", home={"local": sys.executable})
+def test_select_local_home_option():
+    rt = select_python_runtime("local",
+                               options={"local": {
+                                   "home": sys.executable
+                               }})
     assert isinstance(rt, LocalRuntime)
 
 
 def test_select_local_unknown_interpreter_fails_loud(monkeypatch):
     monkeypatch.delenv(LOCAL_HOME_ENV, raising=False)
     with pytest.raises(FileNotFoundError, match="interpreter not found"):
-        select_python_runtime("local", home={"local": "no-such-python-xyz"})
+        select_python_runtime(
+            "local", options={"local": {
+                "home": "no-such-python-xyz"
+            }})
 
 
-def test_home_entries_for_other_runtimes_are_ignored():
+def test_option_blocks_for_other_runtimes_are_ignored():
     rt = select_python_runtime("local",
-                               home={
-                                   "local": sys.executable,
-                                   "pyodide":
-                                   "https://cdn.example.com/pyodide/",
+                               options={
+                                   "local": {
+                                       "home": sys.executable
+                                   },
+                                   "pyodide": {
+                                       "home":
+                                       "https://cdn.example.com/pyodide/"
+                                   },
                                })
     assert isinstance(rt, LocalRuntime)
 
 
-def test_home_rejects_monty_entry():
-    with pytest.raises(ValueError, match="embeds its interpreter"):
-        validate_runtime_home({"monty": "/somewhere"})
+def test_unknown_option_key_fails_loud():
+    with pytest.raises(ValueError, match="unknown wasi runtime option"):
+        select_python_runtime("wasi", options={"wasi": {"hom": "/typo"}})
 
 
-def test_home_rejects_unknown_runtime_name():
-    with pytest.raises(ValueError, match="unknown runtime name in home"):
-        select_python_runtime("monty", home={"docker": "/somewhere"})
+def test_monty_takes_no_options():
+    with pytest.raises(ValueError, match="takes no options"):
+        select_python_runtime("monty", options={"monty": {"workers": 64}})
 
 
-def test_config_threads_wasi_home(monkeypatch, tmp_path):
+def test_unknown_runtime_name_in_options():
+    with pytest.raises(ValueError,
+                       match="unknown runtime name in runtime options"):
+        select_python_runtime("monty", options={"docker": {"home": "/x"}})
+
+
+def test_config_threads_wasi_options(monkeypatch, tmp_path):
     monkeypatch.delenv(WASI_HOME_ENV, raising=False)
     (tmp_path / "python.wasm").write_bytes(b"\0asm")
     (tmp_path / "lib" / "python3.14").mkdir(parents=True)
@@ -100,17 +118,17 @@ def test_config_threads_wasi_home(monkeypatch, tmp_path):
         },
         "runtime": {
             "python": "wasi",
-            "home": {
-                "wasi": str(tmp_path)
+            "wasi": {
+                "home": str(tmp_path)
             }
         },
     })
     kwargs = cfg.to_workspace_kwargs()
     assert kwargs["python_runtime"] == "wasi"
-    assert kwargs["runtime_home"] == {"wasi": str(tmp_path)}
+    assert kwargs["runtime_options"] == {"wasi": {"home": str(tmp_path)}}
 
 
-def test_config_threads_local_home():
+def test_config_threads_local_options():
     cfg = WorkspaceConfig.model_validate({
         "mounts": {
             "/r": {
@@ -119,17 +137,17 @@ def test_config_threads_local_home():
         },
         "runtime": {
             "python": "local",
-            "home": {
-                "local": sys.executable
+            "local": {
+                "home": sys.executable
             }
         },
     })
     kwargs = cfg.to_workspace_kwargs()
     assert kwargs["python_runtime"] == "local"
-    assert kwargs["runtime_home"] == {"local": sys.executable}
+    assert kwargs["runtime_options"] == {"local": {"home": sys.executable}}
 
 
-def test_config_accepts_pyodide_home_entry():
+def test_config_accepts_pyodide_block():
     cfg = WorkspaceConfig.model_validate({
         "mounts": {
             "/r": {
@@ -138,19 +156,21 @@ def test_config_accepts_pyodide_home_entry():
         },
         "runtime": {
             "python": "monty",
-            "home": {
-                "pyodide": "https://cdn.example.com/pyodide/"
+            "pyodide": {
+                "home": "https://cdn.example.com/pyodide/"
             }
         },
     })
     kwargs = cfg.to_workspace_kwargs()
-    assert kwargs["runtime_home"] == {
-        "pyodide": "https://cdn.example.com/pyodide/"
+    assert kwargs["runtime_options"] == {
+        "pyodide": {
+            "home": "https://cdn.example.com/pyodide/"
+        }
     }
 
 
-def test_config_rejects_monty_home_entry():
-    with pytest.raises(ValueError, match="embeds its interpreter"):
+def test_config_rejects_unknown_runtime_block():
+    with pytest.raises(ValueError, match="docker"):
         WorkspaceConfig.model_validate({
             "mounts": {
                 "/r": {
@@ -159,8 +179,8 @@ def test_config_rejects_monty_home_entry():
             },
             "runtime": {
                 "python": "monty",
-                "home": {
-                    "monty": "/somewhere"
+                "docker": {
+                    "home": "/somewhere"
                 }
             },
         })

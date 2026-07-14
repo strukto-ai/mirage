@@ -31,7 +31,7 @@ class LocalRuntime(PythonRuntime):
     run kills the subprocess, so a safeguard timeout reclaims it.
 
     The interpreter defaults to the one running mirage; point the
-    `home` argument (the yaml `runtime: home: local:` entry ends up
+    `home` argument (the yaml `runtime: local: home:` entry ends up
     here) or the MIRAGE_LOCAL_HOME environment variable at another
     binary, e.g. a project venv whose packages the code needs.
 
@@ -50,8 +50,8 @@ class LocalRuntime(PythonRuntime):
             if resolved is None:
                 raise FileNotFoundError(
                     f"local python interpreter not found: {chosen!r} "
-                    "(from the yaml `runtime: home: local:` entry, the "
-                    "Workspace `runtime_home` argument, or "
+                    "(from the yaml `runtime: local: home:` entry, the "
+                    "Workspace `runtime_options` argument, or "
                     f"{LOCAL_HOME_ENV})")
             self._python = resolved
         else:

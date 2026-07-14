@@ -70,7 +70,7 @@ export interface PyodideRuntimeOptions extends PythonRuntimeOptions {
   bootstrapCode?: string
   denyPackages?: readonly string[]
   // Where the pyodide distribution loads from (the yaml
-  // `runtime: home: pyodide:` entry ends up here); falls back to
+  // `runtime: pyodide: home:` entry ends up here); falls back to
   // MIRAGE_PYODIDE_HOME, then the installed package in Node or the
   // pinned CDN in the browser. Override for self-hosted assets.
   home?: string

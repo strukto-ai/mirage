@@ -24,8 +24,7 @@ from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.resource.registry import build_resource
 from mirage.runtime.python.select import (DEFAULT_PYTHON_RUNTIME,
-                                          validate_python_runtime_name,
-                                          validate_runtime_home)
+                                          validate_python_runtime_name)
 from mirage.types import CommandSafeguard, ConsistencyPolicy, MountMode
 
 
@@ -161,24 +160,37 @@ class RuntimeBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     python: str = DEFAULT_PYTHON_RUNTIME
-    # Runtime name to interpreter location: `wasi` takes a CPython WASI
-    # build directory (falls back to MIRAGE_WASI_HOME), `local` an
-    # interpreter path (falls back to MIRAGE_LOCAL_HOME), `pyodide` a
-    # distribution URL (TypeScript). Only the selected runtime's entry
-    # is consumed.
-    home: dict[str, str] | None = None
+    # Per-runtime option blocks, free key/values consumed by the
+    # selected runtime; blocks for other runtimes (including the other
+    # language's) are ignored, so one config stays portable. `home`
+    # locates the interpreter or distribution: a CPython WASI build
+    # directory for `wasi` (falls back to MIRAGE_WASI_HOME), an
+    # interpreter path for `local` (falls back to MIRAGE_LOCAL_HOME),
+    # a distribution URL for `pyodide` (TypeScript).
+    monty: dict[str, Any] | None = None
+    wasi: dict[str, Any] | None = None
+    local: dict[str, Any] | None = None
+    pyodide: dict[str, Any] | None = None
 
     @field_validator("python")
     @classmethod
     def _v_python(cls, v):
         return validate_python_runtime_name(v)
 
-    @field_validator("home")
-    @classmethod
-    def _v_home(cls, v):
-        if v is not None:
-            validate_runtime_home(v)
-        return v
+    def option_blocks(self) -> dict[str, dict[str, Any]]:
+        """Collect the declared per-runtime option blocks.
+
+        Returns:
+            dict[str, dict[str, Any]]: runtime name to option block,
+                omitting runtimes without one.
+        """
+        blocks = {
+            "monty": self.monty,
+            "wasi": self.wasi,
+            "local": self.local,
+            "pyodide": self.pyodide,
+        }
+        return {k: v for k, v in blocks.items() if v is not None}
 
 
 class WorkspaceConfig(BaseModel):
@@ -232,8 +244,9 @@ class WorkspaceConfig(BaseModel):
             kwargs["index"] = _build_index_config(self.index)
         if self.runtime is not None:
             kwargs["python_runtime"] = self.runtime.python
-            if self.runtime.home is not None:
-                kwargs["runtime_home"] = self.runtime.home
+            blocks = self.runtime.option_blocks()
+            if blocks:
+                kwargs["runtime_options"] = blocks
         return kwargs
 
     def fuse_mounts(self) -> dict[str, bool | str]:

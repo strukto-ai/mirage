@@ -127,12 +127,13 @@ export interface WorkspaceOptions {
   /** Python runtime for `python3`: 'pyodide' (default) or 'monty'. */
   pythonRuntime?: string
   /**
-   * Runtime name to interpreter location (the yaml `runtime: home:` map
-   * ends up here); the selected runtime consumes its own entry, e.g.
-   * `{ pyodide: 'https://cdn.example.com/pyodide/' }` for self-hosted
-   * pyodide assets. Falls back to MIRAGE_<RUNTIME>_HOME.
+   * Per-runtime option blocks (the yaml `runtime:` sibling blocks end
+   * up here); the selected runtime consumes its own block, e.g.
+   * `{ pyodide: { home: 'https://cdn.example.com/pyodide/' } }` for
+   * self-hosted pyodide assets (`home` falls back to
+   * MIRAGE_PYODIDE_HOME). Blocks for other runtimes are ignored.
    */
-  runtimeHome?: Record<string, string>
+  runtimeOptions?: Record<string, Record<string, unknown>>
 }
 
 export class ExecuteResult {
@@ -269,7 +270,7 @@ export class Workspace {
         workspaceBridge: this.buildWorkspaceBridge(),
         listMounts: () => this.pythonVisibleMounts(),
       },
-      options.runtimeHome,
+      options.runtimeOptions,
     )
     this.closers.push(() => this.pythonRuntime.close())
     this.observer = new Observer(options.observe)

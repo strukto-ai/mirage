@@ -35,8 +35,8 @@ _BUILD_HINT = (
     "the wasi runtime needs a CPython WASI build directory (python.wasm "
     "plus lib/): download one from "
     "https://github.com/brettcannon/cpython-wasi-build/releases, unzip it, "
-    "and point the yaml `runtime: home: wasi:` key, the Workspace "
-    f"`runtime_home` argument, or the {WASI_HOME_ENV} environment "
+    "and point the yaml `runtime: wasi: home:` key, the Workspace "
+    f"`runtime_options` argument, or the {WASI_HOME_ENV} environment "
     "variable at the directory")
 
 
@@ -63,7 +63,7 @@ class WasiRuntime(PythonRuntime):
     safeguard timeout stops the interpreter instead of leaking it.
 
     The build directory comes from the `home` argument (the yaml
-    `runtime: home: wasi:` entry ends up here) or the MIRAGE_WASI_HOME
+    `runtime: wasi: home:` entry ends up here) or the MIRAGE_WASI_HOME
     environment variable. CPython requires the preopen to be
     rights-complete, so the directory is mounted read-write into the
     guest; make it read-only on the host filesystem to keep runs from
