@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from datetime import datetime, timezone
 
 from mirage.io import IOResult
@@ -166,27 +166,47 @@ async def _setattr_via(
     namespace: Namespace,
     dispatch: Callable,
     path: PathSpec,
-    **fields: object,
+    *,
+    mode: int | None = None,
+    uid: int | str | None = None,
+    gid: int | str | None = None,
+    atime: str | None = None,
+    mtime: str | None = None,
 ) -> None:
     """Apply attributes natively when the mount supports setattr, else
-    into the namespace overlay.
+    into the namespace overlay. None fields are left untouched.
 
     Args:
         namespace (Namespace): addressing authority (overlay home).
         dispatch (Callable): op dispatcher.
         path (PathSpec): target path (already link-resolved).
+        mode (int | None): permission bits (e.g. 0o644).
+        uid (int | str | None): owner id or name.
+        gid (int | str | None): group id or name.
+        atime (str | None): ISO access time.
+        mtime (str | None): ISO modification time.
     """
     mount = namespace.mount_for(path.virtual)
     if mount.supports_op("setattr", path.virtual):
-        await dispatch("setattr", path, **fields)
+        await dispatch("setattr",
+                       path,
+                       mode=mode,
+                       uid=uid,
+                       gid=gid,
+                       atime=atime,
+                       mtime=mtime)
         return
     # The mount has no setattr op (API backend): store in the overlay,
     # which is durable, snapshot-captured namespace state.
-    mtime = fields.pop("mtime", None)
     epoch: float | None = None
-    if isinstance(mtime, str):
+    if mtime is not None:
         epoch = datetime.fromisoformat(mtime).timestamp()
-    namespace.set_attrs(path.virtual, mtime=epoch, **fields)
+    namespace.set_attrs(path.virtual,
+                        mode=mode,
+                        uid=uid,
+                        gid=gid,
+                        atime=atime,
+                        mtime=epoch)
 
 
 def _follow_operand(
@@ -248,7 +268,10 @@ async def _apply_attrs(
     cmd: str,
     resolved: PathSpec,
     errors: list[str],
-    **fields: object,
+    *,
+    mode: int | None = None,
+    uid: int | str | None = None,
+    gid: int | str | None = None,
 ) -> None:
     """Setattr one operand, collecting the read-only refusal.
 
@@ -258,9 +281,17 @@ async def _apply_attrs(
         cmd (str): command name for the error message.
         resolved (PathSpec): link-resolved target path.
         errors (list[str]): per-operand error accumulator.
+        mode (int | None): permission bits (e.g. 0o644).
+        uid (int | str | None): owner id or name.
+        gid (int | str | None): group id or name.
     """
     try:
-        await _setattr_via(namespace, dispatch, resolved, **fields)
+        await _setattr_via(namespace,
+                           dispatch,
+                           resolved,
+                           mode=mode,
+                           uid=uid,
+                           gid=gid)
     except PermissionError:
         errors.append(_read_only_error(cmd, namespace, resolved))
 
@@ -404,14 +435,11 @@ async def handle_touch(
     if stamp is None:
         stamp = _now_iso()
 
-    fields: dict[str, object] = {}
-    if "a" in flags or "m" not in flags:
-        fields["atime"] = stamp
-    if "m" in flags or "a" not in flags:
-        fields["mtime"] = stamp
+    atime = stamp if "a" in flags or "m" not in flags else None
+    mtime = stamp if "m" in flags or "a" not in flags else None
 
     errors: list[str] = []
-    writes: dict[str, bytes] = {}
+    writes: dict[str, bytes | AsyncIterator[bytes]] = {}
     for target in await expand_operands(namespace, operands):
         if namespace.is_mount_root(target.virtual):
             errors.append(f"touch: cannot touch '{target.raw_path}': "
@@ -439,7 +467,11 @@ async def handle_touch(
                     continue
                 await dispatch("write", resolved, data=b"")
                 writes[resolved.virtual] = b""
-            await _setattr_via(namespace, dispatch, resolved, **fields)
+            await _setattr_via(namespace,
+                               dispatch,
+                               resolved,
+                               atime=atime,
+                               mtime=mtime)
         except PermissionError:
             errors.append(_read_only_error("touch", namespace, resolved))
     return finish("touch", errors, io=IOResult(writes=writes))

@@ -39,7 +39,7 @@ def result(
         io (IOResult | None): prebuilt IOResult to reuse (e.g. carrying
             writes); its exit_code/stderr are overwritten.
     """
-    err = stderr.encode() if stderr else None
+    err = stderr.encode() if stderr else b""
     io = io if io is not None else IOResult()
     io.exit_code = exit_code
     if err:

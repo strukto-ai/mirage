@@ -31,7 +31,7 @@ def test_ok_triple():
     assert io.exit_code == 0
     assert node.command == "ln"
     assert node.exit_code == 0
-    assert node.stderr is None
+    assert node.stderr == b""
 
 
 def test_fail_triple():
@@ -50,7 +50,7 @@ def test_finish_no_errors_keeps_io():
     assert result_io.exit_code == 0
     assert result_io.writes == {"/data/f.txt": b""}
     assert node.exit_code == 0
-    assert node.stderr is None
+    assert node.stderr == b""
 
 
 def test_finish_joins_errors():
