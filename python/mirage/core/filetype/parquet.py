@@ -44,7 +44,7 @@ def cat(raw: bytes, max_rows: int = _MAX_PREVIEW_ROWS) -> bytes:
     pf = _open(raw)
     schema = pf.schema_arrow
     num_rows = pf.metadata.num_rows
-    batches = []
+    batches: list[pa.Table] = []
     collected = 0
     for i in range(pf.metadata.num_row_groups):
         if collected >= max_rows:
@@ -66,7 +66,7 @@ def head(raw: bytes, n: int = 10) -> bytes:
     schema = pf.schema_arrow
     num_rows = pf.metadata.num_rows
     rows_needed = min(n, num_rows)
-    batches = []
+    batches: list[pa.Table] = []
     collected = 0
     for i in range(pf.metadata.num_row_groups):
         if collected >= rows_needed:
@@ -87,7 +87,7 @@ def tail(raw: bytes, n: int = 10) -> bytes:
     schema = pf.schema_arrow
     num_rows = pf.metadata.num_rows
     rows_needed = min(n, num_rows)
-    batches = []
+    batches: list[pa.Table] = []
     collected = 0
     for i in range(pf.metadata.num_row_groups - 1, -1, -1):
         if collected >= rows_needed:

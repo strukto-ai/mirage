@@ -16,7 +16,7 @@ import json
 import math
 import sys
 import time
-from typing import Any, Callable
+from typing import Any, Callable, NoReturn
 
 import httpx
 import typer
@@ -38,7 +38,7 @@ def emit(obj: Any, human: Callable[[Any], str] | None = None) -> None:
     typer.echo(json.dumps(obj, indent=2, default=str))
 
 
-def fail(message: str, exit_code: int = 1) -> None:
+def fail(message: str, exit_code: int = 1) -> NoReturn:
     typer.echo(message, err=True)
     raise typer.Exit(code=exit_code)
 

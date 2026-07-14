@@ -245,6 +245,7 @@ warn_redundant_casts = true
 
 
 
+
 # Ratchet baseline: modules with pre-existing mypy errors. Shrink this
 # list, never grow it: when a module is cleaned, delete its entry so
 # regressions in it fail CI. New modules must not be added here.
@@ -263,7 +264,6 @@ module = [
     "mirage.agents.pydantic_ai.backend",
     "mirage.cache.file.io",
     "mirage.cache.index.redis",
-    "mirage.cli.workspace",
     "mirage.commands",
     "mirage.commands.builtin.discord.grep",
     "mirage.commands.builtin.discord.head",
@@ -389,7 +389,6 @@ module = [
     "mirage.commands.builtin.utils.safeguard",
     "mirage.commands.config",
     "mirage.commands.spec.parser",
-    "mirage.commands.spec.types",
     "mirage.context.session_context",
     "mirage.core.chroma.read",
     "mirage.core.databricks_volume.readdir",
@@ -413,8 +412,6 @@ module = [
     "mirage.core.disk.unlink",
     "mirage.core.disk.write",
     "mirage.core.email.readdir",
-    "mirage.core.filetype.orc",
-    "mirage.core.filetype.parquet",
     "mirage.core.gdocs.readdir",
     "mirage.core.gdrive.readdir",
     "mirage.core.gdrive.stream",
@@ -503,7 +500,6 @@ module = [
     "mirage.core.s3.unlink",
     "mirage.core.s3.write",
     "mirage.core.sharepoint._resolver",
-    "mirage.core.sharepoint.readdir",
     "mirage.core.slack.readdir",
     "mirage.core.ssh._client",
     "mirage.core.ssh.copy",
@@ -522,15 +518,11 @@ module = [
     "mirage.fuse.fs",
     "mirage.fuse.mount",
     "mirage.observe.redis_store",
-    "mirage.ops.databricks_volume.mkdir",
-    "mirage.ops.databricks_volume.rename",
-    "mirage.ops.databricks_volume.rmdir",
     "mirage.ops.file",
     "mirage.ops.ops",
     "mirage.ops.os_patch",
     "mirage.ops.registry",
     "mirage.provision.types",
-    "mirage.resource.base",
     "mirage.resource.chroma.chroma",
     "mirage.resource.databricks_volume.databricks_volume",
     "mirage.resource.dev.dev",
@@ -573,7 +565,6 @@ module = [
     "mirage.shell.helpers",
     "mirage.types",
     "mirage.utils.glob_walk",
-    "mirage.workspace.executor.builtins.text",
     "mirage.workspace.executor.builtins.vars",
     "mirage.workspace.executor.command",
     "mirage.workspace.executor.fanout",

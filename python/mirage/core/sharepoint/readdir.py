@@ -73,8 +73,8 @@ async def readdir(accessor: SharePointAccessor,
             raise NotADirectoryError(virtual_key) from exc
         raise enoent(virtual_key) from exc
     base = "/" + stripped if stripped else ""
-    names: list[str] = []
-    index_entries: list[tuple[str, IndexEntry]] = []
+    names = []
+    index_entries = []
     for child in children:
         cname = child.get("name", "")
         key = f"{base}/{cname}"

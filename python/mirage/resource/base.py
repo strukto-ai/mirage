@@ -25,7 +25,7 @@ from mirage.resource.secrets import redacted_config_dump
 try:
     from mirage.cache.index import RedisIndexCacheStore
 except ImportError:
-    RedisIndexCacheStore = None  # type: ignore[misc, assignment]
+    RedisIndexCacheStore = None
 
 
 class BaseResource:

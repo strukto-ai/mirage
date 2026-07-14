@@ -44,7 +44,7 @@ def cat(raw: bytes, max_rows: int = _MAX_PREVIEW_ROWS) -> bytes:
     f = _open(raw)
     schema = f.schema
     num_rows = f.nrows
-    batches = []
+    batches: list[pa.RecordBatch] = []
     collected = 0
     for i in range(f.nstripes):
         if collected >= max_rows:
@@ -66,7 +66,7 @@ def head(raw: bytes, n: int = 10) -> bytes:
     schema = f.schema
     num_rows = f.nrows
     rows_needed = min(n, num_rows)
-    batches = []
+    batches: list[pa.RecordBatch] = []
     collected = 0
     for i in range(f.nstripes):
         if collected >= rows_needed:
@@ -87,7 +87,7 @@ def tail(raw: bytes, n: int = 10) -> bytes:
     schema = f.schema
     num_rows = f.nrows
     rows_needed = min(n, num_rows)
-    batches = []
+    batches: list[pa.RecordBatch] = []
     collected = 0
     for i in range(f.nstripes - 1, -1, -1):
         if collected >= rows_needed:

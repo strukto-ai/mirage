@@ -57,7 +57,7 @@ def _interpret_escapes(text: str) -> str:
             break
         elif ch == "x":
             # \xHH — up to 2 hex digits
-            digits = []
+            digits: list[str] = []
             j = i + 2
             while j < n and len(digits) < 2 and text[j] in _HEX:
                 digits.append(text[j])
