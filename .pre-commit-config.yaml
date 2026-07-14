@@ -140,3 +140,9 @@ repos:
         language: system
         files: ^typescript/.*\.(ts|tsx|js|mjs|cjs|json)$
         pass_filenames: false
+      - id: py-mypy
+        name: Mypy (ratcheted)
+        entry: bash -c 'cd python && uv run mypy'
+        language: system
+        files: ^python/(mirage/.*\.py|pyproject\.toml)$
+        pass_filenames: false
