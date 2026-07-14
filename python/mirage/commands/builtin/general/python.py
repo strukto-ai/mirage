@@ -12,30 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
 from typing import Callable
 
 from mirage.accessor.base import Accessor, NOOPAccessor
+from mirage.commands.builtin.utils.paths import resolve_script
 from mirage.commands.builtin.utils.stream import _read_stdin_async
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.python import MontyRuntime, PythonRunArgs, PythonRuntime
 from mirage.types import PathSpec
-
-
-def _resolve_script(name: str, cwd: PathSpec | None) -> PathSpec:
-    if name.startswith("/"):
-        path = posixpath.normpath(name)
-    else:
-        base = cwd.virtual.rstrip("/") if cwd is not None else ""
-        path = posixpath.normpath((base + "/" + name) if base else "/" + name)
-    last_slash = path.rfind("/")
-    directory = path[:last_slash + 1] if last_slash >= 0 else "/"
-    return PathSpec(resource_path=(path).strip("/"),
-                    virtual=path,
-                    directory=directory,
-                    resolved=True)
 
 
 async def _python3(
@@ -67,7 +53,7 @@ async def _python3(
         script_path = paths[0]
         arg_strs = [p.virtual for p in paths[1:]] + text_list
     elif text_list:
-        script_path = _resolve_script(text_list[0], cwd)
+        script_path = resolve_script(text_list[0], cwd)
         arg_strs = text_list[1:]
     else:
         arg_strs = []

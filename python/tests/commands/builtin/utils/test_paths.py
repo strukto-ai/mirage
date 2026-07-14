@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.utils.paths import default_paths
+from mirage.commands.builtin.utils.paths import default_paths, resolve_script
 from mirage.types import PathSpec
 
 
@@ -20,6 +20,26 @@ def _spec(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual,
                     resource_path=virtual.strip("/"))
+
+
+def test_resolve_script_absolute_is_normalized():
+    spec = resolve_script("/data/../data/run.py", _spec("/cwd"))
+    assert spec.virtual == "/data/run.py"
+    assert spec.resource_path == "data/run.py"
+    assert spec.directory == "/data/"
+    assert spec.resolved is True
+
+
+def test_resolve_script_relative_joins_cwd():
+    spec = resolve_script("sub/run.mjs", _spec("/data"))
+    assert spec.virtual == "/data/sub/run.mjs"
+    assert spec.directory == "/data/sub/"
+
+
+def test_resolve_script_without_cwd_resolves_against_root():
+    spec = resolve_script("run.py", None)
+    assert spec.virtual == "/run.py"
+    assert spec.directory == "/"
 
 
 def test_non_empty_paths_pass_through():

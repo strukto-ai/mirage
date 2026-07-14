@@ -13,6 +13,24 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.types import PathSpec
+from mirage.utils.path import resolve_path
+
+
+def resolve_script(name: str, cwd: PathSpec | None) -> PathSpec:
+    """Resolve a script operand to a fully-resolved PathSpec.
+
+    Args:
+        name (str): the script path as typed, absolute or cwd-relative.
+        cwd (PathSpec | None): the session working directory injected by
+            the dispatcher; None resolves against the root.
+    """
+    path = resolve_path(name, cwd.virtual if cwd is not None else "/")
+    last_slash = path.rfind("/")
+    directory = path[:last_slash + 1] if last_slash >= 0 else "/"
+    return PathSpec(resource_path=path.strip("/"),
+                    virtual=path,
+                    directory=directory,
+                    resolved=True)
 
 
 def default_paths(paths: list[PathSpec],

@@ -16,10 +16,21 @@ import { IOResult, materialize } from '../../../io/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { eisdir, fsErrorLine, isFsError } from '../../../utils/errors.ts'
+import { resolvePath } from '../../../utils/path.ts'
+import { stripSlash } from '../../../utils/slash.ts'
 
 const ENC = new TextEncoder()
 
 type Stat = (p: PathSpec) => Promise<FileStat>
+
+// Resolve a script operand (absolute or cwd-relative) to a fully-resolved
+// PathSpec, the way python3/js locate a mounted script before running it.
+export function resolveScript(name: string, cwd: string): PathSpec {
+  const path = resolvePath(name, cwd)
+  const lastSlash = path.lastIndexOf('/')
+  const directory = lastSlash >= 0 ? path.slice(0, lastSlash + 1) : '/'
+  return new PathSpec({ resourcePath: stripSlash(path), virtual: path, directory, resolved: true })
+}
 
 // Partition operands into readable paths and GNU stderr lines. Read-family
 // commands (cat/head/tail/wc) process remaining operands after one fails,

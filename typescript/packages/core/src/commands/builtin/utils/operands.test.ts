@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import type { FileStat } from '../../../types.ts'
 import { PathSpec } from '../../../types.ts'
 import { enoent } from '../../../utils/errors.ts'
-import { splitReadable } from './operands.ts'
+import { resolveScript, splitReadable } from './operands.ts'
 
 function spec(virtual: string): PathSpec {
   return PathSpec.fromStrPath(virtual)
@@ -52,5 +52,21 @@ describe('splitReadable', () => {
   it('propagates non-filesystem errors', async () => {
     const stat = () => Promise.reject(new Error('backend broke'))
     await expect(splitReadable([spec('/f.txt')], stat, 'cat')).rejects.toThrow('backend broke')
+  })
+})
+
+describe('resolveScript', () => {
+  it('normalizes an absolute path', () => {
+    const s = resolveScript('/data/../data/run.py', '/cwd')
+    expect(s.virtual).toBe('/data/run.py')
+    expect(s.resourcePath).toBe('data/run.py')
+    expect(s.directory).toBe('/data/')
+    expect(s.resolved).toBe(true)
+  })
+
+  it('joins a relative path against cwd', () => {
+    const s = resolveScript('sub/run.mjs', '/data')
+    expect(s.virtual).toBe('/data/sub/run.mjs')
+    expect(s.directory).toBe('/data/sub/')
   })
 })

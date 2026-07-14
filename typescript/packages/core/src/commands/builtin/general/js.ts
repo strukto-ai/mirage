@@ -14,35 +14,14 @@
 
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import { PathSpec } from '../../../types.ts'
+import type { PathSpec } from '../../../types.ts'
 import { handleJs } from '../../../workspace/executor/js/handle.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
+import { resolveScript } from '../utils/operands.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
-
-function normalizePosix(p: string): string {
-  const parts: string[] = []
-  for (const seg of p.split('/')) {
-    if (seg === '' || seg === '.') continue
-    if (seg === '..') {
-      parts.pop()
-      continue
-    }
-    parts.push(seg)
-  }
-  return '/' + parts.join('/')
-}
-
-function resolveScript(name: string, cwd: string): PathSpec {
-  const joined = name.startsWith('/') ? name : `${rstripSlash(cwd)}/${name}`
-  const path = normalizePosix(joined)
-  const lastSlash = path.lastIndexOf('/')
-  const directory = lastSlash >= 0 ? path.slice(0, lastSlash + 1) : '/'
-  return new PathSpec({ resourcePath: stripSlash(path), virtual: path, directory, resolved: true })
-}
 
 async function jsCommand(
   _accessor: Accessor,
