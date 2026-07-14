@@ -25,6 +25,14 @@ import { RedisFileCacheStore } from './file.ts'
 const REDIS_URL = process.env.REDIS_URL
 const skip = REDIS_URL === undefined
 
+describe('RedisFileCacheStore configuration', () => {
+  it('rejects maxDrainBytes above cacheLimit', () => {
+    expect(() => new RedisFileCacheStore({ cacheLimit: 1024, maxDrainBytes: 1025 })).toThrow(
+      'maxDrainBytes cannot exceed cacheLimit',
+    )
+  })
+})
+
 describe.skipIf(skip)('RedisFileCacheStore', () => {
   let cache: RedisFileCacheStore
   const prefix = `mirage:cache:test:${String(Date.now())}:${Math.random().toString(36).slice(2)}:`

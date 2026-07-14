@@ -49,20 +49,32 @@ export async function* readStream(
   if (body === null) return
   const reader = body.getReader()
   let pending: Uint8Array = new Uint8Array(0)
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    pending = concatChunks(pending, value)
-    while (pending.byteLength >= DEFAULT_CHUNK_SIZE) {
-      const piece = pending.slice(0, DEFAULT_CHUNK_SIZE)
-      if (rec !== null) rec.bytes += piece.byteLength
-      yield piece
-      pending = pending.slice(DEFAULT_CHUNK_SIZE)
+  let completed = false
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) {
+        completed = true
+        break
+      }
+      pending = concatChunks(pending, value)
+      while (pending.byteLength >= DEFAULT_CHUNK_SIZE) {
+        const piece = pending.slice(0, DEFAULT_CHUNK_SIZE)
+        if (rec !== null) rec.bytes += piece.byteLength
+        yield piece
+        pending = pending.slice(DEFAULT_CHUNK_SIZE)
+      }
     }
-  }
-  if (pending.byteLength > 0) {
-    if (rec !== null) rec.bytes += pending.byteLength
-    yield pending
+    if (pending.byteLength > 0) {
+      if (rec !== null) rec.bytes += pending.byteLength
+      yield pending
+    }
+  } finally {
+    try {
+      if (!completed) await reader.cancel()
+    } finally {
+      reader.releaseLock()
+    }
   }
 }
 

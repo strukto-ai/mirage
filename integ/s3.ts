@@ -271,6 +271,37 @@ async function measureBytes(
   );
 }
 
+async function waitForDrains(ws: Workspace): Promise<void> {
+  const tasks = ws.cache.drainTasks;
+  if (tasks === undefined) throw new Error("cache does not expose drain tasks");
+  while (tasks.size > 0) {
+    await Promise.all([...tasks.values()]);
+  }
+}
+
+async function runBoundedDrain(ws: Workspace): Promise<void> {
+  const path = "/s3/data/example.jsonl";
+  await ws.cache.clear();
+  ws.maxDrainBytes = 4096;
+  const before = ws.records.reduce((sum, r) => sum + r.bytes, 0);
+  try {
+    const result = await ws.execute(`cat ${path} | head -c 100`);
+    await waitForDrains(ws);
+    const net = ws.records.reduce((sum, r) => sum + r.bytes, 0) - before;
+    const cached = await ws.cache.get(path);
+    if (result.stdout.byteLength !== 100) {
+      throw new Error(`expected 100 output bytes, got ${String(result.stdout.byteLength)}`);
+    }
+    if (net !== 8192) throw new Error(`expected one 8192-byte read, got ${String(net)}`);
+    if (cached !== null) throw new Error("bounded drain populated the cache");
+    process.stdout.write("=== s3:bounded_drain ===\n");
+    process.stdout.write(`bytes=${String(net)} cache_entry=${String(cached !== null)}\n`);
+  } finally {
+    ws.maxDrainBytes = null;
+    await ws.cache.clear();
+  }
+}
+
 async function warmServe(name: string, mount: string, cmd: string): Promise<void> {
   const ws = buildWorkspace();
   try {
@@ -445,6 +476,7 @@ async function main(): Promise<void> {
           tmpl.replaceAll("{m}", mount),
         );
     }
+    await runBoundedDrain(ws);
     for (const mount of MOUNTS) {
       const tag = mount.slice(1);
       for (const [name, tmpl] of WARM_SERVE_CASES)
