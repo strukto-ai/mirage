@@ -1,5 +1,5 @@
 from mirage.accessor.nextcloud import NextcloudAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.nextcloud.stat import stat as nextcloud_stat
 from mirage.provision.types import Precision, ProvisionResult
 from mirage.types import PathSpec
@@ -8,7 +8,7 @@ from mirage.types import PathSpec
 async def _resolve_sizes(
     accessor: NextcloudAccessor,
     paths: list[PathSpec],
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> tuple[list[tuple[str, int]], int]:
     resolved: list[tuple[str, int]] = []
     missing = 0
@@ -38,7 +38,7 @@ async def file_read_provision(
     paths: list[PathSpec],
     *_args: object,
     command: str = "",
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
     **_extra: object,
 ) -> ProvisionResult:
     if not paths:

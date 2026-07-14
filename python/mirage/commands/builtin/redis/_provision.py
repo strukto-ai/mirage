@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.redis.stat import stat as redis_stat
 from mirage.provision.types import Precision, ProvisionResult
 from mirage.types import PathSpec
@@ -22,7 +22,7 @@ from mirage.types import PathSpec
 async def _resolve_sizes(
     accessor: RedisAccessor,
     paths: list[PathSpec],
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> tuple[list[tuple[str, int]], int]:
     """Walk paths, return (path, size) pairs. Self-heals via stat fallback."""
     resolved: list[tuple[str, int]] = []
@@ -53,7 +53,7 @@ async def file_read_provision(
     paths: list[PathSpec],
     *_args: object,
     command: str = "",
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
     **_extra: object,
 ) -> ProvisionResult:
     """Cost estimate for full file reads (cat, wc, grep) backed by Redis.
@@ -83,7 +83,7 @@ async def head_tail_provision(
     command: str = "",
     n: str | int | None = None,
     c: str | int | None = None,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
     **_extra: object,
 ) -> ProvisionResult:
     """Cost estimate for partial reads (head, tail) backed by Redis.
@@ -112,7 +112,7 @@ async def metadata_provision(
     paths: list[PathSpec],
     *_args: object,
     command: str = "",
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
     **_extra: object,
 ) -> ProvisionResult:
     """Cost estimate for metadata-only ops (stat, ls, find) backed by Redis."""

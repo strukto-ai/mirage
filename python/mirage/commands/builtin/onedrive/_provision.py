@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.onedrive import OneDriveAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.onedrive.stat import stat as onedrive_stat
 from mirage.provision.types import Precision, ProvisionResult
 from mirage.types import PathSpec
@@ -22,7 +22,7 @@ from mirage.types import PathSpec
 async def _resolve_sizes(
     accessor: OneDriveAccessor,
     paths: list[PathSpec],
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> tuple[list[tuple[str, int]], int]:
     """Walk paths, return (path, size) pairs. Self-heals via stat fallback.
 
@@ -64,7 +64,7 @@ async def file_read_provision(
     paths: list[PathSpec],
     *_args: object,
     command: str = "",
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
     **_extra: object,
 ) -> ProvisionResult:
     """Cost estimate for full file reads (cat, wc).
