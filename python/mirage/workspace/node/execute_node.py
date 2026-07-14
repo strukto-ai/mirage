@@ -18,7 +18,9 @@ from typing import Any, Callable
 
 from mirage.io import IOResult
 from mirage.io.stream import async_chain
+from mirage.shell.arith import evaluate_arith
 from mirage.shell.call_stack import CallStack
+from mirage.shell.errors import ArithError
 from mirage.shell.job_table import JobTable
 from mirage.shell.node_kind import NodeKind, node_kind
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
@@ -33,6 +35,7 @@ from mirage.workspace.executor.redirect import handle_redirect
 from mirage.workspace.expand import (expand_and_classify, expand_node,
                                      expand_redirects)
 from mirage.workspace.expand.globs import resolve_globs
+from mirage.workspace.expand.node import expand_arith
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.command_dispatch import execute_command
@@ -206,6 +209,31 @@ async def execute_node(
     if kind == NodeKind.SUBSHELL:
         body = get_subshell_body(node)
         return await handle_subshell(recurse, body, session, stdin, cs)
+
+    # ── arithmetic command ((( ... ))) ──────────
+    if (kind == NodeKind.COMPOUND and node.children
+            and node.children[0].type == NT.ARITH_OPEN):
+        text = get_text(node)
+        expr = await expand_arith(node, session, execute_fn, cs)
+        try:
+            value, updates = evaluate_arith(expr, session.env)
+        except ArithError as exc:
+            err = f"bash: ((: {expr}: {exc}\n".encode()
+            return None, IOResult(exit_code=1,
+                                  stderr=err), ExecutionNode(command=text,
+                                                             exit_code=1,
+                                                             stderr=err)
+        for name in updates:
+            if name in session.readonly_vars:
+                err = f"bash: {name}: readonly variable\n".encode()
+                return None, IOResult(exit_code=1,
+                                      stderr=err), ExecutionNode(command=text,
+                                                                 exit_code=1,
+                                                                 stderr=err)
+        session.env.update(updates)
+        code = 0 if value != 0 else 1
+        return None, IOResult(exit_code=code), ExecutionNode(command=text,
+                                                             exit_code=code)
 
     # ── compound statement ({ ... }) ───────────
     if kind == NodeKind.COMPOUND:

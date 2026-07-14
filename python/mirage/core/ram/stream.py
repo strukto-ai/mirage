@@ -15,7 +15,7 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.observe.context import record_stream
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
@@ -24,10 +24,6 @@ from mirage.utils.path import norm
 
 async def stream(accessor: RAMAccessor,
                  path: PathSpec) -> AsyncIterator[bytes]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     path = norm(path.resource_path)
     store = accessor.store
@@ -41,18 +37,12 @@ async def stream(accessor: RAMAccessor,
     yield data
 
 
-async def read_stream(accessor: RAMAccessor,
-                      path: PathSpec,
-                      index: IndexCacheStore = None) -> AsyncIterator[bytes]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
-    virtual = path.virtual
-    path = norm(path.resource_path)
+async def read_stream(
+        accessor: RAMAccessor,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX) -> AsyncIterator[bytes]:
     try:
-        gen = stream(accessor, path)
-        async for chunk in gen:
+        async for chunk in stream(accessor, path):
             yield chunk
     except FileNotFoundError as exc:
-        raise enoent(virtual) from exc
+        raise enoent(path.virtual) from exc

@@ -71,6 +71,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
   const valueFlags = new Set<string>()
   const longBoolFlags = new Set<string>()
   const longValueFlags = new Set<string>()
+  const longOptionalFlags = new Set<string>()
   const valueFlagKinds = new Map<string, OperandKind>()
   const repeatFlags = new Set<string>()
   let numericShorthandFlag: string | null = null
@@ -89,6 +90,11 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     if (opt.long !== null) {
       if (opt.valueKind === OperandKind.NONE) {
         longBoolFlags.add(opt.long)
+      } else if (opt.valueOptional) {
+        // GNU optional argument: bare form is boolean, value only attaches
+        // via `=`; a detached next token is an operand.
+        longBoolFlags.add(opt.long)
+        longOptionalFlags.add(opt.long)
       } else {
         longValueFlags.add(opt.long)
         valueFlagKinds.set(opt.long, opt.valueKind)
@@ -139,6 +145,8 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
   // dropped token shifts every later kind onto the wrong word.
   const wordKinds: (OperandKind | null)[] = new Array<OperandKind | null>(argv.length).fill(null)
   const warnings: string[] = []
+  const invalidOptions: string[] = []
+  const needsValueOptions: string[] = []
   // Free-text commands (echo/python/bash-style TEXT rest) keep unknown dash
   // tokens verbatim; elsewhere they are dropped with a warning so a stray
   // flag never corrupts pattern/path classification.
@@ -173,13 +181,19 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
         i += 2
       } else {
         const eq = tok.indexOf('=')
-        if (eq !== -1 && longValueFlags.has(tok.slice(0, eq))) {
+        if (
+          eq !== -1 &&
+          (longValueFlags.has(tok.slice(0, eq)) || longOptionalFlags.has(tok.slice(0, eq)))
+        ) {
           setValueFlag(flags, tok.slice(0, eq), tok.slice(eq + 1), repeatFlags)
+        } else if (longValueFlags.has(tok)) {
+          // Declared value flag at end of line with no argument.
+          needsValueOptions.push(tok)
         } else if (lenientDashOperands) {
           rawArgs.push(tok)
           rawIndices.push(origIndices[i] ?? -1)
         } else {
-          warnings.push(`warning: unknown option '${tok}' ignored`)
+          invalidOptions.push(tok)
         }
         i += 1
       }
@@ -249,8 +263,22 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
       if (lenientDashOperands || NUMERIC_SHORT.test(tok)) {
         rawArgs.push(tok)
         rawIndices.push(origIndices[i] ?? -1)
+      } else if (valueFlags.has(tok)) {
+        // A declared value flag with no argument left on the line.
+        needsValueOptions.push(tok.slice(1))
+      } else if (mixed !== null && mixed.attached === null) {
+        // A cluster ending in a value flag that ran out of line.
+        needsValueOptions.push(mixed.valueFlag.slice(1))
       } else {
-        warnings.push(`warning: unknown option '${tok}' ignored`)
+        // GNU reports the first offending character, not the token.
+        let bad = tok.slice(1, 2)
+        for (const ch of tok.slice(1)) {
+          if (!boolFlags.has(`-${ch}`) && !valueFlags.has(`-${ch}`)) {
+            bad = ch
+            break
+          }
+        }
+        invalidOptions.push(bad)
       }
       i += 1
       continue
@@ -265,6 +293,12 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     .filter((op) => !op.providedBy.some((name) => name in flags))
     .map((op) => op.kind)
 
+  // Overflow operands past the declared positional slots pass through
+  // classified like the last slot (TEXT when there is none), so a
+  // fixed-arity command receives them and raises its own extra-operand
+  // UsageError (#452). The parser classifies, it never drops or raises.
+  const overflowKind: OperandKind = positional.at(-1) ?? OperandKind.TEXT
+
   const classified: [string, OperandKind][] = []
   const rawOperands: [string, OperandKind][] = []
   for (let j = 0; j < rawArgs.length; j++) {
@@ -276,7 +310,7 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     } else if (restKind !== null) {
       kind = restKind
     } else {
-      continue
+      kind = overflowKind
     }
     if (kind === OperandKind.PATH) {
       classified.push([resolvePath(arg, cwd), OperandKind.PATH])
@@ -323,6 +357,8 @@ export function parseCommand(spec: CommandSpec, argv: string[], cwd: string): Pa
     rawOperands,
     textFlagValues,
     warnings,
+    invalidOptions,
+    needsValueOptions,
     wordKinds,
   })
 }

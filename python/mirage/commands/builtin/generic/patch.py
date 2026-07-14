@@ -4,6 +4,8 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
+from mirage.commands.spec.types import CommandName
+from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -115,7 +117,7 @@ async def _load_patch_data(
     accessor: Accessor,
 ) -> bytes:
     if i is not None and has_resource:
-        return await read_bytes(accessor, i.mount_path)
+        return await read_bytes(accessor, i)
     if paths and has_resource:
         return await read_bytes(accessor, paths[0])
     data = await _read_stdin_async(stdin)
@@ -137,6 +139,8 @@ async def patch(
     i: PathSpec | None = None,
     N: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
+    if len(paths) > 2:
+        raise extra_operand_error(CommandName.PATCH, paths[2].raw_path)
     strip_count = int(p) if p else 0
     patch_data = await _load_patch_data(i, paths, has_resource, stdin,
                                         read_bytes, accessor)
@@ -144,9 +148,10 @@ async def patch(
     file_hunks = _parse_patch(patch_text, strip_count)
     writes: dict[str, bytes] = {}
     for file_path, hunks in file_hunks.items():
+        file_spec = PathSpec.from_str_path(file_path)
         try:
             original = (await read_bytes(accessor,
-                                         file_path)).decode(errors="replace")
+                                         file_spec)).decode(errors="replace")
         except FileNotFoundError:
             original = ""
         original_lines = split_lines(original)
@@ -154,7 +159,7 @@ async def patch(
             hunks = _reverse_hunks(hunks)
         patched_lines = _apply_hunks(original_lines, hunks, forward_only=N)
         patched_data = ("\n".join(patched_lines) + "\n").encode()
-        await write_bytes(accessor, file_path, patched_data)
+        await write_bytes(accessor, file_spec, patched_data)
         writes[file_path] = patched_data
     return None, IOResult(writes=writes)
 

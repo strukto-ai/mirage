@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import dotenv from 'dotenv'
-import { MinIOResource, MountMode, Workspace, type MinIOConfig } from '@struktoai/mirage-node'
+import { MinIOResource, MountMode, Workspace, type FileStat, type MinIOConfig } from '@struktoai/mirage-node'
 
 dotenv.config({ path: '.env.development' })
 
@@ -38,6 +38,21 @@ async function main(): Promise<void> {
     await ws.execute(`echo '{"event":"queue-operation","tool":"other"}' >> /minio/data/example.jsonl`)
     await ws.execute(`echo '{"name":"mirage","version":1,"tags":["s3","minio"]}' > /minio/data/config.json`)
     await ws.execute('echo "hello from minio" > /minio/notes.txt')
+
+
+    // chmod/chown/touch never hit the MinIO API: attrs land in the
+    // workspace namespace (durable, snapshot-captured) and merge into
+    // dispatch-level stat.
+    console.log(`=== metadata overlay on /minio/notes.txt ===`)
+    const metaRes = await ws.execute(
+      `chmod 640 "/minio/notes.txt" && chown 500:dev "/minio/notes.txt" && touch -t 202601021530 "/minio/notes.txt"`,
+    )
+    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+    const metaSt = (await ws.dispatch('stat', `/minio/notes.txt`)) as FileStat
+    const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+    console.log(
+      `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+    )
 
     console.log('\n--- ls /minio/ ---')
     let r = await ws.execute('ls /minio/')

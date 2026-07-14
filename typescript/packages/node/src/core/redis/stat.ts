@@ -23,6 +23,22 @@ import { enoent } from '@struktoai/mirage-core'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { basename, norm } from './utils.ts'
 
+function decodeAttrs(raw: Record<string, string>): {
+  mode?: number
+  uid?: number | string
+  gid?: number | string
+  atime?: string
+} {
+  const out: { mode?: number; uid?: number | string; gid?: number | string; atime?: string } = {}
+  if (raw.mode !== undefined) out.mode = parseInt(raw.mode, 10)
+  for (const key of ['uid', 'gid'] as const) {
+    const val = raw[key]
+    if (val !== undefined) out[key] = /^\d+$/.test(val) ? parseInt(val, 10) : val
+  }
+  if (raw.atime !== undefined) out.atime = raw.atime
+  return out
+}
+
 export async function stat(
   accessor: RedisAccessor,
   path: PathSpec,
@@ -31,19 +47,29 @@ export async function stat(
   const p = norm(path.mountPath)
   const store = accessor.store
   if (await store.hasDir(p)) {
+    const attrs = decodeAttrs(await store.getAttrs(p))
     return new FileStat({
       name: basename(p),
       modified: await store.getModified(p),
       type: FileType.DIRECTORY,
+      mode: attrs.mode ?? null,
+      uid: attrs.uid ?? null,
+      gid: attrs.gid ?? null,
+      atime: attrs.atime ?? null,
     })
   }
   if (await store.hasFile(p)) {
     const size = await store.fileLen(p)
+    const attrs = decodeAttrs(await store.getAttrs(p))
     return new FileStat({
       name: basename(p),
       size,
       modified: await store.getModified(p),
       type: guessType(p),
+      mode: attrs.mode ?? null,
+      uid: attrs.uid ?? null,
+      gid: attrs.gid ?? null,
+      atime: attrs.atime ?? null,
     })
   }
   throw enoent(path)

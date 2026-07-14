@@ -90,7 +90,7 @@ class S3Resource(BaseResource):
 
     async def fingerprint(self, path: str) -> str | None:
         try:
-            remote = await s3_stat(self.accessor, path)
+            remote = await s3_stat(self.accessor, path, index=self._index)
             return remote.extra.get("etag")
         except FileNotFoundError:
             return None

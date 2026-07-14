@@ -44,19 +44,19 @@ def test_parse_find_args_maxdepth_mindepth_str_to_int():
 
 def test_parse_find_args_size_plus_lower_bound():
     args = parse_find_args((), size="+500c")
-    assert args.min_size == 500
+    assert args.min_size == 501
     assert args.max_size is None
 
 
 def test_parse_find_args_size_minus_upper_bound():
     args = parse_find_args((), size="-1k")
     assert args.min_size is None
-    assert args.max_size == 1024
+    assert args.max_size == 0
 
 
 def test_parse_find_args_size_exact():
     args = parse_find_args((), size="1k")
-    assert args.min_size == 1024
+    assert args.min_size == 1
     assert args.max_size == 1024
 
 

@@ -72,14 +72,17 @@ export async function readdir(
     if (fileOwned !== isOwned) continue
     const filename = makeFilename(f.name, f.id, f.modifiedTime ?? '')
     const sizeRaw = f.size ?? f.quotaBytesUsed ?? '0'
-    const sizeNum = Number.parseInt(sizeRaw, 10)
+    const sourceSize = Number.parseInt(sizeRaw, 10)
+    // size stays null: Drive reports the source document's storage size, not
+    // the rendered JSON length (FileStat.size must be render-derived or
+    // null, see the CLAUDE.md FUSE rules). The source size lives in extra.
     const entry = new IndexEntry({
       id: f.id,
       name: f.name,
       resourceType: 'gdocs/file',
       remoteTime: f.modifiedTime ?? '',
       vfsName: filename,
-      size: Number.isFinite(sizeNum) && sizeNum > 0 ? sizeNum : null,
+      extra: Number.isFinite(sourceSize) && sourceSize > 0 ? { source_size: sourceSize } : {},
     })
     entries.push([filename, entry])
     names.push(`${prefix}/${key}/${filename}`)

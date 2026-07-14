@@ -37,7 +37,7 @@ def index():
 
 @pytest.mark.asyncio
 async def test_readdir_root(accessor, index):
-    result = await readdir(accessor, "/", index)
+    result = await readdir(accessor, PathSpec.from_str_path("/"), index)
     assert result == ["/workspaces"]
 
 
@@ -57,7 +57,8 @@ async def test_readdir_workspaces(accessor, index):
     with patch("mirage.core.trello.readdir.list_workspaces",
                new_callable=AsyncMock,
                return_value=workspaces):
-        result = await readdir(accessor, "/workspaces", index)
+        result = await readdir(accessor, PathSpec.from_str_path("/workspaces"),
+                               index)
     assert result == ["/workspaces/Engineering__ws1"]
 
 
@@ -89,7 +90,9 @@ async def test_readdir_workspace_entry(accessor, index):
             vfs_name="Engineering__ws1",
         ),
     )
-    result = await readdir(accessor, "/workspaces/Engineering__ws1", index)
+    result = await readdir(
+        accessor, PathSpec.from_str_path("/workspaces/Engineering__ws1"),
+        index)
     assert result == [
         "/workspaces/Engineering__ws1/workspace.json",
         "/workspaces/Engineering__ws1/boards",
@@ -112,8 +115,10 @@ async def test_readdir_boards(accessor, index):
     with patch("mirage.core.trello.readdir.list_workspace_boards",
                new_callable=AsyncMock,
                return_value=boards):
-        result = await readdir(accessor, "/workspaces/Engineering__ws1/boards",
-                               index)
+        result = await readdir(
+            accessor,
+            PathSpec.from_str_path("/workspaces/Engineering__ws1/boards"),
+            index)
     assert result == [
         "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1"
     ]
@@ -133,7 +138,8 @@ async def test_readdir_board_entry(accessor, index):
     )
     result = await readdir(
         accessor,
-        "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1",
+        PathSpec.from_str_path(
+            "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1"),
         index,
     )
     assert result == [
@@ -159,8 +165,9 @@ async def test_readdir_card_folder(accessor, index):
     )
     result = await readdir(
         accessor,
-        "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1"
-        "/lists/Backlog__l1/cards/Fix_login__c1",
+        PathSpec.from_str_path(
+            "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1"
+            "/lists/Backlog__l1/cards/Fix_login__c1"),
         index,
     )
     assert result == [

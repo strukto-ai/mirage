@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.slack import SlackConfig, SlackResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -131,6 +132,19 @@ async def main():
     out = (await r.stdout_str()).strip()
     if out:
         print(f"  {out[:120]}")
+
+    # ── metadata (namespace overlay) ─────────────────
+    # chmod/chown/touch never hit the Slack API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print(f"\n=== metadata overlay on {target} ===")
+    r = await ws.execute(f'chmod 640 "{file_path}" && chown 500:dev'
+                         f' "{file_path}" && touch -t 202601021530'
+                         f' "{file_path}"')
+    print(f"  chmod/chown/touch exit={r.exit_code}")
+    st, _ = await ws.dispatch("stat", PathSpec.from_str_path(file_path))
+    print(f"  dispatch stat: mode={oct(st.mode)[2:]} uid={st.uid} "
+          f"gid={st.gid} mtime={st.modified}")
 
     # ── basename / dirname / realpath (path ops) ─────
     print(f"\n=== basename {file_path} ===")
@@ -268,6 +282,28 @@ async def main():
 
     print("\n=== find /slack/ -name 'general*' ===")
     r = await ws.execute('find /slack/ -name "general*"')
+    print(f"  exit={r.exit_code}")
+    out = (await r.stdout_str()).strip()
+    if out:
+        for line in out.splitlines():
+            print(f"  {line}")
+
+    # -path matches the display path; -size counts dirs and sizeless
+    # rendered files as 0 (so +0c drops them, -1k keeps them).
+    print(f"\n=== find {base}/ -path '*general*' | tail -n 5 ===")
+    r = await ws.execute(f'find "{base}/" -path "*general*" | tail -n 5')
+    print(f"  exit={r.exit_code}")
+    out = (await r.stdout_str()).strip()
+    if out:
+        for line in out.splitlines():
+            print(f"  {line}")
+
+    print(f"\n=== find {base}/ -maxdepth 1 -size +0c ===")
+    r = await ws.execute(f'find "{base}/" -maxdepth 1 -size +0c')
+    print(f"  exit={r.exit_code} (dirs count as size 0, expect no output)")
+
+    print(f"\n=== find {base}/ -maxdepth 1 -size -1k | tail -n 3 ===")
+    r = await ws.execute(f'find "{base}/" -maxdepth 1 -size -1k | tail -n 3')
     print(f"  exit={r.exit_code}")
     out = (await r.stdout_str()).strip()
     if out:

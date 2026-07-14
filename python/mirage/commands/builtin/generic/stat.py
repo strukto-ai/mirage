@@ -6,6 +6,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.utils.output import format_records
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.errors import FS_ERRORS, fs_error_line
 
 _FORMAT_RE = re.compile(r"%([nsFy]|.)")
 
@@ -48,15 +49,24 @@ async def stat(
         raise ValueError("stat: missing operand")
     fmt = c if c is not None else f
     lines: list[str] = []
+    err = b""
     for p in paths:
-        s = await stat_fn(accessor, p, index)
+        try:
+            s = await stat_fn(accessor, p, index)
+        except FS_ERRORS as exc:
+            # GNU stat keeps reporting the remaining operands, exit 1.
+            err += fs_error_line("stat", p, exc).encode()
+            continue
         if fmt is not None:
             lines.append(_format_stat(fmt, s, p.raw_path))
         else:
             lines.append(f"name={s.name} size={s.size}"
                          f" modified={s.modified}"
                          f" type={s.type.value if s.type else None}")
-    return format_records(lines), IOResult()
+    io = IOResult(exit_code=1 if err else 0, stderr=err or None)
+    if not lines:
+        return None, io
+    return format_records(lines), io
 
 
 __all__ = ["stat"]

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
+from mirage.cache.index import NULL_INDEX
 from mirage.core.databricks_volume.mkdir import mkdir as mkdir_core
 from mirage.ops.registry import op
 from mirage.types import PathSpec
@@ -24,4 +25,7 @@ async def mkdir(
     path: PathSpec,
     **kwargs,
 ) -> None:
-    await mkdir_core(accessor, path, kwargs.get("index"), parents=True)
+    await mkdir_core(accessor,
+                     path,
+                     kwargs.get("index") or NULL_INDEX,
+                     parents=True)

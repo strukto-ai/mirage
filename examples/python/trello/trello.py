@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.trello import TrelloConfig, TrelloResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -56,6 +57,19 @@ async def main() -> None:
     result = await ws.execute(
         f"cat /trello/workspaces/{first_ws}/workspace.json")
     print(await result.stdout_str())
+
+    # chmod/chown/touch never hit the Trello API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    ws_json = f"/trello/workspaces/{first_ws}/workspace.json"
+    print(f"=== metadata overlay on {ws_json} ===")
+    meta_res = await ws.execute(f'chmod 640 "{ws_json}"'
+                                f' && chown 500:dev "{ws_json}"'
+                                f' && touch -t 202601021530 "{ws_json}"')
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    meta_st, _ = await ws.dispatch("stat", PathSpec.from_str_path(ws_json))
+    print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+          f"gid={meta_st.gid} mtime={meta_st.modified}")
 
     print(f"=== ls /trello/workspaces/{first_ws}/boards/ ===")
     board_result = await ws.execute(f"ls /trello/workspaces/{first_ws}/boards/"
@@ -186,6 +200,18 @@ async def main() -> None:
     print("=== find cards -name '*.json' ===")
     result = await ws.execute(
         f'find {list_path}/cards/ -name "*.json" | head -n 5')
+    print(await result.stdout_str())
+
+    # -path matches the display path; -size counts dirs and sizeless
+    # rendered files as 0 (so +0c drops them, -1k keeps them).
+    print("=== find board -path '*cards*' ===")
+    result = await ws.execute(f'find {board_path}/ -path "*cards*" | head -n 5'
+                              )
+    print(await result.stdout_str())
+
+    print("=== find board -maxdepth 1 -size +0c (dirs drop out) ===")
+    result = await ws.execute(f"find {board_path}/ -maxdepth 1 -size +0c")
+    print(f"  exit={result.exit_code}")
     print(await result.stdout_str())
 
     print("=== find board -type d (directory filter) ===")

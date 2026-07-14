@@ -34,6 +34,8 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ short: '-R' }),
       new Option({ short: '-d' }),
       new Option({ short: '-F' }),
+      // Accepted no-op like grep --color (#471).
+      new Option({ long: '--color', valueKind: OperandKind.TEXT, valueOptional: true }),
     ],
     rest: new Operand({ kind: OperandKind.PATH }),
   }),
@@ -95,7 +97,16 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
     rest: new Operand({ kind: OperandKind.PATH }),
   }),
   cat: new CommandSpec({
-    options: [new Option({ short: '-n' })],
+    options: [
+      new Option({ short: '-n' }),
+      new Option({ short: '-E' }),
+      new Option({ short: '-T' }),
+      new Option({ short: '-v' }),
+      new Option({ short: '-e' }),
+      new Option({ short: '-t' }),
+      new Option({ short: '-A' }),
+      new Option({ short: '-s' }),
+    ],
     rest: new Operand({ kind: OperandKind.PATH }),
   }),
   head: new CommandSpec({
@@ -138,7 +149,7 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ short: '-q' }),
       new Option({ short: '-r' }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
+    positional: [new Operand({ kind: OperandKind.PATH }), new Operand({ kind: OperandKind.PATH })],
   }),
   file: new CommandSpec({
     options: [new Option({ short: '-b' }), new Option({ short: '-i' })],
@@ -186,6 +197,11 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ short: '-C', valueKind: OperandKind.TEXT }),
       new Option({ short: '-e', valueKind: OperandKind.TEXT, repeatable: true }),
       new Option({ short: '-f', valueKind: OperandKind.PATH, repeatable: true }),
+      // Accepted no-ops: output is never a tty, so plain output is
+      // exactly what GNU produces with --color=auto (#471).
+      new Option({ long: '--color', valueKind: OperandKind.TEXT, valueOptional: true }),
+      new Option({ long: '--colour', valueKind: OperandKind.TEXT, valueOptional: true }),
+      new Option({ long: '--line-buffered' }),
     ],
     positional: [new Operand({ kind: OperandKind.TEXT, providedBy: ['-e', '-f'] })],
     rest: new Operand({ kind: OperandKind.PATH }),
@@ -211,6 +227,8 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ long: '--hidden' }),
       new Option({ long: '--type', valueKind: OperandKind.TEXT }),
       new Option({ long: '--glob', valueKind: OperandKind.TEXT }),
+      // Accepted no-op like grep --color (#471).
+      new Option({ long: '--color', valueKind: OperandKind.TEXT, valueOptional: true }),
     ],
     positional: [new Operand({ kind: OperandKind.TEXT, providedBy: ['-e', '-f'] })],
     rest: new Operand({ kind: OperandKind.PATH }),
@@ -236,6 +254,7 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ short: '-V' }),
       new Option({ short: '-s' }),
       new Option({ short: '-M' }),
+      new Option({ short: '-b' }),
     ],
     rest: new Operand({ kind: OperandKind.PATH }),
   }),
@@ -249,7 +268,7 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ short: '-i' }),
       new Option({ short: '-w', valueKind: OperandKind.TEXT }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
+    positional: [new Operand({ kind: OperandKind.PATH }), new Operand({ kind: OperandKind.PATH })],
   }),
   cut: new CommandSpec({
     options: [
@@ -337,7 +356,6 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ short: '-c' }),
     ],
     positional: [new Operand({ kind: OperandKind.TEXT }), new Operand({ kind: OperandKind.TEXT })],
-    rest: new Operand({ kind: OperandKind.PATH }),
   }),
   curl: new CommandSpec({
     description: 'Transfer data from or to a server.',
@@ -375,7 +393,6 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ short: '-L', description: 'Follow HTTP redirects.' }),
       new Option({ short: '-s', description: 'Run silently with no progress or messages.' }),
       new Option({ short: '-S', description: 'Show errors even when silent.' }),
-      new Option({ long: '--jina', description: 'Fetch via the Jina Reader proxy.' }),
     ],
     rest: new Operand({ kind: OperandKind.TEXT }),
   }),
@@ -445,7 +462,11 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
         description: 'Format each number with a printf-style format string.',
       }),
     ],
-    rest: new Operand({ kind: OperandKind.TEXT }),
+    positional: [
+      new Operand({ kind: OperandKind.TEXT }),
+      new Operand({ kind: OperandKind.TEXT }),
+      new Operand({ kind: OperandKind.TEXT }),
+    ],
   }),
   base64: new CommandSpec({
     options: [
@@ -453,7 +474,7 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ short: '-D' }),
       new Option({ short: '-w', valueKind: OperandKind.TEXT }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
+    positional: [new Operand({ kind: OperandKind.PATH })],
   }),
   sha256sum: new CommandSpec({
     options: [new Option({ short: '-c' })],
@@ -469,7 +490,7 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ short: '-g', valueKind: OperandKind.TEXT }),
       new Option({ short: '-u' }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
+    positional: [new Operand({ kind: OperandKind.PATH }), new Operand({ kind: OperandKind.PATH })],
   }),
   tar: new CommandSpec({
     options: [
@@ -565,7 +586,7 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ short: '-d' }),
       new Option({ short: '-a', valueKind: OperandKind.TEXT }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
+    positional: [new Operand({ kind: OperandKind.PATH }), new Operand({ kind: OperandKind.PATH })],
   }),
   patch: new CommandSpec({
     options: [
@@ -574,7 +595,7 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ short: '-i', valueKind: OperandKind.PATH }),
       new Option({ short: '-N' }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
+    positional: [new Operand({ kind: OperandKind.PATH }), new Operand({ kind: OperandKind.PATH })],
   }),
   shuf: new CommandSpec({
     options: [
@@ -593,7 +614,7 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ long: '--check-order' }),
       new Option({ long: '--nocheck-order' }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
+    positional: [new Operand({ kind: OperandKind.PATH }), new Operand({ kind: OperandKind.PATH })],
   }),
   column: new CommandSpec({
     options: [
@@ -622,7 +643,7 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ short: '-b' }),
       new Option({ short: '-i', valueKind: OperandKind.TEXT }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
+    positional: [new Operand({ kind: OperandKind.PATH }), new Operand({ kind: OperandKind.PATH })],
   }),
   iconv: new CommandSpec({
     options: [
@@ -666,7 +687,7 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ short: '-p', valueKind: OperandKind.TEXT }),
       new Option({ short: '-t' }),
     ],
-    rest: new Operand({ kind: OperandKind.TEXT }),
+    positional: [new Operand({ kind: OperandKind.TEXT })],
   }),
   bc: new CommandSpec({
     description: 'Arbitrary precision calculator language.',
@@ -713,7 +734,7 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ short: '-I', description: 'Output date in ISO 8601 format.' }),
       new Option({ short: '-R', description: 'Output date in RFC 5322 email format.' }),
     ],
-    rest: new Operand({ kind: OperandKind.TEXT }),
+    positional: [new Operand({ kind: OperandKind.TEXT })],
   }),
   csplit: new CommandSpec({
     options: [
@@ -740,11 +761,10 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
     ],
     rest: new Operand({ kind: OperandKind.PATH }),
   }),
-  tsort: new CommandSpec({ rest: new Operand({ kind: OperandKind.PATH }) }),
+  tsort: new CommandSpec({ positional: [new Operand({ kind: OperandKind.PATH })] }),
   look: new CommandSpec({
     options: [new Option({ short: '-f' })],
-    positional: [new Operand({ kind: OperandKind.TEXT })],
-    rest: new Operand({ kind: OperandKind.PATH }),
+    positional: [new Operand({ kind: OperandKind.TEXT }), new Operand({ kind: OperandKind.PATH })],
   }),
   sleep: new CommandSpec({
     description: 'Delay for a specified amount of time.',
@@ -791,6 +811,6 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
       new Option({ short: '-e', valueKind: OperandKind.TEXT }),
       new Option({ short: '-o', valueKind: OperandKind.TEXT }),
     ],
-    rest: new Operand({ kind: OperandKind.PATH }),
+    positional: [new Operand({ kind: OperandKind.PATH }), new Operand({ kind: OperandKind.PATH })],
   }),
 })

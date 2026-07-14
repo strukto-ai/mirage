@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.mongodb import MongoDBAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.mongodb._client import (database_exists, entity_exists,
                                          list_collections, list_databases)
 from mirage.core.mongodb.scope import detect_scope
@@ -35,12 +35,8 @@ def is_dir_name(child: str) -> bool:
 async def readdir(
     accessor: MongoDBAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
     scope = detect_scope(path)
     virtual_key = (prefix + scope.resource_path).rstrip("/") or "/"
@@ -84,13 +80,12 @@ async def readdir(
 async def _list_root(
     accessor: MongoDBAccessor,
     virtual_key: str,
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
     prefix: str,
 ) -> list[str]:
-    if index is not None:
-        listing = await index.list_dir(virtual_key)
-        if listing.entries is not None:
-            return listing.entries
+    listing = await index.list_dir(virtual_key)
+    if listing.entries is not None:
+        return listing.entries
     dbs = await list_databases(accessor.client, accessor.config)
     entries: list[tuple[str, IndexEntry]] = []
     names: list[str] = []
@@ -103,8 +98,7 @@ async def _list_root(
         )
         entries.append((db_name, entry))
         names.append(f"{prefix}/{db_name}")
-    if index is not None:
-        await index.set_dir(virtual_key, entries)
+    await index.set_dir(virtual_key, entries)
     return names
 
 
@@ -113,13 +107,12 @@ async def _list_kind_dir(
     database: str,
     kind: EntityKind,
     virtual_key: str,
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
     prefix: str,
 ) -> list[str]:
-    if index is not None:
-        listing = await index.list_dir(virtual_key)
-        if listing.entries is not None:
-            return listing.entries
+    listing = await index.list_dir(virtual_key)
+    if listing.entries is not None:
+        return listing.entries
     names = await list_collections(accessor.client, database, kind=kind)
     base = f"{prefix}/{database}/{KIND_TO_DIR[kind]}"
     entries: list[tuple[str, IndexEntry]] = []
@@ -133,6 +126,5 @@ async def _list_kind_dir(
         )
         entries.append((name, entry))
         out.append(f"{base}/{name}")
-    if index is not None:
-        await index.set_dir(virtual_key, entries)
+    await index.set_dir(virtual_key, entries)
     return out

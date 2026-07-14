@@ -1,4 +1,4 @@
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.grep_helper import compile_pattern, grep_lines
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.core.chroma._client import fetch_page_chunks, query_contains
@@ -12,7 +12,7 @@ async def grep_bytes(
     accessor,
     paths: list[PathSpec],
     pattern: str,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
     ignore_case: bool = False,
     invert: bool = False,
     line_numbers: bool = True,
@@ -97,8 +97,9 @@ async def coarse_filter_slugs(
                                 regex=not fixed_string)
 
 
-async def target_slugs(accessor, paths: list[PathSpec],
-                       index: IndexCacheStore) -> dict[str, str]:
+async def target_slugs(accessor,
+                       paths: list[PathSpec],
+                       index: IndexCacheStore = NULL_INDEX) -> dict[str, str]:
     targets: dict[str, str] = {}
     for path in paths:
         resolved = await resolve_path(accessor, path, index)

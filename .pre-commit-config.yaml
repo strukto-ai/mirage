@@ -130,7 +130,7 @@ repos:
         pass_filenames: true
       - id: ts-eslint
         name: ESLint (typescript)
-        entry: typescript/scripts/precommit-run.sh eslint --fix
+        entry: typescript/scripts/precommit-run.sh eslint --fix --no-warn-ignored
         language: system
         files: ^typescript/.*\.(ts|tsx|js|mjs|cjs)$
         pass_filenames: true
@@ -139,4 +139,10 @@ repos:
         entry: bash -c 'cd typescript && pnpm exec knip'
         language: system
         files: ^typescript/.*\.(ts|tsx|js|mjs|cjs|json)$
+        pass_filenames: false
+      - id: py-mypy
+        name: Mypy (ratcheted)
+        entry: bash -c 'cd python && uv run mypy'
+        language: system
+        files: ^python/(mirage/.*\.py|pyproject\.toml)$
         pass_filenames: false

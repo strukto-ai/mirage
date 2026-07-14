@@ -65,6 +65,7 @@ export { DevStore, DevFiles } from './resource/dev/store.ts'
 export {
   type ExecuteOptions,
   ExecuteResult,
+  type MountSpec,
   Workspace,
   type WorkspaceOptions,
 } from './workspace/workspace.ts'
@@ -99,7 +100,6 @@ export { GENERAL_BC } from './commands/builtin/general/bc.ts'
 export { GENERAL_CURL } from './commands/builtin/general/curl.ts'
 export { GENERAL_DATE } from './commands/builtin/general/date.ts'
 export { GENERAL_EXPR } from './commands/builtin/general/expr.ts'
-export { RAM_SED } from './commands/builtin/ram/sed.ts'
 export { GENERAL_SEQ } from './commands/builtin/general/seq.ts'
 export { GENERAL_WGET } from './commands/builtin/general/wget.ts'
 export { S3_COMMANDS } from './commands/builtin/s3/index.ts'
@@ -135,6 +135,8 @@ export { OpRecord, type OpRecordInit } from './observe/record.ts'
 export { LogEntry, type LogEntryInit } from './observe/log_entry.ts'
 export { type EventDict, Observer } from './observe/observer.ts'
 export { type ObserverStore, RAMObserverStore } from './observe/store.ts'
+export { NamespaceStore, type NodeFields } from './workspace/mount/namespace/store.ts'
+export { RAMNamespaceStore } from './workspace/mount/namespace/ram.ts'
 export { HISTORY_PREFIX, HistoryViewResource } from './resource/history/history.ts'
 export {
   record,
@@ -211,7 +213,6 @@ export { gzipGeneric } from './commands/builtin/generic/gzip.ts'
 export { gunzipGeneric } from './commands/builtin/generic/gunzip.ts'
 export { iconvGeneric } from './commands/builtin/generic/iconv.ts'
 export { sedGeneric } from './commands/builtin/generic/sed.ts'
-export { makeSed, type SedBackend } from './commands/builtin/generic/sed_command.ts'
 export { teeGeneric } from './commands/builtin/generic/tee.ts'
 export { splitGeneric } from './commands/builtin/generic/split.ts'
 export { csplitGeneric } from './commands/builtin/generic/csplit.ts'
@@ -222,6 +223,7 @@ export { zipGeneric } from './commands/builtin/generic/zip_cmd.ts'
 export { tarGeneric } from './commands/builtin/generic/tar.ts'
 export { realpathGeneric } from './commands/builtin/generic/realpath.ts'
 export { findGeneric, findSizeMtimeError, invalidFindArg } from './commands/builtin/generic/find.ts'
+export { walkFind } from './core/generic/find.ts'
 export { statGeneric } from './commands/builtin/generic/stat.ts'
 export { diffGeneric } from './commands/builtin/generic/diff.ts'
 export { duGeneric } from './commands/builtin/generic/du.ts'
@@ -426,6 +428,8 @@ export {
   isCrossMount,
 } from './workspace/executor/cross_mount.ts'
 export { handleCommand, ReturnSignal } from './workspace/executor/command.ts'
+export { PYTHON_RUNTIMES } from './workspace/executor/python/runtimes/interface.ts'
+export { validateRuntimeOptions } from './workspace/executor/python/runtimes/select.ts'
 export { applyBarrier, BarrierPolicy } from './shell/barrier.ts'
 export { handleConnection, handlePipe, handleSubshell } from './workspace/executor/pipes.ts'
 export { handleRedirect } from './workspace/executor/redirect.ts'
@@ -519,7 +523,6 @@ export {
   expandParts,
   type ExecuteFn,
   lookupVar,
-  safeEval,
   type TSNodeLike,
   unescapePath,
 } from './workspace/expand/index.ts'
@@ -1097,7 +1100,14 @@ export {
   type PredNode,
   startBasename,
 } from './commands/builtin/findEval.ts'
-export { enoent, enotdir, errorVirtualPath, type FsError, gnuStrerror } from './utils/errors.ts'
+export {
+  eisdir,
+  enoent,
+  enotdir,
+  errorVirtualPath,
+  type FsError,
+  gnuStrerror,
+} from './utils/errors.ts'
 
 export {
   DatabricksVolumeAccessor,
@@ -1125,7 +1135,6 @@ export {
 export { readdir as databricksVolumeReaddir } from './core/databricks_volume/readdir.ts'
 export { stat as databricksVolumeStat } from './core/databricks_volume/stat.ts'
 export { exists as databricksVolumeExists } from './core/databricks_volume/exists.ts'
-export { find as databricksVolumeFind } from './core/databricks_volume/find.ts'
 export { resolveGlob as resolveDatabricksVolumeGlob } from './core/databricks_volume/glob.ts'
 export { writeBytes as databricksVolumeWrite } from './core/databricks_volume/write.ts'
 export { create as databricksVolumeCreate } from './core/databricks_volume/create.ts'

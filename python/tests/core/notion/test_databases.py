@@ -38,7 +38,7 @@ def accessor():
 
 @pytest.mark.asyncio
 async def test_readdir_root_includes_pages_and_databases(accessor):
-    entries = await readdir(accessor, "/")
+    entries = await readdir(accessor, PathSpec.from_str_path("/"))
     assert entries == ["/pages", "/databases"]
 
 
@@ -56,7 +56,8 @@ async def test_readdir_databases_lists_database_directories(
             "last_edited_time": "2026-01-01T00:00:00Z",
         }]),
     )
-    entries = await readdir(accessor, "/databases", RAMIndexCacheStore())
+    entries = await readdir(accessor, PathSpec.from_str_path("/databases"),
+                            RAMIndexCacheStore())
     assert entries == [f"/databases/Tasks__{DATABASE_ID}"]
 
 
@@ -79,7 +80,8 @@ async def test_readdir_database_lists_row_pages(accessor, monkeypatch):
             "last_edited_time": "2026-01-02T00:00:00Z",
         }]),
     )
-    entries = await readdir(accessor, f"/databases/Tasks__{DATABASE_ID}")
+    entries = await readdir(
+        accessor, PathSpec.from_str_path(f"/databases/Tasks__{DATABASE_ID}"))
     assert entries == [
         f"/databases/Tasks__{DATABASE_ID}/database.json",
         f"/databases/Tasks__{DATABASE_ID}/Row_A__{ROW_ID}",
@@ -106,8 +108,10 @@ async def test_read_database_json_returns_database_metadata(
                 "last_edited_time": "2026-01-03T00:00:00Z",
             }),
     )
-    data = await read(accessor,
-                      f"/databases/Tasks__{DATABASE_ID}/database.json")
+    data = await read(
+        accessor,
+        PathSpec.from_str_path(
+            f"/databases/Tasks__{DATABASE_ID}/database.json"))
     import json
 
     decoded = json.loads(data)
@@ -135,7 +139,9 @@ async def test_readdir_database_row_lists_page_json_and_child_pages(
         }]),
     )
     entries = await readdir(
-        accessor, f"/databases/Tasks__{DATABASE_ID}/Row-A__{ROW_ID}")
+        accessor,
+        PathSpec.from_str_path(
+            f"/databases/Tasks__{DATABASE_ID}/Row-A__{ROW_ID}"))
     assert entries == [
         f"/databases/Tasks__{DATABASE_ID}/Row-A__{ROW_ID}/page.json",
         f"/databases/Tasks__{DATABASE_ID}/Row-A__{ROW_ID}/Child__child789",
@@ -149,7 +155,8 @@ async def test_stat_database_dir_uses_database_metadata(accessor, monkeypatch):
         "get_database",
         AsyncMock(return_value={"last_edited_time": "2026-01-03T00:00:00Z"}),
     )
-    result = await stat(accessor, f"/databases/Tasks__{DATABASE_ID}")
+    result = await stat(
+        accessor, PathSpec.from_str_path(f"/databases/Tasks__{DATABASE_ID}"))
     assert result.name == f"Tasks__{DATABASE_ID}"
     assert result.type == FileType.DIRECTORY
     assert result.modified == "2026-01-03T00:00:00Z"

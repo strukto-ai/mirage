@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.github import GitHubAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
                                                emit_start_path, keep,
                                                start_basename)
@@ -37,14 +37,9 @@ async def find(
     path_pattern: str | None = None,
     empty: bool = False,
     tree: PredNode | None = None,
-    index: IndexCacheStore = None,
+    *,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
-    if index is None:
-        raise ValueError("find: no tree loaded")
     base = path.mount_path.strip("/")
     base_depth = 0 if base == "" else base.count("/") + 1
     start_name = start_basename(path)
@@ -80,7 +75,8 @@ async def find(
                           depth=depth)
         if not keep(entry, tree, mindepth):
             continue
-        size = entry_meta.size or 0
+        # Directories count as size 0 for -size (deliberate GNU divergence).
+        size = 0 if is_dir else (entry_meta.size or 0)
         if min_size is not None and size < min_size:
             continue
         if max_size is not None and size > max_size:

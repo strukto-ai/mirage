@@ -41,6 +41,7 @@ async def sort(
     V: bool = False,
     s: bool = False,
     M: bool = False,
+    b: bool = False,
     index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -59,6 +60,7 @@ async def sort(
         human_numeric=h,
         version_sort=V,
         month_sort=M,
+        ignore_blanks=b,
     )
 
 

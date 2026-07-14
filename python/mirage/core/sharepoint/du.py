@@ -1,4 +1,5 @@
 from mirage.accessor.sharepoint import SharePointAccessor
+from mirage.cache.index import NULL_INDEX
 from mirage.core.sharepoint._client import new_session
 from mirage.core.sharepoint._resolver import resolve
 from mirage.core.sharepoint.find import iter_tree
@@ -8,7 +9,7 @@ from mirage.types import FileType, PathSpec
 
 async def du(accessor: SharePointAccessor, path: PathSpec) -> int:
     try:
-        info = await stat(accessor, path)
+        info = await stat(accessor, path, index=NULL_INDEX)
     except FileNotFoundError:
         info = None
     if info is not None and info.type != FileType.DIRECTORY:
@@ -31,7 +32,7 @@ async def du(accessor: SharePointAccessor, path: PathSpec) -> int:
 async def du_all(accessor: SharePointAccessor,
                  path: PathSpec) -> list[tuple[str, int]]:
     try:
-        info = await stat(accessor, path)
+        info = await stat(accessor, path, index=NULL_INDEX)
     except FileNotFoundError:
         info = None
     if info is not None and info.type != FileType.DIRECTORY:

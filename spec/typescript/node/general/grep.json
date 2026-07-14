@@ -54,7 +54,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-r",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
@@ -62,7 +63,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-R",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
@@ -70,7 +72,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-i",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
@@ -78,7 +81,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-I",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
@@ -86,7 +90,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-v",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
@@ -94,7 +99,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-n",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
@@ -102,7 +108,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-c",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
@@ -110,7 +117,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-l",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
@@ -118,7 +126,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-w",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
@@ -126,7 +135,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-F",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
@@ -134,7 +144,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-E",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
@@ -142,7 +153,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-o",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
@@ -150,7 +162,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-q",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
@@ -158,7 +171,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-H",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
@@ -166,7 +180,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-h",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
@@ -174,7 +189,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-m",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": null,
@@ -182,7 +198,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-A",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": null,
@@ -190,7 +207,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-B",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": null,
@@ -198,7 +216,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-C",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": null,
@@ -206,7 +225,8 @@
       "numeric_shorthand": false,
       "repeatable": true,
       "short": "-e",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": null,
@@ -214,7 +234,35 @@
       "numeric_shorthand": false,
       "repeatable": true,
       "short": "-f",
-      "value_kind": "path"
+      "value_kind": "path",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": "--color",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "value_kind": "text",
+      "value_optional": true
+    },
+    {
+      "description": null,
+      "long": "--colour",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "value_kind": "text",
+      "value_optional": true
+    },
+    {
+      "description": null,
+      "long": "--line-buffered",
+      "numeric_shorthand": false,
+      "repeatable": false,
+      "short": null,
+      "value_kind": "none",
+      "value_optional": false
     }
   ],
   "positional": [

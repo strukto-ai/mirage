@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+// Arithmetic operator tokens from tree-sitter that pass through as-is
+// when the expression text is reconstructed for the shared evaluator
+// (shell/arith.ts).
 export const ARITH_OPERATORS: ReadonlySet<string> = new Set([
   '+',
   '-',
@@ -25,6 +28,12 @@ export const ARITH_OPERATORS: ReadonlySet<string> = new Set([
   '>',
   '<=',
   '>=',
+  '<<',
+  '>>',
+  '&',
+  '|',
+  '^',
+  '~',
   '&&',
   '||',
   '!',
@@ -32,6 +41,22 @@ export const ARITH_OPERATORS: ReadonlySet<string> = new Set([
   ':',
   '(',
   ')',
+  ',',
+  '=',
+  '+=',
+  '-=',
+  '*=',
+  '/=',
+  '%=',
+  '<<=',
+  '>>=',
+  '&=',
+  '^=',
+  '|=',
+  '++',
+  '--',
 ])
 
-export const ARITH_DELIMITERS: ReadonlySet<string> = new Set(['$((', '))'])
+// Arithmetic delimiter tokens that mark the start/end of $((...)) and
+// the (( ... )) arithmetic command.
+export const ARITH_DELIMITERS: ReadonlySet<string> = new Set(['$((', '((', '))'])

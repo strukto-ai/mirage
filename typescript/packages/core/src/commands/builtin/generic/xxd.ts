@@ -16,6 +16,8 @@ import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { resolveSource } from '../utils/stream.ts'
+import { extraOperandError } from '../../spec/usage.ts'
+import { CommandName } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -151,6 +153,7 @@ export async function xxdGeneric(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
+  if (paths.length > 2) throw extraOperandError(CommandName.XXD, paths[2]?.rawPath ?? '')
   const cache: string[] = []
   let source: AsyncIterable<Uint8Array>
   if (paths.length > 0) {

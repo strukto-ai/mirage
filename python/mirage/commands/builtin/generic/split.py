@@ -2,6 +2,8 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.spec.types import CommandName
+from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -32,6 +34,8 @@ async def split(
     suffix_len: int = 2,
     numeric_suffix: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
+    if len(paths) > 2:
+        raise extra_operand_error(CommandName.SPLIT, paths[2].raw_path)
     prefix_name = paths[1].mount_path if len(paths) >= 2 else "x"
     if lines_per_file == 0 and byte_limit == 0 and n_chunks == 0:
         lines_per_file = 1000
@@ -57,7 +61,7 @@ async def split(
             if not part:
                 break
             out_path = prefix_name + suffix_fn(i, suffix_len)
-            await write_bytes(accessor, out_path, part)
+            await write_bytes(accessor, PathSpec.from_str_path(out_path), part)
             writes[out_path] = part
             offset += chunk_size
     elif byte_limit > 0:
@@ -67,14 +71,15 @@ async def split(
             while len(buf) >= byte_limit:
                 out_path = prefix_name + suffix_fn(file_idx, suffix_len)
                 data = bytes(buf[:byte_limit])
-                await write_bytes(accessor, out_path, data)
+                await write_bytes(accessor, PathSpec.from_str_path(out_path),
+                                  data)
                 writes[out_path] = data
                 buf = buf[byte_limit:]
                 file_idx += 1
         if buf:
             out_path = prefix_name + suffix_fn(file_idx, suffix_len)
             data = bytes(buf)
-            await write_bytes(accessor, out_path, data)
+            await write_bytes(accessor, PathSpec.from_str_path(out_path), data)
             writes[out_path] = data
     else:
         line_buf: list[bytes] = []
@@ -83,14 +88,15 @@ async def split(
             if len(line_buf) >= lines_per_file:
                 out_path = prefix_name + suffix_fn(file_idx, suffix_len)
                 data = b"\n".join(line_buf) + b"\n"
-                await write_bytes(accessor, out_path, data)
+                await write_bytes(accessor, PathSpec.from_str_path(out_path),
+                                  data)
                 writes[out_path] = data
                 line_buf = []
                 file_idx += 1
         if line_buf:
             out_path = prefix_name + suffix_fn(file_idx, suffix_len)
             data = b"\n".join(line_buf) + b"\n"
-            await write_bytes(accessor, out_path, data)
+            await write_bytes(accessor, PathSpec.from_str_path(out_path), data)
             writes[out_path] = data
 
     return None, IOResult(writes=writes)

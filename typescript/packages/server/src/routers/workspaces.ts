@@ -15,7 +15,7 @@
 import { mkdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, resolve, sep } from 'node:path'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import type { CommandSafeguard, MountMode } from '@struktoai/mirage-node'
+import type { CommandSafeguard, MountSpec } from '@struktoai/mirage-node'
 import { Workspace, type Resource } from '@struktoai/mirage-node'
 import type { WorkspaceRegistry } from '../registry.ts'
 import { buildOverrideResources, cloneWorkspaceWithOverride, type OverrideShape } from '../clone.ts'
@@ -88,24 +88,32 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       } catch (e) {
         return reply.status(502).send({ detail: `resource build failed: ${(e as Error).message}` })
       }
-      const resourceMap: Record<string, Resource> = {}
-      const modeOverrides: Record<string, MountMode> = {}
+      const resourceMap: Record<string, MountSpec> = {}
       const commandSafeguards: Record<string, Record<string, CommandSafeguard>> = {}
       for (const [prefix, [resource, mode, safeguards]] of Object.entries(args.resources)) {
-        resourceMap[prefix] = resource
-        modeOverrides[prefix] = mode
+        resourceMap[prefix] = [resource, mode]
         if (Object.keys(safeguards).length > 0) commandSafeguards[prefix] = safeguards
       }
-      const ws = new Workspace(resourceMap, {
-        mode: args.options.mode,
-        consistency: args.options.consistency,
-        modeOverrides,
-        sessionId: args.options.sessionId,
-        agentId: args.options.agentId,
-        ...(Object.keys(commandSafeguards).length > 0 ? { commandSafeguards } : {}),
-        ...(args.options.cache !== undefined ? { cache: args.options.cache } : {}),
-        ...(args.options.index !== undefined ? { index: args.options.index } : {}),
-      })
+      let ws: Workspace
+      try {
+        ws = new Workspace(resourceMap, {
+          mode: args.options.mode,
+          consistency: args.options.consistency,
+          sessionId: args.options.sessionId,
+          agentId: args.options.agentId,
+          ...(Object.keys(commandSafeguards).length > 0 ? { commandSafeguards } : {}),
+          ...(args.options.cache !== undefined ? { cache: args.options.cache } : {}),
+          ...(args.options.index !== undefined ? { index: args.options.index } : {}),
+          ...(args.options.pythonRuntime !== undefined
+            ? { pythonRuntime: args.options.pythonRuntime }
+            : {}),
+          ...(args.options.runtimeOptions !== undefined
+            ? { runtimeOptions: args.options.runtimeOptions }
+            : {}),
+        })
+      } catch (e) {
+        return reply.status(400).send({ detail: (e as Error).message })
+      }
       let entry
       try {
         for (const [prefix, target] of Object.entries(args.fuseMounts)) {

@@ -14,13 +14,13 @@
 """sed over the read-only GitHub mount (factory-built command).
 
 GitHub is read-only: `sed` is a read-transform (output to stdout) and `-i` is
-rejected. Exercises the make_sed factory wiring for github (index-gated glob,
-index-aware read, inplace_error).
+rejected. Exercises the generic sed builder wiring for github (index-aware
+read, write-gated -i).
 """
 
 import pytest
 
-from mirage.commands.builtin.github.sed import sed
+from mirage.commands.builtin.github import COMMANDS
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
 from tests.fixtures.github_mock import MOCK_BLOBS
@@ -33,6 +33,17 @@ def _patch_read(monkeypatch):
         return MOCK_BLOBS[sha]
 
     monkeypatch.setattr("mirage.core.github.read.read_bytes", _read_bytes)
+
+
+def _sed_command():
+    for cmd in COMMANDS:
+        for rc in cmd._registered_commands:
+            if rc.name == "sed":
+                return cmd
+    raise LookupError("sed not registered for github")
+
+
+sed = _sed_command()
 
 
 def _scope(path: str) -> PathSpec:
@@ -87,5 +98,6 @@ async def test_sed_address_delete(mock_github_api, github_env):
 @pytest.mark.asyncio
 async def test_sed_inplace_rejected(mock_github_api, github_env):
     accessor, index = github_env
-    with pytest.raises(PermissionError, match="read-only GitHub mount"):
+    with pytest.raises(PermissionError,
+                       match="-i not supported on this backend"):
         await _run(accessor, index, "src/main.py", "s/import/X/", i=True)

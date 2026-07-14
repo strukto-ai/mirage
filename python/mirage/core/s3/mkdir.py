@@ -22,10 +22,6 @@ async def mkdir(accessor: S3Accessor,
                 path: PathSpec,
                 parents: bool = False) -> None:
     # Object stores have no real directories; parents is implicit.
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     if isinstance(path, PathSpec):
         path = path.mount_path
     config = accessor.config

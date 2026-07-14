@@ -19,6 +19,30 @@ from mirage.cli.output import emit, handle_response
 
 app = typer.Typer(no_args_is_help=True, help="Manage workspace sessions.")
 
+_MODES = ("read", "write", "exec", "r", "rw", "rwx")
+
+
+def _parse_mount_modes(mounts: list[str]) -> dict[str, str]:
+    """Parse ``-m`` values like ``/data:read`` into a modes mapping.
+
+    Modes are the words ("read", "write", "exec") or their cumulative
+    filesystem aliases ("r", "rw", "rwx"). A bare prefix (no mode
+    suffix) keeps the mount's own configured mode. The mode is taken
+    from the last ``:`` so mount prefixes that contain colons still
+    parse.
+
+    Args:
+        mounts (list[str]): raw ``-m`` option values.
+    """
+    modes: dict[str, str] = {}
+    for item in mounts:
+        prefix, sep, mode = item.rpartition(":")
+        if sep and mode in _MODES:
+            modes[prefix] = mode
+        else:
+            modes[item] = "exec"
+    return modes
+
 
 @app.command("create")
 def create_cmd(
@@ -30,15 +54,17 @@ def create_cmd(
         [],
         "--mount",
         "-m",
-        help=("Restrict this session to the listed mount prefix. "
-              "Repeat to allow multiple mounts; omit for unrestricted."),
+        help=("Restrict this session to a mount, optionally capping its "
+              "mode: '/data:read' (alias '/data:r'), '/scratch:rw', "
+              "'/bin:rwx', or a bare '/data' to keep the mount's own "
+              "mode. Repeat for multiple mounts; omit for unrestricted."),
     ),
 ) -> None:
     body: dict = {}
     if session_id:
         body["session_id"] = session_id
     if mount:
-        body["allowed_mounts"] = mount
+        body["mounts"] = _parse_mount_modes(mount)
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
         r = client.request("POST",

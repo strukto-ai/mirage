@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.github_ci import GitHubCIAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.github_ci.artifacts import list_artifacts
 from mirage.core.github_ci.runs import list_jobs_for_run, list_runs
 from mirage.core.github_ci.workflows import list_workflows
@@ -31,12 +31,8 @@ def _safe_name(name: str) -> str:
 async def readdir(
     accessor: GitHubCIAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     path = (path.dir if path.pattern else path).mount_path
@@ -212,3 +208,11 @@ async def readdir(
         return names
 
     return []
+
+
+def is_dir_name(child: str) -> bool:
+    # Entries are recognized by extension, so classification never needs
+    # the stat fallback.
+    name = child.rsplit("/", 1)[-1]
+    return not (name.endswith(".json") or name.endswith(".jsonl")
+                or name.endswith(".log") or name.endswith(".zip"))

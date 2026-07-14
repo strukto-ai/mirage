@@ -16,6 +16,8 @@ import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { readStdinAsync } from '../utils/stream.ts'
+import { extraOperandError } from '../../spec/usage.ts'
+import { CommandName } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -31,6 +33,7 @@ export async function lookGeneric(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
+  if (paths.length > 1) throw extraOperandError(CommandName.LOOK, paths[1]?.rawPath ?? '')
   if (texts.length === 0) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('look: missing prefix\n') })]
   }

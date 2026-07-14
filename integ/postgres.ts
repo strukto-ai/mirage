@@ -19,7 +19,7 @@ import {
   PostgresResource,
   Workspace,
 } from "@struktoai/mirage-node";
-import { runNotFound, runProvisionProbe } from "./cases.ts";
+import { runNotFound, runProvisionProbe, runSedReadonlyProbe } from "./cases.ts";
 
 const DSN =
   process.env.POSTGRES_DSN ?? "postgres://mirage:mirage@localhost:55432/mirage_integ";
@@ -59,10 +59,16 @@ const CASES: ReadonlyArray<readonly [string, string]> = [
   ["grep_c_title", `grep -c title ${MOUNT}/public/tables/books/rows.jsonl`],
   ["grep_ada", `grep ada ${MOUNT}/public/tables/books/rows.jsonl`],
   ["grep_e_multi", `grep -n -e ada -e ben ${MOUNT}/public/tables/books/rows.jsonl`],
+  ["rg_e_multi", `rg -n -e ada -e ben ${MOUNT}/public/tables/books/rows.jsonl`],
   ["grep_schema_scope", `grep ada ${MOUNT}/public/tables/`],
   ["rg_schema_scope", `rg ben ${MOUNT}/public/`],
   ["find_rows", `find ${MOUNT}/public/ -name rows.jsonl`],
   ["find_schema", `find ${MOUNT}/public/ -name schema.json`],
+  // rows.jsonl is sizeless (tableSizeBytes lives in extra.size_bytes):
+  // stat prints size 0, -size counts it as 0, wc -c sees rendered bytes.
+  ["stat_size_rows", `stat -c '%s %n' ${MOUNT}/public/tables/books/rows.jsonl`],
+  ["find_size_plus_rows", `find ${MOUNT}/public/tables/ -name rows.jsonl -size +1c`],
+  ["find_size_under_rows", `find ${MOUNT}/public/tables/books/ -name rows.jsonl -size -1k`],
   ["jq_titles", `jq '.title' ${MOUNT}/public/tables/books/rows.jsonl`],
   ["pipe_grep_c", `cat ${MOUNT}/public/tables/books/rows.jsonl | grep -c ada`],
   ["cat_view_rows", `cat ${MOUNT}/public/views/recent_books/rows.jsonl`],
@@ -136,6 +142,7 @@ async function main(): Promise<void> {
     }
     await runNotFound(ws, MOUNT);
     await runProvisionProbe(ws, `${MOUNT}/public/tables/books/rows.jsonl`);
+    await runSedReadonlyProbe(ws, `${MOUNT}/public/tables/books/rows.jsonl`);
   } finally {
     await ws.close();
     await resource.close();

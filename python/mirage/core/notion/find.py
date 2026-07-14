@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.notion import NotionAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
                                                keep, start_basename)
 from mirage.core.notion.readdir import readdir
@@ -25,7 +25,7 @@ from mirage.utils.key_prefix import mount_key, mount_prefix_of
 async def _collect(
     accessor: NotionAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
     out: list[tuple[str, FileStat]],
 ) -> None:
     file_stat = await stat(accessor, path, index)
@@ -60,10 +60,9 @@ async def find(
     mindepth: int | None = None,
     empty: bool = False,
     tree: PredNode | None = None,
-    index: IndexCacheStore | None = None,
+    *,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec.from_str_path(path)
     start_name = start_basename(path)
     base = path.mount_path
     base = "/" + base.strip("/") if base.strip("/") else "/"
@@ -96,8 +95,10 @@ async def find(
                           depth=depth)
         if not keep(entry, tree, mindepth):
             continue
-        if not is_dir and (min_size is not None or max_size is not None):
-            size = file_stat.size or 0
+        if min_size is not None or max_size is not None:
+            # Directories count as size 0 for -size (deliberate GNU
+            # divergence).
+            size = 0 if is_dir else (file_stat.size or 0)
             if min_size is not None and size < min_size:
                 continue
             if max_size is not None and size > max_size:

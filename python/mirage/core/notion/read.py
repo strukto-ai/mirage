@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.notion import NotionAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.notion.normalize import (normalize_database, normalize_page,
                                           to_json_bytes)
 from mirage.core.notion.pages import get_database, get_page, list_block_tree
@@ -32,12 +32,8 @@ async def read_page_json(config, page_id: str) -> bytes:
 async def read(
     accessor: NotionAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     if isinstance(path, PathSpec):
         path = path.mount_path

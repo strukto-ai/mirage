@@ -13,13 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
+from mirage.cache.index import NULL_INDEX
 from mirage.core.databricks_volume.stat import stat
 from mirage.types import PathSpec
 
 
 async def exists(accessor: DatabricksVolumeAccessor, path: PathSpec) -> bool:
     try:
-        await stat(accessor, path)
+        await stat(accessor, path, index=NULL_INDEX)
         return True
     except FileNotFoundError:
         return False

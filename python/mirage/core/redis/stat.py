@@ -13,40 +13,59 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.filetype import guess_type
 from mirage.utils.path import norm
 
 
+def _decode_attrs(raw: dict[str, str]) -> dict:
+    out: dict = {}
+    if "mode" in raw:
+        out["mode"] = int(raw["mode"])
+    for key in ("uid", "gid"):
+        if key in raw:
+            val = raw[key]
+            out[key] = int(val) if val.isdigit() else val
+    if "atime" in raw:
+        out["atime"] = raw["atime"]
+    return out
+
+
 async def stat(
     accessor: RedisAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> FileStat:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     if isinstance(path, PathSpec):
         path = path.mount_path
     store = accessor.store
     p = norm(path)
     if await store.has_dir(p):
+        attrs = _decode_attrs(await store.get_attrs(p))
         return FileStat(
             name=p.rsplit("/", 1)[-1] or "/",
             size=None,
             modified=await store.get_modified(p),
             type=FileType.DIRECTORY,
+            mode=attrs.get("mode"),
+            uid=attrs.get("uid"),
+            gid=attrs.get("gid"),
+            atime=attrs.get("atime"),
         )
     if await store.has_file(p):
         size = await store.file_len(p)
+        attrs = _decode_attrs(await store.get_attrs(p))
         return FileStat(
             name=p.rsplit("/", 1)[-1],
             size=size,
             modified=await store.get_modified(p),
             type=guess_type(p),
+            mode=attrs.get("mode"),
+            uid=attrs.get("uid"),
+            gid=attrs.get("gid"),
+            atime=attrs.get("atime"),
         )
     raise enoent(virtual)

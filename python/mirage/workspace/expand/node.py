@@ -12,17 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import ast
 import shlex
 from collections.abc import Callable
 
 import tree_sitter
 
+from mirage.shell.arith import evaluate_arith
 from mirage.shell.call_stack import CallStack
+from mirage.shell.errors import ArithError
 from mirage.shell.types import NodeType as NT
 from mirage.utils.path import expand_tilde
-from mirage.workspace.expand.constants import (ARITH_DELIMITERS,
-                                               ARITH_OPERATORS, SAFE_NODES)
+from mirage.workspace.expand.constants import ARITH_DELIMITERS, ARITH_OPERATORS
 from mirage.workspace.expand.variable import _expand_braces, _lookup_var
 from mirage.workspace.session import Session
 from mirage.workspace.session.shell_dirs import home_dir
@@ -38,43 +38,28 @@ def _unescape_unquoted(text: str) -> str:
     return parts[0] if parts else text
 
 
-def _safe_eval(expr: str) -> int:
-    """Evaluate a bash arithmetic expression using Python's eval.
-
-    Bash arithmetic (e.g. $((1 + 2 * 3))) is a subset of Python
-    integer math. We parse the expression into a Python AST, walk
-    every node to verify it's in SAFE_NODES (rejecting function
-    calls, attribute access, imports, etc.), then eval the compiled
-    AST.
-
-    Args:
-        expr (str): arithmetic expression, e.g. "1 + 2 * 3".
-
-    Raises:
-        ValueError: if the expression contains unsafe AST nodes.
-    """
-    tree = ast.parse(expr.strip(), mode="eval")
-    for node in ast.walk(tree):
-        if not isinstance(node, SAFE_NODES):
-            raise ValueError(f"unsafe arithmetic: {expr}")
-    return int(eval(compile(tree, "<arith>", "eval")))  # noqa: S307
-
-
-async def _expand_arith(
+async def expand_arith(
     ts_node: tree_sitter.Node,
     session: Session,
     execute_fn: Callable,
     call_stack: CallStack | None,
 ) -> str:
-    """Expand arithmetic expression children recursively."""
+    """Reconstruct arithmetic expression text for the shared evaluator.
+
+    ``$``-expansions substitute textually (bash performs expansions
+    before arithmetic evaluation), while bare variable names stay as
+    names so the evaluator can resolve and assign them
+    (``$(( y = 3 ))`` needs ``y``, not its value).
+    """
     parts = []
     for child in ts_node.children:
         if child.type in ARITH_DELIMITERS:
             continue
         if child.type in (NT.BINARY_EXPRESSION, NT.UNARY_EXPRESSION,
-                          NT.PARENTHESIZED_EXPRESSION, NT.TERNARY_EXPRESSION):
-            parts.append(await _expand_arith(child, session, execute_fn,
-                                             call_stack))
+                          NT.PARENTHESIZED_EXPRESSION, NT.TERNARY_EXPRESSION,
+                          NT.POSTFIX_EXPRESSION):
+            parts.append(await expand_arith(child, session, execute_fn,
+                                            call_stack))
         elif child.type in ARITH_OPERATORS:
             parts.append(child.text.decode())
         elif child.type == NT.NUMBER:
@@ -84,8 +69,7 @@ async def _expand_arith(
             parts.append(await expand_node(child, session, execute_fn,
                                            call_stack))
         elif child.type == NT.VARIABLE_NAME:
-            val = session.env.get(child.text.decode(), "0")
-            parts.append(val)
+            parts.append(child.text.decode())
         else:
             parts.append(await expand_node(child, session, execute_fn,
                                            call_stack))
@@ -140,11 +124,13 @@ async def expand_node(
         return (await io.stdout_str()).rstrip("\n")
 
     if ntype == NT.ARITHMETIC_EXPANSION:
-        expr = await _expand_arith(ts_node, session, execute_fn, call_stack)
+        expr = await expand_arith(ts_node, session, execute_fn, call_stack)
         try:
-            return str(_safe_eval(expr))
-        except ValueError:
+            value, updates = evaluate_arith(expr, session.env)
+        except ArithError:
             return ts_node.text.decode()
+        session.env.update(updates)
+        return str(value)
 
     if ntype == NT.CONCATENATION:
         parts = []

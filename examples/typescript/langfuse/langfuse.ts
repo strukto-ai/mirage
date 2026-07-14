@@ -15,7 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { LangfuseResource, MountMode, Workspace, type LangfuseConfig } from '@struktoai/mirage-node'
+import { LangfuseResource, MountMode, Workspace, type FileStat, type LangfuseConfig } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../.env.development') })
@@ -72,6 +72,21 @@ async function main(): Promise<void> {
       await run(ws, `wc "${tracePath}"`)
       await run(ws, `stat "${tracePath}"`)
     }
+
+
+    // chmod/chown/touch never hit the Langfuse API: attrs land in the
+    // workspace namespace (durable, snapshot-captured) and merge into
+    // dispatch-level stat.
+    console.log(`=== metadata overlay on /langfuse/prompts/summarize ===`)
+    const metaRes = await ws.execute(
+      `chmod 640 "/langfuse/prompts/summarize" && chown 500:dev "/langfuse/prompts/summarize" && touch -t 202601021530 "/langfuse/prompts/summarize"`,
+    )
+    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+    const metaSt = (await ws.dispatch('stat', `/langfuse/prompts/summarize`)) as FileStat
+    const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+    console.log(
+      `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+    )
 
     console.log('\n=== grep scope pushdown ===')
     await run(ws, 'grep "a" /langfuse/traces/ | head -n 3')

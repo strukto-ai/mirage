@@ -13,18 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import norm
 
 
-async def readdir(accessor: RAMAccessor, path: PathSpec,
-                  index: IndexCacheStore) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
+async def readdir(accessor: RAMAccessor,
+                  path: PathSpec,
+                  index: IndexCacheStore = NULL_INDEX) -> list[str]:
     target = path.dir if path.pattern else path
     prefix = mount_prefix_of(target.virtual, target.resource_path)
     # Canonical key: no trailing slash (except root), or the same dir

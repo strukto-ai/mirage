@@ -20,7 +20,7 @@ import pytest
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.commands.builtin.discord.find import find
+from mirage.commands.builtin.discord import COMMANDS
 from mirage.commands.builtin.discord.grep import grep
 from mirage.commands.builtin.discord.head import head
 from mirage.resource.discord.config import DiscordConfig
@@ -61,6 +61,14 @@ def _make_glob(path: str, resolved: bool = True) -> list[PathSpec]:
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+def _find_command():
+    for fn in COMMANDS:
+        for rc in getattr(fn, "_registered_commands", []):
+            if rc.name == "find" and rc.filetype is None:
+                return fn
+    raise AssertionError("factory find not registered for discord")
 
 
 def _make_index() -> RAMIndexCacheStore:
@@ -142,7 +150,10 @@ async def test_head(accessor):
                   new_callable=AsyncMock,
                   return_value=FAKE_JSONL),
     ):
-        stream, io = await head(accessor, _make_glob(ABS_FILE), n="1")
+        stream, io = await head(accessor,
+                                _make_glob(ABS_FILE),
+                                index=RAMIndexCacheStore(ttl=600),
+                                n="1")
     data = await _collect(stream)
     assert b"hello world" in data
     assert b"goodbye moon" not in data
@@ -158,7 +169,9 @@ async def test_head_default(accessor):
                   new_callable=AsyncMock,
                   return_value=FAKE_JSONL),
     ):
-        stream, io = await head(accessor, _make_glob(ABS_FILE))
+        stream, io = await head(accessor,
+                                _make_glob(ABS_FILE),
+                                index=RAMIndexCacheStore(ttl=600))
     data = await _collect(stream)
     assert b"hello world" in data
     assert b"goodbye moon" in data
@@ -175,7 +188,10 @@ async def test_grep(accessor):
                   new_callable=AsyncMock,
                   return_value=FAKE_JSONL),
     ):
-        stream, io = await grep(accessor, _make_glob(ABS_FILE), "hello")
+        stream, io = await grep(accessor,
+                                _make_glob(ABS_FILE),
+                                "hello",
+                                index=RAMIndexCacheStore(ttl=600))
     data = await _collect(stream)
     assert b"hello world" in data
     assert b"hello again" in data
@@ -195,6 +211,7 @@ async def test_grep_invert(accessor):
         stream, io = await grep(accessor,
                                 _make_glob(ABS_FILE),
                                 "hello",
+                                index=RAMIndexCacheStore(ttl=600),
                                 v=True)
     data = await _collect(stream)
     assert b"goodbye moon" in data
@@ -203,26 +220,22 @@ async def test_grep_invert(accessor):
 
 @pytest.mark.asyncio
 async def test_find(accessor, index):
-    with patch("mirage.commands.builtin.discord.find.resolve_glob",
-               new_callable=AsyncMock,
-               return_value=_glob_result(CHANNEL_PATH)):
-        stream, io = await find(accessor,
-                                _make_glob(ABS_CHANNEL, resolved=False),
-                                index=index)
+    find = _find_command()
+    stream, io = await find(accessor,
+                            _make_glob(ABS_CHANNEL, resolved=False),
+                            index=index)
     data = await _collect(stream)
     assert b"2024-01-15" in data
 
 
 @pytest.mark.asyncio
 async def test_find_with_name(accessor, index):
-    with patch("mirage.commands.builtin.discord.find.resolve_glob",
-               new_callable=AsyncMock,
-               return_value=_glob_result(CHANNEL_PATH)):
-        stream, io = await find(
-            accessor,
-            _make_glob(ABS_CHANNEL, resolved=False),
-            name="chat.jsonl",
-            index=index,
-        )
+    find = _find_command()
+    stream, io = await find(
+        accessor,
+        _make_glob(ABS_CHANNEL, resolved=False),
+        name="chat.jsonl",
+        index=index,
+    )
     data = await _collect(stream)
     assert b"chat.jsonl" in data

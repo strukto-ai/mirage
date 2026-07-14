@@ -9,10 +9,6 @@ from mirage.utils.errors import enoent
 
 async def rename(accessor: NextcloudAccessor, src: PathSpec,
                  dst: PathSpec) -> None:
-    if isinstance(src, str):
-        src = PathSpec.from_str_path(src)
-    if isinstance(dst, str):
-        dst = PathSpec.from_str_path(dst)
     src_key = src.mount_path.lstrip("/")
     dst_key = dst.mount_path.lstrip("/")
     op = accessor.operator()

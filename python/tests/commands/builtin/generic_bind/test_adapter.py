@@ -73,9 +73,8 @@ async def test_resolve_glob_passthrough():
     resolve = make_resolve_glob(fake_readdir)
     resolved_spec = PathSpec.from_str_path("/notion/pages/Roadmap__uuid2",
                                            "pages/Roadmap__uuid2")
-    result = await resolve(NOOPAccessor(), ["text", resolved_spec], None)
-    assert result[0].virtual == "text"
-    assert result[1] is resolved_spec
+    result = await resolve(NOOPAccessor(), [resolved_spec], None)
+    assert result[0] is resolved_spec
 
 
 @pytest.mark.asyncio

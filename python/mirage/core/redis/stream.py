@@ -15,7 +15,7 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.observe.context import record_stream
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
@@ -25,24 +25,19 @@ from mirage.utils.path import norm
 
 async def stream(accessor: RedisAccessor,
                  path: PathSpec) -> AsyncIterator[bytes]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
-    if isinstance(path, PathSpec):
-        prefix = mount_prefix_of(path.virtual, path.resource_path)
-        path = path.virtual
-        if prefix and path.startswith(prefix):
-            rest = path[len(prefix):]
-            if prefix.endswith("/") or rest == "" or rest.startswith("/"):
-                path = rest or "/"
+    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    raw = path.virtual
+    if prefix and raw.startswith(prefix):
+        rest = raw[len(prefix):]
+        if prefix.endswith("/") or rest == "" or rest.startswith("/"):
+            raw = rest or "/"
     store = accessor.store
-    key = norm(path)
+    key = norm(raw)
     data = await store.get_file(key)
     if data is None:
         raise enoent(virtual)
-    rec = record_stream("read", path, "redis")
+    rec = record_stream("read", raw, "redis")
     if rec is not None:
         rec.bytes = len(data)
     yield data
@@ -51,22 +46,10 @@ async def stream(accessor: RedisAccessor,
 async def read_stream(
     accessor: RedisAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> AsyncIterator[bytes]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
-    virtual = path.virtual if isinstance(path, PathSpec) else path
-    if isinstance(path, PathSpec):
-        prefix = mount_prefix_of(path.virtual, path.resource_path)
-        path = path.virtual
-    if prefix and path.startswith(prefix):
-        rest = path[len(prefix):]
-        if prefix.endswith("/") or rest == "" or rest.startswith("/"):
-            path = rest or "/"
     try:
         async for chunk in stream(accessor, path):
             yield chunk
     except FileNotFoundError as exc:
-        raise enoent(virtual) from exc
+        raise enoent(path.virtual) from exc

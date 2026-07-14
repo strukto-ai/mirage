@@ -16,7 +16,7 @@ import re
 from email.utils import parsedate_to_datetime
 
 from mirage.accessor.email import EmailAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.email._client import fetch_headers, list_message_uids
 from mirage.core.email.folders import list_folders
 from mirage.types import PathSpec
@@ -53,12 +53,8 @@ def _date_from_header(date_str: str) -> str:
 async def readdir(
     accessor: EmailAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     path = (path.dir if path.pattern else path).mount_path
@@ -92,8 +88,6 @@ async def readdir(
             cached = await index.list_dir(virtual_key)
             if cached.entries is not None:
                 return cached.entries
-        if index is None:
-            raise enoent(virtual)
         max_msgs = accessor.config.max_messages
         uids = await list_message_uids(accessor,
                                        folder_name,
@@ -153,8 +147,6 @@ async def readdir(
         return [f"{prefix}/{key}/{name}" for name, _ in date_entries]
 
     if depth == 2:
-        if index is None:
-            raise enoent(virtual)
         cached = await index.list_dir(virtual_key)
         if cached.entries is not None:
             return cached.entries
@@ -170,8 +162,6 @@ async def readdir(
         raise enoent(virtual)
 
     if depth == 3:
-        if index is None:
-            raise enoent(virtual)
         cached = await index.list_dir(virtual_key)
         if cached.entries is not None:
             return cached.entries
@@ -187,3 +177,9 @@ async def readdir(
         raise enoent(virtual)
 
     raise enoent(virtual)
+
+
+def is_dir_name(child: str) -> bool:
+    # Entries are recognized by extension, so classification never needs
+    # the stat fallback.
+    return not child.rsplit("/", 1)[-1].endswith(".email.json")

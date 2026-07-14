@@ -22,7 +22,7 @@ from mirage.core.ram.read import read_bytes
 from mirage.observe.context import RecordingScope
 from mirage.resource.disk.disk import DiskResource
 from mirage.resource.ram import RAMResource
-from mirage.types import MountMode
+from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
 
 from .conftest import (SAMPLE_JSONL, collect, jq, mem_ws, run_raw,
@@ -165,7 +165,8 @@ class TestJqStreamingVerification:
         scope = RecordingScope()
         records = scope.records
         accessor = mem.accessor
-        asyncio.run(read_bytes(accessor, "/data.jsonl"))
+        asyncio.run(read_bytes(accessor,
+                               PathSpec.from_str_path("/data.jsonl")))
         scope.close()
         assert len(records) == 1
         assert records[0].bytes == len(data)
@@ -177,7 +178,7 @@ class TestJqStreamingVerification:
         scope = RecordingScope()
         records = scope.records
         accessor = mem.accessor
-        asyncio.run(read_bytes(accessor, "/f.json"))
+        asyncio.run(read_bytes(accessor, PathSpec.from_str_path("/f.json")))
         scope.close()
         assert len(records) == 1
         assert records[0].bytes == len(data)

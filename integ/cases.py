@@ -12,7 +12,25 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import sys
 import time
+from pathlib import Path
+
+# Importing mirage while this directory is on sys.path resolves the
+# `redis` package to integ/redis.py (mirage swallows the resulting
+# ImportError as "redis extra not installed", and the half-executed
+# shadow module strips this directory from sys.path, breaking the
+# caller's next sibling import). Import mirage with the directory off
+# the path, mirroring integ/redis.py's own guard.
+_INTEG_DIR = str(Path(__file__).resolve().parent)
+_INTEG_ALIASES = {_INTEG_DIR, str(Path(__file__).parent), ""}
+_ON_PATH = any(p in _INTEG_ALIASES for p in sys.path)
+sys.path[:] = [p for p in sys.path if p not in _INTEG_ALIASES]
+
+from mirage.types import PathSpec  # noqa: E402
+
+if _ON_PATH:
+    sys.path.insert(0, _INTEG_DIR)
 
 SEED_FILES = {
     "/data/a.txt":
@@ -482,8 +500,17 @@ CASES: list[tuple[str, str]] = [
      "grep -f /data/patterns.txt -f /data/patterns2.txt /data/a.txt"),
     ("grep_cluster_ne", "grep -ne world /data/a.txt"),
     ("du_max_depth_eq", "du --max-depth=1 /data/sub"),
-    ("grep_unknown_flag_ignored", "grep --color=auto world /data/a.txt"),
-    ("grep_unknown_short_flag", "grep -Y world /data/a.txt"),
+    ("grep_unknown_long_flag",
+     "grep --bogus world /data/a.txt 2>&1; echo code=$?"),
+    ("grep_unknown_short_flag",
+     "grep -Y world /data/a.txt 2>&1; echo code=$?"),
+    ("cat_unknown_long_flag", "cat --bogus /data/a.txt 2>&1; echo code=$?"),
+    ("grep_missing_flag_value", "grep -m 2>&1; echo code=$?"),
+    ("du_missing_flag_value", "du --max-depth 2>&1; echo code=$?"),
+    ("grep_color_auto", "grep --color=auto world /data/a.txt"),
+    ("grep_color_bare", "grep --color world /data/a.txt"),
+    ("grep_line_buffered", "grep --line-buffered world /data/a.txt"),
+    ("ls_color", "ls --color /data/sub"),
     ("head_numeric_shorthand", "head -2 /data/a.txt"),
     ("tail_numeric_shorthand", "tail -2 /data/a.txt"),
     ("grep_cluster_attached", "grep -neworld /data/a.txt"),
@@ -513,6 +540,24 @@ CASES: list[tuple[str, str]] = [
     ("find_size_lt", "find /data -size -5c"),
     ("find_depth", "find /data -depth -type f"),
     ("find_mtime", "find /data -mtime +0 -o -mtime -1"),
+    # -size on directories: mirage counts a directory as size 0 (GNU
+    # compares the inode size), so +N excludes dirs and -N keeps them.
+    ("find_size_gt_dirs",
+     "mkdir -p /data/fs/sub && printf 12345678 > /data/fs/sub/big.bin"
+     " && printf x > /data/fs/small.bin && find /data/fs -size +4c"),
+    ("find_size_lt_dirs", "find /data/fs -size -4c"),
+    # GNU +N / -N are strict (exactly-N is excluded by both) and non-c
+    # units round the size up before comparing (-1k keeps only size 0).
+    ("find_size_gt_boundary",
+     "printf 1234 > /data/fs/four.bin && find /data/fs -size +4c"),
+    ("find_size_lt_boundary", "find /data/fs -size -4c"),
+    ("find_size_eq_boundary", "find /data/fs -size 4c"),
+    ("find_size_round_k", "find /data/fs -size -1k"),
+    # -path matches the display path as printed (GNU), not the
+    # mount-relative key.
+    ("find_path_glob", "find /data/fs -path '*data/fs/sub*'"),
+    ("find_path_exact", "find /data/fs -path '/data/fs/sub'"),
+    ("find_path_or_name", "find /data/fs -path '*sub*' -o -name small.bin"),
 
     # ----- xxd variants -----
     ("xxd_c4", "head -c 12 /data/a.txt | xxd -c 4"),
@@ -699,6 +744,32 @@ CASES: list[tuple[str, str]] = [
     ("return_non_numeric", "f() { return x; }; f 2>&1; echo code=$?"),
     ("read_r_flag", "printf 'hi there\\n' | read -r v; echo code=$?"),
     ("read_invalid_opt", "read -q v 2>&1; echo code=$?"),
+
+    # ----- arithmetic: (( )) command + $(( )) assignment forms -----
+    ("arith_cmd_true", "(( 2 > 1 )); echo code=$?"),
+    ("arith_cmd_false", "(( 0 )); echo code=$?"),
+    ("arith_incr",
+     "i=0; (( i++ )); echo code=$? i=$i; (( i++ )); echo code=$? i=$i;"
+     " unset i"),
+    ("arith_assign_comma", "x=$(( y = 3, y + 2 )); echo $x $y; unset x y"),
+    ("arith_c_semantics",
+     "echo $(( -7 / 2 )) $(( -7 % 2 )) $(( 2 ** 10 )) $(( 0x10 )) $(( 010 ))"),
+    ("arith_while",
+     "n=0; while (( n < 3 )); do (( n++ )); done; echo n=$n; unset n"),
+    ("arith_if", "if (( 2 > 1 )); then echo yes; fi"),
+    ("arith_divzero", "(( 1 / 0 )) 2>&1; echo code=$?"),
+    ("arith_short_circuit", "(( 0 && (q = 7) )); echo q=${q:-unset}"),
+
+    # ----- fixed arity: extra operands refuse with GNU errors (#452) -----
+    ("arity_uniq",
+     "uniq /data/a.txt /data/b.txt /data/mixed.txt 2>&1; echo code=$?"),
+    ("arity_tr", "tr a b /data/a.txt 2>&1; echo code=$?"),
+    ("arity_diff",
+     "diff /data/a.txt /data/b.txt /data/mixed.txt 2>&1; echo code=$?"),
+    ("arity_seq", "seq 1 2 3 4 2>&1; echo code=$?"),
+    ("arity_mktemp", "mktemp t1 t2 2>&1; echo code=$?"),
+    ("arity_relative", "(cd /data && uniq a.txt b.txt extra.txt 2>&1);"
+     " echo code=$?"),
 
     # ----- cp / mv multi-source into a directory (last; these mutate) -----
     ("cp_multi_into_dir", "cp /data/a.txt /data/b.txt /data/sub"),
@@ -963,6 +1034,40 @@ EXIT_CODE_CASES: list[tuple[str, str]] = [
      " && rm -r /data/symd"),
 ]
 
+# chmod/chown/touch rendering needs a backend with a native setattr slot
+# (ram/disk/redis); overlay backends store attrs in the namespace, which
+# backend ls -l cannot see, so these run outside the shared CASES suite.
+META_CASES: list[tuple[str, str]] = [
+    ("meta_setup", "mkdir -p /data/metad && echo alpha > /data/metad/f.txt"
+     " && touch -t 202601021530 /data/metad/f.txt"),
+    ("meta_ls_long", "ls -l /data/metad"),
+    ("meta_chmod_octal", "chmod 601 /data/metad/f.txt && ls -l /data/metad"),
+    ("meta_chmod_symbolic",
+     "chmod u+x,go-r /data/metad/f.txt && ls -l /data/metad"),
+    ("meta_chown_ids", "chown 500:dev /data/metad/f.txt && ls -l /data/metad"),
+    ("meta_chown_name", "chown alice /data/metad/f.txt && ls -l /data/metad"),
+    ("meta_touch_create", "touch -t 202601021530 /data/metad/new.txt"
+     " && ls -l /data/metad"),
+    ("meta_touch_nocreate", "touch -c /data/metad/ghost.txt"
+     " && ls /data/metad"),
+    ("meta_touch_restamp",
+     "touch -t 202603041200 /data/metad/f.txt && ls -l /data/metad"),
+    ("meta_mv_carries",
+     "mv /data/metad/f.txt /data/metad/g.txt && ls -l /data/metad"),
+    ("meta_rm_drops", "rm /data/metad/g.txt && echo fresh > /data/metad/g.txt"
+     " && touch -t 202601021530 /data/metad/g.txt && ls -l /data/metad"),
+    ("meta_link_chmod_follows", "ln -s /data/metad/g.txt /data/metad/ln.txt"
+     " && chmod 604 /data/metad/ln.txt && ls -l /data/metad"),
+    ("meta_touch_h_link", "touch -h -t 202601021530 /data/metad/ln.txt"
+     " && readlink /data/metad/ln.txt"),
+    ("meta_chmod_bad_mode", "chmod 999 /data/metad/g.txt 2>&1"),
+    ("meta_chmod_bad_symbolic", "chmod u+q /data/metad/g.txt 2>&1"),
+    ("meta_chmod_enoent", "chmod 644 /data/metad/missing.txt 2>&1"),
+    ("meta_chown_enoent", "chown alice /data/metad/missing.txt 2>&1"),
+    ("meta_touch_bad_stamp", "touch -t 99 /data/metad/g.txt 2>&1"),
+    ("meta_cleanup", "rm /data/metad/ln.txt && rm -r /data/metad"),
+]
+
 # Not-found errors must always show the full virtual path the user typed
 # (mount prefix included) plus the GNU strerror, identically across backends
 # and languages. Each case prints exit code and stderr.
@@ -997,6 +1102,87 @@ NOT_FOUND_PROGS: list[tuple[str, str]] = [
 ]
 
 
+async def run_meta_cases(ws) -> None:
+    for name, cmd in META_CASES:
+        result = await ws.execute(cmd)
+        out = await result.stdout_str()
+        print(f"=== {name} ===")
+        _emit_body(out)
+
+
+# Overlay backends (s3 and other API mounts) keep attrs in the namespace,
+# which backend ls -l cannot render, so each step reads back through
+# dispatch-stat (where the overlay merges) and prints only the fields the
+# step stamped; unstamped fields like upload mtime stay out of the output.
+META_OVERLAY_CASES: list[tuple[str, str, str | None, tuple[str, ...]]] = [
+    ("ometa_setup", "mkdir -p /data/metao && echo alpha > /data/metao/f.txt"
+     " && touch -t 202601021530 /data/metao/f.txt", "/data/metao/f.txt",
+     ("mode", "uid", "gid", "mtime")),
+    ("ometa_chmod_octal", "chmod 601 /data/metao/f.txt", "/data/metao/f.txt",
+     ("mode", "mtime")),
+    ("ometa_chmod_symbolic", "chmod u+x,go-r /data/metao/f.txt",
+     "/data/metao/f.txt", ("mode", )),
+    ("ometa_chown_ids", "chown 500:dev /data/metao/f.txt", "/data/metao/f.txt",
+     ("uid", "gid")),
+    ("ometa_chown_name", "chown alice /data/metao/f.txt", "/data/metao/f.txt",
+     ("uid", "gid")),
+    ("ometa_touch_create", "touch -t 202601021530 /data/metao/new.txt",
+     "/data/metao/new.txt", ("mode", "mtime")),
+    ("ometa_touch_nocreate", "touch -c /data/metao/ghost.txt",
+     "/data/metao/ghost.txt", ("mode", )),
+    ("ometa_touch_restamp", "touch -t 202603041200 /data/metao/f.txt",
+     "/data/metao/f.txt", ("mtime", )),
+    ("ometa_dir_chmod", "chmod 750 /data/metao", "/data/metao", ("mode", )),
+    ("ometa_mv_carries", "mv /data/metao/f.txt /data/metao/g.txt",
+     "/data/metao/g.txt", ("mode", "uid", "gid", "mtime")),
+    ("ometa_rm_drops",
+     "rm /data/metao/g.txt && echo fresh > /data/metao/g.txt",
+     "/data/metao/g.txt", ("mode", "uid", "gid")),
+    ("ometa_link_chmod_follows", "ln -s /data/metao/g.txt /data/metao/ln.txt"
+     " && chmod 604 /data/metao/ln.txt", "/data/metao/g.txt", ("mode", )),
+    ("ometa_touch_h_link", "touch -t 202601021530 /data/metao/g.txt"
+     " && touch -h -t 202603041200 /data/metao/ln.txt", "/data/metao/g.txt",
+     ("mtime", )),
+    ("ometa_chmod_enoent", "chmod 644 /data/metao/missing.txt 2>&1", None, ()),
+    ("ometa_touch_bad_stamp", "touch -t 99 /data/metao/g.txt 2>&1", None, ()),
+    ("ometa_cleanup", "rm /data/metao/ln.txt && rm -r /data/metao", None, ()),
+]
+
+
+def _meta_field(st, field: str) -> str:
+    if field == "mode":
+        value = oct(st.mode)[2:] if st.mode is not None else "-"
+    elif field == "uid":
+        value = str(st.uid) if st.uid is not None else "-"
+    elif field == "gid":
+        value = str(st.gid) if st.gid is not None else "-"
+    else:
+        # First 19 chars ("2026-01-02T15:30:00") so the Z vs +00:00 suffix
+        # never reaches the byte-diffed truth file.
+        value = st.modified[:19] if st.modified else "-"
+    return f"{field}={value}"
+
+
+def meta_stat_line(st, fields: tuple[str, ...]) -> str:
+    return " ".join(_meta_field(st, field) for field in fields)
+
+
+async def run_meta_overlay_cases(ws) -> None:
+    for name, cmd, path, fields in META_OVERLAY_CASES:
+        result = await ws.execute(cmd)
+        out = await result.stdout_str()
+        print(f"=== {name} ===")
+        if path is None:
+            _emit_body(out)
+            continue
+        try:
+            st, _ = await ws.dispatch("stat", PathSpec.from_str_path(path))
+        except FileNotFoundError:
+            print("absent")
+            continue
+        print(meta_stat_line(st, fields))
+
+
 async def run_not_found(ws, mount: str) -> None:
     target = f"{mount.rstrip('/')}/__nf_missing__.txt"
     for name, prog in NOT_FOUND_PROGS:
@@ -1007,6 +1193,56 @@ async def run_not_found(ws, mount: str) -> None:
         if err:
             print(err)
 
+
+# Multi-file read commands process every operand, GNU-style: each case
+# prints exit, stdout, and stderr, so a command that drops a good operand's
+# output, stops at the first missing operand, or silently swallows the
+# error diverges from truth. Seeds live under /data/pr and are removed at
+# the end so later sections see an untouched /data. stat is excluded (its
+# output carries mtimes); it is pinned in cross_commands instead.
+PARTIAL_READ_CASES: list[tuple[str, str]] = [
+    ("pr_seed", "mkdir -p /data/pr && printf '1\\n2\\n' > /data/pr/one.txt"
+     " && printf '3\\n4\\n' > /data/pr/two.txt"
+     " && printf 'hello\\n' > /data/pr/h1.txt"
+     " && printf 'worlds\\n' > /data/pr/h2.txt"
+     " && printf 'z\\n' > /data/pr/z1.txt"
+     " && printf 'y\\n' > /data/pr/z2.txt"
+     " && gzip /data/pr/z1.txt /data/pr/z2.txt"),
+    # every operand is processed, not just the first
+    ("pr_cut_multi", "cut -c1 /data/pr/one.txt /data/pr/two.txt"),
+    ("pr_tac_multi", "tac /data/pr/one.txt /data/pr/two.txt"),
+    ("pr_nl_multi", "nl /data/pr/one.txt /data/pr/two.txt"),
+    ("pr_strings_multi", "strings /data/pr/h1.txt /data/pr/h2.txt"),
+    ("pr_zcat_multi", "zcat /data/pr/z1.txt.gz /data/pr/z2.txt.gz"),
+    # good + missing keeps partial output, one stderr line, exit 1
+    ("pr_cat", "cat /data/pr/one.txt /data/pr/missing.txt"),
+    ("pr_head", "head -n 1 /data/pr/one.txt /data/pr/missing.txt"),
+    ("pr_tail", "tail -n 1 /data/pr/one.txt /data/pr/missing.txt"),
+    ("pr_wc", "wc -l /data/pr/one.txt /data/pr/missing.txt"),
+    ("pr_nl", "nl /data/pr/one.txt /data/pr/missing.txt"),
+    ("pr_md5", "md5 /data/pr/one.txt /data/pr/missing.txt"),
+    ("pr_sha256sum", "sha256sum /data/pr/one.txt /data/pr/missing.txt"),
+    ("pr_strings", "strings /data/pr/h1.txt /data/pr/missing.txt"),
+    ("pr_tac", "tac /data/pr/one.txt /data/pr/missing.txt"),
+    ("pr_rev", "rev /data/pr/one.txt /data/pr/missing.txt"),
+    ("pr_cut", "cut -c1 /data/pr/one.txt /data/pr/missing.txt"),
+    ("pr_expand", "expand /data/pr/one.txt /data/pr/missing.txt"),
+    ("pr_unexpand", "unexpand /data/pr/one.txt /data/pr/missing.txt"),
+    ("pr_fold", "fold /data/pr/one.txt /data/pr/missing.txt"),
+    ("pr_fmt", "fmt /data/pr/one.txt /data/pr/missing.txt"),
+    ("pr_zcat", "zcat /data/pr/z1.txt.gz /data/pr/missing.gz"),
+    ("pr_sed", "sed s/1/X/ /data/pr/one.txt /data/pr/missing.txt"),
+    # sort aborts (it needs every input before emitting anything)
+    ("pr_sort", "sort /data/pr/one.txt /data/pr/missing.txt"),
+    ("pr_missing_first", "cat /data/pr/missing.txt /data/pr/one.txt"),
+    ("pr_all_missing_wc", "wc -l /data/pr/m1.txt /data/pr/m2.txt"),
+    # a directory operand refuses with GNU EISDIR, partial output kept (#457)
+    ("pr_cat_dir", "cat /data/pr/one.txt /data/pr"),
+    ("pr_head_dir", "head /data/pr"),
+    ("pr_wc_dir", "wc /data/pr/one.txt /data/pr"),
+    ("pr_tac_dir", "tac /data/pr"),
+    ("pr_cleanup", "rm -r /data/pr"),
+]
 
 # Invalid numeric/size/mtime arguments to find must exit 1 with a GNU-style
 # message, identically across every backend (parsed before any backend I/O).
@@ -1042,6 +1278,8 @@ CROSS_MOUNT_CASES: list[tuple[str, str]] = [
     ("xm_mv_over", "mv /data/xm_back.txt /data2/xm_moved.txt"
      " && cat /data2/xm_moved.txt && ls /data2"),
     ("xm_grep_multi", "grep -c s /data/a.txt /data2/xm.txt"),
+    ("xm_unknown_flag_errors",
+     "grep --bogus s /data/a.txt /data2/xm.txt 2>&1; echo code=$?"),
     ("xm_wc_multi", "wc -l /data/a.txt /data2/xm.txt"),
     # du/md5/file fan out per mount and aggregate like the other readers
     ("xm_du_multi", "du /data/b.txt /data2/xm.txt"),
@@ -1065,6 +1303,20 @@ CROSS_MOUNT_CASES: list[tuple[str, str]] = [
     ("xm_cut", "cut -c1 /data/a.txt /data2/xm.txt"),
     ("xm_sed_stream", "sed s/l/L/ /data/a.txt /data2/xm.txt"),
     ("xm_rev", "rev /data/b.txt /data2/xm.txt"),
+    ("xm_awk", "awk '{print $1}' /data/a.txt /data2/xm.txt"),
+    ("xm_awk_nr", "awk 'END{print NR}' /data/a.txt /data2/xm.txt"),
+    # ----- RELAY interleave: paste/comm/join colocate via dispatch reads -----
+    ("xm_paste", "paste /data/b.txt /data2/xm.txt"),
+    ("xm_paste_d", "paste -d, /data/b.txt /data2/xm.txt"),
+    ("xm_comm", "printf 'a\\nb\\nc\\n' | tee /data/xc1.txt > /dev/null"
+     " && printf 'b\\nc\\nd\\n' | tee /data2/xc2.txt > /dev/null"
+     " && comm /data/xc1.txt /data2/xc2.txt"),
+    ("xm_comm_12", "comm -12 /data/xc1.txt /data2/xc2.txt"),
+    ("xm_join", "printf '1 alpha\\n2 beta\\n' | tee /data/xj1.txt > /dev/null"
+     " && printf '1 one\\n3 three\\n' | tee /data2/xj2.txt > /dev/null"
+     " && join /data/xj1.txt /data2/xj2.txt"),
+    ("xm_join_a", "join -a 1 /data/xj1.txt /data2/xj2.txt"
+     " && rm /data/xc1.txt /data2/xc2.txt /data/xj1.txt /data2/xj2.txt"),
     # ----- FANOUT strategy: one native run per operand -----
     ("xm_tac", "tac /data/b.txt /data2/xm.txt"),
     ("xm_grep_names", "grep -n o /data/a.txt /data2/xm.txt"),
@@ -1113,7 +1365,7 @@ CROSS_MOUNT_EXIT_CASES: list[tuple[str, str]] = [
 # Non-whitelisted commands spanning mounts must refuse with the shared
 # message, pinning the whitelist boundary; printed like NOT_FOUND_CASES.
 CROSS_MOUNT_ERR_CASES: list[tuple[str, str]] = [
-    ("xm_refuse_paste", "paste /data/a.txt /data2/xm.txt"),
+    ("xm_refuse_uniq", "uniq /data/a.txt /data2/xm_uniq_out.txt"),
 ]
 
 # Provision (dry-run cost estimates) must print identical numbers on every
@@ -1249,6 +1501,20 @@ async def run_provision_probe(ws, file_path: str) -> None:
         print(provision_line(result))
 
 
+async def run_sed_readonly_probe(ws, file_path: str) -> None:
+    """Sed on a read-only backend: streaming works, in-place is rejected."""
+    result = await ws.execute(f"sed -n 1p {file_path}")
+    out = await result.stdout_str()
+    print("=== sed_stream_1p ===")
+    print(out, end="" if out.endswith("\n") else "\n")
+    result = await ws.execute(f"sed -i s/x/y/ {file_path}")
+    err = (await result.stderr_str()).strip()
+    print("=== sed_i_readonly ===")
+    print(f"exit={result.exit_code}")
+    if err:
+        print(err)
+
+
 async def _backend_bytes(ws, cmd: str) -> int:
     before = sum(rec.bytes for rec in ws.ops.records)
     result = await ws.execute(cmd)
@@ -1381,6 +1647,17 @@ async def run_cases(ws) -> None:
         err = (await result.stderr_str()).strip()
         print(f"=== {name} ===")
         print(f"exit={result.exit_code}")
+        if err:
+            print(err)
+
+    for name, cmd in PARTIAL_READ_CASES:
+        result = await ws.execute(cmd)
+        out = await result.stdout_str()
+        err = (await result.stderr_str()).strip()
+        print(f"=== {name} ===")
+        print(f"exit={result.exit_code}")
+        if out:
+            _emit_body(out)
         if err:
             print(err)
 

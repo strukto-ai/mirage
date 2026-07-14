@@ -14,6 +14,6 @@
 
 export { ARITH_DELIMITERS, ARITH_OPERATORS } from './constants.ts'
 export { classifyBarePath, classifyParts, classifyWord, unescapePath } from './classify/index.ts'
-export { type ExecuteFn, expandNode, safeEval } from './node.ts'
+export { type ExecuteFn, expandNode } from './node.ts'
 export { expandAndClassify, expandParts } from './parts.ts'
 export { expandBraces, lookupVar, type TSNodeLike } from './variable.ts'

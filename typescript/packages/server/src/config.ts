@@ -20,8 +20,10 @@ import {
   ConsistencyPolicy,
   MountMode,
   OnExceed,
+  PYTHON_RUNTIMES,
   RAMFileCacheStore,
   RedisFileCacheStore,
+  validateRuntimeOptions,
   type FileCache,
   type IndexConfig,
   type RedisIndexConfig,
@@ -38,6 +40,24 @@ function coerceMountMode(value: string | undefined, fallback: MountMode): MountM
 }
 
 const VALID_CONSISTENCY = new Set<string>([ConsistencyPolicy.LAZY, ConsistencyPolicy.ALWAYS])
+
+const VALID_PYTHON_RUNTIMES = new Set<string>(PYTHON_RUNTIMES)
+
+const RUNTIME_BLOCK_NAMES = ['monty', 'wasi', 'local', 'pyodide'] as const
+
+function coercePythonRuntime(value: string): string {
+  const lower = value.toLowerCase()
+  if (!VALID_PYTHON_RUNTIMES.has(lower)) {
+    if (lower === 'local' || lower === 'wasi') {
+      throw new Error(
+        `python runtime '${lower}' is Python-only; ` +
+          "TypeScript supports 'pyodide' (default) and 'monty'",
+      )
+    }
+    throw new Error(`invalid python runtime: ${value} (expected 'pyodide' or 'monty')`)
+  }
+  return lower
+}
 
 function coerceConsistency(value: string | undefined): ConsistencyPolicy {
   if (value === undefined) return ConsistencyPolicy.LAZY
@@ -89,6 +109,13 @@ function normalizeConfigKeys(raw: Record<string, unknown>): Record<string, unkno
   const out = camelizeKeys(raw)
   if (isPlainObject(out.cache)) out.cache = camelizeKeys(out.cache)
   if (isPlainObject(out.index)) out.index = camelizeKeys(out.index)
+  if (isPlainObject(out.runtime)) {
+    const runtime = camelizeKeys(out.runtime)
+    for (const name of RUNTIME_BLOCK_NAMES) {
+      if (isPlainObject(runtime[name])) runtime[name] = camelizeKeys(runtime[name])
+    }
+    out.runtime = runtime
+  }
   return out
 }
 
@@ -188,8 +215,17 @@ interface RedisIndexBlock {
   keyPrefix?: string
 }
 
+interface RuntimeBlock {
+  python?: string
+  monty?: Record<string, unknown>
+  wasi?: Record<string, unknown>
+  local?: Record<string, unknown>
+  pyodide?: Record<string, unknown>
+}
+
 export interface WorkspaceConfigRaw {
   mounts: Record<string, MountBlock>
+  runtime?: RuntimeBlock | null
   mode?: string
   consistency?: string
   defaultSessionId?: string
@@ -247,6 +283,8 @@ export interface WorkspaceArgs {
     agentId: string
     cache?: FileCache & Resource
     index?: IndexConfig
+    pythonRuntime?: string
+    runtimeOptions?: Record<string, Record<string, unknown>>
   }
   fuseMounts: Record<string, boolean | string>
 }
@@ -286,6 +324,15 @@ function buildIndex(
 }
 
 export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<WorkspaceArgs> {
+  const runtimeOptions: Record<string, Record<string, unknown>> = {}
+  if (cfg.runtime !== undefined && cfg.runtime !== null) {
+    for (const [name, block] of Object.entries(cfg.runtime)) {
+      if (name === 'python' || block === undefined || block === null) continue
+      if (!isPlainObject(block)) throw new Error(`runtime block '${name}' must be a mapping`)
+      runtimeOptions[name] = block
+    }
+    validateRuntimeOptions(runtimeOptions)
+  }
   const wsMode = coerceMountMode(cfg.mode, MountMode.WRITE)
   const consistency = coerceConsistency(cfg.consistency)
   const resources: Record<string, [Resource, MountMode, Record<string, CommandSafeguard>]> = {}
@@ -307,6 +354,10 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
       agentId: cfg.defaultAgentId ?? 'default',
       ...(cache !== undefined ? { cache } : {}),
       ...(index !== undefined ? { index } : {}),
+      ...(cfg.runtime?.python !== undefined
+        ? { pythonRuntime: coercePythonRuntime(cfg.runtime.python) }
+        : {}),
+      ...(Object.keys(runtimeOptions).length > 0 ? { runtimeOptions } : {}),
     },
     fuseMounts,
   }

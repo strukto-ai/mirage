@@ -13,13 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.hf_buckets import HfBucketsAccessor
+from mirage.cache.index import NULL_INDEX
 from mirage.core.hf_buckets.stat import stat
 from mirage.types import PathSpec
 
 
 async def exists(accessor: HfBucketsAccessor, path: PathSpec) -> bool:
     try:
-        await stat(accessor, path)
+        await stat(accessor, path, index=NULL_INDEX)
         return True
     except FileNotFoundError:
         return False

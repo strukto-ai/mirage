@@ -15,7 +15,7 @@
 from bson.json_util import RELAXED_JSON_OPTIONS, dumps
 
 from mirage.accessor.mongodb import MongoDBAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.mongodb._client import database_exists, entity_exists
 from mirage.core.mongodb._schema_json import (build_collection_schema_json,
                                               build_database_json)
@@ -29,12 +29,8 @@ from mirage.utils.errors import enoent
 async def read(
     accessor: MongoDBAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     scope = detect_scope(path)
     if scope.level == ScopeLevel.DOCUMENTS:
         if not await entity_exists(accessor.client, accessor.config,

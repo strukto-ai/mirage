@@ -337,3 +337,9 @@ export async function readdir(
 
   throw enoent(path)
 }
+export function isDirName(child: string): boolean {
+  // Entries are recognized by extension, so classification never needs
+  // the stat fallback.
+  const name = child.split('/').pop() ?? ''
+  return !(name.endsWith('.json') || name.endsWith('.jsonl'))
+}

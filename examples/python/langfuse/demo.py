@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.langfuse import LangfuseConfig, LangfuseResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -166,6 +167,20 @@ async def main():
     await _run(ws, 'stat "/langfuse/prompts/summarize"')
     await _run(ws, 'stat "/langfuse/datasets/qa-eval"')
 
+    # chmod/chown/touch never hit the Langfuse API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print("=== metadata overlay on /langfuse/prompts/summarize ===")
+    meta_res = await ws.execute(
+        'chmod 640 "/langfuse/prompts/summarize"'
+        ' && chown 500:dev "/langfuse/prompts/summarize"'
+        ' && touch -t 202601021530 "/langfuse/prompts/summarize"')
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    meta_st, _ = await ws.dispatch(
+        "stat", PathSpec.from_str_path("/langfuse/prompts/summarize"))
+    print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+          f"gid={meta_st.gid} mtime={meta_st.modified}")
+
     print("\n" + "=" * 60)
     print("TREE, FIND, NAVIGATION")
     print("=" * 60)
@@ -175,6 +190,11 @@ async def main():
         ws,
         'find "/langfuse/prompts/" -name "*.json"',
     )
+    # -path matches the display path; -size counts dirs and sizeless
+    # rendered files as 0 (so +0c drops them, -1k keeps them).
+    await _run(ws, 'find "/langfuse/" -maxdepth 1 -path "*prompts*"')
+    await _run(ws, 'find "/langfuse/" -maxdepth 1 -size +0c')
+    await _run(ws, 'find "/langfuse/" -maxdepth 1 -size -1k')
 
     await ws.execute('cd "/langfuse/prompts"')
     await _run(ws, "pwd")

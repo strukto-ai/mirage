@@ -1,6 +1,6 @@
 from typing import Any
 
-from mirage.cache.index import IndexCacheStore, IndexEntry
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.chroma.path import resolve_path
 from mirage.core.chroma.walk import walk
 from mirage.types import PathSpec
@@ -12,7 +12,7 @@ async def search_segments(
     accessor,
     query: str,
     paths: list[PathSpec],
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
     top_k: int = 10,
     mount_prefix: str = "",
 ) -> bytes:
@@ -54,7 +54,7 @@ def validate_args(query: str, top_k: int) -> None:
 async def target_entries(
     accessor,
     paths: list[PathSpec],
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> dict[str, IndexEntry]:
     targets: dict[str, IndexEntry] = {}
     for path in paths:

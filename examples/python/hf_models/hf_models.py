@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.hf_models import HfModelsConfig, HfModelsResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -72,6 +73,19 @@ async def main():
     print("\n=== stat /m/config.json ===")
     r = await ws.execute("stat /m/config.json")
     print(f"  {(await r.stdout_str()).strip()}")
+
+    # chmod/chown/touch never hit the Hub API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print("=== metadata overlay on /m/config.json ===")
+    meta_res = await ws.execute('chmod 640 "/m/config.json"'
+                                ' && chown 500:dev "/m/config.json"'
+                                ' && touch -t 202601021530 "/m/config.json"')
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    meta_st, _ = await ws.dispatch("stat",
+                                   PathSpec.from_str_path("/m/config.json"))
+    print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+          f"gid={meta_st.gid} mtime={meta_st.modified}")
 
     print("=== stat /m/model.safetensors (no download) ===")
     r = await ws.execute("stat /m/model.safetensors")

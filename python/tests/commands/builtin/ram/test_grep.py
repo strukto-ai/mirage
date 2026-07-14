@@ -114,7 +114,7 @@ async def test_grep_dash_e_and_repeated_dash_f_union(workspace):
 
 
 @pytest.mark.asyncio
-async def test_grep_unknown_flag_warns_but_works(workspace):
+async def test_grep_color_accepted_as_gnu_noop(workspace):
     await workspace.ops.mkdir("/data")
     await workspace.ops.write("/data/a.txt", b"orange line\nplain line\n")
 
@@ -123,7 +123,19 @@ async def test_grep_unknown_flag_warns_but_works(workspace):
     assert io.exit_code == 0
     assert (io.stdout or b"").decode() == "orange line\n"
     stderr = io.stderr if isinstance(io.stderr, bytes) else b""
-    assert b"--color=auto" in stderr
+    assert stderr == b""
+
+
+@pytest.mark.asyncio
+async def test_grep_unknown_flag_refuses_with_gnu_error(workspace):
+    await workspace.ops.mkdir("/data")
+    await workspace.ops.write("/data/a.txt", b"orange line\nplain line\n")
+
+    io = await workspace.execute("grep --bogus orange /data/a.txt",
+                                 session_id="default")
+    assert io.exit_code == 2
+    stderr = io.stderr if isinstance(io.stderr, bytes) else b""
+    assert b"grep: unrecognized option '--bogus'" in stderr
 
 
 @pytest.mark.asyncio

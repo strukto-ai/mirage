@@ -70,6 +70,9 @@ class RedisStore:
     def _mk(self, path: str) -> str:
         return f"{self._prefix}modified:{path}"
 
+    def _ak(self, path: str) -> str:
+        return f"{self._prefix}attrs:{path}"
+
     async def get_file(self, path: str) -> bytes | None:
         return await self._client.get(self._fk(path))
 
@@ -121,10 +124,25 @@ class RedisStore:
     async def del_modified(self, path: str) -> None:
         await self._client.delete(self._mk(path))
 
+    async def get_attrs(self, path: str) -> dict[str, str]:
+        raw = await self._client.hgetall(self._ak(path))
+        return {
+            (k.decode() if isinstance(k, bytes) else k):
+            (v.decode() if isinstance(v, bytes) else v)
+            for k, v in raw.items()
+        }
+
+    async def set_attrs(self, path: str, fields: dict[str, str]) -> None:
+        await self._client.hset(self._ak(path), mapping=fields)
+
+    async def del_attrs(self, path: str) -> None:
+        await self._client.delete(self._ak(path))
+
     async def clear(self) -> None:
         prefixes = [
             f"{self._prefix}file:*",
             f"{self._prefix}modified:*",
+            f"{self._prefix}attrs:*",
         ]
         for pattern in prefixes:
             keys: list = []

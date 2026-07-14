@@ -21,6 +21,29 @@ function buildClient() {
   return makeClient(loadDaemonSettings())
 }
 
+const MODES = new Set(['read', 'write', 'exec', 'r', 'rw', 'rwx'])
+
+/**
+ * Parse `-m` values like `/data:read` into a modes mapping. Modes are
+ * the words ('read', 'write', 'exec') or their cumulative filesystem
+ * aliases ('r', 'rw', 'rwx'). A bare prefix (no mode suffix) keeps
+ * the mount's own configured mode. The mode is taken from the last
+ * `:` so mount prefixes that contain colons still parse.
+ */
+export function parseMountModes(mounts: string[]): Record<string, string> {
+  const modes: Record<string, string> = {}
+  for (const item of mounts) {
+    const idx = item.lastIndexOf(':')
+    const mode = idx >= 0 ? item.slice(idx + 1) : ''
+    if (idx >= 0 && MODES.has(mode)) {
+      modes[item.slice(0, idx)] = mode
+    } else {
+      modes[item] = 'exec'
+    }
+  }
+  return modes
+}
+
 export function registerSessionCommands(program: Command): void {
   const sess = program.command('session').description('Manage workspace sessions.')
 
@@ -30,7 +53,9 @@ export function registerSessionCommands(program: Command): void {
     .option('--id <sessionId>')
     .option(
       '-m, --mount <prefix>',
-      'restrict session to this mount prefix; repeatable',
+      "restrict session to a mount, optionally capping its mode: '/data:read' " +
+        "(alias '/data:r'), '/scratch:rw', '/bin:rwx', or a bare '/data' to keep " +
+        "the mount's own mode; repeatable",
       (value: string, prev: string[]) => prev.concat([value]),
       [] as string[],
     )
@@ -40,7 +65,7 @@ export function registerSessionCommands(program: Command): void {
       const body: Record<string, unknown> = {}
       if (opts.id !== undefined) body.sessionId = opts.id
       if (opts.mount !== undefined && opts.mount.length > 0) {
-        body.allowedMounts = opts.mount
+        body.mounts = parseMountModes(opts.mount)
       }
       emit(
         await handleResponse(

@@ -16,7 +16,9 @@ import os
 import re
 from pathlib import Path
 
-from mirage.server.env import ENV_HOME, ENV_PID_FILE
+from mirage.server.daemon_config import read_daemon_table
+from mirage.server.env import (ENV_HOME, ENV_PID_FILE, ENV_SNAPSHOT_ROOT,
+                               ENV_VERSION_ROOT)
 
 _SAFE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
@@ -43,13 +45,12 @@ def mirage_home() -> Path:
 def pid_file_path(explicit: str | Path | None = None) -> Path:
     """Resolve the daemon pid file location.
 
-    Priority: ``explicit`` argument, then ``$MIRAGE_PID_FILE``, then
-    ``daemon.pid`` under :func:`mirage_home`. Relative values are
-    absolutized against the current working directory.
+    Priority: ``explicit`` argument, then ``$MIRAGE_PID_FILE``, then the
+    ``pid_file`` key in ``config.toml`` ``[daemon]``, then ``daemon.pid``
+    under :func:`mirage_home`.
 
     Args:
-        explicit (str | Path | None): caller-supplied override that
-            wins over any environment variable.
+        explicit (str | Path | None): caller-supplied override.
 
     Returns:
         Path: the resolved absolute pid file path.
@@ -57,17 +58,63 @@ def pid_file_path(explicit: str | Path | None = None) -> Path:
     if explicit is not None:
         return _absolute(explicit)
     override = os.environ.get(ENV_PID_FILE)
-    return _absolute(override) if override else mirage_home() / "daemon.pid"
+    if override:
+        return _absolute(override)
+    home = mirage_home()
+    from_config = read_daemon_table(home).get("pid_file")
+    if from_config:
+        return _absolute(from_config)
+    return home / "daemon.pid"
 
 
-def default_version_root() -> Path:
-    """Default git repos root, under :func:`mirage_home`."""
-    return mirage_home() / "repos"
+def version_root_path(explicit: str | Path | None = None) -> Path:
+    """Resolve the git repos root.
+
+    Priority: ``explicit`` argument, then ``$MIRAGE_VERSION_ROOT``, then the
+    ``version_root`` key in ``config.toml`` ``[daemon]``, then ``repos``
+    under :func:`mirage_home`.
+
+    Args:
+        explicit (str | Path | None): caller-supplied override.
+
+    Returns:
+        Path: the resolved absolute repos root.
+    """
+    if explicit is not None:
+        return _absolute(explicit)
+    override = os.environ.get(ENV_VERSION_ROOT)
+    if override:
+        return _absolute(override)
+    home = mirage_home()
+    from_config = read_daemon_table(home).get("version_root")
+    if from_config:
+        return _absolute(from_config)
+    return home / "repos"
 
 
-def default_snapshot_root() -> Path:
-    """Default snapshot root, under :func:`mirage_home`."""
-    return mirage_home() / "snapshots"
+def snapshot_root_path(explicit: str | Path | None = None) -> Path:
+    """Resolve the snapshot root.
+
+    Priority: ``explicit`` argument, then ``$MIRAGE_SNAPSHOT_ROOT``, then the
+    ``snapshot_root`` key in ``config.toml`` ``[daemon]``, then ``snapshots``
+    under :func:`mirage_home`.
+
+    Args:
+        explicit (str | Path | None): caller-supplied override.
+
+    Returns:
+        Path: the resolved absolute snapshot root.
+    """
+    if explicit is not None:
+        return _absolute(explicit)
+    override = os.environ.get(ENV_SNAPSHOT_ROOT)
+    if override:
+        return _absolute(override)
+    home = mirage_home()
+    from_config = read_daemon_table(home).get("snapshot_root")
+    if from_config:
+        return _absolute(from_config)
+    return home / "snapshots"
 
 
 class PathOutsideRootError(Exception):

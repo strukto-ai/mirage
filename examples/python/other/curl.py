@@ -21,15 +21,11 @@ ws = Workspace(
     mode=MountMode.WRITE,
 )
 
-print("=== curl (default: via Jina Reader, returns markdown) ===")
+print("=== curl (returns the raw page body) ===")
 result = asyncio.run(ws.execute("curl https://example.com"))
 print(result.stdout)
 
 print("\n=== curl a documentation page ===")
 result = asyncio.run(
     ws.execute("curl https://docs.python.org/3/library/json.html"))
-print(result.stdout)
-
-print("\n=== curl --raw (bypass Jina, raw HTML) ===")
-result = asyncio.run(ws.execute("curl --raw https://example.com"))
 print(result.stdout)

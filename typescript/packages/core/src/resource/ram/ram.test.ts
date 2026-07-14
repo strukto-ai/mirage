@@ -58,6 +58,7 @@ describe('RAMResource.kind / ops()', () => {
       'readdir',
       'rename',
       'rmdir',
+      'setattr',
       'stat',
       'truncate',
       'unlink',

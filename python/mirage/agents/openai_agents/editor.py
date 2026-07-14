@@ -35,6 +35,7 @@ class MirageEditor(ApplyPatchEditor):
         try:
             await ops.mkdir(parent)
         except (FileExistsError, ValueError):
+            # mkdir -p semantics: an existing parent is success
             pass
         content = apply_diff("", op.diff or "", mode="create")
         await ops.write(op.path, content.encode("utf-8"))

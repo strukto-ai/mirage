@@ -2,6 +2,7 @@ import pytest
 from aioresponses import CallbackResult, aioresponses
 
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
+from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.onedrive import COMMANDS
 from mirage.core.onedrive._client import GraphError
 from mirage.core.onedrive.copy import copy
@@ -115,7 +116,7 @@ async def test_cp_recursive_uses_server_side_folder_copy():
         m.post(_BASE + "/root:/src:/copy", status=202, payload={})
         _out, io = await _cp.__wrapped__(_accessor(), [src, dst],
                                          r=True,
-                                         index=None)
+                                         index=NULL_INDEX)
     assert set(io.writes) == {"/dst/a.txt", "/dst/sub/b.txt"}
 
 

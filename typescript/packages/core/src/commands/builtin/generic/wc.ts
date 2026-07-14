@@ -16,6 +16,7 @@ import { cacheAwareStreamEager } from '../../../cache/read_through.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import { fsErrorLine, isFsError } from '../../../utils/errors.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { formatRecords } from '../utils/output.ts'
 
@@ -88,8 +89,16 @@ export async function wcGeneric(
     let totalWords = 0
     let totalBytes = 0
     let totalMax = 0
+    let err = ''
     for (const p of paths) {
-      const data = await materialize(stream(p))
+      let data: Uint8Array
+      try {
+        data = await materialize(stream(p))
+      } catch (e) {
+        if (!isFsError(e)) throw e
+        err += fsErrorLine('wc', p, e)
+        continue
+      }
       const text = DEC.decode(data)
       const lineCount = countChar(text, '\n')
       const wordCount = text.split(/\s+/).filter((s) => s !== '').length
@@ -119,14 +128,21 @@ export async function wcGeneric(
       }
     }
     if (paths.length > 1) {
+      // GNU wc totals the operands that resolved and still prints the row
+      // when some (or all) operands failed: `0 total` when none resolved.
       if (LFlag) rows.push({ values: [totalMax], label: 'total' })
       else if (lFlag) rows.push({ values: [totalLines], label: 'total' })
       else if (wFlag) rows.push({ values: [totalWords], label: 'total' })
       else if (cFlag || mFlag) rows.push({ values: [totalBytes], label: 'total' })
       else rows.push({ values: [totalLines, totalWords, totalBytes], label: 'total' })
     }
+    const io = new IOResult({
+      exitCode: err === '' ? 0 : 1,
+      stderr: err === '' ? null : ENC.encode(err),
+    })
+    if (rows.length === 0) return [null, io]
     const out: ByteSource = formatRecords(formatWcLines(rows))
-    return [out, new IOResult()]
+    return [out, io]
   }
   let source: AsyncIterable<Uint8Array>
   try {

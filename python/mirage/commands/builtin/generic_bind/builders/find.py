@@ -65,6 +65,10 @@ async def find(
                               empty=empty)
 
 
+def _no_dir_hint(_name: str) -> bool | None:
+    return None
+
+
 async def _find_walk(
     ops: CommandIO,
     accessor: Accessor,
@@ -81,8 +85,9 @@ async def _find_walk(
     empty: bool,
     index: IndexCacheStore | None,
 ) -> tuple[ByteSource | None, IOResult]:
-    search = paths[0] if paths else PathSpec(
-        virtual="/", directory="/", resource_path="")
+    searches = paths if paths else [
+        PathSpec(virtual="/", directory="/", resource_path="")
+    ]
     args = parse_find_args(texts,
                            name=name,
                            type=type,
@@ -93,12 +98,17 @@ async def _find_walk(
                            path=path,
                            mindepth=mindepth,
                            empty=empty)
-    results = await walk_find(search,
-                              readdir=partial(ops.readdir, accessor),
-                              stat=partial(ops.stat, accessor),
-                              is_dir_name=lambda _name: None,
-                              index=index,
-                              args=args)
+    hint = (partial(ops.is_dir_name, accessor)
+            if ops.is_dir_name is not None else _no_dir_hint)
+    # GNU find walks every start point in operand order.
+    results: list[str] = []
+    for search in searches:
+        results.extend(await walk_find(search,
+                                       readdir=partial(ops.readdir, accessor),
+                                       stat=partial(ops.stat, accessor),
+                                       is_dir_name=hint,
+                                       index=index,
+                                       args=args))
     return format_records(results), IOResult()
 
 

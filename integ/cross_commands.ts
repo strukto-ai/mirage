@@ -18,6 +18,7 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3";
 import {
+  FileStat,
   MountMode,
   RAMResource,
   RedisResource,
@@ -190,6 +191,91 @@ async function checkReadFamily(
   );
 }
 
+// One good + one missing operand: GNU keeps the good operand's output,
+// reports the missing operand on stderr via the shared formatter, and exits
+// 1. Single-mount and cross-mount must produce identical bytes.
+async function checkPartialRead(
+  ws: Workspace,
+  dst: string,
+  label: string,
+): Promise<void> {
+  const src = "/ram/dir/a.txt";
+  const miss = `${dst}/copied/nope.txt`;
+  let [out, err, code] = await run(ws, `cat ${src} ${miss}`);
+  check(
+    `${label}: cat keeps partial output`,
+    out === "aaa\n" &&
+      code === 1 &&
+      err === `cat: ${miss}: No such file or directory\n`,
+  );
+  [out, err, code] = await run(ws, `wc -l ${src} ${miss}`);
+  check(
+    `${label}: wc keeps total`,
+    out === `1 ${src}\n1 total\n` &&
+      code === 1 &&
+      err === `wc: ${miss}: No such file or directory\n`,
+  );
+  [out, err, code] = await run(ws, `head -n 1 ${src} ${miss}`);
+  check(
+    `${label}: head keeps banner`,
+    out === `==> ${src} <==\naaa\n` &&
+      code === 1 &&
+      err === `head: ${miss}: No such file or directory\n`,
+  );
+  [out, err, code] = await run(ws, `tail -n 1 ${src} ${miss}`);
+  check(
+    `${label}: tail keeps banner`,
+    out === `==> ${src} <==\naaa\n` &&
+      code === 1 &&
+      err === `tail: ${miss}: No such file or directory\n`,
+  );
+  // nl rides the STREAM strategy cross-mount: the error line must carry
+  // nl's own name, not the cat sub-run that fetched the operand.
+  [out, err, code] = await run(ws, `nl ${src} ${miss}`);
+  check(
+    `${label}: nl keeps output, own name`,
+    out === "     1\taaa\n" &&
+      code === 1 &&
+      err === `nl: ${miss}: No such file or directory\n`,
+  );
+  [out, err, code] = await run(ws, `md5 ${src} ${miss}`);
+  check(
+    `${label}: md5 keeps good hash`,
+    out === `5c9597f3c8245907ea71a89d9d39d08e  ${src}\n` &&
+      code === 1 &&
+      err === `md5: ${miss}: No such file or directory\n`,
+  );
+  // stat fans out per operand; mtimes vary, so pin shape and exit only.
+  [out, err, code] = await run(ws, `stat ${src} ${miss}`);
+  check(
+    `${label}: stat keeps good row`,
+    out.includes("name=a.txt") &&
+      code === 1 &&
+      err === `stat: ${miss}: No such file or directory\n`,
+  );
+  [out, err, code] = await run(ws, `cut -c1 ${src} ${miss}`);
+  check(
+    `${label}: cut keeps partial output`,
+    out === "a\n" && code === 1 && err === `cut: ${miss}: No such file or directory\n`,
+  );
+  [out, err, code] = await run(ws, `tac ${src} ${miss}`);
+  check(
+    `${label}: tac keeps partial output`,
+    out === "aaa\n" && code === 1 && err === `tac: ${miss}: No such file or directory\n`,
+  );
+  [out, err, code] = await run(ws, `sed s/a/X/ ${src} ${miss}`);
+  check(
+    `${label}: sed keeps partial output`,
+    out === "Xaa\n" && code === 1 && err === `sed: ${miss}: No such file or directory\n`,
+  );
+  // sort aborts on any failed operand, single- and cross-mount alike.
+  [out, err, code] = await run(ws, `sort ${src} ${miss}`);
+  check(
+    `${label}: sort aborts`,
+    out === "" && code === 1 && err === `sort: ${miss}: No such file or directory\n`,
+  );
+}
+
 // diff/cmp two files that live on different mounts: identical operands exit 0
 // with no output, differing operands exit 1 and report the change.
 async function checkCompare(
@@ -311,6 +397,65 @@ async function checkSymlinks(
 // Reads through a link must share the target's cache entry: warming via the
 // link keys the cache under the REAL path, so a direct read of the target
 // serves the same cached bytes after an out-of-band mutation.
+async function statOf(ws: Workspace, path: string): Promise<FileStat> {
+  return (await ws.dispatch("stat", path)) as FileStat;
+}
+
+async function checkMetadata(
+  ws: Workspace,
+  dst: string,
+  label: string,
+): Promise<void> {
+  // setattr is resolve-then-act: chmod/chown/touch on a dst-homed file,
+  // directly and through links homed on another mount, must land on the
+  // target mount (natively or in the namespace overlay) and read back
+  // through dispatch-stat identically.
+  await run(ws, `printf 'mmm\n' > ${dst}/copied/m.txt`);
+  await run(
+    ws,
+    `chmod 601 ${dst}/copied/m.txt && chown 500:dev ${dst}/copied/m.txt` +
+      ` && touch -t 202601021530 ${dst}/copied/m.txt`,
+  );
+  let st = await statOf(ws, `${dst}/copied/m.txt`);
+  check(`${label}: chmod lands on dst mount`, st.mode === 0o601);
+  check(
+    `${label}: chown lands on dst mount`,
+    st.uid === 500 && st.gid === "dev",
+  );
+  check(
+    `${label}: touch stamps dst mtime`,
+    (st.modified ?? "").startsWith("2026-01-02T15:30"),
+  );
+  await run(ws, `ln -s ${dst}/copied/m.txt /ram/ml.txt`);
+  await run(ws, "chmod 640 /ram/ml.txt && touch -t 202603041200 /ram/ml.txt");
+  st = await statOf(ws, `${dst}/copied/m.txt`);
+  check(
+    `${label}: chmod through cross-mount link hits target`,
+    st.mode === 0o640,
+  );
+  check(
+    `${label}: touch through cross-mount link hits target`,
+    (st.modified ?? "").startsWith("2026-03-04T12:00"),
+  );
+  await run(ws, "touch -h -t 202601010000 /ram/ml.txt");
+  st = await statOf(ws, `${dst}/copied/m.txt`);
+  check(
+    `${label}: touch -h writes link node, target untouched`,
+    (st.modified ?? "").startsWith("2026-03-04T12:00"),
+  );
+  await run(ws, `ln -s ${dst}/copied /ram/mdir`);
+  await run(ws, "touch -t 202601021530 /ram/mdir/created.txt");
+  const [out] = await run(ws, `ls ${dst}/copied`);
+  check(
+    `${label}: touch creates through cross-mount dir link`,
+    out.includes("created.txt"),
+  );
+  await run(
+    ws,
+    `rm /ram/ml.txt /ram/mdir ${dst}/copied/m.txt ${dst}/copied/created.txt`,
+  );
+}
+
 async function checkSymlinkCache(
   ws: Workspace,
   client: S3Client,
@@ -415,11 +560,13 @@ async function exercise(
   await checkRecursive(ws, dst, label, expectDirs);
   await checkCdCrossMount(ws, dst, label);
   await checkReadFamily(ws, dst, label);
+  await checkPartialRead(ws, dst, label);
   await checkCompare(ws, dst, label);
   await checkNoClobber(ws, dst, label);
   await checkOmitDirectory(ws, dst, label);
   await checkMove(ws, dst, label);
   await checkSymlinks(ws, dst, label);
+  await checkMetadata(ws, dst, label);
 }
 
 async function main(): Promise<void> {
@@ -453,6 +600,7 @@ async function main(): Promise<void> {
   const ws = new Workspace(mounts, { mode: MountMode.WRITE });
   try {
     await seedTree(ws, "/ram");
+    await checkPartialRead(ws, "/ram", "ram-single");
     await exercise(ws, "/ram2", "ram", true);
     if (redisUrl) await exercise(ws, "/redis", "redis", true);
     else process.stdout.write("SKIP redis (REDIS_URL unset)\n");

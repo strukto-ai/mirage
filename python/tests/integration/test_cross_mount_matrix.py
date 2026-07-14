@@ -28,7 +28,7 @@ from mirage.resource.gdrive import GoogleDriveConfig, GoogleDriveResource
 from mirage.resource.ram import RAMResource
 from mirage.resource.redis import RedisResource
 from mirage.resource.s3 import S3Config, S3Resource
-from mirage.types import DEFAULT_SESSION_ID, MountMode
+from mirage.types import DEFAULT_SESSION_ID, MountMode, PathSpec
 from mirage.workspace import Workspace
 from tests.integration.gdrive_mock import FakeGDrive, patch_gdrive
 from tests.integration.s3_mock import patch_s3_multi
@@ -135,7 +135,8 @@ async def _populate_file_async(state: _MountState, name: str,
                     await mem_mkdir(state.accessor, d)
                 except (FileExistsError, ValueError):
                     pass
-        await mem_write(state.accessor, "/" + name, content)
+        await mem_write(state.accessor, PathSpec.from_str_path("/" + name),
+                        content)
     elif state.ptype == "disk":
         full = state.disk_root / name
         full.parent.mkdir(parents=True, exist_ok=True)
@@ -148,7 +149,8 @@ async def _populate_file_async(state: _MountState, name: str,
                 await redis_mkdir(state.resource.accessor, d)
             except (FileExistsError, ValueError):
                 pass
-        await redis_write(state.resource.accessor, "/" + name, content)
+        await redis_write(state.resource.accessor,
+                          PathSpec.from_str_path("/" + name), content)
 
 
 def _populate_file(state: _MountState, name: str, content: bytes,

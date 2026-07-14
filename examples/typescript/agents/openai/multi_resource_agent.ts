@@ -66,15 +66,11 @@ for (const op of slack.ops()) ops.register(op)
 const ws = new Workspace(
   {
     '/': ram,
-    '/s3': s3,
-    '/slack': slack,
+    '/s3': [s3, MountMode.READ] as const,
+    '/slack': [slack, MountMode.READ] as const,
   },
   {
     mode: MountMode.WRITE,
-    modeOverrides: {
-      '/s3': MountMode.READ,
-      '/slack': MountMode.READ,
-    },
     ops,
   },
 )

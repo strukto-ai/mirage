@@ -15,7 +15,7 @@
 import time
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.observe.context import record
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
@@ -23,10 +23,6 @@ from mirage.utils.path import norm
 
 
 async def read_bytes(accessor: RedisAccessor, path: PathSpec) -> bytes:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     if isinstance(path, PathSpec):
         path = path.mount_path
@@ -43,16 +39,9 @@ async def read_bytes(accessor: RedisAccessor, path: PathSpec) -> bytes:
 async def read(
     accessor: RedisAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
-    virtual = path.virtual if isinstance(path, PathSpec) else path
-    if isinstance(path, PathSpec):
-        path = path.mount_path
     try:
         return await read_bytes(accessor, path)
     except FileNotFoundError as exc:
-        raise enoent(virtual) from exc
+        raise enoent(path.virtual) from exc

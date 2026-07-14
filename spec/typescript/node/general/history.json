@@ -15,7 +15,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-c",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": "Delete the history entry at the given offset.",
@@ -23,7 +24,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-d",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": "Append the args as a single entry without running.",
@@ -31,7 +33,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-s",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": "Print the args without storing them.",
@@ -39,7 +42,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-p",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": "Append: no-op (file and store are the same).",
@@ -47,7 +51,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-a",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": "Read: no-op (file and store are the same).",
@@ -55,7 +60,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-r",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": "Write: no-op (file and store are the same).",
@@ -63,7 +69,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-w",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": "Read-new: no-op (file and store are the same).",
@@ -71,7 +78,8 @@
       "numeric_shorthand": false,
       "repeatable": false,
       "short": "-n",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     }
   ],
   "positional": [],

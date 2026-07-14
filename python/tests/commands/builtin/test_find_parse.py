@@ -61,8 +61,28 @@ def test_globals_extracted_as_truenode():
 
 def test_size_extracted_global():
     expr = parse_find_expression(["-size", "+50c"])
-    assert expr.min_size == 50
+    assert expr.min_size == 51
     assert expr.max_size is None
+
+
+def test_size_bounds_follow_gnu_strictness():
+    expr = parse_find_expression(["-size", "+0c"])
+    assert (expr.min_size, expr.max_size) == (1, None)
+    expr = parse_find_expression(["-size", "-2c"])
+    assert (expr.min_size, expr.max_size) == (None, 1)
+    expr = parse_find_expression(["-size", "2c"])
+    assert (expr.min_size, expr.max_size) == (2, 2)
+
+
+def test_size_rounds_up_to_unit():
+    # GNU -size -1k keeps only empty files; 1k keeps 1..1024 bytes;
+    # +1k excludes a file of exactly 1024 bytes.
+    expr = parse_find_expression(["-size", "-1k"])
+    assert (expr.min_size, expr.max_size) == (None, 0)
+    expr = parse_find_expression(["-size", "1k"])
+    assert (expr.min_size, expr.max_size) == (1, 1024)
+    expr = parse_find_expression(["-size", "+1k"])
+    assert (expr.min_size, expr.max_size) == (1025, None)
 
 
 def test_empty_expression_is_true():

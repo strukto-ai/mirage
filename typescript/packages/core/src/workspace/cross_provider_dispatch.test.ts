@@ -299,7 +299,7 @@ describe('cross-mount strategies (STREAM/FANOUT) end to end', () => {
 
   it('unsupported multi-stream commands still refuse cleanly', async () => {
     const ws = await twoMounts()
-    const io = await ws.execute('paste /m1/a.txt /m2/c.txt')
+    const io = await ws.execute('uniq /m1/a.txt /m2/c.txt')
     expect(io.exitCode).toBe(1)
     expect(stderrStr(io)).toContain('cross-mount not supported')
     await ws.close()

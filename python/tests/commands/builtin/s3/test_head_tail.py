@@ -23,10 +23,16 @@ from mirage.utils.key_prefix import mount_key
 
 
 def _ops(chunks):
+
+    async def stat(accessor, path, index=None):
+        if path.virtual not in chunks:
+            raise FileNotFoundError(path.virtual)
+        return {"size": 0}
+
     return CommandIO(readdir=None,
                      read_bytes=None,
                      read_stream=_streamer(chunks),
-                     stat=None,
+                     stat=stat,
                      is_mounted=lambda a: True,
                      local=False)
 

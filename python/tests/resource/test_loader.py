@@ -17,6 +17,9 @@ import asyncio
 import pytest
 
 from mirage.resource.loader import load_backend_class
+from mirage.types import PathSpec
+
+_ps = PathSpec.from_str_path
 
 
 def _cat_sync(backend, path):
@@ -41,8 +44,8 @@ def test_load_from_script_file(tmp_path):
     cls = load_backend_class(f"{script}:CustomBackend")
     assert cls.__name__ == "CustomBackend"
     instance = cls()
-    asyncio.run(instance.write("/test.txt", data=b"hello"))
-    assert _cat_sync(instance, "/test.txt") == b"hello"
+    asyncio.run(instance.write(_ps("/test.txt"), data=b"hello"))
+    assert _cat_sync(instance, _ps("/test.txt")) == b"hello"
 
 
 def test_load_invalid_spec_no_colon():

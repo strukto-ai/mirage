@@ -105,17 +105,6 @@ async def test_read_via_index(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_read_no_index(accessor):
-    with pytest.raises(FileNotFoundError):
-        await read(
-            accessor,
-            PathSpec(resource_path=mount_key(
-                "/gdocs/owned/nonexistent.gdoc.json", "/gdocs"),
-                     virtual="/gdocs/owned/nonexistent.gdoc.json",
-                     directory="/gdocs/owned/nonexistent.gdoc.json"), None)
-
-
-@pytest.mark.asyncio
 async def test_read_auto_bootstraps_from_empty_index(accessor, index):
     files = [{
         "id": "doc1",

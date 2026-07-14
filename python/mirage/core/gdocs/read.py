@@ -13,15 +13,18 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+import logging
 import posixpath
 
 from mirage.accessor.gdocs import GDocsAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gdocs._client import DOCS_API_BASE, TokenManager, google_get
 from mirage.core.gdocs.readdir import readdir
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
+
+logger = logging.getLogger(__name__)
 
 
 async def read_doc(token_manager: TokenManager, doc_id: str) -> bytes:
@@ -33,17 +36,11 @@ async def read_doc(token_manager: TokenManager, doc_id: str) -> bytes:
 async def read(
     accessor: GDocsAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     key = path.resource_path
-    if index is None:
-        raise enoent(virtual)
     virtual_key = prefix + "/" + key if prefix else "/" + key
     result = await index.get(virtual_key)
     if result.entry is None:
@@ -54,8 +51,10 @@ async def read(
             try:
                 await readdir(accessor, parent_path, index)
                 result = await index.get(virtual_key)
-            except Exception:
-                pass
+            except Exception as exc:
+                # best-effort cache populate; canonical ENOENT raised below
+                logger.debug("read populate failed for %s: %s", virtual_key,
+                             exc)
         if result.entry is None:
             raise enoent(virtual)
     if result.entry.resource_type in ("gdocs/directory", ):

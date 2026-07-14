@@ -13,11 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountKey } from '../../../../utils/key_prefix.ts'
+import { fsErrorLine, isFsError } from '../../../../utils/errors.ts'
 import { IOResult, materialize } from '../../../../io/types.ts'
 import type { Resource } from '../../../../resource/base.ts'
 import { type FileStat, PathSpec } from '../../../../types.ts'
 import type { CommandOpts } from '../../../config.ts'
 import type { DispatchFn, OperandRun, RunSingle } from './types.ts'
+
+const ENC = new TextEncoder()
 
 // Run one native single-mount command per operand, in operand order. Each
 // operand executes on its owning mount through `runSingle` (which also
@@ -36,7 +39,23 @@ export async function runOperands(
     const [out, io] = await runSingle(cmdName, [scope], texts, flagKwargs, {
       stdin: stdinBytes,
     })
-    const data = out !== null ? await materialize(out) : new Uint8Array()
+    let data: Uint8Array
+    try {
+      data = out !== null ? await materialize(out) : new Uint8Array()
+    } catch (e) {
+      // A lazy stream can fail on first pull (head/tail opening the operand
+      // mid-drain); report it like the native run would and keep the
+      // remaining operands, GNU-style.
+      if (!isFsError(e)) throw e
+      const existing = await materialize(io.stderr)
+      const line = ENC.encode(fsErrorLine(cmdName, scope, e))
+      const merged = new Uint8Array(existing.byteLength + line.byteLength)
+      merged.set(existing, 0)
+      merged.set(line, existing.byteLength)
+      io.stderr = merged
+      io.exitCode = 1
+      data = new Uint8Array()
+    }
     io.syncExitCode()
     results.push({ scope, data, io })
   }

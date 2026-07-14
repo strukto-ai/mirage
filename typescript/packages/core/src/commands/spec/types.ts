@@ -12,6 +12,30 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+// Command names the spec layer references by value. Not a registry of
+// every command: only names that appear away from their own module
+// (usage message shapes, arity guards). Members are their plain string
+// values, so the raw string the executor passes still matches. Mirrors
+// the Python CommandName StrEnum and the crossmount Cmd pattern.
+export enum CommandName {
+  BASE64 = 'base64',
+  CMP = 'cmp',
+  COMM = 'comm',
+  DATE = 'date',
+  DIFF = 'diff',
+  FIND = 'find',
+  JOIN = 'join',
+  LOOK = 'look',
+  MKTEMP = 'mktemp',
+  PATCH = 'patch',
+  SEQ = 'seq',
+  SPLIT = 'split',
+  TR = 'tr',
+  TSORT = 'tsort',
+  UNIQ = 'uniq',
+  XXD = 'xxd',
+}
+
 export const OperandKind = Object.freeze({
   NONE: 'none',
   PATH: 'path',
@@ -38,6 +62,12 @@ export interface OptionInit {
    * and route each joined path.
    */
   repeatable?: boolean
+  /**
+   * GNU optional-argument long option (e.g. `--color[=WHEN]`): bare
+   * `--color` parses as true, `--color=auto` parses as the string, and a
+   * detached next token is never consumed. Requires a long form.
+   */
+  valueOptional?: boolean
   description?: string
 }
 
@@ -47,6 +77,7 @@ export class Option {
   readonly valueKind: OperandKind
   readonly numericShorthand: boolean
   readonly repeatable: boolean
+  readonly valueOptional: boolean
   readonly description: string | null
 
   constructor(init: OptionInit = {}) {
@@ -55,6 +86,7 @@ export class Option {
     this.valueKind = init.valueKind ?? OperandKind.NONE
     this.numericShorthand = init.numericShorthand ?? false
     this.repeatable = init.repeatable ?? false
+    this.valueOptional = init.valueOptional ?? false
     this.description = init.description ?? null
     Object.freeze(this)
   }
@@ -120,6 +152,8 @@ export interface ParsedArgsInit {
   textFlagValues?: string[]
   warnings?: string[]
   wordKinds?: (OperandKind | null)[]
+  invalidOptions?: string[]
+  needsValueOptions?: string[]
 }
 
 export class ParsedArgs {
@@ -131,6 +165,11 @@ export class ParsedArgs {
   readonly textFlagValues: string[]
   readonly warnings: string[]
   readonly wordKinds: (OperandKind | null)[]
+  // GNU-shaped option errors, reported (never thrown) by the parser:
+  // undeclared options ('--bogus' or the offending cluster char 'Y'),
+  // and declared value flags that ran out of line ('--max-depth', 'm').
+  readonly invalidOptions: string[]
+  readonly needsValueOptions: string[]
 
   constructor(init: ParsedArgsInit) {
     this.flags = init.flags
@@ -141,6 +180,8 @@ export class ParsedArgs {
     this.textFlagValues = init.textFlagValues ?? []
     this.warnings = init.warnings ?? []
     this.wordKinds = init.wordKinds ?? []
+    this.invalidOptions = init.invalidOptions ?? []
+    this.needsValueOptions = init.needsValueOptions ?? []
   }
 
   paths(): string[] {

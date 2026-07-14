@@ -15,7 +15,6 @@
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands)
 from mirage.commands.builtin.hf_buckets.du import du
-from mirage.commands.builtin.hf_buckets.sed import sed
 from mirage.core.hf_buckets.create import create as _create
 from mirage.core.hf_buckets.du import du as _du
 from mirage.core.hf_buckets.du import du_all as _du_all
@@ -31,7 +30,7 @@ from mirage.core.hf_buckets.write import write_bytes as _write
 
 # Hugging Face bucket files are read and written through the generic factory;
 # du keeps a wrapper because its du_all returns a flat list (du_multi contract)
-# rather than the generic (list, total) tuple, and sed has no generic builder.
+# rather than the generic (list, total) tuple.
 # cp and mv are skipped because HF buckets have no server-side copy/rename op.
 _HF_BUCKETS_CMD_OPS = CommandIO(
     readdir=_readdir,
@@ -50,7 +49,7 @@ _HF_BUCKETS_CMD_OPS = CommandIO(
     du_all=_du_all,
 )
 
-_HF_BUCKETS_OVERRIDES = {"cp", "du", "mv", "sed"}
+_HF_BUCKETS_OVERRIDES = {"cp", "du", "mv"}
 
 COMMANDS = [
     *make_generic_commands(
@@ -59,5 +58,4 @@ COMMANDS = [
         overrides=_HF_BUCKETS_OVERRIDES,
     ),
     du,
-    sed,
 ]

@@ -86,6 +86,7 @@ class MirageSandboxSession(BaseSandboxSession):
             try:
                 await self._ws.ops.mkdir(parent)
             except (FileExistsError, ValueError):
+                # mkdir -p semantics: an existing parent is success
                 pass
         await self._ws.ops.write(str(path), content)
 

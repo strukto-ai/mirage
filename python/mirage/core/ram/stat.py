@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.filetype import guess_type
@@ -22,22 +22,23 @@ from mirage.utils.path import norm
 
 async def stat(accessor: RAMAccessor,
                path: PathSpec,
-               index: IndexCacheStore = None) -> FileStat:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
+               index: IndexCacheStore = NULL_INDEX) -> FileStat:
     virtual = path.virtual if isinstance(path, PathSpec) else path
     if isinstance(path, PathSpec):
         path = path.mount_path
     store = accessor.store
     p = norm(path)
+    attrs = store.attrs.get(p, {})
     if p in store.dirs:
         return FileStat(
             name=p.rsplit("/", 1)[-1] or "/",
             size=None,
             modified=store.modified.get(p),
             type=FileType.DIRECTORY,
+            mode=attrs.get("mode"),
+            uid=attrs.get("uid"),
+            gid=attrs.get("gid"),
+            atime=attrs.get("atime"),
         )
     if p in store.files:
         data = store.files[p]
@@ -46,5 +47,9 @@ async def stat(accessor: RAMAccessor,
             size=len(data),
             modified=store.modified.get(p),
             type=guess_type(p),
+            mode=attrs.get("mode"),
+            uid=attrs.get("uid"),
+            gid=attrs.get("gid"),
+            atime=attrs.get("atime"),
         )
     raise enoent(virtual)

@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.github_ci import GitHubCIConfig, GitHubCIResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -96,6 +97,19 @@ async def main():
     r = await ws.execute(f'stat "{run_path}"')
     print(f"  {(await r.stdout_str()).strip()}")
 
+    # chmod/chown/touch never hit the Actions API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print(f"=== metadata overlay on {run_path} ===")
+    meta_res = await ws.execute(f'chmod 640 "{run_path}"'
+                                f' && chown 500:dev "{run_path}"'
+                                f' && touch -t 202601021530 "{run_path}"')
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    meta_st, _ = await ws.dispatch("stat",
+                                   PathSpec.from_str_path(f"{run_path}"))
+    print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+          f"gid={meta_st.gid} mtime={meta_st.modified}")
+
     # ── list jobs ─────────────────────────────────────
     jobs_path = f"{run_path}/jobs"
     print(f"\n=== ls {jobs_path}/ ===")
@@ -166,6 +180,17 @@ async def main():
     print(f"=== find {run_path}/ -name '*.json' | head -n 10 ===")
     r = await ws.execute(f'find "{run_path}/" -name "*.json" | head -n 10')
     print(await r.stdout_str())
+
+    # -path matches the display path; -size counts dirs and sizeless
+    # rendered files as 0 (so +0c drops them, -1k keeps them).
+    print(f"=== find {run_path}/ -path '*jobs*' | head -n 5 ===")
+    r = await ws.execute(f'find "{run_path}/" -path "*jobs*" | head -n 5')
+    print(await r.stdout_str())
+
+    print(f"=== find {run_path}/ -maxdepth 1 -size +0c ===")
+    r = await ws.execute(f'find "{run_path}/" -maxdepth 1 -size +0c')
+    print(f"  exit={r.exit_code} (sizeless entries count as 0,"
+          " expect no output)")
 
     # ── cd into a run ─────────────────────────────────
     print("=== pwd ===")

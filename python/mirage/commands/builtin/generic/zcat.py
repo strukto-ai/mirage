@@ -14,12 +14,16 @@ async def zcat(
     accessor: Accessor | None = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
+    # Each operand decompresses independently and the outputs concatenate
+    # in operand order, like GNU zcat.
     if paths:
-        raw = await read_bytes(accessor, paths[0])
-    else:
-        raw = await _read_stdin_async(stdin)
-        if raw is None:
-            raise ValueError("zcat: (stdin): unexpected end of file")
+        parts: list[bytes] = []
+        for p in paths:
+            parts.append(gziplib.decompress(await read_bytes(accessor, p)))
+        return b"".join(parts), IOResult()
+    raw = await _read_stdin_async(stdin)
+    if raw is None:
+        raise ValueError("zcat: (stdin): unexpected end of file")
     return gziplib.decompress(raw), IOResult()
 
 

@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildApp } from './app.ts'
 import { ENV_ALLOWED_HOSTS } from './env.ts'
@@ -222,5 +225,30 @@ describe('buildApp host header enforcement', () => {
       warnSpy.mockRestore()
       await app.close()
     }
+  })
+})
+
+describe('resolveAllowedHosts config layer', () => {
+  it('config beats default', () => {
+    const home = mkdtempSync(join(tmpdir(), 'mir-hosts-'))
+    writeFileSync(
+      join(home, 'config.toml'),
+      '[daemon]\nallowed_hosts = "example.com,api.example.com"\n',
+    )
+    expect(resolveAllowedHosts(undefined, { MIRAGE_HOME: home })).toEqual([
+      'example.com',
+      'api.example.com',
+    ])
+  })
+
+  it('env beats config', () => {
+    const home = mkdtempSync(join(tmpdir(), 'mir-hosts-'))
+    writeFileSync(join(home, 'config.toml'), '[daemon]\nallowed_hosts = "file.example.com"\n')
+    expect(
+      resolveAllowedHosts(undefined, {
+        MIRAGE_HOME: home,
+        MIRAGE_ALLOWED_HOSTS: 'env.example.com',
+      }),
+    ).toEqual(['env.example.com'])
   })
 })

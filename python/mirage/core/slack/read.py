@@ -15,7 +15,7 @@
 import json
 
 from mirage.accessor.slack import SlackAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.slack import files as slack_files
 from mirage.core.slack.history import get_history_jsonl
 from mirage.core.slack.users import get_user_profile
@@ -27,12 +27,8 @@ from mirage.utils.key_prefix import mount_prefix_of
 async def read(
     accessor: SlackAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path) if isinstance(
         path, PathSpec) else ""
@@ -45,8 +41,6 @@ async def read(
     if (len(parts) == 4 and parts[0] in ("channels", "dms")
             and parts[3] == "chat.jsonl"):
         parent_key = f"{parts[0]}/{parts[1]}"
-        if index is None:
-            raise enoent(virtual)
         virtual_key = prefix + "/" + parent_key
         lookup = await index.get(virtual_key)
         if lookup.entry is None:
@@ -57,8 +51,6 @@ async def read(
 
     if (len(parts) == 5 and parts[0] in ("channels", "dms")
             and parts[3] == "files"):
-        if index is None:
-            raise enoent(virtual)
         virtual_key = prefix + "/" + key
         lookup = await index.get(virtual_key)
         if lookup.entry is None or not lookup.entry.extra:
@@ -69,8 +61,6 @@ async def read(
         return await slack_files.download_file(accessor.config, url)
 
     if len(parts) == 2 and parts[0] == "users":
-        if index is None:
-            raise enoent(virtual)
         virtual_key = prefix + "/" + key
         lookup = await index.get(virtual_key)
         if lookup.entry is None:

@@ -1,5 +1,6 @@
 import pytest
 
+from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.databricks_volume.head import head
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -20,7 +21,7 @@ async def test_head_bytes_mode_uses_single_small_range_request(
         "/volume/reports/latest.md",
         mount_key("/volume/reports/latest.md", "/volume"))
 
-    source, _io = await head(accessor, [path], c="3")
+    source, _io = await head(accessor, [path], index=NULL_INDEX, c="3")
 
     assert await collect_bytes(source) == b"abc"
     assert files.download_calls == []

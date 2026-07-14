@@ -15,7 +15,7 @@
 import json
 
 from mirage.accessor.github_ci import GitHubCIAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.github_ci.annotations import list_annotations
 from mirage.core.github_ci.artifacts import download_artifact
 from mirage.core.github_ci.runs import (download_job_log, get_job, get_run,
@@ -29,12 +29,8 @@ from mirage.utils.key_prefix import mount_prefix_of
 async def read(
     accessor: GitHubCIAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     key = path.resource_path
@@ -43,8 +39,6 @@ async def read(
     # /workflows/<name>_<id>.json
     if len(parts) == 2 and parts[0] == "workflows" and parts[1].endswith(
             ".json"):
-        if index is None:
-            raise enoent(virtual)
         virtual_key = prefix + "/" + key
         lookup = await index.get(virtual_key)
         if lookup.entry is None:
@@ -54,8 +48,6 @@ async def read(
 
     # /runs/<workflow>_<run-id>/run.json
     if (len(parts) == 3 and parts[0] == "runs" and parts[2] == "run.json"):
-        if index is None:
-            raise enoent(virtual)
         run_virtual = prefix + "/" + f"{parts[0]}/{parts[1]}"
         lookup = await index.get(run_virtual)
         if lookup.entry is None:
@@ -66,8 +58,6 @@ async def read(
     # /runs/<workflow>_<run-id>/annotations.jsonl
     if (len(parts) == 3 and parts[0] == "runs"
             and parts[2] == "annotations.jsonl"):
-        if index is None:
-            raise enoent(virtual)
         run_virtual = prefix + "/" + f"{parts[0]}/{parts[1]}"
         lookup = await index.get(run_virtual)
         if lookup.entry is None:
@@ -86,8 +76,6 @@ async def read(
     # /runs/<workflow>_<run-id>/jobs/<job>_<job-id>.json
     if (len(parts) == 4 and parts[0] == "runs" and parts[2] == "jobs"
             and parts[3].endswith(".json")):
-        if index is None:
-            raise enoent(virtual)
         virtual_key = prefix + "/" + key
         lookup = await index.get(virtual_key)
         if lookup.entry is None:
@@ -98,8 +86,6 @@ async def read(
     # /runs/<workflow>_<run-id>/jobs/<job>_<job-id>.log
     if (len(parts) == 4 and parts[0] == "runs" and parts[2] == "jobs"
             and parts[3].endswith(".log")):
-        if index is None:
-            raise enoent(virtual)
         virtual_key = prefix + "/" + key
         lookup = await index.get(virtual_key)
         if lookup.entry is None:
@@ -108,8 +94,6 @@ async def read(
 
     # /runs/<workflow>_<run-id>/artifacts/<name>_<id>.zip
     if (len(parts) == 4 and parts[0] == "runs" and parts[2] == "artifacts"):
-        if index is None:
-            raise enoent(virtual)
         virtual_key = prefix + "/" + key
         lookup = await index.get(virtual_key)
         if lookup.entry is None:

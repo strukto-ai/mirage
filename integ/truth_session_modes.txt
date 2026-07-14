@@ -1,0 +1,39 @@
+=== modes:seed_data ===
+failed=False
+=== modes:seed_side ===
+failed=False
+=== modes:reader_cat ===
+hello
+failed=False
+=== modes:reader_rm_denied ===
+rm: read-only mount at /data/
+failed=True
+=== modes:reader_redirect_denied ===
+failed=True
+=== modes:reader_no_partial_write ===
+a.txt
+failed=False
+=== modes:reader_side_denied ===
+cat: session 'reader' not allowed to access mount '/side'
+failed=True
+=== modes:writer_write ===
+w
+failed=False
+=== modes:lister_inherits_write ===
+l
+failed=False
+=== modes:widen_attempt_denied ===
+failed=True
+=== modes:reader_pathless_wc ===
+1
+failed=False
+=== root:root_seed ===
+failed=False
+=== root:root_unlisted_denied ===
+cat: session 'no_root' not allowed to access mount '/'
+failed=True
+=== root:root_read_mode ===
+top
+failed=False
+=== root:root_write_denied ===
+failed=True

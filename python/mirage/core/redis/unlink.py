@@ -19,10 +19,6 @@ from mirage.utils.path import norm
 
 
 async def unlink(accessor: RedisAccessor, path: PathSpec) -> None:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     if isinstance(path, PathSpec):
         path = path.mount_path
     store = accessor.store
@@ -31,4 +27,5 @@ async def unlink(accessor: RedisAccessor, path: PathSpec) -> None:
         raise FileNotFoundError(p)
     await store.del_file(p)
     await store.del_modified(p)
+    await store.del_attrs(p)
     await invalidate_after_unlink(path)

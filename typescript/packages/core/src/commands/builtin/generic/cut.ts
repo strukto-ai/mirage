@@ -17,14 +17,23 @@ import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { cutStream, parseCutRanges } from '../cut_helper.ts'
 import { resolveSource } from '../utils/stream.ts'
+import { operandsIo, readOperands, singleChunk } from '../utils/operands.ts'
 
 const ENC = new TextEncoder()
 
-export function cutGeneric(
+async function* chainStreams(
+  streams: readonly AsyncIterable<Uint8Array>[],
+): AsyncIterable<Uint8Array> {
+  for (const s of streams) {
+    for await (const chunk of s) yield chunk
+  }
+}
+
+export async function cutGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-): CommandFnResult {
+): Promise<CommandFnResult> {
   const f = typeof opts.flags.f === 'string' ? opts.flags.f : null
   const d = typeof opts.flags.d === 'string' ? opts.flags.d : null
   const c = typeof opts.flags.c === 'string' ? opts.flags.c : null
@@ -34,21 +43,27 @@ export function cutGeneric(
   const chars = c !== null ? parseCutRanges(c) : null
   const delim = d ?? '\t'
 
-  let source: AsyncIterable<Uint8Array>
-  const cache: string[] = []
   if (paths.length > 0) {
-    const first = paths[0]
-    if (first === undefined) return [null, new IOResult()]
-    source = stream(first)
-    cache.push(first.virtual)
-  } else {
-    try {
-      source = resolveSource(opts.stdin, 'cut: missing operand')
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
-    }
+    // Each operand is read eagerly (a missing one is reported and skipped,
+    // GNU-style), cut independently, and the outputs concatenate in operand
+    // order (a file without a trailing newline never merges its last line
+    // into the next operand's first).
+    const [ok, err] = await readOperands(paths, stream, 'cut')
+    const io = operandsIo(err, { cache: ok.map((o) => o.path.virtual) })
+    if (ok.length === 0 && err !== '') return [null, io]
+    const outputs = ok.map((o) =>
+      cutStream(singleChunk(o.data), delim, fields, chars, complement, z),
+    )
+    const out: ByteSource = chainStreams(outputs)
+    return [out, io]
+  }
+  let source: AsyncIterable<Uint8Array>
+  try {
+    source = resolveSource(opts.stdin, 'cut: missing operand')
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
   }
   const out: ByteSource = cutStream(source, delim, fields, chars, complement, z)
-  return [out, new IOResult({ cache })]
+  return [out, new IOResult()]
 }

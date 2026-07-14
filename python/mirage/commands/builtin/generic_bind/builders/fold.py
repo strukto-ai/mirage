@@ -19,8 +19,8 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.fold import fold as generic_fold
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           with_index)
-from mirage.commands.builtin.generic_bind.builders.common import \
-    resolve_or_empty
+from mirage.commands.builtin.generic_bind.builders.common import (
+    merge_split_errors, resolve_readable)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -36,13 +36,16 @@ async def fold(
     index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
-    paths = await resolve_or_empty(ops, accessor, paths, index)
-    return await generic_fold(paths,
-                              read_bytes=with_index(ops.read_bytes, index),
-                              accessor=accessor,
-                              stdin=stdin,
-                              width=int(w) if w is not None else 80,
-                              break_spaces=s)
+    paths, err = await resolve_readable(ops, accessor, paths, index, "fold")
+    if err and not paths:
+        return None, IOResult(exit_code=1, stderr=err)
+    return await merge_split_errors(
+        await generic_fold(paths,
+                           read_bytes=with_index(ops.read_bytes, index),
+                           accessor=accessor,
+                           stdin=stdin,
+                           width=int(w) if w is not None else 80,
+                           break_spaces=s), err)
 
 
 BUILDER = Builder('fold', fold, None, False, None, read=True)

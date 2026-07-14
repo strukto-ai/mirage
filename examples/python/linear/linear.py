@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.linear import LinearConfig, LinearResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -56,6 +57,21 @@ async def main() -> None:
     print(f"=== cat /linear/teams/{first_team}/team.json ===")
     result = await ws.execute(f"cat /linear/teams/{first_team}/team.json")
     print(await result.stdout_str())
+
+    # chmod/chown/touch never hit the Linear API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print(f"=== metadata overlay on /linear/teams/{first_team}/team.json ===")
+    meta_res = await ws.execute(
+        f'chmod 640 "/linear/teams/{first_team}/team.json"'
+        f' && chown 500:dev "/linear/teams/{first_team}/team.json"'
+        f' && touch -t 202601021530 "/linear/teams/{first_team}/team.json"')
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    meta_st, _ = await ws.dispatch(
+        "stat",
+        PathSpec.from_str_path(f"/linear/teams/{first_team}/team.json"))
+    print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+          f"gid={meta_st.gid} mtime={meta_st.modified}")
 
     print(f"=== ls /linear/teams/{first_team}/issues/ ===")
     issue_result = await ws.execute(f"ls /linear/teams/{first_team}/issues/")
@@ -142,6 +158,19 @@ async def main() -> None:
     print("=== find teams -type d (directory filter) ===")
     result = await ws.execute(f"find /linear/teams/{first_team}/ -type d"
                               " | head -n 5")
+    print(await result.stdout_str())
+
+    # -path matches the display path; -size counts dirs and sizeless
+    # rendered files as 0 (so +0c drops them, -1k keeps them).
+    print("=== find team -path '*issues*' ===")
+    result = await ws.execute(f'find /linear/teams/{first_team}/'
+                              f' -path "*issues*" | head -n 5')
+    print(await result.stdout_str())
+
+    print("=== find team -maxdepth 1 -size +0c (dirs drop out) ===")
+    result = await ws.execute(
+        f"find /linear/teams/{first_team}/ -maxdepth 1 -size +0c")
+    print(f"  exit={result.exit_code}")
     print(await result.stdout_str())
 
     print(f"=== du -s teams/{first_team} (walk fallback) ===")

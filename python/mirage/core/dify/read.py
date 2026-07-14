@@ -1,14 +1,16 @@
 import errno
 from collections.abc import AsyncIterator
+from typing import Any
 
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.dify._client import get_document_segments, iter_segment_pages
 from mirage.core.dify.path import resolve_path
 from mirage.types import PathSpec
 
 
-async def read_bytes(accessor, path: PathSpec,
-                     index: IndexCacheStore) -> bytes:
+async def read_bytes(accessor,
+                     path: PathSpec,
+                     index: IndexCacheStore = NULL_INDEX) -> bytes:
     resolved = await resolve_path(accessor, path, index)
     if resolved.is_dir:
         raise IsADirectoryError(errno.EISDIR, "Is a directory", path.virtual)
@@ -16,8 +18,10 @@ async def read_bytes(accessor, path: PathSpec,
     return segments_to_bytes(segments)
 
 
-async def read_stream(accessor, path: PathSpec,
-                      index: IndexCacheStore) -> AsyncIterator[bytes]:
+async def read_stream(
+        accessor,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX) -> AsyncIterator[bytes]:
     resolved = await resolve_path(accessor, path, index)
     if resolved.is_dir:
         raise IsADirectoryError(errno.EISDIR, "Is a directory", path.virtual)
@@ -31,11 +35,11 @@ async def read_stream(accessor, path: PathSpec,
             yield segment_text(segment).encode()
 
 
-def segments_to_bytes(segments: list[dict]) -> bytes:
+def segments_to_bytes(segments: list[dict[str, Any]]) -> bytes:
     return "\n".join(segment_text(segment) for segment in segments).encode()
 
 
-def segment_text(segment: dict) -> str:
+def segment_text(segment: dict[str, Any]) -> str:
     value = segment.get("content")
     if value is None:
         return ""

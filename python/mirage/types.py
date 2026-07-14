@@ -81,6 +81,10 @@ class FileStat(BaseModel):
     fingerprint: str | None = None
     revision: str | None = None
     type: FileType | None = None
+    mode: int | None = None
+    uid: int | str | None = None
+    gid: int | str | None = None
+    atime: str | None = None
     extra: dict = Field(default_factory=dict)
 
 
@@ -88,6 +92,47 @@ class MountMode(str, Enum):
     READ = "read"
     WRITE = "write"
     EXEC = "exec"
+
+
+MOUNT_MODE_RANK: dict[MountMode, int] = {
+    MountMode.READ: 1,
+    MountMode.WRITE: 2,
+    MountMode.EXEC: 3,
+}
+
+
+def weaker_mode(a: MountMode, b: MountMode) -> MountMode:
+    """The weaker of two mount modes on the READ < WRITE < EXEC lattice.
+
+    Args:
+        a (MountMode): first mode.
+        b (MountMode): second mode.
+    """
+    return a if MOUNT_MODE_RANK[a] <= MOUNT_MODE_RANK[b] else b
+
+
+MOUNT_MODE_ALIASES: dict[str, MountMode] = {
+    "r": MountMode.READ,
+    "rw": MountMode.WRITE,
+    "rwx": MountMode.EXEC,
+}
+
+
+def parse_mount_mode(value: MountMode | str) -> MountMode:
+    """Coerce a mount mode, accepting cumulative filesystem aliases.
+
+    The mode ladder is cumulative (exec implies write implies read),
+    so only the cumulative spellings ``r``, ``rw``, ``rwx`` alias the
+    modes; bit-style forms like ``w`` or ``x`` are rejected.
+
+    Args:
+        value (MountMode | str): a mode name ("read", "write", "exec")
+            or its filesystem alias ("r", "rw", "rwx").
+    """
+    if isinstance(value, MountMode):
+        return value
+    alias = MOUNT_MODE_ALIASES.get(value)
+    return alias if alias is not None else MountMode(value)
 
 
 class ConsistencyPolicy(str, Enum):
@@ -301,7 +346,7 @@ class StateKey(StrEnum):
     JOBS = "jobs"
     FINGERPRINTS = "fingerprints"
     LIVE_ONLY_MOUNTS = "live_only_mounts"
-    SYMLINKS = "symlinks"
+    NODES = "nodes"
 
 
 class DriftPolicy(StrEnum):
@@ -374,6 +419,15 @@ class NodeKey(StrEnum):
     STDERR = "stderr"
     EXIT_CODE = "exit_code"
     CHILDREN = "children"
+
+
+class NodeMetaKey(StrEnum):
+    TARGET = "target"
+    MTIME = "mtime"
+    MODE = "mode"
+    UID = "uid"
+    GID = "gid"
+    ATIME = "atime"
 
 
 class SessionKey(StrEnum):

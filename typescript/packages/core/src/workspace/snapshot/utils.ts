@@ -14,7 +14,7 @@
 
 import { stripSlash } from '../../utils/slash.ts'
 
-export const FORMAT_VERSION = 2
+export const FORMAT_VERSION = 3
 
 export const BLOB_REF_KEY = '__file'
 

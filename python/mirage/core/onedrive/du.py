@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.onedrive import OneDriveAccessor
+from mirage.cache.index import NULL_INDEX
 from mirage.core.onedrive._client import new_session, split_path
 from mirage.core.onedrive.find import iter_tree
 from mirage.core.onedrive.stat import stat
@@ -31,7 +32,7 @@ async def du(accessor: OneDriveAccessor, path: PathSpec) -> int:
         path (PathSpec): target path.
     """
     try:
-        info = await stat(accessor, path)
+        info = await stat(accessor, path, index=NULL_INDEX)
     except FileNotFoundError:
         info = None
     if info is not None and info.type != FileType.DIRECTORY:
@@ -59,7 +60,7 @@ async def du_all(accessor: OneDriveAccessor,
         path (PathSpec): target path.
     """
     try:
-        info = await stat(accessor, path)
+        info = await stat(accessor, path, index=NULL_INDEX)
     except FileNotFoundError:
         info = None
     if info is not None and info.type != FileType.DIRECTORY:

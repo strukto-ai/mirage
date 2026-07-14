@@ -763,7 +763,6 @@ world
 /data/sub/nested.txt
 /data/tabbed.txt
 === find_size_gt ===
-/data
 /data/a.txt
 /data/abc.csv
 /data/anchors.txt
@@ -772,18 +771,11 @@ world
 /data/chat.jsonl
 /data/csv.csv
 /data/data.jsonl
-/data/disptree
-/data/disptree/d
 /data/disptree/x.txt
-/data/dup.txt
 /data/fields.txt
-/data/guard
-/data/guard/sub
 /data/mixed.txt
 /data/no_nl.txt
 /data/numbers.txt
-/data/oooo.txt
-/data/patterns.txt
 /data/poem.diff
 /data/poem.txt
 /data/prefix_dup.txt
@@ -793,8 +785,6 @@ world
 /data/sorted_b.txt
 /data/sorted_c.txt
 /data/spaced.txt
-/data/sub
-/data/sub/deep
 /data/sub/nested.txt
 /data/tabbed.txt
 /data/user.json
@@ -1316,10 +1306,35 @@ baz
 2:world
 === du_max_depth_eq ===
 20	/data/sub
-=== grep_unknown_flag_ignored ===
-world
+=== grep_unknown_long_flag ===
+grep: unrecognized option '--bogus'
+Try 'grep --help' for more information.
+code=2
 === grep_unknown_short_flag ===
+grep: invalid option -- 'Y'
+Try 'grep --help' for more information.
+code=2
+=== cat_unknown_long_flag ===
+cat: unrecognized option '--bogus'
+Try 'cat --help' for more information.
+code=1
+=== grep_missing_flag_value ===
+grep: option requires an argument -- 'm'
+Try 'grep --help' for more information.
+code=2
+=== du_missing_flag_value ===
+du: option '--max-depth' requires an argument
+Try 'du --help' for more information.
+code=1
+=== grep_color_auto ===
 world
+=== grep_color_bare ===
+world
+=== grep_line_buffered ===
+world
+=== ls_color ===
+deep
+nested.txt
 === head_numeric_shorthand ===
 hello
 world
@@ -1394,7 +1409,6 @@ baz,
 /data
 /data/disptree
 /data/disptree/d
-/data/disptree/d/y.txt
 /data/empty.txt
 /data/guard
 /data/guard/sub
@@ -1402,7 +1416,6 @@ baz,
 /data/patterns2.txt
 /data/sub
 /data/sub/deep
-/data/sub/deep/deeper.txt
 === find_depth ===
 /data/a.txt
 /data/abc.csv
@@ -1488,6 +1501,32 @@ baz,
 /data/tabbed.txt
 /data/user.json
 /data/users.json
+=== find_size_gt_dirs ===
+/data/fs/sub/big.bin
+=== find_size_lt_dirs ===
+/data/fs
+/data/fs/small.bin
+/data/fs/sub
+=== find_size_gt_boundary ===
+/data/fs/sub/big.bin
+=== find_size_lt_boundary ===
+/data/fs
+/data/fs/small.bin
+/data/fs/sub
+=== find_size_eq_boundary ===
+/data/fs/four.bin
+=== find_size_round_k ===
+/data/fs
+/data/fs/sub
+=== find_path_glob ===
+/data/fs/sub
+/data/fs/sub/big.bin
+=== find_path_exact ===
+/data/fs/sub
+=== find_path_or_name ===
+/data/fs/small.bin
+/data/fs/sub
+/data/fs/sub/big.bin
 === xxd_c4 ===
 00000000: 6865 6c6c  hell
 00000004: 6f0a 776f  o.wo
@@ -1538,7 +1577,7 @@ diff -r /data/dr/x/sub/d.txt /data/dr/y/sub/d.txt
 === du_file ===
 24	/data/a.txt
 === du_dir ===
-881	/data
+894	/data
 === du_h ===
 24B	/data/a.txt
 === tree ===
@@ -1552,19 +1591,19 @@ foo
 bar
 baz
 === cat_E ===
-hello
-world
-foo
-bar
-baz
+hello$
+world$
+foo$
+bar$
+baz$
 === cat_T ===
-a	1
-b	2
-c	3
+a^I1
+b^I2
+c^I3
 === cat_A ===
-a	1
-b	2
-c	3
+a^I1$
+b^I2$
+c^I3$
 === nl_d_pipe ===
      1	hello
      2	world
@@ -1891,6 +1930,50 @@ code=0
 === read_invalid_opt ===
 read: -q: invalid option
 code=2
+=== arith_cmd_true ===
+code=0
+=== arith_cmd_false ===
+code=1
+=== arith_incr ===
+code=1 i=1
+code=0 i=2
+=== arith_assign_comma ===
+5 3
+=== arith_c_semantics ===
+-3 -1 1024 16 8
+=== arith_while ===
+n=3
+=== arith_if ===
+yes
+=== arith_divzero ===
+bash: ((: 1 / 0: division by 0
+code=1
+=== arith_short_circuit ===
+q=unset
+=== arity_uniq ===
+uniq: extra operand '/data/mixed.txt'
+Try 'uniq --help' for more information.
+code=1
+=== arity_tr ===
+tr: extra operand '/data/a.txt'
+Try 'tr --help' for more information.
+code=1
+=== arity_diff ===
+diff: extra operand '/data/mixed.txt'
+diff: Try 'diff --help' for more information.
+code=2
+=== arity_seq ===
+seq: extra operand '4'
+Try 'seq --help' for more information.
+code=1
+=== arity_mktemp ===
+mktemp: too many templates
+Try 'mktemp --help' for more information.
+code=1
+=== arity_relative ===
+uniq: extra operand 'extra.txt'
+Try 'uniq --help' for more information.
+code=1
 === cp_multi_into_dir ===
 
 === cp_multi_verify_a ===
@@ -2437,6 +2520,145 @@ nosuchcmd: command not found
 === glob_ln_multi_source ===
 exit=1
 ln: target '/data/lnk_multi' is not a directory
+=== pr_seed ===
+exit=0
+=== pr_cut_multi ===
+exit=0
+1
+2
+3
+4
+=== pr_tac_multi ===
+exit=0
+2
+1
+4
+3
+=== pr_nl_multi ===
+exit=0
+     1	1
+     2	2
+     3	3
+     4	4
+=== pr_strings_multi ===
+exit=0
+hello
+worlds
+=== pr_zcat_multi ===
+exit=0
+z
+y
+=== pr_cat ===
+exit=1
+1
+2
+cat: /data/pr/missing.txt: No such file or directory
+=== pr_head ===
+exit=1
+==> /data/pr/one.txt <==
+1
+head: /data/pr/missing.txt: No such file or directory
+=== pr_tail ===
+exit=1
+==> /data/pr/one.txt <==
+2
+tail: /data/pr/missing.txt: No such file or directory
+=== pr_wc ===
+exit=1
+2 /data/pr/one.txt
+2 total
+wc: /data/pr/missing.txt: No such file or directory
+=== pr_nl ===
+exit=1
+     1	1
+     2	2
+nl: /data/pr/missing.txt: No such file or directory
+=== pr_md5 ===
+exit=1
+6ddb4095eb719e2a9f0a3f95677d24e0  /data/pr/one.txt
+md5: /data/pr/missing.txt: No such file or directory
+=== pr_sha256sum ===
+exit=1
+a6e2b7a040683432de03a18fd8a1939a2fdf82585b364bfc874bdd4095c4cae1  /data/pr/one.txt
+sha256sum: /data/pr/missing.txt: No such file or directory
+=== pr_strings ===
+exit=1
+hello
+strings: /data/pr/missing.txt: No such file or directory
+=== pr_tac ===
+exit=1
+2
+1
+tac: /data/pr/missing.txt: No such file or directory
+=== pr_rev ===
+exit=1
+1
+2
+rev: /data/pr/missing.txt: No such file or directory
+=== pr_cut ===
+exit=1
+1
+2
+cut: /data/pr/missing.txt: No such file or directory
+=== pr_expand ===
+exit=1
+1
+2
+expand: /data/pr/missing.txt: No such file or directory
+=== pr_unexpand ===
+exit=1
+1
+2
+unexpand: /data/pr/missing.txt: No such file or directory
+=== pr_fold ===
+exit=1
+1
+2
+fold: /data/pr/missing.txt: No such file or directory
+=== pr_fmt ===
+exit=1
+1 2
+fmt: /data/pr/missing.txt: No such file or directory
+=== pr_zcat ===
+exit=1
+z
+zcat: /data/pr/missing.gz: No such file or directory
+=== pr_sed ===
+exit=1
+X
+2
+sed: /data/pr/missing.txt: No such file or directory
+=== pr_sort ===
+exit=1
+sort: /data/pr/missing.txt: No such file or directory
+=== pr_missing_first ===
+exit=1
+1
+2
+cat: /data/pr/missing.txt: No such file or directory
+=== pr_all_missing_wc ===
+exit=1
+0 total
+wc: /data/pr/m1.txt: No such file or directory
+wc: /data/pr/m2.txt: No such file or directory
+=== pr_cat_dir ===
+exit=1
+1
+2
+cat: /data/pr: Is a directory
+=== pr_head_dir ===
+exit=1
+head: /data/pr: Is a directory
+=== pr_wc_dir ===
+exit=1
+2 2 4 /data/pr/one.txt
+2 2 4 total
+wc: /data/pr: Is a directory
+=== pr_tac_dir ===
+exit=1
+tac: /data/pr: Is a directory
+=== pr_cleanup ===
+exit=0
 === find_bad_maxdepth ===
 exit=1
 find: invalid argument 'abc' to '-maxdepth'
@@ -2491,6 +2713,10 @@ xm_moved.txt
 === xm_grep_multi ===
 /data/a.txt:0
 /data2/xm.txt:1
+=== xm_unknown_flag_errors ===
+grep: unrecognized option '--bogus'
+Try 'grep --help' for more information.
+code=2
 === xm_wc_multi ===
 5 /data/a.txt
 1 /data2/xm.txt
@@ -2577,6 +2803,36 @@ cross
 2
 3
 ssorc
+=== xm_awk ===
+hello
+world
+foo
+bar
+baz
+cross
+=== xm_awk_nr ===
+6
+=== xm_paste ===
+1	cross
+2	
+3	
+=== xm_paste_d ===
+1,cross
+2,
+3,
+=== xm_comm ===
+a
+		b
+		c
+	d
+=== xm_comm_12 ===
+b
+c
+=== xm_join ===
+1 alpha one
+=== xm_join_a ===
+1 alpha one
+2 beta
 === xm_tac ===
 3
 2
@@ -2683,9 +2939,9 @@ exit=1
 /data/xdiff.txt /data2/xdiff.txt differ: char 6, line 2
 === xm_cmp_equal ===
 exit=0
-=== xm_refuse_paste ===
+=== xm_refuse_uniq ===
 exit=1
-paste: paths span multiple mounts (/data/, /data2/), cross-mount not supported
+uniq: paths span multiple mounts (/data/, /data2/), cross-mount not supported
 === prov_cat ===
 net=24 write=0 cache=0 ops=1 hits=0 precision=exact
 === prov_cat_multi ===

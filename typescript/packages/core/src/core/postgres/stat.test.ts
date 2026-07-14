@@ -78,7 +78,7 @@ describe('stat', () => {
     expect(r.extra).toEqual({ schema: 'public', kind: 'tables', name: 'users' })
   })
 
-  it('marks rows.jsonl as TEXT with size + fingerprint', async () => {
+  it('marks rows.jsonl as TEXT with null size (storage size in extra) + fingerprint', async () => {
     vi.mocked(_client.fetchColumns).mockResolvedValue([
       { name: 'id', type: 'uuid', nullable: false },
     ])
@@ -93,7 +93,8 @@ describe('stat', () => {
       }),
     )
     expect(r.type).toBe(FileType.TEXT)
-    expect(r.size).toBe(4096)
+    expect(r.size).toBeNull()
+    expect(r.extra.size_bytes).toBe(4096)
     expect(r.fingerprint).toMatch(/^[a-f0-9]{64}$/)
     expect(r.extra.row_count).toBe(42)
   })

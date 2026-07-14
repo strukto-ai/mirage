@@ -1,22 +1,23 @@
 from datetime import datetime, timezone
 from typing import Any
 
-from mirage.cache.index import IndexCacheStore, IndexEntry
-from mirage.core.dify._client import is_visible_document, list_all_documents
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
+from mirage.core.dify._client import list_all_documents
 from mirage.utils.path import gnu_basename, parent
 
 
 async def ensure_tree(accessor,
-                      index: IndexCacheStore,
+                      index: IndexCacheStore = NULL_INDEX,
                       prefix: str = "") -> None:
     root_key = mount_root(prefix)
     listing = await index.list_dir(root_key)
     if listing.entries is not None:
         return
 
+    # list_all_documents already filters to visible documents.
     documents = await list_all_documents(accessor.config)
     dir_entries = build_dir_entries(
-        [document for document in documents if is_visible_document(document)],
+        documents,
         prefix,
         accessor.config.slug_metadata_name,
     )

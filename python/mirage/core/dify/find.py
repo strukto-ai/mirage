@@ -1,4 +1,4 @@
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
                                                keep, start_basename,
                                                tree_has_type)
@@ -26,10 +26,9 @@ async def find(
     mindepth: int | None = None,
     empty: bool = False,
     tree: PredNode | None = None,
-    index: IndexCacheStore | None = None,
+    *,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
-    if index is None:
-        raise ValueError("find: missing index")
     results = await walk(accessor,
                          path,
                          index,
@@ -42,7 +41,8 @@ async def find(
                                                     type=type,
                                                     name_exclude=name_exclude,
                                                     or_names=or_names)
-    needs_kind = tree_has_type(tree)
+    needs_kind = (tree_has_type(tree) or min_size is not None
+                  or max_size is not None)
     start_name = start_basename(path)
     filtered: list[str] = []
     for item in results:
@@ -82,13 +82,18 @@ async def _matches(
                       depth=_relative_depth(item, root))
     if not keep(entry, tree, mindepth):
         return False
+    # Directories count as size 0 for -size (deliberate GNU divergence).
     if min_size is not None or max_size is not None:
-        item_stat = await stat(accessor, spec, index)
-        if item_stat.size is None:
+        if kind == "d":
+            size = 0
+        else:
+            item_stat = await stat(accessor, spec, index)
+            # Sizeless rendered files count as size 0, same as dirs and the
+            # FUSE view (CLAUDE.md find -size rules); never drop them.
+            size = item_stat.size if item_stat.size is not None else 0
+        if min_size is not None and size < min_size:
             return False
-        if min_size is not None and item_stat.size < min_size:
-            return False
-        if max_size is not None and item_stat.size > max_size:
+        if max_size is not None and size > max_size:
             return False
     return True
 

@@ -15,7 +15,7 @@
 import json
 
 from mirage.accessor.langfuse import LangfuseAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.langfuse._client import (fetch_dataset_items,
                                           fetch_dataset_runs, fetch_prompt,
                                           fetch_trace)
@@ -41,7 +41,7 @@ def _jsonl_bytes(items: list[dict]) -> bytes:
 async def read(
     accessor: LangfuseAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
     """Read a file as bytes.
 
@@ -51,10 +51,6 @@ async def read(
         index (IndexCacheStore | None): index cache.
         prefix (str): mount prefix for virtual index keys.
     """
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     mount_prefix_of(path.virtual, path.resource_path)
     key = path.resource_path

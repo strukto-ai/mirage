@@ -22,6 +22,7 @@ from aiofiles.os import path as aio_path
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.context import invalidate_after_unlink
 from mirage.types import PathSpec
+from mirage.utils.path import norm
 
 
 def _resolve(root: Path, path: str) -> Path:
@@ -32,10 +33,6 @@ def _resolve(root: Path, path: str) -> Path:
 
 
 async def rm_r(accessor: DiskAccessor, path: PathSpec) -> None:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     if isinstance(path, PathSpec):
         path = path.mount_path
     p = _resolve(accessor.root, path)
@@ -43,4 +40,9 @@ async def rm_r(accessor: DiskAccessor, path: PathSpec) -> None:
         await asyncio.to_thread(shutil.rmtree, p)
     elif await aio_path.exists(p):
         await aiofiles.os.remove(p)
+    key = norm(path)
+    prefix = key.rstrip("/") + "/"
+    for stale in list(accessor.attrs):
+        if stale == key or stale.startswith(prefix):
+            del accessor.attrs[stale]
     await invalidate_after_unlink(path)

@@ -45,6 +45,10 @@ export class RedisStore {
     return `${this.keyPrefix}modified:${path}`
   }
 
+  ak(path: string): string {
+    return `${this.keyPrefix}attrs:${path}`
+  }
+
   async client(): Promise<RedisClientType> {
     if (this.providedClient !== null) return this.providedClient
     this.clientPromise ??= (async () => {
@@ -151,9 +155,29 @@ export class RedisStore {
     await c.del(this.mk(path))
   }
 
+  async getAttrs(path: string): Promise<Record<string, string>> {
+    const c = await this.client()
+    const raw = await c.hGetAll(this.ak(path))
+    return { ...raw }
+  }
+
+  async setAttrs(path: string, fields: Record<string, string>): Promise<void> {
+    const c = await this.client()
+    await c.hSet(this.ak(path), fields)
+  }
+
+  async delAttrs(path: string): Promise<void> {
+    const c = await this.client()
+    await c.del(this.ak(path))
+  }
+
   async clear(): Promise<void> {
     const c = await this.client()
-    for (const pattern of [`${this.keyPrefix}file:*`, `${this.keyPrefix}modified:*`]) {
+    for (const pattern of [
+      `${this.keyPrefix}file:*`,
+      `${this.keyPrefix}modified:*`,
+      `${this.keyPrefix}attrs:*`,
+    ]) {
       const keys: string[] = []
       for await (const k of c.scanIterator({ MATCH: pattern })) {
         if (Array.isArray(k)) keys.push(...k)

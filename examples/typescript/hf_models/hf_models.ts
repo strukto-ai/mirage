@@ -14,7 +14,7 @@
 
 // Read-only Hugging Face model demo against a public model repo.
 // No credentials required. Set HF_MODEL_REPO / HF_TOKEN for private repos.
-import { HfModelsResource, Workspace, MountMode, type HfModelsConfig } from '@struktoai/mirage-node'
+import { HfModelsResource, Workspace, MountMode, type FileStat, type HfModelsConfig } from '@struktoai/mirage-node'
 
 function configFromEnv(): HfModelsConfig {
   return {
@@ -40,6 +40,21 @@ async function main(): Promise<void> {
 
     console.log('=== stat /m/config.json ===')
     process.stdout.write((await ws.execute('stat /m/config.json')).stdoutText)
+
+
+    // chmod/chown/touch never hit the Hub API: attrs land in the
+    // workspace namespace (durable, snapshot-captured) and merge into
+    // dispatch-level stat.
+    console.log(`=== metadata overlay on /m/config.json ===`)
+    const metaRes = await ws.execute(
+      `chmod 640 "/m/config.json" && chown 500:dev "/m/config.json" && touch -t 202601021530 "/m/config.json"`,
+    )
+    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+    const metaSt = (await ws.dispatch('stat', `/m/config.json`)) as FileStat
+    const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+    console.log(
+      `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+    )
     console.log()
 
     console.log("=== stat -c '%s' /m/model.safetensors (no download) ===")

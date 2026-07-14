@@ -18,6 +18,7 @@ import { sha256Hex } from '../../../utils/hash.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { resolveSource } from '../utils/stream.ts'
+import { operandsIo, readOperands } from '../utils/operands.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -35,13 +36,6 @@ async function* sha256SingleStream(
 ): AsyncIterable<Uint8Array> {
   const digest = await hashStream(source)
   yield ENC.encode(`${digest}  ${label}\n`)
-}
-
-async function* sha256Multi(stream: Stream, paths: readonly PathSpec[]): AsyncIterable<Uint8Array> {
-  for (const p of paths) {
-    const digest = await hashStream(stream(p))
-    yield ENC.encode(`${digest}  ${p.rawPath}\n`)
-  }
 }
 
 function makePathSpec(virtual: string, mountPrefix: string): PathSpec {
@@ -88,7 +82,15 @@ export async function sha256sumGeneric(
     return [result, new IOResult({ exitCode })]
   }
   if (paths.length > 0) {
-    return [sha256Multi(stream, paths), new IOResult({ cache: paths.map((p) => p.mountPath) })]
+    // A missing operand is reported and skipped; the good hashes still
+    // print (GNU sha256sum).
+    const [ok, err] = await readOperands(paths, stream, 'sha256sum')
+    const io = operandsIo(err, { cache: ok.map((o) => o.path.mountPath) })
+    if (ok.length === 0 && err !== '') return [null, io]
+    let body = ''
+    for (const o of ok) body += `${await sha256Hex(o.data)}  ${o.path.rawPath}\n`
+    const result: ByteSource = ENC.encode(body)
+    return [result, io]
   }
   const source: AsyncIterable<Uint8Array> = resolveSource(opts.stdin)
   return [sha256SingleStream(source, '-'), new IOResult()]

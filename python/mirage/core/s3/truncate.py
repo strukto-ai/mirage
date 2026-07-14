@@ -19,10 +19,6 @@ from mirage.types import PathSpec
 
 
 async def truncate(accessor: S3Accessor, path: PathSpec, length: int) -> None:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     if isinstance(path, PathSpec):
         path = path.mount_path
     config = accessor.config

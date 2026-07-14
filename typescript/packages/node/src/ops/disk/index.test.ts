@@ -33,8 +33,8 @@ import {
 } from './index.ts'
 
 describe('DISK_OPS', () => {
-  it('registers the expected 14 ops with resource=disk', () => {
-    expect(DISK_OPS).toHaveLength(14)
+  it('registers the expected 15 ops with resource=disk', () => {
+    expect(DISK_OPS).toHaveLength(15)
     for (const op of DISK_OPS) expect(op.resource).toBe(ResourceName.DISK)
   })
 
@@ -49,6 +49,7 @@ describe('DISK_OPS', () => {
         'readdir',
         'rename',
         'rmdir',
+        'setattr',
         'stat',
         'truncate',
         'unlink',
@@ -67,7 +68,17 @@ describe('DISK_OPS', () => {
   it('write-side ops are flagged write:true', () => {
     const writes = new Set(DISK_OPS.filter((o) => o.write).map((o) => o.name))
     expect(writes).toEqual(
-      new Set(['append', 'create', 'mkdir', 'rename', 'rmdir', 'truncate', 'unlink', 'write']),
+      new Set([
+        'append',
+        'create',
+        'mkdir',
+        'rename',
+        'rmdir',
+        'setattr',
+        'truncate',
+        'unlink',
+        'write',
+      ]),
     )
   })
 

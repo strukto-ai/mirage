@@ -14,7 +14,7 @@
 
 import type { GSheetsAccessor } from '../../../accessor/gsheets.ts'
 import { read as gsheetsRead, stream as gsheetsStream } from '../../../core/gsheets/read.ts'
-import { readdir as gsheetsReaddir } from '../../../core/gsheets/readdir.ts'
+import { isDirName, readdir as gsheetsReaddir } from '../../../core/gsheets/readdir.ts'
 import { stat as gsheetsStat } from '../../../core/gsheets/stat.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
 
@@ -24,5 +24,6 @@ export const GSHEETS_CMD_OPS: CommandIO<GSheetsAccessor> = {
   readStream: gsheetsStream,
   stat: gsheetsStat,
   isMounted: () => true,
+  isDirName: (_accessor, child) => isDirName(child),
   local: false,
 }

@@ -19,8 +19,8 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.fmt import fmt as generic_fmt
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           with_index)
-from mirage.commands.builtin.generic_bind.builders.common import \
-    resolve_or_empty
+from mirage.commands.builtin.generic_bind.builders.common import (
+    merge_split_errors, resolve_readable)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -35,12 +35,15 @@ async def fmt(
     index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
-    paths = await resolve_or_empty(ops, accessor, paths, index)
-    return await generic_fmt(paths,
-                             read_bytes=with_index(ops.read_bytes, index),
-                             accessor=accessor,
-                             stdin=stdin,
-                             width=int(w) if w is not None else 75)
+    paths, err = await resolve_readable(ops, accessor, paths, index, "fmt")
+    if err and not paths:
+        return None, IOResult(exit_code=1, stderr=err)
+    return await merge_split_errors(
+        await generic_fmt(paths,
+                          read_bytes=with_index(ops.read_bytes, index),
+                          accessor=accessor,
+                          stdin=stdin,
+                          width=int(w) if w is not None else 75), err)
 
 
 BUILDER = Builder('fmt', fmt, None, False, None, read=True)

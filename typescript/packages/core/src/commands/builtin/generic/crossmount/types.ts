@@ -63,6 +63,10 @@ export enum Cmd {
   MV = 'mv',
   DIFF = 'diff',
   CMP = 'cmp',
+  AWK = 'awk',
+  PASTE = 'paste',
+  COMM = 'comm',
+  JOIN = 'join',
 }
 
 export type DispatchFn = (

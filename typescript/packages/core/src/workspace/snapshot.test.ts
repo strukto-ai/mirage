@@ -212,8 +212,8 @@ describe('Workspace.snapshot / load — filenames with spaces and unicode', () =
 describe('Workspace.snapshot / load — per-mount mode preservation', () => {
   it('preserves per-mount modes through save → load', async () => {
     const ws = new Workspace(
-      { '/': new RAMResource(), '/ro': new RAMResource() },
-      { mode: MountMode.WRITE, modeOverrides: { '/ro': MountMode.READ } },
+      { '/': new RAMResource(), '/ro': [new RAMResource(), MountMode.READ] as const },
+      { mode: MountMode.WRITE },
     )
     const tmp = join(mkdtempSync(join(tmpdir(), 'snap-')), 'ws.tar')
     await ws.snapshot(tmp)
@@ -223,20 +223,6 @@ describe('Workspace.snapshot / load — per-mount mode preservation', () => {
     expect(roMount?.mode).toBe(MountMode.READ)
     const rootMount = mounts.find((m) => m.prefix === '/')
     expect(rootMount?.mode).toBe(MountMode.WRITE)
-  })
-
-  it('snapshot mode wins over caller-supplied modeOverrides on load', async () => {
-    const ws = new Workspace(
-      { '/': new RAMResource(), '/ro': new RAMResource() },
-      { mode: MountMode.WRITE, modeOverrides: { '/ro': MountMode.READ } },
-    )
-    const tmp = join(mkdtempSync(join(tmpdir(), 'snap-')), 'ws.tar')
-    await ws.snapshot(tmp)
-    const loaded = await Workspace.load(tmp, {
-      modeOverrides: { '/ro': MountMode.WRITE },
-    })
-    const roMount = loaded.registry.allMounts().find((m) => m.prefix === '/ro/')
-    expect(roMount?.mode).toBe(MountMode.READ)
   })
 
   it('load accepts an in-memory tar buffer', async () => {

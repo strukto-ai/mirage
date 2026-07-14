@@ -49,11 +49,17 @@ async def _nl_multi(
     separator: str,
     pattern: re.Pattern[str] | None,
 ) -> AsyncIterator[bytes]:
+    # One counter across every operand: GNU nl numbering continues from
+    # file to file (it resets per logical page, never per file).
+    num = start
     for p in paths:
-        source = read_stream(accessor, p)
-        async for chunk in _nl_stream(source, body_numbering, start, increment,
-                                      width, separator, pattern):
-            yield chunk
+        async for raw_line in AsyncLineIterator(read_stream(accessor, p)):
+            line = raw_line.decode(errors="replace")
+            if _should_number(line, body_numbering, pattern):
+                yield f"{num:{width}d}{separator}{line}\n".encode()
+                num += increment
+            else:
+                yield f"{' ' * width}{separator}{line}\n".encode()
 
 
 async def nl(

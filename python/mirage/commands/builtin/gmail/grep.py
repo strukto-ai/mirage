@@ -39,13 +39,13 @@ async def grep_provision(
     accessor: GmailAccessor,
     paths: list[PathSpec],
     *texts: str,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore,
     **_extra: object,
 ) -> ProvisionResult:
     return await file_read_provision(
         accessor,
         paths,
-        "grep " + " ".join(texts + tuple(str(p) for p in paths)),
+        command="grep " + " ".join(texts + tuple(str(p) for p in paths)),
         index=index)
 
 
@@ -59,7 +59,7 @@ async def grep(
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     prefix: str = "",
-    index: IndexCacheStore = None,
+    index: IndexCacheStore,
     **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["grep"])

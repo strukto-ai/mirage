@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-const GLOB_META = ['*', '?', '['] as const
+import { GLOB_CHARS } from '../../utils/glob_walk.ts'
 
 function iso(year: number, month: number, day: number): string {
   const mm = String(month).padStart(2, '0')
@@ -34,7 +34,7 @@ function parseFixedInt(s: string | undefined, expectedLength: number): number | 
 export function globToModifiedRange(pattern: string | null | undefined): [string, string] | null {
   if (!pattern) return null
   let metaIndex = -1
-  for (const ch of GLOB_META) {
+  for (const ch of GLOB_CHARS) {
     const idx = pattern.indexOf(ch)
     if (idx !== -1 && (metaIndex === -1 || idx < metaIndex)) metaIndex = idx
   }

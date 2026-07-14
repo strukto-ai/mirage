@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { readStdinAsync } from '../utils/stream.ts'
+import { operandsIo, readOperands } from '../utils/operands.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -57,12 +58,17 @@ export async function fmtGeneric(
 ): Promise<CommandFnResult> {
   const width = typeof opts.flags.w === 'string' ? Number.parseInt(opts.flags.w, 10) : 75
   if (paths.length > 0) {
+    // A missing operand is reported and skipped; the remaining operands
+    // still format (GNU fmt).
+    const [ok, err] = await readOperands(paths, stream, 'fmt')
+    const io = operandsIo(err)
+    if (ok.length === 0 && err !== '') return [null, io]
     const parts: string[] = []
-    for (const p of paths) {
-      parts.push(DEC.decode(await materialize(stream(p))))
+    for (const o of ok) {
+      parts.push(DEC.decode(o.data))
     }
     const result: ByteSource = ENC.encode(fmtText(parts.join(''), width))
-    return [result, new IOResult()]
+    return [result, io]
   }
   const stdinData = await readStdinAsync(opts.stdin)
   if (stdinData === null) {

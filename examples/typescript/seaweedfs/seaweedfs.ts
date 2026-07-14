@@ -18,6 +18,7 @@ import {
   SeaweedFSResource,
   Workspace,
   type SeaweedFSConfig,
+  type FileStat,
 } from '@struktoai/mirage-node'
 
 dotenv.config({ path: '.env.development' })
@@ -52,6 +53,21 @@ async function main(): Promise<void> {
       `echo '{"name":"mirage","version":1,"tags":["s3","seaweedfs"]}' > /seaweedfs/data/config.json`,
     )
     await ws.execute('echo "hello from seaweedfs" > /seaweedfs/notes.txt')
+
+
+    // chmod/chown/touch never hit the SeaweedFS API: attrs land in the
+    // workspace namespace (durable, snapshot-captured) and merge into
+    // dispatch-level stat.
+    console.log(`=== metadata overlay on /seaweedfs/notes.txt ===`)
+    const metaRes = await ws.execute(
+      `chmod 640 "/seaweedfs/notes.txt" && chown 500:dev "/seaweedfs/notes.txt" && touch -t 202601021530 "/seaweedfs/notes.txt"`,
+    )
+    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+    const metaSt = (await ws.dispatch('stat', `/seaweedfs/notes.txt`)) as FileStat
+    const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+    console.log(
+      `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+    )
 
     console.log('\n--- ls /seaweedfs/ ---')
     let r = await ws.execute('ls /seaweedfs/')

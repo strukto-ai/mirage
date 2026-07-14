@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.langfuse import LangfuseAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_prefix_of
@@ -24,7 +24,7 @@ TOP_LEVEL_DIRS = {"traces", "sessions", "prompts", "datasets"}
 async def stat(
     accessor: LangfuseAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> FileStat:
     """Get file stat for a path.
 
@@ -34,10 +34,6 @@ async def stat(
         index (IndexCacheStore | None): index cache.
         prefix (str): mount prefix for virtual index keys.
     """
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     mount_prefix_of(path.virtual, path.resource_path)
     key = path.resource_path

@@ -17,7 +17,7 @@ import re
 from datetime import datetime, timezone
 
 from mirage.accessor.gmail import GmailAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.gmail.date_query import date_dir_to_gmail_query
 from mirage.core.gmail.labels import list_labels
 from mirage.core.gmail.messages import (_extract_attachments, _extract_header,
@@ -70,7 +70,7 @@ def _date_from_internal(internal_date: str) -> str:
 async def _build_date_groups(
     accessor: GmailAccessor,
     msg_ids: list[dict],
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
     virtual_key: str,
     write_dates: bool,
 ) -> list[tuple[str, IndexEntry]]:
@@ -96,12 +96,18 @@ async def _build_date_groups(
             headers = raw.get("payload", {}).get("headers", [])
             subject = _extract_header(headers, "Subject") or "No Subject"
             filename = _msg_filename(subject, mid)
+            size_estimate = raw.get("sizeEstimate")
+            # size stays None: sizeEstimate is the source message size, not
+            # the rendered .gmail.json length (FileStat.size must be
+            # render-derived or None, see the CLAUDE.md FUSE rules). The
+            # estimate lives in extra.
             msg_entry = IndexEntry(
                 id=mid,
                 name=subject,
                 resource_type="gmail/message",
                 vfs_name=filename,
-                size=raw.get("sizeEstimate"),
+                extra={"size_estimate": size_estimate}
+                if size_estimate is not None else {},
             )
             date_children.append((filename, msg_entry))
             attachments = _extract_attachments(raw.get("payload", {}))
@@ -137,12 +143,8 @@ async def _build_date_groups(
 async def readdir(
     accessor: GmailAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     path = (path.dir if path.pattern else path).mount_path
@@ -180,8 +182,6 @@ async def readdir(
             cached = await index.list_dir(virtual_key)
             if cached.entries is not None:
                 return cached.entries
-        if index is None:
-            raise enoent(virtual)
         label_key = prefix + "/" + label_name if prefix else "/" + label_name
         result = await index.get(label_key)
         if result.entry is None:
@@ -220,8 +220,6 @@ async def readdir(
         return [f"{prefix}/{key}/{name}" for name, _ in date_entries]
 
     if depth == 2:
-        if index is None:
-            raise enoent(virtual)
         cached = await index.list_dir(virtual_key)
         if cached.entries is not None:
             return cached.entries
@@ -280,8 +278,6 @@ async def readdir(
         raise enoent(virtual)
 
     if depth == 3:
-        if index is None:
-            raise enoent(virtual)
         cached = await index.list_dir(virtual_key)
         if cached.entries is not None:
             return cached.entries

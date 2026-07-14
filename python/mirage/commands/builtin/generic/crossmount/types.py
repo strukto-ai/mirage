@@ -75,6 +75,10 @@ class Cmd(StrEnum):
     MV = "mv"
     DIFF = "diff"
     CMP = "cmp"
+    AWK = "awk"
+    PASTE = "paste"
+    COMM = "comm"
+    JOIN = "join"
 
 
 CrossResult = tuple[ByteSource | None, IOResult]

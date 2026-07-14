@@ -44,4 +44,13 @@ export {
   type JWTConfig,
 } from './auth/index.ts'
 export { ENV_ALLOWED_HOSTS, ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS } from './env.ts'
-export { mirageHome, pidFilePath } from './paths.ts'
+export { DEFAULT_ALLOWED_HOSTS } from './host_validation_constants.ts'
+export {
+  ALLOWED_KEYS,
+  DaemonConfigError,
+  NUMERIC_KEYS,
+  parseDaemonTable,
+  readDaemonTable,
+  validateDaemonTable,
+} from './daemon_config.ts'
+export { mirageHome, pidFilePath, snapshotRootPath, versionRootPath } from './paths.ts'

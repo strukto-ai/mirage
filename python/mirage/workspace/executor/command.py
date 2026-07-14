@@ -21,9 +21,13 @@ from mirage.commands.builtin.find_parse import (FindParseError, find_expr_tail,
 from mirage.commands.builtin.generic.crossmount import (handle_cross_mount,
                                                         is_cross_mount)
 from mirage.commands.builtin.utils.safeguard import maybe_with_timeout
+from mirage.commands.errors import UsageError
 from mirage.commands.safeguard import resolve_across_mounts, resolve_safeguard
-from mirage.commands.spec import (SPECS, OperandKind, flag_kwarg_name,
-                                  parse_command, parse_to_kwargs)
+from mirage.commands.spec import (SPECS, CommandSpec, OperandKind,
+                                  flag_kwarg_name, parse_command,
+                                  parse_to_kwargs)
+from mirage.commands.spec.usage import (missing_value_error,
+                                        unknown_option_error)
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize, wrap_cachable_streams
 from mirage.io.types import ByteSource
@@ -31,7 +35,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.job_table import JobTable
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
 from mirage.types import PathSpec, word_text
-from mirage.utils.errors import format_fs_error
+from mirage.utils.errors import FS_ERRORS, format_fs_error
 from mirage.workspace.executor.control import ReturnSignal
 from mirage.workspace.executor.fanout import (_fan_out_traversal,
                                               _should_fan_out)
@@ -160,8 +164,9 @@ async def run_on_mount(
 ) -> tuple[ByteSource | None, IOResult]:
     """Run one already-parsed command on the mount that owns its paths.
 
-    The shared single-mount execution tail: mount resolution, grant checks,
-    ``execute_cmd``, filesystem-error formatting, ls/find post-processing,
+    The shared single-mount execution tail: mount resolution, session
+    mode checks, ``execute_cmd``, filesystem-error formatting, ls/find
+    post-processing,
     and read/write key prefixing. ``handle_command`` uses it for the normal
     path, and passes it (bound) to the cross-mount runners so each operand
     executes natively on its owning mount.
@@ -179,8 +184,8 @@ async def run_on_mount(
         stdin (ByteSource | None): Standard input for the command.
         resolve_hint (PathSpec | None): Mount-resolution path when ``paths``
             is empty (a stream command running in stdin mode).
-        mount: Pre-resolved mount; skips resolution and grant checks, which
-            the caller already performed.
+        mount: Pre-resolved mount; skips resolution and session mode
+            checks, which the caller already performed.
     """
     if mount is None:
         resolve_paths = paths or ([resolve_hint] if resolve_hint else [])
@@ -216,16 +221,22 @@ async def run_on_mount(
             session_id=session.session_id,
             env=session.env,
             exec_allowed=registry.is_exec_allowed(),
+            python_runtime=registry.python_runtime,
         )
-    except (FileNotFoundError, NotADirectoryError, IsADirectoryError,
-            FileExistsError, PermissionError) as exc:
+    except UsageError as exc:
+        # Command-owned usage errors (extra operands, missing patterns)
+        # become this command's IOResult so the rest of the line keeps
+        # running, like a real shell (#452).
+        return None, IOResult(exit_code=exc.exit_code,
+                              stderr=f"{exc}\n".encode())
+    except FS_ERRORS as exc:
         err = format_fs_error(cmd_name, exc, paths)
         return None, IOResult(exit_code=1, stderr=err)
 
     if cmd_name == "ls" and io.exit_code == 0:
         stdout = await _inject_child_mounts(stdout, registry, paths,
                                             flag_kwargs, session.cwd)
-        if namespace is not None and namespace.symlinks:
+        if namespace is not None and namespace.has_links():
             stdout = await _inject_links(stdout, namespace, paths, flag_kwargs,
                                          session.cwd)
 
@@ -251,22 +262,35 @@ class _ParsedCommand(NamedTuple):
     texts: list[str]
     flag_kwargs: dict[str, object]
     warnings: list[str]
+    invalid_options: list[str]
+    needs_value_options: list[str]
 
 
 def _parse_flags(
     parts: list[str | PathSpec],
-    mount: object,
+    spec: CommandSpec | None,
     cmd_name: str,
     cwd: str,
+    str_flag_paths: bool = False,
 ) -> _ParsedCommand:
     """Parse flags from classified parts, recovering PathSpec for PATH values.
+
+    Single-mount dispatch and cross-mount dispatch both parse through
+    here, so flags, texts, and parser warnings cannot drift between the
+    two paths (a cross-mount `grep --bogus` used to lose its warning).
 
     Args:
         parts (list[str | PathSpec]): expanded command words after the
             command name; path-classified words arrive as PathSpec.
-        mount (object): mount providing spec_for(cmd_name).
-        cmd_name (str): command name used to look up the spec.
+        spec (CommandSpec | None): command spec, from the owning mount on
+            the single-mount path or the shared SPECS registry on the
+            cross-mount path; None falls back to type separation.
+        cmd_name (str): command name used in warnings.
         cwd (str): current working directory for relative path resolution.
+        str_flag_paths (bool): keep PATH flag values as their resolved
+            virtual-path strings instead of PathSpec. Cross-mount
+            strategies read flags through FlagView, which type-checks
+            str, so they get the string view.
 
     Returns:
         _ParsedCommand: positional paths, positional texts, parsed flag dict
@@ -285,7 +309,6 @@ def _parse_flags(
             if stripped and stripped != item.virtual:
                 scope_map[stripped] = item
 
-    spec = mount.spec_for(cmd_name)
     if spec is not None:
         parsed = parse_command(spec, argv, cwd=cwd)
         flag_kwargs = parse_to_kwargs(parsed)
@@ -308,25 +331,27 @@ def _parse_flags(
             if opt.value_kind == OperandKind.PATH and not opt.repeatable
             for name in (opt.short, opt.long) if name
         }
-        for key, value in flag_kwargs.items():
-            if key in repeat_path_keys and isinstance(value, list):
-                flag_kwargs[key] = [
-                    scope_map.get(
-                        part,
-                        PathSpec(virtual=part,
-                                 directory=part[:part.rfind("/") + 1] or "/",
+        if not str_flag_paths:
+            for key, value in flag_kwargs.items():
+                if key in repeat_path_keys and isinstance(value, list):
+                    flag_kwargs[key] = [
+                        scope_map.get(
+                            part,
+                            PathSpec(virtual=part,
+                                     directory=part[:part.rfind("/") + 1]
+                                     or "/",
+                                     resource_path="",
+                                     resolved=True)) for part in value
+                    ]
+                elif key in single_path_keys and isinstance(value, str):
+                    flag_kwargs[key] = scope_map.get(
+                        value,
+                        PathSpec(virtual=value,
+                                 directory=value[:value.rfind("/") + 1] or "/",
                                  resource_path="",
-                                 resolved=True)) for part in value
-                ]
-            elif key in single_path_keys and isinstance(value, str):
-                flag_kwargs[key] = scope_map.get(
-                    value,
-                    PathSpec(virtual=value,
-                             directory=value[:value.rfind("/") + 1] or "/",
-                             resource_path="",
-                             resolved=True))
-            elif isinstance(value, str) and value in scope_map:
-                flag_kwargs[key] = scope_map[value]
+                                 resolved=True))
+                elif isinstance(value, str) and value in scope_map:
+                    flag_kwargs[key] = scope_map[value]
 
         # Classify positional args
         paths: list[PathSpec] = []
@@ -344,12 +369,34 @@ def _parse_flags(
                 paths.append(scope)
             else:
                 texts.append(value)
-        return _ParsedCommand(paths, texts, flag_kwargs, parsed.warnings)
+        return _ParsedCommand(paths, texts, flag_kwargs, parsed.warnings,
+                              parsed.invalid_options,
+                              parsed.needs_value_options)
 
     # No spec: separate by type
     paths = [item for item in parts if isinstance(item, PathSpec)]
     texts = [item for item in parts if not isinstance(item, PathSpec)]
-    return _ParsedCommand(paths, texts, {}, [])
+    return _ParsedCommand(paths, texts, {}, [], [], [])
+
+
+def _option_error(cmd_name: str,
+                  parsed: _ParsedCommand) -> tuple[bytes, int] | None:
+    """GNU-shaped refusal for option errors the parser reported.
+
+    find is exempt: its expression tokens are validated by
+    parse_find_expression, which raises the GNU predicate error itself.
+
+    Args:
+        cmd_name (str): command name for message shape and exit code.
+        parsed (_ParsedCommand): parse result carrying the reports.
+    """
+    if cmd_name == "find":
+        return None
+    if parsed.invalid_options:
+        return unknown_option_error(cmd_name, parsed.invalid_options[0])
+    if parsed.needs_value_options:
+        return missing_value_error(cmd_name, parsed.needs_value_options[0])
+    return None
 
 
 async def handle_command(
@@ -473,18 +520,34 @@ async def handle_command(
         # against the shared spec so flags and text operands do not depend on
         # the source mount. The bound single-mount runner lets the strategy
         # runners execute each operand natively on its owning mount.
-        parsed = parse_command(SPECS[cmd_name], raw_argv, cwd=session.cwd)
+        cross_parsed = _parse_flags(parts[1:],
+                                    SPECS.get(cmd_name),
+                                    cmd_name,
+                                    session.cwd,
+                                    str_flag_paths=True)
         cross_texts = (find_expr_tokens
-                       if find_expr_tokens is not None else parsed.texts())
+                       if find_expr_tokens is not None else cross_parsed.texts)
+        cross_refusal = _option_error(cmd_name, cross_parsed)
+        if cross_refusal is not None:
+            msg, code = cross_refusal
+            return None, IOResult(exit_code=code,
+                                  stderr=msg), ExecutionNode(command=cmd_str,
+                                                             exit_code=code,
+                                                             stderr=msg)
         run_single = functools.partial(run_on_mount, registry, session,
                                        dispatch, namespace)
         stdout, io = await handle_cross_mount(cmd_name,
                                               path_scopes,
                                               cross_texts,
-                                              parse_to_kwargs(parsed),
+                                              cross_parsed.flag_kwargs,
                                               dispatch,
                                               run_single,
                                               stdin=stdin)
+        if cross_parsed.warnings:
+            warn = "".join(f"{cmd_name}: {w}\n"
+                           for w in cross_parsed.warnings).encode()
+            existing = await materialize(io.stderr) if io.stderr else b""
+            io.stderr = warn + existing
         # The native sub-runs carry their own mount's safeguard; the
         # cross-mount command as a whole uses the strictest one across the
         # operand mounts, regardless of which sub-run merged last.
@@ -493,6 +556,7 @@ async def handle_command(
             try:
                 mounts.append(registry.mount_for(s.virtual))
             except ValueError:
+                # a scope outside any mount contributes nothing here
                 pass
         io.safeguard = (resolve_across_mounts(cmd_name, mounts)
                         if mounts else resolve_safeguard(cmd_name))
@@ -506,6 +570,7 @@ async def handle_command(
             try:
                 mount_prefixes.add(registry.mount_for(s.virtual).prefix)
             except ValueError:
+                # a scope outside any mount contributes nothing here
                 pass
         if len(mount_prefixes) > 1:
             prefixes_str = ", ".join(sorted(mount_prefixes))
@@ -537,15 +602,26 @@ async def handle_command(
             target = registry.mount_for(ps.virtual)
             assert_mount_allowed(target.prefix)
     except PermissionError as exc:
-        err = f"{exc}\n".encode()
+        err = f"{cmd_name}: {exc}\n".encode()
         return None, IOResult(exit_code=1,
                               stderr=err), ExecutionNode(command=cmd_str,
                                                          exit_code=1,
                                                          stderr=err)
 
     # Parse flags upstream — mount receives clean args
-    paths, texts, flag_kwargs, parse_warnings = _parse_flags(
-        parts[1:], mount, cmd_name, session.cwd)
+    single_parsed = _parse_flags(parts[1:], mount.spec_for(cmd_name), cmd_name,
+                                 session.cwd)
+    paths, texts, flag_kwargs, parse_warnings = (single_parsed.paths,
+                                                 single_parsed.texts,
+                                                 single_parsed.flag_kwargs,
+                                                 single_parsed.warnings)
+    refusal = _option_error(cmd_name, single_parsed)
+    if refusal is not None:
+        msg, code = refusal
+        return None, IOResult(exit_code=code,
+                              stderr=msg), ExecutionNode(command=cmd_str,
+                                                         exit_code=code,
+                                                         stderr=msg)
 
     if find_expr_tokens is not None:
         texts = find_expr_tokens

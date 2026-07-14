@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ssh import SSHAccessor
+from mirage.cache.index import NULL_INDEX
 from mirage.core.ssh.read import read_bytes
 from mirage.core.ssh.write import write_bytes
 from mirage.ops.registry import op
@@ -23,7 +24,7 @@ from mirage.types import PathSpec
 async def truncate(accessor: SSHAccessor, path: PathSpec, length: int,
                    **kwargs) -> None:
     try:
-        data = await read_bytes(accessor, path)
+        data = await read_bytes(accessor, path, index=NULL_INDEX)
     except FileNotFoundError:
         data = b""
     await write_bytes(accessor, path, data[:length].ljust(length, b"\0"))

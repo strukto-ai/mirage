@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from mirage.cache.index import IndexCacheStore, IndexEntry
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.dify.tree import ensure_tree
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
@@ -15,12 +15,10 @@ class ResolvedDifyPath:
     entry: IndexEntry | None = None
 
 
-async def resolve_path(accessor, path: PathSpec,
-                       index: IndexCacheStore) -> ResolvedDifyPath:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
+async def resolve_path(
+        accessor,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX) -> ResolvedDifyPath:
     mount_prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
     await ensure_tree(accessor, index, mount_prefix)
     virtual_key = virtual_key_for(path)

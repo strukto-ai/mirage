@@ -205,3 +205,37 @@ describe('readdir shared drives', () => {
     expect(innerCall?.[1]?.driveId).toBe('drive1')
   })
 })
+
+describe('readdir sizes', () => {
+  it('keeps Drive size for binaries, moves google-apps source size to extra', async () => {
+    vi.mocked(drive.listFiles).mockResolvedValue([
+      {
+        id: 'f1',
+        name: 'report.pdf',
+        mimeType: 'application/pdf',
+        modifiedTime: '2026-04-01T00:00:00.000Z',
+        size: '2048',
+      },
+      {
+        id: 'd1',
+        name: 'My Document',
+        mimeType: 'application/vnd.google-apps.document',
+        modifiedTime: '2026-04-01T00:00:00.000Z',
+        quotaBytesUsed: '9999',
+      },
+    ])
+
+    const accessor = makeAccessor()
+    const index = new RAMIndexCacheStore()
+    await readdir(accessor, new PathSpec({ resourcePath: '', virtual: '/', directory: '/' }), index)
+
+    // Binary files download raw: Drive's size is the rendered byte length.
+    const binary = (await index.get('/report.pdf')).entry
+    expect(binary?.size).toBe(2048)
+    // Google-apps files render to JSON: Drive's source size must not
+    // become the entry size, it lives in extra only.
+    const doc = (await index.get('/My Document.gdoc.json')).entry
+    expect(doc?.size).toBeNull()
+    expect(doc?.extra.source_size).toBe(9999)
+  })
+})

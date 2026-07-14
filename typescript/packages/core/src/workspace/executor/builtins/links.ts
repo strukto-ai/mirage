@@ -18,7 +18,7 @@ import { FileStat, FileType, PathSpec, wordText } from '../../../types.ts'
 import { CycleError } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { DispatchFn } from '../cross_mount.ts'
-import type { Namespace } from '../../mount/namespace.ts'
+import type { Namespace } from '../../mount/namespace/namespace.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import type { Result } from './scope.ts'
@@ -74,11 +74,11 @@ function errorResult(command: string, message: string): Result {
   ]
 }
 
-export function handleLn(
+export async function handleLn(
   namespace: Namespace,
   session: Session,
   args: (string | PathSpec)[],
-): Result {
+): Promise<Result> {
   const [flags, operands] = splitFlags(args, 'sfnv')
   const targetArg = operands[0]
   const linkArg = operands[1]
@@ -101,7 +101,7 @@ export function handleLn(
       `ln: failed to create symbolic link '${wordText(linkArg)}': File exists\n`,
     )
   }
-  namespace.symlink(linkAbs, targetTyped, Date.now() / 1000)
+  await namespace.symlink(linkAbs, targetTyped, Date.now() / 1000)
   let out: Uint8Array | null = null
   if (flags.has('v')) {
     out = new TextEncoder().encode(`'${wordText(linkArg)}' -> '${targetTyped}'\n`)
@@ -150,15 +150,15 @@ export function followPaths(
 
 // Unlink and drop `rm` operands that are symlinks. GNU rm removes the link
 // itself and never follows it; a dangling link removes fine.
-export function stripLinkOperands(
+export async function stripLinkOperands(
   namespace: Namespace,
   items: (string | PathSpec)[],
-): [(string | PathSpec)[], number] {
+): Promise<[(string | PathSpec)[], number]> {
   let removed = 0
   const kept: (string | PathSpec)[] = []
   for (const item of items) {
     if (item instanceof PathSpec && namespace.isLink(item.virtual)) {
-      namespace.unlink(item.virtual)
+      await namespace.unlink(item.virtual)
       removed += 1
       continue
     }
@@ -181,14 +181,17 @@ async function statOrNull(dispatch: DispatchFn, path: PathSpec): Promise<FileSta
 export interface PreparedMv {
   items: (string | PathSpec)[]
   postUnlink: string | null
+  postRename: [string, string] | null
   early: Result | null
 }
 
-// Adjust a two-operand `mv` for symlink operands. A link source renames the
-// link entry itself (into a destination directory when one exists). A link
-// destination whose target is a directory is followed (mv moves into it);
-// any other link destination is replaced, so its entry must drop once the
-// backend move succeeds.
+// Adjust a two-operand `mv` for node-meta operands. A link source renames
+// the link entry itself. A destination that is (a link to) a directory
+// receives the move inside it (rename(2) preceded by mv's dst stat); any
+// other destination is replaced, so its node entry, link or overlay attrs
+// alike, drops once the backend move succeeds. A plain source that carries
+// overlay attributes has its meta travel with the file once the backend
+// move succeeds.
 export async function prepareMv(
   namespace: Namespace,
   dispatch: DispatchFn,
@@ -198,32 +201,35 @@ export async function prepareMv(
   const src = paths[0]
   const dst = paths[1]
   if (paths.length !== 2 || src === undefined || dst === undefined) {
-    return { items, postUnlink: null, early: null }
+    return { items, postUnlink: null, postRename: null, early: null }
+  }
+
+  // Where the move lands: inside a directory destination (followed, so
+  // node-meta keys line up with the followed paths stat merges on), else
+  // the destination itself, replaced like rename(2).
+  const followed = namespace.follow(dst.virtual)
+  const stat = await statOrNull(dispatch, PathSpec.fromStrPath(followed))
+  const intoDir = stat !== null && stat.type === FileType.DIRECTORY
+  let targetDst = dst.virtual
+  if (intoDir) {
+    const name = src.virtual.slice(src.virtual.lastIndexOf('/') + 1)
+    targetDst = rstripSlash(followed) + '/' + name
   }
 
   if (namespace.isLink(src.virtual)) {
-    let targetDst = dst.virtual
-    const stat = await statOrNull(dispatch, dst)
-    if (stat !== null && stat.type === FileType.DIRECTORY) {
-      const name = src.virtual.slice(src.virtual.lastIndexOf('/') + 1)
-      targetDst = rstripSlash(dst.virtual) + '/' + name
-    }
-    namespace.unlink(targetDst)
-    namespace.rename(src.virtual, targetDst)
+    await namespace.unlink(targetDst)
+    await namespace.rename(src.virtual, targetDst)
     const early: Result = [null, new IOResult(), new ExecutionNode({ command: 'mv', exitCode: 0 })]
-    return { items, postUnlink: null, early }
+    return { items, postUnlink: null, postRename: null, early }
   }
 
-  if (namespace.isLink(dst.virtual)) {
-    const followed = namespace.follow(dst.virtual)
-    const stat = await statOrNull(dispatch, PathSpec.fromStrPath(followed))
-    if (stat !== null && stat.type === FileType.DIRECTORY) {
-      return { items: followPaths(namespace, items), postUnlink: null, early: null }
-    }
-    return { items, postUnlink: dst.virtual, early: null }
+  let postRename: [string, string] | null = null
+  if (namespace.metaFor(src.virtual) !== null) {
+    postRename = [src.virtual, targetDst]
   }
 
-  return { items, postUnlink: null, early: null }
+  const rewritten = intoDir && namespace.isLink(dst.virtual) ? followPaths(namespace, items) : items
+  return { items: rewritten, postUnlink: targetDst, postRename, early: null }
 }
 
 export function handleReadlink(

@@ -147,6 +147,29 @@ async def main() -> None:
     result = await ws.execute("base64 /data/hello.txt")
     print(await result.stdout_str())
 
+    print("\n=== METADATA (chmod / chown / touch) ===\n")
+    print("=== chmod 640 + chown 500:staff + touch -t 202601021530 ===")
+    await ws.execute("chmod 640 /data/hello.txt")
+    await ws.execute("chown 500:staff /data/hello.txt")
+    await ws.execute("touch -t 202601021530 /data/hello.txt")
+    result = await ws.execute("ls -l /data/hello.txt")
+    print(await result.stdout_str())
+
+    print("=== chmod u+x,go-r (symbolic, composes on current mode) ===")
+    await ws.execute("chmod u+x,go-r /data/hello.txt")
+    result = await ws.execute("ls -l /data/hello.txt")
+    print(await result.stdout_str())
+
+    print("=== mv carries metadata ===")
+    await ws.execute("mv /data/hello.txt /data/moved.txt")
+    result = await ws.execute("ls -l /data/moved.txt")
+    print(await result.stdout_str())
+    await ws.execute("mv /data/moved.txt /data/hello.txt")
+
+    print("=== touch -c missing.txt does not create ===")
+    result = await ws.execute("touch -c /data/ghost.txt && ls /data/")
+    print(await result.stdout_str())
+
     print("=== not-found errors show the full virtual path ===")
     for cmd in ("cat /data/missing.txt", "head /data/missing.txt",
                 "stat /data/missing.txt"):

@@ -70,6 +70,7 @@ async def list_message_uids(
                     uid_val = rest.split(")")[0].split()[0]
                     uids.append(uid_val)
                 except (ValueError, IndexError):
+                    # tolerant IMAP parse: skip lines that do not match
                     pass
     return uids
 
@@ -162,6 +163,7 @@ def _extract_flags(response) -> list[str]:
                 end = line.index(")", start)
                 return line[start:end].split()
             except ValueError:
+                # tolerant IMAP parse: skip lines that do not match the shape
                 pass
     return []
 
@@ -184,6 +186,7 @@ def _parse_multi_fetch(response, uids: list[str]) -> list[dict]:
                     " ", uid_idx) if " " in line[uid_idx:] else len(line)
                 current_uid = line[uid_idx:uid_end].strip(")")
             except (ValueError, IndexError):
+                # tolerant IMAP parse: skip lines that do not match the shape
                 pass
             if "FLAGS" in line:
                 current_flags = _extract_flags_from_line(line)

@@ -3,6 +3,8 @@ from collections.abc import AsyncIterator, Callable
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.escapes import interpret_escapes
 from mirage.commands.builtin.utils.stream import _resolve_source
+from mirage.commands.spec.types import CommandName
+from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -64,6 +66,8 @@ async def tr(
     squeeze: bool = False,
     complement: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
+    if len(texts) > 2:
+        raise extra_operand_error(CommandName.TR, texts[2])
     if not texts:
         raise ValueError("tr: usage: tr [-d] [-s] [-c] set1 [set2] [path]")
     set1 = _expand_ranges(interpret_escapes(texts[0]))

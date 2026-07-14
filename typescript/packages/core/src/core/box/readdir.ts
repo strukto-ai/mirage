@@ -128,3 +128,8 @@ export async function readdir(
   }
   return out
 }
+export function isDirName(child: string): boolean | null {
+  // Cold reads mark folders with a trailing slash; warm index-cache hits
+  // return slash-less keys, so fall back to stat for classification.
+  return child.endsWith('/') ? true : null
+}

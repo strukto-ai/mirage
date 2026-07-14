@@ -26,6 +26,7 @@ interface Call {
 describe('mirage_fs_shim', () => {
   let py: PyodideInterface
   const calls: Call[] = []
+  const mounts: string[] = []
   const preloaded = new Map<string, Uint8Array>()
   const lazyFiles = new Map<string, Uint8Array>()
   const lazyListings = new Map<string, MirageEntry[]>()
@@ -61,29 +62,27 @@ describe('mirage_fs_shim', () => {
       }
       return Promise.resolve(lazyListings.get(path) ?? [])
     }
-    py.registerJsModule('_mirage_bridge', createMirageBridge(dispatch))
+    py.registerJsModule(
+      '_mirage_bridge',
+      createMirageBridge(dispatch, () => mounts),
+    )
     await py.runPythonAsync(MIRAGE_FS_SHIM_PY)
     py.FS.mkdirTree('/ram')
     py.FS.mkdirTree('/tmp')
   }, 60_000)
 
-  beforeEach(async () => {
+  beforeEach(() => {
     calls.length = 0
+    mounts.length = 0
     preloaded.clear()
     lazyFiles.clear()
     lazyListings.clear()
     lazyListErrors.clear()
-    await py.runPythonAsync(`
-import _mirage_fs_shim as m
-for p in list(m._PREFIXES):
-    m.unregister(p)
-`)
   })
 
   it('flushes a binary write to the bridge on close', async () => {
+    mounts.push('/ram/')
     await py.runPythonAsync(`
-import _mirage_fs_shim as m
-m.register('/ram/')
 with open('/ram/hello.txt', 'wb') as f:
     f.write(b'world')
 `)
@@ -95,10 +94,9 @@ with open('/ram/hello.txt', 'wb') as f:
     expect(new TextDecoder().decode(w0.bytes)).toBe('world')
   })
 
-  it('does not flush writes outside registered prefixes', async () => {
+  it('does not flush writes outside mounted prefixes', async () => {
+    mounts.push('/ram/')
     await py.runPythonAsync(`
-import _mirage_fs_shim as m
-m.register('/ram/')
 with open('/tmp/x.txt', 'wb') as f:
     f.write(b'unbridged')
 `)
@@ -106,9 +104,8 @@ with open('/tmp/x.txt', 'wb') as f:
   })
 
   it('text mode write also flushes', async () => {
+    mounts.push('/ram/')
     await py.runPythonAsync(`
-import _mirage_fs_shim as m
-m.register('/ram/')
 with open('/ram/x.txt', 'w') as f:
     f.write('hello')
 `)
@@ -122,9 +119,8 @@ with open('/ram/x.txt', 'w') as f:
 
   it('append mode flushes the full file content on close', async () => {
     preload('/ram/log.txt', new TextEncoder().encode('a'))
+    mounts.push('/ram/')
     await py.runPythonAsync(`
-import _mirage_fs_shim as m
-m.register('/ram/')
 with open('/ram/log.txt', 'ab') as f:
     f.write(b'b')
 `)
@@ -136,11 +132,10 @@ with open('/ram/log.txt', 'ab') as f:
     expect(new TextDecoder().decode(w0.bytes)).toBe('ab')
   })
 
-  it('unregistering a prefix stops flushing', async () => {
+  it('removing a prefix from the live mount view stops flushing', async () => {
+    mounts.push('/ram/')
+    mounts.length = 0
     await py.runPythonAsync(`
-import _mirage_fs_shim as m
-m.register('/ram/')
-m.unregister('/ram/')
 with open('/ram/x.txt', 'wb') as f:
     f.write(b'nope')
 `)
@@ -149,9 +144,8 @@ with open('/ram/x.txt', 'wb') as f:
 
   it('reads of preloaded files do not call the bridge', async () => {
     preload('/ram/data.bin', new Uint8Array([1, 2, 3]))
+    mounts.push('/ram/')
     await py.runPythonAsync(`
-import _mirage_fs_shim as m
-m.register('/ram/')
 _read_result = open('/ram/data.bin', 'rb').read()
 `)
     const bytes = py.globals.get('_read_result') as Uint8Array | { toJs?: () => Uint8Array } | null
@@ -171,11 +165,10 @@ _read_result = open('/ram/data.bin', 'rb').read()
   })
 
   it('rejects path traversal — /ram/../etc/x is not in /ram/', async () => {
+    mounts.push('/ram/')
     let opened = true
     try {
       await py.runPythonAsync(`
-import _mirage_fs_shim as m
-m.register('/ram/')
 f = open('/ram/../etc/x', 'wb')
 f.write(b'x')
 f.close()
@@ -190,9 +183,8 @@ f.close()
 
   it('r+b mode flushes the modified content on close', async () => {
     preload('/ram/data.bin', new Uint8Array([1, 2, 3, 4]))
+    mounts.push('/ram/')
     await py.runPythonAsync(`
-import _mirage_fs_shim as m
-m.register('/ram/')
 with open('/ram/data.bin', 'r+b') as f:
     f.seek(2)
     f.write(b'\\x99\\x99')
@@ -207,9 +199,8 @@ with open('/ram/data.bin', 'r+b') as f:
 
   it('shim is idempotent — loading twice still works', async () => {
     await py.runPythonAsync(MIRAGE_FS_SHIM_PY)
+    mounts.push('/ram/')
     await py.runPythonAsync(`
-import _mirage_fs_shim as m
-m.register('/ram/')
 with open('/ram/x', 'wb') as f:
     f.write(b'y')
 `)
@@ -227,9 +218,8 @@ with open('/ram/x', 'wb') as f:
       { path: '/ram/lazy/sub', size: 0, isDir: true },
     ])
     seedLazyFile('/ram/lazy/file.txt', new TextEncoder().encode('lazy-bytes'))
+    mounts.push('/ram/')
     await py.runPythonAsync(`
-import _mirage_fs_shim as m
-m.register('/ram/')
 import os
 _lazy_entries = sorted(os.listdir('/ram/lazy'))
 `)
@@ -246,9 +236,8 @@ _lazy_entries = sorted(os.listdir('/ram/lazy'))
   it('open() in read mode lazy-fetches when MEMFS misses', async () => {
     seedLazyListing('/ram/lazyread/', [{ path: '/ram/lazyread/note.txt', size: 5, isDir: false }])
     seedLazyFile('/ram/lazyread/note.txt', new TextEncoder().encode('hello-lazy'))
+    mounts.push('/ram/')
     await py.runPythonAsync(`
-import _mirage_fs_shim as m
-m.register('/ram/')
 with open('/ram/lazyread/note.txt', 'rb') as f:
     _lazy_read = f.read()
 `)
@@ -267,9 +256,8 @@ with open('/ram/lazyread/note.txt', 'rb') as f:
   it('os.stat lazy-backfills', async () => {
     seedLazyListing('/ram/lazystat/', [{ path: '/ram/lazystat/data.bin', size: 3, isDir: false }])
     seedLazyFile('/ram/lazystat/data.bin', new Uint8Array([7, 8, 9]))
+    mounts.push('/ram/')
     await py.runPythonAsync(`
-import _mirage_fs_shim as m
-m.register('/ram/')
 import os
 _lazy_size = os.stat('/ram/lazystat/data.bin').st_size
 `)
@@ -281,9 +269,8 @@ _lazy_size = os.stat('/ram/lazystat/data.bin').st_size
   it('lazy backfill is cached — second call does not re-hit the bridge', async () => {
     seedLazyListing('/ram/cached/', [{ path: '/ram/cached/a.txt', size: 1, isDir: false }])
     seedLazyFile('/ram/cached/a.txt', new TextEncoder().encode('A'))
+    mounts.push('/ram/')
     await py.runPythonAsync(`
-import _mirage_fs_shim as m
-m.register('/ram/')
 import os
 os.listdir('/ram/cached')
 os.listdir('/ram/cached')
@@ -297,11 +284,10 @@ with open('/ram/cached/a.txt', 'rb') as f:
   it('lazy backfill failure surfaces as FileNotFoundError', async () => {
     lazyListErrors.add('/ram/missing/')
     lazyListErrors.add('/ram/')
+    mounts.push('/ram/')
     let raised = false
     try {
       await py.runPythonAsync(`
-import _mirage_fs_shim as m
-m.register('/ram/')
 import os
 os.listdir('/ram/missing')
 `)

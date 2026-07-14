@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.discord import DiscordConfig, DiscordResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -97,6 +98,19 @@ async def main():
     print(f"\n=== ls {base}/{target_date}/ ===")
     r = await ws.execute(f'ls "{base}/{target_date}/"')
     print(await r.stdout_str())
+
+    # chmod/chown/touch never hit the Discord API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print(f"=== metadata overlay on {file_path} ===")
+    meta_res = await ws.execute(f'chmod 640 "{file_path}"'
+                                f' && chown 500:dev "{file_path}"'
+                                f' && touch -t 202601021530 "{file_path}"')
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    meta_st, _ = await ws.dispatch("stat",
+                                   PathSpec.from_str_path(f"{file_path}"))
+    print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+          f"gid={meta_st.gid} mtime={meta_st.modified}")
 
     # ── list attachments for that date (may be empty) ─
     print(f"\n=== ls {base}/{target_date}/files/ (attachments) ===")
@@ -227,6 +241,25 @@ async def main():
         raise AssertionError(
             f"regression: find chat.jsonl exited {r.exit_code} "
             "(soft errors should not abort)")
+
+    # -path matches the display path; -size counts dirs and sizeless
+    # rendered files as 0 (so +0c drops them, -1k keeps them).
+    print(f"\n=== find /discord/{guild}/ -path '*channels*' | head -n 5 ===")
+    r = await ws.execute(f'find "/discord/{guild}/" -path "*channels*"'
+                         ' | head -n 5')
+    print(f"  exit={r.exit_code}")
+    out = (await r.stdout_str()).strip()
+    if out:
+        for line in out.splitlines():
+            print(f"  {line}")
+    if r.exit_code != 0 or not out:
+        raise AssertionError("regression: find -path returned nothing")
+
+    print(f"\n=== find /discord/{guild}/ -maxdepth 1 -size +0c ===")
+    r = await ws.execute(f'find "/discord/{guild}/" -maxdepth 1 -size +0c')
+    print(f"  exit={r.exit_code} (dirs count as size 0, expect no output)")
+    if (await r.stdout_str()).strip():
+        raise AssertionError("regression: -size +0c matched a directory")
 
     # ── pwd / cd / relative ──────────────────────────
     print(f"\n=== cd {base} ===")

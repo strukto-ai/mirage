@@ -8,6 +8,7 @@ from mirage.accessor.base import Accessor
 from mirage.cache.read_through import cache_aware_read
 from mirage.commands.builtin.utils.output import format_records
 from mirage.types import PathSpec
+from mirage.utils.errors import FS_ERRORS, fs_error_line
 from mirage.utils.stream import ensure_stream
 
 
@@ -193,13 +194,16 @@ async def format_multi(
     c: bool = False,
     m: bool = False,
     L: bool = False,
-) -> bytes:
+) -> tuple[bytes, bytes]:
     """Format wc output for multiple already-resolved paths.
 
     Globs are expanded by the caller (``resolve_glob``) before this runs, so
     ``paths`` is always a flat list of concrete entries, never patterns. One
     record is emitted per path, plus a trailing ``total`` row when more than
-    one path is given; every record ends with a newline per POSIX wc.
+    one path is given; every record ends with a newline per POSIX wc. A
+    failed operand is skipped and reported as one GNU stderr line, and the
+    ``total`` row still prints (GNU wc totals the operands that resolved,
+    ``0 total`` when none did).
 
     Args:
         paths (list[PathSpec]): Resolved paths; only ``.virtual`` is read.
@@ -214,21 +218,27 @@ async def format_multi(
         L (bool): Report longest line length only.
 
     Returns:
-        bytes: Encoded wc output, or ``b""`` when ``paths`` is empty.
+        tuple[bytes, bytes]: Encoded wc output (``b""`` when nothing prints)
+        and concatenated stderr lines for failed operands (``b""`` if none).
     """
     read = cache_aware_read(read)
     rows: list[tuple[WCCounts, str | None]] = []
     totals = WCCounts()
+    err = b""
     for path in paths:
-        source = read(accessor, path)
-        if inspect.isawaitable(source):
-            source = await source
-        counts = await wc(source)
+        try:
+            source = read(accessor, path)
+            if inspect.isawaitable(source):
+                source = await source
+            counts = await wc(source)
+        except FS_ERRORS as exc:
+            err += fs_error_line("wc", path, exc).encode()
+            continue
         rows.append((counts, path.raw_path))
         totals.merge(counts)
     if len(paths) > 1:
         rows.append((totals, "total"))
     if not rows:
-        return b""
+        return b"", err
     return format_records(
-        format_wc_lines(rows, args_l=args_l, w=w, c=c, m=m, L=L))
+        format_wc_lines(rows, args_l=args_l, w=w, c=c, m=m, L=L)), err

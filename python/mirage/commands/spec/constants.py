@@ -20,6 +20,31 @@ AMBIGUOUS_NAMES = {"l": "args_l", "O": "args_O", "I": "args_I", "1": "args_1"}
 # cluster or a path.
 NUMERIC_SHORT = re.compile(r"^-\d+$")
 
+# GNU usage-error exit codes, pinned against debian coreutils/grep/diffutils
+# (plus ripgrep and jq upstream docs). Everything else exits 1. Keys are
+# plain strings, not CommandName members: types.py (the enum's home)
+# imports this module for flag_kwarg_name, so importing the enum here
+# would be a cycle; StrEnum members hash as their values, so lookups
+# with CommandName still hit.
+USAGE_EXIT = {
+    "grep": 2,
+    "egrep": 2,
+    "fgrep": 2,
+    "zgrep": 2,
+    "rg": 2,
+    "ls": 2,
+    "sort": 2,
+    "diff": 2,
+    "cmp": 2,
+    "awk": 2,
+    "jq": 2,
+    "tar": 64,
+}
+
+# Commands whose `Try '--help'` hint line is prefixed with the command
+# name (GNU diffutils style: `diff: Try 'diff --help' ...`).
+USAGE_HINT_PREFIX = frozenset({"diff", "cmp"})
+
 
 def flag_kwarg_name(flag: str) -> str:
     """Map a flag name to its dispatcher kwarg name.

@@ -16,7 +16,7 @@ import asyncio
 import logging
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path, virtual_path
 from mirage.core.databricks_volume.stat import modified_to_iso
@@ -38,12 +38,8 @@ def _list_directory_sync(
 async def readdir(
     accessor: DatabricksVolumeAccessor,
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     list_path = path.dir if path.pattern else path
     virtual_key = list_path.virtual.rstrip("/") or "/"
     listing = await index.list_dir(virtual_key)

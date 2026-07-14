@@ -165,7 +165,7 @@ describe('readdir(/runs) cap', () => {
 })
 
 describe('find on /runs', () => {
-  it('produces at most maxRuns run directories', async () => {
+  it('refuses recursive search across runs like python', async () => {
     const transport = new FakeCITransport(1000)
     const accessor = new GitHubCIAccessor({
       transport,
@@ -185,23 +185,20 @@ describe('find on /runs', () => {
     }
     const findCmd = GITHUB_CI_FIND[0]
     if (findCmd === undefined) throw new Error('GITHUB_CI_FIND missing')
-    const result = await findCmd.fn(
-      accessor as unknown as Parameters<typeof findCmd.fn>[0],
-      [
-        new PathSpec({
-          virtual: '/runs',
-          directory: '/runs',
-          resolved: false,
-          resourcePath: 'runs',
-        }),
-      ],
-      [],
-      opts,
-    )
-    expect(result).not.toBeNull()
-    const [bytes] = result as [Uint8Array, unknown]
-    const lines = new TextDecoder().decode(bytes).split('\n')
-    const runDirs = lines.filter((l) => /^\/runs\/[^/]+$/.test(l))
-    expect(runDirs.length).toBe(5)
+    await expect(
+      findCmd.fn(
+        accessor as unknown as Parameters<typeof findCmd.fn>[0],
+        [
+          new PathSpec({
+            virtual: '/runs',
+            directory: '/runs',
+            resolved: false,
+            resourcePath: 'runs',
+          }),
+        ],
+        [],
+        opts,
+      ),
+    ).rejects.toThrow('across runs is disabled')
   })
 })

@@ -12,22 +12,25 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { SPECS } from '../../commands/spec/index.ts'
 import { parseCommand, parseToKwargs } from '../../commands/spec/parser.ts'
+import { missingValueError, unknownOptionError } from '../../commands/spec/usage.ts'
 import { concatBytes } from '../../core/jq/format.ts'
 import { OperandKind } from '../../commands/spec/types.ts'
+import type { CommandSpec } from '../../commands/spec/types.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import type { Resource } from '../../resource/base.ts'
-import { assertMountAllowed, MountNotAllowedError } from '../../runtime/session_context.ts'
+import { assertMountAllowed, MountNotAllowedError } from '../../context/session_context.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/types.ts'
 import { PathSpec, wordText } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
-import type { Namespace } from '../mount/namespace.ts'
+import type { Namespace } from '../mount/namespace/namespace.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { Consumer, JOB_BUILTINS, route } from '../route/index.ts'
-import type { PyodideRuntime } from './python/runtime.ts'
+import type { PythonRuntime } from './python/runtimes/interface.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import { asyncChain } from '../../io/stream.ts'
@@ -41,10 +44,11 @@ import {
   findExprTail,
   parseFindExpression,
 } from '../../commands/builtin/findParse.ts'
-import { maybeWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
+import { CommandTimeoutError, maybeWithTimeout } from '../../commands/builtin/utils/safeguard.ts'
 import { resolveAcrossMounts, resolveSafeguard } from '../../commands/safeguard.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
 import { handleJobs, handleKill, handlePs, handleWait } from './jobs.ts'
+import { UsageError } from '../../commands/errors.ts'
 import { formatFsError } from '../../utils/errors.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 
@@ -57,7 +61,7 @@ interface RunOnMountCtx {
   dispatch: DispatchFn
   namespace?: Namespace
   ensureOpen?: (resource: Resource) => Promise<void>
-  pythonRuntime?: PyodideRuntime
+  pythonRuntime?: PythonRuntime
 }
 
 interface RunOnMountOpts {
@@ -81,13 +85,13 @@ function scalarFindFlags(flagKwargs: Flags): Flags {
 }
 
 // Run one already-parsed command on the mount that owns its paths. The shared
-// single-mount execution tail: mount resolution, grant checks, executeCmd,
+// single-mount execution tail: mount resolution, session-mode checks, executeCmd,
 // filesystem-error formatting, ls/find post-processing, and read/write key
 // prefixing. handleCommand uses it for the normal path, and passes it (bound)
 // to the cross-mount runners so each operand executes natively on its owning
 // mount. `resolveHint` resolves the mount when `paths` is empty (a stream
 // command running in stdin mode); a pre-resolved `mount` skips resolution and
-// grant checks, which the caller already performed.
+// session-mode checks, which the caller already performed.
 async function runOnMount(
   ctx: RunOnMountCtx,
   cmdName: string,
@@ -97,9 +101,9 @@ async function runOnMount(
   opts: RunOnMountOpts = {},
 ): Promise<[ByteSource | null, IOResult]> {
   const { registry, session, dispatch, namespace, ensureOpen, pythonRuntime } = ctx
+  const hint = opts.resolveHint ?? null
   let mount = opts.mount ?? null
   if (mount === null) {
-    const hint = opts.resolveHint ?? null
     const resolvePaths = paths.length > 0 ? paths : hint !== null ? [hint] : []
     try {
       mount = await registry.resolveMount(cmdName, resolvePaths, session.cwd)
@@ -139,9 +143,10 @@ async function runOnMount(
   // resolveMount may redirect a warm remote read to the cache mount, which
   // does not carry the origin mount's per-command safeguards. Resolve the
   // safeguard from the real (pre-redirect) mount so the cap survives the hit.
-  const realMount = registry.mountFor(
-    paths.length > 0 ? (paths[0]?.virtual ?? session.cwd) : session.cwd,
-  )
+  // A spec can bucket a path-shaped operand as TEXT (python3's script), so
+  // when the spec-split paths are empty fall back to the classified scope
+  // hint before cwd, mirroring the Python executor.
+  const realMount = registry.mountFor(paths[0]?.virtual ?? hint?.virtual ?? session.cwd)
   const safeguardOverride = realMount?.commandSafeguards.get(cmdName) ?? null
 
   try {
@@ -158,7 +163,7 @@ async function runOnMount(
     let stdout = initialStdout
     if (cmdName === 'ls' && io.exitCode === 0) {
       stdout = await injectChildMounts(stdout, registry, paths, flags, session.cwd)
-      if (namespace !== undefined && namespace.symlinks.size > 0) {
+      if (namespace?.hasLinks() === true) {
         stdout = await injectLinks(stdout, namespace, paths, flags, session.cwd)
       }
     }
@@ -182,6 +187,21 @@ async function runOnMount(
     }
     return [stdout, io]
   } catch (err) {
+    // Command-owned usage errors (extra operands, missing patterns) become
+    // this command's IOResult so the rest of the line keeps running, like a
+    // real shell (#452).
+    if (err instanceof UsageError) {
+      return [
+        null,
+        new IOResult({
+          exitCode: err.exitCode,
+          stderr: new TextEncoder().encode(`${err.message}\n`),
+        }),
+      ]
+    }
+    // A safeguard timeout is not a filesystem failure: let it reach the
+    // workspace-level handler that answers with exit 124.
+    if (err instanceof CommandTimeoutError) throw err
     return [null, new IOResult({ exitCode: 1, stderr: formatFsError(cmdName, err, paths) })]
   }
 }
@@ -208,7 +228,7 @@ export async function handleCommand(
   jobTable: JobTable | null = null,
   ensureOpen?: (resource: Resource) => Promise<void>,
   unmount?: (prefix: string) => Promise<void>,
-  pythonRuntime?: PyodideRuntime,
+  pythonRuntime?: PythonRuntime,
   namespace?: Namespace,
 ): Promise<Result> {
   if (parts.length === 0) {
@@ -248,8 +268,6 @@ export async function handleCommand(
     const p = parts[i]
     if (p instanceof PathSpec) pathScopes.push(p)
   }
-  const textOnly = parts.slice(1).map((p) => (typeof p === 'string' ? p : p.virtual))
-
   const rawArgv = parts.slice(1).map((p) => (typeof p === 'string' ? p : p.virtual))
   const guardResult = checkMountRootGuard(cmdName, pathScopes, registry, rawArgv)
   if (guardResult !== null) {
@@ -302,15 +320,23 @@ export async function handleCommand(
   }
 
   if (isCrossMount(cmdName, pathScopes, registry)) {
-    // Parse against the mount spec so flags and text operands split like
-    // the single-mount path: raw argv would hand flag tokens ("-c") to
-    // the generic as the search pattern. The bound single-mount runner lets
-    // the strategy runners execute each operand natively on its owning mount.
-    const srcMount = registry.mountFor(pathScopes[0]?.virtual ?? session.cwd)
-    const csParsed =
-      srcMount !== null ? parseFlags(parts.slice(1), srcMount, cmdName, session.cwd) : null
-    const csFlags = csParsed !== null ? csParsed[2] : {}
-    const csTexts = findExprTokens ?? (csParsed !== null ? csParsed[1] : textOnly)
+    // Parse against the shared spec so flags and text operands do not
+    // depend on the source mount: raw argv would hand flag tokens ("-c")
+    // to the generic as the search pattern. The bound single-mount runner
+    // lets the strategy runners execute each operand natively on its
+    // owning mount.
+    const csParsed = parseFlags(parts.slice(1), SPECS[cmdName] ?? null, cmdName, session.cwd)
+    const csFlags = csParsed[2]
+    const csTexts = findExprTokens ?? csParsed[1]
+    const csRefusal = optionError(cmdName, csParsed[4], csParsed[5])
+    if (csRefusal !== null) {
+      const [msg, code] = csRefusal
+      return [
+        null,
+        new IOResult({ exitCode: code, stderr: msg }),
+        new ExecutionNode({ command: cmdStr, exitCode: code, stderr: msg }),
+      ]
+    }
     const runCtx: RunOnMountCtx = {
       registry,
       session,
@@ -331,6 +357,12 @@ export async function handleCommand(
       stdin,
       cmdStr,
     )
+    if (csParsed[3].length > 0) {
+      const csWarn = new TextEncoder().encode(csParsed[3].map((w) => `${cmdName}: ${w}\n`).join(''))
+      const csExisting = await materialize(csIo.stderr)
+      csIo.stderr = concatBytes([csWarn, csExisting])
+      csExec.stderr = concatBytes([csWarn, csExec.stderr])
+    }
     // The native sub-runs carry their own mount's safeguard; the cross-mount
     // command as a whole uses the strictest one across the operand mounts,
     // regardless of which sub-run merged last.
@@ -400,12 +432,17 @@ export async function handleCommand(
     throw err
   }
 
-  const [paths, textsRaw, flagKwargs, parseWarnings] = parseFlags(
-    parts.slice(1),
-    mount,
-    cmdName,
-    session.cwd,
-  )
+  const [paths, textsRaw, flagKwargs, parseWarnings, invalidOptions, needsValueOptions] =
+    parseFlags(parts.slice(1), mount.specFor(cmdName), cmdName, session.cwd)
+  const refusal = optionError(cmdName, invalidOptions, needsValueOptions)
+  if (refusal !== null) {
+    const [msg, code] = refusal
+    return [
+      null,
+      new IOResult({ exitCode: code, stderr: msg }),
+      new ExecutionNode({ command: cmdStr, exitCode: code, stderr: msg }),
+    ]
+  }
   const texts = findExprTokens ?? textsRaw
   if (findExprTokens !== null) {
     // `repeatable: true` on find value-flags makes parseToKwargs emit arrays;
@@ -459,6 +496,7 @@ export async function handleCommand(
   const [rawStdout, io] = await runOnMount(runCtx, cmdName, paths, texts, flagKwargs, {
     stdin,
     mount,
+    resolveHint: pathScopes[0] ?? null,
   })
   let stdout = rawStdout
   if (warnBytes !== null) {
@@ -477,12 +515,24 @@ export async function handleCommand(
   return [stdout, io, exec]
 }
 
+// Single-mount dispatch and cross-mount dispatch both parse through here,
+// so flags, texts, and parser warnings cannot drift between the two paths
+// (a cross-mount `grep --bogus` used to lose its warning). The spec comes
+// from the owning mount on the single-mount path and the shared SPECS
+// registry on the cross-mount path.
 function parseFlags(
   parts: readonly (string | PathSpec)[],
-  mount: MountEntry,
+  spec: CommandSpec | null,
   cmdName: string,
   cwd: string,
-): [PathSpec[], string[], Record<string, string | boolean | string[]>, string[]] {
+): [
+  PathSpec[],
+  string[],
+  Record<string, string | boolean | string[]>,
+  string[],
+  string[],
+  string[],
+] {
   const argv: string[] = parts.map((item) => (item instanceof PathSpec ? item.virtual : item))
   const scopeMap = new Map<string, PathSpec>()
   for (const item of parts) {
@@ -493,7 +543,6 @@ function parseFlags(
     }
   }
 
-  const spec = mount.specFor(cmdName)
   if (spec !== null) {
     const parsed = parseCommand(spec, argv, cwd)
     const flagKwargs = parseToKwargs(parsed)
@@ -529,7 +578,14 @@ function parseFlags(
         texts.push(value)
       }
     }
-    return [paths, texts, flagKwargs, parsed.warnings]
+    return [
+      paths,
+      texts,
+      flagKwargs,
+      parsed.warnings,
+      parsed.invalidOptions,
+      parsed.needsValueOptions,
+    ]
   }
 
   const paths: PathSpec[] = []
@@ -538,7 +594,21 @@ function parseFlags(
     if (item instanceof PathSpec) paths.push(item)
     else texts.push(item)
   }
-  return [paths, texts, {}, []]
+  return [paths, texts, {}, [], [], []]
+}
+
+// GNU-shaped refusal for option errors the parser reported. find is
+// exempt: its expression tokens are validated by parseFindExpression,
+// which raises the GNU predicate error itself.
+function optionError(
+  cmdName: string,
+  invalid: readonly string[],
+  needsValue: readonly string[],
+): [Uint8Array, number] | null {
+  if (cmdName === 'find') return null
+  if (invalid.length > 0) return unknownOptionError(cmdName, invalid[0] ?? '')
+  if (needsValue.length > 0) return missingValueError(cmdName, needsValue[0] ?? '')
+  return null
 }
 
 function prefixKeys(obj: Record<string, ByteSource>, prefix: string): Record<string, ByteSource> {

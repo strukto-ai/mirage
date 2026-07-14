@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Command } from 'commander'
+import { registerConfigCommands } from './config.ts'
 import { registerDaemonCommands } from './daemon.ts'
 import { registerExecuteCommand } from './execute.ts'
 import { registerJobCommands } from './job.ts'
@@ -52,5 +53,6 @@ export function buildProgram(): Command {
   registerExecuteCommand(program)
   registerProvisionCommand(program)
   registerDaemonCommands(program)
+  registerConfigCommands(program)
   return program
 }

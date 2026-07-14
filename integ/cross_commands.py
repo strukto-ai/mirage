@@ -25,6 +25,7 @@ from mirage import MountMode, Workspace
 from mirage.resource.ram import RAMResource
 from mirage.resource.redis import RedisResource
 from mirage.resource.s3 import S3Config, S3Resource
+from mirage.types import PathSpec
 
 S3_BUCKET = "mirage-integ-cross"
 CREDS = dict(aws_access_key_id="testing",
@@ -127,6 +128,63 @@ async def check_read_family(ws: Workspace, dst: str, label: str) -> None:
     check(
         f"{label}: grep missing strerror", code == 0 and f"{src}:aaa" in out
         and err == f"grep: {miss}: No such file or directory\n")
+
+
+async def check_partial_read(ws: Workspace, dst: str, label: str) -> None:
+    # One good + one missing operand: GNU keeps the good operand's output,
+    # reports the missing operand on stderr via the shared formatter, and
+    # exits 1. Single-mount and cross-mount must produce identical bytes.
+    src = "/ram/dir/a.txt"
+    miss = f"{dst}/copied/nope.txt"
+    out, err, code = await run(ws, f"cat {src} {miss}")
+    check(
+        f"{label}: cat keeps partial output", out == "aaa\n" and code == 1
+        and err == f"cat: {miss}: No such file or directory\n")
+    out, err, code = await run(ws, f"wc -l {src} {miss}")
+    check(
+        f"{label}: wc keeps total", out == f"1 {src}\n1 total\n" and code == 1
+        and err == f"wc: {miss}: No such file or directory\n")
+    out, err, code = await run(ws, f"head -n 1 {src} {miss}")
+    check(
+        f"{label}: head keeps banner", out == f"==> {src} <==\naaa\n"
+        and code == 1 and err == f"head: {miss}: No such file or directory\n")
+    out, err, code = await run(ws, f"tail -n 1 {src} {miss}")
+    check(
+        f"{label}: tail keeps banner", out == f"==> {src} <==\naaa\n"
+        and code == 1 and err == f"tail: {miss}: No such file or directory\n")
+    # nl rides the STREAM strategy cross-mount: the error line must carry
+    # nl's own name, not the cat sub-run that fetched the operand.
+    out, err, code = await run(ws, f"nl {src} {miss}")
+    check(
+        f"{label}: nl keeps output, own name", out == "     1\taaa\n"
+        and code == 1 and err == f"nl: {miss}: No such file or directory\n")
+    out, err, code = await run(ws, f"md5 {src} {miss}")
+    check(
+        f"{label}: md5 keeps good hash",
+        out == f"5c9597f3c8245907ea71a89d9d39d08e  {src}\n" and code == 1
+        and err == f"md5: {miss}: No such file or directory\n")
+    # stat fans out per operand; mtimes vary, so pin shape and exit only.
+    out, err, code = await run(ws, f"stat {src} {miss}")
+    check(
+        f"{label}: stat keeps good row", "name=a.txt" in out and code == 1
+        and err == f"stat: {miss}: No such file or directory\n")
+    out, err, code = await run(ws, f"cut -c1 {src} {miss}")
+    check(
+        f"{label}: cut keeps partial output", out == "a\n" and code == 1
+        and err == f"cut: {miss}: No such file or directory\n")
+    out, err, code = await run(ws, f"tac {src} {miss}")
+    check(
+        f"{label}: tac keeps partial output", out == "aaa\n" and code == 1
+        and err == f"tac: {miss}: No such file or directory\n")
+    out, err, code = await run(ws, f"sed s/a/X/ {src} {miss}")
+    check(
+        f"{label}: sed keeps partial output", out == "Xaa\n" and code == 1
+        and err == f"sed: {miss}: No such file or directory\n")
+    # sort aborts on any failed operand, single- and cross-mount alike.
+    out, err, code = await run(ws, f"sort {src} {miss}")
+    check(
+        f"{label}: sort aborts", out == "" and code == 1
+        and err == f"sort: {miss}: No such file or directory\n")
 
 
 async def check_compare(ws: Workspace, dst: str, label: str) -> None:
@@ -295,6 +353,47 @@ async def check_symlinks(ws: Workspace, dst: str, label: str) -> None:
     await run(ws, "rm /ram/xl_copy.txt")
 
 
+async def stat_of(ws: Workspace, path: str):
+    st, _ = await ws.dispatch("stat", PathSpec.from_str_path(path))
+    return st
+
+
+async def check_metadata(ws: Workspace, dst: str, label: str) -> None:
+    # setattr is resolve-then-act: chmod/chown/touch on a dst-homed file,
+    # directly and through links homed on another mount, must land on the
+    # target mount (natively or in the namespace overlay) and read back
+    # through dispatch-stat identically.
+    await run(ws, f"printf 'mmm\n' > {dst}/copied/m.txt")
+    await run(
+        ws, f"chmod 601 {dst}/copied/m.txt && chown 500:dev {dst}/copied/m.txt"
+        f" && touch -t 202601021530 {dst}/copied/m.txt")
+    st = await stat_of(ws, f"{dst}/copied/m.txt")
+    check(f"{label}: chmod lands on dst mount", st.mode == 0o601)
+    check(f"{label}: chown lands on dst mount",
+          (st.uid, st.gid) == (500, "dev"))
+    check(f"{label}: touch stamps dst mtime",
+          (st.modified or "").startswith("2026-01-02T15:30"))
+    await run(ws, f"ln -s {dst}/copied/m.txt /ram/ml.txt")
+    await run(ws, "chmod 640 /ram/ml.txt && touch -t 202603041200 /ram/ml.txt")
+    st = await stat_of(ws, f"{dst}/copied/m.txt")
+    check(f"{label}: chmod through cross-mount link hits target",
+          st.mode == 0o640)
+    check(f"{label}: touch through cross-mount link hits target",
+          (st.modified or "").startswith("2026-03-04T12:00"))
+    await run(ws, "touch -h -t 202601010000 /ram/ml.txt")
+    st = await stat_of(ws, f"{dst}/copied/m.txt")
+    check(f"{label}: touch -h writes link node, target untouched",
+          (st.modified or "").startswith("2026-03-04T12:00"))
+    await run(ws, f"ln -s {dst}/copied /ram/mdir")
+    await run(ws, "touch -t 202601021530 /ram/mdir/created.txt")
+    out, _, _ = await run(ws, f"ls {dst}/copied")
+    check(f"{label}: touch creates through cross-mount dir link", "created.txt"
+          in out)
+    await run(
+        ws, f"rm /ram/ml.txt /ram/mdir {dst}/copied/m.txt"
+        f" {dst}/copied/created.txt")
+
+
 async def check_symlink_cache(ws: Workspace, s3_client, label: str) -> None:
     # Reads through a link must share the target's cache entry: warming via
     # the link keys the cache under the REAL path, so a direct read of the
@@ -323,11 +422,13 @@ async def exercise(ws: Workspace, dst: str, label: str,
     await check_recursive(ws, dst, label, expect_dirs)
     await check_cd_cross_mount(ws, dst, label)
     await check_read_family(ws, dst, label)
+    await check_partial_read(ws, dst, label)
     await check_compare(ws, dst, label)
     await check_no_clobber(ws, dst, label)
     await check_omit_directory(ws, dst, label)
     await check_move(ws, dst, label)
     await check_symlinks(ws, dst, label)
+    await check_metadata(ws, dst, label)
 
 
 async def main() -> None:
@@ -355,6 +456,7 @@ async def main() -> None:
     ws = Workspace(mounts, mode=MountMode.WRITE)
     try:
         await seed_tree(ws, "/ram")
+        await check_partial_read(ws, "/ram", "ram-single")
         await exercise(ws, "/ram2", "ram", expect_dirs=True)
         if redis_url:
             await exercise(ws, "/redis", "redis", expect_dirs=True)

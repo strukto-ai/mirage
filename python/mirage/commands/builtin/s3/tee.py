@@ -33,7 +33,7 @@ async def tee(
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     a: bool = False,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
@@ -46,10 +46,11 @@ async def tee(
     if a:
         try:
             existing = b""
-            async for chunk in read_stream(accessor, paths[0]):
+            async for chunk in read_stream(accessor, paths[0], index=index):
                 existing += chunk
             write_data = existing + raw
         except FileNotFoundError:
+            # appending to a missing object starts from empty
             pass
     await write_bytes(accessor, paths[0], write_data)
     return raw, IOResult(writes={paths[0].mount_path: write_data},

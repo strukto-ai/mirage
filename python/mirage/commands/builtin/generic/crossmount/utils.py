@@ -22,6 +22,7 @@ from mirage.commands.builtin.generic.crossmount.types import (OperandRun,
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
+from mirage.utils.errors import FS_ERRORS, fs_error_line
 
 
 async def relay(dispatch: Callable,
@@ -72,7 +73,16 @@ async def run_operands(run_single: RunSingle,
                                    texts,
                                    flag_kwargs,
                                    stdin=stdin_bytes)
-        data = await materialize(out) if out is not None else b""
+        try:
+            data = await materialize(out) if out is not None else b""
+        except FS_ERRORS as exc:
+            # A lazy stream can fail on first pull (head/tail opening the
+            # operand mid-drain); report it like the native run would and
+            # keep the remaining operands, GNU-style.
+            existing = await materialize(io.stderr) if io.stderr else b""
+            io.stderr = existing + fs_error_line(cmd_name, scope, exc).encode()
+            io.exit_code = 1
+            data = b""
         io.sync_exit_code()
         results.append(OperandRun(scope, data, io))
     return results

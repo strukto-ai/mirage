@@ -17,8 +17,10 @@ from functools import partial
 import pytest
 
 from mirage.commands.builtin.rg_helper import rg_full, rg_matches_filter
+from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
+                                                call_stat, to_pathspec)
 from mirage.core.ram.mkdir import mkdir
-from mirage.core.ram.read import read_bytes
+from mirage.core.ram.read import read
 from mirage.core.ram.readdir import readdir
 from mirage.core.ram.stat import stat
 from mirage.core.ram.write import write_bytes as _async_write_bytes
@@ -26,25 +28,21 @@ from mirage.core.ram.write import write_bytes as _async_write_bytes
 
 async def _write(backend, path, content):
     accessor = backend.accessor
-    await _async_write_bytes(accessor, path, content.encode())
+    await _async_write_bytes(accessor, to_pathspec(path), content.encode())
 
 
 async def _mkdir(backend, path):
     accessor = backend.accessor
-    await mkdir(accessor, path, parents=True)
+    await mkdir(accessor, to_pathspec(path), parents=True)
 
 
 def _bind(backend):
     accessor = backend.accessor
     index = backend.index
-
-    async def _readdir(path):
-        return await readdir(accessor, path, index)
-
     return (
-        _readdir,
-        partial(stat, accessor),
-        partial(read_bytes, accessor),
+        partial(call_readdir, readdir, accessor, index=index),
+        partial(call_stat, stat, accessor),
+        partial(call_read_bytes, read, accessor),
     )
 
 

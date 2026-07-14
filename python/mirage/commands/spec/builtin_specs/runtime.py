@@ -33,7 +33,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-p", value_kind=OperandKind.TEXT),
             Option(short="-t"),
         ),
-        rest=Operand(kind=OperandKind.TEXT),
+        positional=(Operand(kind=OperandKind.TEXT), ),
     ),
     'bc':
     CommandSpec(
@@ -86,7 +86,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-R",
                    description="Output date in RFC 5322 email format."),
         ),
-        rest=Operand(kind=OperandKind.TEXT),
+        positional=(Operand(kind=OperandKind.TEXT), ),
     ),
     'sleep':
     CommandSpec(

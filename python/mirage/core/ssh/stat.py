@@ -15,7 +15,7 @@
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.ssh._client import _abs
 from mirage.core.timeutil import epoch_to_iso
 from mirage.types import FileStat, FileType, PathSpec
@@ -25,11 +25,7 @@ from mirage.utils.filetype import guess_type
 
 async def stat(accessor: SSHAccessor,
                path: PathSpec,
-               index: IndexCacheStore = None) -> FileStat:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
+               index: IndexCacheStore = NULL_INDEX) -> FileStat:
     virtual = path.virtual
     if isinstance(path, PathSpec):
         path = path.mount_path

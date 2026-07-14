@@ -41,17 +41,50 @@ export interface MountOptions {
    * FuseManager runs `diskutil unmount force` instead.
    */
   autoUnmount?: boolean
-  /** Extra options forwarded verbatim to `@zkochan/fuse-native`. */
+  /**
+   * Extra options forwarded verbatim to `@zkochan/fuse-native`.
+   * `directIO: false` additionally skips the `direct_io` mount option that
+   * Mirage appends by default (see appendDirectIO).
+   */
   fuseOptions?: Record<string, unknown>
+}
+
+interface FuseInstance {
+  mount: (cb: (err: Error | null) => void) => void
+  unmount: (cb: (err: Error | null) => void) => void
+  _fuseOptions?: () => string
 }
 
 type FuseConstructor = new (
   mountpoint: string,
   ops: Record<string, unknown>,
   options?: Record<string, unknown>,
-) => {
-  mount: (cb: (err: Error | null) => void) => void
-  unmount: (cb: (err: Error | null) => void) => void
+) => FuseInstance
+
+/**
+ * Append libfuse's `direct_io` to the mount option string.
+ * `@zkochan/fuse-native` serializes a fixed allowlist of options in
+ * `_fuseOptions()` that doesn't include `direct_io`, so we wrap the
+ * serializer at runtime — this ships to consumers, unlike a pnpm patch,
+ * which would only apply inside this repository. direct_io is load-bearing
+ * for size-unknown API files: getattr reports 0 pre-open and the kernel
+ * must read to EOF regardless (verified on the macOS kext: without it,
+ * `cat` reads 0 bytes; see the CLAUDE.md FUSE section).
+ */
+export function appendDirectIO(fuse: FuseInstance): void {
+  const orig = fuse._fuseOptions?.bind(fuse)
+  if (orig === undefined) {
+    throw new Error(
+      '@zkochan/fuse-native no longer exposes _fuseOptions(); the direct_io ' +
+        'mount option cannot be applied. Update appendDirectIO in mount.ts ' +
+        'for the new fuse-native version.',
+    )
+  }
+  fuse._fuseOptions = () => {
+    const serialized = orig()
+    if (serialized === '') return '-odirect_io'
+    return serialized.includes('direct_io') ? serialized : `${serialized},direct_io`
+  }
 }
 
 async function loadFuse(): Promise<FuseConstructor> {
@@ -101,10 +134,12 @@ export async function mount(ws: Workspace, options: MountOptions = {}): Promise<
     ...(options.rootPrefix !== undefined ? { rootPrefix: options.rootPrefix } : {}),
   })
   const autoUnmount = options.autoUnmount ?? process.platform === 'linux'
-  // attr_timeout=0 (string: the option serializer drops falsy values) keeps
-  // the kernel from caching the UNKNOWN_SIZE_SENTINEL that getattr reports
-  // for size-unknown API files; the post-open fstat then reaches fgetattr,
-  // which answers with the prefetched real size.
+  // Size-unknown recipe, mirroring Python's mount.py: direct_io (appended
+  // below) makes the kernel read to EOF even though getattr reports 0
+  // pre-open, and attrTimeout '0' (string: the option serializer drops falsy
+  // values) keeps the kernel from caching that 0, so the post-open fstat
+  // reaches fgetattr, which answers with the prefetched real size. Both are
+  // load-bearing on the macOS kext; see the CLAUDE.md FUSE section.
   const fuseOpts: Record<string, unknown> = {
     force: true,
     mkdir: true,
@@ -113,6 +148,7 @@ export async function mount(ws: Workspace, options: MountOptions = {}): Promise<
     ...(options.fuseOptions ?? {}),
   }
   const fuse = new Fuse(mountpoint, mfs.ops(), fuseOpts)
+  if (fuseOpts.directIO !== false) appendDirectIO(fuse)
   await new Promise<void>((resolve, reject) => {
     fuse.mount((err) => {
       if (err === null) resolve()

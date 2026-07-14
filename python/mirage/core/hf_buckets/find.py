@@ -40,8 +40,6 @@ async def find(
     empty: bool = False,
     tree: PredNode | None = None,
 ) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec.from_str_path(path)
     start_name = start_basename(path)
     target = path.mount_path
     pfx = target.strip("/")
@@ -94,10 +92,13 @@ async def find(
                 if not keep(fe, tree, mindepth):
                     continue
 
-                if k == "f" and (min_size is not None or max_size is not None):
-                    if min_size is not None and content_length < min_size:
+                if min_size is not None or max_size is not None:
+                    # Directories count as size 0 for -size (deliberate GNU
+                    # divergence).
+                    size = content_length if k == "f" else 0
+                    if min_size is not None and size < min_size:
                         continue
-                    if max_size is not None and content_length > max_size:
+                    if max_size is not None and size > max_size:
                         continue
 
                 if mtime_min is not None or mtime_max is not None:
@@ -121,5 +122,7 @@ async def find(
                         exists=True,
                         tree=tree,
                         maxdepth=maxdepth,
-                        mindepth=mindepth)
+                        mindepth=mindepth,
+                        min_size=min_size,
+                        max_size=max_size)
     return sorted(set(results))

@@ -16,7 +16,7 @@ import time
 from collections.abc import AsyncIterator
 
 from mirage.accessor.s3 import S3Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.s3._client import _client_kwargs, _key, async_session
 from mirage.core.s3.read import _fp_rev_from_response
 from mirage.observe.context import record, record_stream, revision_for
@@ -34,7 +34,7 @@ def _is_not_found(exc: Exception) -> bool:
 async def read_stream(
     accessor: S3Accessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore = NULL_INDEX,
     chunk_size: int = 8192,
 ) -> AsyncIterator[bytes]:
     """Async generator yielding chunks of an S3 object.
@@ -45,10 +45,6 @@ async def read_stream(
         index: Index cache store.
         chunk_size (int): Size of each chunk in bytes.
     """
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     path = path.mount_path
     pinned_revision = revision_for(virtual)
@@ -85,10 +81,6 @@ async def range_read(accessor: S3Accessor, path: PathSpec, start: int,
         start (int): Start byte offset.
         end (int): End byte offset (exclusive).
     """
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual if isinstance(path, PathSpec) else path
     if isinstance(path, PathSpec):
         path = path.mount_path

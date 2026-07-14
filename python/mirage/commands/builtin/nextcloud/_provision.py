@@ -1,5 +1,5 @@
 from mirage.accessor.nextcloud import NextcloudAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.nextcloud.stat import stat as nextcloud_stat
 from mirage.provision.types import Precision, ProvisionResult
 from mirage.types import PathSpec
@@ -8,22 +8,23 @@ from mirage.types import PathSpec
 async def _resolve_sizes(
     accessor: NextcloudAccessor,
     paths: list[PathSpec],
-    index: IndexCacheStore | None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> tuple[list[tuple[str, int]], int]:
     resolved: list[tuple[str, int]] = []
     missing = 0
     for p in paths:
         path_str = p.virtual if isinstance(p, PathSpec) else p
         size = None
-        if index is not None:
-            lookup = await index.get(path_str)
-            if lookup.entry is not None:
-                size = lookup.entry.size
+        lookup = await index.get(path_str)
+        if lookup.entry is not None:
+            size = lookup.entry.size
         if size is None:
             try:
                 file_stat = await nextcloud_stat(accessor, p, index)
                 size = file_stat.size
             except (FileNotFoundError, ValueError):
+                # provision estimates degrade, never fail: unresolved
+                # sizes stay UNKNOWN
                 pass
         if size is not None:
             resolved.append((path_str, size))
@@ -37,7 +38,7 @@ async def file_read_provision(
     paths: list[PathSpec],
     *_args: object,
     command: str = "",
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     **_extra: object,
 ) -> ProvisionResult:
     if not paths:
