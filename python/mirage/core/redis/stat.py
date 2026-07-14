@@ -23,7 +23,7 @@ from mirage.utils.path import norm
 async def stat(
     accessor: RedisAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> FileStat:
     virtual = path.virtual
     if isinstance(path, PathSpec):

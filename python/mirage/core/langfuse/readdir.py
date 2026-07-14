@@ -27,7 +27,7 @@ TOP_LEVEL_DIRS = ["traces", "sessions", "prompts", "datasets"]
 async def readdir(
     accessor: LangfuseAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> list[str]:
     """List directory contents.
 

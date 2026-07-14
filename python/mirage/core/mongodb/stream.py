@@ -55,7 +55,7 @@ async def read_tail(
     accessor: MongoDBAccessor,
     path: PathSpec,
     n: int,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> bytes:
     """Read only the last ``n`` documents of a collection.
 
@@ -94,7 +94,7 @@ async def read_tail(
 async def read_stream(
     accessor: MongoDBAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
     batch_size: int = 100,
 ) -> AsyncIterator[bytes]:
     scope = detect_scope(path)
@@ -116,7 +116,7 @@ async def read_stream(
 async def watch_stream(
     accessor: MongoDBAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> AsyncIterator[bytes]:
     scope = detect_scope(path)
     if scope.level != ScopeLevel.DOCUMENTS:

@@ -21,6 +21,6 @@ from mirage.types import PathSpec
 async def create(
     accessor: DatabricksVolumeAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> None:
     await write_bytes(accessor, path, b"", index)

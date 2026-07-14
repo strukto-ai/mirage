@@ -20,7 +20,7 @@ from mirage.types import PathSpec
 
 async def exists(accessor: OneDriveAccessor,
                  path: PathSpec,
-                 index: IndexCacheStore = None) -> bool:
+                 index: IndexCacheStore | None = None) -> bool:
     try:
         await stat(accessor, path, index)
         return True

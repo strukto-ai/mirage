@@ -72,7 +72,7 @@ async def write_bytes(
     accessor: DatabricksVolumeAccessor,
     path: PathSpec,
     data: bytes,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> None:
     path = ensure_path_spec(path)
     parent = parent_path(path)

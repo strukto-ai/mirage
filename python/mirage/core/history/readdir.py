@@ -19,7 +19,7 @@ from mirage.types import PathSpec
 
 async def readdir(accessor: HistoryAccessor,
                   path: PathSpec,
-                  index: IndexCacheStore = None) -> list[str]:
+                  index: IndexCacheStore | None = None) -> list[str]:
     """List nothing: the mount root is a file, not a directory.
 
     Keeps recursive traversal (find, grep -r, tree) from blowing up

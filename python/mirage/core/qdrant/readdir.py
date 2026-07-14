@@ -48,7 +48,7 @@ def _row_files(rows: list[dict], config) -> list[str]:
 async def readdir(
     accessor: QdrantAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> list[str]:
     config = accessor.config
     scope = detect_scope(path, config)

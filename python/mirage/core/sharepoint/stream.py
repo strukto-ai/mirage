@@ -16,7 +16,7 @@ from mirage.utils.errors import enoent
 async def read_stream(
     accessor: SharePointAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
     chunk_size: int = 8192,
 ) -> AsyncIterator[bytes]:
     virtual = path.virtual if isinstance(path, PathSpec) else path

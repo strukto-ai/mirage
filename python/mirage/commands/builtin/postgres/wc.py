@@ -46,7 +46,7 @@ async def wc(
     c: bool = False,
     m: bool = False,
     L: bool = False,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:

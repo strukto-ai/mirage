@@ -39,7 +39,7 @@ async def read_bytes(accessor: RedisAccessor, path: PathSpec) -> bytes:
 async def read(
     accessor: RedisAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> bytes:
     try:
         return await read_bytes(accessor, path)

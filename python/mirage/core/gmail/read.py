@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 async def read(
     accessor: GmailAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> bytes:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

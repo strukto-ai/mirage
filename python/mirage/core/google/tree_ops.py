@@ -42,7 +42,7 @@ def make_stat(readdir: Callable) -> Callable:
     async def stat(
         accessor: Accessor,
         path: PathSpec,
-        index: IndexCacheStore = None,
+        index: IndexCacheStore | None = None,
     ) -> FileStat:
         virtual = path.virtual
         prefix = mount_prefix_of(path.virtual, path.resource_path)
@@ -97,7 +97,7 @@ def make_unlink(readdir: Callable) -> Callable:
     async def unlink(
         accessor: Accessor,
         path: PathSpec,
-        index: IndexCacheStore = None,
+        index: IndexCacheStore | None = None,
     ) -> None:
         prefix = mount_prefix_of(path.virtual, path.resource_path)
         raw = path.virtual

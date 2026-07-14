@@ -83,7 +83,7 @@ def _download_bytes_sync(
 async def read_bytes(
     accessor: DatabricksVolumeAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
     offset: int = 0,
     size: int | None = None,
 ) -> bytes:

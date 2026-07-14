@@ -38,7 +38,7 @@ async def rg(
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     prefix: str = "",
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
     **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
     return await generic_rg(

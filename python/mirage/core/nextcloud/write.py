@@ -13,7 +13,7 @@ from mirage.utils.errors import enoent
 async def write_bytes(accessor: NextcloudAccessor,
                       path: PathSpec,
                       data: bytes,
-                      index: IndexCacheStore = None) -> None:
+                      index: IndexCacheStore | None = None) -> None:
     raw = path.mount_path
     key = raw.lstrip("/")
     op = accessor.operator()

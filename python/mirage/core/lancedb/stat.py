@@ -35,7 +35,7 @@ def _name_of(path: PathSpec) -> str:
 async def stat(
     accessor: LanceDBAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> FileStat:
     config = accessor.config
     scope = detect_scope(path, config)

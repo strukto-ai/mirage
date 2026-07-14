@@ -40,7 +40,7 @@ async def tree(
     args_I: str | None = None,
     d: bool = False,
     P: str | None = None,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     return await generic_tree(

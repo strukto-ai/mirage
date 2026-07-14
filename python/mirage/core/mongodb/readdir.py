@@ -35,7 +35,7 @@ def is_dir_name(child: str) -> bool:
 async def readdir(
     accessor: MongoDBAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> list[str]:
     prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
     scope = detect_scope(path)

@@ -38,7 +38,7 @@ async def read_bytes(accessor: RAMAccessor, path: PathSpec) -> bytes:
 
 async def read(accessor: RAMAccessor,
                path: PathSpec,
-               index: IndexCacheStore = None) -> bytes:
+               index: IndexCacheStore | None = None) -> bytes:
     try:
         return await read_bytes(accessor, path)
     except FileNotFoundError as exc:

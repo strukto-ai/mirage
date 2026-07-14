@@ -28,7 +28,7 @@ VIRTUAL_ROOTS = ("pages", "databases")
 async def readdir(
     accessor: NotionAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> list[str]:
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     path = (path.dir if path.pattern else path).mount_path

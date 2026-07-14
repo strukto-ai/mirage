@@ -30,7 +30,7 @@ def is_dir_name(child: str) -> bool:
 
 async def readdir(accessor: PostgresAccessor,
                   path: PathSpec,
-                  index: IndexCacheStore = None) -> list[str]:
+                  index: IndexCacheStore | None = None) -> list[str]:
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     raw = path.directory if path.pattern else path.virtual
     if prefix and raw.startswith(prefix):

@@ -78,7 +78,7 @@ async def copy(
     accessor: DatabricksVolumeAccessor,
     src: PathSpec,
     dst: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
     recursive: bool = False,
 ) -> None:
     src = ensure_path_spec(src)

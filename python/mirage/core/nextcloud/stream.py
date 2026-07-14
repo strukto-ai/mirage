@@ -31,7 +31,7 @@ async def range_read(accessor: NextcloudAccessor, path: PathSpec, start: int,
 async def read_stream(
     accessor: NextcloudAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
 ) -> AsyncIterator[bytes]:
     raw = path.mount_path

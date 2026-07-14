@@ -28,7 +28,7 @@ from mirage.utils.key_prefix import mount_key, mount_prefix_of
 async def read(
     accessor: PostgresAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
     *,
     limit: int | None = None,
     offset: int | None = None,

@@ -43,7 +43,7 @@ def _fp_rev_from_response(resp: dict) -> tuple[str | None, str | None]:
 
 async def read_bytes(accessor: S3Accessor,
                      path: PathSpec,
-                     index: IndexCacheStore = None,
+                     index: IndexCacheStore | None = None,
                      offset: int = 0,
                      size: int | None = None) -> bytes:
     """Read bytes from S3, with optional range read.

@@ -45,7 +45,7 @@ def unique_shared_drive_name(name: str, existing_names: set[str]) -> str:
 async def readdir(
     accessor: GDriveAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> list[str]:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

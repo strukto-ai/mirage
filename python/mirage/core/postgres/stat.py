@@ -27,7 +27,7 @@ from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 async def stat(accessor: PostgresAccessor,
                path: PathSpec,
-               index: IndexCacheStore = None) -> FileStat:
+               index: IndexCacheStore | None = None) -> FileStat:
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     raw = path.virtual
     if prefix and raw.startswith(prefix):

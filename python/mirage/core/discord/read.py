@@ -41,7 +41,7 @@ async def _ensure_channel(
 async def read(
     accessor: DiscordAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> bytes:
     virtual = path.virtual if isinstance(path, PathSpec) else path
     prefix = mount_prefix_of(path.virtual, path.resource_path)

@@ -29,7 +29,7 @@ from mirage.utils.errors import enoent
 async def read(
     accessor: MongoDBAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> bytes:
     scope = detect_scope(path)
     if scope.level == ScopeLevel.DOCUMENTS:

@@ -40,7 +40,7 @@ async def du_provision(
     accessor: GitHubAccessor,
     paths: list[PathSpec],
     *texts: str,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
     **_extra: object,
 ) -> ProvisionResult:
     return await metadata_provision("du " + " ".join(
@@ -58,7 +58,7 @@ async def du(
     a: bool = False,
     max_depth: str | None = None,
     c: bool = False,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if index is None:

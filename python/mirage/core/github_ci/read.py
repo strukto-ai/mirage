@@ -29,7 +29,7 @@ from mirage.utils.key_prefix import mount_prefix_of
 async def read(
     accessor: GitHubCIAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> bytes:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

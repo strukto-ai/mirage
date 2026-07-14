@@ -32,7 +32,7 @@ async def read_page_json(config, page_id: str) -> bytes:
 async def read(
     accessor: NotionAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> bytes:
     virtual = path.virtual
     if isinstance(path, PathSpec):

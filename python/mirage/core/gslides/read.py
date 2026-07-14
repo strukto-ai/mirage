@@ -38,7 +38,7 @@ async def read_presentation(token_manager: TokenManager,
 async def read(
     accessor: GSlidesAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> bytes:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

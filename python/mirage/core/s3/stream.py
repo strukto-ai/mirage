@@ -34,7 +34,7 @@ def _is_not_found(exc: Exception) -> bool:
 async def read_stream(
     accessor: S3Accessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
     chunk_size: int = 8192,
 ) -> AsyncIterator[bytes]:
     """Async generator yielding chunks of an S3 object.

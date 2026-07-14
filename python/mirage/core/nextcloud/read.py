@@ -11,7 +11,7 @@ from mirage.utils.errors import enoent
 
 async def read_bytes(accessor: NextcloudAccessor,
                      path: PathSpec,
-                     index: IndexCacheStore = None,
+                     index: IndexCacheStore | None = None,
                      offset: int = 0,
                      size: int | None = None) -> bytes:
     raw = path.mount_path

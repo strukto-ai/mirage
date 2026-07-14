@@ -24,7 +24,7 @@ from mirage.utils.filetype import guess_type
 async def stat(
     accessor: NotionAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> FileStat:
     virtual = path.virtual
     if isinstance(path, PathSpec):

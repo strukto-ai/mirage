@@ -30,7 +30,7 @@ VIRTUAL_ROOTS = ("teams", )
 async def readdir(
     accessor: LinearAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> list[str]:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

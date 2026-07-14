@@ -21,7 +21,7 @@ def _range_header(offset: int, size: int | None) -> str | None:
 
 async def read_bytes(accessor: SharePointAccessor,
                      path: PathSpec,
-                     index: IndexCacheStore = None,
+                     index: IndexCacheStore | None = None,
                      offset: int = 0,
                      size: int | None = None) -> bytes:
     virtual = path.virtual if isinstance(path, PathSpec) else path

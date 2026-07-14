@@ -293,7 +293,7 @@ async def _readdir_files_dir(
 async def readdir(
     accessor: SlackAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> list[str]:
     path, prefix, key, virtual_key = _normalize_path(path)
 

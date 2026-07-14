@@ -37,7 +37,7 @@ def _delete_file_sync(
 async def unlink(
     accessor: DatabricksVolumeAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> None:
     path = ensure_path_spec(path)
     file_stat = await stat(accessor, path, index)

@@ -37,7 +37,7 @@ async def find(
     path_pattern: str | None = None,
     empty: bool = False,
     tree: PredNode | None = None,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> list[str]:
     if index is None:
         raise ValueError("find: no tree loaded")

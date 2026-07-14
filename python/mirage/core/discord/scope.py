@@ -56,7 +56,7 @@ def _strip_prefix(raw: str, prefix: str) -> str:
 
 async def detect_scope(
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> DiscordScope:
     """Determine scope from a path.
 
@@ -184,7 +184,7 @@ async def detect_scope(
 
 async def coalesce_scopes(
     paths: list[PathSpec],
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> DiscordScope | None:
     if not paths:
         return None

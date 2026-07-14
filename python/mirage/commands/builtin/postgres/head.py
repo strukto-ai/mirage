@@ -42,7 +42,7 @@ async def head(
     c: str | None = None,
     q: bool = False,
     v: bool = False,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     n_int = int(n) if n is not None else None

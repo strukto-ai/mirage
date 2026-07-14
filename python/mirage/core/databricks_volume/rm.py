@@ -74,7 +74,7 @@ def _remove_tree_sync(
 async def rm_recursive(
     accessor: DatabricksVolumeAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> list[str]:
     path = ensure_path_spec(path)
     file_stat = await stat(accessor, path, index)

@@ -46,7 +46,7 @@ async def stream(accessor: RedisAccessor,
 async def read_stream(
     accessor: RedisAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> AsyncIterator[bytes]:
     try:
         async for chunk in stream(accessor, path):

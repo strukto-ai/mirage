@@ -23,7 +23,7 @@ VIEW_KEYS = ("", VIEW_NAME)
 
 async def read(accessor: HistoryAccessor,
                path: PathSpec,
-               index: IndexCacheStore = None) -> bytes:
+               index: IndexCacheStore | None = None) -> bytes:
     """Render the GNU histfile from the recorder's command events.
 
     Args:

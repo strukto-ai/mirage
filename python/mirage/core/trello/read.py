@@ -104,7 +104,7 @@ async def read_bytes(
 async def read(
     accessor: TrelloAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> bytes:
     virtual = path.virtual
     if isinstance(path, PathSpec):

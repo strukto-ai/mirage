@@ -64,7 +64,7 @@ async def read_values(token_manager: TokenManager, spreadsheet_id: str,
 async def read(
     accessor: GSheetsAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> bytes:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

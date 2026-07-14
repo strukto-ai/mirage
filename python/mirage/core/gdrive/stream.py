@@ -32,7 +32,7 @@ from mirage.utils.key_prefix import mount_key, mount_prefix_of
 async def read_stream(
     accessor: GDriveAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
     chunk_size: int = 8192,
 ) -> AsyncIterator[bytes] | bytes:
     virtual = path.virtual
@@ -79,7 +79,7 @@ async def read_stream(
 async def stream(
     accessor: GDriveAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
     chunk_size: int = 8192,
 ) -> AsyncIterator[bytes]:
     result = await read_stream(accessor, path, index, chunk_size)

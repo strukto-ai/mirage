@@ -36,7 +36,7 @@ async def mkdir(
     stdin: bytes | None = None,
     p: bool = False,
     v: bool = False,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:

@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 async def stat(
     accessor: GDriveAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> FileStat:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

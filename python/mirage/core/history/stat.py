@@ -21,7 +21,7 @@ from mirage.utils.filetype import guess_type
 
 async def stat(accessor: HistoryAccessor,
                path: PathSpec,
-               index: IndexCacheStore = None) -> FileStat:
+               index: IndexCacheStore | None = None) -> FileStat:
     """Stat the rendered histfile.
 
     Args:

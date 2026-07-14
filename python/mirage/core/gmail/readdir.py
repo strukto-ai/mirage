@@ -143,7 +143,7 @@ async def _build_date_groups(
 async def readdir(
     accessor: GmailAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> list[str]:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

@@ -32,7 +32,7 @@ def _resolve(root: Path, path: str) -> Path:
 
 async def read_bytes(accessor: DiskAccessor,
                      path: PathSpec,
-                     index: IndexCacheStore = None) -> bytes:
+                     index: IndexCacheStore | None = None) -> bytes:
     virtual = path.virtual
     if isinstance(path, PathSpec):
         path = path.mount_path

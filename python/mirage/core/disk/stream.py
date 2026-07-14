@@ -32,7 +32,7 @@ def _resolve(root: Path, path: str) -> Path:
 
 async def read_stream(accessor: DiskAccessor,
                       path: PathSpec,
-                      index: IndexCacheStore = None,
+                      index: IndexCacheStore | None = None,
                       chunk_size: int = 8192) -> AsyncIterator[bytes]:
     virtual = path.virtual
     if isinstance(path, PathSpec):

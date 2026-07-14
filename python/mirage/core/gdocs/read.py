@@ -36,7 +36,7 @@ async def read_doc(token_manager: TokenManager, doc_id: str) -> bytes:
 async def read(
     accessor: GDocsAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> bytes:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

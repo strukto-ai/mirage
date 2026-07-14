@@ -33,7 +33,7 @@ def _resolve(root: Path, path: str) -> Path:
 
 async def stat(accessor: DiskAccessor,
                path: PathSpec,
-               index: IndexCacheStore = None) -> FileStat:
+               index: IndexCacheStore | None = None) -> FileStat:
     virtual = path.virtual
     if isinstance(path, PathSpec):
         path = path.mount_path

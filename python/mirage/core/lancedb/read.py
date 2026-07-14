@@ -43,7 +43,7 @@ def _blob_bytes(value: object) -> bytes:
 async def read(
     accessor: LanceDBAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> bytes:
     config = accessor.config
     scope = detect_scope(path, config)

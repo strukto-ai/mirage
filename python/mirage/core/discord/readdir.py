@@ -339,7 +339,7 @@ async def _readdir_files_dir(
 async def readdir(
     accessor: DiscordAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> list[str]:
     """List directory contents.
 

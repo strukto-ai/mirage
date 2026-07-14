@@ -54,7 +54,7 @@ async def _lookup_with_fallback(
 async def stat(
     accessor: TrelloAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> FileStat:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

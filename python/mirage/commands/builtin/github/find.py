@@ -31,7 +31,7 @@ async def find_provision(
     accessor: GitHubAccessor,
     paths: list[PathSpec],
     *texts: str,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
     **_extra: object,
 ) -> ProvisionResult:
     path_strs = [
@@ -57,7 +57,7 @@ async def find(
     iname: str | None = None,
     path: str | None = None,
     mindepth: str | None = None,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if index is None:

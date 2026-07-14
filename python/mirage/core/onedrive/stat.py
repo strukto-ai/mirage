@@ -44,7 +44,7 @@ def _entry_stat(item: dict) -> FileStat:
 
 async def stat(accessor: OneDriveAccessor,
                path: PathSpec,
-               index: IndexCacheStore = None) -> FileStat:
+               index: IndexCacheStore | None = None) -> FileStat:
     virtual = path.virtual if isinstance(path, PathSpec) else path
     prefix, stripped = split_path(path)
     if not stripped:

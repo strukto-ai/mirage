@@ -37,7 +37,7 @@ async def read_bytes(config: GitHubConfig, owner: str, repo: str,
 async def read(
     accessor: GitHubAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> bytes:
     virtual = path.virtual
     if isinstance(path, PathSpec):

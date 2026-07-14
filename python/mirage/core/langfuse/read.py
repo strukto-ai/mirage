@@ -41,7 +41,7 @@ def _jsonl_bytes(items: list[dict]) -> bytes:
 async def read(
     accessor: LangfuseAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> bytes:
     """Read a file as bytes.
 

@@ -42,7 +42,7 @@ def _delete_directory_sync(
 async def rmdir(
     accessor: DatabricksVolumeAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> None:
     path = ensure_path_spec(path)
     file_stat = await stat(accessor, path, index)

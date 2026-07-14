@@ -29,7 +29,7 @@ async def rename(
     accessor: DatabricksVolumeAccessor,
     src: PathSpec,
     dst: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> None:
     # Non-atomic: the Databricks Files API has no native rename, so this is
     # implemented as copy + delete and can leave partial state on failure.

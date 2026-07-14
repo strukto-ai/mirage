@@ -42,7 +42,7 @@ async def cat(
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     n: bool = False,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:

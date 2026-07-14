@@ -53,7 +53,7 @@ async def _populate_via_parent(
 async def stat(
     accessor: DiscordAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> FileStat:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

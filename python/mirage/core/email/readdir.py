@@ -53,7 +53,7 @@ def _date_from_header(date_str: str) -> str:
 async def readdir(
     accessor: EmailAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> list[str]:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

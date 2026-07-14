@@ -37,9 +37,10 @@ async def stream(accessor: RAMAccessor,
     yield data
 
 
-async def read_stream(accessor: RAMAccessor,
-                      path: PathSpec,
-                      index: IndexCacheStore = None) -> AsyncIterator[bytes]:
+async def read_stream(
+        accessor: RAMAccessor,
+        path: PathSpec,
+        index: IndexCacheStore | None = None) -> AsyncIterator[bytes]:
     try:
         async for chunk in stream(accessor, path):
             yield chunk

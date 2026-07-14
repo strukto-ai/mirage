@@ -24,7 +24,7 @@ TOP_LEVEL_DIRS = {"traces", "sessions", "prompts", "datasets"}
 async def stat(
     accessor: LangfuseAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> FileStat:
     """Get file stat for a path.
 

@@ -46,7 +46,7 @@ def _open_download_sync(
 async def read_stream(
     accessor: DatabricksVolumeAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
     chunk_size: int = 8192,
 ) -> AsyncIterator[bytes]:
     if chunk_size <= 0:

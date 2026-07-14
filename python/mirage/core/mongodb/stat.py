@@ -25,7 +25,7 @@ from mirage.utils.errors import enoent
 async def stat(
     accessor: MongoDBAccessor,
     path: PathSpec,
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> FileStat:
     scope = detect_scope(path)
 
