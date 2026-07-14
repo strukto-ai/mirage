@@ -2,7 +2,7 @@
   "_meta": {
     "filetypes": [],
     "has_aggregate": false,
-    "has_provision": false,
+    "has_provision": true,
     "has_write": false,
     "resources": [
       "box",
@@ -24,6 +24,7 @@
       "notion",
       "opfs",
       "postgres",
+      "qdrant",
       "ram",
       "s3",
       "slack",
@@ -37,40 +38,51 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-a",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-L",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-I",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-d",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-P",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     }
   ],
   "positional": [],
   "rest": {
-    "kind": "path"
+    "kind": "path",
+    "provided_by": []
   }
 }

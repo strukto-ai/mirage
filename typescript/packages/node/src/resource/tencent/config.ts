@@ -33,7 +33,7 @@ export interface TencentConfigRedacted {
   timeoutMs?: number
 }
 
-export const TencentConfigSchema = z.object({
+const TencentConfigSchema = z.object({
   bucket: z.string(),
   accessKeyId: secretStr(),
   secretAccessKey: secretStr(),

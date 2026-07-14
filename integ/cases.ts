@@ -269,6 +269,22 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ["awk_fs_comma", "awk -F , '{print $2}' /data/csv.csv"],
   ["awk_ofs", "awk -F , 'BEGIN{OFS=\":\"} {print $1, $2}' /data/csv.csv"],
   ["awk_range", "awk 'NR>=2 && NR<=4' /data/a.txt"],
+  ["awk_v_repeat", "awk -v a=va1 -v b=vb2 '{print a, b}' /data/one_byte.txt"],
+  ["awk_v_equals", "awk -v x=eq=val '{print x}' /data/one_byte.txt"],
+  [
+    "awk_f_program",
+    "echo '{print $3, $1}' | tee /data/prog.awk > /dev/null" +
+      " && awk -f /data/prog.awk /data/fields.txt && rm /data/prog.awk",
+  ],
+  ["awk_default_fs", "awk '{print NF, $1}' /data/spaced.txt"],
+  ["awk_multifile", "awk '{print NR, $1}' /data/a.txt /data/b.txt"],
+  [
+    "awk_f_repeat",
+    "echo '{sum += $1}' | tee /data/pa.awk > /dev/null" +
+      " && echo 'END {print sum}' | tee /data/pb.awk > /dev/null" +
+      " && awk -f /data/pa.awk -f /data/pb.awk /data/numbers.txt" +
+      " && rm /data/pa.awk /data/pb.awk",
+  ],
 
   ["sed_d_first", "sed 1d /data/a.txt"],
   ["sed_d_last", "sed '$d' /data/a.txt"],
@@ -401,7 +417,17 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ["grep_f_multi", "grep -f /data/patterns.txt -f /data/patterns2.txt /data/a.txt"],
   ["grep_cluster_ne", "grep -ne world /data/a.txt"],
   ["du_max_depth_eq", "du --max-depth=1 /data/sub"],
-  ["grep_unknown_flag_ignored", "grep --color=auto world /data/a.txt"],
+  ["grep_unknown_long_flag", "grep --bogus world /data/a.txt 2>&1; echo code=$?"],
+  ["grep_unknown_short_flag", "grep -Y world /data/a.txt 2>&1; echo code=$?"],
+  ["cat_unknown_long_flag", "cat --bogus /data/a.txt 2>&1; echo code=$?"],
+  ["grep_missing_flag_value", "grep -m 2>&1; echo code=$?"],
+  ["du_missing_flag_value", "du --max-depth 2>&1; echo code=$?"],
+  ["grep_color_auto", "grep --color=auto world /data/a.txt"],
+  ["grep_color_bare", "grep --color world /data/a.txt"],
+  ["grep_line_buffered", "grep --line-buffered world /data/a.txt"],
+  ["ls_color", "ls --color /data/sub"],
+  ["head_numeric_shorthand", "head -2 /data/a.txt"],
+  ["tail_numeric_shorthand", "tail -2 /data/a.txt"],
   ["grep_cluster_attached", "grep -neworld /data/a.txt"],
   ["grep_cluster_count", "grep -im1 l /data/mixed.txt"],
   ["rg_f_multi", "rg -f /data/patterns.txt -f /data/patterns2.txt /data/a.txt"],
@@ -425,6 +451,25 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ["find_size_lt", "find /data -size -5c"],
   ["find_depth", "find /data -depth -type f"],
   ["find_mtime", "find /data -mtime +0 -o -mtime -1"],
+  // -size on directories: mirage counts a directory as size 0 (GNU
+  // compares the inode size), so +N excludes dirs and -N keeps them.
+  [
+    "find_size_gt_dirs",
+    "mkdir -p /data/fs/sub && printf 12345678 > /data/fs/sub/big.bin" +
+      " && printf x > /data/fs/small.bin && find /data/fs -size +4c",
+  ],
+  ["find_size_lt_dirs", "find /data/fs -size -4c"],
+  // GNU +N / -N are strict (exactly-N is excluded by both) and non-c
+  // units round the size up before comparing (-1k keeps only size 0).
+  ["find_size_gt_boundary", "printf 1234 > /data/fs/four.bin && find /data/fs -size +4c"],
+  ["find_size_lt_boundary", "find /data/fs -size -4c"],
+  ["find_size_eq_boundary", "find /data/fs -size 4c"],
+  ["find_size_round_k", "find /data/fs -size -1k"],
+  // -path matches the display path as printed (GNU), not the
+  // mount-relative key.
+  ["find_path_glob", "find /data/fs -path '*data/fs/sub*'"],
+  ["find_path_exact", "find /data/fs -path '/data/fs/sub'"],
+  ["find_path_or_name", "find /data/fs -path '*sub*' -o -name small.bin"],
 
   ["xxd_c4", "head -c 12 /data/a.txt | xxd -c 4"],
   ["xxd_g1", "head -c 8 /data/a.txt | xxd -g 1"],
@@ -506,6 +551,138 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ["sort_stdin", "cat /data/dup.txt | sort"],
   ["rev_stdin", "echo hello | rev"],
   ["base64_stdin_d", "echo aGVsbG8= | base64 -d"],
+
+  // ----- argv dispatch: expanded names, xargs/timeout token safety -----
+  ["var_command_name", "E=echo; $E hi"],
+  ["var_command_mount", "C=cat; $C /data/a.txt"],
+  ["quoted_command_name", '"cat" /data/a.txt'],
+  ["xargs_initial_args", "echo c | xargs echo a b"],
+  ["xargs_wc_initial_args", "echo /data/a.txt | xargs wc -l"],
+  ["xargs_literal_input", "echo '$(echo pwned)' | xargs echo"],
+  ["xargs_quote_char_input", 'echo "don\'t" | xargs echo'],
+  ["timeout_basic", "timeout 5 echo hello"],
+  ["timeout_quoted_arg", "timeout 5 echo 'a  b'"],
+
+  // ----- glob rule: resolved by whoever consumes the word, once -----
+  ["glob_unmatched_echo", "echo /data/*.nope"],
+  ["glob_test_f", "test -f /data/one_b* && echo yes"],
+  ["glob_function_args", "f() { echo $1 $#; }; f /data/sorted_*.txt"],
+  ["glob_matched_echo", "echo /data/sorted_*.txt"],
+  [
+    "glob_pattern_dup_word",
+    "mkdir -p /data/g8 && printf 'x *.txt y\\n' | tee /data/g8/l1.txt" +
+      " > /dev/null && printf 'plain\\n' | tee /data/g8/l2.txt > /dev/null" +
+      " && cd /data/g8 && grep -F '*.txt' *.txt" +
+      " && cd / && rm -r /data/g8",
+  ],
+  ["redirect_bare_prep", "mkdir -p /data/g9 && cd /data/g9"],
+  ["redirect_bare_target", "echo hi > OUT && cat OUT && cd / && rm -r /data/g9"],
+  [
+    "source_prep",
+    "mkdir -p /data/g10 && cd /data/g10 && printf 'echo sourced-ok\\n' | tee lib.sh > /dev/null",
+  ],
+  ["source_relative", "source lib.sh && . /data/g10/lib.sh && cd / && rm -r /data/g10"],
+  [
+    "relative_operand_prep",
+    "mkdir -p /data/g11/sub && cd /data/g11 && printf 'one\\ntwo\\n' | tee sub/README > /dev/null",
+  ],
+  ["relative_operand_extensionless", "cat sub/README && wc -l sub/README && head -1 sub/README"],
+  ["redirect_relative_write", "echo one > sub/LOG"],
+  ["redirect_relative_append", "echo two >> sub/LOG && cat sub/LOG"],
+  ["redirect_stdin_relative", "wc -l < sub/LOG && cd / && rm -r /data/g11"],
+  [
+    "relword_prep",
+    "mkdir -p /data/g12/sub && cd /data/g12 && printf 'y\n' | tee plain.txt > /dev/null" +
+      " && printf 'x\n' | tee sub/a.txt > /dev/null && printf 'x\n' | tee sub/b.txt > /dev/null",
+  ],
+  [
+    "test_relative_paths",
+    "test -f plain.txt && echo yes-f && test -d sub && echo yes-d" +
+      " && test -f missing.txt || echo no-f",
+  ],
+  ["glob_relative_display", "echo sub/*.txt && echo *.nope"],
+  ["glob_relative_for", "for f in sub/*.txt; do echo $f; done"],
+  ["glob_relative_func", "f() { echo $1 $#; }; f sub/*.txt && cd / && rm -r /data/g12"],
+  [
+    "redirect_after_cd",
+    "mkdir -p /data/g13 && cd /data/g13 && echo hi > CDOUT && cat /data/g13/CDOUT",
+  ],
+  ["redirect_list_last_only", "echo one && echo two > captured && cat captured"],
+  ["redirect_chain", "echo a > chain && echo b >> chain && cat chain && wc -l < chain"],
+  ["redirect_group", "{ echo g1; echo g2; } > gout && cat gout && cd / && rm -r /data/g13"],
+  [
+    "relspell_prep",
+    "mkdir -p /data/g14/sub && cd /data/g14" +
+      " && printf 'hello\n' | tee sub/a.txt > /dev/null" +
+      " && printf 'hello\n' | tee sub/b.txt > /dev/null",
+  ],
+  ["relspell_walk_grep", "grep -r hello sub"],
+  ["relspell_walk_find", "find sub -name '*.txt'"],
+  ["relspell_error_cat", "cat sub/missing.txt 2>&1"],
+  ["relspell_error_grep", "grep hello sub/missing.txt 2>&1"],
+  ["relspell_glob_dot", "echo ./sub/*.txt"],
+  ["relspell_du_slash", "du -s sub/"],
+  ["relspell_labels", "wc -l sub/a.txt && head -v sub/a.txt && cd / && rm -r /data/g14"],
+  [
+    "midglob_prep",
+    "mkdir -p /data/g15/sub /data/g15/sea && cd /data/g15" +
+      " && printf 'hi\\n' | tee sub/x.txt > /dev/null" +
+      " && printf 'yo\\n' | tee sea/x.txt > /dev/null",
+  ],
+  ["midglob_echo", "echo s*/x.txt"],
+  ["midglob_cat", "cat s*/x.txt"],
+  ["midglob_absolute", "cat /data/g15/s*/x.txt"],
+  ["midglob_zero_literal", "echo n*/x.txt"],
+  ["glob_zero_mount_error", "cat *.nope 2>&1"],
+  ["glob_pushdown_labels", "wc -l s*/x.txt && grep -l hi sub/*.txt"],
+  ["glob_ls_operand", "ls sub/*.txt && cd / && rm -r /data/g15"],
+
+  // ----- shell builtins: GNU argument handling -----
+  ["xargs_n1", "echo a b c | xargs -n1 echo"],
+  ["xargs_n2", "echo a b c d e | xargs -n2 echo"],
+  ["xargs_invalid_opt", "echo hi | xargs -q echo 2>&1; echo code=$?"],
+  ["xargs_n0", "echo x | xargs -n0 echo 2>&1; echo code=$?"],
+  ["xargs_delim", "printf 'a,b,c' | xargs -d, echo"],
+  ["xargs_empty_r", "printf '' | xargs -r echo hi; echo code=$?"],
+  ["xargs_empty_default", "printf '' | xargs echo hi"],
+  ["timeout_kill", "timeout 0.2 sleep 5; echo code=$?"],
+  ["timeout_ok", "timeout 5 echo fast"],
+  ["timeout_bad_duration", "timeout xx sleep 1 2>&1; echo code=$?"],
+  ["timeout_unsupported", "timeout -s KILL 1 sleep 1 2>&1; echo code=$?"],
+  ["echo_trailing_dash_n", "echo hi -n"],
+  ["echo_cluster", "echo -ne 'ab\\tcd'; echo"],
+  ["echo_unknown_cluster", "echo -nq hi"],
+  ["shift_non_numeric", "shift x 2>&1; echo code=$?"],
+  ["shift_too_many", "shift 1 2 2>&1; echo code=$?"],
+  ["return_non_numeric", "f() { return x; }; f 2>&1; echo code=$?"],
+  ["read_r_flag", "printf 'hi there\\n' | read -r v; echo code=$?"],
+  ["read_invalid_opt", "read -q v 2>&1; echo code=$?"],
+
+  // ----- arithmetic: (( )) command + $(( )) assignment forms -----
+  ["arith_cmd_true", "(( 2 > 1 )); echo code=$?"],
+  ["arith_cmd_false", "(( 0 )); echo code=$?"],
+  [
+    "arith_incr",
+    "i=0; (( i++ )); echo code=$? i=$i; (( i++ )); echo code=$? i=$i;" +
+      " unset i",
+  ],
+  ["arith_assign_comma", "x=$(( y = 3, y + 2 )); echo $x $y; unset x y"],
+  [
+    "arith_c_semantics",
+    "echo $(( -7 / 2 )) $(( -7 % 2 )) $(( 2 ** 10 )) $(( 0x10 )) $(( 010 ))",
+  ],
+  ["arith_while", "n=0; while (( n < 3 )); do (( n++ )); done; echo n=$n; unset n"],
+  ["arith_if", "if (( 2 > 1 )); then echo yes; fi"],
+  ["arith_divzero", "(( 1 / 0 )) 2>&1; echo code=$?"],
+  ["arith_short_circuit", "(( 0 && (q = 7) )); echo q=${q:-unset}"],
+
+  // ----- fixed arity: extra operands refuse with GNU errors (#452) -----
+  ["arity_uniq", "uniq /data/a.txt /data/b.txt /data/mixed.txt 2>&1; echo code=$?"],
+  ["arity_tr", "tr a b /data/a.txt 2>&1; echo code=$?"],
+  ["arity_diff", "diff /data/a.txt /data/b.txt /data/mixed.txt 2>&1; echo code=$?"],
+  ["arity_seq", "seq 1 2 3 4 2>&1; echo code=$?"],
+  ["arity_mktemp", "mktemp t1 t2 2>&1; echo code=$?"],
+  ["arity_relative", "(cd /data && uniq a.txt b.txt extra.txt 2>&1); echo code=$?"],
 
   // ----- cp / mv multi-source into a directory (last; these mutate) -----
   ["cp_multi_into_dir", "cp /data/a.txt /data/b.txt /data/sub"],
@@ -700,6 +877,8 @@ export const EXIT_CODE_CASES: ReadonlyArray<readonly [string, string]> = [
   ["grep_usage_exit", "grep"],
   ["rg_usage_exit", "rg"],
   ["zgrep_usage_exit", "zgrep"],
+  ["awk_usage_exit", "awk"],
+  ["awk_f_missing_exit", "awk -f /data/nope.awk /data/a.txt"],
   ["grep_usage_no_input", "grep foo"],
   ["rg_usage_no_input", "rg foo"],
   ["grep_usage_stdin_only", "echo hi | grep"],
@@ -831,6 +1010,7 @@ export const CROSS_MOUNT_CASES: ReadonlyArray<readonly [string, string]> = [
   ["xm_cp_back", "cp /data2/xm.txt /data/xm_back.txt && cat /data/xm_back.txt"],
   ["xm_mv_over", "mv /data/xm_back.txt /data2/xm_moved.txt && cat /data2/xm_moved.txt && ls /data2"],
   ["xm_grep_multi", "grep -c s /data/a.txt /data2/xm.txt"],
+  ["xm_unknown_flag_errors", "grep --bogus s /data/a.txt /data2/xm.txt 2>&1; echo code=$?"],
   ["xm_wc_multi", "wc -l /data/a.txt /data2/xm.txt"],
   // du/md5/file fan out per mount and aggregate like the other readers
   ["xm_du_multi", "du /data/b.txt /data2/xm.txt"],
@@ -844,6 +1024,99 @@ export const CROSS_MOUNT_CASES: ReadonlyArray<readonly [string, string]> = [
   ["xm_ln_back", "ln -s /data2/xm.txt /data/xm_rlink.txt && cat /data/xm_rlink.txt"],
   ["xm_link_grep", "grep -c cross /data/xm_rlink.txt"],
   ["xm_cd_across", "(cd /data2 && cat xm.txt && cd /data && ls b.txt)"],
+  // ----- STREAM strategy: cmd files == cat files | cmd -----
+  ["xm_sort_stream", "sort /data/numbers.txt /data2/xm.txt"],
+  ["xm_cat_n", "cat -n /data/b.txt /data2/xm.txt"],
+  ["xm_cat_glob", "cat /data/sorted_*.txt /data2/xm.txt"],
+  ["xm_nl", "nl /data/b.txt /data2/xm.txt"],
+  ["xm_cut", "cut -c1 /data/a.txt /data2/xm.txt"],
+  ["xm_sed_stream", "sed s/l/L/ /data/a.txt /data2/xm.txt"],
+  ["xm_rev", "rev /data/b.txt /data2/xm.txt"],
+  ["xm_awk", "awk '{print $1}' /data/a.txt /data2/xm.txt"],
+  ["xm_awk_nr", "awk 'END{print NR}' /data/a.txt /data2/xm.txt"],
+  // ----- RELAY interleave: paste/comm/join colocate via dispatch reads -----
+  ["xm_paste", "paste /data/b.txt /data2/xm.txt"],
+  ["xm_paste_d", "paste -d, /data/b.txt /data2/xm.txt"],
+  [
+    "xm_comm",
+    "printf 'a\\nb\\nc\\n' | tee /data/xc1.txt > /dev/null" +
+      " && printf 'b\\nc\\nd\\n' | tee /data2/xc2.txt > /dev/null" +
+      " && comm /data/xc1.txt /data2/xc2.txt",
+  ],
+  ["xm_comm_12", "comm -12 /data/xc1.txt /data2/xc2.txt"],
+  [
+    "xm_join",
+    "printf '1 alpha\\n2 beta\\n' | tee /data/xj1.txt > /dev/null" +
+      " && printf '1 one\\n3 three\\n' | tee /data2/xj2.txt > /dev/null" +
+      " && join /data/xj1.txt /data2/xj2.txt",
+  ],
+  [
+    "xm_join_a",
+    "join -a 1 /data/xj1.txt /data2/xj2.txt" +
+      " && rm /data/xc1.txt /data2/xc2.txt /data/xj1.txt /data2/xj2.txt",
+  ],
+  // ----- FANOUT strategy: one native run per operand -----
+  ["xm_tac", "tac /data/b.txt /data2/xm.txt"],
+  ["xm_grep_names", "grep -n o /data/a.txt /data2/xm.txt"],
+  ["xm_grep_h", "grep -h o /data/a.txt /data2/xm.txt"],
+  ["xm_head", "head -n 2 /data/a.txt /data2/xm.txt"],
+  ["xm_tail", "tail -n 1 /data/a.txt /data2/xm.txt"],
+  ["xm_tail_q", "tail -q -n 1 /data/a.txt /data2/xm.txt"],
+  ["xm_wc_full", "wc /data/b.txt /data2/xm.txt"],
+  ["xm_wc_glob", "wc -l /data/sorted_*.txt /data2/xm.txt"],
+  ["xm_sha256", "sha256sum /data/b.txt /data2/xm.txt"],
+  ["xm_strings", "strings /data/binary.bin /data2/xm.txt"],
+  ["xm_ls_files", "ls /data/b.txt /data2/xm.txt"],
+  ["xm_find_roots", "find /data/sub /data2 -name '*.txt'"],
+  // ----- FANOUT writes: per-operand mutations on both mounts -----
+  [
+    "xm_touch_rm",
+    "touch /data/xt.txt /data2/xt.txt" +
+      " && ls /data/xt.txt /data2/xt.txt" +
+      " && rm /data/xt.txt /data2/xt.txt && ls /data2",
+  ],
+  ["xm_mkdir_multi", "mkdir /data/xd /data2/xd && ls /data2 && rm -r /data/xd /data2/xd"],
+  [
+    "xm_tee_multi",
+    "echo dual | tee /data/xdual.txt /data2/xdual.txt" +
+      " && cat /data/xdual.txt /data2/xdual.txt" +
+      " && rm /data/xdual.txt /data2/xdual.txt",
+  ],
+  [
+    "xm_sed_inplace",
+    "echo abc | tee /data/xi.txt /data2/xi.txt > /dev/null" +
+      " && sed -i s/b/B/ /data/xi.txt /data2/xi.txt" +
+      " && cat /data/xi.txt /data2/xi.txt" +
+      " && rm /data/xi.txt /data2/xi.txt",
+  ],
+  ["xm_rg_count", "rg -c o /data/a.txt /data2/xm.txt"],
+  ["xm_head_q", "head -q -n 1 /data/a.txt /data2/xm.txt"],
+  ["xm_ls_multi", "ls /data/sub /data2"],
+];
+
+// Exit codes matter here (grep no-match merge, diff/cmp differ), so these
+// print like EXIT_CODE_CASES.
+export const CROSS_MOUNT_EXIT_CASES: ReadonlyArray<readonly [string, string]> = [
+  ["xm_grep_nomatch", "grep zzz /data/a.txt /data2/xm.txt"],
+  [
+    "xm_diff_differ",
+    "printf 'same\\nold\\n' | tee /data/xdiff.txt > /dev/null" +
+      " && printf 'same\\nnew\\n' | tee /data2/xdiff.txt > /dev/null" +
+      " && diff /data/xdiff.txt /data2/xdiff.txt",
+  ],
+  ["xm_cmp_differ", "cmp /data/xdiff.txt /data2/xdiff.txt"],
+  [
+    "xm_cmp_equal",
+    "cp /data/xdiff.txt /data2/xsame.txt" +
+      " && cmp /data/xdiff.txt /data2/xsame.txt" +
+      " && rm /data/xdiff.txt /data2/xdiff.txt /data2/xsame.txt",
+  ],
+];
+
+// Non-whitelisted commands spanning mounts must refuse with the shared
+// message, pinning the whitelist boundary; printed like NOT_FOUND_CASES.
+export const CROSS_MOUNT_ERR_CASES: ReadonlyArray<readonly [string, string]> = [
+  ["xm_refuse_uniq", "uniq /data/a.txt /data2/xm_uniq_out.txt"],
 ];
 
 // Provision (dry-run cost estimates) must print identical numbers on every
@@ -960,6 +1233,63 @@ export const NOT_FOUND_CASES: ReadonlyArray<readonly [string, string]> = [
   ["nf_cat_rel", "(cd /data && cat missing.txt)"],
   ["nf_cat_rel_subdir", "(cd /data && cat sub/missing.txt)"],
   ["nf_grep_r_rel", "(cd /data && grep -r x missing)"],
+  // glob rule: unknown names 127 before backend work; GNU ln
+  // multi-source refusal after expansion
+  ["unknown_command", "nosuchcmd /data/a.txt"],
+  ["glob_ln_multi_source", "ln -s /data/sorted_*.txt /data/lnk_multi"],
+];
+
+// Multi-file read commands process every operand, GNU-style: each case
+// prints exit, stdout, and stderr, so a command that drops a good operand's
+// output, stops at the first missing operand, or silently swallows the
+// error diverges from truth. Seeds live under /data/pr and are removed at
+// the end so later sections see an untouched /data. stat is excluded (its
+// output carries mtimes); it is pinned in cross_commands instead.
+export const PARTIAL_READ_CASES: ReadonlyArray<readonly [string, string]> = [
+  [
+    "pr_seed",
+    "mkdir -p /data/pr && printf '1\\n2\\n' > /data/pr/one.txt" +
+      " && printf '3\\n4\\n' > /data/pr/two.txt" +
+      " && printf 'hello\\n' > /data/pr/h1.txt" +
+      " && printf 'worlds\\n' > /data/pr/h2.txt" +
+      " && printf 'z\\n' > /data/pr/z1.txt" +
+      " && printf 'y\\n' > /data/pr/z2.txt" +
+      " && gzip /data/pr/z1.txt /data/pr/z2.txt",
+  ],
+  // every operand is processed, not just the first
+  ["pr_cut_multi", "cut -c1 /data/pr/one.txt /data/pr/two.txt"],
+  ["pr_tac_multi", "tac /data/pr/one.txt /data/pr/two.txt"],
+  ["pr_nl_multi", "nl /data/pr/one.txt /data/pr/two.txt"],
+  ["pr_strings_multi", "strings /data/pr/h1.txt /data/pr/h2.txt"],
+  ["pr_zcat_multi", "zcat /data/pr/z1.txt.gz /data/pr/z2.txt.gz"],
+  // good + missing keeps partial output, one stderr line, exit 1
+  ["pr_cat", "cat /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_head", "head -n 1 /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_tail", "tail -n 1 /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_wc", "wc -l /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_nl", "nl /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_md5", "md5 /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_sha256sum", "sha256sum /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_strings", "strings /data/pr/h1.txt /data/pr/missing.txt"],
+  ["pr_tac", "tac /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_rev", "rev /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_cut", "cut -c1 /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_expand", "expand /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_unexpand", "unexpand /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_fold", "fold /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_fmt", "fmt /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_zcat", "zcat /data/pr/z1.txt.gz /data/pr/missing.gz"],
+  ["pr_sed", "sed s/1/X/ /data/pr/one.txt /data/pr/missing.txt"],
+  // sort aborts (it needs every input before emitting anything)
+  ["pr_sort", "sort /data/pr/one.txt /data/pr/missing.txt"],
+  ["pr_missing_first", "cat /data/pr/missing.txt /data/pr/one.txt"],
+  ["pr_all_missing_wc", "wc -l /data/pr/m1.txt /data/pr/m2.txt"],
+  // a directory operand refuses with GNU EISDIR, partial output kept (#457)
+  ["pr_cat_dir", "cat /data/pr/one.txt /data/pr"],
+  ["pr_head_dir", "head /data/pr"],
+  ["pr_wc_dir", "wc /data/pr/one.txt /data/pr"],
+  ["pr_tac_dir", "tac /data/pr"],
+  ["pr_cleanup", "rm -r /data/pr"],
 ];
 
 const ENC = new TextEncoder();
@@ -1148,6 +1478,16 @@ export async function runCases(ws: Workspace): Promise<void> {
     if (err) process.stdout.write(err + "\n");
   }
 
+  for (const [name, cmd] of PARTIAL_READ_CASES) {
+    const result = await ws.execute(cmd);
+    const out = new TextDecoder().decode(result.stdout);
+    const err = new TextDecoder().decode(result.stderr).trim();
+    process.stdout.write(`=== ${name} ===\n`);
+    process.stdout.write(`exit=${result.exitCode}\n`);
+    if (out) emitBody(out);
+    if (err) process.stdout.write(err + "\n");
+  }
+
   for (const [name, cmd] of FIND_ARG_ERROR_CASES) {
     const result = await ws.execute(cmd);
     const err = new TextDecoder().decode(result.stderr).trim();
@@ -1173,6 +1513,22 @@ export async function runCases(ws: Workspace): Promise<void> {
     const out = new TextDecoder().decode(result.stdout);
     process.stdout.write(`=== ${name} ===\n`);
     emitBody(out);
+  }
+
+  for (const [name, cmd] of CROSS_MOUNT_EXIT_CASES) {
+    const result = await ws.execute(cmd);
+    const out = new TextDecoder().decode(result.stdout);
+    process.stdout.write(`=== ${name} ===\n`);
+    process.stdout.write(`exit=${result.exitCode}\n`);
+    if (out) emitBody(out);
+  }
+
+  for (const [name, cmd] of CROSS_MOUNT_ERR_CASES) {
+    const result = await ws.execute(cmd);
+    const err = new TextDecoder().decode(result.stderr).trim();
+    process.stdout.write(`=== ${name} ===\n`);
+    process.stdout.write(`exit=${result.exitCode}\n`);
+    if (err) process.stdout.write(err + "\n");
   }
 
   await runProvisionCases(ws);
@@ -1210,6 +1566,19 @@ export async function runProvisionProbe(ws: Workspace, filePath: string): Promis
     process.stdout.write(`=== ${name} ===\n`);
     process.stdout.write(provisionLine(result) + "\n");
   }
+}
+
+export async function runSedReadonlyProbe(ws: Workspace, filePath: string): Promise<void> {
+  // Sed on a read-only backend: streaming works, in-place is rejected.
+  let result = await ws.execute(`sed -n 1p ${filePath}`);
+  const out = new TextDecoder().decode(result.stdout);
+  process.stdout.write(`=== sed_stream_1p ===\n`);
+  process.stdout.write(out.endsWith("\n") ? out : `${out}\n`);
+  result = await ws.execute(`sed -i s/x/y/ ${filePath}`);
+  const err = new TextDecoder().decode(result.stderr).trim();
+  process.stdout.write(`=== sed_i_readonly ===\n`);
+  process.stdout.write(`exit=${String(result.exitCode)}\n`);
+  if (err) process.stdout.write(`${err}\n`);
 }
 
 async function backendBytes(ws: Workspace, cmd: string): Promise<number> {

@@ -19,7 +19,7 @@ import { RedisIndexCacheStore } from '../cache/index/redis.ts'
 import { BaseResource } from './base.ts'
 
 class Probe extends BaseResource {
-  readonly indexTtl: number = 123
+  override readonly indexTtl: number = 123
 }
 
 describe('BaseResource index', () => {

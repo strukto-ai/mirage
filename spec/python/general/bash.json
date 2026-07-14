@@ -13,82 +13,105 @@
       "description": "Read commands from the next argument and execute them.",
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-c",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": "Read commands from stdin instead of from an argument.",
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-s",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": "(Ignored) Login shell. Mirage does not source profile files.",
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-l",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": "(Ignored) Interactive flag. Mirage shells are non-interactive.",
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-i",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": "(Ignored) Exit on first error.",
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-e",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": "(Ignored) Treat unset variables as errors.",
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-u",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": "(Ignored) Print commands as they execute.",
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-x",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": "(Ignored) Login shell.",
       "long": "--login",
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": null,
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": "(Ignored) Skip rc files.",
       "long": "--norc",
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": null,
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": "(Ignored) Skip profile files.",
       "long": "--noprofile",
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": null,
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": "(Ignored) POSIX-conformant mode.",
       "long": "--posix",
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": null,
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     }
   ],
   "positional": [],
   "rest": {
-    "kind": "text"
+    "kind": "text",
+    "provided_by": []
   }
 }

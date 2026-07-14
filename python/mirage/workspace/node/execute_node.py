@@ -18,7 +18,9 @@ from typing import Any, Callable
 
 from mirage.io import IOResult
 from mirage.io.stream import async_chain
+from mirage.shell.arith import evaluate_arith
 from mirage.shell.call_stack import CallStack
+from mirage.shell.errors import ArithError
 from mirage.shell.job_table import JobTable
 from mirage.shell.node_kind import NodeKind, node_kind
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
@@ -32,11 +34,12 @@ from mirage.workspace.executor.pipes import (handle_connection, handle_pipe,
 from mirage.workspace.executor.redirect import handle_redirect
 from mirage.workspace.expand import (expand_and_classify, expand_node,
                                      expand_redirects)
+from mirage.workspace.expand.globs import resolve_globs
+from mirage.workspace.expand.node import expand_arith
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.command_dispatch import execute_command
 from mirage.workspace.node.program import execute_program
-from mirage.workspace.node.resolve_globs import resolve_globs
 from mirage.workspace.node.test_expr import expand_test_expr
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
@@ -48,6 +51,52 @@ from mirage.shell.helpers import (  # isort: skip
     get_subshell_body, get_text, get_unset_names, get_while_parts)
 from mirage.workspace.executor.builtins import (  # isort: skip
     handle_export, handle_local, handle_readonly, handle_test, handle_unset)
+
+
+async def _recurse_reassociated(
+    recurse: Callable,
+    dispatch: Callable,
+    execute_fn: Callable,
+    registry: MountRegistry,
+    redirects: list,
+    right: Any,
+    node: Any,
+    session: Session,
+    stdin: Any = None,
+    call_stack: CallStack | None = None,
+) -> tuple[Any, IOResult, ExecutionNode]:
+    """Recurse wrapper for a re-associated trailing redirect.
+
+    Executes the list's last command with the hoisted redirects,
+    expanding targets only at that point (after the left side ran, so
+    cwd changes apply); every other node recurses normally.
+
+    Args:
+        recurse (Callable): the plain execute_node recursion.
+        dispatch (Callable): VFS op dispatcher.
+        execute_fn (Callable): recursive execute (for expansions).
+        registry (MountRegistry): mount registry.
+        redirects (list): parsed redirects hoisted off the list.
+        right (Any): the list's last command node.
+        node (Any): node being executed by handle_connection.
+        session (Session): shell session state.
+        stdin (Any): input stream.
+        call_stack (CallStack | None): shell call stack.
+    """
+    if node is not right:
+        return await recurse(node, session, stdin, call_stack)
+    expanded, pipe_node = await expand_redirects(redirects, session,
+                                                 execute_fn, registry,
+                                                 call_stack)
+    stdout, io, exec_node = await handle_redirect(recurse, dispatch, right,
+                                                  expanded, session, stdin,
+                                                  call_stack)
+    if pipe_node is not None and stdout is not None:
+        stdout, io2, exec_node2 = await recurse(pipe_node, session, stdout,
+                                                call_stack)
+        io = await io.merge(io2)
+        exec_node = exec_node2
+    return stdout, io, exec_node
 
 
 async def execute_node(
@@ -130,6 +179,19 @@ async def execute_node(
     # ── redirected statement ────────────────────
     if kind == NodeKind.REDIRECT:
         command, redirects = get_redirects(node)
+        if command.type == NT.LIST:
+            # tree-sitter hoists a trailing redirect over the whole
+            # &&/|| list; bash binds it to the last command:
+            #   redirected(list(L, op, R), r) == list(L, op, redirected(R, r))
+            # Re-associate and defer target expansion until R runs, so
+            # `cd /x && echo hi > f` writes under /x. Compound and
+            # subshell bodies keep the whole-body redirect (bash group
+            # semantics).
+            left, op, right = get_list_parts(command)
+            wrapped = partial(_recurse_reassociated, recurse, dispatch,
+                              execute_fn, registry, redirects, right)
+            return await handle_connection(wrapped, left, op, right, session,
+                                           stdin, cs)
         expanded_redirects, pipe_node = await expand_redirects(
             redirects, session, execute_fn, registry, cs)
         stdout, io, exec_node = await handle_redirect(recurse, dispatch,
@@ -147,6 +209,31 @@ async def execute_node(
     if kind == NodeKind.SUBSHELL:
         body = get_subshell_body(node)
         return await handle_subshell(recurse, body, session, stdin, cs)
+
+    # ── arithmetic command ((( ... ))) ──────────
+    if (kind == NodeKind.COMPOUND and node.children
+            and node.children[0].type == NT.ARITH_OPEN):
+        text = get_text(node)
+        expr = await expand_arith(node, session, execute_fn, cs)
+        try:
+            value, updates = evaluate_arith(expr, session.env)
+        except ArithError as exc:
+            err = f"bash: ((: {expr}: {exc}\n".encode()
+            return None, IOResult(exit_code=1,
+                                  stderr=err), ExecutionNode(command=text,
+                                                             exit_code=1,
+                                                             stderr=err)
+        for name in updates:
+            if name in session.readonly_vars:
+                err = f"bash: {name}: readonly variable\n".encode()
+                return None, IOResult(exit_code=1,
+                                      stderr=err), ExecutionNode(command=text,
+                                                                 exit_code=1,
+                                                                 stderr=err)
+        session.env.update(updates)
+        code = 0 if value != 0 else 1
+        return None, IOResult(exit_code=code), ExecutionNode(command=text,
+                                                             exit_code=code)
 
     # ── compound statement ({ ... }) ───────────
     if kind == NodeKind.COMPOUND:
@@ -180,6 +267,8 @@ async def execute_node(
         var, values, body = get_for_parts(node)
         classified = await expand_and_classify(values, session, execute_fn,
                                                registry, session.cwd, cs)
+        # The loop word list is consumed by the shell (WordPolicy.SHELL):
+        # globs resolve to matches before iteration starts.
         classified = await resolve_globs(classified, registry)
         if kind == NodeKind.SELECT:
             return await handle_select(recurse, var, classified, body, session,

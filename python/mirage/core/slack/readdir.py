@@ -79,10 +79,6 @@ async def _latest_message_ts(config, channel_id: str) -> float | None:
 
 
 def _normalize_path(path: PathSpec | str) -> tuple[PathSpec, str, str, str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
     raw = path.directory if path.pattern else path.virtual
     if prefix and raw.startswith(prefix):
@@ -395,4 +391,11 @@ async def _fetch_day(
     await index.set_dir(date_vkey + "/files", file_entries)
 
 
-__all__ = ["readdir", "VIRTUAL_ROOTS", "SlackScope"]
+def is_dir_name(child: str) -> bool:
+    # Entries are recognized by extension, so classification never needs
+    # the stat fallback.
+    name = child.rsplit("/", 1)[-1]
+    return not (name.endswith(".json") or name.endswith(".jsonl"))
+
+
+__all__ = ["readdir", "is_dir_name", "VIRTUAL_ROOTS", "SlackScope"]

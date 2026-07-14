@@ -15,7 +15,8 @@
 import pytest
 from pydantic import ValidationError
 
-from mirage.types import Aggr, CommandSafeguard, FileStat, OnExceed, PathSpec
+from mirage.types import (Aggr, CommandSafeguard, FileStat, MountMode,
+                          OnExceed, PathSpec, parse_mount_mode, word_text)
 
 
 def test_filestat_defaults():
@@ -92,19 +93,31 @@ def test_pathspec_requires_resource_path():
         PathSpec(virtual="/x.txt", directory="/")
 
 
-def test_pathspec_display_prefers_raw_path():
+def test_pathspec_raw_path_kept_when_given():
     p = PathSpec(virtual="/data/a.txt",
                  directory="/data/",
                  resource_path="a.txt",
                  raw_path="../a.txt")
-    assert p.display == "../a.txt"
+    assert p.raw_path == "../a.txt"
 
 
-def test_pathspec_display_falls_back_to_virtual():
+def test_pathspec_raw_path_defaults_to_virtual():
     p = PathSpec(virtual="/data/a.txt",
                  directory="/data/",
                  resource_path="a.txt")
-    assert p.display == "/data/a.txt"
+    assert p.raw_path == "/data/a.txt"
+
+
+def test_word_text_passes_strings_through():
+    assert word_text("plain") == "plain"
+
+
+def test_word_text_renders_paths_as_typed():
+    p = PathSpec(virtual="/data/a.txt",
+                 directory="/data/",
+                 resource_path="a.txt",
+                 raw_path="a.txt")
+    assert word_text(p) == "a.txt"
 
 
 def test_pathspec_dir_trims_resource_path():
@@ -134,3 +147,17 @@ def test_pathspec_from_str_path_defaults_to_root_mounted():
 def test_pathspec_from_str_path_explicit_resource_path():
     p = PathSpec.from_str_path("/mnt/s3/data/x.json", "data/x.json")
     assert p.resource_path == "data/x.json"
+
+
+def test_parse_mount_mode_words_and_aliases():
+    assert parse_mount_mode("read") == MountMode.READ
+    assert parse_mount_mode("r") == MountMode.READ
+    assert parse_mount_mode("rw") == MountMode.WRITE
+    assert parse_mount_mode("rwx") == MountMode.EXEC
+    assert parse_mount_mode(MountMode.EXEC) == MountMode.EXEC
+
+
+def test_parse_mount_mode_rejects_bit_style_forms():
+    for bad in ("w", "x", "wx", "rx", "admin"):
+        with pytest.raises(ValueError):
+            parse_mount_mode(bad)

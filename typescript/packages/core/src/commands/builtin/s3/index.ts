@@ -22,7 +22,6 @@ import { makeGenericCommands } from '../generic_bind/index.ts'
 import { S3_DU } from './du.ts'
 import { S3_MKDIR } from './mkdir.ts'
 import { S3_RM } from './rm.ts'
-import { S3_SED } from './sed.ts'
 import { S3_STAT } from './stat.ts'
 import { S3_TEE } from './tee.ts'
 import { S3_TOUCH } from './touch.ts'
@@ -45,5 +44,4 @@ export const S3_COMMANDS: readonly RegisteredCommand[] = [
   ...S3_MKDIR,
   ...S3_TEE,
   ...S3_TOUCH,
-  ...S3_SED,
 ]

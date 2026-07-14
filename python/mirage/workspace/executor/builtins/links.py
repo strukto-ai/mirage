@@ -12,24 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import dataclasses
 import posixpath
 import time
 from collections.abc import Callable
 
 from mirage.io import IOResult
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import FileStat, FileType, PathSpec, word_text
 from mirage.utils.path import CycleError
 from mirage.workspace.executor.builtins.shared import (Result, abs_path, fail,
-                                                       ok, split_flags, typed)
+                                                       ok, split_flags)
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
-
-# Commands whose path operands name the link itself (lstat semantics):
-# rm/mv mutate the link entry, ln/readlink inspect it, rmdir must not
-# descend through it. Everything else follows links before dispatch,
-# mirroring open(2).
-NO_FOLLOW_COMMANDS = frozenset({"rm", "mv", "ln", "readlink", "rmdir"})
 
 
 def link_flags(args: list[str | PathSpec], known: str) -> set[str]:
@@ -45,17 +40,24 @@ def handle_ln(
     flags, operands = split_flags(args, "sfnv")
     if len(operands) < 2:
         return fail("ln", "ln: missing file operand\n")
+    # GNU: with more than two operands the last must be a directory;
+    # namespace links never name directories, so this is always an error
+    # (an expanded multi-match glob source lands here).
+    if len(operands) > 2:
+        return fail(
+            "ln", f"ln: target '{word_text(operands[-1])}' "
+            f"is not a directory\n")
     link_abs = abs_path(operands[1], session.cwd)
-    target_typed = typed(operands[0])
+    target_typed = word_text(operands[0])
     exists = namespace.is_link(link_abs) and "f" not in flags
     if namespace.is_mount_root(link_abs) or exists:
         return fail(
             "ln", f"ln: failed to create symbolic link "
-            f"'{typed(operands[1])}': File exists\n")
+            f"'{word_text(operands[1])}': File exists\n")
     namespace.symlink(link_abs, target_typed, time.time())
     out = None
     if "v" in flags:
-        out = (f"'{typed(operands[1])}' -> '{target_typed}'\n").encode()
+        out = (f"'{word_text(operands[1])}' -> '{target_typed}'\n").encode()
     return ok("ln", out)
 
 
@@ -109,17 +111,16 @@ def follow_paths(
         try:
             virtual = namespace.follow(item.virtual)
         except CycleError:
-            raise CycleError(item.raw_path or item.virtual) from None
+            raise CycleError(item.raw_path) from None
         if virtual == item.virtual:
             out.append(item)
             continue
         out.append(
-            PathSpec(virtual=virtual,
-                     directory=virtual[:virtual.rfind("/") + 1] or "/",
-                     resource_path="",
-                     pattern=item.pattern,
-                     resolved=item.resolved,
-                     raw_path=item.raw_path or item.virtual))
+            dataclasses.replace(item,
+                                virtual=virtual,
+                                directory=virtual[:virtual.rfind("/") + 1]
+                                or "/",
+                                resource_path=""))
     return out
 
 
@@ -226,7 +227,6 @@ async def prepare_mv(
 
 
 __all__ = [
-    "NO_FOLLOW_COMMANDS",
     "follow_paths",
     "handle_ln",
     "handle_readlink",

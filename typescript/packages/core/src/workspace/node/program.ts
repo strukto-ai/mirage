@@ -18,6 +18,7 @@ import type { CallStack } from '../../shell/call_stack.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { ERREXIT_EXEMPT_TYPES, NodeType as NT } from '../../shell/types.ts'
 import type { TSNodeLike } from '../expand/variable.ts'
+import { errorVirtualPath, gnuStrerror } from '../../utils/errors.ts'
 import { handleBackground } from '../executor/jobs.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
@@ -90,8 +91,19 @@ export async function executeProgram(
         stdout = await materialize(s)
       } catch (err) {
         // Lazy reads can fail on the first pull (e.g. a backend size guard);
-        // surface that as a failed statement, not a crash.
-        drainErr = err instanceof Error ? err.message : String(err)
+        // surface that as a failed statement, not a crash. Filesystem
+        // errors format as a GNU coreutils line, respelling the path as
+        // typed via the operands the leaf node carries, mirroring the
+        // eager executor chokepoint.
+        const strerror = gnuStrerror((err as { code?: string }).code)
+        if (strerror !== null) {
+          const vpath = errorVirtualPath(err)
+          const cmdName = execNode.command?.split(' ')[0] ?? ''
+          const spelled = execNode.paths.find((p) => p.virtual === vpath)?.rawPath ?? vpath
+          drainErr = `${cmdName}: ${spelled}: ${strerror}`
+        } else {
+          drainErr = err instanceof Error ? err.message : String(err)
+        }
         stdout = null
       }
       ioResult.syncExitCode()

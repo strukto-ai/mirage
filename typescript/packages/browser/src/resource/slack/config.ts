@@ -24,7 +24,7 @@ export interface SlackConfigRedacted {
   getHeaders?: '<REDACTED>'
 }
 
-export const SlackConfigSchema = z.object({
+const SlackConfigSchema = z.object({
   proxyUrl: z.string(),
   getHeaders: secretSchema(
     z.custom<SlackConfig['getHeaders']>((value) => typeof value === 'function'),

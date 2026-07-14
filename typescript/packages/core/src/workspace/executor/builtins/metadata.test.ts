@@ -17,7 +17,6 @@ import { OpsRegistry, type RegisteredOp } from '../../../ops/registry.ts'
 import { RAMResource } from '../../../resource/ram/ram.ts'
 import type { FileStat } from '../../../types.ts'
 import { MountMode } from '../../../types.ts'
-import type { IOResult } from '../../../io/types.ts'
 import { getTestParser } from '../../fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace.ts'
 import { parseMode, parseOwner, parseTouchStamp } from './metadata.ts'
@@ -126,7 +125,7 @@ async function statOf(ws: Workspace, path: string): Promise<FileStat> {
 }
 
 async function run(ws: Workspace, cmd: string): Promise<[number, string, string]> {
-  const r: IOResult = await ws.execute(cmd)
+  const r = await ws.execute(cmd)
   return [r.exitCode, r.stdoutText, r.stderrText]
 }
 

@@ -118,7 +118,7 @@ describe('resolveDiscordGlob', () => {
     }
   })
 
-  it('returns empty when pattern matches nothing', async () => {
+  it('keeps unmatched pattern word as literal', async () => {
     const t = new FakeDiscordTransport()
     const idx = new RAMIndexCacheStore()
     await seedChannelHistory(idx, '/mnt/discord', 'My Server__G1', 'general__C1', [
@@ -136,7 +136,10 @@ describe('resolveDiscordGlob', () => {
       resolved: false,
     })
     const out = await resolveDiscordGlob(new DiscordAccessor(t), [spec], idx)
-    expect(out).toEqual([])
+    // bash nullglob off: the unmatched glob word stays the literal
+    expect(out.map((p) => p.virtual)).toEqual([spec.virtual])
+    expect(out[0]?.resolved).toBe(true)
+    expect(out[0]?.pattern).toBeNull()
   })
 
   it('truncates matched entries at SCOPE_ERROR', async () => {

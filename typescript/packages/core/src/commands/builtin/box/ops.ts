@@ -15,7 +15,7 @@
 import type { BoxAccessor } from '../../../accessor/box.ts'
 import { du as boxDu, duAll as boxDuAll } from '../../../core/box/du.ts'
 import { read as boxRead, stream as boxStream } from '../../../core/box/read.ts'
-import { readdir as boxReaddir } from '../../../core/box/readdir.ts'
+import { isDirName, readdir as boxReaddir } from '../../../core/box/readdir.ts'
 import { stat as boxStat } from '../../../core/box/stat.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
 
@@ -25,6 +25,7 @@ export const BOX_CMD_OPS: CommandIO<BoxAccessor> = {
   readStream: boxStream,
   stat: boxStat,
   isMounted: () => true,
+  isDirName: (_accessor, child) => isDirName(child),
   local: false,
   duTotal: boxDu,
   duAll: boxDuAll,

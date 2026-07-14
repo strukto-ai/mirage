@@ -209,3 +209,19 @@ async def test_rejection_emits_log_warning(monkeypatch, caplog):
     ]
     assert rejection_logs, "expected a warning log for the rejected host"
     assert rejection_logs[0].levelname == "WARNING"
+
+
+def test_resolve_allowed_hosts_config_beats_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
+    monkeypatch.delenv("MIRAGE_ALLOWED_HOSTS", raising=False)
+    (tmp_path / "config.toml"
+     ).write_text('[daemon]\nallowed_hosts = "example.com,api.example.com"\n')
+    assert resolve_allowed_hosts() == ["example.com", "api.example.com"]
+
+
+def test_resolve_allowed_hosts_env_beats_config(tmp_path, monkeypatch):
+    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
+    monkeypatch.setenv("MIRAGE_ALLOWED_HOSTS", "env.example.com")
+    (tmp_path / "config.toml"
+     ).write_text('[daemon]\nallowed_hosts = "file.example.com"\n')
+    assert resolve_allowed_hosts() == ["env.example.com"]

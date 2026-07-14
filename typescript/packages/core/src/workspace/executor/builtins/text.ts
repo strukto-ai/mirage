@@ -13,14 +13,35 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { interpretEscapes } from '../../../commands/builtin/utils/escapes.ts'
+import { ECHO_OPTION } from '../../../commands/spec/shell.ts'
 import { IOResult } from '../../../io/types.ts'
 import { ExecutionNode } from '../../types.ts'
 import type { Result } from './scope.ts'
 
-export function handleEcho(args: string[], nFlag = false, eFlag = false): Result {
-  let text = args.join(' ')
-  if (eFlag) text = interpretEscapes(text)
-  if (!nFlag) text += '\n'
+/**
+ * Print arguments, honoring GNU echo's option rules.
+ *
+ * GNU echo is not getopt: options are LEADING words matching `-[neE]+`
+ * only. The first word that does not match (including `-x` or a
+ * repeated `hi -n`) ends option parsing and prints literally. Within
+ * clusters the last of -e/-E wins; -n sticks.
+ */
+export function handleEcho(args: string[]): Result {
+  let noNewline = false
+  let escapes = false
+  let idx = 0
+  for (const word of args) {
+    if (!ECHO_OPTION.test(word)) break
+    for (const ch of word.slice(1)) {
+      if (ch === 'n') noNewline = true
+      else if (ch === 'e') escapes = true
+      else escapes = false
+    }
+    idx += 1
+  }
+  let text = args.slice(idx).join(' ')
+  if (escapes) text = interpretEscapes(text)
+  if (!noNewline) text += '\n'
   const out = new TextEncoder().encode(text)
   return [out, new IOResult(), new ExecutionNode({ command: 'echo', exitCode: 0 })]
 }

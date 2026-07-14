@@ -177,7 +177,7 @@ describe('region-derived S3 aliases', () => {
         endpoint_url: 'https://custom.example.com',
         timeout: 30,
         proxy: 'http://localhost:8080',
-      }) as Record<string, unknown>
+      }) as unknown as Record<string, unknown>
       expect(norm.accessKeyId).toBe('k')
       expect(norm.secretAccessKey).toBe('s')
       expect(norm.endpoint).toBe('https://custom.example.com')

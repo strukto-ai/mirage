@@ -18,6 +18,8 @@ import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 import { lstripSlash, stripSlash } from '../../../utils/slash.ts'
+import { extraOperandError } from '../../spec/usage.ts'
+import { CommandName } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -152,6 +154,7 @@ export async function patchGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<CommandFnResult> {
+  if (paths.length > 2) throw extraOperandError(CommandName.PATCH, paths[2]?.rawPath ?? '')
   const stripCount = typeof opts.flags.p === 'string' ? Number.parseInt(opts.flags.p, 10) : 0
   const reverseMode = opts.flags.R === true
   const forwardOnly = opts.flags.N === true

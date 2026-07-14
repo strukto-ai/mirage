@@ -12,11 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { resolvePath } from '../../../commands/spec/parser.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { FileStat } from '../../../types.ts'
 import { FileType, PathSpec } from '../../../types.ts'
-import { CycleError } from '../../../utils/path.ts'
+import { CycleError, resolvePath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import type { DispatchFn } from '../cross_mount.ts'
@@ -203,7 +202,7 @@ function splitValueFlags(
           i += 1
           const nxt = args[i]
           if (nxt !== undefined) {
-            values.set(c, nxt instanceof PathSpec ? (nxt.rawPath ?? nxt.virtual) : nxt)
+            values.set(c, nxt instanceof PathSpec ? nxt.rawPath : nxt)
           }
         }
         break
@@ -341,7 +340,7 @@ export async function handleChmod(
       virtual = namespace.follow(target.virtual)
     } catch (err) {
       if (err instanceof CycleError) {
-        errors.push(`chmod: cannot access '${target.display}': Too many levels of symbolic links\n`)
+        errors.push(`chmod: cannot access '${target.rawPath}': Too many levels of symbolic links\n`)
         exitCode = 1
         continue
       }
@@ -354,7 +353,7 @@ export async function handleChmod(
       stat = result as FileStat
     } catch (err) {
       if (isEnoent(err)) {
-        errors.push(`chmod: cannot access '${target.display}': No such file or directory\n`)
+        errors.push(`chmod: cannot access '${target.rawPath}': No such file or directory\n`)
         exitCode = 1
         continue
       }
@@ -415,7 +414,7 @@ export async function handleChown(
       virtual = namespace.follow(target.virtual)
     } catch (err) {
       if (err instanceof CycleError) {
-        errors.push(`chown: cannot access '${target.display}': Too many levels of symbolic links\n`)
+        errors.push(`chown: cannot access '${target.rawPath}': Too many levels of symbolic links\n`)
         exitCode = 1
         continue
       }
@@ -426,7 +425,7 @@ export async function handleChown(
       await dispatch('stat', resolved)
     } catch (err) {
       if (isEnoent(err)) {
-        errors.push(`chown: cannot access '${target.display}': No such file or directory\n`)
+        errors.push(`chown: cannot access '${target.rawPath}': No such file or directory\n`)
         exitCode = 1
         continue
       }
@@ -470,7 +469,7 @@ export async function handleTouch(
   }
   const refText = values.get('r')
   if (stamp === null && refText !== undefined) {
-    const ref = PathSpec.fromStrPath(resolvePath(session.cwd, refText))
+    const ref = PathSpec.fromStrPath(resolvePath(refText, session.cwd))
     try {
       const [refStat] = await dispatch('stat', ref)
       stamp = (refStat as FileStat).modified
@@ -494,7 +493,7 @@ export async function handleTouch(
   const writes: Record<string, Uint8Array> = {}
   for (const target of await expandOperands(namespace, operands)) {
     if (namespace.isMountRoot(target.virtual)) {
-      errors.push(`touch: cannot touch '${target.display}': Is a directory\n`)
+      errors.push(`touch: cannot touch '${target.rawPath}': Is a directory\n`)
       exitCode = 1
       continue
     }
@@ -507,7 +506,7 @@ export async function handleTouch(
       virtual = namespace.follow(target.virtual)
     } catch (err) {
       if (err instanceof CycleError) {
-        errors.push(`touch: cannot touch '${target.display}': Too many levels of symbolic links\n`)
+        errors.push(`touch: cannot touch '${target.rawPath}': Too many levels of symbolic links\n`)
         exitCode = 1
         continue
       }
@@ -526,7 +525,7 @@ export async function handleTouch(
           // Stat-only backend (e.g. an API surface): creation is
           // impossible, which GNU reports as EROFS.
           if (!isMissingOp(werr, 'write')) throw werr
-          errors.push(`touch: cannot touch '${target.display}': Read-only file system\n`)
+          errors.push(`touch: cannot touch '${target.rawPath}': Read-only file system\n`)
           exitCode = 1
           continue
         }

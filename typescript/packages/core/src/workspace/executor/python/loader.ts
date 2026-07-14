@@ -19,7 +19,7 @@ const noopIo = (): void => undefined
 const PYODIDE_CDN_VERSION = '0.29.3'
 const PYODIDE_CDN_URL = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_CDN_VERSION}/full/`
 
-export interface PyodideFS {
+interface PyodideFS {
   mkdirTree: (path: string, mode?: number) => void
   writeFile: (path: string, data: Uint8Array | string) => void
   readFile: (path: string, opts?: { encoding?: 'binary' | 'utf8' }) => Uint8Array | string

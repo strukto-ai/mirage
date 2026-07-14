@@ -22,9 +22,8 @@ import { GITHUB_GREP } from './grep.ts'
 import { GITHUB_CMD_OPS } from './ops.ts'
 import { metadataProvision } from './provision.ts'
 import { GITHUB_RG } from './rg.ts'
-import { GITHUB_SED } from './sed.ts'
 
-const GITHUB_OVERRIDES = new Set(['du', 'find', 'grep', 'rg', 'sed'])
+const GITHUB_OVERRIDES = new Set(['du', 'find', 'grep', 'rg'])
 
 export const GITHUB_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<GitHubAccessor>(ResourceName.GITHUB, GITHUB_CMD_OPS, {
@@ -37,5 +36,4 @@ export const GITHUB_COMMANDS: readonly RegisteredCommand[] = [
   ...GITHUB_FIND,
   ...GITHUB_GREP,
   ...GITHUB_RG,
-  ...GITHUB_SED,
 ]

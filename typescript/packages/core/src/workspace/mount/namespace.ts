@@ -63,14 +63,6 @@ export class Namespace {
     return this.nodeTable
   }
 
-  get symlinks(): Map<string, NodeMeta> {
-    const out = new Map<string, NodeMeta>()
-    for (const [path, meta] of this.nodeTable) {
-      if (meta.target !== undefined) out.set(path, meta)
-    }
-    return out
-  }
-
   replaceNodes(entries: Map<string, NodeMeta>): void {
     this.nodeTable = new Map(entries)
   }

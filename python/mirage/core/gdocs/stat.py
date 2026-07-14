@@ -12,58 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.gdocs import GDocsAccessor
-from mirage.cache.index import IndexCacheStore
-from mirage.core.gdocs.readdir import readdir as _readdir
-from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import enoent
-from mirage.utils.key_prefix import mount_key, mount_prefix_of
+from mirage.core.gdocs.readdir import readdir
+from mirage.core.google.tree_ops import make_stat
 
-VIRTUAL_DIRS = {"", "owned", "shared"}
-
-
-async def stat(
-    accessor: GDocsAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = None,
-) -> FileStat:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
-    virtual = path.virtual
-    prefix = mount_prefix_of(path.virtual, path.resource_path)
-    key = path.resource_path
-    if key in VIRTUAL_DIRS:
-        name = key if key else "/"
-        return FileStat(name=name, type=FileType.DIRECTORY)
-    if index is None:
-        raise enoent(virtual)
-    virtual_key = prefix + "/" + key if prefix else "/" + key
-    result = await index.get(virtual_key)
-    if result.entry is None:
-        parent_virtual = virtual_key.rsplit("/", 1)[0] or "/"
-        try:
-            await _readdir(
-                accessor,
-                PathSpec(virtual=parent_virtual,
-                         directory=parent_virtual,
-                         resource_path=mount_key(parent_virtual, prefix)),
-                index=index,
-            )
-        # best-effort cache populate; canonical ENOENT raised below
-        except Exception:
-            pass
-        result = await index.get(virtual_key)
-        if result.entry is None:
-            raise enoent(virtual)
-    return FileStat(
-        name=result.entry.vfs_name,
-        type=FileType.JSON,
-        modified=result.entry.remote_time,
-        size=result.entry.size,
-        extra={
-            "doc_id": result.entry.id,
-            "doc_name": result.entry.name,
-        },
-    )
+stat = make_stat(readdir)

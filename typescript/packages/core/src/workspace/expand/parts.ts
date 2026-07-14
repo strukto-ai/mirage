@@ -17,7 +17,7 @@ import { NodeType as NT } from '../../shell/types.ts'
 import type { PathSpec } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Session } from '../session/session.ts'
-import { classifyWord } from './classify.ts'
+import { classifyWord } from './classify/index.ts'
 import { expandNode, type ExecuteFn } from './node.ts'
 import type { TSNodeLike } from './variable.ts'
 

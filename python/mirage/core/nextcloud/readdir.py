@@ -6,7 +6,7 @@ from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.cache.index import IndexCacheStore, IndexEntry, ResourceType
 from mirage.core.nextcloud.constants import SCOPE_ERROR
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
+from mirage.utils.errors import enoent, enotdir
 from mirage.utils.key_prefix import mount_prefix_of
 
 logger = logging.getLogger(__name__)
@@ -14,10 +14,6 @@ logger = logging.getLogger(__name__)
 
 async def readdir(accessor: NextcloudAccessor, path: PathSpec,
                   index: IndexCacheStore) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     target = path.directory if path.pattern else path.virtual
     if prefix and target.startswith(prefix):
@@ -52,6 +48,11 @@ async def readdir(accessor: NextcloudAccessor, path: PathSpec,
                 sizes[base] = meta.content_length if meta else None
     except NotFound as exc:
         raise enoent(path) from exc
+    # WebDAV PROPFIND on a file returns the file itself; POSIX readdir of a
+    # non-directory raises ENOTDIR instead.
+    target_key = "/" + target.strip("/")
+    if names == [target_key] and target_key not in dir_keys:
+        raise enotdir(path)
     names = sorted(names)
     if len(names) > SCOPE_ERROR:
         logger.warning(

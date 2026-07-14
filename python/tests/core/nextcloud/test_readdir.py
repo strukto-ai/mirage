@@ -27,6 +27,14 @@ async def test_readdir_subdir(make_acc):
 
 
 @pytest.mark.asyncio
+async def test_readdir_file_raises_enotdir(make_acc):
+    acc = make_acc({"data/a.txt": b"a"})
+    with pytest.raises(NotADirectoryError):
+        await readdir(acc, PathSpec.from_str_path("/data/a.txt"),
+                      RAMIndexCacheStore(ttl=60))
+
+
+@pytest.mark.asyncio
 async def test_readdir_populates_index_cache(make_acc):
     acc = make_acc({"f.txt": b"hello"})
     cache = RAMIndexCacheStore(ttl=60)

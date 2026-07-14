@@ -19,6 +19,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.aggregators import concat_aggregate
 from mirage.commands.builtin.generic.cat import cat as generic_cat
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.builders.common import split_readable
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.stream import async_chain, chain_cachables
@@ -33,18 +34,33 @@ async def cat(
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     n: bool = False,
+    E: bool = False,
+    T: bool = False,
+    v: bool = False,
+    e: bool = False,
+    t: bool = False,
+    A: bool = False,
+    s: bool = False,
     index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
+    # GNU combinations: -e is -vE, -t is -vT, -A is -vET.
+    display = dict(
+        number_lines=n,
+        show_ends=E or e or A,
+        show_tabs=T or t or A,
+        show_nonprinting=v or e or t or A,
+        squeeze_blank=s,
+    )
+    wants_display = any(display.values())
     if paths and ops.is_mounted(accessor):
         paths = await ops.resolve_glob(accessor, paths, index)
-        if ops.local:
-            for p in paths:
-                await ops.stat(accessor, p, index)
+        paths, err = await split_readable(ops, accessor, paths, index, "cat")
+        if not paths:
+            return None, IOResult(exit_code=1 if err else 0,
+                                  stderr=err or None)
         if len(paths) == 1:
             p = paths[0]
-            if not ops.local:
-                await ops.stat(accessor, p, index)
             cachable = CachableAsyncIterator(
                 ops.read_stream(accessor, p, index))
             io = IOResult(reads={p.mount_path: cachable}, cache=[p.mount_path])
@@ -69,12 +85,15 @@ async def cat(
                 parts.append(data)
             io = IOResult(reads=reads, cache=list(reads))
             source = async_chain(*parts)
-        if n:
-            return generic_cat(source, number_lines=True), io
+        if err:
+            io.stderr = err
+            io.exit_code = 1
+        if wants_display:
+            return generic_cat(source, **display), io
         return source, io
     source = _resolve_source(stdin, "cat: missing operand")
-    if n:
-        return generic_cat(source, number_lines=True), IOResult()
+    if wants_display:
+        return generic_cat(source, **display), IOResult()
     return source, IOResult()
 
 

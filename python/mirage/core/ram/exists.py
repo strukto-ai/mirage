@@ -18,10 +18,6 @@ from mirage.utils.path import norm
 
 
 async def exists(accessor: RAMAccessor, path: PathSpec) -> bool:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     if isinstance(path, PathSpec):
         path = path.mount_path
     store = accessor.store

@@ -17,6 +17,8 @@ import type { PathSpec } from '../../../types.ts'
 import { decodeBase64, encodeBase64 } from '../../../utils/base64.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { resolveSource } from '../utils/stream.ts'
+import { extraOperandError } from '../../spec/usage.ts'
+import { CommandName } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -52,6 +54,7 @@ export async function base64Generic(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
+  if (paths.length > 1) throw extraOperandError(CommandName.BASE64, paths[1]?.rawPath ?? '')
   const decode = opts.flags.d === true || opts.flags.D === true
   const wrap = typeof opts.flags.w === 'string' ? Number.parseInt(opts.flags.w, 10) : null
   const cache: string[] = []

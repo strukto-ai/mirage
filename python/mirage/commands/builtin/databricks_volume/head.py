@@ -37,6 +37,8 @@ async def head(
     stdin: AsyncIterator[bytes] | bytes | None = None,
     n: str | None = None,
     c: str | None = None,
+    q: bool = False,
+    v: bool = False,
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -60,6 +62,7 @@ async def head(
                           index=index,
                           n=n_int,
                           c=c_int,
-                          show_headers=len(paths) > 1), IOResult()
+                          show_headers=(v or len(paths) > 1)
+                          and not q), IOResult()
     source = _resolve_source(stdin, "head: missing operand")
     return generic_head(source, n=n_int, c=c_int), IOResult()

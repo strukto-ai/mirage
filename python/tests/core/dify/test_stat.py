@@ -63,7 +63,8 @@ async def test_stat_light_uses_index_entry_without_detail_call(monkeypatch):
 
     assert item.name == "quickstart"
     assert item.type == FileType.TEXT
-    assert item.size == 123
+    assert item.size is None
+    assert item.extra["source_size"] == 123
     assert item.modified == "2024-05-21T09:00:00+00:00"
     assert item.extra["slug"] == "guides/quickstart"
 

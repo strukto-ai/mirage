@@ -15,7 +15,6 @@
 from mirage.commands.builtin.dify.cat import make_cat
 from mirage.commands.builtin.dify.find import find
 from mirage.commands.builtin.dify.search import search
-from mirage.commands.builtin.dify.sed import sed
 from mirage.commands.builtin.generic_bind import (CommandIO,
                                                   make_generic_commands,
                                                   with_read_cache)
@@ -29,8 +28,8 @@ from mirage.core.dify.stat import stat as _stat
 # generic cat eagerly stats the file and the generic find would call the full
 # stat, while Dify's stat is a detail fetch (the wrappers use bespoke glob
 # resolution / stat_light instead). search pushes down to the Dify retrieval
-# API and sed has no generic builder. Dify is read-only, so the generic
-# byte-mutation commands are intentionally absent (no write op wired).
+# API. Dify is read-only, so the generic byte-mutation commands are
+# intentionally absent (no write op wired).
 _DIFY_CMD_OPS = CommandIO(
     readdir=_readdir,
     read_bytes=_read,
@@ -53,5 +52,4 @@ COMMANDS = [
     make_cat(_DIFY_CACHED_OPS),
     find,
     search,
-    sed,
 ]

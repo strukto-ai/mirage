@@ -12,19 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
-import re
-
-from mirage.commands.spec.constants import flag_kwarg_name
+from mirage.commands.spec.constants import NUMERIC_SHORT, flag_kwarg_name
 from mirage.commands.spec.types import CommandSpec, OperandKind, ParsedArgs
-
-_NUMERIC_SHORT = re.compile(r"^-\d+$")
-
-
-def _resolve(cwd: str, path: str) -> str:
-    if path.startswith("/"):
-        return posixpath.normpath(path)
-    return posixpath.normpath(posixpath.join(cwd, path))
+from mirage.utils.path import resolve_path
 
 
 def _set_value_flag(
@@ -84,6 +74,7 @@ def parse_command(
     value_flags: set[str] = set()
     long_bool_flags: set[str] = set()
     long_value_flags: set[str] = set()
+    long_optional_flags: set[str] = set()
     value_flag_kinds: dict[str, OperandKind] = {}
     repeat_flags: set[str] = set()
     numeric_shorthand_flag: str | None = None
@@ -101,6 +92,11 @@ def parse_command(
         if opt.long:
             if opt.value_kind == OperandKind.NONE:
                 long_bool_flags.add(opt.long)
+            elif opt.value_optional:
+                # GNU optional argument: bare form is boolean, value only
+                # attaches via `=`; a detached next token is an operand.
+                long_bool_flags.add(opt.long)
+                long_optional_flags.add(opt.long)
             else:
                 long_value_flags.add(opt.long)
                 value_flag_kinds[opt.long] = opt.value_kind
@@ -112,20 +108,38 @@ def parse_command(
 
     cache_paths: list[str] = []
     filtered_argv: list[str] = []
+    # orig_indices[j] = argv position of filtered_argv[j]
+    orig_indices: list[int] = []
     i = 0
     while i < len(argv):
         if argv[i] == "--cache":
             i += 1
             while i < len(argv) and not argv[i].startswith("-"):
-                cache_paths.append(_resolve(cwd, argv[i]))
+                cache_paths.append(resolve_path(argv[i], cwd))
                 i += 1
         else:
             filtered_argv.append(argv[i])
+            orig_indices.append(i)
             i += 1
 
     flags: dict[str, str | bool | list[str]] = {}
     raw_args: list[str] = []
+    # raw_indices[k] = argv position of raw_args[k]
+    raw_indices: list[int] = []
+    # Per-position operand kinds aligned with the caller's argv (None =
+    # flag token or ignored word). Positions, not value sets, so the
+    # same word can be TEXT in one slot and PATH in another:
+    #   grep  *.txt  *.txt               -> [TEXT, PATH]
+    #   find  /data  -name  *.txt        -> [PATH, None, TEXT]
+    #   grep  --cache  /c  pat  f.txt    -> [None, None, TEXT, PATH]
+    # orig_indices/raw_indices map the parser's shrunken views back to
+    # argv slots (filtered_argv drops --cache tokens, raw_args keeps
+    # only operands); kinds must be written at the original positions
+    # or one dropped token shifts every later kind onto the wrong word.
+    word_kinds: list[OperandKind | None] = [None] * len(argv)
     warnings: list[str] = []
+    invalid_options: list[str] = []
+    needs_value_options: list[str] = []
     # Free-text commands (echo/python/bash-style TEXT rest) keep unknown
     # dash tokens verbatim; elsewhere they are dropped with a warning so a
     # stray flag never corrupts pattern/path classification.
@@ -143,6 +157,7 @@ def parse_command(
 
         if end_of_flags:
             raw_args.append(tok)
+            raw_indices.append(orig_indices[i])
             i += 1
             continue
 
@@ -152,22 +167,27 @@ def parse_command(
                 i += 1
             elif tok in long_value_flags and i + 1 < len(filtered_argv):
                 _set_value_flag(flags, tok, filtered_argv[i + 1], repeat_flags)
+                word_kinds[orig_indices[i + 1]] = value_flag_kinds[tok]
                 i += 2
             else:
                 eq = tok.find("=")
-                if eq != -1 and tok[:eq] in long_value_flags:
+                if eq != -1 and (tok[:eq] in long_value_flags
+                                 or tok[:eq] in long_optional_flags):
                     _set_value_flag(flags, tok[:eq], tok[eq + 1:],
                                     repeat_flags)
+                elif tok in long_value_flags:
+                    # Declared value flag at end of line with no argument.
+                    needs_value_options.append(tok)
                 elif lenient_dash_operands:
                     raw_args.append(tok)
+                    raw_indices.append(orig_indices[i])
                 else:
-                    warnings.append(f"warning: unknown option '{tok}' ignored")
+                    invalid_options.append(tok)
                 i += 1
             continue
 
         if tok.startswith("-") and len(tok) > 1:
-            if numeric_shorthand_flag is not None and _NUMERIC_SHORT.match(
-                    tok):
+            if numeric_shorthand_flag is not None and NUMERIC_SHORT.match(tok):
                 flags[numeric_shorthand_flag] = tok[1:]
                 i += 1
                 continue
@@ -176,6 +196,7 @@ def parse_command(
                 if tok == vf and i + 1 < len(filtered_argv):
                     _set_value_flag(flags, vf, filtered_argv[i + 1],
                                     repeat_flags)
+                    word_kinds[orig_indices[i + 1]] = value_flag_kinds[vf]
                     i += 2
                     matched_value = True
                     break
@@ -217,23 +238,45 @@ def parse_command(
                         flags[name] = True
                     _set_value_flag(flags, vflag, filtered_argv[i + 1],
                                     repeat_flags)
+                    word_kinds[orig_indices[i + 1]] = value_flag_kinds[vflag]
                     i += 2
                     continue
 
-            if lenient_dash_operands or _NUMERIC_SHORT.match(tok):
+            if lenient_dash_operands or NUMERIC_SHORT.match(tok):
                 raw_args.append(tok)
+                raw_indices.append(orig_indices[i])
+            elif tok in value_flags or (mixed is not None
+                                        and mixed[2] is None):
+                # A declared value flag (alone or ending a cluster) with no
+                # argument left on the line. GNU reports the flag character.
+                needy = tok[1:] if tok in value_flags else mixed[1][1:]
+                needs_value_options.append(needy)
             else:
-                warnings.append(f"warning: unknown option '{tok}' ignored")
+                # GNU reports the first offending character, not the token.
+                bad = tok[1:2]
+                for ch in tok[1:]:
+                    if (f"-{ch}" not in bool_flags
+                            and f"-{ch}" not in value_flags):
+                        bad = ch
+                        break
+                invalid_options.append(bad)
             i += 1
             continue
 
         raw_args.append(tok)
+        raw_indices.append(orig_indices[i])
         i += 1
 
     positional: tuple[OperandKind,
                       ...] = tuple(op.kind for op in spec.positional
                                    if not any(name in flags
                                               for name in op.provided_by))
+
+    # Overflow operands past the declared positional slots pass through
+    # classified like the last slot (TEXT when there is none), so a
+    # fixed-arity command receives them and raises its own extra-operand
+    # UsageError (#452). The parser classifies, it never drops or raises.
+    overflow_kind = positional[-1] if positional else OperandKind.TEXT
 
     classified: list[tuple[str, OperandKind]] = []
     raw_operands: list[tuple[str, OperandKind]] = []
@@ -243,13 +286,14 @@ def parse_command(
         elif rest_kind is not None:
             kind = rest_kind
         else:
-            continue
+            kind = overflow_kind
         if kind == OperandKind.PATH:
-            classified.append((_resolve(cwd, arg), OperandKind.PATH))
+            classified.append((resolve_path(arg, cwd), OperandKind.PATH))
             raw_operands.append((arg, OperandKind.PATH))
         else:
             classified.append((arg, OperandKind.TEXT))
             raw_operands.append((arg, OperandKind.TEXT))
+        word_kinds[raw_indices[j]] = kind
 
     path_flag_values: list[str] = []
     for flag_name, kind in value_flag_kinds.items():
@@ -257,11 +301,11 @@ def parse_command(
             continue
         value = flags[flag_name]
         if isinstance(value, list):
-            resolved_list = [_resolve(cwd, part) for part in value]
+            resolved_list = [resolve_path(part, cwd) for part in value]
             flags[flag_name] = resolved_list
             path_flag_values.extend(resolved_list)
         elif isinstance(value, str):
-            resolved = _resolve(cwd, value)
+            resolved = resolve_path(value, cwd)
             flags[flag_name] = resolved
             path_flag_values.append(resolved)
 
@@ -283,6 +327,9 @@ def parse_command(
         raw_operands=raw_operands,
         text_flag_values=text_flag_values,
         warnings=warnings,
+        word_kinds=word_kinds,
+        invalid_options=invalid_options,
+        needs_value_options=needs_value_options,
     )
 
 

@@ -23,10 +23,6 @@ from mirage.types import PathSpec
 
 async def write_bytes(accessor: SSHAccessor, path: PathSpec,
                       data: bytes) -> None:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     if isinstance(path, PathSpec):
         path = path.mount_path
     config = accessor.config

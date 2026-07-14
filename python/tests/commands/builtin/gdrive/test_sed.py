@@ -19,7 +19,7 @@ import pytest
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.commands.builtin.gdrive.sed import sed
+from mirage.commands.builtin.gdrive import COMMANDS
 from mirage.core.google._client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.io.stream import materialize
@@ -52,6 +52,17 @@ def accessor(config, token_manager):
 @pytest.fixture
 def index():
     return RAMIndexCacheStore()
+
+
+def _sed_command():
+    for cmd in COMMANDS:
+        for rc in cmd._registered_commands:
+            if rc.name == "sed":
+                return cmd
+    raise LookupError("sed not registered for gdrive")
+
+
+sed = _sed_command()
 
 
 def _scope(path: str, prefix: str = "") -> PathSpec:
@@ -133,7 +144,8 @@ async def test_sed_stdin(accessor, index):
 
 @pytest.mark.asyncio
 async def test_sed_in_place_rejected(accessor, index):
-    with pytest.raises(PermissionError, match="read-only Google Drive"):
+    with pytest.raises(PermissionError,
+                       match="-i not supported on this backend"):
         await sed(
             accessor,
             [_scope("/test/file.txt")],

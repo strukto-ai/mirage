@@ -24,12 +24,14 @@ from mirage.commands.config import RegisteredCommand
 from mirage.commands.resolve import get_extension
 from mirage.commands.safeguard import CommandSafeguard, resolve_safeguard
 from mirage.commands.spec import CommandSpec
+from mirage.context import effective_mount_mode
 from mirage.io.types import ByteSource, IOResult
 from mirage.observe.context import (push_mount_prefix, push_revisions,
                                     reset_revisions, with_mount_prefix,
                                     with_revisions)
 from mirage.ops.registry import RegisteredOp
 from mirage.resource.base import BaseResource
+from mirage.runtime.python.base import PythonRuntime
 from mirage.types import ConsistencyPolicy, MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -124,6 +126,14 @@ class MountEntry:
         self._general_ops: dict[str, RegisteredOp] = {}
         # key: (cmd_name, target_resource_type)
         self._cross_cmds: dict[tuple, RegisteredCommand] = {}
+
+    def effective_mode(self) -> MountMode:
+        """This mount's mode narrowed by the current session's cap.
+
+        The configured mode is the ceiling; a session's mode can only
+        weaken it.
+        """
+        return effective_mount_mode(self.prefix, self.mode)
 
     # ── command registration ──────────────────────────
 
@@ -382,6 +392,7 @@ class MountEntry:
         session_id: str | None = None,
         env: dict[str, str] | None = None,
         exec_allowed: bool = True,
+        python_runtime: PythonRuntime | None = None,
     ) -> tuple[ByteSource | None, IOResult]:
         """Execute a command on this mount's resource.
 
@@ -455,27 +466,38 @@ class MountEntry:
         if env is not None:
             kw["env"] = env
         kw["exec_allowed"] = exec_allowed
+        if python_runtime is not None:
+            kw["python_runtime"] = python_runtime
 
         prev_prefix = push_mount_prefix(mount_prefix)
         revs_token = push_revisions(self.revisions or None)
         prev_manager = push_cache_manager(self.cache_manager)
         try:
             for cmd in handlers:
-                if cmd.write and self.mode == MountMode.READ:
+                if cmd.write and self.effective_mode() == MountMode.READ:
                     return None, IOResult(
                         exit_code=1,
                         stderr=(f"{cmd_name}: read-only mount "
                                 f"at {self.prefix}".encode()))
-                result = await cmd.fn(self.resource.accessor, paths, *texts,
-                                      **kw)
+                # The dispatch-level guard only sees default safeguards
+                # (the mount is unknown before routing), so the
+                # mount-resolved timeout must also bound the command
+                # body: eager commands do their work inside cmd.fn,
+                # where the stream-consumption guard never runs.
+                resolved_safeguard = resolve_safeguard(
+                    cmd_name, cmd.safeguard,
+                    self.command_safeguards.get(cmd_name))
+                cmd_timeout = (resolved_safeguard.timeout_seconds
+                               if resolved_safeguard is not None else None)
+                result = await run_with_timeout(
+                    cmd.fn(self.resource.accessor, paths, *texts, **kw),
+                    cmd_timeout, cmd_name)
                 if result is not None:
                     stream, io = _wrap_cmd_streams(result, mount_prefix,
                                                    self.revisions or None)
                     # TODO: hand back a finalization context separately
                     # instead of stamping policy onto io.safeguard.
-                    io.safeguard = resolve_safeguard(
-                        cmd_name, cmd.safeguard,
-                        self.command_safeguards.get(cmd_name))
+                    io.safeguard = resolved_safeguard
                     return stream, io
             return None, IOResult()
         finally:
@@ -518,7 +540,8 @@ class MountEntry:
             raise AttributeError(f"{self.resource.name}: "
                                  f"no op {op_name!r}")
 
-        if self.mode == MountMode.READ and any(o.write for o in levels):
+        if (self.effective_mode() == MountMode.READ
+                and any(o.write for o in levels)):
             raise PermissionError(f"mount {self.prefix!r} is read-only")
 
         mount_prefix = self.prefix.rstrip("/")

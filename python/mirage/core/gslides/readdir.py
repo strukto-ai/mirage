@@ -34,10 +34,6 @@ async def readdir(
     path: PathSpec,
     index: IndexCacheStore = None,
 ) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     modified_range = None
     if isinstance(path, PathSpec):
@@ -79,13 +75,18 @@ async def readdir(
         if file_owned != is_owned:
             continue
         filename = make_filename(f["name"], f["id"], f.get("modifiedTime", ""))
+        source_size = int(f.get("size") or f.get("quotaBytesUsed") or 0)
+        # size stays None: Drive reports the source document's storage size,
+        # not the rendered JSON length (FileStat.size must be render-derived
+        # or None, see the CLAUDE.md FUSE rules). The source size lives in
+        # extra.
         entry = IndexEntry(
             id=f["id"],
             name=f["name"],
             resource_type="gslides/file",
             remote_time=f.get("modifiedTime", ""),
             vfs_name=filename,
-            size=int(f.get("size") or f.get("quotaBytesUsed") or 0) or None,
+            extra={"source_size": source_size} if source_size else {},
         )
         entries.append((filename, entry))
 

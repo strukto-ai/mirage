@@ -7,6 +7,8 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,

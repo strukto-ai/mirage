@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { readStdinAsync } from '../utils/stream.ts'
+import { operandsIo, readOperands } from '../utils/operands.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -73,13 +74,18 @@ export async function unexpandGeneric(
   const tabsize = typeof opts.flags.t === 'string' ? Number.parseInt(opts.flags.t, 10) : 8
   const allSpaces = opts.flags.a === true
   if (paths.length > 0) {
+    // A missing operand is reported and skipped; the remaining operands
+    // still unexpand (GNU unexpand).
+    const [ok, err] = await readOperands(paths, stream, 'unexpand')
+    const io = operandsIo(err)
+    if (ok.length === 0 && err !== '') return [null, io]
     const parts: string[] = []
-    for (const p of paths) {
-      const data = DEC.decode(await materialize(stream(p)))
+    for (const o of ok) {
+      const data = DEC.decode(o.data)
       for (const ln of splitLinesKeepEnds(data)) parts.push(unexpandLine(ln, tabsize, allSpaces))
     }
     const result: ByteSource = ENC.encode(parts.join(''))
-    return [result, new IOResult()]
+    return [result, io]
   }
   const stdinData = await readStdinAsync(opts.stdin)
   if (stdinData === null) {

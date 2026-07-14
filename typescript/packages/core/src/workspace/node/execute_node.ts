@@ -34,12 +34,14 @@ import {
   getUnsetNames,
   getWhileParts,
 } from '../../shell/helpers.ts'
-import type { PyodideRuntime } from '../executor/python/runtime.ts'
+import type { PythonRuntime } from '../executor/python/runtimes/interface.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { ERREXIT_EXEMPT_TYPES, NodeType as NT } from '../../shell/types.ts'
 import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
 import { expandRedirects } from '../expand/redirects.ts'
-import { type ExecuteFn, expandNode } from '../expand/node.ts'
+import { type ExecuteFn, expandArith, expandNode } from '../expand/node.ts'
+import { evaluateArith } from '../../shell/arith.ts'
+import { ArithError } from '../../shell/errors.ts'
 import { expandAndClassify } from '../expand/parts.ts'
 import type { TSNodeLike } from '../expand/variable.ts'
 import {
@@ -64,7 +66,7 @@ import type { Namespace } from '../mount/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
-import { resolveGlobs } from './resolve_globs.ts'
+import { resolveGlobs } from '../expand/globs.ts'
 import { expandTestExpr } from './test_expr.ts'
 import { executeProgram } from './program.ts'
 import { executeCommand } from './command_dispatch.ts'
@@ -82,7 +84,7 @@ export interface ExecuteNodeDeps {
   registerCloser: (fn: () => Promise<void>) => void
   ensureOpen?: (resource: Resource) => Promise<void>
   unmount?: (prefix: string) => Promise<void>
-  pythonRuntime?: PyodideRuntime
+  pythonRuntime?: PythonRuntime
   signal?: AbortSignal
 }
 
@@ -146,6 +148,36 @@ export async function executeNode(
 
   if (kind === NodeKind.REDIRECT) {
     const [command, redirects] = getRedirects(node)
+    if (command.type === NT.LIST) {
+      // tree-sitter hoists a trailing redirect over the whole &&/||
+      // list; bash binds it to the last command:
+      //   redirected(list(L, op, R), r) == list(L, op, redirected(R, r))
+      // Re-associate and defer target expansion until R runs, so
+      // `cd /x && echo hi > f` writes under /x. Compound and subshell
+      // bodies keep the whole-body redirect (bash group semantics).
+      const [left, op, right] = getListParts(command)
+      const wrapped: typeof recurse = async (n, sess, sin, cstack) => {
+        if (n !== right) return recurse(n, sess, sin, cstack)
+        const [expanded, pipe] = await expandRedirects(redirects, sess, executeFn, registry, cstack)
+        let [rStdout, rIo, rExec] = await handleRedirect(
+          recurse,
+          dispatch,
+          right,
+          expanded,
+          sess,
+          sin,
+          cstack,
+        )
+        if (pipe !== null && rStdout !== null) {
+          const [s2, io2, e2] = await recurse(pipe, sess, rStdout, cstack)
+          rStdout = s2
+          rIo = await rIo.merge(io2)
+          rExec = e2
+        }
+        return [rStdout, rIo, rExec]
+      }
+      return handleConnection(wrapped, left, op, right, session, stdin, callStack)
+    }
     const [expandedRedirects, pipeNode] = await expandRedirects(
       redirects,
       session,
@@ -173,6 +205,41 @@ export async function executeNode(
 
   if (kind === NodeKind.SUBSHELL) {
     return handleSubshell(recurse, getSubshellBody(node), session, stdin, callStack)
+  }
+
+  if (kind === NodeKind.COMPOUND && node.children[0]?.type === NT.ARITH_OPEN) {
+    const text = getText(node)
+    const expr = await expandArith(node, session, executeFn, callStack)
+    let value: bigint
+    let updates: Record<string, string>
+    try {
+      ;({ value, updates } = evaluateArith(expr, session.env))
+    } catch (err) {
+      if (!(err instanceof ArithError)) throw err
+      const errBytes = new TextEncoder().encode(`bash: ((: ${expr}: ${err.message}\n`)
+      return [
+        null,
+        new IOResult({ exitCode: 1, stderr: errBytes }),
+        new ExecutionNode({ command: text, exitCode: 1, stderr: errBytes }),
+      ]
+    }
+    for (const name of Object.keys(updates)) {
+      if (session.readonlyVars.has(name)) {
+        const errBytes = new TextEncoder().encode(`bash: ${name}: readonly variable\n`)
+        return [
+          null,
+          new IOResult({ exitCode: 1, stderr: errBytes }),
+          new ExecutionNode({ command: text, exitCode: 1, stderr: errBytes }),
+        ]
+      }
+    }
+    Object.assign(session.env, updates)
+    const code = value !== 0n ? 0 : 1
+    return [
+      null,
+      new IOResult({ exitCode: code }),
+      new ExecutionNode({ command: text, exitCode: code }),
+    ]
   }
 
   if (kind === NodeKind.COMPOUND) {
@@ -216,6 +283,8 @@ export async function executeNode(
       session.cwd,
       callStack,
     )
+    // The loop word list is consumed by the shell (WordPolicy.SHELL):
+    // globs resolve to matches before iteration starts.
     const resolved = await resolveGlobs(classified, registry)
     if (kind === NodeKind.SELECT) {
       return handleSelect(recurse, variable, resolved, body, session, stdin, callStack)

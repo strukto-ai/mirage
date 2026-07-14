@@ -15,7 +15,7 @@
 import asyncio
 import os
 
-from cases import run_not_found, run_provision_probe
+from cases import run_not_found, run_provision_probe, run_sed_readonly_probe
 from pymongo import AsyncMongoClient
 
 from mirage import MountMode, Workspace
@@ -218,6 +218,8 @@ async def main() -> None:
         await _run(ws, name, cmd)
     await run_not_found(ws, MOUNT)
     await run_provision_probe(
+        ws, f"{MOUNT}/{DB}/collections/books/documents.jsonl")
+    await run_sed_readonly_probe(
         ws, f"{MOUNT}/{DB}/collections/books/documents.jsonl")
     live_client = AsyncMongoClient(MONGODB_URI)
     try:

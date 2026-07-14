@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { nlGeneric } from '../../generic/nl.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { type Builder, dirAwareStream, resolveGlobOf } from '../adapter.ts'
 
 export const NL_BUILDER: Builder = {
   name: 'nl',
@@ -21,6 +21,6 @@ export const NL_BUILDER: Builder = {
   fn: async (ops, accessor, paths, _texts, opts) => {
     const idx = opts.index ?? undefined
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return nlGeneric(resolved, opts, (p) => ops.readStream(accessor, p, idx))
+    return nlGeneric(resolved, opts, dirAwareStream(ops, accessor, idx))
   },
 }

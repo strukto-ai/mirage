@@ -16,7 +16,6 @@ import type { GmailAccessor } from '../../../accessor/gmail.ts'
 import { ResourceName } from '../../../types.ts'
 import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
-import { GMAIL_FIND } from './find.ts'
 import { GMAIL_GREP } from './grep.ts'
 import { GMAIL_GWS_DELETE } from './gws_gmail_delete.ts'
 import { GMAIL_GWS_FORWARD } from './gws_gmail_forward.ts'
@@ -29,7 +28,7 @@ import { GMAIL_CMD_OPS } from './ops.ts'
 import { metadataProvision } from './provision.ts'
 import { GMAIL_RG } from './rg.ts'
 
-const GMAIL_OVERRIDES = new Set(['grep', 'rg', 'find'])
+const GMAIL_OVERRIDES = new Set(['grep', 'rg'])
 
 export const GMAIL_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<GmailAccessor>(ResourceName.GMAIL, GMAIL_CMD_OPS, {
@@ -38,7 +37,6 @@ export const GMAIL_COMMANDS: readonly RegisteredCommand[] = [
       ls: metadataProvision as ProvisionFn,
     },
   }),
-  ...GMAIL_FIND,
   ...GMAIL_GREP,
   ...GMAIL_RG,
   ...GMAIL_GWS_SEND,

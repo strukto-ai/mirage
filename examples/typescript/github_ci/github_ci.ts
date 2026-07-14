@@ -44,7 +44,7 @@ async function main(): Promise<void> {
   const resource = new GitHubCIResource({
     token: TOKEN!,
     owner: 'strukto-ai',
-    repo: 'mirage-internal',
+    repo: 'mirage',
     maxRuns: 300,
   })
   const ws = new Workspace({ '/ci': resource }, { mode: MountMode.READ })

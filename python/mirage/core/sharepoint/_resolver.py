@@ -69,16 +69,13 @@ async def resolve(accessor: SharePointAccessor,
     Returns:
         ResolvedPath: Resolved components.
     """
-    if isinstance(path, str):
-        raw = path.strip("/")
-    else:
-        prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
-        raw = path.virtual
-        if prefix and raw.startswith(prefix):
-            rest = raw[len(prefix):]
-            if prefix.endswith("/") or rest == "" or rest.startswith("/"):
-                raw = rest or "/"
-        raw = raw.strip("/")
+    prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
+    raw = path.virtual
+    if prefix and raw.startswith(prefix):
+        rest = raw[len(prefix):]
+        if prefix.endswith("/") or rest == "" or rest.startswith("/"):
+            raw = rest or "/"
+    raw = raw.strip("/")
 
     if not raw:
         return ResolvedPath(level="root")

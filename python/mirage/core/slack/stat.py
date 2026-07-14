@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 import re
 
 from mirage.accessor.slack import SlackAccessor
@@ -22,6 +23,8 @@ from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.filetype import filetype_from_mimetype
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
+
+logger = logging.getLogger(__name__)
 
 VIRTUAL_DIRS = {"", "channels", "dms", "users"}
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -54,9 +57,9 @@ async def _populate_via_parent(
                      resource_path=mount_key(parent_virtual, prefix)),
             index=index,
         )
-    # best-effort cache populate; canonical ENOENT raised below
-    except Exception:
-        pass
+    except Exception as exc:
+        # best-effort cache populate; canonical ENOENT raised below
+        logger.debug("stat populate failed for %s: %s", virtual_key, exc)
 
 
 async def stat(
@@ -64,10 +67,6 @@ async def stat(
     path: PathSpec,
     index: IndexCacheStore = None,
 ) -> FileStat:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path) if isinstance(
         path, PathSpec) else ""

@@ -80,10 +80,6 @@ async def stat(
     path: PathSpec,
     index: IndexCacheStore | None = None,
 ) -> FileStat:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     stripped = path.mount_path.strip("/")
     if not stripped:
         return FileStat(name="/", type=FileType.DIRECTORY)

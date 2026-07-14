@@ -1,6 +1,7 @@
 import zlib
 from collections.abc import AsyncIterator, Awaitable, Callable
 
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -45,7 +46,7 @@ async def gzip(
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
     unlink: Callable[..., Awaitable[None]],
-    accessor: object = None,
+    accessor: Accessor | None = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     decompress: bool = False,
     keep: bool = False,
@@ -85,7 +86,7 @@ async def gzip(
             out_data = zlib.compress(raw,
                                      level=level,
                                      wbits=zlib.MAX_WBITS | 16)
-        await write_bytes(accessor, out_path, out_data)
+        await write_bytes(accessor, PathSpec.from_str_path(out_path), out_data)
         writes[out_path] = out_data
         if not keep:
             await unlink(accessor, p)

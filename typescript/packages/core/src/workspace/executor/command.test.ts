@@ -132,6 +132,16 @@ describe('handleCommand — cross-mount', () => {
       { '/ram': new StubResource('ram'), '/disk': new StubResource('disk') },
       MountMode.WRITE,
     )
+    const mount = reg.mountFor('/ram')
+    if (mount === null) throw new Error('mount missing')
+    const [cmd] = command({
+      name: 'mycmd',
+      resource: 'ram',
+      spec: new CommandSpec({ rest: new Operand({ kind: OperandKind.PATH }) }),
+      fn: () => [null, new IOResult()],
+    })
+    if (cmd === undefined) throw new Error('cmd missing')
+    mount.register(cmd)
     const [, io, exec] = await handleCommand(
       NEVER_EXECUTE,
       NEVER_DISPATCH,

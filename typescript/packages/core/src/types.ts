@@ -22,6 +22,37 @@ export const MountMode = Object.freeze({
 
 export type MountMode = (typeof MountMode)[keyof typeof MountMode]
 
+const MOUNT_MODE_RANK: Readonly<Record<MountMode, number>> = Object.freeze({
+  [MountMode.READ]: 1,
+  [MountMode.WRITE]: 2,
+  [MountMode.EXEC]: 3,
+})
+
+/** The weaker of two mount modes on the READ < WRITE < EXEC lattice. */
+export function weakerMode(a: MountMode, b: MountMode): MountMode {
+  return MOUNT_MODE_RANK[a] <= MOUNT_MODE_RANK[b] ? a : b
+}
+
+const MOUNT_MODE_ALIASES: Readonly<Record<string, MountMode>> = Object.freeze({
+  r: MountMode.READ,
+  rw: MountMode.WRITE,
+  rwx: MountMode.EXEC,
+})
+
+/**
+ * Coerce a mount mode, accepting cumulative filesystem aliases.
+ *
+ * The mode ladder is cumulative (exec implies write implies read), so
+ * only the cumulative spellings `r`, `rw`, `rwx` alias the modes;
+ * bit-style forms like `w` or `x` are rejected.
+ */
+export function parseMountMode(value: string): MountMode {
+  const alias = MOUNT_MODE_ALIASES[value]
+  if (alias !== undefined) return alias
+  if ((Object.values(MountMode) as string[]).includes(value)) return value as MountMode
+  throw new Error(`invalid mount mode: '${value}'`)
+}
+
 export const ConsistencyPolicy = Object.freeze({
   LAZY: 'lazy',
   ALWAYS: 'always',
@@ -231,7 +262,7 @@ export interface PathSpecInit {
   resourcePath: string
   pattern?: string | null
   resolved?: boolean
-  rawPath?: string | null
+  rawPath?: string
 }
 
 export class PathSpec {
@@ -240,7 +271,9 @@ export class PathSpec {
   readonly resourcePath: string
   readonly pattern: string | null
   readonly resolved: boolean
-  readonly rawPath: string | null
+  // The word's spelling: as typed for relative words, the absolute path
+  // for everything else (defaults to `virtual`).
+  readonly rawPath: string
 
   constructor(init: PathSpecInit) {
     this.virtual = init.virtual
@@ -248,15 +281,8 @@ export class PathSpec {
     this.resourcePath = init.resourcePath
     this.pattern = init.pattern ?? null
     this.resolved = init.resolved ?? true
-    this.rawPath = init.rawPath ?? null
+    this.rawPath = init.rawPath ?? init.virtual
     Object.freeze(this)
-  }
-
-  // The path as the user typed it, for rendering in output. Falls back to
-  // `virtual` (the resolved absolute path) when no raw form was recorded,
-  // e.g. for absolute arguments.
-  get display(): string {
-    return this.rawPath ?? this.virtual
   }
 
   // Mount-relative path with a leading slash. Pure formatting of
@@ -297,4 +323,12 @@ export class PathSpec {
       resourcePath: resourcePath ?? stripSlash(path),
     })
   }
+}
+
+// Shell-text form of an argv word. Text words pass through; paths render
+// as spelled (`rawPath`). Use wherever a word re-enters string space (env
+// values, function args, the argv text view). Mount I/O keeps using
+// `virtual`.
+export function wordText(word: string | PathSpec): string {
+  return word instanceof PathSpec ? word.rawPath : word
 }

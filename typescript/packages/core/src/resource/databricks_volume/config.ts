@@ -42,7 +42,7 @@ function validVolumePart(value: string): boolean {
   return value !== '' && !value.includes('/')
 }
 
-export function normalizeRootPath(value: string): string {
+function normalizeRootPath(value: string): string {
   const parts = value.split('/').filter((p) => p !== '' && p !== '.')
   if (parts.some((p) => p === '..')) {
     throw new Error("root_path must not contain '..' segments")

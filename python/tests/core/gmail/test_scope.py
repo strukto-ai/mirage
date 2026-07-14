@@ -31,7 +31,7 @@ def _gs(path: str,
 
 
 def test_root_empty():
-    scope = detect_scope("/")
+    scope = detect_scope(PathSpec.from_str_path("/"))
     assert scope.use_native is True
     assert scope.label_name is None
 

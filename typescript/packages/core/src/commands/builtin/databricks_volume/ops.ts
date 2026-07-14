@@ -40,7 +40,9 @@ export const DATABRICKS_VOLUME_CMD_OPS: CommandIO<DatabricksVolumeAccessor> = {
   mkdir: (accessor, path, parents) => dbxMkdir(accessor, path, undefined, parents === true),
   unlink: dbxUnlink,
   rmdir: dbxRmdir,
-  rmR: dbxRmR,
+  rmR: async (accessor, path) => {
+    await dbxRmR(accessor, path)
+  },
   rename: dbxRename,
   copy: dbxCopy,
   create: dbxCreate,

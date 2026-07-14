@@ -28,10 +28,6 @@ logger = logging.getLogger(__name__)
 
 async def readdir(accessor: S3Accessor, path: PathSpec,
                   index: IndexCacheStore) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     if isinstance(path, PathSpec):
         prefix = mount_prefix_of(path.virtual, path.resource_path)
         # When called from resolve_glob with a pattern (e.g. *.txt),

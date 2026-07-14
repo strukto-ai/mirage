@@ -47,10 +47,6 @@ async def readdir(
     path: PathSpec,
     index: IndexCacheStore = None,
 ) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     path = (path.dir if path.pattern else path).mount_path
@@ -107,16 +103,27 @@ async def readdir(
             rt = "gdrive/gslide"
         else:
             rt = "gdrive/file"
-        owners = f.get("owners", [])
-        owners[0] if owners else {}
+        source_size = int(f.get("size") or f.get("quotaBytesUsed") or 0)
+        extra = {"drive_id": f.get("driveId")} if f.get("driveId") else {}
+        # Binary files download raw, so Drive's size is the rendered byte
+        # length and stays. Google-apps files (gdoc/gsheet/gslide) render to
+        # JSON, so Drive's source size must not become FileStat.size
+        # (render-derived or None, see the CLAUDE.md FUSE rules); it lives in
+        # extra instead.
+        if rt == "gdrive/file":
+            size = source_size or None
+        else:
+            size = None
+            if source_size:
+                extra["source_size"] = source_size
         entry = IndexEntry(
             id=f["id"],
             name=name,
             resource_type=rt,
             remote_time=f.get("modifiedTime", ""),
             vfs_name=filename,
-            size=int(f.get("size") or f.get("quotaBytesUsed") or 0) or None,
-            extra={"drive_id": f.get("driveId")} if f.get("driveId") else {},
+            size=size,
+            extra=extra,
         )
         entries.append((filename, entry, is_dir))
 

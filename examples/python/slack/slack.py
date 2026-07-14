@@ -288,6 +288,28 @@ async def main():
         for line in out.splitlines():
             print(f"  {line}")
 
+    # -path matches the display path; -size counts dirs and sizeless
+    # rendered files as 0 (so +0c drops them, -1k keeps them).
+    print(f"\n=== find {base}/ -path '*general*' | tail -n 5 ===")
+    r = await ws.execute(f'find "{base}/" -path "*general*" | tail -n 5')
+    print(f"  exit={r.exit_code}")
+    out = (await r.stdout_str()).strip()
+    if out:
+        for line in out.splitlines():
+            print(f"  {line}")
+
+    print(f"\n=== find {base}/ -maxdepth 1 -size +0c ===")
+    r = await ws.execute(f'find "{base}/" -maxdepth 1 -size +0c')
+    print(f"  exit={r.exit_code} (dirs count as size 0, expect no output)")
+
+    print(f"\n=== find {base}/ -maxdepth 1 -size -1k | tail -n 3 ===")
+    r = await ws.execute(f'find "{base}/" -maxdepth 1 -size -1k | tail -n 3')
+    print(f"  exit={r.exit_code}")
+    out = (await r.stdout_str()).strip()
+    if out:
+        for line in out.splitlines():
+            print(f"  {line}")
+
     # ── pwd / cd ─────────────────────────────────────
     print("\n=== pwd ===")
     r = await ws.execute("pwd")
@@ -329,25 +351,30 @@ async def main():
                               f"stderr={await r.stderr_str()}")
     assert count > 0, "regression: workspace-wide find returned no matches"
 
-    # ── glob expansion (KNOWN LIMITATION: only single-segment globs
-    # are supported; multi-level patterns like `path/*/file` do not
-    # walk intermediate `*` segments). The next two probes document
-    # the limitation; if a future change makes them work, great.
-    print(
-        f"\n=== echo {base}/*/chat.jsonl (multi-level glob — limitation) ===")
-    r = await ws.execute(f'echo "{base}/"*/chat.jsonl')
+    # ── glob expansion: mid-path segments walk like bash, so
+    # channels/*/<date>/chat.jsonl lists channels once, then each
+    # channel's dates, keeping only channels that have that day.
+    date_seg = date_path.rsplit("/", 1)[-1]
+    print(f"\n=== echo /slack/channels/*/{date_seg}/chat.jsonl ===")
+    r = await ws.execute(f"echo /slack/channels/*/{date_seg}/chat.jsonl")
     out = (await r.stdout_str()).strip()
-    print(f"  out={out[:200]!r}  (multi-level globs are not expanded today)")
+    print(f"  {out[:200]}")
+    assert "/chat.jsonl" in out, "mid-path glob did not expand"
 
-    print(f"\n=== for f in {base}/*/chat.jsonl (glob loop — limitation) ===")
+    print(f"\n=== for f in {base}/* (date glob loop) ===")
     r = await ws.execute(
-        f'for f in "{base}/"*/chat.jsonl; do echo found:$f; done | head -n 3')
+        f'for f in "{base}/"*; do echo found:$f; done | head -n 3')
     out = (await r.stdout_str()).strip()
-    if out:
-        for line in out.splitlines():
-            print(f"  {line[:120]}")
-    else:
-        print("  (no output — multi-level glob limitation)")
+    for line in out.splitlines():
+        print(f"  {line[:120]}")
+
+    # A glob that matches nothing stays the literal word (bash with
+    # nullglob off), so the command reports it like GNU coreutils.
+    print("\n=== cat /slack/channels/zz-none-*/chat.jsonl (no match) ===")
+    r = await ws.execute("cat /slack/channels/zz-none-*/chat.jsonl")
+    err = (await r.stderr_str()).strip()
+    print(f"  exit={r.exit_code}  {err[:120]}")
+    assert r.exit_code == 1 and "zz-none-*" in err
 
 
 if __name__ == "__main__":

@@ -212,11 +212,11 @@ describe('S3Resource (mocked integration)', () => {
       expect(txts.sort()).toEqual(['/find/a.txt', '/find/c.txt'])
     })
 
-    it('find with minSize skips small files, letting directories pass', async () => {
+    it('find with minSize skips small files and directories (size 0)', async () => {
       await resource.writeFile(mkPath('/sz/small'), ENC.encode('x'))
       await resource.writeFile(mkPath('/sz/big'), ENC.encode('x'.repeat(100)))
       const results = await resource.find(mkPath('/sz/'), { minSize: 10 })
-      expect(results).toEqual(['/sz', '/sz/big'])
+      expect(results).toEqual(['/sz/big'])
     })
   })
 })

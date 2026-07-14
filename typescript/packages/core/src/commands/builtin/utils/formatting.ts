@@ -14,6 +14,14 @@
 
 import { FileType, type FileStat } from '../../../types.ts'
 
+const SIZE_UNITS: Record<string, number> = {
+  B: 1,
+  K: 1024,
+  M: 1024 ** 2,
+  G: 1024 ** 3,
+  T: 1024 ** 4,
+}
+
 export function humanSize(n: number): string {
   const units = ['B', 'K', 'M', 'G', 'T']
   let value = n
@@ -24,6 +32,14 @@ export function humanSize(n: number): string {
   }
   const s = i === 0 ? Math.round(value).toString() : value.toFixed(1)
   return `${s}${units[i] ?? ''}`
+}
+
+// Invert humanSize: `4.0K` -> 4096, plain digits pass through.
+export function parseSize(text: string): number {
+  const last = text.at(-1) ?? ''
+  const unit = SIZE_UNITS[last]
+  if (unit !== undefined) return Math.round(parseFloat(text.slice(0, -1)) * unit)
+  return parseInt(text, 10)
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -81,4 +97,11 @@ export function formatLsLong(stats: readonly FileStat[], opts: LsLongOptions = {
     const grp = s.gid !== null ? String(s.gid) : group
     return `${mode} 1 ${who} ${grp} ${size} ${time} ${s.name}`
   })
+}
+
+const NUMERIC_PREFIX = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?/
+
+export function toNumber(val: string): number {
+  const m = NUMERIC_PREFIX.exec(val.trim())
+  return m === null ? 0 : Number.parseFloat(m[0])
 }

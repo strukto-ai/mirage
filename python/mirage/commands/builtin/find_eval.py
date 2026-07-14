@@ -53,7 +53,11 @@ class Name:
 
 @dataclass(frozen=True, slots=True)
 class Path:
+    # `-path` matches the display path as printed (mount prefix + key),
+    # so the tree is stamped with the mount prefix before evaluation
+    # (`prefix_path_nodes`); entry keys stay mount-relative (#396).
     pattern: str
+    prefix: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +93,46 @@ class TrueNode:
 PredNode = Name | Path | Type | Empty | Not | And | Or | TrueNode
 
 
+def display_path(prefix: str, key: str) -> str:
+    """Display path for a mount-relative key, as ``find`` prints it.
+
+    Mirrors ``apply_mount_prefix`` for a single key: the mount root maps
+    to the bare prefix, everything else joins with one slash.
+
+    Args:
+        prefix (str): Mount prefix ("" for a root mount).
+        key (str): Mount-relative key with a leading slash.
+    """
+    if not prefix:
+        return key
+    rel = key.lstrip("/")
+    return prefix if not rel else prefix + "/" + rel
+
+
+def prefix_path_nodes(node: PredNode, prefix: str) -> PredNode:
+    """Copy of a predicate tree with ``Path`` nodes bound to a prefix.
+
+    ``-path`` matches the display path, but backend find ops evaluate
+    entries by mount-relative key; stamping the prefix onto the tree
+    keeps the evaluation site prefix-free (#396).
+
+    Args:
+        node (PredNode): Predicate tree to rewrite.
+        prefix (str): Mount prefix ("" leaves the tree unchanged).
+    """
+    if not prefix:
+        return node
+    if isinstance(node, Path):
+        return Path(node.pattern, prefix=prefix)
+    if isinstance(node, Not):
+        return Not(prefix_path_nodes(node.kid, prefix))
+    if isinstance(node, And):
+        return And([prefix_path_nodes(kid, prefix) for kid in node.kids])
+    if isinstance(node, Or):
+        return Or([prefix_path_nodes(kid, prefix) for kid in node.kids])
+    return node
+
+
 def eval_predicate(node: PredNode, entry: FindEntry) -> bool:
     if isinstance(node, TrueNode):
         return True
@@ -99,7 +143,7 @@ def eval_predicate(node: PredNode, entry: FindEntry) -> bool:
             return fnmatch(entry.name.lower(), node.pattern.lower())
         return fnmatch(entry.name, node.pattern)
     if isinstance(node, Path):
-        return fnmatch(entry.key, node.pattern)
+        return fnmatch(display_path(node.prefix, entry.key), node.pattern)
     if isinstance(node, Type):
         return entry.kind == node.kind
     if isinstance(node, Not):
@@ -160,10 +204,14 @@ def emit_start_path(
     start), ``-mindepth 0`` (start included), and ``-name``/``-iname``
     against the start's own basename all behave the same everywhere.
 
-    Size filtering applies only to a file start path; directory roots
-    pass ``size=None`` and skip it. Backends whose start path can be a
-    file (ram/redis/chroma/dify/notion) pass the start's size so
-    ``find <file> -size`` filters the start like GNU does.
+    A directory start path contributes size ``0`` to ``-size``
+    filtering (mirage directories have no meaningful content size; a
+    documented divergence from GNU, which compares the inode size), so
+    ``-size +N`` excludes directory roots and ``-size -N`` keeps them
+    (#318). Backends whose start path can be a file
+    (ram/redis/chroma/dify/notion) pass the start's size so
+    ``find <file> -size`` filters the start like GNU does; a file start
+    with an unknown size (``None``) skips the filter.
 
     Args:
         results (list[str]): Mount-relative result keys to append to.
@@ -190,11 +238,15 @@ def emit_start_path(
                       is_empty=is_empty)
     if not keep(entry, tree, mindepth):
         return
-    if kind == "f" and size is not None:
-        if min_size is not None and size < min_size:
-            return
-        if max_size is not None and size > max_size:
-            return
+    if min_size is not None or max_size is not None:
+        # Directories count as size 0 for -size: GNU compares the inode size
+        # (e.g. 4096 on ext4); see CLAUDE.md Rules.
+        effective = 0 if kind != "f" else size
+        if effective is not None:
+            if min_size is not None and effective < min_size:
+                return
+            if max_size is not None and effective > max_size:
+                return
     results.append(start_key)
 
 

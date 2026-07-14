@@ -92,7 +92,7 @@ def main() -> None:
     ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
 
     with tempfile.TemporaryDirectory() as mountpoint:
-        fs = MirageFS(ws, agent_id=args.agent_id)
+        fs = MirageFS(ws.ops, agent_id=args.agent_id)
         t = mount_background(ws, mountpoint, agent_id=args.agent_id)
         print(f"Mounted memory workspace at {mountpoint}")
         print(f"Agent: {args.agent_id}")

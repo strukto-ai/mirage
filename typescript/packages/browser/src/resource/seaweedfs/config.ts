@@ -27,7 +27,7 @@ export interface SeaweedFSConfigRedacted extends Omit<SeaweedFSConfig, 'presigne
   presignedUrlProvider: '<REDACTED>'
 }
 
-export const SeaweedFSConfigSchema = z.object({
+const SeaweedFSConfigSchema = z.object({
   bucket: z.string(),
   presignedUrlProvider: secretSchema(
     z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),

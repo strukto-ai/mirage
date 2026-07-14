@@ -20,6 +20,7 @@ from mirage.commands.builtin.aggregators import header_aggregate
 from mirage.commands.builtin.generic.head import head as generic_head
 from mirage.commands.builtin.generic.head import head_multi
 from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.builders.common import split_readable
 from mirage.commands.builtin.tail_helper import number_flag_error
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.types import ByteSource, IOResult
@@ -34,6 +35,8 @@ async def head(
     stdin: AsyncIterator[bytes] | bytes | None = None,
     n: str | None = None,
     c: str | None = None,
+    q: bool = False,
+    v: bool = False,
     index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -44,13 +47,18 @@ async def head(
     c_int = int(c) if c is not None else None
     if paths and ops.is_mounted(accessor):
         paths = await ops.resolve_glob(accessor, paths, index)
+        show_headers = (v or len(paths) > 1) and not q
+        paths, err = await split_readable(ops, accessor, paths, index, "head")
+        io = IOResult(exit_code=1 if err else 0, stderr=err or None)
+        if not paths:
+            return None, io
         return head_multi(paths,
                           read=ops.read_stream,
                           accessor=accessor,
                           index=index,
                           n=n_int,
                           c=c_int,
-                          show_headers=len(paths) > 1), IOResult()
+                          show_headers=show_headers), io
     source = _resolve_source(stdin, "head: missing operand")
     return generic_head(source, n=n_int, c=c_int), IOResult()
 

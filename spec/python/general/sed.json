@@ -2,16 +2,39 @@
   "_meta": {
     "filetypes": [],
     "has_aggregate": false,
-    "has_provision": false,
+    "has_provision": true,
     "has_write": false,
     "resources": [
+      "chroma",
+      "databricks_volume",
+      "dify",
+      "discord",
       "disk",
+      "email",
+      "gdocs",
       "gdrive",
       "github",
+      "github_ci",
+      "gmail",
+      "gsheets",
+      "gslides",
+      "hf_buckets",
+      "lancedb",
+      "langfuse",
+      "linear",
+      "mongodb",
+      "nextcloud",
+      "notion",
+      "onedrive",
+      "postgres",
+      "qdrant",
       "ram",
       "redis",
       "s3",
-      "ssh"
+      "sharepoint",
+      "slack",
+      "ssh",
+      "trello"
     ]
   },
   "description": null,
@@ -21,8 +44,10 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-i",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
@@ -30,36 +55,57 @@
       "numeric_shorthand": false,
       "repeatable": true,
       "short": "-e",
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": true,
+      "short": "-f",
+      "value_kind": "path",
+      "value_optional": false
+    },
+    {
+      "description": null,
+      "long": null,
+      "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-n",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-E",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-r",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     }
   ],
   "positional": [
     {
-      "kind": "text"
+      "kind": "text",
+      "provided_by": [
+        "-e",
+        "-f"
+      ]
     }
   ],
   "rest": {
-    "kind": "path"
+    "kind": "path",
+    "provided_by": []
   }
 }

@@ -57,7 +57,7 @@ async def set_attrs(
     """
     p = _resolve(accessor.root, path.mount_path)
     if not await aiofiles.os.path.exists(p):
-        raise FileNotFoundError(path.display)
+        raise FileNotFoundError(path.raw_path)
     key = norm(path.mount_path)
     entry = accessor.attrs.setdefault(key, {})
     if mode is not None:

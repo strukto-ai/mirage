@@ -32,10 +32,6 @@ def _resolve(root: Path, path: str) -> Path:
 
 async def readdir(accessor: DiskAccessor, path: PathSpec,
                   index: IndexCacheStore) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     if isinstance(path, PathSpec):
         prefix = mount_prefix_of(path.virtual, path.resource_path)
         path = path.directory if path.pattern else path.virtual
@@ -44,7 +40,10 @@ async def readdir(accessor: DiskAccessor, path: PathSpec,
         if prefix.endswith("/") or rest == "" or rest.startswith("/"):
             path = rest or "/"
     root = accessor.root
+    # Canonical key: no trailing slash (except root), or the same dir
+    # indexes under two keys and cache hits return doubled-slash entries.
     virtual_key = prefix + path if prefix else path
+    virtual_key = virtual_key.rstrip("/") or "/"
     listing = await index.list_dir(virtual_key)
     if listing.entries is not None:
         return listing.entries

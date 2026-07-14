@@ -48,24 +48,3 @@ export interface WorkspaceDetail {
   mounts: MountSummary[]
   internals: WorkspaceInternals | null
 }
-
-export interface CreateWorkspaceRequest {
-  config: Record<string, unknown>
-  id?: string
-}
-
-export interface CloneWorkspaceRequest {
-  id?: string
-  override?: Record<string, unknown>
-}
-
-export interface DeleteWorkspaceResponse {
-  id: string
-  closedAt: number
-}
-
-export interface HealthResponse {
-  status: string
-  workspaces: number
-  uptimeS: number
-}

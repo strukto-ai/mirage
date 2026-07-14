@@ -50,10 +50,6 @@ async def readdir(
     path: PathSpec,
     index: IndexCacheStore = None,
 ) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     config = accessor.config
     scope = detect_scope(path, config)
     base = path.virtual.rstrip("/")

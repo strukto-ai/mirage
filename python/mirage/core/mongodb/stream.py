@@ -97,10 +97,6 @@ async def read_stream(
     index: IndexCacheStore = None,
     batch_size: int = 100,
 ) -> AsyncIterator[bytes]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     scope = detect_scope(path)
     if scope.level != ScopeLevel.DOCUMENTS:
         raise enoent(path)
@@ -122,10 +118,6 @@ async def watch_stream(
     path: PathSpec,
     index: IndexCacheStore = None,
 ) -> AsyncIterator[bytes]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     scope = detect_scope(path)
     if scope.level != ScopeLevel.DOCUMENTS:
         raise enoent(path)

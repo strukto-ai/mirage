@@ -249,8 +249,9 @@ async def test_format_multi_single_path_emits_trailing_newline():
     async def fake_read(_accessor, _path):
         return b"hello\n"
 
-    out = await format_multi(paths, read=fake_read, args_l=True)
+    out, err = await format_multi(paths, read=fake_read, args_l=True)
     assert out == b"1 /a.txt\n"
+    assert err == b""
 
 
 @pytest.mark.asyncio
@@ -264,7 +265,8 @@ async def test_format_multi_multi_path_emits_total_and_trailing_newline():
     async def fake_read(_accessor, path):
         return data[path.virtual]
 
-    out = await format_multi(paths, read=fake_read, args_l=True)
+    out, err = await format_multi(paths, read=fake_read, args_l=True)
+    assert err == b""
     assert out.endswith(b"\n")
     lines = out.decode().rstrip("\n").split("\n")
     assert lines == ["1 /a.txt", "2 /b.txt", "3 total"]
@@ -277,8 +279,9 @@ async def test_format_multi_accepts_sync_read_returning_bytes():
     def sync_read(_accessor, _path):
         return b"x\n"
 
-    out = await format_multi(paths, read=sync_read, args_l=True)
+    out, err = await format_multi(paths, read=sync_read, args_l=True)
     assert out == b"1 /a.txt\n"
+    assert err == b""
 
 
 @pytest.mark.asyncio
@@ -287,8 +290,42 @@ async def test_format_multi_empty_paths_returns_empty():
     async def fake_read(_accessor, _path):
         return b""
 
-    out = await format_multi([], read=fake_read, args_l=True)
+    out, err = await format_multi([], read=fake_read, args_l=True)
     assert out == b""
+    assert err == b""
+
+
+@pytest.mark.asyncio
+async def test_format_multi_missing_operand_reports_and_totals():
+    paths = [
+        PathSpec.from_str_path("/a.txt"),
+        PathSpec.from_str_path("/m.txt"),
+    ]
+
+    async def fake_read(_accessor, path):
+        if path.virtual == "/m.txt":
+            raise FileNotFoundError(path.virtual)
+        return b"hello\n"
+
+    out, err = await format_multi(paths, read=fake_read, args_l=True)
+    assert out == b"1 /a.txt\n1 total\n"
+    assert err == b"wc: /m.txt: No such file or directory\n"
+
+
+@pytest.mark.asyncio
+async def test_format_multi_all_missing_zero_total():
+    paths = [
+        PathSpec.from_str_path("/m1.txt"),
+        PathSpec.from_str_path("/m2.txt"),
+    ]
+
+    async def fake_read(_accessor, path):
+        raise FileNotFoundError(path.virtual)
+
+    out, err = await format_multi(paths, read=fake_read, args_l=True)
+    assert out == b"0 total\n"
+    assert err == (b"wc: /m1.txt: No such file or directory\n"
+                   b"wc: /m2.txt: No such file or directory\n")
 
 
 async def _async_byte_read(_accessor, _path):
@@ -300,5 +337,6 @@ async def _async_byte_read(_accessor, _path):
 async def test_format_multi_accepts_async_iterator_read():
     paths = [PathSpec.from_str_path("/a.txt")]
 
-    out = await format_multi(paths, read=_async_byte_read, args_l=True)
+    out, err = await format_multi(paths, read=_async_byte_read, args_l=True)
     assert out == b"1 /a.txt\n"
+    assert err == b""

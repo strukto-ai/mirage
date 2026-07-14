@@ -11,10 +11,12 @@
   "options": [],
   "positional": [
     {
-      "kind": "text"
+      "kind": "text",
+      "provided_by": []
     }
   ],
   "rest": {
-    "kind": "text"
+    "kind": "text",
+    "provided_by": []
   }
 }

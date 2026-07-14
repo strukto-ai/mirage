@@ -14,7 +14,19 @@
 
 
 class UsageError(ValueError):
-    """Command-line usage error (GNU semantics: stderr message, exit 2)."""
+    """Command-line usage error (GNU semantics: stderr message + exit code).
+
+    Args:
+        message (str): the full stderr text (may span lines for the
+            ``Try '--help'`` hint).
+        exit_code (int): GNU usage-error exit code; most tools use 2 for
+            option errors but 1 for operand errors, and the caller knows
+            which (``usage_exit_code`` for the per-command table).
+    """
+
+    def __init__(self, message: str, exit_code: int = 2) -> None:
+        super().__init__(message)
+        self.exit_code = exit_code
 
 
 class FindParseError(ValueError):

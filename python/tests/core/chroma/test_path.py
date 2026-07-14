@@ -54,7 +54,8 @@ async def test_resolve_missing_raises(chroma_accessor, chroma_index):
 
 @pytest.mark.asyncio
 async def test_resolve_str_path_coerced(chroma_accessor, chroma_index):
-    resolved = await resolve_path(chroma_accessor, "/guides/quickstart",
+    resolved = await resolve_path(chroma_accessor,
+                                  PathSpec.from_str_path("/guides/quickstart"),
                                   chroma_index)
     assert not resolved.is_dir
 

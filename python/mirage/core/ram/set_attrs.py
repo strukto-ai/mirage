@@ -45,7 +45,7 @@ async def set_attrs(
     store = accessor.store
     p = norm(path.mount_path)
     if p not in store.files and p not in store.dirs:
-        raise enoent(path.display)
+        raise enoent(path.raw_path)
     entry = store.attrs.setdefault(p, {})
     if mode is not None:
         entry["mode"] = mode

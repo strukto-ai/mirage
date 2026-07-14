@@ -17,10 +17,6 @@ class ResolvedChromaPath:
 
 async def resolve_path(accessor, path: PathSpec,
                        index: IndexCacheStore) -> ResolvedChromaPath:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     mount_prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
     await ensure_tree(accessor, index, mount_prefix)
     virtual_key = virtual_key_for(path)

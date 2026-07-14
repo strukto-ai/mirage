@@ -20,7 +20,7 @@ import type {
   simpleParser,
 } from 'mailparser'
 
-export interface EmailAddress {
+interface EmailAddress {
   name: string
   email: string
 }

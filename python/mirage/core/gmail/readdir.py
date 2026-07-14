@@ -96,12 +96,18 @@ async def _build_date_groups(
             headers = raw.get("payload", {}).get("headers", [])
             subject = _extract_header(headers, "Subject") or "No Subject"
             filename = _msg_filename(subject, mid)
+            size_estimate = raw.get("sizeEstimate")
+            # size stays None: sizeEstimate is the source message size, not
+            # the rendered .gmail.json length (FileStat.size must be
+            # render-derived or None, see the CLAUDE.md FUSE rules). The
+            # estimate lives in extra.
             msg_entry = IndexEntry(
                 id=mid,
                 name=subject,
                 resource_type="gmail/message",
                 vfs_name=filename,
-                size=raw.get("sizeEstimate"),
+                extra={"size_estimate": size_estimate}
+                if size_estimate is not None else {},
             )
             date_children.append((filename, msg_entry))
             attachments = _extract_attachments(raw.get("payload", {}))
@@ -139,10 +145,6 @@ async def readdir(
     path: PathSpec,
     index: IndexCacheStore = None,
 ) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     path = (path.dir if path.pattern else path).mount_path

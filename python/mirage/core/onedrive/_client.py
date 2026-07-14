@@ -28,10 +28,6 @@ MAX_BACKOFF = 30.0
 
 
 def split_path(path: PathSpec | str) -> tuple[str, str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
     return prefix, path.resource_path
 
@@ -119,6 +115,7 @@ def _retry_delay(resp: aiohttp.ClientResponse, attempt: int) -> float:
         try:
             return float(retry_after)
         except ValueError:
+            # malformed Retry-After header: fall back to exponential backoff
             pass
     return min(2.0**attempt, MAX_BACKOFF)
 

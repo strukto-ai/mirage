@@ -34,13 +34,6 @@ def accessor():
 
 
 @pytest.mark.asyncio
-async def test_resolve_glob_str_path(accessor, index):
-    result = await resolve_glob(accessor, ["/public/tables/users"], index)
-    assert len(result) == 1
-    assert result[0].virtual == "/public/tables/users"
-
-
-@pytest.mark.asyncio
 async def test_resolve_glob_resolved_pathspec(accessor, index):
     p = PathSpec(resource_path="public/tables/users",
                  virtual="/public/tables/users",

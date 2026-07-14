@@ -6,8 +6,6 @@ from mirage.types import FileType, PathSpec
 
 
 async def du(accessor: NextcloudAccessor, path: PathSpec) -> int:
-    if isinstance(path, str):
-        path = PathSpec.from_str_path(path)
     try:
         info = await stat(accessor, path)
     except FileNotFoundError:
@@ -33,8 +31,6 @@ async def du(accessor: NextcloudAccessor, path: PathSpec) -> int:
 
 async def du_all(accessor: NextcloudAccessor,
                  path: PathSpec) -> list[tuple[str, int]]:
-    if isinstance(path, str):
-        path = PathSpec.from_str_path(path)
     try:
         info = await stat(accessor, path)
     except FileNotFoundError:
@@ -57,6 +53,7 @@ async def du_all(accessor: NextcloudAccessor,
             results.append(("/" + rel.lstrip("/"), sz))
             total += sz
     except NotFound:
+        # the listing raced a delete: report the entries we saw
         pass
     results.sort()
     results.append((target, total))

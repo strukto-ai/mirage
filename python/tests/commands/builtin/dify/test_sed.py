@@ -1,10 +1,21 @@
 import pytest
 
-from mirage.commands.builtin.dify.sed import sed
+from mirage.commands.builtin.dify import COMMANDS
 from mirage.core.dify import read, tree
 from mirage.io.types import materialize
 
 from .conftest import document
+
+
+def _sed_command():
+    for cmd in COMMANDS:
+        for rc in cmd._registered_commands:
+            if rc.name == "sed":
+                return cmd
+    raise LookupError("sed not registered for dify")
+
+
+sed = _sed_command()
 
 
 async def list_documents(config):
@@ -35,7 +46,7 @@ async def test_sed_rejects_in_place(monkeypatch, dify_accessor, dify_index,
     monkeypatch.setattr(tree, "list_all_documents", list_documents)
 
     with pytest.raises(PermissionError,
-                       match="sed -i not supported on read-only Dify mount"):
+                       match="-i not supported on this backend"):
         await sed(dify_accessor, [guide_path],
                   "s/alpha/gamma/",
                   i=True,

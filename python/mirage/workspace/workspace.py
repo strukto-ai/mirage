@@ -16,7 +16,7 @@ import asyncio
 import builtins
 import logging
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable, Mapping
 from functools import partial
 from typing import Any
 
@@ -44,14 +44,15 @@ from mirage.provision import ProvisionResult
 from mirage.resource.base import BaseResource
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
 from mirage.resource.ram import RAMResource
+from mirage.runtime.python import select_python_runtime
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
 from mirage.types import (DEFAULT_AGENT_ID, DEFAULT_SESSION_ID,
                           ConsistencyPolicy, DriftPolicy, FileStat, MountMode,
-                          PathSpec, StateKey)
+                          PathSpec, StateKey, parse_mount_mode)
+from mirage.utils.errors import format_fs_error
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.dispatcher import Dispatcher
-from mirage.workspace.executor.fs_error import format_fs_error
 from mirage.workspace.file_prompt import build_file_prompt
 from mirage.workspace.fuse import FuseManager
 from mirage.workspace.mount import MountEntry, MountRegistry
@@ -89,6 +90,7 @@ class Workspace:
         session_id: str = DEFAULT_SESSION_ID,
         agent_id: str = DEFAULT_AGENT_ID,
         observe: ObserverStore | None = None,
+        python_runtime: str | None = None,
     ) -> None:
         self._registry = MountRegistry()
         if isinstance(cache, RedisCacheConfig):
@@ -152,7 +154,8 @@ class Workspace:
             if mount_fuse:
                 fuse_targets.append((prefix, mount_fuse))
 
-        if self._registry.root_mount is None:
+        self._implicit_root = self._registry.root_mount is None
+        if self._implicit_root:
             self._registry.mount("/", RAMResource(), mode)
 
         self._fuse_mountpoints: dict[str, str] = {}
@@ -168,6 +171,18 @@ class Workspace:
                         observer=self.observer,
                         agent_id=agent_id,
                         session_id=session_id)
+
+        # Graceful default: without the 'monty' extra the default runtime
+        # cannot build; leave it unset so python3 reports the install hint
+        # per invocation. An explicitly requested runtime still fails loud.
+        try:
+            self._python_runtime = select_python_runtime(
+                python_runtime, self.dispatch)
+        except ImportError:
+            if python_runtime is not None:
+                raise
+            self._python_runtime = None
+        self._registry.python_runtime = self._python_runtime
 
         for prefix, fuse_target in fuse_targets:
             mountpoint = fuse_target if isinstance(fuse_target, str) else None
@@ -352,11 +367,14 @@ class Workspace:
 
     async def close(self) -> None:
         drain_tasks = list(self._cache._drain_tasks.values())
+        if self._python_runtime is not None:
+            await self._python_runtime.close()
         self._close_parts()
         for task in drain_tasks:
             try:
                 await task
             except asyncio.CancelledError:
+                # drain tasks may already be cancelled at close
                 pass
         await self._cache.clear()
 
@@ -510,29 +528,51 @@ class Workspace:
     # ── session lifecycle ──────────────────────────────────────────────────
 
     def create_session(
-            self,
-            session_id: str,
-            allowed_mounts: frozenset[str] | None = None) -> Session:
-        if allowed_mounts is not None:
-            normalized = {("/" + m.strip("/")) for m in allowed_mounts}
-            normalized.update(self._infrastructure_mount_prefixes())
-            allowed_mounts = frozenset(normalized)
-        return self._session_mgr.create(session_id,
-                                        allowed_mounts=allowed_mounts)
+        self,
+        session_id: str,
+        mounts: Mapping[str, MountMode | str] | Iterable[str] | None = None,
+    ) -> Session:
+        """Create a session, optionally restricted to per-mount modes.
+
+        Args:
+            session_id (str): unique id for the session.
+            mounts (Mapping[str, MountMode | str] | Iterable[str] | None):
+                per-mount modes. A mapping assigns each prefix a mode
+                ceiling ("read", "write", "exec", or the filesystem
+                aliases "r", "rw", "rwx"); a plain iterable of
+                prefixes keeps each mount at its own configured mode (the
+                previous allowlist behavior). ``None`` leaves the
+                session unrestricted.
+        """
+        modes: dict[str, MountMode] | None = None
+        if mounts is not None:
+            if isinstance(mounts, str):
+                mounts = [mounts]
+            if isinstance(mounts, Mapping):
+                modes = {
+                    ("/" + p.strip("/")): parse_mount_mode(m)
+                    for p, m in mounts.items()
+                }
+            else:
+                modes = {("/" + p.strip("/")): MountMode.EXEC for p in mounts}
+            for prefix in self._infrastructure_mount_prefixes():
+                modes.setdefault(prefix, MountMode.EXEC)
+        return self._session_mgr.create(session_id, mount_modes=modes)
 
     def _infrastructure_mount_prefixes(self) -> set[str]:
         """Mount prefixes a session is always allowed to touch.
 
-        The virtual root (where text-processing commands like ``wc``
-        without a path argument resolve), the device mount, and the
-        history view are infrastructure: they hold no user
+        The implicit scratch root (where text-processing commands like
+        ``wc`` without a path argument resolve), the device mount, and
+        the history view are infrastructure: they hold no user
         credentials, and rejecting them would break common shell
-        idioms or the history builtin.
+        idioms or the history builtin. A user-defined root mount is
+        NOT infrastructure; sessions must be granted ``/`` explicitly
+        to touch it.
         """
         prefixes = {"/dev", HISTORY_PREFIX}
-        root_mount = self._registry.root_mount
-        if root_mount is not None:
-            prefixes.add("/" + root_mount.prefix.strip("/"))
+        if self._implicit_root:
+            prefixes.add("/")
         return prefixes
 
     def get_session(self, session_id: str) -> Session:
@@ -754,7 +794,7 @@ class Workspace:
             return io
         except UsageError as exc:
             msg = f"{exc}\n".encode()
-            io = IOResult(exit_code=2, stderr=msg)
+            io = IOResult(exit_code=exc.exit_code, stderr=msg)
             return io
         except OSError as exc:
             cmd_name = command.split()[0] if command.split() else command

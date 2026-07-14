@@ -5,7 +5,8 @@
     "has_provision": false,
     "has_write": false,
     "resources": [
-      "lancedb"
+      "lancedb",
+      "qdrant"
     ]
   },
   "description": null,
@@ -15,30 +16,38 @@
       "description": null,
       "long": "--method",
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": null,
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": null,
       "long": "--top-k",
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": null,
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     },
     {
       "description": null,
       "long": "--threshold",
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": null,
-      "value_kind": "text"
+      "value_kind": "text",
+      "value_optional": false
     }
   ],
   "positional": [
     {
-      "kind": "text"
+      "kind": "text",
+      "provided_by": []
     }
   ],
   "rest": {
-    "kind": "path"
+    "kind": "path",
+    "provided_by": []
   }
 }

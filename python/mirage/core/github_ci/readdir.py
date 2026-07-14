@@ -33,10 +33,6 @@ async def readdir(
     path: PathSpec,
     index: IndexCacheStore = None,
 ) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     path = (path.dir if path.pattern else path).mount_path
@@ -212,3 +208,11 @@ async def readdir(
         return names
 
     return []
+
+
+def is_dir_name(child: str) -> bool:
+    # Entries are recognized by extension, so classification never needs
+    # the stat fallback.
+    name = child.rsplit("/", 1)[-1]
+    return not (name.endswith(".json") or name.endswith(".jsonl")
+                or name.endswith(".log") or name.endswith(".zip"))

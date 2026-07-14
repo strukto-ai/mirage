@@ -63,7 +63,7 @@ def index():
 
 
 def test_root_empty():
-    scope = _run(detect_scope("/"))
+    scope = _run(detect_scope(PathSpec.from_str_path("/")))
     assert scope.level == "root"
 
 
@@ -207,13 +207,14 @@ def test_glob_non_jsonl():
 
 
 def test_guild_no_index():
-    scope = _run(detect_scope("TestGuild"))
+    scope = _run(detect_scope(PathSpec.from_str_path("TestGuild")))
     assert scope.level == "guild"
     assert scope.guild_id is None
 
 
 def test_channel_no_index():
-    scope = _run(detect_scope("TestGuild/channels/general"))
+    scope = _run(
+        detect_scope(PathSpec.from_str_path("TestGuild/channels/general")))
     assert scope.level == "channel"
     assert scope.guild_id is None
     assert scope.channel_id is None

@@ -29,7 +29,7 @@ import { rstripSlash } from '@struktoai/mirage-core'
 const S_IFDIR = 0o040000
 const S_IFREG = 0o100000
 
-export interface FakeSftpFile {
+interface FakeSftpFile {
   data: Uint8Array
   attrs?: Partial<Stats> | undefined
 }
@@ -162,7 +162,7 @@ function unimplemented(name: string): never {
   throw new Error(`fake sftp: ${name} not implemented`)
 }
 
-export function makeFakeSftp(state: FakeSftp): SFTPWrapper {
+function makeFakeSftp(state: FakeSftp): SFTPWrapper {
   const handler: ProxyHandler<Record<string, unknown>> = {
     get(target, prop) {
       const key = String(prop)

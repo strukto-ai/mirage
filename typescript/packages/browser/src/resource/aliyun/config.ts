@@ -27,7 +27,7 @@ export interface AliyunConfigRedacted extends Omit<AliyunConfig, 'presignedUrlPr
   presignedUrlProvider: '<REDACTED>'
 }
 
-export const AliyunConfigSchema = z.object({
+const AliyunConfigSchema = z.object({
   bucket: z.string(),
   presignedUrlProvider: secretSchema(
     z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),

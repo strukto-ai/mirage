@@ -112,13 +112,21 @@ Precedence (highest first):
 
 1. **`MIRAGE_DAEMON_URL`** env var, e.g. `http://127.0.0.1:9000`.
 2. **`MIRAGE_TOKEN`** env var, bearer token passed as `Authorization: Bearer <token>`.
-3. **`~/.mirage/config.toml`** `[daemon]` table:
+3. **`~/.mirage/config.toml`** `[daemon]` table, managed with
+   `mirage config list|get|set|unset` (per key: env var >
+   `config.toml` > default; `mirage config list --resolved` shows the
+   effective values and origins):
    ```toml
    [daemon]
    url = "http://127.0.0.1:8765"
    auth_token = ""
    idle_grace_seconds = 30
+   port = 8765
+   version_root = "/data/repos"
    ```
+   The daemon validates the table at startup and refuses to start on
+   unknown keys or malformed TOML. The full key list and semantics
+   match the Python CLI docs.
 
 ## Python parity
 

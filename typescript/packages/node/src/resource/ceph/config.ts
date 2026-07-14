@@ -35,7 +35,7 @@ export interface CephConfigRedacted {
   timeoutMs?: number
 }
 
-export const CephConfigSchema = z.object({
+const CephConfigSchema = z.object({
   bucket: z.string(),
   endpoint: z.string(),
   accessKeyId: secretStr(),

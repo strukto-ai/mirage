@@ -18,7 +18,7 @@ import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { FakeSlackTransport, makeFakeResource, seedChannel } from './_test_util.ts'
-import { SLACK_FIND } from './find.ts'
+import { SLACK_COMMANDS } from './index.ts'
 
 const DEC = new TextDecoder()
 
@@ -27,7 +27,7 @@ async function runFind(
   flags: Record<string, string | boolean | string[]>,
   options: { index?: RAMIndexCacheStore; transport?: FakeSlackTransport } = {},
 ): Promise<string> {
-  const cmd = SLACK_FIND[0]
+  const cmd = SLACK_COMMANDS.find((c) => c.name === 'find')
   if (cmd === undefined) throw new Error('find not registered')
   const transport = options.transport ?? new FakeSlackTransport()
   const resource = makeFakeResource(transport)

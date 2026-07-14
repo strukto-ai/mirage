@@ -24,7 +24,7 @@ export interface DiscordConfigRedacted {
   getHeaders?: '<REDACTED>'
 }
 
-export const DiscordConfigSchema = z.object({
+const DiscordConfigSchema = z.object({
   proxyUrl: z.string(),
   getHeaders: secretSchema(
     z.custom<DiscordConfig['getHeaders']>((value) => typeof value === 'function'),

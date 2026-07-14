@@ -58,7 +58,6 @@ export {
   readdirOp,
   renameOp,
   rmdirOp,
-  setAttrsOp,
   statOp,
   truncateOp,
   unlinkOp,

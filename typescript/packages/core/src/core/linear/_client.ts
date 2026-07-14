@@ -100,7 +100,7 @@ function navigate(root: Record<string, unknown>, path: readonly string[]): Conne
   return cursor as unknown as Connection
 }
 
-export async function paginate(
+async function paginate(
   transport: LinearTransport,
   query: string,
   variables: Record<string, unknown>,

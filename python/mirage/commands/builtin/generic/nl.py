@@ -1,6 +1,7 @@
 import re
 from collections.abc import AsyncIterator, Callable
 
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.stream import _resolve_source
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
@@ -38,7 +39,7 @@ async def _nl_stream(
 
 
 async def _nl_multi(
-    accessor: object,
+    accessor: Accessor,
     paths: list[PathSpec],
     read_stream: Callable[..., AsyncIterator[bytes]],
     body_numbering: str,
@@ -48,18 +49,24 @@ async def _nl_multi(
     separator: str,
     pattern: re.Pattern[str] | None,
 ) -> AsyncIterator[bytes]:
+    # One counter across every operand: GNU nl numbering continues from
+    # file to file (it resets per logical page, never per file).
+    num = start
     for p in paths:
-        source = read_stream(accessor, p)
-        async for chunk in _nl_stream(source, body_numbering, start, increment,
-                                      width, separator, pattern):
-            yield chunk
+        async for raw_line in AsyncLineIterator(read_stream(accessor, p)):
+            line = raw_line.decode(errors="replace")
+            if _should_number(line, body_numbering, pattern):
+                yield f"{num:{width}d}{separator}{line}\n".encode()
+                num += increment
+            else:
+                yield f"{' ' * width}{separator}{line}\n".encode()
 
 
 async def nl(
     paths: list[PathSpec],
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
-    accessor: object = None,
+    accessor: Accessor | None = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     body_numbering_raw: str | None = None,
     start_raw: str | None = None,

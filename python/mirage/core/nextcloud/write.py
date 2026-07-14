@@ -14,8 +14,6 @@ async def write_bytes(accessor: NextcloudAccessor,
                       path: PathSpec,
                       data: bytes,
                       index: IndexCacheStore = None) -> None:
-    if isinstance(path, str):
-        path = PathSpec.from_str_path(path)
     raw = path.mount_path
     key = raw.lstrip("/")
     op = accessor.operator()

@@ -22,7 +22,7 @@ from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
 from mirage.workspace.executor.builtins.shared import (  # yapf: disable
     abs_path, expand_operands, fail, finish, ok, operand_text, split_flags,
-    split_value_flags, typed)
+    split_value_flags)
 
 
 def test_ok_triple():
@@ -58,13 +58,6 @@ def test_finish_joins_errors():
     assert io.exit_code == 1
     assert io.stderr == b"a\nb\n"
     assert node.stderr == b"a\nb\n"
-
-
-def test_typed_prefers_raw_path():
-    spec = PathSpec.from_str_path("/data/f.txt")
-    assert typed(replace(spec, raw_path="f.txt")) == "f.txt"
-    assert typed(spec) == "/data/f.txt"
-    assert typed("literal") == "literal"
 
 
 def test_operand_text():

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { walkFind } from '../../../../core/generic/find.ts'
 import { findGeneric } from '../../generic/find.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
 
@@ -19,11 +20,24 @@ export const FIND_BUILDER: Builder = {
   name: 'find',
   fn: async (ops, accessor, paths, texts, opts) => {
     const idx = opts.index ?? undefined
-    const { find } = ops
-    if (find === undefined) {
-      throw new Error('find: backend provides no find op (override required)')
-    }
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-    return findGeneric(resolved, texts, opts, (root, options) => find(accessor, root, options))
+    const { find, isDirName } = ops
+    if (find !== undefined) {
+      return findGeneric(resolved, texts, opts, (root, options) => find(accessor, root, options))
+    }
+    // No backend find op: walk readdir/stat, classifying directories by the
+    // isDirName hint when the backend provides one.
+    return findGeneric(resolved, texts, opts, (root, options) =>
+      walkFind(
+        root,
+        {
+          readdir: (spec, i) => ops.readdir(accessor, spec, i),
+          stat: (spec, i) => ops.stat(accessor, spec, i),
+          isDirName: isDirName === undefined ? () => null : (child) => isDirName(accessor, child),
+        },
+        options,
+        idx,
+      ),
+    )
   },
 }

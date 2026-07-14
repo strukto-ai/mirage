@@ -377,7 +377,7 @@ async def test_resolve_mount_rejects_path_bound_unsupported_command():
                      resolved=True)
     with pytest.raises(
             MountCommandUnsupported,
-            match="fallback-only: not supported on the limited backend"):
+            match="fallback-only: /limited/file.txt: Operation not supported"):
         await reg.resolve_mount("fallback-only", [scope], "/limited")
 
 

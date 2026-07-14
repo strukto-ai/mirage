@@ -27,7 +27,6 @@ if _already_patched:
     _open = builtins.open._mirage_original_open
     _io_open = io.open
     _shim = sys.modules['_mirage_fs_shim']
-    _PREFIXES = _shim._PREFIXES
     _listdir = _shim._original_listdir
     _stat = _shim._original_stat
     _scandir = _shim._original_scandir
@@ -35,7 +34,6 @@ if _already_patched:
 else:
     _open = builtins.open
     _io_open = io.open
-    _PREFIXES = set()
     _listdir = os.listdir
     _stat = os.stat
     _scandir = os.scandir
@@ -44,7 +42,7 @@ else:
 def _under_prefix(path):
     if not isinstance(path, str):
         return False
-    for p in _PREFIXES:
+    for p in _mb.prefixes():
         if path.startswith(p):
             return True
     return False
@@ -54,16 +52,6 @@ def _is_writable_mode(mode):
         if c in mode:
             return True
     return False
-
-def register(prefix):
-    if not prefix.endswith('/'):
-        prefix = prefix + '/'
-    _PREFIXES.add(prefix)
-
-def unregister(prefix):
-    if not prefix.endswith('/'):
-        prefix = prefix + '/'
-    _PREFIXES.discard(prefix)
 
 class _FlushOnClose(io.FileIO):
     def __init__(self, path, mode='r', closefd=True, opener=None):
@@ -266,9 +254,6 @@ if not _already_patched:
     os.scandir = _patched_scandir
 
 _mod = types.ModuleType('_mirage_fs_shim')
-_mod.register = register
-_mod.unregister = unregister
-_mod._PREFIXES = _PREFIXES
 _mod._original_listdir = _listdir
 _mod._original_stat = _stat
 _mod._original_scandir = _scandir

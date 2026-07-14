@@ -19,8 +19,8 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.nl import nl as generic_nl
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           with_index)
-from mirage.commands.builtin.generic_bind.builders.common import \
-    resolve_or_empty
+from mirage.commands.builtin.generic_bind.builders.common import (
+    merge_split_errors, resolve_readable)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -39,18 +39,21 @@ async def nl(
     index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
-    paths = await resolve_or_empty(ops, accessor, paths, index)
-    return await generic_nl(
-        paths,
-        read_stream=with_index(ops.read_stream, index),
-        accessor=accessor,
-        stdin=stdin,
-        body_numbering_raw=b,
-        start_raw=v,
-        increment_raw=i,
-        width_raw=w,
-        separator=s,
-    )
+    paths, err = await resolve_readable(ops, accessor, paths, index, "nl")
+    if err and not paths:
+        return None, IOResult(exit_code=1, stderr=err)
+    return await merge_split_errors(
+        await generic_nl(
+            paths,
+            read_stream=with_index(ops.read_stream, index),
+            accessor=accessor,
+            stdin=stdin,
+            body_numbering_raw=b,
+            start_raw=v,
+            increment_raw=i,
+            width_raw=w,
+            separator=s,
+        ), err)
 
 
 BUILDER = Builder('nl', nl, None, False, None, read=True)

@@ -208,7 +208,7 @@ def _follow_operand(
     try:
         virtual = namespace.follow(target.virtual)
     except CycleError:
-        errors.append(f"{cmd}: cannot {action} '{target.display}': "
+        errors.append(f"{cmd}: cannot {action} '{target.raw_path}': "
                       f"Too many levels of symbolic links\n")
         return None
     return PathSpec.from_str_path(virtual)
@@ -236,7 +236,7 @@ async def _resolve_operand(
     try:
         stat, _ = await dispatch("stat", resolved)
     except FileNotFoundError:
-        errors.append(f"{cmd}: cannot access '{target.display}': "
+        errors.append(f"{cmd}: cannot access '{target.raw_path}': "
                       f"No such file or directory\n")
         return None
     return resolved, stat
@@ -414,7 +414,7 @@ async def handle_touch(
     writes: dict[str, bytes] = {}
     for target in await expand_operands(namespace, operands):
         if namespace.is_mount_root(target.virtual):
-            errors.append(f"touch: cannot touch '{target.display}': "
+            errors.append(f"touch: cannot touch '{target.raw_path}': "
                           f"Is a directory\n")
             continue
         if "h" in flags and namespace.is_link(target.virtual):
@@ -434,7 +434,7 @@ async def handle_touch(
                 if not mount.supports_op("write", resolved.virtual):
                     # Stat-only backend (e.g. an API surface): creation is
                     # impossible, which GNU reports as EROFS.
-                    errors.append(f"touch: cannot touch '{target.display}': "
+                    errors.append(f"touch: cannot touch '{target.raw_path}': "
                                   f"Read-only file system\n")
                     continue
                 await dispatch("write", resolved, data=b"")

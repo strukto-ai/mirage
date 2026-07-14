@@ -21,10 +21,6 @@ from mirage.types import FileType, PathSpec
 
 
 async def du(accessor: SSHAccessor, path: PathSpec) -> int:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     try:
         info = await stat(accessor, path)
     except FileNotFoundError:
@@ -41,10 +37,6 @@ async def du_all(
     accessor: SSHAccessor,
     path: PathSpec,
 ) -> tuple[list[tuple[str, int]], int]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     try:
         info = await stat(accessor, path)
     except FileNotFoundError:

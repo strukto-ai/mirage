@@ -47,7 +47,6 @@ async function curlCommand(
   const o = typeof opts.flags.o === 'string' ? opts.flags.o : null
   const L = opts.flags.L === true
   const silent = opts.flags.s === true
-  const jina = opts.flags.jina === true
 
   const headers: Record<string, string> = {}
   if (H !== null) {
@@ -82,7 +81,6 @@ async function curlCommand(
         method,
         headers,
         ...(body !== undefined ? { body } : {}),
-        jina,
         followRedirects: L,
       })
     }

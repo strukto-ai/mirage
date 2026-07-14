@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { resolvePath } from '../../../commands/spec/parser.ts'
+import { resolvePath } from '../../../utils/path.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { FileType } from '../../../types.ts'
 import { CycleError, MAX_SYMLINK_HOPS, resolveSymlinks } from '../../../utils/path.ts'
-import { posixNormpath } from '../../expand/classify.ts'
+import { posixNormpath } from '../../../utils/path.ts'
 import type { Session } from '../../session/session.ts'
 import { changeDir } from '../../session/shell_dirs.ts'
 import { ExecutionNode } from '../../types.ts'
@@ -52,15 +52,15 @@ function cdCandidates(
   session: Session,
 ): [string, boolean][] {
   const cwd = session.cwd
-  const fallback = resolvePath(cwd, raw)
+  const fallback = resolvePath(raw, cwd)
   const cdpath = session.env.CDPATH
   if (!cdpath || !cdpathTarget || !cdpathSearchable(cdpathTarget)) {
     return [[fallback, false]]
   }
   const out: [string, boolean][] = []
   for (const entry of cdpath.split(':')) {
-    const base = entry ? resolvePath(cwd, entry) : cwd
-    out.push([resolvePath(base, cdpathTarget), entry !== ''])
+    const base = entry ? resolvePath(entry, cwd) : cwd
+    out.push([resolvePath(cdpathTarget, base), entry !== ''])
   }
   out.push([fallback, false])
   return out

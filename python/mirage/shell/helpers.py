@@ -148,17 +148,6 @@ def get_redirect_parts(
     return command, target, r.append, r.kind
 
 
-def _is_last_cmd_redirect(body: tree_sitter.Node, redirects: list) -> bool:
-    """Check if redirects belong to the last command, not the whole list.
-
-    tree-sitter-bash parses ``a || echo x > file`` as
-    ``(a || echo x) > file`` but bash treats it as
-    ``a || (echo x > file)``. Redirects never apply to an entire
-    &&/|| chain — they bind to the last simple command.
-    """
-    return body.type == NT.LIST and len(redirects) > 0
-
-
 def get_redirects(
         node: tree_sitter.Node,  # noqa: E125
 ) -> tuple[tree_sitter.Node, list[Redirect]]:

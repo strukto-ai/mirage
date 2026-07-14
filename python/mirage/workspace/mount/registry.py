@@ -18,6 +18,7 @@ from mirage.commands.builtin.general import COMMANDS as GENERAL_COMMANDS
 from mirage.ops.config import OpsMount
 from mirage.resource.base import BaseResource
 from mirage.resource.dev import DevResource
+from mirage.runtime.python.base import PythonRuntime
 from mirage.types import ConsistencyPolicy, MountMode, PathSpec
 from mirage.workspace.mount.mount import MountEntry
 
@@ -25,12 +26,18 @@ DEV_PREFIX = "/dev/"
 
 
 class MountCommandUnsupported(Exception):
-    """Raised when a path-bound command is unsupported by its backend."""
+    """Raised when a path-bound command is unsupported by its backend.
 
-    def __init__(self, cmd_name: str, backend: str) -> None:
+    Rendered in the GNU shape ``<cmd>: <operand>: <reason>`` with the
+    EOPNOTSUPP strerror, naming the offending path like coreutils does;
+    the backend name stays on the exception for programmatic use (#394).
+    """
+
+    def __init__(self, cmd_name: str, backend: str, operand: str) -> None:
         self.cmd_name = cmd_name
         self.backend = backend
-        super().__init__(f"{cmd_name}: not supported on the {backend} backend")
+        self.operand = operand
+        super().__init__(f"{cmd_name}: {operand}: Operation not supported")
 
 
 class MountRegistry:
@@ -44,6 +51,9 @@ class MountRegistry:
     def __init__(self) -> None:
         self._mounts: list[MountEntry] = []
         self._root: MountEntry | None = None
+        # Workspace-level Python runtime for `python3`, set by Workspace
+        # after construction (same vehicle as is_exec_allowed()).
+        self.python_runtime: PythonRuntime | None = None
         self._consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
         self._file_cache: FileCacheMixin | None = None
         self.mount(DEV_PREFIX, DevResource(), MountMode.WRITE)
@@ -214,7 +224,7 @@ class MountRegistry:
         for m in self._mounts:
             if m.prefix == DEV_PREFIX:
                 continue
-            if m.mode == MountMode.EXEC:
+            if m.effective_mode() == MountMode.EXEC:
                 return True
         return False
 
@@ -264,7 +274,8 @@ class MountRegistry:
 
         if mount is not None and mount.resolve_command(cmd_name) is None:
             if path_scopes:
-                raise MountCommandUnsupported(cmd_name, mount.resource.name)
+                raise MountCommandUnsupported(cmd_name, mount.resource.name,
+                                              path_scopes[0].raw_path)
             mount = self.mount_for_command(cmd_name)
         elif mount is None:
             mount = self.mount_for_command(cmd_name)

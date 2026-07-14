@@ -14,7 +14,7 @@
 
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
-from mirage.types import PathSpec
+from mirage.types import PathSpec, word_text
 from mirage.utils.path import resolve_path
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.types import ExecutionNode
@@ -68,17 +68,6 @@ def finish(cmd: str, errors: list[str], io: IOResult | None = None) -> Result:
     if errors:
         return result(cmd, exit_code=1, stderr="".join(errors), io=io)
     return result(cmd, io=io)
-
-
-def typed(arg: str | PathSpec) -> str:
-    """The operand as the user typed it (for GNU error messages).
-
-    Args:
-        arg (str | PathSpec): a classified command part.
-    """
-    if isinstance(arg, PathSpec):
-        return arg.raw_path or arg.virtual
-    return arg
 
 
 def operand_text(arg: str | PathSpec) -> str:
@@ -180,7 +169,7 @@ def split_value_flags(
                     values[c] = rest
                 elif i + 1 < len(args):
                     i += 1
-                    values[c] = typed(args[i])
+                    values[c] = word_text(args[i])
                 break
             i += 1
             continue

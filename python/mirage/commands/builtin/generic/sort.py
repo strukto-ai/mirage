@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator, Awaitable, Callable
 
+from mirage.accessor.base import Accessor
 from mirage.commands.builtin.sort_helper import _sort_key, _unique_key
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import _read_stdin_async
@@ -11,7 +12,7 @@ async def sort(
     paths: list[PathSpec],
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
-    accessor: object = None,
+    accessor: Accessor | None = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     reverse: bool = False,
     numeric: bool = False,
@@ -22,6 +23,7 @@ async def sort(
     human_numeric: bool = False,
     version_sort: bool = False,
     month_sort: bool = False,
+    ignore_blanks: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
         all_lines: list[str] = []
@@ -35,7 +37,7 @@ async def sort(
         all_lines = split_lines(raw.decode(errors="replace"))
 
     key_args = (key_field, field_separator, fold_case, numeric, human_numeric,
-                version_sort, month_sort)
+                version_sort, month_sort, ignore_blanks)
     all_lines.sort(key=lambda x: _sort_key(x, *key_args), reverse=reverse)
     if unique:
         seen: set[object] = set()

@@ -15,7 +15,7 @@
 import { PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 
-export type EntityKind = 'tables' | 'views'
+type EntityKind = 'tables' | 'views'
 
 export type PostgresScope =
   | { level: 'root'; resourcePath: string }
@@ -46,8 +46,6 @@ export type PostgresScope =
       resourcePath: string
     }
   | { level: 'invalid'; resourcePath: string }
-
-export type PostgresScopeLevel = PostgresScope['level']
 
 export function detectScope(path: PathSpec | string): PostgresScope {
   const raw = path instanceof PathSpec ? path.mountPath : path

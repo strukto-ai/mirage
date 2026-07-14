@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+import logging
 import posixpath
 
 from mirage.accessor.gslides import GSlidesAccessor
@@ -23,6 +24,8 @@ from mirage.core.gslides.readdir import readdir
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
+
+logger = logging.getLogger(__name__)
 
 
 async def read_presentation(token_manager: TokenManager,
@@ -37,10 +40,6 @@ async def read(
     path: PathSpec,
     index: IndexCacheStore = None,
 ) -> bytes:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     key = path.resource_path
@@ -56,8 +55,10 @@ async def read(
             try:
                 await readdir(accessor, parent_path, index)
                 result = await index.get(virtual_key)
-            except Exception:
-                pass
+            except Exception as exc:
+                # best-effort cache populate; canonical ENOENT raised below
+                logger.debug("read populate failed for %s: %s", virtual_key,
+                             exc)
         if result.entry is None:
             raise enoent(virtual)
     if result.entry.resource_type in ("gslides/directory", ):

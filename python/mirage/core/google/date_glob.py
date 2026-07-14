@@ -14,7 +14,7 @@
 
 from datetime import date, timedelta
 
-_GLOB_META = ("*", "?", "[")
+from mirage.utils.glob_walk import GLOB_CHARS
 
 
 def _iso(d: date) -> str:
@@ -25,7 +25,7 @@ def glob_to_modified_range(pattern: str | None) -> tuple[str, str] | None:
     if not pattern:
         return None
     meta_index = -1
-    for ch in _GLOB_META:
+    for ch in GLOB_CHARS:
         idx = pattern.find(ch)
         if idx != -1 and (meta_index == -1 or idx < meta_index):
             meta_index = idx

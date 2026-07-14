@@ -16,7 +16,6 @@ import { rekey } from '../../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import type { CommandFnResult } from '../../config.ts'
 import {
   backendKeyDefault,
   copyTargets,
@@ -49,7 +48,7 @@ export async function mvGeneric(
   index?: IndexCacheStore,
   backendKey?: BackendKeyFn,
   prim?: MvPrimitives,
-): Promise<CommandFnResult> {
+): Promise<[ByteSource | null, IOResult]> {
   const keyOf = backendKey ?? backendKeyDefault
   const sources = paths.slice(0, -1)
   const dst = paths[paths.length - 1]

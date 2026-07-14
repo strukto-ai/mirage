@@ -59,6 +59,10 @@ class FuseManager:
         if sys.platform == "darwin":
             subprocess.run(["diskutil", "unmount", "force", self._mountpoint],
                            capture_output=True)
+        elif sys.platform == "win32":
+            # No fusermount equivalent: WinFsp tears the mount down when the
+            # serving process exits.
+            pass
         else:
             subprocess.run(["fusermount", "-u", self._mountpoint],
                            capture_output=True)
@@ -68,6 +72,7 @@ class FuseManager:
                 # the directory has contents, leave it for the caller/admin.
                 os.rmdir(self._mountpoint)
             except OSError:
+                # non-empty or busy mountpoint: leave it for the caller/admin
                 pass
         self._mountpoint = None
         self._owns_mountpoint = False

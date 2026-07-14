@@ -15,8 +15,7 @@
 from mirage.workspace.executor.builtins.condition import handle_test
 from mirage.workspace.executor.builtins.dirs import handle_cd
 from mirage.workspace.executor.builtins.history import handle_history
-from mirage.workspace.executor.builtins.links import (NO_FOLLOW_COMMANDS,
-                                                      follow_paths, handle_ln,
+from mirage.workspace.executor.builtins.links import (follow_paths, handle_ln,
                                                       handle_readlink,
                                                       link_flags, prepare_mv,
                                                       strip_link_operands)
@@ -35,6 +34,8 @@ from mirage.workspace.executor.builtins.script import (handle_bash,
 from mirage.workspace.executor.builtins.text import (_interpret_escapes,
                                                      handle_echo,
                                                      handle_printf)
+from mirage.workspace.executor.builtins.timeout import handle_timeout
+from mirage.workspace.executor.builtins.xargs import handle_xargs
 
 from mirage.workspace.executor.builtins.vars import (  # isort: skip
     handle_export, handle_local, handle_printenv, handle_read, handle_readonly,
@@ -58,7 +59,6 @@ __all__ = [
     'handle_local',
     'handle_readlink',
     'link_flags',
-    'NO_FOLLOW_COMMANDS',
     'follow_paths',
     'handle_chmod',
     'handle_chown',
@@ -76,7 +76,9 @@ __all__ = [
     'handle_sleep',
     'handle_source',
     'handle_test',
+    'handle_timeout',
     'handle_trap',
     'handle_unset',
     'handle_whoami',
+    'handle_xargs',
 ]

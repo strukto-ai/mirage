@@ -48,7 +48,7 @@ export interface SearchOptions {
   unseen?: boolean
 }
 
-export function buildSearchCriteria(opts: SearchOptions): string {
+function buildSearchCriteria(opts: SearchOptions): string {
   const parts: string[] = []
   if (opts.unseen === true) parts.push('UNSEEN')
   if (opts.text !== undefined && opts.text !== null && opts.text !== '') {

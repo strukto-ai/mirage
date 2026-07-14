@@ -39,10 +39,10 @@ export async function stat(accessor: DiskAccessor, p: PathSpec): Promise<FileSta
       size: null,
       modified,
       type: FileType.DIRECTORY,
-      mode: attrs.mode,
-      uid: attrs.uid,
-      gid: attrs.gid,
-      atime: attrs.atime,
+      mode: attrs.mode ?? null,
+      uid: attrs.uid ?? null,
+      gid: attrs.gid ?? null,
+      atime: attrs.atime ?? null,
     })
   }
   return new FileStat({
@@ -51,9 +51,9 @@ export async function stat(accessor: DiskAccessor, p: PathSpec): Promise<FileSta
     modified,
     fingerprint: modified,
     type: guessType(name),
-    mode: attrs.mode,
-    uid: attrs.uid,
-    gid: attrs.gid,
-    atime: attrs.atime,
+    mode: attrs.mode ?? null,
+    uid: attrs.uid ?? null,
+    gid: attrs.gid ?? null,
+    atime: attrs.atime ?? null,
   })
 }

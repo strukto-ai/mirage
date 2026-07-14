@@ -31,10 +31,6 @@ def is_dir_name(child: str) -> bool:
 async def readdir(accessor: PostgresAccessor,
                   path: PathSpec,
                   index: IndexCacheStore = None) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     raw = path.directory if path.pattern else path.virtual
     if prefix and raw.startswith(prefix):
@@ -43,7 +39,9 @@ async def readdir(accessor: PostgresAccessor,
         PathSpec(virtual=raw,
                  directory=raw,
                  resource_path=mount_key(raw, prefix)))
-    virtual_key = (prefix or "") + raw
+    # Canonical key: no trailing slash (except root), or the same dir
+    # indexes under two keys and cache hits return doubled-slash entries.
+    virtual_key = ((prefix or "") + raw).rstrip("/") or "/"
 
     if scope.level == "root":
         return await _list_root(accessor, virtual_key, index, prefix)

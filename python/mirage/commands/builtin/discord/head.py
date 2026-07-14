@@ -56,6 +56,8 @@ async def head(
     stdin: AsyncIterator[bytes] | bytes | None = None,
     n: str | None = None,
     c: str | None = None,
+    q: bool = False,
+    v: bool = False,
     index: IndexCacheStore = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -90,7 +92,8 @@ async def head(
                           index=index,
                           n=n_int,
                           c=c_int,
-                          show_headers=len(paths) > 1), IOResult()
+                          show_headers=(v or len(paths) > 1)
+                          and not q), IOResult()
     raw = await _read_stdin_async(stdin)
     if raw is None:
         raise ValueError("head: missing operand")

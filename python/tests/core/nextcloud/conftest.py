@@ -135,6 +135,10 @@ class FakeAsyncOperator:
         pfx = path.lstrip("/")
         seen_dirs: set[str] = set()
         entries: list[_FakeEntry] = []
+        key = pfx.rstrip("/")
+        if key in self.files:
+            # WebDAV PROPFIND on a file returns the file itself.
+            entries.append(_FakeEntry(path=key, metadata=self.metas[key]))
         for f in self.files:
             if not f.startswith(pfx):
                 continue

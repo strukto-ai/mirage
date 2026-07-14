@@ -25,10 +25,6 @@ async def readdir(
     path: PathSpec,
     index: IndexCacheStore,
 ) -> list[str]:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     if isinstance(path, PathSpec):
         prefix = mount_prefix_of(path.virtual, path.resource_path)
@@ -38,7 +34,10 @@ async def readdir(
         if prefix.endswith("/") or rest == "" or rest.startswith("/"):
             path = rest or "/"
     store = accessor.store
+    # Canonical key: no trailing slash (except root), or the same dir
+    # indexes under two keys and cache hits return doubled-slash entries.
     virtual_key = prefix + path if prefix else path
+    virtual_key = virtual_key.rstrip("/") or "/"
     listing = await index.list_dir(virtual_key)
     if listing.entries is not None:
         return listing.entries

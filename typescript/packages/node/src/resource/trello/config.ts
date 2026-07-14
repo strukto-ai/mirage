@@ -30,7 +30,7 @@ export interface TrelloConfigRedacted {
   baseUrl?: string
 }
 
-export const TrelloConfigSchema = z.object({
+const TrelloConfigSchema = z.object({
   apiKey: secretStr(),
   apiToken: secretStr(),
   workspaceId: z.string().optional(),

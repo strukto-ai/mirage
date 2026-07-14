@@ -96,7 +96,7 @@ export function pageContentTitle(page: Json): string {
   return ''
 }
 
-export function extractDatabaseTitle(database: Json): string {
+function extractDatabaseTitle(database: Json): string {
   const titleFragments = asArray(database.title)
   if (titleFragments.length > 0) {
     const joined = joinTitleFragments(titleFragments)

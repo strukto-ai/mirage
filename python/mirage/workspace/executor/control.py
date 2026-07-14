@@ -24,7 +24,7 @@ from mirage.io.types import ByteSource
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
-from mirage.types import PathSpec
+from mirage.types import PathSpec, word_text
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
@@ -102,8 +102,9 @@ class ContinueSignal(Exception):
 
 class ReturnSignal(Exception):
 
-    def __init__(self, exit_code: int = 0) -> None:
+    def __init__(self, exit_code: int = 0, stderr: bytes = b"") -> None:
         self.exit_code = exit_code
+        self.stderr = stderr
 
 
 def _collect_loop_result(
@@ -161,9 +162,9 @@ async def handle_for(
 
     try:
         for val in values:
-            # env stores strings only; PathSpec → .virtual
-            session.env[variable] = (val.virtual
-                                     if isinstance(val, PathSpec) else val)
+            # env stores strings only; bash keeps `for f in sub/*.txt`
+            # matches relative, so the loop variable takes the typed form
+            session.env[variable] = word_text(val)
             try:
                 stdout, io, _ = await _execute_body(execute_node, body,
                                                     session, stdin, call_stack)
@@ -330,9 +331,9 @@ async def handle_select(
 
     try:
         for val in values:
-            # env stores strings only; PathSpec → .virtual
-            session.env[variable] = (val.virtual
-                                     if isinstance(val, PathSpec) else val)
+            # env stores strings only; bash keeps `for f in sub/*.txt`
+            # matches relative, so the loop variable takes the typed form
+            session.env[variable] = word_text(val)
             try:
                 stdout, io, _ = await _execute_body(execute_node, body,
                                                     session, stdin, call_stack)

@@ -3,7 +3,9 @@ from mirage.commands.builtin.find_eval import (And, Empty, FindEntry, Name,
                                                Not, Or, Path, TrueNode, Type,
                                                args_to_tree, build_tree,
                                                compute_nonempty_dirs,
+                                               display_path, emit_start_path,
                                                eval_predicate, keep,
+                                               prefix_path_nodes,
                                                tree_has_type)
 # yapf: enable
 from mirage.commands.builtin.generic.find import FindArgs
@@ -155,3 +157,58 @@ def test_tree_has_type():
     assert tree_has_type(Not(Type("f"))) is True
     assert tree_has_type(Or([Name("a"), Name("b")])) is False
     assert tree_has_type(TrueNode()) is False
+
+
+def test_path_matches_display_path():
+    # -path matches the path as printed (mount prefix + key), so a
+    # pattern naming the mount segment matches once the tree is stamped
+    # with the prefix (#396).
+    tree = prefix_path_nodes(Path("*data/sub*"), "/data")
+    assert eval_predicate(tree, _entry(key="/sub", name="sub",
+                                       kind="d")) is True
+    assert eval_predicate(tree, _entry(key="/other")) is False
+    exact = prefix_path_nodes(Path("/data/sub"), "/data")
+    assert eval_predicate(exact, _entry(key="/sub", kind="d")) is True
+
+
+def test_prefix_path_nodes_rewrites_nested_and_keeps_root_mount():
+    tree = prefix_path_nodes(And([Path("/data/*"), Name("x")]), "/data")
+    assert eval_predicate(tree, _entry(key="/x", name="x")) is True
+    same = Or([Path("*a*"), Type("f")])
+    assert prefix_path_nodes(same, "") is same
+
+
+def test_display_path_joins_like_apply_mount_prefix():
+    assert display_path("", "/sub/x") == "/sub/x"
+    assert display_path("/data", "/sub/x") == "/data/sub/x"
+    assert display_path("/data", "/") == "/data"
+
+
+def test_emit_start_path_directory_size_zero():
+    # A directory start path contributes size 0: -size +N excludes it,
+    # -size -N keeps it (#318).
+    results: list[str] = []
+    emit_start_path(results,
+                    "/data",
+                    "data",
+                    kind="d",
+                    is_empty=None,
+                    exists=True,
+                    tree=TrueNode(),
+                    maxdepth=None,
+                    mindepth=None,
+                    min_size=5,
+                    max_size=None)
+    assert results == []
+    emit_start_path(results,
+                    "/data",
+                    "data",
+                    kind="d",
+                    is_empty=None,
+                    exists=True,
+                    tree=TrueNode(),
+                    maxdepth=None,
+                    mindepth=None,
+                    min_size=None,
+                    max_size=5)
+    assert results == ["/data"]

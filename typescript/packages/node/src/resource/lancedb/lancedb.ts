@@ -42,7 +42,7 @@ export interface LanceDBResourceOptions {
 export class LanceDBResource extends BaseResource implements Resource {
   readonly kind: string = ResourceName.LANCEDB
   readonly cachesReads: boolean
-  readonly indexTtl: number = 0
+  override readonly indexTtl: number = 0
   readonly prompt: string = LANCEDB_PROMPT
   readonly config: LanceDBConfigResolved
   readonly store: LanceDBStore

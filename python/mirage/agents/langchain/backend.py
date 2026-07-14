@@ -126,11 +126,13 @@ class LangchainWorkspace(SandboxBackendProtocol):
             return WriteResult(
                 error=f"Error: file '{file_path}' already exists")
         except (FileNotFoundError, ValueError):
+            # missing file is the good path: the write may proceed
             pass
         parent = "/".join(file_path.rstrip("/").split("/")[:-1]) or "/"
         try:
             await ops.mkdir(parent)
         except (FileExistsError, ValueError):
+            # mkdir -p semantics: an existing parent is success
             pass
         await ops.write(file_path, content.encode("utf-8"))
         return WriteResult(path=file_path)
@@ -228,6 +230,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
             try:
                 await ops.mkdir(parent)
             except (FileExistsError, ValueError):
+                # mkdir -p semantics: an existing parent is success
                 pass
             await ops.write(path, data)
             results.append(FileUploadResponse(path=path))

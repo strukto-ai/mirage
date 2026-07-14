@@ -16,7 +16,7 @@ import os
 import subprocess
 import sys
 import time
-from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 
@@ -24,6 +24,10 @@ from mirage.cli.env import ENV_AUTH_MODE, ENV_AUTH_TOKEN
 from mirage.cli.settings import DaemonSettings, load_daemon_settings
 from mirage.server.auth import AuthMode
 from mirage.server.auth import storage as auth_storage
+from mirage.server.daemon_config import (read_daemon_table,
+                                         validate_daemon_table)
+from mirage.server.env import ENV_DAEMON_PORT
+from mirage.server.paths import mirage_home
 
 
 class DaemonUnreachable(RuntimeError):
@@ -99,13 +103,15 @@ class DaemonClient:
             f"{startup_timeout:.1f}s")
 
     def _spawn_daemon(self) -> None:
-        port = self._port_from_url()
+        table = read_daemon_table(mirage_home())
+        validate_daemon_table(table)
+        port = self._resolve_port(table)
         env = dict(os.environ)
         if not self.settings.auth_token:
             self.settings.auth_token = auth_storage.ensure_token_file(
-                auth_storage.DEFAULT_TOKEN_FILE)
+                auth_storage.default_token_file())
         env[ENV_AUTH_TOKEN] = self.settings.auth_token
-        if ENV_AUTH_MODE not in env:
+        if ENV_AUTH_MODE not in env and not table.get("auth_mode"):
             env[ENV_AUTH_MODE] = AuthMode.LOCAL.value
         cmd = [
             sys.executable,
@@ -119,7 +125,7 @@ class DaemonClient:
             "--log-level",
             "warning",
         ]
-        log_dir = Path.home() / ".mirage"
+        log_dir = mirage_home()
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / "daemon.log"
         with open(log_file, "ab") as f:
@@ -131,8 +137,28 @@ class DaemonClient:
                 start_new_session=True,
             )
 
+    def _resolve_port(self, table: dict) -> int:
+        """Resolve the listen port for a spawned daemon.
+
+        Priority: ``$MIRAGE_DAEMON_PORT``, then the ``port`` key in
+        ``config.toml`` ``[daemon]``, then the port embedded in the
+        client ``url`` setting, then 8765.
+
+        Args:
+            table (dict): the already-read ``[daemon]`` table.
+
+        Returns:
+            int: the port to bind.
+        """
+        env_port = os.environ.get(ENV_DAEMON_PORT)
+        if env_port:
+            return int(env_port)
+        config_port = table.get("port")
+        if config_port:
+            return int(config_port)
+        return self._port_from_url()
+
     def _port_from_url(self) -> int:
-        from urllib.parse import urlparse
         parsed = urlparse(self.settings.url)
         return parsed.port or 8765
 

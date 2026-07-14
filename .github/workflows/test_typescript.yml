@@ -79,6 +79,10 @@ jobs:
         working-directory: typescript
         run: pnpm -r build
 
+      - name: Typecheck
+        working-directory: typescript
+        run: pnpm -r typecheck
+
       - name: Run TypeScript tests
         working-directory: typescript
         env:

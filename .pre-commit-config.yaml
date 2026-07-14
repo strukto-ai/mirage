@@ -130,7 +130,13 @@ repos:
         pass_filenames: true
       - id: ts-eslint
         name: ESLint (typescript)
-        entry: typescript/scripts/precommit-run.sh eslint --fix
+        entry: typescript/scripts/precommit-run.sh eslint --fix --no-warn-ignored
         language: system
         files: ^typescript/.*\.(ts|tsx|js|mjs|cjs)$
         pass_filenames: true
+      - id: ts-knip
+        name: Knip (typescript dead code)
+        entry: bash -c 'cd typescript && pnpm exec knip'
+        language: system
+        files: ^typescript/.*\.(ts|tsx|js|mjs|cjs|json)$
+        pass_filenames: false

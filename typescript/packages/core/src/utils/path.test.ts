@@ -13,7 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { CycleError, expandTilde, globPrefixMatch, resolveSymlinks } from './path.ts'
+import {
+  CycleError,
+  expandTilde,
+  globPrefixMatch,
+  posixNormpath,
+  resolvePath,
+  resolveSymlinks,
+} from './path.ts'
 
 describe('resolveSymlinks', () => {
   it('substitutes the longest matching link prefix', () => {
@@ -86,5 +93,41 @@ describe('globPrefixMatch', () => {
   it('matches intermediate segment globs', () => {
     expect(globPrefixMatch('/a/one/b.txt', '/a/*/b.txt')).toBe(true)
     expect(globPrefixMatch('/a/one/c.txt', '/a/*/b.txt')).toBe(false)
+  })
+})
+
+describe('posixNormpath', () => {
+  it('normalizes ..', () => {
+    expect(posixNormpath('/a/b/../c')).toBe('/a/c')
+  })
+
+  it('collapses redundant slashes', () => {
+    expect(posixNormpath('/a//b')).toBe('/a/b')
+  })
+
+  it('drops trailing slash', () => {
+    expect(posixNormpath('/a/b/')).toBe('/a/b')
+  })
+
+  it('handles relative paths', () => {
+    expect(posixNormpath('a/./b/../c')).toBe('a/c')
+  })
+
+  it('empty string becomes .', () => {
+    expect(posixNormpath('')).toBe('.')
+  })
+})
+
+describe('resolvePath', () => {
+  it('passes through absolute paths', () => {
+    expect(resolvePath('/abs/path', '/cwd')).toBe('/abs/path')
+  })
+
+  it('joins relative paths with cwd', () => {
+    expect(resolvePath('file.txt', '/cwd/sub')).toBe('/cwd/sub/file.txt')
+  })
+
+  it('normalizes .. segments', () => {
+    expect(resolvePath('../file.txt', '/cwd/sub')).toBe('/cwd/file.txt')
   })
 })

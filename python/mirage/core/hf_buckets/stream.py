@@ -27,8 +27,6 @@ from mirage.utils.errors import enoent
 
 async def range_read(accessor: HfBucketsAccessor, path: PathSpec, start: int,
                      end: int) -> bytes:
-    if isinstance(path, str):
-        path = PathSpec.from_str_path(path)
     raw = path.mount_path
     key = raw.lstrip("/")
     op = accessor.operator()
@@ -50,8 +48,6 @@ async def read_stream(
     index: IndexCacheStore | None = None,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
 ) -> AsyncIterator[bytes]:
-    if isinstance(path, str):
-        path = PathSpec.from_str_path(path)
     raw = path.mount_path
     key = raw.lstrip("/")
     op = accessor.operator()

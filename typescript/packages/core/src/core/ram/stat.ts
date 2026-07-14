@@ -27,10 +27,10 @@ export function stat(accessor: RAMAccessor, path: PathSpec): Promise<FileStat> {
         name: basename(p),
         modified: accessor.store.modified.get(p) ?? null,
         type: FileType.DIRECTORY,
-        mode: attrs.mode,
-        uid: attrs.uid,
-        gid: attrs.gid,
-        atime: attrs.atime,
+        mode: attrs.mode ?? null,
+        uid: attrs.uid ?? null,
+        gid: attrs.gid ?? null,
+        atime: attrs.atime ?? null,
       }),
     )
   }
@@ -44,10 +44,10 @@ export function stat(accessor: RAMAccessor, path: PathSpec): Promise<FileStat> {
       size: data.byteLength,
       modified: accessor.store.modified.get(p) ?? null,
       type: guessType(p),
-      mode: attrs.mode,
-      uid: attrs.uid,
-      gid: attrs.gid,
-      atime: attrs.atime,
+      mode: attrs.mode ?? null,
+      uid: attrs.uid ?? null,
+      gid: attrs.gid ?? null,
+      atime: attrs.atime ?? null,
     }),
   )
 }

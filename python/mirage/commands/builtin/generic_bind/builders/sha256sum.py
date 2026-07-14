@@ -20,8 +20,8 @@ from mirage.commands.builtin.generic.sha256sum import \
     sha256sum as generic_sha256sum
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           with_index)
-from mirage.commands.builtin.generic_bind.builders.common import \
-    resolve_or_empty
+from mirage.commands.builtin.generic_bind.builders.common import (
+    merge_split_errors, resolve_readable)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -36,14 +36,17 @@ async def sha256sum(
     index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
-    paths = await resolve_or_empty(ops, accessor, paths, index)
-    return await generic_sha256sum(
-        paths,
-        read_bytes=with_index(ops.read_bytes, index),
-        read_stream=with_index(ops.read_stream, index),
-        accessor=accessor,
-        stdin=stdin,
-        check=c)
+    paths, err = await resolve_readable(ops, accessor, paths, index,
+                                        "sha256sum")
+    if err and not paths:
+        return None, IOResult(exit_code=1, stderr=err)
+    return await merge_split_errors(
+        await generic_sha256sum(paths,
+                                read_bytes=with_index(ops.read_bytes, index),
+                                read_stream=with_index(ops.read_stream, index),
+                                accessor=accessor,
+                                stdin=stdin,
+                                check=c), err)
 
 
 BUILDER = Builder('sha256sum', sha256sum, None, False, None, read=True)

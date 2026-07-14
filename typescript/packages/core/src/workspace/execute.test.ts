@@ -178,3 +178,107 @@ describe('Workspace.execute', () => {
     await ws.close()
   })
 })
+
+describe('argv dispatch regressions', () => {
+  it('timeout keeps a quoted word as one argument', async () => {
+    const { ws } = buildWorkspace()
+    const res = await ws.execute("timeout 5 echo 'a  b'")
+    expect(new TextDecoder().decode(res.stdout)).toBe('a  b\n')
+    await ws.close()
+  })
+
+  it('xargs keeps initial args before stdin words (GNU)', async () => {
+    const { ws } = buildWorkspace()
+    const res = await ws.execute('echo c | xargs echo a b')
+    expect(new TextDecoder().decode(res.stdout)).toBe('a b c\n')
+    await ws.close()
+  })
+
+  it('xargs input words stay literal argv tokens', async () => {
+    const { ws } = buildWorkspace()
+    const res = await ws.execute("echo '$(echo pwned)' | xargs echo")
+    expect(new TextDecoder().decode(res.stdout)).toBe('$(echo pwned)\n')
+    await ws.close()
+  })
+
+  it('xargs survives a quote character in input', async () => {
+    const { ws } = buildWorkspace()
+    const res = await ws.execute('echo "don\'t" | xargs echo')
+    expect(new TextDecoder().decode(res.stdout)).toBe("don't\n")
+    await ws.close()
+  })
+
+  it('runs a command named by a variable', async () => {
+    const { ws } = buildWorkspace()
+    const res = await ws.execute('E=echo; $E hi')
+    expect(new TextDecoder().decode(res.stdout)).toBe('hi\n')
+    expect(res.exitCode).toBe(0)
+    await ws.close()
+  })
+
+  it('runs a quoted command name', async () => {
+    const { ws } = buildWorkspace()
+    const res = await ws.execute('"echo" hi')
+    expect(new TextDecoder().decode(res.stdout)).toBe('hi\n')
+    await ws.close()
+  })
+})
+
+describe('glob rule: resolved by whoever consumes the word, exactly once', () => {
+  function seed(ram: RAMResource): void {
+    ram.store.files.set('/notes.txt', new TextEncoder().encode('line1\n'))
+    ram.store.files.set('/nums.txt', new TextEncoder().encode('5\n'))
+    ram.store.files.set('/words.txt', new TextEncoder().encode('banana\n'))
+  }
+
+  it('zero-match glob stays the literal word (bash nullglob off)', async () => {
+    const { ws, ram } = buildWorkspace()
+    seed(ram)
+    const res = await ws.execute('echo /ram/*.nope')
+    expect(new TextDecoder().decode(res.stdout)).toBe('/ram/*.nope\n')
+    await ws.close()
+  })
+
+  it('test -f sees the shell-resolved match, not the pattern', async () => {
+    const { ws, ram } = buildWorkspace()
+    seed(ram)
+    const res = await ws.execute('test -f /ram/note* && echo yes')
+    expect(new TextDecoder().decode(res.stdout)).toBe('yes\n')
+    await ws.close()
+  })
+
+  it('function positional args receive matches, not the pattern', async () => {
+    const { ws, ram } = buildWorkspace()
+    seed(ram)
+    const res = await ws.execute('f() { echo $1 $#; }; f /ram/*.txt')
+    expect(new TextDecoder().decode(res.stdout)).toBe('/ram/notes.txt 3\n')
+    await ws.close()
+  })
+
+  it('ln with multiple expanded sources is a GNU error', async () => {
+    const { ws, ram } = buildWorkspace()
+    seed(ram)
+    const res = await ws.execute('ln -s /ram/*.txt /ram/lnk')
+    expect(res.exitCode).toBe(1)
+    expect(new TextDecoder().decode(res.stderr)).toContain('is not a directory')
+    await ws.close()
+  })
+
+  it('ln links to the single glob match, not the literal pattern', async () => {
+    const { ws, ram } = buildWorkspace()
+    seed(ram)
+    await ws.execute('ln -s /ram/note* /ram/l2')
+    const res = await ws.execute('readlink /ram/l2')
+    expect(new TextDecoder().decode(res.stdout)).toBe('/ram/notes.txt\n')
+    await ws.close()
+  })
+
+  it('unknown command fails 127 without a backend error', async () => {
+    const { ws, ram } = buildWorkspace()
+    seed(ram)
+    const res = await ws.execute('nosuchcmd /ram/*.txt')
+    expect(res.exitCode).toBe(127)
+    expect(new TextDecoder().decode(res.stderr)).toBe('nosuchcmd: command not found\n')
+    await ws.close()
+  })
+})

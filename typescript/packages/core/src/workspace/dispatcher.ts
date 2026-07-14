@@ -25,6 +25,7 @@ import { ConsistencyPolicy, FileStat, MountMode, PathSpec } from '../types.ts'
 import { epochToIso } from '../utils/dates.ts'
 import type { DispatchFn } from './executor/cross_mount.ts'
 import type { Namespace } from './mount/namespace.ts'
+import { effectiveMountMode } from '../context/session_context.ts'
 
 const NOOP_ACCESSOR_INSTANCE = new NOOPAccessor()
 const DISPATCH_READ_OPS = new Set(['read', 'read_bytes'])
@@ -91,7 +92,11 @@ export class Dispatcher {
         return [cached, new IOResult({ reads: { [p.virtual]: cached } })]
       }
     }
-    if (mode === MountMode.READ && this.opsRegistry.find(opName, resource.kind)?.write === true) {
+    const mountPrefix = this.namespace.mountFor(p.virtual)?.prefix ?? '/'
+    if (
+      effectiveMountMode(mountPrefix, mode) === MountMode.READ &&
+      this.opsRegistry.find(opName, resource.kind)?.write === true
+    ) {
       throw new Error(`mount at '${p.virtual}' is read-only`)
     }
     const fullKwargs: OpKwargs =

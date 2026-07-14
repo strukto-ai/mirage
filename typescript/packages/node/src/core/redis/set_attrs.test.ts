@@ -33,7 +33,11 @@ describe.skipIf(skip)('core/redis setAttrs', () => {
   let acc: RedisAccessor
 
   beforeEach(async () => {
-    store = new RedisStore({ url: REDIS_URL, keyPrefix: 'test:setattr:' })
+    store = new RedisStore(
+      REDIS_URL !== undefined
+        ? { url: REDIS_URL, keyPrefix: 'test:setattr:' }
+        : { keyPrefix: 'test:setattr:' },
+    )
     await store.clear()
     await store.addDir('/')
     await store.setFile('/f.txt', new TextEncoder().encode('hello'))

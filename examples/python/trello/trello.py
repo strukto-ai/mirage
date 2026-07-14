@@ -76,6 +76,23 @@ async def main() -> None:
                                     )
     print(await board_result.stdout_str())
 
+    # ── glob expansion: the workspace segment is the pattern, the
+    # literal tail keeps walking (lists workspaces once, then filters).
+    print("=== echo /trello/workspaces/*/boards (mid-path glob) ===")
+    result = await ws.execute("echo /trello/workspaces/*/boards")
+    glob_out = (await result.stdout_str()).strip()
+    print(f"  {glob_out[:200]}")
+    assert glob_out.endswith("/boards"), "mid-path glob did not expand"
+
+    # A glob that matches nothing stays the literal word, so the
+    # command reports it like GNU coreutils.
+    print("=== cat /trello/workspaces/zz-none-*/workspace.json ===")
+    result = await ws.execute("cat /trello/workspaces/zz-none-*/workspace.json"
+                              )
+    glob_err = (await result.stderr_str()).strip()
+    print(f"  exit={result.exit_code}  {glob_err[:120]}")
+    assert result.exit_code == 1 and "zz-none-*" in glob_err
+
     print(f"=== ls -l /trello/workspaces/{first_ws}/boards/ "
           "(mtime from dateLastActivity) ===")
     long_boards = await ws.execute(
@@ -183,6 +200,18 @@ async def main() -> None:
     print("=== find cards -name '*.json' ===")
     result = await ws.execute(
         f'find {list_path}/cards/ -name "*.json" | head -n 5')
+    print(await result.stdout_str())
+
+    # -path matches the display path; -size counts dirs and sizeless
+    # rendered files as 0 (so +0c drops them, -1k keeps them).
+    print("=== find board -path '*cards*' ===")
+    result = await ws.execute(f'find {board_path}/ -path "*cards*" | head -n 5'
+                              )
+    print(await result.stdout_str())
+
+    print("=== find board -maxdepth 1 -size +0c (dirs drop out) ===")
+    result = await ws.execute(f"find {board_path}/ -maxdepth 1 -size +0c")
+    print(f"  exit={result.exit_code}")
     print(await result.stdout_str())
 
     print("=== find board -type d (directory filter) ===")

@@ -37,7 +37,7 @@ logging.basicConfig(
 logging.getLogger("openai.agents").setLevel(logging.DEBUG)
 
 GITHUB_OWNER = os.environ.get("MIRAGE_GITHUB_OWNER", "strukto-ai")
-GITHUB_REPO = os.environ.get("MIRAGE_GITHUB_REPO", "mirage-internal")
+GITHUB_REPO = os.environ.get("MIRAGE_GITHUB_REPO", "mirage")
 GITHUB_REF = os.environ.get("MIRAGE_GITHUB_REF", "main")
 
 

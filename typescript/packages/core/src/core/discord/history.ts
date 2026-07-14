@@ -37,7 +37,7 @@ export interface DiscordMessage extends Record<string, unknown> {
   attachments?: { id: string; [key: string]: unknown }[]
 }
 
-export async function* streamMessagesForDay(
+async function* streamMessagesForDay(
   accessor: DiscordAccessor,
   channelId: string,
   dateStr: string,

@@ -90,6 +90,26 @@ async def main() -> None:
     result = await ws.execute(f'jq ".from" {first_msg}')
     print(await result.stdout_str())
 
+    # find: -name at folder level pushes down to IMAP search; -path and
+    # -size run the local walk (dirs and sizeless entries count as 0, so
+    # +0c drops them and -1k keeps them).
+    print(f"=== find /email/{folder}/ -name '*.email.json' | head -n 5 ===")
+    result = await ws.execute(
+        f'find /email/{folder}/ -name "*.email.json" | head -n 5')
+    print(await result.stdout_str())
+
+    print(f"=== find /email/{folder}/ -path '*{first_date}*'"
+          " | head -n 5 ===")
+    result = await ws.execute(
+        f'find /email/{folder}/ -path "*{first_date}*" | head -n 5')
+    print(await result.stdout_str())
+
+    print(f"=== find /email/{folder}/ -maxdepth 1 -size +0c"
+          " (dirs drop out) ===")
+    result = await ws.execute(f"find /email/{folder}/ -maxdepth 1 -size +0c")
+    print(f"  exit={result.exit_code}")
+    print(await result.stdout_str())
+
     # chmod/chown/touch never hit the IMAP API: attrs land in the
     # workspace namespace (durable, snapshot-captured) and merge into
     # dispatch-level stat.
@@ -128,6 +148,23 @@ async def main() -> None:
             print(f"  stderr: {err[:200]}")
         for line in lines[:3]:
             print(f"  {line[:150]}")
+
+    # ── glob expansion: the folder segment is the pattern, the date
+    # tail keeps walking (lists folders once, then each match's days).
+    glob_folder = folder[:2] + "*"
+    print(f"\n=== echo /email/{glob_folder}/2* (mid-path glob) ===")
+    r = await ws.execute(f"echo /email/{glob_folder}/2*")
+    out = (await r.stdout_str()).strip()
+    print(f"  {out[:200]}")
+    assert f"/email/{folder}/2" in out, "mid-path glob did not expand"
+
+    # A glob that matches nothing stays the literal word, so the
+    # command reports it like GNU coreutils.
+    print("\n=== cat /email/zz-none-*/x.eml (no match) ===")
+    r = await ws.execute("cat /email/zz-none-*/x.eml")
+    err = (await r.stderr_str()).strip()
+    print(f"  exit={r.exit_code}  {err[:120]}")
+    assert r.exit_code == 1 and "zz-none-*" in err
 
 
 if __name__ == "__main__":

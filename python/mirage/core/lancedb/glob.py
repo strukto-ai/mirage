@@ -12,52 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import fnmatch
-import logging
-
 from mirage.accessor.lancedb import LanceDBAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.constants import SCOPE_ERROR
 from mirage.core.lancedb.readdir import readdir
 from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_key, mount_prefix_of
-
-logger = logging.getLogger(__name__)
+from mirage.utils.glob_walk import resolve_glob_with
 
 
 async def resolve_glob(
     accessor: LanceDBAccessor,
     paths: list[PathSpec],
-    index: IndexCacheStore = None,
+    index: IndexCacheStore | None = None,
 ) -> list[PathSpec]:
-    result: list[PathSpec] = []
-    for p in paths:
-        if isinstance(p, str):
-            result.append(
-                PathSpec(virtual=p, directory=p, resource_path=p.strip("/")))
-            continue
-        if p.resolved:
-            result.append(p)
-        elif p.pattern:
-            entries = await readdir(accessor, p.dir, index)
-            matched = [
-                PathSpec(
-                    virtual=e,
-                    directory=p.directory,
-                    resource_path=mount_key(
-                        e, mount_prefix_of(p.virtual, p.resource_path)),
-                ) for e in entries
-                if fnmatch.fnmatch(e.rsplit("/", 1)[-1], p.pattern)
-            ]
-            if len(matched) > SCOPE_ERROR:
-                logger.warning(
-                    "%s: %d matches exceeds limit (%d), truncating",
-                    p.directory,
-                    len(matched),
-                    SCOPE_ERROR,
-                )
-                matched = matched[:SCOPE_ERROR]
-            result.extend(matched)
-        else:
-            result.append(p)
-    return result
+    return await resolve_glob_with(readdir, accessor, paths, index,
+                                   SCOPE_ERROR)

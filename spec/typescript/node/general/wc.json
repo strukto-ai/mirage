@@ -1,8 +1,11 @@
 {
   "_meta": {
     "filetypes": [
+      ".arrow",
       ".feather",
       ".h5",
+      ".hdf5",
+      ".ipc",
       ".parquet"
     ],
     "has_aggregate": true,
@@ -33,6 +36,7 @@
       "mongodb",
       "notion",
       "postgres",
+      "qdrant",
       "ram",
       "redis",
       "s3",
@@ -48,40 +52,51 @@
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-l",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-w",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-c",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-m",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     },
     {
       "description": null,
       "long": null,
       "numeric_shorthand": false,
+      "repeatable": false,
       "short": "-L",
-      "value_kind": "none"
+      "value_kind": "none",
+      "value_optional": false
     }
   ],
   "positional": [],
   "rest": {
-    "kind": "path"
+    "kind": "path",
+    "provided_by": []
   }
 }

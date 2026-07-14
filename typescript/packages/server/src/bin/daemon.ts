@@ -14,15 +14,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname } from 'node:path'
 import { buildApp, type BuildAppOptions, type MirageApp } from '../app.ts'
-import {
-  ENV_DAEMON_PORT,
-  ENV_IDLE_GRACE_SECONDS,
-  ENV_SNAPSHOT_ROOT,
-  ENV_VERSION_ROOT,
-} from '../env.ts'
+import { DaemonConfigError, readDaemonTable } from '../daemon_config.ts'
+import { ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS } from '../env.ts'
+import { mirageHome } from '../paths.ts'
 
 const DEFAULT_PORT = 8765
 
@@ -32,30 +28,21 @@ export interface DaemonEnvOpts {
 }
 
 export function buildDaemonOpts(env: Record<string, string | undefined>): DaemonEnvOpts {
-  const port = Number(env[ENV_DAEMON_PORT] ?? DEFAULT_PORT)
+  const configPort = readDaemonTable(mirageHome(env)).port
+  const port = Number(env[ENV_DAEMON_PORT] ?? configPort ?? DEFAULT_PORT)
   const idleGraceSeconds = Number(env[ENV_IDLE_GRACE_SECONDS] ?? '30')
-  const versionRoot = env[ENV_VERSION_ROOT]
-  const snapshotRoot = env[ENV_SNAPSHOT_ROOT]
-  const opts: Omit<BuildAppOptions, 'onIdleExit'> = {
-    idleGraceSeconds,
-    ...(versionRoot !== undefined ? { versionRoot } : {}),
-    ...(snapshotRoot !== undefined ? { snapshotRoot } : {}),
-  }
+  const opts: Omit<BuildAppOptions, 'onIdleExit'> = { idleGraceSeconds }
   return { port, opts }
 }
 
-function pidFilePath(): string {
-  return join(homedir(), '.mirage', 'daemon.pid')
+function writePidFile(p: string): void {
+  mkdirSync(dirname(p), { recursive: true })
+  writeFileSync(p, String(process.pid))
 }
 
-function writePidFile(): void {
-  mkdirSync(join(homedir(), '.mirage'), { recursive: true })
-  writeFileSync(pidFilePath(), String(process.pid))
-}
-
-function removePidFile(): void {
+function removePidFile(p: string): void {
   try {
-    unlinkSync(pidFilePath())
+    unlinkSync(p)
   } catch {
     // file already gone; nothing to clean up.
   }
@@ -75,7 +62,7 @@ async function main(): Promise<void> {
         console.error('daemon close error:', err)
       })
       .finally(() => {
-        removePidFile()
+        removePidFile(app.pidFile)
         process.exit(0)
       })
   }
@@ -83,10 +70,14 @@ async function main(): Promise<void> {
   process.on('SIGTERM', triggerExit)
   process.on('SIGINT', triggerExit)
   await app.listen({ port, host: '127.0.0.1' })
-  writePidFile()
+  writePidFile(app.pidFile)
 }
 
 main().catch((err: unknown) => {
+  if (err instanceof DaemonConfigError) {
+    console.error(err.message)
+    process.exit(2)
+  }
   console.error(err)
   process.exit(1)
 })

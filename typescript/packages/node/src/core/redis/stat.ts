@@ -52,10 +52,10 @@ export async function stat(
       name: basename(p),
       modified: await store.getModified(p),
       type: FileType.DIRECTORY,
-      mode: attrs.mode,
-      uid: attrs.uid,
-      gid: attrs.gid,
-      atime: attrs.atime,
+      mode: attrs.mode ?? null,
+      uid: attrs.uid ?? null,
+      gid: attrs.gid ?? null,
+      atime: attrs.atime ?? null,
     })
   }
   if (await store.hasFile(p)) {
@@ -66,10 +66,10 @@ export async function stat(
       size,
       modified: await store.getModified(p),
       type: guessType(p),
-      mode: attrs.mode,
-      uid: attrs.uid,
-      gid: attrs.gid,
-      atime: attrs.atime,
+      mode: attrs.mode ?? null,
+      uid: attrs.uid ?? null,
+      gid: attrs.gid ?? null,
+      atime: attrs.atime ?? null,
     })
   }
   throw enoent(path)

@@ -27,7 +27,7 @@ export interface GSheetsConfigRedacted {
   refreshToken: '<REDACTED>'
 }
 
-export const GSheetsConfigSchema = z.object({
+const GSheetsConfigSchema = z.object({
   clientId: z.string(),
   clientSecret: secretStr(),
   refreshToken: secretStr(),

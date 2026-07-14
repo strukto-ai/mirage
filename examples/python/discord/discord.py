@@ -242,6 +242,25 @@ async def main():
             f"regression: find chat.jsonl exited {r.exit_code} "
             "(soft errors should not abort)")
 
+    # -path matches the display path; -size counts dirs and sizeless
+    # rendered files as 0 (so +0c drops them, -1k keeps them).
+    print(f"\n=== find /discord/{guild}/ -path '*channels*' | head -n 5 ===")
+    r = await ws.execute(f'find "/discord/{guild}/" -path "*channels*"'
+                         ' | head -n 5')
+    print(f"  exit={r.exit_code}")
+    out = (await r.stdout_str()).strip()
+    if out:
+        for line in out.splitlines():
+            print(f"  {line}")
+    if r.exit_code != 0 or not out:
+        raise AssertionError("regression: find -path returned nothing")
+
+    print(f"\n=== find /discord/{guild}/ -maxdepth 1 -size +0c ===")
+    r = await ws.execute(f'find "/discord/{guild}/" -maxdepth 1 -size +0c')
+    print(f"  exit={r.exit_code} (dirs count as size 0, expect no output)")
+    if (await r.stdout_str()).strip():
+        raise AssertionError("regression: -size +0c matched a directory")
+
     # ── pwd / cd / relative ──────────────────────────
     print(f"\n=== cd {base} ===")
     r = await ws.execute(f'cd "{base}"')
@@ -271,6 +290,29 @@ async def main():
         print(f"  {body[:200]}")
     else:
         print("  (no members visible)")
+
+    # ── glob expansion: a mid-path glob replaces the guild segment
+    # (which may contain spaces) and walks into the literal tail.
+    print("\n=== echo /discord/*/channels (mid-path glob) ===")
+    r = await ws.execute("echo /discord/*/channels")
+    out = (await r.stdout_str()).strip()
+    print(f"  {out[:200]}")
+    assert out.endswith("/channels"), "mid-path glob did not expand"
+
+    print("\n=== for f in /discord/*/channels/* (channel glob loop) ===")
+    r = await ws.execute(
+        "for f in /discord/*/channels/*; do echo found:$f; done | head -n 3")
+    out = (await r.stdout_str()).strip()
+    for line in out.splitlines():
+        print(f"  {line[:120]}")
+
+    # A glob that matches nothing stays the literal word, so the
+    # command reports it like GNU coreutils.
+    print("\n=== cat /discord/zz-none-*/guild.json (no match) ===")
+    r = await ws.execute("cat /discord/zz-none-*/guild.json")
+    err = (await r.stderr_str()).strip()
+    print(f"  exit={r.exit_code}  {err[:120]}")
+    assert r.exit_code == 1 and "zz-none-*" in err
 
 
 if __name__ == "__main__":

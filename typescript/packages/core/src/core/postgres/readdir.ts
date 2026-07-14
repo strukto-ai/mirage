@@ -35,7 +35,9 @@ export async function readdir(
   const scope = detectScope(
     new PathSpec({ virtual: raw, directory: raw, resourcePath: mountKey(raw, prefix) }),
   )
-  const virtualKey = (prefix !== '' ? prefix : '') + raw
+  // Canonical key: no trailing slash (except root), or the same dir
+  // indexes under two keys and cache hits return doubled-slash entries.
+  const virtualKey = rstripSlash((prefix !== '' ? prefix : '') + raw) || '/'
 
   if (scope.level === 'root') {
     return listRoot(accessor, virtualKey, index, prefix)
@@ -126,4 +128,10 @@ async function listEntities(
   if (index !== undefined) await index.setDir(virtualKey, entries)
   const base = rstripSlash(raw)
   return entries.map(([n]) => `${prefix}${base}/${n}`)
+}
+export function isDirName(child: string): boolean {
+  // Entries are recognized by extension, so classification never needs
+  // the stat fallback.
+  const name = child.split('/').pop() ?? ''
+  return !(name.endsWith('.json') || name.endsWith('.jsonl'))
 }

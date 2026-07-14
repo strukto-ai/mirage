@@ -42,3 +42,14 @@ Other command groups: `session`, `provision`, `daemon`, plus
 | `MIRAGE_AUTH_TOKEN`         | (auto-minted in `local`)  | Token the daemon accepts                                                          |
 | `MIRAGE_IDLE_GRACE_SECONDS` | `30`                      | Seconds the daemon waits after its last workspace is removed before shutting down |
 | `MIRAGE_ALLOWED_HOSTS`      | `127.0.0.1,localhost,::1` | Daemon Host-header allowlist (CSV; `*` disables the check)                        |
+| `MIRAGE_DAEMON_PORT`        | `8765`                    | Port the spawned daemon binds                                                     |
+| `MIRAGE_PID_FILE`           | `~/.mirage/daemon.pid`    | Daemon pid file location                                                          |
+| `MIRAGE_VERSION_ROOT`       | `~/.mirage/repos`         | Bare git repos backing workspace versioning                                       |
+| `MIRAGE_SNAPSHOT_ROOT`      | `~/.mirage/snapshots`     | Snapshot storage root                                                             |
+
+Every daemon setting (except the bootstrap `MIRAGE_HOME` and raw
+secrets) can also live in `~/.mirage/config.toml` under `[daemon]`,
+managed with `mirage config list|get|set|unset`. Per key the
+precedence is: env var > config.toml > default. `mirage config list --resolved` prints the effective value of every key and where it came
+from. The daemon validates the `[daemon]` table at startup and
+refuses to start on unknown keys or malformed TOML; `mirage config unset <key>` accepts unknown keys so a broken file can be repaired.

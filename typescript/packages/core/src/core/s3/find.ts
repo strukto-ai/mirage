@@ -87,11 +87,13 @@ export async function find(
         ) {
           continue
         }
-        if (!isDir) {
-          if (options.minSize !== null && options.minSize !== undefined && size < options.minSize) {
+        if (options.minSize != null || options.maxSize != null) {
+          // Directories count as size 0 for -size (deliberate GNU divergence).
+          const effective = isDir ? 0 : size
+          if (options.minSize != null && effective < options.minSize) {
             continue
           }
-          if (options.maxSize !== null && options.maxSize !== undefined && size > options.maxSize) {
+          if (options.maxSize != null && effective > options.maxSize) {
             continue
           }
         }
@@ -109,6 +111,8 @@ export async function find(
       tree,
       maxDepth: options.maxDepth,
       minDepth: options.minDepth,
+      minSize: options.minSize,
+      maxSize: options.maxSize,
     })
   }
   return results.sort()

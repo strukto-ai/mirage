@@ -217,7 +217,8 @@ describe.skipIf(skip)('core/redis ops', () => {
     await writeBytes(acc, spec('/b.txt'), ENC.encode('.'))
     const entries = await readdir(acc, spec('/data', '/data'), index)
     expect(entries.sort()).toEqual(['/data/a.txt', '/data/b.txt'])
-    const cached = await index.listDir('/data/')
+    // readdir stores under the canonical key: no trailing slash except root.
+    const cached = await index.listDir('/data')
     expect(cached.status).toBeUndefined()
     expect(cached.entries).toBeDefined()
   })
@@ -239,7 +240,7 @@ describe.skipIf(skip)('core/redis ops', () => {
     await writeBytes(acc, spec('/c.txt'), ENC.encode('.'))
     const fresh = await readdir(acc, spec('/data', '/data'))
     expect(fresh).toContain('/data/c.txt')
-    const evicted = await index.listDir('/data/')
+    const evicted = await index.listDir('/data')
     expect(evicted.status !== LookupStatus.NOT_FOUND || evicted.entries === undefined).toBe(true)
   })
 

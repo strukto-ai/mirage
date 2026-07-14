@@ -17,7 +17,9 @@ import stat
 
 import pytest
 
-from mirage.server.auth.storage import ensure_token_file, read_token_file
+from mirage.server.auth.storage import (default_token_file, ensure_token_file,
+                                        read_token_file)
+from mirage.server.env import ENV_HOME
 
 
 @pytest.mark.no_host_override
@@ -50,3 +52,9 @@ def test_read_token_file_returns_stripped_contents(tmp_path):
     target = tmp_path / "auth_token"
     target.write_text("  abc-def  \n")
     assert read_token_file(target) == "abc-def"
+
+
+@pytest.mark.no_host_override
+def test_default_token_file_follows_mirage_home(tmp_path, monkeypatch):
+    monkeypatch.setenv(ENV_HOME, str(tmp_path))
+    assert default_token_file() == tmp_path / "auth_token"

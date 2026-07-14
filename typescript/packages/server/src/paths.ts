@@ -12,7 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { resolve, sep } from 'node:path'
+import { homedir } from 'node:os'
+import { join, resolve, sep } from 'node:path'
+import { readDaemonTable } from './daemon_config.ts'
+import { ENV_HOME, ENV_PID_FILE, ENV_SNAPSHOT_ROOT, ENV_VERSION_ROOT } from './env.ts'
 
 export class PathOutsideRootError extends Error {
   constructor(message: string) {
@@ -22,6 +25,50 @@ export class PathOutsideRootError extends Error {
 }
 
 const SAFE_SEGMENT_RE = /^[A-Za-z0-9._-]+$/
+
+export function mirageHome(env: Record<string, string | undefined> = process.env): string {
+  const override = env[ENV_HOME]
+  return override !== undefined && override !== '' ? resolve(override) : join(homedir(), '.mirage')
+}
+
+export function pidFilePath(
+  explicit?: string,
+  env: Record<string, string | undefined> = process.env,
+): string {
+  if (explicit !== undefined) return resolve(explicit)
+  const override = env[ENV_PID_FILE]
+  if (override !== undefined && override !== '') return resolve(override)
+  const home = mirageHome(env)
+  const fromConfig = readDaemonTable(home).pid_file
+  if (fromConfig !== undefined && fromConfig !== '') return resolve(fromConfig)
+  return join(home, 'daemon.pid')
+}
+
+export function versionRootPath(
+  explicit?: string,
+  env: Record<string, string | undefined> = process.env,
+): string {
+  if (explicit !== undefined) return resolve(explicit)
+  const override = env[ENV_VERSION_ROOT]
+  if (override !== undefined && override !== '') return resolve(override)
+  const home = mirageHome(env)
+  const fromConfig = readDaemonTable(home).version_root
+  if (fromConfig !== undefined && fromConfig !== '') return resolve(fromConfig)
+  return join(home, 'repos')
+}
+
+export function snapshotRootPath(
+  explicit?: string,
+  env: Record<string, string | undefined> = process.env,
+): string {
+  if (explicit !== undefined) return resolve(explicit)
+  const override = env[ENV_SNAPSHOT_ROOT]
+  if (override !== undefined && override !== '') return resolve(override)
+  const home = mirageHome(env)
+  const fromConfig = readDaemonTable(home).snapshot_root
+  if (fromConfig !== undefined && fromConfig !== '') return resolve(fromConfig)
+  return join(home, 'snapshots')
+}
 
 export function resolveWithinRoot(root: string, userPath: string): string {
   const resolvedRoot = resolve(root)

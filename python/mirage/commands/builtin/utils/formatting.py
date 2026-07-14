@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
 from datetime import datetime, timezone
 
 from mirage.types import FileStat, FileType
@@ -20,6 +21,14 @@ _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
            "Oct", "Nov", "Dec")
 
 EPOCH_LS_TIME = "Jan  1 00:00"
+
+_SIZE_UNITS = {
+    "B": 1,
+    "K": 1024,
+    "M": 1024**2,
+    "G": 1024**3,
+    "T": 1024**4,
+}
 
 
 def _human_size(n: int) -> str:
@@ -36,6 +45,17 @@ def _human_size(n: int) -> str:
 def _perm_triplet(bits: int) -> str:
     return (("r" if bits & 4 else "-") + ("w" if bits & 2 else "-") +
             ("x" if bits & 1 else "-"))
+
+
+def parse_size(text: str) -> int:
+    """Invert ``_human_size``: ``4.0K`` -> 4096, plain digits pass through.
+
+    Args:
+        text (str): size text, optionally suffixed with B/K/M/G/T.
+    """
+    if text and text[-1] in _SIZE_UNITS:
+        return round(float(text[:-1]) * _SIZE_UNITS[text[-1]])
+    return int(text)
 
 
 def _ls_mode_string(s: FileStat) -> str:
@@ -88,3 +108,25 @@ def format_ls_long(
         grp = str(s.gid) if s.gid is not None else group
         out.append(f"{mode} 1 {who} {grp} {size} {time} {s.name}")
     return out
+
+
+NUMERIC_PREFIX = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?")
+
+
+def to_number(val: str) -> float:
+    """Coerce a string to a number with GNU awk semantics.
+
+    Args:
+        val (str): raw token; the leading numeric prefix counts, else 0.
+    """
+    m = NUMERIC_PREFIX.match(val.strip())
+    return float(m.group(0)) if m else 0.0
+
+
+def format_number(val: float) -> str:
+    """Render an awk numeric value, collapsing integral floats.
+
+    Args:
+        val (float): numeric value to render.
+    """
+    return str(int(val)) if val == int(val) else str(val)

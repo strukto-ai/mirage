@@ -14,22 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { specOf } from './builtins.ts'
-import { parseCommand, parseToKwargs, resolvePath } from './parser.ts'
+import { parseCommand, parseToKwargs } from './parser.ts'
 import { CommandSpec, Operand, OperandKind, Option, ParsedArgs } from './types.ts'
-
-describe('resolvePath', () => {
-  it('passes through absolute paths', () => {
-    expect(resolvePath('/cwd', '/abs/path')).toBe('/abs/path')
-  })
-
-  it('joins relative paths with cwd', () => {
-    expect(resolvePath('/cwd/sub', 'file.txt')).toBe('/cwd/sub/file.txt')
-  })
-
-  it('normalizes .. segments', () => {
-    expect(resolvePath('/cwd/sub', '../file.txt')).toBe('/cwd/file.txt')
-  })
-})
 
 describe('parseCommand — bool short flags', () => {
   const spec = new CommandSpec({
@@ -146,9 +132,10 @@ describe('parseCommand — positional classification', () => {
     ])
   })
 
-  it('drops extra args when no rest', () => {
+  it('passes overflow args through like the last slot when no rest', () => {
     const p = parseCommand(spec, ['pattern', '/ram/x', 'extra'], '/')
-    expect(p.args).toHaveLength(2)
+    expect(p.args).toHaveLength(3)
+    expect(p.args[2]?.[1]).toBe(OperandKind.PATH)
   })
 })
 
@@ -199,13 +186,13 @@ describe('parseCommand — clustered flags shift positionals when one is missing
     rest: new Operand({ kind: OperandKind.PATH }),
   })
 
-  it('drops the cluster with a warning when -I is missing from the spec', () => {
+  it('reports the missing cluster char without shifting positionals', () => {
     const p = parseCommand(grepLikeMissingI, ['-RIl', 'Base3\\|base3', '/r2/Review'], '/')
-    // -RIl can't fully resolve; it is dropped with a warning instead of
-    // becoming the pattern and shifting the real pattern into the paths.
+    // -RIl can't fully resolve; the offending char is reported instead of
+    // the token becoming the pattern and shifting the real pattern.
     expect(p.texts()).toEqual(['Base3\\|base3'])
     expect(p.paths()).toEqual(['/r2/Review'])
-    expect(p.warnings.some((w) => w.includes('-RIl'))).toBe(true)
+    expect(p.invalidOptions).toEqual(['I'])
   })
 
   it('correctly assigns pattern + path once -I is registered', () => {
@@ -347,21 +334,52 @@ describe('parseCommand — GNU long flag =value syntax', () => {
     expect(p.paths()).toEqual(['/x'])
   })
 
-  it('unknown long flag with = is dropped with a warning', () => {
-    const p = parseCommand(specOf('grep'), ['--color=auto', 'pat', '/a.txt'], '/')
-    expect(p.flags['--color']).toBeUndefined()
+  it('unknown long flag with = is reported as invalid', () => {
+    const p = parseCommand(specOf('grep'), ['--bogus=x', 'pat', '/a.txt'], '/')
+    expect(p.flags['--bogus']).toBeUndefined()
     expect(p.texts()).toEqual(['pat'])
     expect(p.paths()).toEqual(['/a.txt'])
-    expect(p.warnings.some((w) => w.includes('--color=auto'))).toBe(true)
+    expect(p.invalidOptions).toEqual(['--bogus=x'])
+    expect(p.warnings).toEqual([])
+  })
+})
+
+describe('parseCommand — optional-value long options', () => {
+  it('bare form is boolean and never consumes the next token', () => {
+    const p = parseCommand(specOf('grep'), ['--color', 'world', '/a.txt'], '/')
+    expect(p.flags['--color']).toBe(true)
+    expect(p.texts()).toEqual(['world'])
+    expect(p.paths()).toEqual(['/a.txt'])
+    expect(p.warnings).toEqual([])
+  })
+
+  it('equals form carries the value', () => {
+    const p = parseCommand(specOf('grep'), ['--color=auto', 'world', '/a.txt'], '/')
+    expect(p.flags['--color']).toBe('auto')
+    expect(p.warnings).toEqual([])
+  })
+
+  it('ls --color keeps its path operand', () => {
+    const p = parseCommand(specOf('ls'), ['--color', '/data'], '/')
+    expect(p.flags['--color']).toBe(true)
+    expect(p.paths()).toEqual(['/data'])
   })
 })
 
 describe('parseCommand — unknown dash tokens warn and drop', () => {
-  it('drops unknown long flags from operands', () => {
+  it('reports unknown long flags and keeps operands aligned', () => {
     const p = parseCommand(specOf('grep'), ['--bogus', 'pat', '/a.txt'], '/')
     expect(p.texts()).toEqual(['pat'])
     expect(p.paths()).toEqual(['/a.txt'])
-    expect(p.warnings.some((w) => w.includes('--bogus'))).toBe(true)
+    expect(p.invalidOptions).toEqual(['--bogus'])
+  })
+
+  it('reports missing values for declared flags', () => {
+    expect(parseCommand(specOf('grep'), ['-m'], '/').needsValueOptions).toEqual(['m'])
+    expect(parseCommand(specOf('du'), ['--max-depth'], '/').needsValueOptions).toEqual([
+      '--max-depth',
+    ])
+    expect(parseCommand(specOf('grep'), ['-ne'], '/').needsValueOptions).toEqual(['e'])
   })
 
   it('keeps dash tokens for TEXT-rest commands', () => {
@@ -405,11 +423,11 @@ describe('parseCommand — clusters ending in a value flag (getopt)', () => {
     expect(p.texts()).toEqual(['pat'])
   })
 
-  it('unknown char in cluster drops the token with a warning', () => {
+  it('unknown char in cluster reports the offending char', () => {
     const p = parseCommand(specOf('grep'), ['-nx', 'pat', '/a.txt'], '/')
     expect(p.flags['-n']).toBeUndefined()
     expect(p.texts()).toEqual(['pat'])
-    expect(p.warnings.some((w) => w.includes('-nx'))).toBe(true)
+    expect(p.invalidOptions).toEqual(['x'])
   })
 
   it('find multi-char short flags still work', () => {
@@ -438,5 +456,48 @@ describe('parseToKwargs', () => {
   it('maps -1 to args_1 (numeric flag, not a valid JS identifier)', () => {
     const parsed = new ParsedArgs({ flags: { '-1': true }, args: [] })
     expect(parseToKwargs(parsed)).toEqual({ args_1: true })
+  })
+})
+
+describe('parseCommand — awk spec', () => {
+  it('accumulates repeated -v assignments', () => {
+    const p = parseCommand(
+      specOf('awk'),
+      ['-v', 'a=1', '-v', 'b=2', '{print a, b}', '/data/x.txt'],
+      '/',
+    )
+    expect(p.flags['-v']).toEqual(['a=1', 'b=2'])
+    expect(p.texts()).toEqual(['{print a, b}'])
+    expect(p.paths()).toEqual(['/data/x.txt'])
+  })
+
+  it('accumulates repeated -f program files', () => {
+    const p = parseCommand(specOf('awk'), ['-f', '/p1.awk', '-f', '/p2.awk', '/data/a.txt'], '/')
+    expect(p.flags['-f']).toEqual(['/p1.awk', '/p2.awk'])
+    expect(p.texts()).toEqual([])
+    expect(p.paths()).toEqual(['/data/a.txt'])
+  })
+
+  it('frees the program slot when -f is present', () => {
+    const p = parseCommand(specOf('awk'), ['-f', '/prog.awk', '/data/a.txt', '/data/b.txt'], '/')
+    expect(p.texts()).toEqual([])
+    expect(p.paths()).toEqual(['/data/a.txt', '/data/b.txt'])
+  })
+})
+
+describe('overflow operand pass-through', () => {
+  it('classifies overflow like the last positional slot', () => {
+    const uniq = parseCommand(specOf('uniq'), ['a.txt', 'b.txt', 'c.txt'], '/data')
+    expect(uniq.args.map(([, k]) => k)).toEqual([
+      OperandKind.PATH,
+      OperandKind.PATH,
+      OperandKind.PATH,
+    ])
+    const tr = parseCommand(specOf('tr'), ['a', 'b', 'extra.txt'], '/data')
+    expect(tr.args.map(([, k]) => k)).toEqual([
+      OperandKind.TEXT,
+      OperandKind.TEXT,
+      OperandKind.TEXT,
+    ])
   })
 })

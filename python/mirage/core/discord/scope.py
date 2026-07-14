@@ -73,10 +73,6 @@ async def detect_scope(
         /<guild>/channels/<ch>/<date>/files            → files
         /<guild>/channels/<ch>/<date>/files/<blob>     → file_blob
     """
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
 
     prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
 

@@ -19,9 +19,8 @@ import {
   createShellParser,
   type ExecuteOptions,
   type ExecuteResult,
-  type MountMode,
+  type MountSpec,
   type ProvisionResult,
-  type Resource,
   type ShellParser,
   Workspace as CoreWorkspace,
   type WorkspaceOptions,
@@ -52,28 +51,26 @@ export class Workspace extends CoreWorkspace {
   private readonly fuseMountpointsMap = new Map<string, string>()
   private readonly fuseManagers = new Map<string, FuseManager>()
 
-  constructor(resources: Record<string, Resource | Mount>, options: NodeWorkspaceOptions = {}) {
-    const bareResources: Record<string, Resource> = {}
-    const modeOverrides: Record<string, MountMode> = { ...(options.modeOverrides ?? {}) }
+  constructor(resources: Record<string, MountSpec | Mount>, options: NodeWorkspaceOptions = {}) {
+    const specs: Record<string, MountSpec> = {}
     const commandSafeguards: Record<string, Record<string, CommandSafeguard>> = {
       ...(options.commandSafeguards ?? {}),
     }
     const fuseTargets: [string, boolean | string][] = []
     for (const [prefix, value] of Object.entries(resources)) {
       if (value instanceof Mount) {
-        bareResources[prefix] = value.resource
-        if (value.options.mode !== undefined) modeOverrides[prefix] = value.options.mode
+        specs[prefix] =
+          value.options.mode !== undefined ? [value.resource, value.options.mode] : value.resource
         if (value.options.commandSafeguards !== undefined)
           commandSafeguards[prefix] = value.options.commandSafeguards
         if (value.options.fuse !== undefined && value.options.fuse !== false)
           fuseTargets.push([prefix, value.options.fuse])
       } else {
-        bareResources[prefix] = value
+        specs[prefix] = value
       }
     }
-    super(bareResources, {
+    super(specs, {
       ...options,
-      ...(Object.keys(modeOverrides).length > 0 ? { modeOverrides } : {}),
       ...(Object.keys(commandSafeguards).length > 0 ? { commandSafeguards } : {}),
       shellParserFactory: options.shellParserFactory ?? loadShellParser,
     })

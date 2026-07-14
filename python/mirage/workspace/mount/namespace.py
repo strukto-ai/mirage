@@ -70,13 +70,6 @@ class Namespace:
     def nodes(self) -> dict[str, NodeMeta]:
         return self._nodes
 
-    @property
-    def symlinks(self) -> dict[str, NodeMeta]:
-        return {
-            path: meta
-            for path, meta in self._nodes.items() if meta.target is not None
-        }
-
     def replace_nodes(self, entries: dict[str, NodeMeta]) -> None:
         self._nodes = dict(entries)
 

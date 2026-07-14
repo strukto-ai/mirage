@@ -46,7 +46,7 @@ async def set_attrs(
     store = accessor.store
     p = norm(path.mount_path)
     if not (await store.has_file(p) or await store.has_dir(p)):
-        raise enoent(path.display)
+        raise enoent(path.raw_path)
     fields: dict[str, str] = {}
     if mode is not None:
         fields["mode"] = str(mode)

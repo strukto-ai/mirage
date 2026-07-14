@@ -12,12 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
+
 from mirage.accessor.github_ci import GitHubCIAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.core.github_ci.readdir import readdir as _readdir
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
+
+logger = logging.getLogger(__name__)
 
 VIRTUAL_DIRS = {"workflows", "runs", "jobs", "artifacts"}
 
@@ -40,9 +44,9 @@ async def _lookup_with_fallback(
                      resource_path=mount_key(parent_virtual, prefix)),
             index=index,
         )
-    # best-effort cache populate; canonical ENOENT raised below
-    except Exception:
-        pass
+    except Exception as exc:
+        # best-effort cache populate; canonical ENOENT raised below
+        logger.debug("stat populate failed for %s: %s", virtual_key, exc)
     return await index.get(virtual_key)
 
 
@@ -51,10 +55,6 @@ async def stat(
     path: PathSpec,
     index: IndexCacheStore = None,
 ) -> FileStat:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     key = path.resource_path

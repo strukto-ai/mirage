@@ -76,7 +76,7 @@ async function main(): Promise<void> {
   const resource = await GitHubResource.create({
     token: TOKEN!,
     owner: "strukto-ai",
-    repo: "mirage-internal",
+    repo: "mirage",
     ref: "main",
   });
   const ws = new Workspace({ "/github": resource }, { mode: MountMode.READ });

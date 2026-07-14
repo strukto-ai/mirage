@@ -58,9 +58,9 @@ id,value,label
 id,value,label
 5,7.5,item_5
 === s3:ls_glob_parquet ===
-example.parquet
+/s3/data/example.parquet
 === s3:ls_file_json ===
-example.json
+/s3/data/example.json
 === s3:find_json ===
 /s3/data/example.json
 === s3:find_type_f ===
@@ -188,9 +188,9 @@ id,value,label
 id,value,label
 5,7.5,item_5
 === gcs:ls_glob_parquet ===
-example.parquet
+/gcs/data/example.parquet
 === gcs:ls_file_json ===
-example.json
+/gcs/data/example.json
 === gcs:find_json ===
 /gcs/data/example.json
 === gcs:find_type_f ===
@@ -318,9 +318,9 @@ id,value,label
 id,value,label
 5,7.5,item_5
 === minio:ls_glob_parquet ===
-example.parquet
+/minio/data/example.parquet
 === minio:ls_file_json ===
-example.json
+/minio/data/example.json
 === minio:find_json ===
 /minio/data/example.json
 === minio:find_type_f ===
@@ -448,9 +448,9 @@ id,value,label
 id,value,label
 5,7.5,item_5
 === seaweedfs:ls_glob_parquet ===
-example.parquet
+/seaweedfs/data/example.parquet
 === seaweedfs:ls_file_json ===
-example.json
+/seaweedfs/data/example.json
 === seaweedfs:find_json ===
 /seaweedfs/data/example.json
 === seaweedfs:find_type_f ===

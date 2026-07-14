@@ -37,10 +37,6 @@ async def readdir(
         index (IndexCacheStore | None): index cache.
         prefix (str): mount prefix for virtual index keys.
     """
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     path = (path.dir if path.pattern else path).mount_path
@@ -317,3 +313,10 @@ async def _readdir_dataset_runs(
     if index is not None:
         await index.set_dir(virtual_key, entries)
     return names
+
+
+def is_dir_name(child: str) -> bool:
+    # Entries are recognized by extension, so classification never needs
+    # the stat fallback.
+    name = child.rsplit("/", 1)[-1]
+    return not (name.endswith(".json") or name.endswith(".jsonl"))

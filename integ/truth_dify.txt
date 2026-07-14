@@ -26,7 +26,15 @@ quickstart
 === find_root_name ===
 /knowledge
 === stat_fmt ===
-190 /knowledge/guides/auth
+0 /knowledge/guides/auth
+=== find_size_plus_1c ===
+
+=== find_size_under_1k ===
+/knowledge/CHANGELOG.md
+/knowledge/guides/auth
+/knowledge/guides/quickstart
+/knowledge/policies/privacy
+/knowledge/policies/refunds
 === cat_auth ===
 Authentication uses bearer tokens via the Authorization header.
 Requests are rate limited to 100 calls per minute per token.
@@ -112,3 +120,8 @@ net=0 write=0 cache=190 ops=1 hits=1 precision=exact
 net=0 write=0 cache=190 ops=1 hits=1 precision=exact
 === prov_probe_ls ===
 net=0 write=0 cache=0 ops=1 hits=0 precision=exact
+=== sed_stream_1p ===
+Authentication uses bearer tokens via the Authorization header.
+=== sed_i_readonly ===
+exit=1
+sed: -i not supported on this backend: Permission denied

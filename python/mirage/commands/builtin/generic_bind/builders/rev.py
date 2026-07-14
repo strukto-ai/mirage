@@ -19,8 +19,8 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.rev import rev as generic_rev
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           with_index)
-from mirage.commands.builtin.generic_bind.builders.common import \
-    resolve_or_empty
+from mirage.commands.builtin.generic_bind.builders.common import (
+    merge_split_errors, resolve_readable)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -34,11 +34,14 @@ async def rev(
     index: IndexCacheStore | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
-    paths = await resolve_or_empty(ops, accessor, paths, index)
-    return await generic_rev(paths,
-                             read_bytes=with_index(ops.read_bytes, index),
-                             accessor=accessor,
-                             stdin=stdin)
+    paths, err = await resolve_readable(ops, accessor, paths, index, "rev")
+    if err and not paths:
+        return None, IOResult(exit_code=1, stderr=err)
+    return await merge_split_errors(
+        await generic_rev(paths,
+                          read_bytes=with_index(ops.read_bytes, index),
+                          accessor=accessor,
+                          stdin=stdin), err)
 
 
 BUILDER = Builder('rev', rev, None, False, None, read=True)

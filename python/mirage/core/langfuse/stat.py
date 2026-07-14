@@ -34,10 +34,6 @@ async def stat(
         index (IndexCacheStore | None): index cache.
         prefix (str): mount prefix for virtual index keys.
     """
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual
     mount_prefix_of(path.virtual, path.resource_path)
     key = path.resource_path

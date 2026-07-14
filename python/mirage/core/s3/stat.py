@@ -32,10 +32,6 @@ def _is_not_found(exc: Exception) -> bool:
 async def stat(accessor: S3Accessor,
                path: PathSpec,
                index: IndexCacheStore = None) -> FileStat:
-    if isinstance(path, str):
-        path = PathSpec(virtual=path,
-                        directory=path,
-                        resource_path=path.strip("/"))
     virtual = path.virtual if isinstance(path, PathSpec) else path
     original_prefix = ""
     if isinstance(path, PathSpec):

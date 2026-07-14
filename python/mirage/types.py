@@ -94,6 +94,47 @@ class MountMode(str, Enum):
     EXEC = "exec"
 
 
+MOUNT_MODE_RANK: dict[MountMode, int] = {
+    MountMode.READ: 1,
+    MountMode.WRITE: 2,
+    MountMode.EXEC: 3,
+}
+
+
+def weaker_mode(a: MountMode, b: MountMode) -> MountMode:
+    """The weaker of two mount modes on the READ < WRITE < EXEC lattice.
+
+    Args:
+        a (MountMode): first mode.
+        b (MountMode): second mode.
+    """
+    return a if MOUNT_MODE_RANK[a] <= MOUNT_MODE_RANK[b] else b
+
+
+MOUNT_MODE_ALIASES: dict[str, MountMode] = {
+    "r": MountMode.READ,
+    "rw": MountMode.WRITE,
+    "rwx": MountMode.EXEC,
+}
+
+
+def parse_mount_mode(value: MountMode | str) -> MountMode:
+    """Coerce a mount mode, accepting cumulative filesystem aliases.
+
+    The mode ladder is cumulative (exec implies write implies read),
+    so only the cumulative spellings ``r``, ``rw``, ``rwx`` alias the
+    modes; bit-style forms like ``w`` or ``x`` are rejected.
+
+    Args:
+        value (MountMode | str): a mode name ("read", "write", "exec")
+            or its filesystem alias ("r", "rw", "rwx").
+    """
+    if isinstance(value, MountMode):
+        return value
+    alias = MOUNT_MODE_ALIASES.get(value)
+    return alias if alias is not None else MountMode(value)
+
+
 class ConsistencyPolicy(str, Enum):
     LAZY = "lazy"
     ALWAYS = "always"
@@ -203,14 +244,15 @@ class PathSpec:
     resolved: bool = True
     raw_path: str | None = None
 
-    @property
-    def display(self) -> str:
-        """The path as the user typed it, for rendering in output.
+    def __post_init__(self) -> None:
+        """Default ``raw_path`` to ``virtual``.
 
-        Falls back to ``virtual`` (the resolved absolute path) when no
-        raw form was recorded, e.g. for absolute arguments.
+        ``raw_path`` is the word's spelling: as typed for relative
+        words, the absolute path for everything else. It is always a
+        ``str`` after construction; pass None to take the default.
         """
-        return self.raw_path if self.raw_path is not None else self.virtual
+        if self.raw_path is None:
+            object.__setattr__(self, "raw_path", self.virtual)
 
     @property
     def mount_path(self) -> str:
@@ -257,6 +299,19 @@ class PathSpec:
             resource_path=(path.strip("/")
                            if resource_path is None else resource_path),
         )
+
+
+def word_text(word: "str | PathSpec") -> str:
+    """Shell-text form of an argv word.
+
+    Text words pass through; paths render as spelled (``raw_path``).
+    Use wherever a word re-enters string space (env values, function
+    args, the argv text view). Mount I/O keeps using ``virtual``.
+
+    Args:
+        word (str | PathSpec): text argument or path.
+    """
+    return word.raw_path if isinstance(word, PathSpec) else word
 
 
 class IndexType(str, Enum):

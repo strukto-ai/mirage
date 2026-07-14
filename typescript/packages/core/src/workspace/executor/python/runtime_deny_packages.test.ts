@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { stripDeniedImports } from './runtime.ts'
+import { stripDeniedImports } from './runtimes/pyodide.ts'
 
 describe('stripDeniedImports', () => {
   it('returns code unchanged when denyPackages is empty', () => {

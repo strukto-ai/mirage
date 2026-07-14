@@ -14,10 +14,12 @@
 
 import { randomBytes } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { mirageHome } from '../paths.ts'
 
-export const DEFAULT_TOKEN_FILE = join(homedir(), '.mirage', 'auth_token')
+export function defaultTokenFile(env: Record<string, string | undefined> = process.env): string {
+  return join(mirageHome(env), 'auth_token')
+}
 
 export function readTokenFile(path: string): string | undefined {
   if (!existsSync(path)) return undefined

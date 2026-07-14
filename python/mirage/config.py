@@ -23,6 +23,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.resource.registry import build_resource
+from mirage.runtime.python.select import (DEFAULT_PYTHON_RUNTIME,
+                                          validate_python_runtime_name)
 from mirage.types import CommandSafeguard, ConsistencyPolicy, MountMode
 
 
@@ -154,10 +156,22 @@ class MountBlock(BaseModel):
         return _coerce_mount_mode(v)
 
 
+class RuntimeBlock(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    python: str = DEFAULT_PYTHON_RUNTIME
+
+    @field_validator("python")
+    @classmethod
+    def _v_python(cls, v):
+        return validate_python_runtime_name(v)
+
+
 class WorkspaceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     mounts: dict[str, MountBlock]
+    runtime: RuntimeBlock | None = None
     mode: MountMode = MountMode.WRITE
     consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
     default_session_id: str = "default"
@@ -202,6 +216,8 @@ class WorkspaceConfig(BaseModel):
             kwargs["cache"] = _build_cache_config(self.cache)
         if self.index is not None:
             kwargs["index"] = _build_index_config(self.index)
+        if self.runtime is not None:
+            kwargs["python_runtime"] = self.runtime.python
         return kwargs
 
     def fuse_mounts(self) -> dict[str, bool | str]:

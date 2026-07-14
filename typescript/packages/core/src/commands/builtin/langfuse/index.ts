@@ -15,19 +15,17 @@
 import type { LangfuseAccessor } from '../../../accessor/langfuse.ts'
 import { ResourceName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
-import { LANGFUSE_FIND } from './find.ts'
 import { LANGFUSE_GREP } from './grep.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { LANGFUSE_CMD_OPS } from './ops.ts'
 import { LANGFUSE_RG } from './rg.ts'
 
-const LANGFUSE_OVERRIDES = new Set(['find', 'grep', 'rg'])
+const LANGFUSE_OVERRIDES = new Set(['grep', 'rg'])
 
 export const LANGFUSE_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<LangfuseAccessor>(ResourceName.LANGFUSE, LANGFUSE_CMD_OPS, {
     overrides: LANGFUSE_OVERRIDES,
   }),
-  ...LANGFUSE_FIND,
   ...LANGFUSE_GREP,
   ...LANGFUSE_RG,
 ]

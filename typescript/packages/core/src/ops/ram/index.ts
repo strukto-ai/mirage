@@ -46,21 +46,3 @@ export const RAM_OPS: readonly RegisteredOp[] = [
   unlinkOp,
   writeOp,
 ]
-
-export {
-  appendOp,
-  createOp,
-  mkdirOp,
-  readOp,
-  readFeatherOp,
-  readHdf5Op,
-  readParquetOp,
-  readdirOp,
-  renameOp,
-  rmdirOp,
-  setAttrsOp,
-  statOp,
-  truncateOp,
-  unlinkOp,
-  writeOp,
-}
