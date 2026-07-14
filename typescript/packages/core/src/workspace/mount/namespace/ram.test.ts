@@ -68,4 +68,20 @@ describe('RAMNamespaceStore', () => {
     entry.mode = 999
     expect((await store.load()).get('/a')).toEqual({ mode: 1 })
   })
+
+  it('user roundtrip', async () => {
+    const store = new RAMNamespaceStore()
+    expect(await store.loadUser()).toBeNull()
+    await store.setUser('alice')
+    expect(await store.loadUser()).toBe('alice')
+  })
+
+  it('user survives replaceAll but not clear', async () => {
+    const store = new RAMNamespaceStore()
+    await store.setUser('alice')
+    await store.replaceAll(new Map([['/a', { mode: 1 }]]))
+    expect(await store.loadUser()).toBe('alice')
+    await store.clear()
+    expect(await store.loadUser()).toBeNull()
+  })
 })

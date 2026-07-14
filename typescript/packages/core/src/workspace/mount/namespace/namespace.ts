@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Resource } from '../../../resource/base.ts'
-import type { MountMode, PathSpec } from '../../../types.ts'
+import { DEFAULT_AGENT_ID, type MountMode, type PathSpec } from '../../../types.ts'
 import { globPrefixMatch, resolveSymlinks } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { ResolveFn } from '../../dispatcher.ts'
@@ -85,22 +85,60 @@ export class Namespace {
   private nodeTable = new Map<string, NodeMeta>()
   private loaded = false
   private loading: Promise<void> | null = null
+  private readonly claim: string | null
+  private workspaceUser: string | null = null
+  private userResolved = false
+  private userResolving: Promise<void> | null = null
 
-  constructor(registry: MountRegistry, resolveFn: ResolveFn, store?: NamespaceStore) {
+  constructor(
+    registry: MountRegistry,
+    resolveFn: ResolveFn,
+    store?: NamespaceStore,
+    user?: string | null,
+  ) {
     this.registry = registry
     this.resolveFn = resolveFn
     this.store = store ?? new RAMNamespaceStore()
+    this.claim = user ?? null
   }
 
   get nodes(): Map<string, NodeMeta> {
     return this.nodeTable
   }
 
+  // The workspace user (whoami identity). Before store resolution the
+  // launch claim (or DEFAULT_AGENT_ID) answers; after it, the resolved
+  // identity.
+  get user(): string {
+    if (this.workspaceUser !== null) return this.workspaceUser
+    if (this.claim !== null) return this.claim
+    return DEFAULT_AGENT_ID
+  }
+
+  // Resolve the workspace user against the store, once. An explicit launch
+  // claim wins and writes through; without one the stored identity is
+  // adopted, so a runtime attaching to a shared store (e.g. Redis)
+  // inherits the workspace's whoami.
+  private async resolveUser(): Promise<void> {
+    if (this.userResolved) return
+    this.userResolving ??= (async () => {
+      const stored = await this.store.loadUser()
+      if (this.claim !== null) {
+        this.workspaceUser = this.claim
+        if (stored !== this.claim) await this.store.setUser(this.claim)
+      } else {
+        this.workspaceUser = stored
+      }
+      this.userResolved = true
+    })()
+    await this.userResolving
+  }
+
   // Hydrate the working copy from the store, once. A snapshot restore
   // (`replaceNodes`) marks the table loaded, so snapshot state wins over
   // whatever the store held before it.
   async ensureLoaded(): Promise<void> {
-    if (this.loaded) return
+    if (this.loaded && this.userResolved) return
     this.loading ??= this.store.load().then((entries) => {
       if (this.loaded) return
       const table = new Map<string, NodeMeta>()
@@ -109,11 +147,13 @@ export class Namespace {
       this.loaded = true
     })
     await this.loading
+    await this.resolveUser()
   }
 
   async replaceNodes(entries: Map<string, NodeMeta>): Promise<void> {
     this.nodeTable = new Map(entries)
     this.loaded = true
+    await this.resolveUser()
     const out = new Map<string, NodeFields>()
     for (const [path, meta] of entries) out.set(path, metaToFields(meta))
     await this.store.replaceAll(out)

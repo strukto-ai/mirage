@@ -27,6 +27,7 @@ class RAMNamespaceStore(NamespaceStore):
 
     def __init__(self) -> None:
         self._entries: dict[str, NodeFields] = {}
+        self._user: str | None = None
 
     async def load(self) -> dict[str, NodeFields]:
         return {path: dict(f) for path, f in self._entries.items()}
@@ -41,8 +42,15 @@ class RAMNamespaceStore(NamespaceStore):
     async def replace_all(self, entries: dict[str, NodeFields]) -> None:
         self._entries = {path: dict(f) for path, f in entries.items()}
 
+    async def load_user(self) -> str | None:
+        return self._user
+
+    async def set_user(self, user: str) -> None:
+        self._user = user
+
     async def clear(self) -> None:
         self._entries.clear()
+        self._user = None
 
     async def close(self) -> None:
         return None

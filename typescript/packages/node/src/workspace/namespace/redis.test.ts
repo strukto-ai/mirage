@@ -60,6 +60,42 @@ describe.skipIf(skip)('RedisNamespaceStore', () => {
     await store.close()
   })
 
+  it('user roundtrip', async () => {
+    const store = makeStore(`mirage:test:namespace:${randomUUID().slice(0, 8)}:`)
+    expect(await store.loadUser()).toBeNull()
+    await store.setUser('alice')
+    expect(await store.loadUser()).toBe('alice')
+    await store.replaceAll(new Map())
+    expect(await store.loadUser()).toBe('alice')
+    await store.clear()
+    expect(await store.loadUser()).toBeNull()
+    await store.close()
+  })
+
+  it('whoami identity is shared across workspaces', async () => {
+    const prefix = `mirage:test:namespace:${randomUUID().slice(0, 8)}:`
+    const ws = new Workspace(
+      { '/data': new RAMResource() },
+      { agentId: 'alice', namespaceStore: makeStore(prefix) },
+    )
+    const io = await ws.execute('whoami')
+    expect(io.stdoutText).toBe('alice\n')
+    await ws.close()
+
+    // A fresh runtime attached to the same store, launched without an
+    // agentId, adopts the workspace's identity.
+    const reborn = new Workspace(
+      { '/data': new RAMResource() },
+      { namespaceStore: makeStore(prefix) },
+    )
+    const io2 = await reborn.execute('whoami')
+    expect(io2.stdoutText).toBe('alice\n')
+    const cleaner = makeStore(prefix)
+    await cleaner.clear()
+    await cleaner.close()
+    await reborn.close()
+  })
+
   it('namespace state survives a workspace restart', async () => {
     const prefix = `mirage:test:namespace:${randomUUID().slice(0, 8)}:`
     const ws = new Workspace(

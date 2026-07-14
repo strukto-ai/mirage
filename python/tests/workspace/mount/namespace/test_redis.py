@@ -71,6 +71,15 @@ async def test_clear_empties_table(store):
     assert await store.load() == {}
 
 
+@pytest.mark.asyncio
+async def test_user_roundtrip(store):
+    assert await store.load_user() is None
+    await store.set_user("alice")
+    assert await store.load_user() == "alice"
+    await store.replace_all({})
+    assert await store.load_user() == "alice"
+
+
 def test_redis_store_subclasses_namespace_store():
     assert issubclass(RedisNamespaceStore, NamespaceStore)
 
@@ -107,6 +116,29 @@ async def test_namespace_survives_workspace_restart(prefix):
     assert st.gid == "dev"
     result = await reborn.execute("readlink /data/link")
     assert (await result.stdout_str()) == "/data/f.txt\n"
+    store = RedisNamespaceStore(url=REDIS_URL, key_prefix=prefix)
+    await store.clear()
+    await store.close()
+    await reborn.close()
+
+
+@pytest.mark.asyncio
+async def test_whoami_shared_across_workspaces(prefix):
+    ws = Workspace({"/data": RAMResource()},
+                   agent_id="alice",
+                   namespace_store=RedisNamespaceStore(url=REDIS_URL,
+                                                       key_prefix=prefix))
+    result = await ws.execute("whoami")
+    assert (await result.stdout_str()) == "alice\n"
+    await ws.close()
+
+    # A fresh runtime attached to the same store, launched without an
+    # agent_id, adopts the workspace's identity.
+    reborn = Workspace({"/data": RAMResource()},
+                       namespace_store=RedisNamespaceStore(url=REDIS_URL,
+                                                           key_prefix=prefix))
+    result = await reborn.execute("whoami")
+    assert (await result.stdout_str()) == "alice\n"
     store = RedisNamespaceStore(url=REDIS_URL, key_prefix=prefix)
     await store.clear()
     await store.close()

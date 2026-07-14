@@ -49,7 +49,7 @@ function putDir(res: RAMResource, path: string): void {
   res.store.dirs.add(path)
 }
 
-export async function makeWorkspace(): Promise<TestWorkspace> {
+export async function makeWorkspace(extra: { agentId?: string } = {}): Promise<TestWorkspace> {
   const parser = await getTestParser()
   const s3 = new RAMResource()
   const disk = new RAMResource()
@@ -81,7 +81,7 @@ export async function makeWorkspace(): Promise<TestWorkspace> {
 
   const ws = new Workspace(
     { '/s3': s3, '/disk': disk, '/ram': ram },
-    { mode: MountMode.EXEC, ops: registry, shellParser: parser },
+    { mode: MountMode.EXEC, ops: registry, shellParser: parser, ...extra },
   )
   ws.getSession(DEFAULT_SESSION_ID).cwd = '/s3'
   return { ws, s3, disk, ram }

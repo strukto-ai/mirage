@@ -66,8 +66,30 @@ class NamespaceStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def load_user(self) -> str | None:
+        """Read the stored workspace user (whoami identity).
+
+        Returns:
+            str | None: the stored user, or None when never claimed.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def set_user(self, user: str) -> None:
+        """Store the workspace user (whoami identity).
+
+        Workspace-level metadata, not a node entry: ``replace_all``
+        (snapshot restore of the node table) leaves it alone; only
+        ``clear`` drops it.
+
+        Args:
+            user (str): the workspace user.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     async def clear(self) -> None:
-        """Delete every stored entry."""
+        """Delete every stored entry, including the workspace user."""
         raise NotImplementedError
 
     @abstractmethod

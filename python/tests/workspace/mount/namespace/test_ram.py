@@ -82,6 +82,24 @@ async def test_load_returns_copies():
     assert (await store.load())["/a"]["mode"] == 1
 
 
+@pytest.mark.asyncio
+async def test_user_roundtrip():
+    store = RAMNamespaceStore()
+    assert await store.load_user() is None
+    await store.set_user("alice")
+    assert await store.load_user() == "alice"
+
+
+@pytest.mark.asyncio
+async def test_user_survives_replace_all_but_not_clear():
+    store = RAMNamespaceStore()
+    await store.set_user("alice")
+    await store.replace_all({"/a": {"mode": 1}})
+    assert await store.load_user() == "alice"
+    await store.clear()
+    assert await store.load_user() is None
+
+
 def test_ram_store_subclasses_namespace_store():
     assert issubclass(RAMNamespaceStore, NamespaceStore)
     assert isinstance(RAMNamespaceStore(), NamespaceStore)

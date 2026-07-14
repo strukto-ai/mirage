@@ -337,7 +337,7 @@ async def _run_argv(
         return await handle_printenv(var_name, session)
 
     if name == SB.WHOAMI:
-        return await handle_whoami(session)
+        return await handle_whoami(namespace)
 
     if name == SB.MAN:
         return await handle_man(args, session, registry)

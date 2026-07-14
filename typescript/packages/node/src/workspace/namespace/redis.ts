@@ -32,12 +32,15 @@ export interface RedisNamespaceStoreOptions {
 export class RedisNamespaceStore extends NamespaceStore {
   readonly url: string
   private readonly key: string
+  private readonly userKey: string
   private clientPromise: Promise<RedisClientType> | null = null
 
   constructor(options: RedisNamespaceStoreOptions = {}) {
     super()
     this.url = options.url ?? 'redis://localhost:6379/0'
-    this.key = `${options.keyPrefix ?? 'mirage:namespace:'}nodes`
+    const prefix = options.keyPrefix ?? 'mirage:namespace:'
+    this.key = `${prefix}nodes`
+    this.userKey = `${prefix}user`
   }
 
   private async client(): Promise<RedisClientType> {
@@ -89,9 +92,19 @@ export class RedisNamespaceStore extends NamespaceStore {
     await multi.exec()
   }
 
+  async loadUser(): Promise<string | null> {
+    const c = await this.client()
+    return c.get(this.userKey)
+  }
+
+  async setUser(user: string): Promise<void> {
+    const c = await this.client()
+    await c.set(this.userKey, user)
+  }
+
   async clear(): Promise<void> {
     const c = await this.client()
-    await c.del(this.key)
+    await c.del([this.key, this.userKey])
   }
 
   async close(): Promise<void> {

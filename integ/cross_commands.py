@@ -488,6 +488,14 @@ async def check_symlink_cache(ws: Workspace, s3_client, label: str) -> None:
     await run(ws, "rm /ram/cl.txt")
 
 
+async def check_whoami(ws: Workspace) -> None:
+    out, _, code = await run(ws, "whoami")
+    check("whoami: prints the launch agent_id", out == "integ-agent\n"
+          and code == 0)
+    out, _, _ = await run(ws, "export USER=bob; whoami")
+    check("whoami: ignores $USER (GNU effective user)", out == "integ-agent\n")
+
+
 async def exercise(ws: Workspace,
                    dst: str,
                    label: str,
@@ -528,9 +536,10 @@ async def main() -> None:
         prefix = f"mirage-integ-cross-{uuid.uuid4().hex[:8]}/"
         mounts["/redis"] = RedisResource(url=redis_url, key_prefix=prefix)
 
-    ws = Workspace(mounts, mode=MountMode.WRITE)
+    ws = Workspace(mounts, mode=MountMode.WRITE, agent_id="integ-agent")
     try:
         await seed_tree(ws, "/ram")
+        await check_whoami(ws)
         await check_partial_read(ws, "/ram", "ram-single")
         await exercise(ws, "/ram2", "ram", expect_dirs=True)
         if redis_url:

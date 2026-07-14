@@ -1,10 +1,14 @@
+from unittest.mock import MagicMock
+
 import pytest
 
 from mirage.io.stream import materialize
 from mirage.workspace.executor.builtins.vars import (handle_read,
                                                      handle_return,
-                                                     handle_shift)
+                                                     handle_shift,
+                                                     handle_whoami)
 from mirage.workspace.executor.control import ReturnSignal
+from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session.session import Session
 
 
@@ -74,3 +78,18 @@ async def test_read_defaults_to_reply():
     _, io, _ = await handle_read([], session, b"hi\n")
     assert io.exit_code == 0
     assert session.env["REPLY"] == "hi"
+
+
+@pytest.mark.asyncio
+async def test_whoami_prints_workspace_user():
+    out, io, node = await handle_whoami(Namespace(MagicMock(), user="alice"))
+    assert io.exit_code == 0
+    assert out == b"alice\n"
+    assert node.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_whoami_defaults_without_identity():
+    out, io, _ = await handle_whoami(Namespace(MagicMock()))
+    assert io.exit_code == 0
+    assert out == b"default\n"

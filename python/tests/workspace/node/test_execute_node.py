@@ -382,23 +382,18 @@ def test_printenv_all():
 # ── whoami ──────────────────────────────────────
 
 
-def test_whoami_set():
-    stdout, io, _, _, _, _ = _exec("whoami", env={"USER": "alice"})
+def test_whoami_default():
+    stdout, io, _, _, _, _ = _exec("whoami", env={})
     assert io.exit_code == 0
-    assert stdout == b"alice\n"
+    assert stdout == b"default\n"
     assert io.stderr in (None, b"")
 
 
-def test_whoami_unset():
-    stdout, io, _, _, _, _ = _exec("whoami", env={})
-    assert io.exit_code == 1
-    assert io.stderr == b"whoami: USER not set\n"
-
-
-def test_whoami_empty():
-    stdout, io, _, _, _, _ = _exec("whoami", env={"USER": ""})
+def test_whoami_ignores_env_user():
+    # GNU whoami reports the effective user, never $USER.
+    stdout, io, _, _, _, _ = _exec("whoami", env={"USER": "alice"})
     assert io.exit_code == 0
-    assert stdout == b"\n"
+    assert stdout == b"default\n"
 
 
 # ── unsupported node raises ─────────────────────

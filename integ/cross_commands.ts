@@ -650,6 +650,16 @@ async function checkGlobCache(
   );
 }
 
+async function checkWhoami(ws: Workspace): Promise<void> {
+  let [out, , code] = await run(ws, "whoami");
+  check(
+    "whoami: prints the launch agentId",
+    out === "integ-agent\n" && code === 0,
+  );
+  [out] = await run(ws, "export USER=bob; whoami");
+  check("whoami: ignores $USER (GNU effective user)", out === "integ-agent\n");
+}
+
 async function exercise(
   ws: Workspace,
   dst: string,
@@ -698,9 +708,13 @@ async function main(): Promise<void> {
     mounts["/redis"] = new RedisResource({ url: redisUrl, keyPrefix: prefix });
   }
 
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE });
+  const ws = new Workspace(mounts, {
+    mode: MountMode.WRITE,
+    agentId: "integ-agent",
+  });
   try {
     await seedTree(ws, "/ram");
+    await checkWhoami(ws);
     await checkPartialRead(ws, "/ram", "ram-single");
     await exercise(ws, "/ram2", "ram", true);
     if (redisUrl) await exercise(ws, "/redis", "redis", true);

@@ -19,6 +19,7 @@ import { IOResult } from '../../../io/types.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import type { CallStack } from '../../../shell/call_stack.ts'
 import { SET_FLAG_TO_OPTION } from '../../../shell/types.ts'
+import type { Namespace } from '../../mount/namespace/namespace.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import { ReturnSignal } from '../command.ts'
@@ -104,17 +105,11 @@ export function handlePrintenv(name: string | null, session: Session): Result {
   return [out, new IOResult(), new ExecutionNode({ command: 'printenv', exitCode: 0 })]
 }
 
-export function handleWhoami(session: Session): Result {
-  const user = session.env.USER
-  if (user === undefined) {
-    const err = new TextEncoder().encode('whoami: USER not set\n')
-    return [
-      null,
-      new IOResult({ exitCode: 1, stderr: err }),
-      new ExecutionNode({ command: 'whoami', exitCode: 1, stderr: err }),
-    ]
-  }
-  const out = new TextEncoder().encode(`${user}\n`)
+export function handleWhoami(namespace: Namespace): Result {
+  // GNU whoami reports the effective user and never consults $USER; the
+  // workspace user (launch agentId, shared via the namespace store) is
+  // the effective identity here.
+  const out = new TextEncoder().encode(`${namespace.user}\n`)
   return [out, new IOResult(), new ExecutionNode({ command: 'whoami', exitCode: 0 })]
 }
 

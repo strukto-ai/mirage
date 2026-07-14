@@ -20,6 +20,7 @@ from mirage.io.types import ByteSource
 from mirage.shell.call_stack import CallStack
 from mirage.shell.types import SET_FLAG_TO_OPTION
 from mirage.workspace.executor.control import ReturnSignal
+from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
@@ -92,16 +93,12 @@ async def handle_printenv(
 
 
 async def handle_whoami(
-        session: Session,  # noqa: E125
+        namespace: Namespace,  # noqa: E125
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    user = session.env.get("USER")
-    if user is None:
-        err = b"whoami: USER not set\n"
-        return None, IOResult(exit_code=1,
-                              stderr=err), ExecutionNode(command="whoami",
-                                                         exit_code=1,
-                                                         stderr=err)
-    out = f"{user}\n".encode()
+    # GNU whoami reports the effective user and never consults $USER;
+    # the workspace user (launch agent_id, shared via the namespace
+    # store) is the effective identity here.
+    out = f"{namespace.user}\n".encode()
     return out, IOResult(), ExecutionNode(command="whoami", exit_code=0)
 
 

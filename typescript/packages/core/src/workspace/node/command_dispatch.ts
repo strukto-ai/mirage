@@ -468,7 +468,7 @@ async function runArgv(
   if (name === SB.PRINTENV) {
     return handlePrintenv(args.length > 0 ? (args[0] ?? null) : null, session)
   }
-  if (name === SB.WHOAMI) return handleWhoami(session)
+  if (name === SB.WHOAMI) return handleWhoami(namespace)
   if (name === SB.MAN) return handleMan(args, session, registry)
   if (name === SB.HISTORY) return handleHistory(registry, args, session)
   if (name === SB.SET) return handleSet(args, session, callStack)

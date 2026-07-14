@@ -29,7 +29,13 @@ export abstract class NamespaceStore {
   abstract delete(paths: readonly string[]): Promise<void>
   // Overwrite the whole table (snapshot restore).
   abstract replaceAll(entries: Map<string, NodeFields>): Promise<void>
-  // Delete every stored entry.
+  // Read the stored workspace user (whoami identity); null when never claimed.
+  abstract loadUser(): Promise<string | null>
+  // Store the workspace user. Workspace-level metadata, not a node entry:
+  // replaceAll (snapshot restore of the node table) leaves it alone; only
+  // clear drops it.
+  abstract setUser(user: string): Promise<void>
+  // Delete every stored entry, including the workspace user.
   abstract clear(): Promise<void>
   // Release any held connections or handles.
   abstract close(): Promise<void>

@@ -21,7 +21,9 @@ import { CallStack } from '../../shell/call_stack.ts'
 import { FileStat, FileType, MountMode } from '../../types.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import type { MountEntry } from '../mount/mount.ts'
+import { Namespace } from '../mount/namespace/namespace.ts'
 import { Session } from '../session/session.ts'
+import type { ResolveFn } from '../dispatcher.ts'
 import type { DispatchFn } from './cross_mount.ts'
 import {
   handleCd,
@@ -116,28 +118,21 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
 })
 
 describe('handleWhoami', () => {
-  it('echoes USER + newline, exit 0, no stderr', () => {
-    const s = new Session({ sessionId: 'test', env: { USER: 'alice' } })
-    const [out, io] = handleWhoami(s)
+  const unusedResolve: ResolveFn = () => Promise.reject(new Error('unused'))
+  const emptyRegistry = () => new MountRegistry({}, MountMode.READ)
+
+  it('prints the workspace user + newline, exit 0, no stderr', () => {
+    const ns = new Namespace(emptyRegistry(), unusedResolve, undefined, 'alice')
+    const [out, io] = handleWhoami(ns)
     expect(decode(out as Uint8Array)).toBe('alice\n')
     expect(io.exitCode).toBe(0)
     expect(io.stderr).toBeNull()
   })
 
-  it('exits 1 with stderr when USER unset', () => {
-    const s = new Session({ sessionId: 'test' })
-    const [out, io] = handleWhoami(s)
-    expect(out).toBeNull()
-    expect(io.exitCode).toBe(1)
-    expect(decode(io.stderr instanceof Uint8Array ? io.stderr : null)).toBe(
-      'whoami: USER not set\n',
-    )
-  })
-
-  it('echoes empty string when USER explicitly empty', () => {
-    const s = new Session({ sessionId: 'test', env: { USER: '' } })
-    const [out, io] = handleWhoami(s)
-    expect(decode(out as Uint8Array)).toBe('\n')
+  it('defaults without an identity', () => {
+    const ns = new Namespace(emptyRegistry(), unusedResolve)
+    const [out, io] = handleWhoami(ns)
+    expect(decode(out as Uint8Array)).toBe('default\n')
     expect(io.exitCode).toBe(0)
   })
 })

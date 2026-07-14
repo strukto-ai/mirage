@@ -19,6 +19,7 @@ import { NamespaceStore, type NodeFields } from './store.ts'
 // workspaces pass a RedisNamespaceStore instead and survive restarts.
 export class RAMNamespaceStore extends NamespaceStore {
   private readonly entries = new Map<string, NodeFields>()
+  private user: string | null = null
 
   load(): Promise<Map<string, NodeFields>> {
     const out = new Map<string, NodeFields>()
@@ -42,8 +43,18 @@ export class RAMNamespaceStore extends NamespaceStore {
     return Promise.resolve()
   }
 
+  loadUser(): Promise<string | null> {
+    return Promise.resolve(this.user)
+  }
+
+  setUser(user: string): Promise<void> {
+    this.user = user
+    return Promise.resolve()
+  }
+
   clear(): Promise<void> {
     this.entries.clear()
+    this.user = null
     return Promise.resolve()
   }
 

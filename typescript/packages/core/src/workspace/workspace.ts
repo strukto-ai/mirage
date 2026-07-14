@@ -280,7 +280,14 @@ export class Workspace {
     this.registry.mount(HISTORY_PREFIX, new HistoryViewResource(this.observer), MountMode.READ)
     this.cache = options.cache ?? new RAMFileCacheStore({ limit: options.cacheLimit ?? '512MB' })
     this.registry.attachFileCache(this.cache)
-    this.namespace = new Namespace(this.registry, (p) => this.resolve(p), options.namespaceStore)
+    // Only an explicit agentId claims the workspace user; a bare launch
+    // adopts whatever identity the namespace store holds.
+    this.namespace = new Namespace(
+      this.registry,
+      (p) => this.resolve(p),
+      options.namespaceStore,
+      options.agentId ?? null,
+    )
     this.dispatcher = new Dispatcher(this.namespace, this.cache, this.opsRegistry, consistency)
     // The file cache is a hidden store (attached above), never a mount. Arg-less
     // commands and root listing resolve against a neutral root anchor: reuse the

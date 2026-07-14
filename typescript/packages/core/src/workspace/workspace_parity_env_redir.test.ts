@@ -64,31 +64,30 @@ describe('workspace: env set / unset / printenv', () => {
 })
 
 describe('workspace: whoami', () => {
-  it('echoes $USER when set', async () => {
-    const { ws } = await makeWorkspace()
-    await ws.execute('export USER=alice')
+  it('prints the launch agentId', async () => {
+    const { ws } = await makeWorkspace({ agentId: 'alice' })
     const io = await ws.execute('whoami')
     expect(stdoutStr(io)).toBe('alice\n')
     expect(io.exitCode).toBe(0)
     await ws.close()
   })
 
-  it('exits 1 with stderr when $USER unset', async () => {
+  it('defaults without an agentId', async () => {
     const { ws } = await makeWorkspace()
     const io = await ws.execute('whoami')
-    expect(io.exitCode).toBe(1)
-    expect(new TextDecoder().decode(io.stderr)).toBe('whoami: USER not set\n')
+    expect(stdoutStr(io)).toBe('default\n')
+    expect(io.exitCode).toBe(0)
     await ws.close()
   })
 
-  it('reflects export → unset → whoami round-trip', async () => {
-    const { ws } = await makeWorkspace()
+  it('ignores $USER (GNU: effective user, not env)', async () => {
+    const { ws } = await makeWorkspace({ agentId: 'alice' })
     await ws.execute('export USER=bob')
-    const io1 = await ws.execute('whoami')
-    expect(stdoutStr(io1)).toBe('bob\n')
+    const io = await ws.execute('whoami')
+    expect(stdoutStr(io)).toBe('alice\n')
     await ws.execute('unset USER')
     const io2 = await ws.execute('whoami')
-    expect(io2.exitCode).toBe(1)
+    expect(stdoutStr(io2)).toBe('alice\n')
     await ws.close()
   })
 })
