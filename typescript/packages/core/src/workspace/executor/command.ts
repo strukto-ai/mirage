@@ -101,9 +101,9 @@ async function runOnMount(
   opts: RunOnMountOpts = {},
 ): Promise<[ByteSource | null, IOResult]> {
   const { registry, session, dispatch, namespace, ensureOpen, pythonRuntime } = ctx
+  const hint = opts.resolveHint ?? null
   let mount = opts.mount ?? null
   if (mount === null) {
-    const hint = opts.resolveHint ?? null
     const resolvePaths = paths.length > 0 ? paths : hint !== null ? [hint] : []
     try {
       mount = await registry.resolveMount(cmdName, resolvePaths, session.cwd)
@@ -143,9 +143,10 @@ async function runOnMount(
   // resolveMount may redirect a warm remote read to the cache mount, which
   // does not carry the origin mount's per-command safeguards. Resolve the
   // safeguard from the real (pre-redirect) mount so the cap survives the hit.
-  const realMount = registry.mountFor(
-    paths.length > 0 ? (paths[0]?.virtual ?? session.cwd) : session.cwd,
-  )
+  // A spec can bucket a path-shaped operand as TEXT (python3's script), so
+  // when the spec-split paths are empty fall back to the classified scope
+  // hint before cwd, mirroring the Python executor.
+  const realMount = registry.mountFor(paths[0]?.virtual ?? hint?.virtual ?? session.cwd)
   const safeguardOverride = realMount?.commandSafeguards.get(cmdName) ?? null
 
   try {
@@ -495,6 +496,7 @@ export async function handleCommand(
   const [rawStdout, io] = await runOnMount(runCtx, cmdName, paths, texts, flagKwargs, {
     stdin,
     mount,
+    resolveHint: pathScopes[0] ?? null,
   })
   let stdout = rawStdout
   if (warnBytes !== null) {

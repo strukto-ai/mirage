@@ -13,6 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import time
+
+import pytest
 
 from mirage.runtime.python import LocalRuntime, PythonRunArgs
 
@@ -61,3 +64,16 @@ def test_local_exit_code_and_stderr():
 
 def test_local_name():
     assert LocalRuntime().name == "local"
+
+
+@pytest.mark.asyncio
+async def test_local_cancellation_kills_subprocess():
+    runtime = LocalRuntime()
+    task = asyncio.ensure_future(
+        runtime.run(PythonRunArgs(code="import time; time.sleep(30)")))
+    await asyncio.sleep(0.3)
+    start = time.monotonic()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert time.monotonic() - start < 5  # killed, not waited out

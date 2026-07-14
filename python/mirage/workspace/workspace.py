@@ -93,6 +93,7 @@ class Workspace:
         observe: ObserverStore | None = None,
         namespace_store: NamespaceStore | None = None,
         python_runtime: str | None = None,
+        runtime_options: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         self._registry = MountRegistry()
         if isinstance(cache, RedisCacheConfig):
@@ -179,7 +180,7 @@ class Workspace:
         # per invocation. An explicitly requested runtime still fails loud.
         try:
             self._python_runtime = select_python_runtime(
-                python_runtime, self.dispatch)
+                python_runtime, self.dispatch, options=runtime_options)
         except ImportError:
             if python_runtime is not None:
                 raise

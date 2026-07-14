@@ -39,7 +39,12 @@ async def create_workspace(req: CreateWorkspaceRequest,
         raise HTTPException(status_code=409,
                             detail=f"workspace id already exists: {req.id!r}")
     kwargs = req.config.to_workspace_kwargs()
-    ws = Workspace(**kwargs)
+    try:
+        ws = Workspace(**kwargs)
+    except (FileNotFoundError, ImportError, ValueError) as e:
+        # Construction failures (a wasi build dir that does not exist, a
+        # missing runtime extra) are the caller's to fix, not a 500.
+        raise HTTPException(status_code=400, detail=str(e))
     try:
         for prefix, target in req.config.fuse_mounts().items():
             mountpoint = target if isinstance(target, str) else None

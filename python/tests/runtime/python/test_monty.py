@@ -176,6 +176,24 @@ def test_monty_name():
     assert MontyRuntime().name == "monty"
 
 
+@pytest.mark.asyncio
+async def test_monty_runs_off_loop_and_cancellation_halts():
+    rt = MontyRuntime()
+    hot = "n = 0\nwhile True:\n    n = n + 1"
+    task = asyncio.ensure_future(rt.run(PythonRunArgs(code=hot)))
+    ticks = 0
+    for _ in range(6):
+        await asyncio.sleep(0.05)
+        ticks += 1
+    assert ticks == 6  # the loop stayed free while the interpreter ran
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    result = await rt.run(PythonRunArgs(code="print(6 * 7)"))
+    assert result.exit_code == 0
+    assert result.stdout == b"42\n"
+
+
 def test_monty_missing_extra_raises(monkeypatch):
     import mirage.runtime.python.monty as monty_module
     monkeypatch.setattr(monty_module, "pydantic_monty", None)

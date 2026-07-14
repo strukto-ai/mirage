@@ -42,6 +42,13 @@ class _MirageOS(OSAccess):
     and are then flushed back through the dispatch. Runs on Monty's
     worker thread, so async dispatch calls hop to the workspace loop via
     `run_coroutine_threadsafe`.
+
+    The binding only accepts sync callbacks (pydantic/monty#560), so
+    `_sync` parks the tokio worker for the whole I/O wait. That caps
+    concurrent I/O-waiting runs at Monty's worker pool size, which is
+    the core count by default; TOKIO_WORKER_THREADS raises it, and
+    parked workers cost stack pages, not CPU (measured: 100 concurrent
+    1s-I/O runs finish in ~2s at 64 workers versus ~8s at 14).
     """
 
     def __init__(self, loop: asyncio.AbstractEventLoop,
@@ -233,11 +240,12 @@ class MontyRuntime(PythonRuntime):
         self._workspace_dispatch = dispatch
 
     async def run(self, args: PythonRunArgs) -> PythonRunResult:
+        # run_async executes on Monty's own tokio pool and returns an
+        # asyncio-compatible future: the loop stays free, and cancelling
+        # the future halts the interpreter (verified: CPU drops to zero),
+        # so a safeguard timeout reclaims the run instead of leaking a
+        # burning thread.
         loop = asyncio.get_running_loop()
-        return await asyncio.to_thread(self._run_sync, args, loop)
-
-    def _run_sync(self, args: PythonRunArgs,
-                  loop: asyncio.AbstractEventLoop) -> PythonRunResult:
         collector = pydantic_monty.CollectStreams()
         bridge = _MirageOS(loop, self._workspace_dispatch, args.env)
         try:
@@ -249,9 +257,9 @@ class MontyRuntime(PythonRuntime):
                                    exit_code=1)
         argv = ["main.py", *args.args]
         try:
-            monty.run(inputs={"argv": argv},
-                      print_callback=collector,
-                      os=bridge)
+            await monty.run_async(inputs={"argv": argv},
+                                  print_callback=collector,
+                                  os=bridge)
         except pydantic_monty.MontyRuntimeError as exc:
             stdout, stderr = _split_streams(collector)
             trace = exc.display(format="traceback") + "\n"

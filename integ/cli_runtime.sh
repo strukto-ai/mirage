@@ -82,7 +82,7 @@ mounts:
 YML
   $cli workspace create "$work/safeguard.yaml" --id rtsg >/dev/null </dev/null
   $cli execute -w rtsg -c "echo 'n = 0' > /data/slow.py && echo 'for i in range(300000000):' >> /data/slow.py && echo '    n = n + 1' >> /data/slow.py" </dev/null >/dev/null
-  $cli execute -w rtsg -c "cd /data && python3 /data/slow.py" \
+  $cli execute -w rtsg -c "python3 /data/slow.py" \
     >/tmp/cli-runtime-$lang-sg.txt 2>&1 </dev/null
   echo "sg_exec=exit$?"
   echo "sg_msg=$(grep -o 'python3: timed out after' /tmp/cli-runtime-$lang-sg.txt | head -1)"
@@ -100,6 +100,42 @@ YML
     >/tmp/cli-runtime-$lang-invalid.txt 2>&1 </dev/null
   echo "invalid_create=exit$?"
   echo "invalid_msg=$(grep -oE 'TypeScript-only|Python-only' /tmp/cli-runtime-$lang-invalid.txt | head -1)"
+
+  # --- per-runtime option blocks: py validates the wasi build dir at
+  # create (portable pyodide block ignored); ts ignores the portable
+  # wasi block but rejects an unknown option key on the selected
+  # runtime ---
+  if [ "$lang" == "py" ]; then
+    cat > "$work/wasip.yaml" <<YML
+mode: EXEC
+runtime:
+  python: wasi
+  wasi:
+    home: /nonexistent-wasi-build
+  pyodide:
+    home: https://assets.example.com/pyodide/
+mounts:
+  /data:
+    resource: ram
+YML
+  else
+    cat > "$work/wasip.yaml" <<YML
+mode: EXEC
+runtime:
+  python: pyodide
+  wasi:
+    home: /nonexistent-wasi-build
+  pyodide:
+    homee: /typo-key
+mounts:
+  /data:
+    resource: ram
+YML
+  fi
+  $cli workspace create "$work/wasip.yaml" --id rtwp \
+    >/tmp/cli-runtime-$lang-wasip.txt 2>&1 </dev/null
+  echo "wasip_create=exit$?"
+  echo "wasip_msg=$(grep -oE 'cpython-wasi-build|unknown pyodide runtime option' /tmp/cli-runtime-$lang-wasip.txt | head -1)"
 
   $cli daemon stop >/dev/null 2>&1 </dev/null || true
   sleep 1
@@ -131,12 +167,14 @@ expect /tmp/cli-runtime-py.txt "selected_py3" "argv-len 1"
 expect /tmp/cli-runtime-py.txt "invalid_msg" "TypeScript-only"
 expect /tmp/cli-runtime-py.txt "sg_exec" "exit124"
 expect /tmp/cli-runtime-py.txt "sg_msg" "python3: timed out after"
+expect /tmp/cli-runtime-py.txt "wasip_msg" "cpython-wasi-build"
 expect /tmp/cli-runtime-ts.txt "default_py3" "hi-from-vfs"
 expect /tmp/cli-runtime-ts.txt "explicit_py3" "explicit-runtime-ok"
 expect /tmp/cli-runtime-ts.txt "selected_py3" "hi-from-vfs"
 expect /tmp/cli-runtime-ts.txt "invalid_msg" "Python-only"
 expect /tmp/cli-runtime-ts.txt "sg_exec" "exit124"
 expect /tmp/cli-runtime-ts.txt "sg_msg" "python3: timed out after"
+expect /tmp/cli-runtime-ts.txt "wasip_msg" "unknown pyodide runtime option"
 
 py_invalid="$(grep -F 'invalid_create=' /tmp/cli-runtime-py.txt | head -1 | cut -d= -f2-)"
 ts_invalid="$(grep -F 'invalid_create=' /tmp/cli-runtime-ts.txt | head -1 | cut -d= -f2-)"

@@ -194,9 +194,7 @@ async function main(): Promise<void> {
       },
     },
   );
-  // cd first: the per-mount safeguard guards commands dispatched on
-  // that mount, and python3 dispatches via the working directory.
-  await runError(wsSg, "py3_safeguard_timeout", "cd /ram && python3 /ram/slow.py");
+  await runError(wsSg, "py3_safeguard_timeout", "python3 /ram/slow.py");
   await wsSg.close();
   await ws.close();
 }

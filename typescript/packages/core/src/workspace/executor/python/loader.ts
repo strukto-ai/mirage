@@ -19,6 +19,14 @@ const noopIo = (): void => undefined
 const PYODIDE_CDN_VERSION = '0.29.3'
 const PYODIDE_CDN_URL = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_CDN_VERSION}/full/`
 
+const PYODIDE_HOME_ENV = 'MIRAGE_PYODIDE_HOME'
+
+function envHome(): string | null {
+  const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
+  const value = proc?.env?.[PYODIDE_HOME_ENV]
+  return typeof value === 'string' && value !== '' ? value : null
+}
+
 interface PyodideFS {
   mkdirTree: (path: string, mode?: number) => void
   writeFile: (path: string, data: Uint8Array | string) => void
@@ -60,7 +68,7 @@ async function resolveNodeIndexURL(): Promise<string | null> {
   }
 }
 
-export async function loadPyodideRuntime(): Promise<PyodideInterface> {
+export async function loadPyodideRuntime(home?: string): Promise<PyodideInterface> {
   let mod: { loadPyodide: (opts?: Record<string, unknown>) => Promise<unknown> }
   try {
     mod = (await import('pyodide')) as unknown as {
@@ -72,8 +80,8 @@ export async function loadPyodideRuntime(): Promise<PyodideInterface> {
       { cause: err },
     )
   }
-  const nodeIndexURL = await resolveNodeIndexURL()
-  const indexURL = nodeIndexURL ?? (isNode() ? null : PYODIDE_CDN_URL)
+  const indexURL =
+    home ?? envHome() ?? (await resolveNodeIndexURL()) ?? (isNode() ? null : PYODIDE_CDN_URL)
   const opts: Record<string, unknown> = { stdout: noopIo, stderr: noopIo }
   if (indexURL !== null) opts.indexURL = indexURL
   try {

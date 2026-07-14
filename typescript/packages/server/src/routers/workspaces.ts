@@ -94,18 +94,26 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         resourceMap[prefix] = [resource, mode]
         if (Object.keys(safeguards).length > 0) commandSafeguards[prefix] = safeguards
       }
-      const ws = new Workspace(resourceMap, {
-        mode: args.options.mode,
-        consistency: args.options.consistency,
-        sessionId: args.options.sessionId,
-        agentId: args.options.agentId,
-        ...(Object.keys(commandSafeguards).length > 0 ? { commandSafeguards } : {}),
-        ...(args.options.cache !== undefined ? { cache: args.options.cache } : {}),
-        ...(args.options.index !== undefined ? { index: args.options.index } : {}),
-        ...(args.options.pythonRuntime !== undefined
-          ? { pythonRuntime: args.options.pythonRuntime }
-          : {}),
-      })
+      let ws: Workspace
+      try {
+        ws = new Workspace(resourceMap, {
+          mode: args.options.mode,
+          consistency: args.options.consistency,
+          sessionId: args.options.sessionId,
+          agentId: args.options.agentId,
+          ...(Object.keys(commandSafeguards).length > 0 ? { commandSafeguards } : {}),
+          ...(args.options.cache !== undefined ? { cache: args.options.cache } : {}),
+          ...(args.options.index !== undefined ? { index: args.options.index } : {}),
+          ...(args.options.pythonRuntime !== undefined
+            ? { pythonRuntime: args.options.pythonRuntime }
+            : {}),
+          ...(args.options.runtimeOptions !== undefined
+            ? { runtimeOptions: args.options.runtimeOptions }
+            : {}),
+        })
+      } catch (e) {
+        return reply.status(400).send({ detail: (e as Error).message })
+      }
       let entry
       try {
         for (const [prefix, target] of Object.entries(args.fuseMounts)) {
