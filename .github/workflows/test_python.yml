@@ -328,7 +328,7 @@ jobs:
         working-directory: python
         env:
           MIRAGE_QUICKJS_HOME: /tmp/quickjs
-        run: uv run pytest tests/runtime/python/test_quickjs.py -v --no-cov
+        run: uv run pytest tests/runtime/js/ -v --no-cov
 
   audit:
     needs: changes
