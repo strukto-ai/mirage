@@ -54,14 +54,14 @@ async def run_fanout(cmd_name: str,
     stdin_bytes: bytes | None = None
     if cmd_name == Cmd.TEE:
         stdin_bytes = await materialize(stdin) if stdin is not None else b""
-    if cmd_name == Cmd.GREP and not FlagView(flags,
-                                             spec=SPECS[Cmd.GREP]).bool("h"):
+    if cmd_name == Cmd.GREP and not FlagView(
+            flags, spec=SPECS[Cmd.GREP]).as_bool("h"):
         flags["H"] = True
-    if cmd_name == Cmd.RG and not FlagView(flags,
-                                           spec=SPECS[Cmd.RG]).bool("args_I"):
+    if cmd_name == Cmd.RG and not FlagView(
+            flags, spec=SPECS[Cmd.RG]).as_bool("args_I"):
         flags["H"] = True
     if cmd_name in (Cmd.HEAD, Cmd.TAIL) and not FlagView(
-            flags, spec=SPECS[cmd_name]).bool("q"):
+            flags, spec=SPECS[cmd_name]).as_bool("q"):
         flags["v"] = True
 
     results = await run_operands(run_single,
@@ -75,15 +75,15 @@ async def run_fanout(cmd_name: str,
     if cmd_name == Cmd.WC:
         body = combine_wc(results, flag_kwargs)
     elif cmd_name == Cmd.DU and FlagView(flag_kwargs,
-                                         spec=SPECS[Cmd.DU]).bool("c"):
+                                         spec=SPECS[Cmd.DU]).as_bool("c"):
         body = du_total(results,
-                        FlagView(flag_kwargs, spec=SPECS[Cmd.DU]).bool("h"))
+                        FlagView(flag_kwargs, spec=SPECS[Cmd.DU]).as_bool("h"))
     elif cmd_name == Cmd.TEE:
         body = stdin_bytes or b""
     elif (cmd_name in (Cmd.HEAD, Cmd.TAIL)
-          and FlagView(flags, spec=SPECS[cmd_name]).bool("v")) or (
+          and FlagView(flags, spec=SPECS[cmd_name]).as_bool("v")) or (
               cmd_name == Cmd.LS
-              and FlagView(flags, spec=SPECS[Cmd.LS]).bool("R")):
+              and FlagView(flags, spec=SPECS[Cmd.LS]).as_bool("R")):
         # Blank line between per-operand blocks, like one native run
         # separates its own file blocks.
         body = b"\n".join(r.data for r in results if r.data)

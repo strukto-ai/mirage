@@ -35,14 +35,14 @@ async def run_cmp(scopes: list[PathSpec], flag_kwargs: dict,
         dispatch (Callable): Workspace operation dispatcher.
     """
     fl = FlagView(flag_kwargs, spec=SPECS["cmp"])
-    limit = fl.str("n")
-    skip = fl.str("i")
+    limit = fl.as_str("n")
+    skip = fl.as_str("i")
     return await generic_cmp(flat_scopes(scopes),
                              read_bytes=functools.partial(
                                  relay, dispatch, "read"),
                              accessor=None,
-                             silent=fl.bool("s"),
-                             verbose=fl.bool("args_l"),
+                             silent=fl.as_bool("s"),
+                             verbose=fl.as_bool("args_l"),
                              limit=int(limit) if limit is not None else None,
-                             print_bytes=fl.bool("b"),
+                             print_bytes=fl.as_bool("b"),
                              skip=int(skip) if skip is not None else None)

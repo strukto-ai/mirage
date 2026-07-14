@@ -53,11 +53,11 @@ def combine_wc(results: list[OperandRun], flag_kwargs: dict) -> bytes:
         flag_kwargs (dict): Flags parsed against the shared wc spec.
     """
     fl = FlagView(flag_kwargs, spec=SPECS["wc"])
-    sel = dict(args_l=fl.bool("args_l"),
-               w=fl.bool("w"),
-               c=fl.bool("c"),
-               m=fl.bool("m"),
-               L=fl.bool("L"))
+    sel = dict(args_l=fl.as_bool("args_l"),
+               w=fl.as_bool("w"),
+               c=fl.as_bool("c"),
+               m=fl.as_bool("m"),
+               L=fl.as_bool("L"))
     columns = 1 if any(sel.values()) else 3
     rows: list[tuple[WCCounts, str | None]] = []
     for run in results:

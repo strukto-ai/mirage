@@ -140,9 +140,9 @@ async def grep(
 
     if paths and pattern is not None and "\n" not in pattern:
         scope = detect_scope(paths[0])
-        ignore_case = fl.bool("i")
-        fixed_string = fl.bool("F")
-        whole_word = fl.bool("w")
+        ignore_case = fl.as_bool("i")
+        fixed_string = fl.as_bool("F")
+        whole_word = fl.as_bool("w")
 
         if scope.level == "traces" or scope.level == "root":
             traces = await fetch_traces(

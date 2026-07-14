@@ -21,36 +21,36 @@ from mirage.commands.spec.types import (CommandSpec, FlagView, OperandKind,
 
 def test_flag_view_typed_reads():
     fl = FlagView({"i": True, "m": "5", "type": "py", "e": ["a", "b"]})
-    assert fl.bool("i") is True
-    assert fl.bool("v") is False
-    assert fl.int("m") == 5
-    assert fl.int("A") is None
-    assert fl.str("type") == "py"
-    assert fl.str("glob") is None
-    assert fl.list("e") == ["a", "b"]
-    assert fl.list("f") == []
+    assert fl.as_bool("i") is True
+    assert fl.as_bool("v") is False
+    assert fl.as_int("m") == 5
+    assert fl.as_int("A") is None
+    assert fl.as_str("type") == "py"
+    assert fl.as_str("glob") is None
+    assert fl.as_list("e") == ["a", "b"]
+    assert fl.as_list("f") == []
 
 
 def test_flag_view_list_coerces_single_string():
     fl = FlagView({"e": "solo"})
-    assert fl.list("e") == ["solo"]
+    assert fl.as_list("e") == ["solo"]
 
 
 def test_flag_view_without_spec_is_lenient():
     fl = FlagView({"anything": True})
-    assert fl.bool("anything") is True
-    assert fl.bool("missing") is False
+    assert fl.as_bool("anything") is True
+    assert fl.as_bool("missing") is False
 
 
 def test_flag_view_with_spec_rejects_unknown_names():
     fl = FlagView({"i": True}, spec=SPECS["grep"])
-    assert fl.bool("i") is True
+    assert fl.as_bool("i") is True
     with pytest.raises(KeyError, match="ignorecase"):
-        fl.bool("ignorecase")
+        fl.as_bool("ignorecase")
     with pytest.raises(KeyError):
-        fl.int("max_count")
+        fl.as_int("max_count")
     with pytest.raises(KeyError):
-        fl.list("patterns")
+        fl.as_list("patterns")
 
 
 def test_spec_flag_names_includes_short_long_and_ambiguous():

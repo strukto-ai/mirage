@@ -68,22 +68,22 @@ async def grep(
     pattern = pattern_arg(texts, fl)
 
     if paths and pattern is not None and "\n" not in pattern and (
-            fl.bool("r") or fl.bool("R")):
+            fl.as_bool("r") or fl.as_bool("R")):
         scope = detect_scope(paths[0])
         if scope.use_native and scope.folder:
             return await _grep_server_side(accessor,
                                            scope.folder,
                                            pattern,
                                            paths,
-                                           i=fl.bool("i"),
-                                           v=fl.bool("v"),
-                                           n=fl.bool("n"),
-                                           c=fl.bool("c"),
-                                           args_l=fl.bool("args_l"),
-                                           w=fl.bool("w"),
-                                           F=fl.bool("F"),
-                                           o=fl.bool("o"),
-                                           max_count=fl.int("m"))
+                                           i=fl.as_bool("i"),
+                                           v=fl.as_bool("v"),
+                                           n=fl.as_bool("n"),
+                                           c=fl.as_bool("c"),
+                                           args_l=fl.as_bool("args_l"),
+                                           w=fl.as_bool("w"),
+                                           F=fl.as_bool("F"),
+                                           o=fl.as_bool("o"),
+                                           max_count=fl.as_int("m"))
 
     resolved = await resolve_glob(accessor, paths, index) if paths else []
     return await generic_grep(

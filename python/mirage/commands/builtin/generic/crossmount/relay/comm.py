@@ -40,7 +40,7 @@ async def run_comm(scopes: list[PathSpec], flag_kwargs: dict,
                               read_bytes=functools.partial(
                                   relay, dispatch, "read"),
                               accessor=None,
-                              suppress1=fl.bool("args_1"),
-                              suppress2=fl.bool("2"),
-                              suppress3=fl.bool("3"),
-                              check_order=fl.bool("check_order"))
+                              suppress1=fl.as_bool("args_1"),
+                              suppress2=fl.as_bool("2"),
+                              suppress3=fl.as_bool("3"),
+                              check_order=fl.as_bool("check_order"))

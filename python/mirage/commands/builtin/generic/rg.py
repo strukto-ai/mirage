@@ -58,29 +58,29 @@ def parse_flags(fl: FlagView, never_match: bool) -> RgFlags:
         never_match (bool): zero-pattern sentinel from resolve_pattern; it is
             a regex, so it suppresses -F.
     """
-    a_ctx = fl.int("A")
-    b_ctx = fl.int("B")
-    c_ctx = fl.int("C")
+    a_ctx = fl.as_int("A")
+    b_ctx = fl.as_int("B")
+    c_ctx = fl.as_int("C")
     context_after = a_ctx if a_ctx is not None else 0
     context_before = b_ctx if b_ctx is not None else 0
     if c_ctx is not None:
         # rg family: -C overrides -A/-B (grep keeps -A/-B precedence)
         context_before = context_after = c_ctx
     return RgFlags(
-        ignore_case=fl.bool("i"),
-        invert=fl.bool("v"),
-        line_numbers=fl.bool("n"),
-        count_only=fl.bool("c"),
-        files_only=fl.bool("args_l"),
-        whole_word=fl.bool("w"),
-        fixed_string=fl.bool("F") and not never_match,
-        only_matching=fl.bool("o"),
-        with_filename=fl.bool("H"),
-        no_filename=fl.bool("args_I"),
-        hidden=fl.bool("hidden"),
-        file_type=fl.str("type"),
-        glob_pattern=fl.str("glob"),
-        max_count=fl.int("m"),
+        ignore_case=fl.as_bool("i"),
+        invert=fl.as_bool("v"),
+        line_numbers=fl.as_bool("n"),
+        count_only=fl.as_bool("c"),
+        files_only=fl.as_bool("args_l"),
+        whole_word=fl.as_bool("w"),
+        fixed_string=fl.as_bool("F") and not never_match,
+        only_matching=fl.as_bool("o"),
+        with_filename=fl.as_bool("H"),
+        no_filename=fl.as_bool("args_I"),
+        hidden=fl.as_bool("hidden"),
+        file_type=fl.as_str("type"),
+        glob_pattern=fl.as_str("glob"),
+        max_count=fl.as_int("m"),
         context_after=context_after,
         context_before=context_before,
     )

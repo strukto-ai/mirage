@@ -106,12 +106,12 @@ def files_only_shortcircuit(
     Returns:
         tuple[ByteSource, IOResult] | None: the formatted file list, or None.
     """
-    if not fl.bool("args_l") or pattern is None:
+    if not fl.as_bool("args_l") or pattern is None:
         return None
-    if (fl.bool("i") or fl.bool("w") or fl.bool("v") or fl.bool("c")
-            or fl.bool("o")):
+    if (fl.as_bool("i") or fl.as_bool("w") or fl.as_bool("v")
+            or fl.as_bool("c") or fl.as_bool("o")):
         return None
-    fixed = fl.bool("F")
+    fixed = fl.as_bool("F")
     pt = classify_pattern(pattern, fixed)
     fully_literal = fixed or pt == PatternType.EXACT or (
         pt == PatternType.SIMPLE and "." not in pattern)

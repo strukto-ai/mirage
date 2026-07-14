@@ -36,16 +36,16 @@ async def run_join(scopes: list[PathSpec], flag_kwargs: dict,
         dispatch (Callable): Workspace operation dispatcher.
     """
     fl = FlagView(flag_kwargs, spec=SPECS["join"])
-    field1 = fl.str("args_1")
-    field2 = fl.str("2")
+    field1 = fl.as_str("args_1")
+    field2 = fl.as_str("2")
     return await generic_join(flat_scopes(scopes),
                               read_bytes=functools.partial(
                                   relay, dispatch, "read"),
                               accessor=None,
                               field1=int(field1 or 1) - 1,
                               field2=int(field2 or 1) - 1,
-                              separator=fl.str("t"),
-                              also_unpairable=fl.str("a"),
-                              only_unpairable=fl.str("v"),
-                              empty_value=fl.str("e"),
-                              output_format=fl.str("o"))
+                              separator=fl.as_str("t"),
+                              also_unpairable=fl.as_str("a"),
+                              only_unpairable=fl.as_str("v"),
+                              empty_value=fl.as_str("e"),
+                              output_format=fl.as_str("o"))

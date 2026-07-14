@@ -57,7 +57,7 @@ async def rg(
             index,
             paths,
             pattern_str,
-            fixed_string=fl.bool("F"),
+            fixed_string=fl.as_bool("F"),
             recursive=True,
         )
         if file_count > SCOPE_ERROR:
@@ -65,9 +65,9 @@ async def rg(
             return b"", IOResult(exit_code=1, stderr=msg.encode())
         if used_search:
             predicate = partial(rg_matches_filter,
-                                file_type=fl.str("type"),
-                                glob_pattern=fl.str("glob"),
-                                hidden=fl.bool("hidden"))
+                                file_type=fl.as_str("type"),
+                                glob_pattern=fl.as_str("glob"),
+                                hidden=fl.as_bool("hidden"))
             short = files_only_shortcircuit(fl,
                                             pattern_str,
                                             paths,

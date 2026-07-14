@@ -55,23 +55,23 @@ def parse_flags(fl: FlagView, never_match: bool) -> GrepFlags:
         never_match (bool): zero-pattern sentinel from resolve_pattern; it is
             a regex, so it suppresses -F.
     """
-    a_ctx = fl.int("A")
-    b_ctx = fl.int("B")
-    c_ctx = fl.int("C")
+    a_ctx = fl.as_int("A")
+    b_ctx = fl.as_int("B")
+    c_ctx = fl.as_int("C")
     return GrepFlags(
-        ignore_case=fl.bool("i"),
-        invert=fl.bool("v"),
-        line_numbers=fl.bool("n"),
-        count_only=fl.bool("c"),
-        files_only=fl.bool("args_l"),
-        whole_word=fl.bool("w"),
-        fixed_string=fl.bool("F") and not never_match,
-        only_matching=fl.bool("o"),
-        quiet=fl.bool("q"),
-        recursive=fl.bool("r") or fl.bool("R"),
-        with_filename=fl.bool("H"),
-        no_filename=fl.bool("h"),
-        max_count=fl.int("m"),
+        ignore_case=fl.as_bool("i"),
+        invert=fl.as_bool("v"),
+        line_numbers=fl.as_bool("n"),
+        count_only=fl.as_bool("c"),
+        files_only=fl.as_bool("args_l"),
+        whole_word=fl.as_bool("w"),
+        fixed_string=fl.as_bool("F") and not never_match,
+        only_matching=fl.as_bool("o"),
+        quiet=fl.as_bool("q"),
+        recursive=fl.as_bool("r") or fl.as_bool("R"),
+        with_filename=fl.as_bool("H"),
+        no_filename=fl.as_bool("h"),
+        max_count=fl.as_int("m"),
         after_context=a_ctx if a_ctx is not None else (c_ctx or 0),
         before_context=b_ctx if b_ctx is not None else (c_ctx or 0),
     )

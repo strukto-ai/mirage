@@ -51,9 +51,9 @@ async def rg(
     pattern_str = pattern_arg(texts, fl)
     if pattern_str is None:
         raise UsageError("rg: usage: rg [flags] pattern [path]")
-    i = fl.bool("i")
-    w = fl.bool("w")
-    F = fl.bool("F")
+    i = fl.as_bool("i")
+    w = fl.as_bool("w")
+    F = fl.as_bool("F")
     pat = compile_pattern(pattern_str, i, F, w)
 
     config = accessor.config

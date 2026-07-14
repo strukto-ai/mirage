@@ -39,7 +39,7 @@ async def grep(
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["grep"])
     resolved = await resolve_glob(accessor, paths, index) if paths else []
-    recursive = fl.bool("r") or fl.bool("R")
+    recursive = fl.as_bool("r") or fl.as_bool("R")
     if recursive and any(is_cross_run_root(p) for p in resolved):
         raise ValueError("grep: recursive search across runs is disabled; "
                          "target a specific run (e.g. /ci/runs/<run>/jobs)")

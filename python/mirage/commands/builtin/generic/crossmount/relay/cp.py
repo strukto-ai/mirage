@@ -38,8 +38,8 @@ async def run_cp(scopes: list[PathSpec], flag_kwargs: dict,
     """
     fl = FlagView(flag_kwargs, spec=SPECS["cp"])
     return await generic_cp(flat_scopes(scopes),
-                            recursive=fl.bool("r") or fl.bool("R")
-                            or fl.bool("a"),
-                            n=fl.bool("n"),
-                            v=fl.bool("v"),
+                            recursive=fl.as_bool("r") or fl.as_bool("R")
+                            or fl.as_bool("a"),
+                            n=fl.as_bool("n"),
+                            v=fl.as_bool("v"),
                             **transfer_primitives(dispatch))

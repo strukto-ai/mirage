@@ -113,18 +113,18 @@ def parse_flags(fl: FlagView, never_match: bool) -> ZgrepFlags:
             a regex, so it suppresses -F.
     """
     return ZgrepFlags(
-        ignore_case=fl.bool("i"),
-        invert=fl.bool("v"),
-        count=fl.bool("c"),
-        files_only=fl.bool("args_l"),
-        line_numbers=fl.bool("n"),
-        fixed=fl.bool("F") and not never_match,
-        force_filename=fl.bool("H"),
-        suppress_filename=fl.bool("h"),
-        only_matching=fl.bool("o"),
-        quiet=fl.bool("q"),
-        whole_word=fl.bool("w"),
-        max_count=fl.int("m"),
+        ignore_case=fl.as_bool("i"),
+        invert=fl.as_bool("v"),
+        count=fl.as_bool("c"),
+        files_only=fl.as_bool("args_l"),
+        line_numbers=fl.as_bool("n"),
+        fixed=fl.as_bool("F") and not never_match,
+        force_filename=fl.as_bool("H"),
+        suppress_filename=fl.as_bool("h"),
+        only_matching=fl.as_bool("o"),
+        quiet=fl.as_bool("q"),
+        whole_word=fl.as_bool("w"),
+        max_count=fl.as_int("m"),
     )
 
 

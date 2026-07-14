@@ -33,7 +33,7 @@ def strategy_for(cmd_name: str, flag_kwargs: dict) -> Strategy:
     if cmd_name in RELAY_COMMANDS:
         return Strategy.RELAY
     if cmd_name == Cmd.SED and FlagView(flag_kwargs,
-                                        spec=SPECS[Cmd.SED]).bool("i"):
+                                        spec=SPECS[Cmd.SED]).as_bool("i"):
         return Strategy.FANOUT
     if cmd_name in STREAM_COMMANDS:
         return Strategy.STREAM

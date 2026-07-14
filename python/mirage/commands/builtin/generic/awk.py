@@ -31,8 +31,8 @@ def parse_flags(fl: FlagView) -> AwkFlags:
     else:
         program_files = ()
     return AwkFlags(
-        field_separator=fl.str("F"),
-        assignments=tuple(fl.list("v")),
+        field_separator=fl.as_str("F"),
+        assignments=tuple(fl.as_list("v")),
         program_files=program_files,
     )
 

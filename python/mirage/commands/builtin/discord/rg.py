@@ -54,7 +54,7 @@ async def rg(
     pattern_str = pattern_arg(texts, fl)
     if pattern_str is None:
         raise UsageError("rg: usage: rg [flags] pattern [path]")
-    max_count = fl.int("m")
+    max_count = fl.as_int("m")
 
     pushdown_warnings: list[str] = []
     if paths and "\n" not in pattern_str:

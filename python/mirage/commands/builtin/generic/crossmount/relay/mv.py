@@ -39,8 +39,8 @@ async def run_mv(scopes: list[PathSpec], flag_kwargs: dict,
     p = functools.partial
     fl = FlagView(flag_kwargs, spec=SPECS["mv"])
     return await generic_mv(flat_scopes(scopes),
-                            n=fl.bool("n"),
-                            v=fl.bool("v"),
+                            n=fl.as_bool("n"),
+                            v=fl.as_bool("v"),
                             unlink=p(relay, dispatch, "unlink", None),
                             rmdir=p(relay, dispatch, "rmdir", None),
                             **transfer_primitives(dispatch))

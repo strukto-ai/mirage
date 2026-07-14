@@ -150,7 +150,7 @@ def pattern_arg(texts: Sequence[str], flags: FlagView) -> str | None:
             itself be a newline-separated list), or None when neither -e nor
             a positional pattern was supplied.
     """
-    e_values = flags.list("e")
+    e_values = flags.as_list("e")
     if e_values:
         return "\n".join(e_values)
     if texts:

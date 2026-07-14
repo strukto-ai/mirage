@@ -67,7 +67,7 @@ async def grep(
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["grep"])
     pattern = pattern_arg(texts, fl)
-    max_count = fl.int("m")
+    max_count = fl.as_int("m")
 
     pushdown_warnings: list[str] = []
     if paths and pattern is not None and "\n" not in pattern:

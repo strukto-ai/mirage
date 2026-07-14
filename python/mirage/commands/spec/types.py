@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import builtins
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum, StrEnum
@@ -141,18 +140,18 @@ class FlagView:
                            f"spec (known: {sorted(self._allowed)})")
         return name
 
-    def bool(self, name: str) -> bool:
+    def as_bool(self, name: str) -> bool:
         return self._flags.get(self._key(name)) is True
 
-    def int(self, name: str) -> int | None:
+    def as_int(self, name: str) -> int | None:
         value = self._flags.get(self._key(name))
         return int(value) if isinstance(value, str) else None
 
-    def str(self, name: str) -> str | None:
+    def as_str(self, name: str) -> str | None:
         value = self._flags.get(self._key(name))
         return value if isinstance(value, str) else None
 
-    def list(self, name: "builtins.str") -> "builtins.list[builtins.str]":
+    def as_list(self, name: str) -> list[str]:
         value = self._flags.get(self._key(name))
         if isinstance(value, list):
             return [item for item in value if isinstance(item, str)]
@@ -160,7 +159,7 @@ class FlagView:
             return [value]
         return []
 
-    def raw(self, name: "builtins.str") -> object:
+    def raw(self, name: str) -> object:
         return self._flags.get(self._key(name))
 
 

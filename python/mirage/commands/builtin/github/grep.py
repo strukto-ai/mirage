@@ -100,7 +100,7 @@ async def grep(
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["grep"])
     pattern = pattern_arg(texts, fl)
-    recursive = fl.bool("r") or fl.bool("R")
+    recursive = fl.as_bool("r") or fl.as_bool("R")
 
     resolved: list[PathSpec] = []
     if paths and index is not None:
@@ -109,7 +109,7 @@ async def grep(
             index,
             paths,
             pattern,
-            fixed_string=fl.bool("F"),
+            fixed_string=fl.as_bool("F"),
             recursive=recursive,
         )
         if file_count > SCOPE_ERROR:
