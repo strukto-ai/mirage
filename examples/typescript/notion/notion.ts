@@ -15,7 +15,7 @@
 import { basename, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { MountMode, NotionResource, Workspace, type NotionConfig } from '@struktoai/mirage-node'
+import { MountMode, NotionResource, Workspace, type FileStat, type NotionConfig } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../.env.development') })
@@ -59,6 +59,21 @@ async function explorePages(ws: Workspace): Promise<void> {
   await run(ws, `tail -n 5 "${base}/page.json"`)
   await run(ws, `wc -l "${base}/page.json"`)
   await run(ws, `stat "${base}/page.json"`)
+
+
+  // chmod/chown/touch never hit the Notion API: attrs land in the
+  // workspace namespace (durable, snapshot-captured) and merge into
+  // dispatch-level stat.
+  console.log(`=== metadata overlay on ${base}/page.json ===`)
+  const metaRes = await ws.execute(
+    `chmod 640 "${base}/page.json" && chown 500:dev "${base}/page.json" && touch -t 202601021530 "${base}/page.json"`,
+  )
+  console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+  const metaSt = (await ws.dispatch('stat', `${base}/page.json`)) as FileStat
+  const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+  console.log(
+    `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+  )
   await run(ws, `jq ".title" "${base}/page.json"`)
   await run(ws, `jq ".page_id" "${base}/page.json"`)
   await run(ws, `jq ".parent_type" "${base}/page.json"`)

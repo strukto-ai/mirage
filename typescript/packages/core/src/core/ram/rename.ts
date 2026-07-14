@@ -19,6 +19,14 @@ import { rstripSlash } from '../../utils/slash.ts'
 import { enoent } from '../../utils/errors.ts'
 import { invalidateAfterUnlink, invalidateAfterWrite } from '../../cache/context.ts'
 
+function moveAttrs(accessor: RAMAccessor, src: string, dst: string): void {
+  const attrs = accessor.store.attrs.get(src)
+  if (attrs !== undefined) {
+    accessor.store.attrs.delete(src)
+    accessor.store.attrs.set(dst, attrs)
+  }
+}
+
 export async function rename(accessor: RAMAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const s = norm(src.mountPath)
   const d = norm(dst.mountPath)
@@ -29,6 +37,7 @@ export async function rename(accessor: RAMAccessor, src: PathSpec, dst: PathSpec
     accessor.store.files.delete(s)
     accessor.store.modified.set(d, accessor.store.modified.get(s) ?? now)
     accessor.store.modified.delete(s)
+    moveAttrs(accessor, s, d)
     await invalidateAfterUnlink(src)
     await invalidateAfterWrite(dst)
     return Promise.resolve()
@@ -38,6 +47,7 @@ export async function rename(accessor: RAMAccessor, src: PathSpec, dst: PathSpec
     accessor.store.dirs.add(d)
     accessor.store.modified.set(d, accessor.store.modified.get(s) ?? now)
     accessor.store.modified.delete(s)
+    moveAttrs(accessor, s, d)
     const srcPrefix = `${rstripSlash(s)}/`
     const dstPrefix = `${rstripSlash(d)}/`
     for (const key of [...accessor.store.files.keys()]) {
@@ -48,6 +58,7 @@ export async function rename(accessor: RAMAccessor, src: PathSpec, dst: PathSpec
           accessor.store.files.set(newKey, data)
           accessor.store.files.delete(key)
         }
+        moveAttrs(accessor, key, dstPrefix + key.slice(srcPrefix.length))
       }
     }
     await invalidateAfterUnlink(src)

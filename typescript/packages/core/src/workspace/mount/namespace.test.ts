@@ -138,3 +138,102 @@ describe('Namespace symlink table', () => {
     await ws.close()
   })
 })
+
+describe('Namespace node metadata overlay', () => {
+  it('setAttrs creates an overlay node that is not a link', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    ws.namespace.setAttrs('/data/f.txt', { mode: 0o601, uid: 500, gid: 'dev' })
+    const meta = ws.namespace.metaFor('/data/f.txt')
+    expect(meta?.target).toBeUndefined()
+    expect(meta?.mode).toBe(0o601)
+    expect(meta?.uid).toBe(500)
+    expect(meta?.gid).toBe('dev')
+    expect(ws.namespace.isLink('/data/f.txt')).toBe(false)
+    await ws.close()
+  })
+
+  it('partial setAttrs updates keep earlier fields', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    ws.namespace.setAttrs('/data/f.txt', { mode: 0o600 })
+    ws.namespace.setAttrs('/data/f.txt', { uid: 'alice' })
+    const meta = ws.namespace.metaFor('/data/f.txt')
+    expect(meta?.mode).toBe(0o600)
+    expect(meta?.uid).toBe('alice')
+    await ws.close()
+  })
+
+  it('setAttrs on a link keeps its target', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    ws.namespace.symlink('/data/link', '/t1', 1)
+    ws.namespace.setAttrs('/data/link', { mtime: 2 })
+    const meta = ws.namespace.metaFor('/data/link')
+    expect(meta?.target).toBe('/t1')
+    expect(meta?.mtime).toBe(2)
+    expect(ws.namespace.readlink('/data/link')).toBe('/t1')
+    await ws.close()
+  })
+
+  it('overlay nodes never appear in the symlink views', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    ws.namespace.setAttrs('/data/f.txt', { mode: 0o600 })
+    expect(ws.namespace.symlinkTargets().size).toBe(0)
+    expect(ws.namespace.hasLinks()).toBe(false)
+    expect(ws.namespace.linksUnder('/data').size).toBe(0)
+    await ws.close()
+  })
+
+  it('unlink and rename move overlay nodes', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    ws.namespace.setAttrs('/data/f.txt', { mode: 0o600 })
+    ws.namespace.rename('/data/f.txt', '/data/g.txt')
+    expect(ws.namespace.metaFor('/data/f.txt')).toBeNull()
+    expect(ws.namespace.metaFor('/data/g.txt')?.mode).toBe(0o600)
+    ws.namespace.unlink('/data/g.txt')
+    expect(ws.namespace.metaFor('/data/g.txt')).toBeNull()
+    await ws.close()
+  })
+
+  it('clearTimes keeps mode and ownership, drops time-only nodes', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    ws.namespace.setAttrs('/data/f.txt', {
+      mode: 0o601,
+      uid: 500,
+      mtime: 1,
+      atime: '2026-03-04T12:00:00+00:00',
+    })
+    ws.namespace.clearTimes('/data/f.txt')
+    const meta = ws.namespace.metaFor('/data/f.txt')
+    expect(meta?.mtime).toBeUndefined()
+    expect(meta?.atime).toBeUndefined()
+    expect(meta?.mode).toBe(0o601)
+    expect(meta?.uid).toBe(500)
+    ws.namespace.setAttrs('/data/g.txt', { mtime: 1 })
+    ws.namespace.clearTimes('/data/g.txt')
+    expect(ws.namespace.metaFor('/data/g.txt')).toBeNull()
+    await ws.close()
+  })
+
+  it('clearTimes leaves links alone', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    ws.namespace.symlink('/data/link', '/t1', 1)
+    ws.namespace.clearTimes('/data/link')
+    expect(ws.namespace.metaFor('/data/link')?.mtime).toBe(1)
+    await ws.close()
+  })
+
+  it('unlinkGlob matches segment-wise and purges under matched dirs', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    ws.namespace.setAttrs('/data/a.log', { mode: 0o600 })
+    ws.namespace.setAttrs('/data/sub/b.log', { mode: 0o600 })
+    ws.namespace.setAttrs('/data/keep.txt', { mode: 0o600 })
+    expect(ws.namespace.unlinkGlob('/data/*.log')).toBe(1)
+    expect(ws.namespace.metaFor('/data/a.log')).toBeNull()
+    expect(ws.namespace.metaFor('/data/sub/b.log')).not.toBeNull()
+    expect(ws.namespace.metaFor('/data/keep.txt')).not.toBeNull()
+    ws.namespace.setAttrs('/data/sub/deep/a.txt', { mode: 0o600 })
+    expect(ws.namespace.unlinkGlob('/data/s*')).toBe(2)
+    expect(ws.namespace.metaFor('/data/sub/deep/a.txt')).toBeNull()
+    expect(ws.namespace.metaFor('/data/keep.txt')).not.toBeNull()
+    await ws.close()
+  })
+})

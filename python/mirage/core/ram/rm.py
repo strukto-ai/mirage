@@ -28,8 +28,10 @@ async def rm_r(accessor: RAMAccessor, path: PathSpec) -> None:
         if key == p or key.startswith(prefix):
             del store.files[key]
             store.modified.pop(key, None)
+            store.attrs.pop(key, None)
     for key in list(store.dirs):
         if key == p or key.startswith(prefix):
             store.dirs.discard(key)
             store.modified.pop(key, None)
+            store.attrs.pop(key, None)
     await invalidate_after_unlink(path)

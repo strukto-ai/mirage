@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.supabase import SupabaseConfig, SupabaseResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -44,6 +45,16 @@ def ops_summary() -> str:
 
 
 async def main():
+    # Free-tier Supabase pauses idle projects; every S3 call then
+    # returns HTTP 540. Probe once and report instead of failing
+    # cryptically on each section.
+    probe = await ws.execute("ls /supabase/")
+    if probe.exit_code != 0:
+        err = (await probe.stderr_str()).strip()
+        print(f"supabase mount unavailable: {err}")
+        print("unpause the project in the Supabase dashboard and rerun")
+        return
+
     print("=== PLAN ESTIMATES ===\n")
 
     dr = await ws.execute(
@@ -234,6 +245,20 @@ async def main():
     parsed = json.loads(await result.stdout_str())
     print(f"  departments: {len(parsed)}")
     print(f"  first team: {parsed[0]['teams'][0]['name']}")
+
+    # chmod/chown/touch never hit the Storage API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print("=== metadata overlay on /supabase/example.json ===")
+    meta_res = await ws.execute(
+        'chmod 640 "/supabase/example.json"'
+        ' && chown 500:dev "/supabase/example.json"'
+        ' && touch -t 202601021530 "/supabase/example.json"')
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    meta_st, _ = await ws.dispatch(
+        "stat", PathSpec.from_str_path("/supabase/example.json"))
+    print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+          f"gid={meta_st.gid} mtime={meta_st.modified}")
 
 
 if __name__ == "__main__":

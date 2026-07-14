@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.github_ci import GitHubCIConfig, GitHubCIResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -95,6 +96,19 @@ async def main():
     print(f"=== stat {run_path} ===")
     r = await ws.execute(f'stat "{run_path}"')
     print(f"  {(await r.stdout_str()).strip()}")
+
+    # chmod/chown/touch never hit the Actions API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print(f"=== metadata overlay on {run_path} ===")
+    meta_res = await ws.execute(f'chmod 640 "{run_path}"'
+                                f' && chown 500:dev "{run_path}"'
+                                f' && touch -t 202601021530 "{run_path}"')
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    meta_st, _ = await ws.dispatch("stat",
+                                   PathSpec.from_str_path(f"{run_path}"))
+    print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+          f"gid={meta_st.gid} mtime={meta_st.modified}")
 
     # ── list jobs ─────────────────────────────────────
     jobs_path = f"{run_path}/jobs"

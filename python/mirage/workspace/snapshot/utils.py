@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
 
 BLOB_REF_KEY = "__file"
 

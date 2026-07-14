@@ -90,6 +90,15 @@ export interface JobSnapshot {
  * bytes the agent actually saw, populated at read time from the GET
  * response. At least one of `fingerprint` and `revision` is non-null.
  */
+export interface NodeMetaSnapshot {
+  target?: string
+  mtime?: number
+  mode?: number
+  uid?: number | string
+  gid?: number | string
+  atime?: string
+}
+
 export interface FingerprintEntrySnapshot {
   path: string
   mount_prefix: string
@@ -120,8 +129,9 @@ export interface WorkspaceStateDict {
    */
   live_only_mounts?: string[]
   /**
-   * Namespace symlink table: link path -> {target, mtime}. Optional for
-   * backwards compatibility with snapshots that predate symlinks.
+   * Namespace node table: path -> per-path metadata (symlink target and
+   * attribute overlay). Only non-null fields are serialized. Optional for
+   * backwards compatibility with snapshots that predate the table.
    */
-  symlinks?: Record<string, { target: string; mtime: number }>
+  nodes?: Record<string, NodeMetaSnapshot>
 }

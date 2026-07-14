@@ -19,6 +19,7 @@ from build_table import build_table
 
 from mirage import MountMode, Workspace
 from mirage.resource.lancedb import LanceDBConfig, LanceDBResource
+from mirage.types import PathSpec
 
 
 async def show(ws: Workspace, cmd: str) -> None:
@@ -57,6 +58,20 @@ async def main() -> None:
     print("\n=== stat /fashion/Men/Shoes/White/3.jpg (raw image bytes) ===")
     r = await ws.execute("stat -c '%s' /fashion/Men/Shoes/White/3.jpg")
     print(f"  image size: {(await r.stdout_str()).strip()} bytes")
+
+    # chmod/chown/touch never hit the LanceDB API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print("=== metadata overlay on /fashion/Men/Shoes/White/3.md ===")
+    meta_res = await ws.execute(
+        'chmod 640 "/fashion/Men/Shoes/White/3.md"'
+        ' && chown 500:dev "/fashion/Men/Shoes/White/3.md"'
+        ' && touch -t 202601021530 "/fashion/Men/Shoes/White/3.md"')
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    meta_st, _ = await ws.dispatch(
+        "stat", PathSpec.from_str_path("/fashion/Men/Shoes/White/3.md"))
+    print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+          f"gid={meta_st.gid} mtime={meta_st.modified}")
 
     await show(ws, 'search "white running sneakers" /fashion')
 

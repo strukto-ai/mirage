@@ -25,6 +25,7 @@ from mirage import MountMode, Workspace
 from mirage.commands.config import command
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Config, S3Resource
+from mirage.types import PathSpec
 from mirage.workspace.snapshot import ContentDriftError
 
 load_dotenv(".env.development")
@@ -634,6 +635,18 @@ async def main():
         r = await mv_ws.execute("cat /local/a.txt")
         print(f"  RAM source after mv: exit={r.exit_code} "
               f"(expect non-zero — file moved away)")
+
+        # ── metadata on S3 (namespace overlay) ───────────────────────
+        # S3 has no native attr slots, so chmod/chown/touch land in the
+        # workspace namespace (durable, snapshot-captured) and merge
+        # into dispatch-level stat.
+        r = await mv_ws.execute(f"chmod 640 {remote} && chown 500:dev"
+                                f" {remote} && touch -t 202601021530"
+                                f" {remote}")
+        print(f"  chmod/chown/touch exit={r.exit_code}")
+        st, _ = await mv_ws.dispatch("stat", PathSpec.from_str_path(remote))
+        print(f"  dispatch stat: mode={oct(st.mode)[2:]} uid={st.uid} "
+              f"gid={st.gid} mtime={st.modified}")
     finally:
         r = await mv_ws.execute(f"rm {remote}")
         print(f"  cleanup rm exit={r.exit_code}")

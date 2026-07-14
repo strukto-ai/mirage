@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.hf_buckets import HfBucketsConfig, HfBucketsResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -428,6 +429,19 @@ async def main():
     print("\n--- touch on existing file (no-op) ---")
     r = await ws.execute("touch /hf/example.json")
     print(f"  exit: {r.exit_code}")
+
+    # chmod/chown/touch never hit the Hub API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print("=== metadata overlay on /hf/example.json ===")
+    meta_res = await ws.execute('chmod 640 "/hf/example.json"'
+                                ' && chown 500:dev "/hf/example.json"'
+                                ' && touch -t 202601021530 "/hf/example.json"')
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    meta_st, _ = await ws.dispatch("stat",
+                                   PathSpec.from_str_path("/hf/example.json"))
+    print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+          f"gid={meta_st.gid} mtime={meta_st.modified}")
 
     print(f"\nStats: {ops_summary()}")
 

@@ -28,12 +28,17 @@ async def stat(accessor: RAMAccessor,
         path = path.mount_path
     store = accessor.store
     p = norm(path)
+    attrs = store.attrs.get(p, {})
     if p in store.dirs:
         return FileStat(
             name=p.rsplit("/", 1)[-1] or "/",
             size=None,
             modified=store.modified.get(p),
             type=FileType.DIRECTORY,
+            mode=attrs.get("mode"),
+            uid=attrs.get("uid"),
+            gid=attrs.get("gid"),
+            atime=attrs.get("atime"),
         )
     if p in store.files:
         data = store.files[p]
@@ -42,5 +47,9 @@ async def stat(accessor: RAMAccessor,
             size=len(data),
             modified=store.modified.get(p),
             type=guess_type(p),
+            mode=attrs.get("mode"),
+            uid=attrs.get("uid"),
+            gid=attrs.get("gid"),
+            atime=attrs.get("atime"),
         )
     raise enoent(virtual)

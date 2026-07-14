@@ -117,6 +117,15 @@ async def main() -> None:
         print(f"  exit={result.exit_code}  "
               f"{(await result.stderr_str()).strip()}")
 
+    print("=== metadata writes refuse on read-only mounts ===")
+    for cmd in ("chmod 600 /data/example.json",
+                "chown 500:dev /data/example.json",
+                "touch -t 202601021530 /data/example.json"):
+        result = await ws.execute(cmd)
+        print(f"$ {cmd}")
+        print(f"  exit={result.exit_code}  "
+              f"{(await result.stderr_str()).strip()}")
+
     # ── persistence: save / load / copy / deepcopy ──────────────────
     # Disk has no redacted config: full file tree is in the snapshot.
     # Default load behavior creates a fresh tmpdir. Caller can override

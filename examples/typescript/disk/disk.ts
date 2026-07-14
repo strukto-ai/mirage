@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { cpSync, mkdtempSync, rmSync } from 'node:fs'
+import { cpSync, mkdtempSync, rmSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -71,6 +71,16 @@ async function main(): Promise<void> {
   console.log('\n━━━ write-through ━━━')
   await run(ws, "echo 'hello from disk' | tee /data/mirage_hello.txt")
   await run(ws, 'cat /data/mirage_hello.txt')
+
+  console.log('\n━━━ metadata (chmod / chown / touch) ━━━')
+  console.log('(mode hits the real inode AND a sidecar, so ls -l is umask-independent;')
+  console.log(' uid/gid are sidecar-only; times hit the real inode)')
+  await run(ws, 'chmod 640 /data/mirage_hello.txt')
+  await run(ws, 'chown 500:staff /data/mirage_hello.txt')
+  await run(ws, 'touch -t 202601021530 /data/mirage_hello.txt')
+  await run(ws, 'ls -l /data/mirage_hello.txt')
+  const real = statSync(join(filesDir, 'mirage_hello.txt'))
+  console.log(`real inode mode: ${(real.mode & 0o777).toString(8)}, mtime: ${real.mtime.toISOString()}`)
 
   console.log('\n━━━ fs-monkey routes /data/ through workspace ━━━')
   console.log('(ESM `import from "node:fs"` is NOT patchable — only CJS `require("fs")`)')

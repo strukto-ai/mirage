@@ -12,8 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.utils.path import (expand_tilde, gnu_basename, gnu_dirname, norm,
-                               parent, resolve_path)
+from mirage.utils.path import (expand_tilde, glob_prefix_match, gnu_basename,
+                               gnu_dirname, norm, parent, resolve_path)
 
 
 def test_norm_strips_and_adds_leading_slash():
@@ -166,3 +166,22 @@ def test_resolve_symlinks_cycle_raises():
     links = {"/a": "/b", "/b": "/a"}
     with pytest.raises(CycleError):
         resolve_symlinks("/a", links)
+
+
+def test_glob_prefix_match_basename_glob():
+    assert glob_prefix_match("/a/x.log", "/a/*.log") is True
+    assert glob_prefix_match("/a/x.txt", "/a/*.log") is False
+
+
+def test_glob_prefix_match_star_does_not_cross_slash():
+    assert glob_prefix_match("/a/d/x.log", "/a/*.log") is False
+
+
+def test_glob_prefix_match_covers_descendants_of_matched_dir():
+    assert glob_prefix_match("/a/dir/deep/x.txt", "/a/d*") is True
+    assert glob_prefix_match("/a/other/x.txt", "/a/d*") is False
+
+
+def test_glob_prefix_match_intermediate_segment_glob():
+    assert glob_prefix_match("/a/one/b.txt", "/a/*/b.txt") is True
+    assert glob_prefix_match("/a/one/c.txt", "/a/*/b.txt") is False

@@ -13,87 +13,76 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import dataclasses
+import posixpath
 import time
 from collections.abc import Callable
 
 from mirage.io import IOResult
-from mirage.io.types import ByteSource
-from mirage.types import FileType, PathSpec, word_text
-from mirage.utils.path import CycleError, resolve_path
+from mirage.types import FileStat, FileType, PathSpec, word_text
+from mirage.utils.path import CycleError
+from mirage.workspace.executor.builtins.shared import (Result, abs_path, fail,
+                                                       ok, split_flags)
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import Session
 from mirage.workspace.types import ExecutionNode
 
 
-def _split_flags(
-    args: list[str | PathSpec],
-    known: str,
-) -> tuple[set[str], list[str | PathSpec]]:
-    flags: set[str] = set()
-    operands: list[str | PathSpec] = []
-    parsing = True
-    for arg in args:
-        s = arg.virtual if isinstance(arg, PathSpec) else str(arg)
-        if parsing and s == "--":
-            parsing = False
-            continue
-        if (parsing and s != "-" and len(s) >= 2 and s.startswith("-")
-                and all(c in known for c in s[1:])):
-            flags.update(s[1:])
-            continue
-        parsing = False
-        operands.append(arg)
-    return flags, operands
-
-
 def link_flags(args: list[str | PathSpec], known: str) -> set[str]:
-    flags, _ = _split_flags(args, known)
+    flags, _ = split_flags(args, known)
     return flags
-
-
-def _abs(arg: str | PathSpec, cwd: str) -> str:
-    if isinstance(arg, PathSpec):
-        return arg.virtual
-    return resolve_path(arg, cwd)
 
 
 def handle_ln(
     namespace: Namespace,
     session: Session,
     args: list[str | PathSpec],
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    flags, operands = _split_flags(args, "sfnv")
+) -> Result:
+    flags, operands = split_flags(args, "sfnv")
     if len(operands) < 2:
-        err = b"ln: missing file operand\n"
-        return None, IOResult(exit_code=1,
-                              stderr=err), ExecutionNode(command="ln",
-                                                         exit_code=1,
-                                                         stderr=err)
+        return fail("ln", "ln: missing file operand\n")
     # GNU: with more than two operands the last must be a directory;
     # namespace links never name directories, so this is always an error
     # (an expanded multi-match glob source lands here).
     if len(operands) > 2:
-        err = (f"ln: target '{word_text(operands[-1])}' "
-               f"is not a directory\n").encode()
-        return None, IOResult(exit_code=1,
-                              stderr=err), ExecutionNode(command="ln",
-                                                         exit_code=1,
-                                                         stderr=err)
-    link_abs = _abs(operands[1], session.cwd)
+        return fail(
+            "ln", f"ln: target '{word_text(operands[-1])}' "
+            f"is not a directory\n")
+    link_abs = abs_path(operands[1], session.cwd)
     target_typed = word_text(operands[0])
     exists = namespace.is_link(link_abs) and "f" not in flags
     if namespace.is_mount_root(link_abs) or exists:
-        err = (f"ln: failed to create symbolic link "
-               f"'{word_text(operands[1])}': File exists\n").encode()
-        return None, IOResult(exit_code=1,
-                              stderr=err), ExecutionNode(command="ln",
-                                                         exit_code=1,
-                                                         stderr=err)
+        return fail(
+            "ln", f"ln: failed to create symbolic link "
+            f"'{word_text(operands[1])}': File exists\n")
     namespace.symlink(link_abs, target_typed, time.time())
     out = None
     if "v" in flags:
         out = (f"'{word_text(operands[1])}' -> '{target_typed}'\n").encode()
-    return out, IOResult(), ExecutionNode(command="ln", exit_code=0)
+    return ok("ln", out)
+
+
+def handle_readlink(
+    namespace: Namespace,
+    session: Session,
+    args: list[str | PathSpec],
+) -> Result:
+    flags, operands = split_flags(args, "fenm")
+    if not operands:
+        return fail("readlink", "readlink: missing operand\n")
+    lines: list[str] = []
+    exit_code = 0
+    for op in operands:
+        target = namespace.readlink(abs_path(op, session.cwd))
+        if target is None:
+            exit_code = 1
+            continue
+        lines.append(target)
+    if "n" in flags:
+        text = "".join(lines)
+    else:
+        text = "".join(line + "\n" for line in lines)
+    return (text.encode() if text else None, IOResult(exit_code=exit_code),
+            ExecutionNode(command="readlink", exit_code=exit_code))
 
 
 def follow_paths(
@@ -163,57 +152,7 @@ def strip_link_operands(
     return kept, removed
 
 
-async def prepare_mv(
-    namespace: Namespace,
-    dispatch: Callable,
-    items: list[str | PathSpec],
-) -> tuple[list[str | PathSpec], str | None, tuple[ByteSource | None, IOResult,
-                                                   ExecutionNode] | None]:
-    """Adjust a two-operand ``mv`` for symlink operands.
-
-    A link source renames the link entry itself (into a destination
-    directory when one exists, mirroring rename(2) preceded by mv's dst
-    stat). A link destination whose target is a directory is followed
-    (mv moves into it); any other link destination is replaced, so its
-    entry must drop once the backend move succeeds.
-
-    Args:
-        namespace (Namespace): addressing authority holding the link table.
-        dispatch (Callable): op dispatcher used to stat the destination.
-        items (list[str | PathSpec]): classified command parts.
-
-    Returns:
-        tuple: (possibly rewritten parts, link path to unlink after a
-        successful backend move, early result when the mv completed as a
-        pure namespace rename).
-    """
-    paths = [p for p in items if isinstance(p, PathSpec)]
-    if len(paths) != 2:
-        return items, None, None
-    src, dst = paths
-
-    if namespace.is_link(src.virtual):
-        target_dst = dst.virtual
-        stat = await _stat_or_none(dispatch, dst)
-        if stat is not None and stat.type == FileType.DIRECTORY:
-            target_dst = (dst.virtual.rstrip("/") + "/" +
-                          src.virtual.rsplit("/", 1)[-1])
-        namespace.unlink(target_dst)
-        namespace.rename(src.virtual, target_dst)
-        return items, None, (None, IOResult(),
-                             ExecutionNode(command="mv", exit_code=0))
-
-    if namespace.is_link(dst.virtual):
-        followed = namespace.follow(dst.virtual)
-        stat = await _stat_or_none(dispatch, PathSpec.from_str_path(followed))
-        if stat is not None and stat.type == FileType.DIRECTORY:
-            return follow_paths(namespace, items), None, None
-        return items, dst.virtual, None
-
-    return items, None, None
-
-
-async def _stat_or_none(dispatch: Callable, path: PathSpec):
+async def _stat_or_none(dispatch: Callable, path: PathSpec) -> FileStat | None:
     """Stat a path via dispatch, mapping a missing file to ``None``.
 
     Args:
@@ -229,32 +168,69 @@ async def _stat_or_none(dispatch: Callable, path: PathSpec):
     return stat
 
 
-def handle_readlink(
+async def prepare_mv(
     namespace: Namespace,
-    session: Session,
-    args: list[str | PathSpec],
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    flags, operands = _split_flags(args, "fenm")
-    if not operands:
-        err = b"readlink: missing operand\n"
-        return None, IOResult(exit_code=1,
-                              stderr=err), ExecutionNode(command="readlink",
-                                                         exit_code=1,
-                                                         stderr=err)
-    lines: list[str] = []
-    exit_code = 0
-    for op in operands:
-        target = namespace.readlink(_abs(op, session.cwd))
-        if target is None:
-            exit_code = 1
-            continue
-        lines.append(target)
-    if not lines:
-        return None, IOResult(exit_code=exit_code), ExecutionNode(
-            command="readlink", exit_code=exit_code)
-    if "n" in flags:
-        text = "".join(lines)
+    dispatch: Callable,
+    items: list[str | PathSpec],
+) -> tuple[list[str | PathSpec], str | None, tuple[str, str] | None, Result
+           | None]:
+    """Adjust a two-operand ``mv`` for node-meta operands.
+
+    A link source renames the link entry itself. A destination that is
+    (a link to) a directory receives the move inside it (rename(2)
+    preceded by mv's dst stat); any other destination is replaced, so its
+    node entry, link or overlay attrs alike, drops once the backend move
+    succeeds. A plain source that carries overlay attributes has its meta
+    travel with the file once the backend move succeeds.
+
+    Args:
+        namespace (Namespace): addressing authority holding the node table.
+        dispatch (Callable): op dispatcher used to stat the destination.
+        items (list[str | PathSpec]): classified command parts.
+
+    Returns:
+        tuple: (possibly rewritten parts, node entry to drop after a
+        successful backend move (the replaced destination), (src, dst)
+        meta rename to apply after a successful backend move, early
+        result when the mv completed as a pure namespace rename).
+    """
+    paths = [p for p in items if isinstance(p, PathSpec)]
+    if len(paths) != 2:
+        return items, None, None, None
+    src, dst = paths
+
+    # Where the move lands: inside a directory destination (followed, so
+    # node-meta keys line up with the followed paths stat merges on), else
+    # the destination itself, replaced like rename(2).
+    followed = namespace.follow(dst.virtual)
+    stat = await _stat_or_none(dispatch, PathSpec.from_str_path(followed))
+    into_dir = stat is not None and stat.type == FileType.DIRECTORY
+    if into_dir:
+        target_dst = (followed.rstrip("/") + "/" +
+                      posixpath.basename(src.virtual))
     else:
-        text = "".join(line + "\n" for line in lines)
-    return text.encode(), IOResult(exit_code=exit_code), ExecutionNode(
-        command="readlink", exit_code=exit_code)
+        target_dst = dst.virtual
+
+    if namespace.is_link(src.virtual):
+        namespace.unlink(target_dst)
+        namespace.rename(src.virtual, target_dst)
+        return items, None, None, ok("mv")
+
+    post_rename: tuple[str, str] | None = None
+    if namespace.meta_for(src.virtual) is not None:
+        post_rename = (src.virtual, target_dst)
+
+    rewritten = items
+    if into_dir and namespace.is_link(dst.virtual):
+        rewritten = follow_paths(namespace, items)
+    return rewritten, target_dst, post_rename, None
+
+
+__all__ = [
+    "follow_paths",
+    "handle_ln",
+    "handle_readlink",
+    "link_flags",
+    "prepare_mv",
+    "strip_link_operands",
+]

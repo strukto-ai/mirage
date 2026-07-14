@@ -18,6 +18,7 @@ import {
   HfDatasetsResource,
   Workspace,
   MountMode,
+  type FileStat,
   type HfDatasetsConfig,
 } from '@struktoai/mirage-node'
 
@@ -43,6 +44,21 @@ async function main(): Promise<void> {
     await run(ws, 'ls /ds/')
     await run(ws, 'ls -lh /ds/')
     await run(ws, 'stat /ds/README.md')
+
+
+    // chmod/chown/touch never hit the Hub API: attrs land in the
+    // workspace namespace (durable, snapshot-captured) and merge into
+    // dispatch-level stat.
+    console.log(`=== metadata overlay on /ds/README.md ===`)
+    const metaRes = await ws.execute(
+      `chmod 640 "/ds/README.md" && chown 500:dev "/ds/README.md" && touch -t 202601021530 "/ds/README.md"`,
+    )
+    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+    const metaSt = (await ws.dispatch('stat', `/ds/README.md`)) as FileStat
+    const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+    console.log(
+      `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+    )
     await run(ws, "find /ds/ -name '*.md'")
     await run(ws, 'find /ds/ -type d')
     await run(ws, "find /ds/ -name '*.parquet' | head -n 5")

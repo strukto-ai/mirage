@@ -13,6 +13,33 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
+from fnmatch import fnmatchcase
+
+
+def glob_prefix_match(path: str, pattern: str) -> bool:
+    """Whether a glob pattern matches ``path`` or one of its ancestors.
+
+    Segment-wise fnmatch, so ``*`` does not cross ``/`` (shell glob
+    semantics, not fnmatch's flat matching). An ancestor match covers
+    entries living under a matched directory.
+
+    Args:
+        path (str): absolute virtual path.
+        pattern (str): absolute glob pattern.
+
+    Example::
+
+        glob_prefix_match("/a/x.log", "/a/*.log")    → True
+        glob_prefix_match("/a/d/x.log", "/a/*.log")  → False
+        glob_prefix_match("/a/d/x.log", "/a/d*")     → True
+    """
+    pat_segs = pattern.strip("/").split("/")
+    path_segs = path.strip("/").split("/")
+    if len(path_segs) < len(pat_segs):
+        return False
+    return all(
+        fnmatchcase(seg, pat)
+        for seg, pat in zip(path_segs[:len(pat_segs)], pat_segs))
 
 
 def norm(path: str) -> str:

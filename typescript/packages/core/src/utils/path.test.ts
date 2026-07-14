@@ -13,7 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { CycleError, expandTilde, posixNormpath, resolvePath, resolveSymlinks } from './path.ts'
+import {
+  CycleError,
+  expandTilde,
+  globPrefixMatch,
+  posixNormpath,
+  resolvePath,
+  resolveSymlinks,
+} from './path.ts'
 
 describe('resolveSymlinks', () => {
   it('substitutes the longest matching link prefix', () => {
@@ -68,6 +75,24 @@ describe('expandTilde', () => {
 
   it('plain word left unchanged', () => {
     expect(expandTilde('file.txt', '/home/u')).toBe('file.txt')
+  })
+})
+
+describe('globPrefixMatch', () => {
+  it('matches a basename glob in the same directory only', () => {
+    expect(globPrefixMatch('/a/x.log', '/a/*.log')).toBe(true)
+    expect(globPrefixMatch('/a/x.txt', '/a/*.log')).toBe(false)
+    expect(globPrefixMatch('/a/d/x.log', '/a/*.log')).toBe(false)
+  })
+
+  it('covers descendants of a matched directory', () => {
+    expect(globPrefixMatch('/a/dir/deep/x.txt', '/a/d*')).toBe(true)
+    expect(globPrefixMatch('/a/other/x.txt', '/a/d*')).toBe(false)
+  })
+
+  it('matches intermediate segment globs', () => {
+    expect(globPrefixMatch('/a/one/b.txt', '/a/*/b.txt')).toBe(true)
+    expect(globPrefixMatch('/a/one/c.txt', '/a/*/b.txt')).toBe(false)
   })
 })
 

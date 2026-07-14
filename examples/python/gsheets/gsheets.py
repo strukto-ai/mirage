@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.gsheets import GSheetsConfig, GSheetsResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -72,6 +73,19 @@ async def main() -> None:
     print("=== stat ===")
     r = await ws.execute(f"stat /gsheets/owned/{first}")
     print(await r.stdout_str())
+
+    # chmod/chown/touch never hit the Sheets API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print(f"=== metadata overlay on /gsheets/owned/{first} ===")
+    r = await ws.execute(f'chmod 640 "/gsheets/owned/{first}"'
+                         f' && chown 500:dev "/gsheets/owned/{first}"'
+                         f' && touch -t 202601021530 "/gsheets/owned/{first}"')
+    print(f"  chmod/chown/touch exit={r.exit_code}")
+    st, _ = await ws.dispatch(
+        "stat", PathSpec.from_str_path(f"/gsheets/owned/{first}"))
+    print(f"  dispatch stat: mode={oct(st.mode)[2:]} uid={st.uid} "
+          f"gid={st.gid} mtime={st.modified}")
 
     print("=== jq .properties.title ===")
     r = await ws.execute(f'jq ".properties.title" /gsheets/owned/{first}')

@@ -14,8 +14,20 @@
 
 import { Accessor } from '@struktoai/mirage-core'
 
+export interface DiskAttrs {
+  mode?: number
+  uid?: number | string
+  gid?: number | string
+  atime?: string
+}
+
 export class DiskAccessor extends Accessor {
   readonly root: string
+  // Metadata sidecar. mode is also applied to the real inode, but stat
+  // reports the sidecar so ls -l output stays deterministic across host
+  // umasks; ownership is sidecar-only (chown to arbitrary ids needs
+  // privileges the process does not have).
+  readonly attrs = new Map<string, DiskAttrs>()
 
   constructor(root: string) {
     super()

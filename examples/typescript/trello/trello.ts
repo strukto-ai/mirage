@@ -15,7 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { MountMode, TrelloResource, Workspace, type TrelloConfig } from '@struktoai/mirage-node'
+import { MountMode, TrelloResource, Workspace, type FileStat, type TrelloConfig } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../.env.development') })
@@ -87,6 +87,20 @@ async function main(): Promise<void> {
     if (litR.exitCode !== 1 || !litErr.includes('zz-none-*')) {
       throw new Error('regression: zero-match glob did not keep the literal')
     }
+
+    // chmod/chown/touch never hit the Trello API: attrs land in the
+    // workspace namespace (durable, snapshot-captured) and merge into
+    // dispatch-level stat.
+    console.log(`\n=== metadata overlay on ${wsBase}/workspace.json ===`)
+    const metaRes = await ws.execute(
+      `chmod 640 "${wsBase}/workspace.json" && chown 500:dev "${wsBase}/workspace.json" && touch -t 202601021530 "${wsBase}/workspace.json"`,
+    )
+    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+    const metaSt = (await ws.dispatch('stat', `${wsBase}/workspace.json`)) as FileStat
+    const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+    console.log(
+      `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+    )
 
     console.log(`\n=== ls ${wsBase}/boards/ ===`)
     const b0 = (await run(ws, `ls "${wsBase}/boards/" | head -n 1`)).trim()
