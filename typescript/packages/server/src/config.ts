@@ -23,6 +23,7 @@ import {
   PYTHON_RUNTIMES,
   RAMFileCacheStore,
   RedisFileCacheStore,
+  validateRuntimeHome,
   type FileCache,
   type IndexConfig,
   type RedisIndexConfig,
@@ -208,8 +209,7 @@ interface RedisIndexBlock {
 
 interface RuntimeBlock {
   python?: string
-  wasiPython?: string
-  localPython?: string
+  home?: Record<string, string>
 }
 
 export interface WorkspaceConfigRaw {
@@ -273,6 +273,7 @@ export interface WorkspaceArgs {
     cache?: FileCache & Resource
     index?: IndexConfig
     pythonRuntime?: string
+    runtimeHome?: Record<string, string>
   }
   fuseMounts: Record<string, boolean | string>
 }
@@ -312,18 +313,7 @@ function buildIndex(
 }
 
 export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<WorkspaceArgs> {
-  const pythonOnlyKey =
-    cfg.runtime?.wasiPython !== undefined
-      ? 'wasi_python'
-      : cfg.runtime?.localPython !== undefined
-        ? 'local_python'
-        : null
-  if (pythonOnlyKey !== null) {
-    throw new Error(
-      `runtime key '${pythonOnlyKey}' is Python-only (it configures a Python-only ` +
-        "runtime); TypeScript supports 'pyodide' (default) and 'monty'",
-    )
-  }
+  if (cfg.runtime?.home !== undefined) validateRuntimeHome(cfg.runtime.home)
   const wsMode = coerceMountMode(cfg.mode, MountMode.WRITE)
   const consistency = coerceConsistency(cfg.consistency)
   const resources: Record<string, [Resource, MountMode, Record<string, CommandSafeguard>]> = {}
@@ -348,6 +338,7 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
       ...(cfg.runtime?.python !== undefined
         ? { pythonRuntime: coercePythonRuntime(cfg.runtime.python) }
         : {}),
+      ...(cfg.runtime?.home !== undefined ? { runtimeHome: cfg.runtime.home } : {}),
     },
     fuseMounts,
   }

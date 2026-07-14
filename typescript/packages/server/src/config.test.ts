@@ -69,20 +69,41 @@ describe('configToWorkspaceArgs', () => {
     await expect(configToWorkspaceArgs(bad)).rejects.toThrow(/invalid mount mode/)
   })
 
-  it('rejects the Python-only wasi_python runtime key', async () => {
+  it('threads the runtime home map into workspace options', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { resource: 'ram' } },
-      runtime: { python: 'pyodide', wasi_python: '/opt/wasi-build' },
+      runtime: { python: 'pyodide', home: { pyodide: 'https://assets.example.com/pyodide/' } },
     })
-    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/Python-only/)
+    const args = await configToWorkspaceArgs(cfg)
+    expect(args.options.runtimeHome).toEqual({ pyodide: 'https://assets.example.com/pyodide/' })
   })
 
-  it('rejects the Python-only local_python runtime key', async () => {
+  it('accepts home entries for Python-only runtimes (portable config)', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { resource: 'ram' } },
-      runtime: { python: 'pyodide', local_python: '/usr/bin/python3' },
+      runtime: { python: 'pyodide', home: { wasi: '/opt/wasi-build', local: '/usr/bin/python3' } },
     })
-    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/Python-only/)
+    const args = await configToWorkspaceArgs(cfg)
+    expect(args.options.runtimeHome).toEqual({
+      wasi: '/opt/wasi-build',
+      local: '/usr/bin/python3',
+    })
+  })
+
+  it('rejects a home entry for monty', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      runtime: { python: 'monty', home: { monty: '/somewhere' } },
+    })
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/embeds its interpreter/)
+  })
+
+  it('rejects an unknown runtime name in home', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      runtime: { python: 'pyodide', home: { docker: '/somewhere' } },
+    })
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/unknown runtime name in home/)
   })
 
   it('builds a redis index config from an index block', async () => {

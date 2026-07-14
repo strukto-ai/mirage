@@ -20,7 +20,7 @@ import sys
 from mirage.runtime.python.base import (PythonRunArgs, PythonRunResult,
                                         PythonRuntime)
 
-LOCAL_PYTHON_ENV = "MIRAGE_LOCAL_PYTHON"
+LOCAL_HOME_ENV = "MIRAGE_LOCAL_HOME"
 
 
 class LocalRuntime(PythonRuntime):
@@ -30,29 +30,29 @@ class LocalRuntime(PythonRuntime):
     filesystem and environment, not the workspace mounts. Cancelling the
     run kills the subprocess, so a safeguard timeout reclaims it.
 
-    The interpreter defaults to the one running mirage; point
-    `local_python` (the yaml `runtime: local_python:` key ends up here)
-    or the MIRAGE_LOCAL_PYTHON environment variable at another binary,
-    e.g. a project venv whose packages the code needs.
+    The interpreter defaults to the one running mirage; point the
+    `home` argument (the yaml `runtime: home: local:` entry ends up
+    here) or the MIRAGE_LOCAL_HOME environment variable at another
+    binary, e.g. a project venv whose packages the code needs.
 
     Args:
-        local_python (str | None): interpreter path or command name.
-            None reads MIRAGE_LOCAL_PYTHON, then falls back to
+        home (str | None): interpreter path or command name. None
+            reads MIRAGE_LOCAL_HOME, then falls back to
             `sys.executable`.
     """
 
     name = "local"
 
-    def __init__(self, local_python: str | None = None) -> None:
-        chosen = local_python or os.environ.get(LOCAL_PYTHON_ENV)
+    def __init__(self, home: str | None = None) -> None:
+        chosen = home or os.environ.get(LOCAL_HOME_ENV)
         if chosen:
             resolved = shutil.which(chosen)
             if resolved is None:
                 raise FileNotFoundError(
                     f"local python interpreter not found: {chosen!r} "
-                    "(from the yaml `runtime: local_python:` key, the "
-                    "Workspace `local_python` argument, or "
-                    f"{LOCAL_PYTHON_ENV})")
+                    "(from the yaml `runtime: home: local:` entry, the "
+                    "Workspace `runtime_home` argument, or "
+                    f"{LOCAL_HOME_ENV})")
             self._python = resolved
         else:
             self._python = sys.executable

@@ -282,7 +282,7 @@ jobs:
       - name: Run wasi runtime tests
         working-directory: python
         env:
-          MIRAGE_WASI_PYTHON: /tmp/cpython-wasi
+          MIRAGE_WASI_HOME: /tmp/cpython-wasi
         run: uv run pytest tests/runtime/python/test_wasi.py -v --no-cov
 
   audit:

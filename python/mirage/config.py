@@ -24,7 +24,8 @@ from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.resource.registry import build_resource
 from mirage.runtime.python.select import (DEFAULT_PYTHON_RUNTIME,
-                                          validate_python_runtime_name)
+                                          validate_python_runtime_name,
+                                          validate_runtime_home)
 from mirage.types import CommandSafeguard, ConsistencyPolicy, MountMode
 
 
@@ -160,17 +161,24 @@ class RuntimeBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     python: str = DEFAULT_PYTHON_RUNTIME
-    # CPython WASI build directory for the `wasi` runtime; falls back to
-    # the MIRAGE_WASI_PYTHON environment variable when unset.
-    wasi_python: str | None = None
-    # Interpreter for the `local` runtime; falls back to
-    # MIRAGE_LOCAL_PYTHON, then the interpreter running mirage.
-    local_python: str | None = None
+    # Runtime name to interpreter location: `wasi` takes a CPython WASI
+    # build directory (falls back to MIRAGE_WASI_HOME), `local` an
+    # interpreter path (falls back to MIRAGE_LOCAL_HOME), `pyodide` a
+    # distribution URL (TypeScript). Only the selected runtime's entry
+    # is consumed.
+    home: dict[str, str] | None = None
 
     @field_validator("python")
     @classmethod
     def _v_python(cls, v):
         return validate_python_runtime_name(v)
+
+    @field_validator("home")
+    @classmethod
+    def _v_home(cls, v):
+        if v is not None:
+            validate_runtime_home(v)
+        return v
 
 
 class WorkspaceConfig(BaseModel):
@@ -224,10 +232,8 @@ class WorkspaceConfig(BaseModel):
             kwargs["index"] = _build_index_config(self.index)
         if self.runtime is not None:
             kwargs["python_runtime"] = self.runtime.python
-            if self.runtime.wasi_python is not None:
-                kwargs["wasi_python"] = self.runtime.wasi_python
-            if self.runtime.local_python is not None:
-                kwargs["local_python"] = self.runtime.local_python
+            if self.runtime.home is not None:
+                kwargs["runtime_home"] = self.runtime.home
         return kwargs
 
     def fuse_mounts(self) -> dict[str, bool | str]:

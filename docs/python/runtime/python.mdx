@@ -92,21 +92,22 @@ unzip a release from
 pip install mirage-ai[wasi]
 ```
 
-Point mirage at the build directory with the `wasi_python` argument, the
-yaml `runtime: wasi_python:` key, or the MIRAGE_WASI_PYTHON environment
-variable:
+Point mirage at the build directory with a `wasi` entry in the runtime
+home map (the `runtime_home` argument, the yaml `runtime: home:` map,
+or the MIRAGE_WASI_HOME environment variable):
 
 ```python
 ws = Workspace({"/data": RAMResource()},
                mode=MountMode.EXEC,
                python_runtime="wasi",
-               wasi_python="/path/to/unzipped/build")
+               runtime_home={"wasi": "/path/to/unzipped/build"})
 ```
 
 ```yaml
 runtime:
   python: wasi
-  wasi_python: /path/to/unzipped/build
+  home:
+    wasi: /path/to/unzipped/build
 ```
 
 The first run compiles `python.wasm` (a few hundred milliseconds) and
@@ -127,14 +128,15 @@ ws = Workspace({"/data": RAMResource()},
                python_runtime="local")
 ```
 
-It defaults to the interpreter running mirage; point `local_python`
-(or the MIRAGE_LOCAL_PYTHON environment variable) at another binary,
-e.g. a project venv whose packages the code needs:
+It defaults to the interpreter running mirage; point the `local` home
+entry (or the MIRAGE_LOCAL_HOME environment variable) at another
+binary, e.g. a project venv whose packages the code needs:
 
 ```yaml
 runtime:
   python: local
-  local_python: /path/to/venv/bin/python
+  home:
+    local: /path/to/venv/bin/python
 ```
 
 Note that `local` code does **not** see workspace mounts; it sees the real
@@ -147,6 +149,9 @@ Workspace config files take a top-level `runtime` block:
 ```yaml
 runtime:
   python: monty   # or: wasi, local
+  home:           # optional: where each runtime finds its interpreter
+    wasi: /opt/cpython-wasi
+    local: /usr/bin/python3.12
 
 mounts:
   /data:
@@ -155,6 +160,14 @@ mounts:
       python3:
         timeout_seconds: 30
 ```
+
+`home` maps a runtime name to the location of its interpreter or
+distribution, in the spirit of JAVA_HOME: a build directory for
+`wasi`, an interpreter path for `local`, a distribution URL for
+`pyodide` (TypeScript). Only the selected runtime consumes its entry,
+so one config stays portable across runtimes and languages; each entry
+also falls back to a MIRAGE_&lt;RUNTIME&gt;_HOME environment variable.
+`monty` embeds its interpreter and takes no entry.
 
 ## Resource limits
 

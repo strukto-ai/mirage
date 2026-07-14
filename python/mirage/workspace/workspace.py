@@ -91,8 +91,7 @@ class Workspace:
         agent_id: str = DEFAULT_AGENT_ID,
         observe: ObserverStore | None = None,
         python_runtime: str | None = None,
-        wasi_python: str | None = None,
-        local_python: str | None = None,
+        runtime_home: dict[str, str] | None = None,
     ) -> None:
         self._registry = MountRegistry()
         if isinstance(cache, RedisCacheConfig):
@@ -178,11 +177,9 @@ class Workspace:
         # cannot build; leave it unset so python3 reports the install hint
         # per invocation. An explicitly requested runtime still fails loud.
         try:
-            self._python_runtime = select_python_runtime(
-                python_runtime,
-                self.dispatch,
-                wasi_python=wasi_python,
-                local_python=local_python)
+            self._python_runtime = select_python_runtime(python_runtime,
+                                                         self.dispatch,
+                                                         home=runtime_home)
         except ImportError:
             if python_runtime is not None:
                 raise

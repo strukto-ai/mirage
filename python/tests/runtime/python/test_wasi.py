@@ -21,11 +21,11 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.resource.ram import RAMResource
 from mirage.runtime.python import PythonRunArgs, WasiRuntime
-from mirage.runtime.python.wasi import WASI_PYTHON_ENV
+from mirage.runtime.python.wasi import WASI_HOME_ENV
 
 
 def _build_dir() -> str | None:
-    root = os.environ.get(WASI_PYTHON_ENV)
+    root = os.environ.get(WASI_HOME_ENV)
     if root and (Path(root) / "python.wasm").is_file():
         return root
     return None
@@ -33,24 +33,24 @@ def _build_dir() -> str | None:
 
 live = pytest.mark.skipif(
     _build_dir() is None,
-    reason=f"{WASI_PYTHON_ENV} does not point at a CPython WASI build")
+    reason=f"{WASI_HOME_ENV} does not point at a CPython WASI build")
 
 
 def test_missing_build_dir_raises_hint(monkeypatch):
-    monkeypatch.delenv(WASI_PYTHON_ENV, raising=False)
+    monkeypatch.delenv(WASI_HOME_ENV, raising=False)
     with pytest.raises(FileNotFoundError, match="cpython-wasi-build"):
         WasiRuntime()
 
 
 def test_dir_without_wasm_raises_hint(tmp_path):
     with pytest.raises(FileNotFoundError, match="no python.wasm"):
-        WasiRuntime(wasi_python=str(tmp_path))
+        WasiRuntime(home=str(tmp_path))
 
 
 def test_dir_without_stdlib_raises_hint(tmp_path):
     (tmp_path / "python.wasm").write_bytes(b"\0asm")
     with pytest.raises(FileNotFoundError, match="no lib/python3"):
-        WasiRuntime(wasi_python=str(tmp_path))
+        WasiRuntime(home=str(tmp_path))
 
 
 @live
