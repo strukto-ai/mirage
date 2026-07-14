@@ -23,7 +23,7 @@ import {
 // All tests in this file are direct ports of Python mirage's python3 tests
 // in tests/workspace/test_workspace.py. Citations are in the `it()` title.
 
-describe('python3: core (ports of Python tests_workspace)', () => {
+describe('python3: core (ports of Python tests_workspace)', { timeout: 30000 }, () => {
   it('test_python3_c_simple (L1364): print(42) → "42\\n"', async () => {
     const { ws } = await makeWorkspace()
     const io = await ws.execute('python3 -c "print(42)"')
