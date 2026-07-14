@@ -21,7 +21,8 @@ import type { OpRecord } from '../observe/record.ts'
 import type { OpsRegistry } from '../ops/registry.ts'
 import { type OpKwargs } from '../ops/registry.ts'
 import { cachesReads, type Resource } from '../resource/base.ts'
-import { ConsistencyPolicy, MountMode, PathSpec } from '../types.ts'
+import { ConsistencyPolicy, FileStat, MountMode, PathSpec } from '../types.ts'
+import { epochToIso } from '../utils/dates.ts'
 import type { DispatchFn } from './executor/cross_mount.ts'
 import type { Namespace } from './mount/namespace.ts'
 import { effectiveMountMode } from '../context/session_context.ts'
@@ -118,12 +119,53 @@ export class Dispatcher {
     if (DISPATCH_WRITE_OPS.has(opName)) {
       await this.invalidateAfterWriteByPath(p.virtual)
     }
+    if (opName === 'stat' && result instanceof FileStat) {
+      return [this.mergeOverlayStat(p.virtual, result), new IOResult()]
+    }
     return [result, new IOResult()]
+  }
+
+  // Overlay namespace node attrs onto a backend stat. Backends without a
+  // native attribute slot store chmod/chown/touch results in the namespace
+  // node table; merging here (overlay wins per-field) makes dispatch('stat')
+  // report them uniformly.
+  mergeOverlayStat(path: string, stat: FileStat): FileStat {
+    const meta = this.namespace.metaFor(path)
+    if (meta === null) return stat
+    const update: {
+      mode?: number
+      uid?: number | string
+      gid?: number | string
+      atime?: string
+      modified?: string
+    } = {}
+    if (meta.mode !== undefined) update.mode = meta.mode
+    if (meta.uid !== undefined) update.uid = meta.uid
+    if (meta.gid !== undefined) update.gid = meta.gid
+    if (meta.atime !== undefined) update.atime = meta.atime
+    if (meta.mtime !== undefined && meta.target === undefined) {
+      update.modified = epochToIso(meta.mtime)
+    }
+    if (Object.keys(update).length === 0) return stat
+    return new FileStat({
+      name: stat.name,
+      size: stat.size,
+      modified: update.modified ?? stat.modified,
+      fingerprint: stat.fingerprint,
+      revision: stat.revision,
+      type: stat.type,
+      mode: update.mode ?? stat.mode,
+      uid: update.uid ?? stat.uid,
+      gid: update.gid ?? stat.gid,
+      atime: update.atime ?? stat.atime,
+      extra: stat.extra,
+    })
   }
 
   async invalidateAfterWriteByPath(path: string): Promise<void> {
     const mount = this.namespace.mountFor(path)
     if (mount === null) return
+    this.namespace.clearTimes(path)
     if (cachesReads(mount.resource)) {
       await this.cache.remove(path)
     }

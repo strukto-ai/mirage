@@ -22,6 +22,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.core.timeutil import epoch_to_iso
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.filetype import guess_type
+from mirage.utils.path import norm
 
 
 def _resolve(root: Path, path: str) -> Path:
@@ -43,13 +44,22 @@ async def stat(accessor: DiskAccessor,
         raise FileNotFoundError(virtual)
     st = await aiofiles.os.stat(p)
     modified = epoch_to_iso(st.st_mtime)
+    attrs = accessor.attrs.get(norm(path), {})
     if await aio_path.isdir(p):
         return FileStat(name=p.name,
                         size=None,
                         modified=modified,
-                        type=FileType.DIRECTORY)
+                        type=FileType.DIRECTORY,
+                        mode=attrs.get("mode"),
+                        uid=attrs.get("uid"),
+                        gid=attrs.get("gid"),
+                        atime=attrs.get("atime"))
     return FileStat(name=p.name,
                     size=st.st_size,
                     modified=modified,
                     fingerprint=modified,
-                    type=guess_type(p.name))
+                    type=guess_type(p.name),
+                    mode=attrs.get("mode"),
+                    uid=attrs.get("uid"),
+                    gid=attrs.get("gid"),
+                    atime=attrs.get("atime"))

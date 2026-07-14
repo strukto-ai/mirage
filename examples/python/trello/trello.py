@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.trello import TrelloConfig, TrelloResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -56,6 +57,19 @@ async def main() -> None:
     result = await ws.execute(
         f"cat /trello/workspaces/{first_ws}/workspace.json")
     print(await result.stdout_str())
+
+    # chmod/chown/touch never hit the Trello API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    ws_json = f"/trello/workspaces/{first_ws}/workspace.json"
+    print(f"=== metadata overlay on {ws_json} ===")
+    meta_res = await ws.execute(f'chmod 640 "{ws_json}"'
+                                f' && chown 500:dev "{ws_json}"'
+                                f' && touch -t 202601021530 "{ws_json}"')
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    meta_st, _ = await ws.dispatch("stat", PathSpec.from_str_path(ws_json))
+    print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+          f"gid={meta_st.gid} mtime={meta_st.modified}")
 
     print(f"=== ls /trello/workspaces/{first_ws}/boards/ ===")
     board_result = await ws.execute(f"ls /trello/workspaces/{first_ws}/boards/"

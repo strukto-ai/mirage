@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.tencent import TencentConfig, TencentResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -52,6 +53,20 @@ async def main():
           f"precision={r.precision}")
 
     print(f"\nStats: {ops_summary()}")
+
+    # chmod/chown/touch never hit the COS API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print("=== metadata overlay on /cos/data/example.jsonl ===")
+    meta_res = await ws.execute(
+        'chmod 640 "/cos/data/example.jsonl"'
+        ' && chown 500:dev "/cos/data/example.jsonl"'
+        ' && touch -t 202601021530 "/cos/data/example.jsonl"')
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    meta_st, _ = await ws.dispatch(
+        "stat", PathSpec.from_str_path("/cos/data/example.jsonl"))
+    print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+          f"gid={meta_st.gid} mtime={meta_st.modified}")
 
 
 if __name__ == "__main__":

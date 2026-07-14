@@ -16,8 +16,8 @@ import { describe, expect, it } from 'vitest'
 import { REDIS_OPS } from './index.ts'
 
 describe('REDIS_OPS table', () => {
-  it('registers the expected 14 ops with resource=redis', () => {
-    expect(REDIS_OPS).toHaveLength(14)
+  it('registers the expected 15 ops with resource=redis', () => {
+    expect(REDIS_OPS).toHaveLength(15)
     for (const op of REDIS_OPS) {
       expect(op.resource).toBe('redis')
     }
@@ -33,7 +33,17 @@ describe('REDIS_OPS table', () => {
   it('marks writes correctly', () => {
     const writes = REDIS_OPS.filter((op) => op.write).map((op) => op.name)
     expect(writes.sort()).toEqual(
-      ['append', 'create', 'mkdir', 'rename', 'rmdir', 'truncate', 'unlink', 'write'].sort(),
+      [
+        'append',
+        'create',
+        'mkdir',
+        'rename',
+        'rmdir',
+        'setattr',
+        'truncate',
+        'unlink',
+        'write',
+      ].sort(),
     )
   })
 })

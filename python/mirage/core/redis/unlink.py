@@ -27,4 +27,5 @@ async def unlink(accessor: RedisAccessor, path: PathSpec) -> None:
         raise FileNotFoundError(p)
     await store.del_file(p)
     await store.del_modified(p)
+    await store.del_attrs(p)
     await invalidate_after_unlink(path)

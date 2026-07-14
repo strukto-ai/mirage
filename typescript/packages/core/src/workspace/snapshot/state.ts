@@ -23,6 +23,7 @@ import { resourceStateRequiresOverride } from '../../resource/secrets.ts'
 import { Job, JobStatus } from '../../shell/job_table.ts'
 import { ConsistencyPolicy, MountMode } from '../../types.ts'
 import { VERSION } from '../../version.ts'
+import type { NodeMeta } from '../mount/namespace.ts'
 import type { Workspace } from '../workspace.ts'
 import type { MountArgs } from './config.ts'
 import { captureFingerprints, liveOnlyMountPrefixes } from './drift.ts'
@@ -31,6 +32,7 @@ import type {
   FingerprintEntrySnapshot,
   JobSnapshot,
   MountSnapshot,
+  NodeMetaSnapshot,
   ResourceState,
   SessionSnapshot,
   WorkspaceStateDict,
@@ -97,9 +99,16 @@ export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
   )
   const fingerprints: FingerprintEntrySnapshot[] = captureFingerprints(ws.records, ws.registry)
   const liveOnly = liveOnlyMountPrefixes(ws.registry)
-  const symlinks: Record<string, { target: string; mtime: number }> = {}
-  for (const [link, entry] of ws.namespace.symlinks) {
-    symlinks[link] = { target: entry.target, mtime: entry.mtime }
+  const nodes: Record<string, NodeMetaSnapshot> = {}
+  for (const [path, meta] of ws.namespace.nodes) {
+    const entry: NodeMetaSnapshot = {}
+    if (meta.target !== undefined) entry.target = meta.target
+    if (meta.mtime !== undefined) entry.mtime = meta.mtime
+    if (meta.mode !== undefined) entry.mode = meta.mode
+    if (meta.uid !== undefined) entry.uid = meta.uid
+    if (meta.gid !== undefined) entry.gid = meta.gid
+    if (meta.atime !== undefined) entry.atime = meta.atime
+    nodes[path] = entry
   }
   return {
     version: FORMAT_VERSION,
@@ -118,7 +127,7 @@ export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
     jobs,
     fingerprints,
     live_only_mounts: liveOnly,
-    symlinks,
+    nodes,
   }
 }
 
@@ -132,9 +141,15 @@ export function buildMountArgs(
         `(loader expects v${String(FORMAT_VERSION)})`,
     )
   }
+  const normalized: Record<string, Resource> = {}
+  for (const [prefix, resource] of Object.entries(overrides)) {
+    normalized[normMountPrefix(prefix)] = resource
+  }
   const missing = state.mounts
     .filter(
-      (m) => overrides[m.prefix] === undefined && resourceStateRequiresOverride(m.resource_state),
+      (m) =>
+        normalized[normMountPrefix(m.prefix)] === undefined &&
+        resourceStateRequiresOverride(m.resource_state),
     )
     .map((m) => m.prefix)
   if (missing.length > 0) {
@@ -149,7 +164,10 @@ export function buildMountArgs(
     if (!VALID_MODES.includes(m.mode)) {
       throw new Error(`Workspace.fromState: mount '${m.prefix}' has invalid mode '${m.mode}'`)
     }
-    mountArgs[m.prefix] = [overrides[m.prefix] ?? new RAMResource(), m.mode as MountMode]
+    mountArgs[m.prefix] = [
+      normalized[normMountPrefix(m.prefix)] ?? new RAMResource(),
+      m.mode as MountMode,
+    ]
   }
   return {
     mountArgs,
@@ -175,15 +193,22 @@ export async function applyStateDict(ws: Workspace, state: WorkspaceStateDict): 
   restoreCache(ws, state)
   await restoreHistory(ws, state)
   restoreJobs(ws, state)
-  restoreSymlinks(ws, state)
+  restoreNodes(ws, state)
 }
 
-function restoreSymlinks(ws: Workspace, state: WorkspaceStateDict): void {
-  const entries = new Map<string, { target: string; mtime: number }>()
-  for (const [link, e] of Object.entries(state.symlinks ?? {})) {
-    entries.set(link, { target: e.target, mtime: e.mtime })
+function restoreNodes(ws: Workspace, state: WorkspaceStateDict): void {
+  const entries = new Map<string, NodeMeta>()
+  for (const [path, e] of Object.entries(state.nodes ?? {})) {
+    const meta: NodeMeta = {}
+    if (e.target !== undefined) meta.target = e.target
+    if (e.mtime !== undefined) meta.mtime = e.mtime
+    if (e.mode !== undefined) meta.mode = e.mode
+    if (e.uid !== undefined) meta.uid = e.uid
+    if (e.gid !== undefined) meta.gid = e.gid
+    if (e.atime !== undefined) meta.atime = e.atime
+    entries.set(path, meta)
   }
-  ws.namespace.replaceSymlinks(entries)
+  ws.namespace.replaceNodes(entries)
 }
 
 function restoreSessions(ws: Workspace, state: WorkspaceStateDict): void {

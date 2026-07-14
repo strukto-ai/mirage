@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.notion import NotionConfig, NotionResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -61,6 +62,20 @@ async def explore_pages(ws: Workspace) -> None:
     await run(ws, f"tail -n 5 {base}/page.json")
     await run(ws, f"wc -l {base}/page.json")
     await run(ws, f"stat {base}/page.json")
+
+    # chmod/chown/touch never hit the Notion API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print(f"=== metadata overlay on {base}/page.json ===")
+    meta_res = await ws.execute(f'chmod 640 "{base}/page.json"'
+                                f' && chown 500:dev "{base}/page.json"'
+                                f' && touch -t 202601021530 "{base}/page.json"'
+                                )
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    meta_st, _ = await ws.dispatch("stat",
+                                   PathSpec.from_str_path(f"{base}/page.json"))
+    print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+          f"gid={meta_st.gid} mtime={meta_st.modified}")
     await run(ws, f'jq ".title" {base}/page.json')
     await run(ws, f'jq ".page_id" {base}/page.json')
     await run(ws, f'jq ".parent_type" {base}/page.json')

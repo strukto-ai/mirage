@@ -505,6 +505,18 @@ class MountEntry:
             push_mount_prefix(prev_prefix)
             push_cache_manager(prev_manager)
 
+    def supports_op(self, op_name: str, path: str) -> bool:
+        """Report whether an op would resolve for a path on this mount.
+
+        Args:
+            op_name (str): operation name (e.g. "setattr").
+            path (str): virtual path (drives filetype-specific lookup).
+        """
+        filetype = get_extension(path)
+        return bool(
+            self._resolve_cascade(op_name, filetype, self._ops,
+                                  self._general_ops))
+
     async def execute_op(
         self,
         op_name: str,

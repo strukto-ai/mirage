@@ -12,7 +12,25 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import sys
 import time
+from pathlib import Path
+
+# Importing mirage while this directory is on sys.path resolves the
+# `redis` package to integ/redis.py (mirage swallows the resulting
+# ImportError as "redis extra not installed", and the half-executed
+# shadow module strips this directory from sys.path, breaking the
+# caller's next sibling import). Import mirage with the directory off
+# the path, mirroring integ/redis.py's own guard.
+_INTEG_DIR = str(Path(__file__).resolve().parent)
+_INTEG_ALIASES = {_INTEG_DIR, str(Path(__file__).parent), ""}
+_ON_PATH = any(p in _INTEG_ALIASES for p in sys.path)
+sys.path[:] = [p for p in sys.path if p not in _INTEG_ALIASES]
+
+from mirage.types import PathSpec  # noqa: E402
+
+if _ON_PATH:
+    sys.path.insert(0, _INTEG_DIR)
 
 SEED_FILES = {
     "/data/a.txt":
@@ -1016,6 +1034,40 @@ EXIT_CODE_CASES: list[tuple[str, str]] = [
      " && rm -r /data/symd"),
 ]
 
+# chmod/chown/touch rendering needs a backend with a native setattr slot
+# (ram/disk/redis); overlay backends store attrs in the namespace, which
+# backend ls -l cannot see, so these run outside the shared CASES suite.
+META_CASES: list[tuple[str, str]] = [
+    ("meta_setup", "mkdir -p /data/metad && echo alpha > /data/metad/f.txt"
+     " && touch -t 202601021530 /data/metad/f.txt"),
+    ("meta_ls_long", "ls -l /data/metad"),
+    ("meta_chmod_octal", "chmod 601 /data/metad/f.txt && ls -l /data/metad"),
+    ("meta_chmod_symbolic",
+     "chmod u+x,go-r /data/metad/f.txt && ls -l /data/metad"),
+    ("meta_chown_ids", "chown 500:dev /data/metad/f.txt && ls -l /data/metad"),
+    ("meta_chown_name", "chown alice /data/metad/f.txt && ls -l /data/metad"),
+    ("meta_touch_create", "touch -t 202601021530 /data/metad/new.txt"
+     " && ls -l /data/metad"),
+    ("meta_touch_nocreate", "touch -c /data/metad/ghost.txt"
+     " && ls /data/metad"),
+    ("meta_touch_restamp",
+     "touch -t 202603041200 /data/metad/f.txt && ls -l /data/metad"),
+    ("meta_mv_carries",
+     "mv /data/metad/f.txt /data/metad/g.txt && ls -l /data/metad"),
+    ("meta_rm_drops", "rm /data/metad/g.txt && echo fresh > /data/metad/g.txt"
+     " && touch -t 202601021530 /data/metad/g.txt && ls -l /data/metad"),
+    ("meta_link_chmod_follows", "ln -s /data/metad/g.txt /data/metad/ln.txt"
+     " && chmod 604 /data/metad/ln.txt && ls -l /data/metad"),
+    ("meta_touch_h_link", "touch -h -t 202601021530 /data/metad/ln.txt"
+     " && readlink /data/metad/ln.txt"),
+    ("meta_chmod_bad_mode", "chmod 999 /data/metad/g.txt 2>&1"),
+    ("meta_chmod_bad_symbolic", "chmod u+q /data/metad/g.txt 2>&1"),
+    ("meta_chmod_enoent", "chmod 644 /data/metad/missing.txt 2>&1"),
+    ("meta_chown_enoent", "chown alice /data/metad/missing.txt 2>&1"),
+    ("meta_touch_bad_stamp", "touch -t 99 /data/metad/g.txt 2>&1"),
+    ("meta_cleanup", "rm /data/metad/ln.txt && rm -r /data/metad"),
+]
+
 # Not-found errors must always show the full virtual path the user typed
 # (mount prefix included) plus the GNU strerror, identically across backends
 # and languages. Each case prints exit code and stderr.
@@ -1048,6 +1100,87 @@ NOT_FOUND_PROGS: list[tuple[str, str]] = [
     ("nf_stat", "stat"),
     ("nf_grep", "grep x"),
 ]
+
+
+async def run_meta_cases(ws) -> None:
+    for name, cmd in META_CASES:
+        result = await ws.execute(cmd)
+        out = await result.stdout_str()
+        print(f"=== {name} ===")
+        _emit_body(out)
+
+
+# Overlay backends (s3 and other API mounts) keep attrs in the namespace,
+# which backend ls -l cannot render, so each step reads back through
+# dispatch-stat (where the overlay merges) and prints only the fields the
+# step stamped; unstamped fields like upload mtime stay out of the output.
+META_OVERLAY_CASES: list[tuple[str, str, str | None, tuple[str, ...]]] = [
+    ("ometa_setup", "mkdir -p /data/metao && echo alpha > /data/metao/f.txt"
+     " && touch -t 202601021530 /data/metao/f.txt", "/data/metao/f.txt",
+     ("mode", "uid", "gid", "mtime")),
+    ("ometa_chmod_octal", "chmod 601 /data/metao/f.txt", "/data/metao/f.txt",
+     ("mode", "mtime")),
+    ("ometa_chmod_symbolic", "chmod u+x,go-r /data/metao/f.txt",
+     "/data/metao/f.txt", ("mode", )),
+    ("ometa_chown_ids", "chown 500:dev /data/metao/f.txt", "/data/metao/f.txt",
+     ("uid", "gid")),
+    ("ometa_chown_name", "chown alice /data/metao/f.txt", "/data/metao/f.txt",
+     ("uid", "gid")),
+    ("ometa_touch_create", "touch -t 202601021530 /data/metao/new.txt",
+     "/data/metao/new.txt", ("mode", "mtime")),
+    ("ometa_touch_nocreate", "touch -c /data/metao/ghost.txt",
+     "/data/metao/ghost.txt", ("mode", )),
+    ("ometa_touch_restamp", "touch -t 202603041200 /data/metao/f.txt",
+     "/data/metao/f.txt", ("mtime", )),
+    ("ometa_dir_chmod", "chmod 750 /data/metao", "/data/metao", ("mode", )),
+    ("ometa_mv_carries", "mv /data/metao/f.txt /data/metao/g.txt",
+     "/data/metao/g.txt", ("mode", "uid", "gid", "mtime")),
+    ("ometa_rm_drops",
+     "rm /data/metao/g.txt && echo fresh > /data/metao/g.txt",
+     "/data/metao/g.txt", ("mode", "uid", "gid")),
+    ("ometa_link_chmod_follows", "ln -s /data/metao/g.txt /data/metao/ln.txt"
+     " && chmod 604 /data/metao/ln.txt", "/data/metao/g.txt", ("mode", )),
+    ("ometa_touch_h_link", "touch -t 202601021530 /data/metao/g.txt"
+     " && touch -h -t 202603041200 /data/metao/ln.txt", "/data/metao/g.txt",
+     ("mtime", )),
+    ("ometa_chmod_enoent", "chmod 644 /data/metao/missing.txt 2>&1", None, ()),
+    ("ometa_touch_bad_stamp", "touch -t 99 /data/metao/g.txt 2>&1", None, ()),
+    ("ometa_cleanup", "rm /data/metao/ln.txt && rm -r /data/metao", None, ()),
+]
+
+
+def _meta_field(st, field: str) -> str:
+    if field == "mode":
+        value = oct(st.mode)[2:] if st.mode is not None else "-"
+    elif field == "uid":
+        value = str(st.uid) if st.uid is not None else "-"
+    elif field == "gid":
+        value = str(st.gid) if st.gid is not None else "-"
+    else:
+        # First 19 chars ("2026-01-02T15:30:00") so the Z vs +00:00 suffix
+        # never reaches the byte-diffed truth file.
+        value = st.modified[:19] if st.modified else "-"
+    return f"{field}={value}"
+
+
+def meta_stat_line(st, fields: tuple[str, ...]) -> str:
+    return " ".join(_meta_field(st, field) for field in fields)
+
+
+async def run_meta_overlay_cases(ws) -> None:
+    for name, cmd, path, fields in META_OVERLAY_CASES:
+        result = await ws.execute(cmd)
+        out = await result.stdout_str()
+        print(f"=== {name} ===")
+        if path is None:
+            _emit_body(out)
+            continue
+        try:
+            st, _ = await ws.dispatch("stat", PathSpec.from_str_path(path))
+        except FileNotFoundError:
+            print("absent")
+            continue
+        print(meta_stat_line(st, fields))
 
 
 async def run_not_found(ws, mount: str) -> None:

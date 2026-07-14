@@ -12,80 +12,182 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 from mirage.resource.base import BaseResource
 from mirage.types import MountMode
-from mirage.utils.path import resolve_symlinks
+from mirage.utils.path import glob_prefix_match, resolve_symlinks
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.registry import MountRegistry
 
 
-@dataclass(frozen=True, slots=True)
-class LinkEntry:
-    target: str
-    mtime: float
+@dataclass(slots=True)
+class NodeMeta:
+    """Per-path namespace metadata.
+
+    Two roles, distinguished by ``target``: a target-bearing entry is an
+    authoritative symlink (the link exists only here); a target-less entry
+    is a metadata overlay for a backend file whose backend has no native
+    attribute slot. Attributes are stored, not enforced: mount mode does
+    real access control.
+    """
+
+    target: str | None = None
+    mtime: float | None = None
+    mode: int | None = None
+    uid: int | str | None = None
+    gid: int | str | None = None
+    atime: str | None = None
+
+    def is_empty(self) -> bool:
+        return all(getattr(self, f.name) is None for f in fields(self))
 
 
 class Namespace:
     """Addressing authority: maps virtual paths to their mounts.
 
-    Owns the mount registry and the symlink table (and, in a later phase, the
-    attribute overlay). Pure addressing: it resolves a virtual path to its
-    mount and backend-relative path, following symlinks and crossing mounts.
-    It holds no cache and performs no backend I/O. Op execution and caching
-    live in the Dispatcher, which calls this layer to locate the mount.
+    Owns the mount registry and the per-path node-metadata table (symlinks
+    plus the attribute overlay). Pure addressing: it resolves a virtual
+    path to its mount and backend-relative path, following symlinks and
+    crossing mounts. It holds no cache and performs no backend I/O. Op
+    execution and caching live in the Dispatcher, which calls this layer
+    to locate the mount.
 
-    Symlinks are stored verbatim as typed: the target string is kept exactly as
-    the user wrote it (relative targets are resolved lazily against the link's
-    own parent at resolution time), so ``readlink`` is GNU-faithful.
+    Symlinks are stored verbatim as typed: the target string is kept exactly
+    as the user wrote it (relative targets are resolved lazily against the
+    link's own parent at resolution time), so ``readlink`` is GNU-faithful.
     """
 
     def __init__(self, registry: MountRegistry) -> None:
         self._registry = registry
-        self._symlinks: dict[str, LinkEntry] = {}
+        self._nodes: dict[str, NodeMeta] = {}
 
     @property
     def registry(self) -> MountRegistry:
         return self._registry
 
     @property
-    def symlinks(self) -> dict[str, LinkEntry]:
-        return self._symlinks
+    def nodes(self) -> dict[str, NodeMeta]:
+        return self._nodes
 
-    def replace_symlinks(self, entries: dict[str, LinkEntry]) -> None:
-        self._symlinks = dict(entries)
+    def replace_nodes(self, entries: dict[str, NodeMeta]) -> None:
+        self._nodes = dict(entries)
 
     def symlink_targets(self) -> dict[str, str]:
-        return {link: entry.target for link, entry in self._symlinks.items()}
+        return {
+            path: meta.target
+            for path, meta in self._nodes.items() if meta.target is not None
+        }
+
+    def has_links(self) -> bool:
+        return any(meta.target is not None for meta in self._nodes.values())
 
     def is_link(self, path: str) -> bool:
-        return path in self._symlinks
+        meta = self._nodes.get(path)
+        return meta is not None and meta.target is not None
 
     def readlink(self, path: str) -> str | None:
-        entry = self._symlinks.get(path)
-        return entry.target if entry is not None else None
+        meta = self._nodes.get(path)
+        return meta.target if meta is not None else None
 
     def symlink(self, link: str, target: str, mtime: float) -> None:
-        self._symlinks[link] = LinkEntry(target=target, mtime=mtime)
+        meta = self._nodes.setdefault(link, NodeMeta())
+        meta.target = target
+        meta.mtime = mtime
+
+    def meta_for(self, path: str) -> NodeMeta | None:
+        return self._nodes.get(path)
+
+    def set_attrs(
+        self,
+        path: str,
+        *,
+        mode: int | None = None,
+        uid: int | str | None = None,
+        gid: int | str | None = None,
+        atime: str | None = None,
+        mtime: float | None = None,
+    ) -> None:
+        """Write overlay attributes for a path (setattr fallback).
+
+        Used for symlinks (which have no backend inode) and for backends
+        without a native metadata slot. Only non-None fields are written.
+
+        Args:
+            path (str): absolute virtual path.
+            mode (int | None): permission bits (e.g. 0o644).
+            uid (int | str | None): owner id or name.
+            gid (int | str | None): group id or name.
+            atime (str | None): ISO access time.
+            mtime (float | None): modification time (epoch seconds).
+        """
+        meta = self._nodes.setdefault(path, NodeMeta())
+        if mode is not None:
+            meta.mode = mode
+        if uid is not None:
+            meta.uid = uid
+        if gid is not None:
+            meta.gid = gid
+        if atime is not None:
+            meta.atime = atime
+        if mtime is not None:
+            meta.mtime = mtime
+
+    def clear_times(self, path: str) -> None:
+        """Drop overlay times after a content write.
+
+        write(2) refreshes mtime, so a stored overlay time would
+        otherwise shadow the backend's fresh one forever. Permission and
+        ownership survive writes; a symlink entry keeps its own times.
+
+        Args:
+            path (str): absolute virtual path that was written.
+        """
+        meta = self._nodes.get(path)
+        if meta is None or meta.target is not None:
+            return
+        meta.mtime = None
+        meta.atime = None
+        if meta.is_empty():
+            del self._nodes[path]
 
     def unlink(self, path: str) -> bool:
-        if path in self._symlinks:
-            del self._symlinks[path]
+        if path in self._nodes:
+            del self._nodes[path]
             return True
         return False
 
+    def unlink_glob(self, pattern: str) -> int:
+        """Drop node entries matching an unexpanded glob operand.
+
+        ``rm`` receives the pattern verbatim (backend wrappers expand
+        globs themselves), so the node table must match it here. Drops
+        matched entries and everything under a matched directory.
+
+        Args:
+            pattern (str): absolute virtual glob pattern.
+
+        Returns:
+            int: number of entries dropped.
+        """
+        doomed = [
+            path for path in self._nodes if glob_prefix_match(path, pattern)
+        ]
+        for path in doomed:
+            del self._nodes[path]
+        return len(doomed)
+
     def rename(self, src: str, dst: str) -> bool:
-        entry = self._symlinks.pop(src, None)
-        if entry is None:
+        meta = self._nodes.pop(src, None)
+        if meta is None:
             return False
-        self._symlinks[dst] = entry
+        self._nodes[dst] = meta
         return True
 
     def follow(self, path: str) -> str:
         """Return ``path`` with all symlink prefixes resolved.
 
-        Identity when the table is empty or nothing matches.
+        Identity when no link entries exist or nothing matches.
 
         Args:
             path (str): absolute virtual path.
@@ -93,9 +195,10 @@ class Namespace:
         Raises:
             CycleError: when resolution exceeds the hop limit (ELOOP).
         """
-        if not self._symlinks:
+        targets = self.symlink_targets()
+        if not targets:
             return path
-        return resolve_symlinks(path, self.symlink_targets())
+        return resolve_symlinks(path, targets)
 
     def links_under(self, directory: str) -> dict[str, str]:
         """Links living directly under a directory.
@@ -109,13 +212,14 @@ class Namespace:
         """
         base = directory.rstrip("/") + "/"
         out: dict[str, str] = {}
-        for link, entry in self._symlinks.items():
-            if link.startswith(base) and "/" not in link[len(base):]:
-                out[link[len(base):]] = entry.target
+        for path, meta in self._nodes.items():
+            if (meta.target is not None and path.startswith(base)
+                    and "/" not in path[len(base):]):
+                out[path[len(base):]] = meta.target
         return out
 
     def purge_under(self, directory: str) -> int:
-        """Drop every link entry under a directory (``rm -r`` semantics).
+        """Drop every node entry under a directory (``rm -r`` semantics).
 
         Args:
             directory (str): absolute virtual directory path being removed.
@@ -124,9 +228,9 @@ class Namespace:
             int: number of entries dropped.
         """
         base = directory.rstrip("/") + "/"
-        doomed = [link for link in self._symlinks if link.startswith(base)]
-        for link in doomed:
-            del self._symlinks[link]
+        doomed = [path for path in self._nodes if path.startswith(base)]
+        for path in doomed:
+            del self._nodes[path]
         return len(doomed)
 
     def resolve(self,
@@ -137,14 +241,14 @@ class Namespace:
 
         Args:
             path (str): virtual path to resolve.
-            follow (bool): follow symlinks (the symlink table) before mapping
+            follow (bool): follow symlinks (the node table) before mapping
                 the path to its mount.
 
         Raises:
             CycleError: when symlink resolution exceeds the hop limit (ELOOP).
         """
-        if follow and self._symlinks:
-            path = resolve_symlinks(path, self.symlink_targets())
+        if follow:
+            path = self.follow(path)
         return self._registry.resolve(path)
 
     def mount_for(self, path: str) -> MountEntry:

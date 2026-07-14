@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.minio import MinIOConfig, MinIOResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -50,6 +51,19 @@ async def main():
     await ws.ops.write("/minio/data/config.json",
                        b'{"name":"mirage","version":1,"tags":["s3","minio"]}')
     await ws.ops.write("/minio/notes.txt", b"hello from minio\n")
+
+    # chmod/chown/touch never hit the MinIO API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print("=== metadata overlay on /minio/notes.txt ===")
+    meta_res = await ws.execute('chmod 640 "/minio/notes.txt"'
+                                ' && chown 500:dev "/minio/notes.txt"'
+                                ' && touch -t 202601021530 "/minio/notes.txt"')
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    meta_st, _ = await ws.dispatch("stat",
+                                   PathSpec.from_str_path("/minio/notes.txt"))
+    print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+          f"gid={meta_st.gid} mtime={meta_st.modified}")
 
     print("\n--- ls /minio/ ---")
     r = await ws.execute("ls /minio/")

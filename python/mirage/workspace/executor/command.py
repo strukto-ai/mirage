@@ -236,7 +236,7 @@ async def run_on_mount(
     if cmd_name == "ls" and io.exit_code == 0:
         stdout = await _inject_child_mounts(stdout, registry, paths,
                                             flag_kwargs, session.cwd)
-        if namespace is not None and namespace.symlinks:
+        if namespace is not None and namespace.has_links():
             stdout = await _inject_links(stdout, namespace, paths, flag_kwargs,
                                          session.cwd)
 

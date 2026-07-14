@@ -28,8 +28,10 @@ async def rm_r(accessor: RedisAccessor, path: PathSpec) -> None:
         if key == p or key.startswith(prefix):
             await store.del_file(key)
             await store.del_modified(key)
+            await store.del_attrs(key)
     for key in list(await store.list_dirs()):
         if key == p or key.startswith(prefix):
             await store.remove_dir(key)
             await store.del_modified(key)
+            await store.del_attrs(key)
     await invalidate_after_unlink(path)

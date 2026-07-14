@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.chroma import ChromaConfig, ChromaResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -85,6 +86,18 @@ async def main() -> None:
     print(f"First document: {first_path}\n")
 
     await run(ws, f"cat {quoted_path}", max_chars=1500)
+
+    # chmod/chown/touch never hit Chroma: attrs land in the workspace
+    # namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print(f"=== metadata overlay on {first_path} ===")
+    meta_res = await ws.execute(f"chmod 640 {quoted_path}"
+                                f" && chown 500:dev {quoted_path}"
+                                f" && touch -t 202601021530 {quoted_path}")
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    meta_st, _ = await ws.dispatch("stat", PathSpec.from_str_path(first_path))
+    print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+          f"gid={meta_st.gid} mtime={meta_st.modified}")
     await run(ws, f"head -n 5 {quoted_path}")
     await run(ws, f"tail -n 5 {quoted_path}")
 

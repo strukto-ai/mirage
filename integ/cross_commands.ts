@@ -18,6 +18,7 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3";
 import {
+  FileStat,
   MountMode,
   RAMResource,
   RedisResource,
@@ -396,6 +397,65 @@ async function checkSymlinks(
 // Reads through a link must share the target's cache entry: warming via the
 // link keys the cache under the REAL path, so a direct read of the target
 // serves the same cached bytes after an out-of-band mutation.
+async function statOf(ws: Workspace, path: string): Promise<FileStat> {
+  return (await ws.dispatch("stat", path)) as FileStat;
+}
+
+async function checkMetadata(
+  ws: Workspace,
+  dst: string,
+  label: string,
+): Promise<void> {
+  // setattr is resolve-then-act: chmod/chown/touch on a dst-homed file,
+  // directly and through links homed on another mount, must land on the
+  // target mount (natively or in the namespace overlay) and read back
+  // through dispatch-stat identically.
+  await run(ws, `printf 'mmm\n' > ${dst}/copied/m.txt`);
+  await run(
+    ws,
+    `chmod 601 ${dst}/copied/m.txt && chown 500:dev ${dst}/copied/m.txt` +
+      ` && touch -t 202601021530 ${dst}/copied/m.txt`,
+  );
+  let st = await statOf(ws, `${dst}/copied/m.txt`);
+  check(`${label}: chmod lands on dst mount`, st.mode === 0o601);
+  check(
+    `${label}: chown lands on dst mount`,
+    st.uid === 500 && st.gid === "dev",
+  );
+  check(
+    `${label}: touch stamps dst mtime`,
+    (st.modified ?? "").startsWith("2026-01-02T15:30"),
+  );
+  await run(ws, `ln -s ${dst}/copied/m.txt /ram/ml.txt`);
+  await run(ws, "chmod 640 /ram/ml.txt && touch -t 202603041200 /ram/ml.txt");
+  st = await statOf(ws, `${dst}/copied/m.txt`);
+  check(
+    `${label}: chmod through cross-mount link hits target`,
+    st.mode === 0o640,
+  );
+  check(
+    `${label}: touch through cross-mount link hits target`,
+    (st.modified ?? "").startsWith("2026-03-04T12:00"),
+  );
+  await run(ws, "touch -h -t 202601010000 /ram/ml.txt");
+  st = await statOf(ws, `${dst}/copied/m.txt`);
+  check(
+    `${label}: touch -h writes link node, target untouched`,
+    (st.modified ?? "").startsWith("2026-03-04T12:00"),
+  );
+  await run(ws, `ln -s ${dst}/copied /ram/mdir`);
+  await run(ws, "touch -t 202601021530 /ram/mdir/created.txt");
+  const [out] = await run(ws, `ls ${dst}/copied`);
+  check(
+    `${label}: touch creates through cross-mount dir link`,
+    out.includes("created.txt"),
+  );
+  await run(
+    ws,
+    `rm /ram/ml.txt /ram/mdir ${dst}/copied/m.txt ${dst}/copied/created.txt`,
+  );
+}
+
 async function checkSymlinkCache(
   ws: Workspace,
   client: S3Client,
@@ -506,6 +566,7 @@ async function exercise(
   await checkOmitDirectory(ws, dst, label);
   await checkMove(ws, dst, label);
   await checkSymlinks(ws, dst, label);
+  await checkMetadata(ws, dst, label);
 }
 
 async function main(): Promise<void> {

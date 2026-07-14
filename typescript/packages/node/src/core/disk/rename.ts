@@ -18,6 +18,8 @@ import {
   enoent,
   invalidateAfterUnlink,
   invalidateAfterWrite,
+  norm,
+  rstripSlash,
   type PathSpec,
 } from '@struktoai/mirage-core'
 import { resolveSafe } from './utils.ts'
@@ -32,6 +34,22 @@ export async function rename(accessor: DiskAccessor, src: PathSpec, dst: PathSpe
       throw enoent(src)
     }
     throw err
+  }
+  const sKey = norm(src.mountPath)
+  const dKey = norm(dst.mountPath)
+  const prefix = rstripSlash(sKey) + '/'
+  for (const key of [...accessor.attrs.keys()]) {
+    if (key === sKey) {
+      const entry = accessor.attrs.get(key)
+      accessor.attrs.delete(key)
+      if (entry !== undefined) accessor.attrs.set(dKey, entry)
+    } else if (key.startsWith(prefix)) {
+      const entry = accessor.attrs.get(key)
+      accessor.attrs.delete(key)
+      if (entry !== undefined) {
+        accessor.attrs.set(rstripSlash(dKey) + '/' + key.slice(prefix.length), entry)
+      }
+    }
   }
   await invalidateAfterUnlink(src)
   await invalidateAfterWrite(dst)

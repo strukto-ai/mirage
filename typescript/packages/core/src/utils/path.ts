@@ -12,10 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { fnmatch } from './fnmatch.ts'
 import { rstripSlash, stripSlash } from './slash.ts'
 
 export function norm(path: string): string {
   return `/${stripSlash(path)}`
+}
+
+// Whether a glob pattern matches `path` or one of its ancestors.
+// Segment-wise fnmatch, so `*` does not cross `/` (shell glob semantics,
+// not fnmatch's flat matching). An ancestor match covers entries living
+// under a matched directory.
+export function globPrefixMatch(path: string, pattern: string): boolean {
+  const patSegs = stripSlash(pattern).split('/')
+  const pathSegs = stripSlash(path).split('/')
+  if (pathSegs.length < patSegs.length) return false
+  return patSegs.every((pat, i) => fnmatch(pathSegs[i] ?? '', pat))
 }
 
 // Resolve a relative path against cwd; absolute paths are only

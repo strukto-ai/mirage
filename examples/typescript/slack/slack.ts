@@ -19,6 +19,7 @@ import {
   MountMode,
   SlackResource,
   Workspace,
+  type FileStat,
   type SlackConfig,
 } from '@struktoai/mirage-node'
 
@@ -135,6 +136,21 @@ async function main(): Promise<void> {
     if (tailOut !== '') {
       console.log(`  ${tailOut.slice(0, 120)}`)
     }
+
+    // ── metadata (namespace overlay) ───────────────────
+    // chmod/chown/touch never hit the Slack API: attrs land in the
+    // workspace namespace (durable, snapshot-captured) and merge into
+    // dispatch-level stat.
+    console.log(`\n=== metadata overlay on ${target} ===`)
+    r = await ws.execute(
+      `chmod 640 "${filePath}" && chown 500:dev "${filePath}" && touch -t 202601021530 "${filePath}"`,
+    )
+    console.log(`  chmod/chown/touch exit=${String(r.exitCode)}`)
+    const metaSt = (await ws.dispatch('stat', filePath)) as FileStat
+    const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+    console.log(
+      `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+    )
 
     // ── basename / dirname / realpath (path ops) ───────
     console.log(`\n=== basename ${filePath} ===`)

@@ -19,6 +19,7 @@ import aiofiles.os
 from mirage.accessor.disk import DiskAccessor
 from mirage.cache.context import invalidate_after_unlink
 from mirage.types import PathSpec
+from mirage.utils.path import norm
 
 
 def _resolve(root: Path, path: str) -> Path:
@@ -33,4 +34,5 @@ async def unlink(accessor: DiskAccessor, path: PathSpec) -> None:
         path = path.mount_path
     p = _resolve(accessor.root, path)
     await aiofiles.os.remove(p)
+    accessor.attrs.pop(norm(path), None)
     await invalidate_after_unlink(path)

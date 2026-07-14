@@ -18,6 +18,7 @@ import {
   MountMode,
   Workspace,
   type DiscordConfig,
+  type FileStat,
 } from '@struktoai/mirage-node'
 
 dotenv.config({ path: '.env.development' })
@@ -87,6 +88,21 @@ async function main(): Promise<void> {
     console.log(`\n=== ls ${base}/${targetDate}/ ===`)
     r = await ws.execute(`ls "${base}/${targetDate}/"`)
     console.log(r.stdoutText)
+
+
+    // chmod/chown/touch never hit the Discord API: attrs land in the
+    // workspace namespace (durable, snapshot-captured) and merge into
+    // dispatch-level stat.
+    console.log(`=== metadata overlay on ${filePath} ===`)
+    const metaRes = await ws.execute(
+      `chmod 640 "${filePath}" && chown 500:dev "${filePath}" && touch -t 202601021530 "${filePath}"`,
+    )
+    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+    const metaSt = (await ws.dispatch('stat', `${filePath}`)) as FileStat
+    const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+    console.log(
+      `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+    )
 
     // ── files dir ──────────────────────────────────
     console.log(`\n=== ls ${base}/${targetDate}/files/ (attachments) ===`)

@@ -160,6 +160,11 @@ jobs:
           ./python/.venv/bin/python integ/redis.py > /tmp/redis.out
           diff integ/truth.txt /tmp/redis.out
 
+      - name: Run metadata suite (ram/disk/redis + s3 overlay via moto) and diff against truth
+        run: |
+          ./python/.venv/bin/python integ/metadata.py > /tmp/metadata.out
+          diff integ/truth_metadata.txt /tmp/metadata.out
+
       - name: Run Safeguard scenarios and diff against truth
         run: |
           ./python/.venv/bin/python integ/safeguard.py > /tmp/safeguard.out
@@ -314,6 +319,12 @@ jobs:
         run: |
           pnpm exec tsx redis.ts > /tmp/ts-redis.out
           diff truth.txt /tmp/ts-redis.out
+
+      - name: Run metadata suite (ram/disk/redis + s3 overlay via MinIO) and diff against truth
+        working-directory: integ
+        run: |
+          pnpm exec tsx metadata.ts > /tmp/ts-metadata.out
+          diff truth_metadata.txt /tmp/ts-metadata.out
 
       - name: Run Safeguard scenarios and diff against truth
         working-directory: integ

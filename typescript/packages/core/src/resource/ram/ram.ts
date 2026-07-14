@@ -39,13 +39,14 @@ import type { RegisteredOp } from '../../ops/registry.ts'
 import { PathSpec, ResourceName, type FileStat } from '../../types.ts'
 import { BaseResource, type FindOptions, type Resource } from '../base.ts'
 import { RAM_PROMPT } from './prompt.ts'
-import { RAMStore } from './store.ts'
+import { RAMStore, type RAMAttrs } from './store.ts'
 
 export interface RAMResourceState {
   type: string
   files?: Record<string, Uint8Array>
   dirs?: string[]
   modified?: Record<string, string>
+  attrs?: Record<string, RAMAttrs>
 }
 
 export class RAMResource extends BaseResource implements Resource {
@@ -178,11 +179,14 @@ export class RAMResource extends BaseResource implements Resource {
     for (const [k, v] of this.store.files) files[k] = v
     const modified: Record<string, string> = {}
     for (const [k, v] of this.store.modified) modified[k] = v
+    const attrs: Record<string, RAMAttrs> = {}
+    for (const [k, v] of this.store.attrs) attrs[k] = { ...v }
     return {
       type: this.kind,
       files,
       dirs: [...this.store.dirs],
       modified,
+      attrs,
     }
   }
 
@@ -194,5 +198,7 @@ export class RAMResource extends BaseResource implements Resource {
     for (const d of dirs.length > 0 ? dirs : ['/']) this.store.dirs.add(d)
     this.store.modified.clear()
     for (const [k, v] of Object.entries(state.modified ?? {})) this.store.modified.set(k, v)
+    this.store.attrs.clear()
+    for (const [k, v] of Object.entries(state.attrs ?? {})) this.store.attrs.set(k, { ...v })
   }
 }

@@ -21,6 +21,7 @@ export async function unlink(accessor: RAMAccessor, path: PathSpec): Promise<voi
   const p = norm(path.mountPath)
   accessor.store.files.delete(p)
   accessor.store.modified.delete(p)
+  accessor.store.attrs.delete(p)
   await invalidateAfterUnlink(path)
   return Promise.resolve()
 }

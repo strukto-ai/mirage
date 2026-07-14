@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.r2 import R2Config, R2Resource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -224,6 +225,20 @@ async def main():
     parsed = json.loads(await result.stdout_str())
     print(f"  departments: {len(parsed)}")
     print(f"  first team: {parsed[0]['teams'][0]['name']}")
+
+    # chmod/chown/touch never hit the R2 API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print("=== metadata overlay on /r2/data/example.jsonl ===")
+    meta_res = await ws.execute(
+        'chmod 640 "/r2/data/example.jsonl"'
+        ' && chown 500:dev "/r2/data/example.jsonl"'
+        ' && touch -t 202601021530 "/r2/data/example.jsonl"')
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    meta_st, _ = await ws.dispatch(
+        "stat", PathSpec.from_str_path("/r2/data/example.jsonl"))
+    print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+          f"gid={meta_st.gid} mtime={meta_st.modified}")
 
 
 if __name__ == "__main__":

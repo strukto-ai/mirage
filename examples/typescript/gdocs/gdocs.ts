@@ -15,7 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { GDocsResource, MountMode, Workspace, type GDocsConfig } from '@struktoai/mirage-node'
+import { GDocsResource, MountMode, Workspace, type FileStat, type GDocsConfig } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../.env.development'), override: true })
@@ -76,6 +76,21 @@ async function main(): Promise<void> {
     const stat = await run(ws, `stat "/gdocs/owned/${first}"`)
     console.log('=== stat ===')
     console.log(`  ${stat.out.trim()}`)
+
+
+    // chmod/chown/touch never hit the Docs API: attrs land in the
+    // workspace namespace (durable, snapshot-captured) and merge into
+    // dispatch-level stat.
+    console.log(`=== metadata overlay on /gdocs/owned/${first} ===`)
+    const metaRes = await ws.execute(
+      `chmod 640 "/gdocs/owned/${first}" && chown 500:dev "/gdocs/owned/${first}" && touch -t 202601021530 "/gdocs/owned/${first}"`,
+    )
+    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+    const metaSt = (await ws.dispatch('stat', `/gdocs/owned/${first}`)) as FileStat
+    const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+    console.log(
+      `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+    )
 
     const jq = await run(ws, `jq ".title" "/gdocs/owned/${first}"`)
     console.log('=== jq .title ===')

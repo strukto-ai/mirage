@@ -35,24 +35,36 @@ async def rename(
     if await store.has_file(s):
         data = await store.get_file(s)
         mod = await store.get_modified(s)
+        attrs = await store.get_attrs(s)
         await store.del_file(s)
         await store.del_modified(s)
+        await store.del_attrs(s)
         await store.set_file(d, data)
         await store.set_modified(d, mod or now)
+        if attrs:
+            await store.set_attrs(d, attrs)
     elif await store.has_dir(s):
         mod = await store.get_modified(s)
+        attrs = await store.get_attrs(s)
         await store.remove_dir(s)
         await store.del_modified(s)
+        await store.del_attrs(s)
         await store.add_dir(d)
         await store.set_modified(d, mod or now)
+        if attrs:
+            await store.set_attrs(d, attrs)
         prefix = s.rstrip("/") + "/"
         all_files = await store.list_files()
         for key in all_files:
             if key.startswith(prefix):
                 new_key = d.rstrip("/") + "/" + key[len(prefix):]
                 data = await store.get_file(key)
+                sub_attrs = await store.get_attrs(key)
                 await store.del_file(key)
+                await store.del_attrs(key)
                 await store.set_file(new_key, data)
+                if sub_attrs:
+                    await store.set_attrs(new_key, sub_attrs)
     else:
         raise FileNotFoundError(s)
     await invalidate_after_write(d)

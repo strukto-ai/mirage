@@ -35,17 +35,18 @@ import {
   MountMode,
   S3Resource,
   Workspace,
+  type FileStat,
   type S3Config,
 } from '@struktoai/mirage-node'
 
 const DEC = new TextDecoder()
 
 const config: S3Config = {
-  bucket: 'mirage-demo',
-  region: 'us-east-1',
-  endpoint: 'http://localhost:9000',
-  accessKeyId: 'minioadmin',
-  secretAccessKey: 'minioadmin',
+  bucket: process.env.S3_BUCKET ?? 'mirage-demo',
+  region: process.env.S3_REGION ?? 'us-east-1',
+  endpoint: process.env.S3_ENDPOINT ?? 'http://localhost:9000',
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? 'minioadmin',
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? 'minioadmin',
   forcePathStyle: true,
 }
 
@@ -233,6 +234,20 @@ async function main(): Promise<void> {
 
     await runLabeled(ws, 'du /s3/demo/', 'du /s3/demo/')
     await runLabeled(ws, "find /s3/demo/ -name '*.txt'", `find /s3/demo/ -name '*.txt'`)
+
+    console.log('=== metadata on S3 (namespace overlay) ===')
+    // S3 has no native attr slots, so chmod/chown/touch land in the
+    // workspace namespace (durable, snapshot-captured) and merge into
+    // dispatch-level stat.
+    await ws.execute(
+      'chmod 640 /s3/demo/hello.txt && chown 500:dev /s3/demo/hello.txt' +
+        ' && touch -t 202601021530 /s3/demo/hello.txt',
+    )
+    const st = (await ws.dispatch('stat', '/s3/demo/hello.txt')) as FileStat
+    const mode = st.mode !== null ? st.mode.toString(8) : '-'
+    console.log(
+      `  dispatch stat: mode=${mode} uid=${String(st.uid)} gid=${String(st.gid)} mtime=${String(st.modified)}`,
+    )
 
     console.log('\n=== CLEANUP ===')
     await ws.execute('rm -rf /s3/demo')
