@@ -47,13 +47,19 @@ A `.mjs` file runs as an ES module automatically (top-level
 js -m -e "const x = await Promise.resolve(41); console.log(x + 1)"
 ```
 
-## Sandbox
+## Isolation
 
-The engine sees only what the run passes it. Host files, mounts, and the
-network are all invisible, and file I/O inside the code cannot reach
-workspace mounts. The `node`/`js` command still resolves a script *file*
-through the workspace before running it, so `node /data/script.mjs`
-works, but reading another mount path inside the code does not.
+The engine runs under WebAssembly capability isolation: it sees only what
+the run passes it. Host files, mounts, and the network are all invisible,
+and file I/O inside the code cannot reach workspace mounts. The `node`/`js`
+command still resolves a script *file* through the workspace before running
+it, so `node /data/script.mjs` works, but reading another mount path inside
+the code does not.
+
+This is capability isolation, not a resource sandbox: the guest cannot
+reach your files or the network, but CPU and memory are bounded only by soft
+engine caps and `command_safeguards` timeouts. For untrusted code or hard
+resource limits, run behind a sandboxed deployment.
 
 ## Setup
 
