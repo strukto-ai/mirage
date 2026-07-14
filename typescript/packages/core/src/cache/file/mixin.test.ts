@@ -1,0 +1,60 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { describe, expect, it } from 'vitest'
+import { drainBudget } from './mixin.ts'
+import { RAMFileCacheStore } from './ram.ts'
+
+describe('drainBudget', () => {
+  it('defaults to cacheLimit when maxDrainBytes is null', () => {
+    const cache = new RAMFileCacheStore({ limit: 1024 })
+    expect(cache.maxDrainBytes).toBeNull()
+    expect(drainBudget(cache)).toBe(1024)
+  })
+
+  it('honors an explicit maxDrainBytes below the limit', () => {
+    const cache = new RAMFileCacheStore({ limit: 1024, maxDrainBytes: 100 })
+    expect(drainBudget(cache)).toBe(100)
+  })
+
+  it('honors an explicit maxDrainBytes equal to the limit', () => {
+    const cache = new RAMFileCacheStore({ limit: 1024, maxDrainBytes: 1024 })
+    expect(drainBudget(cache)).toBe(1024)
+  })
+
+  it('accepts zero', () => {
+    const cache = new RAMFileCacheStore({ limit: 1024, maxDrainBytes: 0 })
+    expect(drainBudget(cache)).toBe(0)
+  })
+
+  it('rejects maxDrainBytes above the limit', () => {
+    expect(() => new RAMFileCacheStore({ limit: 1024, maxDrainBytes: 1025 })).toThrow(
+      'maxDrainBytes cannot exceed cacheLimit',
+    )
+  })
+
+  it('rejects negative maxDrainBytes', () => {
+    expect(() => new RAMFileCacheStore({ limit: 1024, maxDrainBytes: -1 })).toThrow(
+      'maxDrainBytes must be a non-negative safe integer',
+    )
+  })
+
+  it('preserves the previous value when a setter update is invalid', () => {
+    const cache = new RAMFileCacheStore({ limit: 1024, maxDrainBytes: 100 })
+    expect(() => {
+      cache.maxDrainBytes = 1025
+    }).toThrow('maxDrainBytes cannot exceed cacheLimit')
+    expect(cache.maxDrainBytes).toBe(100)
+  })
+})

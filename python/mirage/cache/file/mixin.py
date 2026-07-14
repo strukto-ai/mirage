@@ -15,6 +15,16 @@
 from collections.abc import Iterable
 
 
+def validate_max_drain_bytes(cache_limit: int,
+                             max_drain_bytes: int | None) -> None:
+    if cache_limit < 0:
+        raise ValueError("cache_limit must be non-negative")
+    if max_drain_bytes is not None and max_drain_bytes < 0:
+        raise ValueError("max_drain_bytes must be non-negative")
+    if max_drain_bytes is not None and max_drain_bytes > cache_limit:
+        raise ValueError("max_drain_bytes cannot exceed cache_limit")
+
+
 class FileCacheMixin:
     """LRU file cache mixin for resources.
 
@@ -22,6 +32,8 @@ class FileCacheMixin:
     on top of any resource. Data lives in the resource's storage —
     subclass implements the cache methods using resource's store.
     """
+
+    _max_drain_bytes: int | None = None
 
     async def get(self, key: str) -> bytes | None:
         raise NotImplementedError
@@ -90,3 +102,24 @@ class FileCacheMixin:
     @property
     def cache_limit(self) -> int:
         raise NotImplementedError
+
+    @property
+    def max_drain_bytes(self) -> int | None:
+        return self._max_drain_bytes
+
+    @max_drain_bytes.setter
+    def max_drain_bytes(self, value: int | None) -> None:
+        validate_max_drain_bytes(self.cache_limit, value)
+        self._max_drain_bytes = value
+
+    @property
+    def drain_budget(self) -> int:
+        """Max bytes a background drain may buffer to fill this cache.
+
+        ``None`` (the default) derives the budget from ``cache_limit``.
+        An explicit value limits speculative background reads further
+        and may not exceed the cache's intended capacity.
+        """
+        if self.max_drain_bytes is None:
+            return self.cache_limit
+        return self.max_drain_bytes

@@ -185,6 +185,11 @@ jobs:
           ./python/.venv/bin/python integ/s3.py > /tmp/s3.out
           diff integ/truth_s3.txt /tmp/s3.out
 
+      - name: Run Databricks Volume cache-drain integ and diff against truth
+        run: |
+          ./python/.venv/bin/python integ/databricks_volume.py > /tmp/databricks-volume.out
+          diff integ/truth_databricks_volume.txt /tmp/databricks-volume.out
+
       - name: Run shared command suite on s3 (moto) and diff against shared truth
         run: |
           ./python/.venv/bin/python integ/s3_cases.py > /tmp/s3_cases.out
@@ -349,6 +354,12 @@ jobs:
         run: |
           pnpm exec tsx s3.ts > /tmp/ts-s3-native.out
           diff truth_s3_ts.txt /tmp/ts-s3-native.out
+
+      - name: Run Databricks Volume cache-drain integ and diff against truth
+        working-directory: integ
+        run: |
+          pnpm exec tsx databricks_volume.ts > /tmp/ts-databricks-volume.out
+          diff truth_databricks_volume.txt /tmp/ts-databricks-volume.out
 
       - name: Run cross-mount commands (ram -> ram/s3 via MinIO)
         working-directory: integ

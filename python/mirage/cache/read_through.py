@@ -26,8 +26,14 @@ async def _serve_stream(manager, raw: Callable, accessor, path: PathSpec,
         if cached is not None:
             yield cached
             return
-    async for chunk in raw(accessor, path, *args, **kwargs):
-        yield chunk
+    source = raw(accessor, path, *args, **kwargs)
+    try:
+        async for chunk in source:
+            yield chunk
+    finally:
+        close = getattr(source, "aclose", None)
+        if close is not None:
+            await close()
 
 
 def cache_aware_read_stream(raw: Callable) -> Callable:

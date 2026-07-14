@@ -39,6 +39,22 @@ class CachableAsyncIterator:
         """Chunks consumed from the source so far. Do not mutate."""
         return self._buffer
 
+    @property
+    def source(self) -> AsyncIterator[bytes]:
+        """Underlying iterator used by mount-context wrappers."""
+        return self._source
+
+    def replace_source(self, source: AsyncIterator[bytes]) -> None:
+        """Replace the source before iteration starts.
+
+        Args:
+            source (AsyncIterator[bytes]): Context-wrapped source iterator.
+        """
+        if self._buffer or self._exhausted:
+            raise RuntimeError(
+                "cannot replace a started cache iterator source")
+        self._source = source
+
     def __aiter__(self) -> "CachableAsyncIterator":
         return self
 
@@ -60,21 +76,40 @@ class CachableAsyncIterator:
             self._exhausted = True
         return b"".join(self._buffer)
 
-    async def drain_bounded(self, max_bytes: int) -> tuple[bytes, bool]:
+    async def drain_bounded(self, max_bytes: int) -> bytes | None:
         """Drain remaining chunks but stop if buffer exceeds max_bytes.
 
-        Returns (accumulated_bytes, fully_drained). When fully_drained
-        is False, the source still has unread chunks but we stopped
-        because the budget was exceeded; the partial buffer is returned
-        to the caller so it can decide whether to use or discard it.
+        Returns the accumulated bytes when fully drained. When the
+        budget is exceeded, closes the source, releases the partial
+        buffer, and returns None.
         """
         total = sum(len(c) for c in self._buffer)
         try:
+            if total > max_bytes:
+                await self._close_and_discard()
+                return None
             async for chunk in self._source:
                 self._buffer.append(chunk)
                 total += len(chunk)
                 if total > max_bytes:
-                    return b"".join(self._buffer), False
+                    await self._close_and_discard()
+                    return None
         finally:
             self._exhausted = True
-        return b"".join(self._buffer), True
+        return b"".join(self._buffer)
+
+    async def _close_and_discard(self) -> None:
+        self._buffer.clear()
+        await self._close_source()
+
+    async def _close_source(self) -> None:
+        """Close the underlying source iterator if it supports aclose.
+
+        Deliberately NOT named ``aclose``: pipes.py close_quietly duck-
+        types on that name for SIGPIPE-style teardown, and it must keep
+        no-opping on this wrapper so an early-exiting consumer (``cat x
+        | head``) leaves the source open for the background cache drain.
+        """
+        close = getattr(self._source, "aclose", None)
+        if close is not None:
+            await close()

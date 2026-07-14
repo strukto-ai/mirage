@@ -19,6 +19,7 @@ import pytest
 from mirage.cache.file import io as cache_io
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.io import CachableAsyncIterator, IOResult
+from mirage.io.stream import close_quietly
 from mirage.observe.record import OpRecord
 
 
@@ -247,16 +248,55 @@ def _make_chunked_stream(chunks: list[bytes]) -> CachableAsyncIterator:
 
 
 @pytest.mark.asyncio
-async def test_drain_unbounded_when_threshold_none():
-    """Default behavior: full drain into cache regardless of size."""
-    cache = RAMFileCacheStore()  # max_drain_bytes=None
-    chunks = [b"a" * 100 for _ in range(10)]  # 1000 bytes total
+async def test_drain_survives_pipeline_close_quietly():
+    """SIGPIPE-style teardown must not starve the background drain.
+
+    `cat big.json | head -n 5` consumes one chunk, then pipes.py calls
+    close_quietly on the upstream stream. The drain must still pull the
+    remainder and cache the FULL file — a partial entry would poison
+    every later read of the path (integ regression: 8192-byte cache).
+    """
+    cache = RAMFileCacheStore()
+    chunks = [b"a" * 100 for _ in range(10)]
     stream = _make_chunked_stream(chunks)
+    await stream.__anext__()
+    await close_quietly(stream)
+    io = IOResult(reads={"/big.json": stream}, cache=["/big.json"])
+    await cache_io.apply_io(cache, io)
+    await asyncio.sleep(0.05)
+    cached = await cache.get("/big.json")
+    assert cached is not None and len(cached) == 1000
+
+
+@pytest.mark.asyncio
+async def test_drain_default_budget_is_cache_limit():
+    """Default: drains up to cache_limit, never unbounded."""
+    cache = RAMFileCacheStore(cache_limit=500)  # max_drain_bytes=None
+    small = _make_chunked_stream([b"a" * 100 for _ in range(3)])
+    huge = _make_chunked_stream([b"b" * 100 for _ in range(10)])
+    io_small = IOResult(reads={"/small.txt": small}, cache=["/small.txt"])
+    io_huge = IOResult(reads={"/huge.txt": huge}, cache=["/huge.txt"])
+    await cache_io.apply_io(cache, io_small)
+    await cache_io.apply_io(cache, io_huge)
+    await asyncio.sleep(0.05)
+    cached = await cache.get("/small.txt")
+    assert cached is not None and len(cached) == 300
+    # 1000 bytes exceeds the 500-byte cache_limit: the drain stops
+    # instead of buffering a file the cache could never hold.
+    assert await cache.get("/huge.txt") is None
+
+
+@pytest.mark.asyncio
+async def test_drain_over_budget_releases_buffer_and_preserves_cache():
+    cache = RAMFileCacheStore(cache_limit=500, max_drain_bytes=300)
+    await cache.set("/warm.txt", b"w" * 200)
+    stream = _make_chunked_stream([b"c" * 100 for _ in range(10)])
     io = IOResult(reads={"/big.txt": stream}, cache=["/big.txt"])
     await cache_io.apply_io(cache, io)
     await asyncio.sleep(0.05)
-    cached = await cache.get("/big.txt")
-    assert cached is not None and len(cached) == 1000
+    assert await cache.get("/warm.txt") == b"w" * 200
+    assert await cache.get("/big.txt") is None
+    assert stream.buffered_chunks == []
 
 
 @pytest.mark.asyncio

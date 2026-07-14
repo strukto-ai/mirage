@@ -17,6 +17,7 @@ import {
   defaultFingerprint,
   parseLimit,
   type PathSpec,
+  validateMaxDrainBytes,
 } from '@struktoai/mirage-core'
 import type { RedisClientType } from 'redis'
 import { RedisResource, type RedisResourceOptions } from '../../resource/redis/redis.ts'
@@ -34,7 +35,7 @@ export class RedisFileCacheStore extends RedisResource implements FileCache {
   private readonly limit: number
   private readonly dataPrefix: string
   private readonly metaPrefix: string
-  maxDrainBytes: number | null
+  private maxDrainBytesValue: number | null = null
   readonly drainTasks = new Map<string, Promise<void>>()
 
   constructor(options: RedisFileCacheOptions = {}) {
@@ -46,6 +47,15 @@ export class RedisFileCacheStore extends RedisResource implements FileCache {
     this.dataPrefix = `${this.keyPrefix}data:`
     this.metaPrefix = `${this.keyPrefix}meta:`
     this.maxDrainBytes = options.maxDrainBytes ?? null
+  }
+
+  get maxDrainBytes(): number | null {
+    return this.maxDrainBytesValue
+  }
+
+  set maxDrainBytes(value: number | null) {
+    validateMaxDrainBytes(this.limit, value)
+    this.maxDrainBytesValue = value
   }
 
   // Size lives in the redis server and is not tracked client-side.
