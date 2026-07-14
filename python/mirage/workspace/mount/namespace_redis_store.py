@@ -18,10 +18,10 @@ from typing import cast
 
 import redis.asyncio as aioredis
 
-from mirage.workspace.mount.namespace_store import NodeFields
+from mirage.workspace.mount.namespace_store import NamespaceStore, NodeFields
 
 
-class RedisNamespaceStore:
+class RedisNamespaceStore(NamespaceStore):
     """NamespaceStore backed by one Redis hash (path -> JSON fields).
 
     Symlinks and attribute overlays survive process restarts and are

@@ -18,7 +18,8 @@ import { globPrefixMatch, resolveSymlinks } from '../../utils/path.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import type { ResolveFn } from '../dispatcher.ts'
 import type { MountEntry } from './mount.ts'
-import { type NamespaceStore, type NodeFields, RAMNamespaceStore } from './namespace_store.ts'
+import { RAMNamespaceStore } from './namespace_ram_store.ts'
+import type { NamespaceStore, NodeFields } from './namespace_store.ts'
 import type { MountRegistry } from './registry.ts'
 
 // Per-path namespace metadata. Two roles, distinguished by `target`: a

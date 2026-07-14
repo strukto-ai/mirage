@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.workspace.mount.namespace import Namespace, NodeMeta
-from mirage.workspace.mount.namespace_store import RAMNamespaceStore
+from mirage.workspace.mount.namespace_ram_store import RAMNamespaceStore
 
 
 @pytest.fixture

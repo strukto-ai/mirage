@@ -71,9 +71,8 @@ async def test_clear_empties_table(store):
     assert await store.load() == {}
 
 
-def test_redis_store_satisfies_protocol():
-    assert isinstance(RedisNamespaceStore.__new__(RedisNamespaceStore),
-                      NamespaceStore)
+def test_redis_store_subclasses_namespace_store():
+    assert issubclass(RedisNamespaceStore, NamespaceStore)
 
 
 class _OverlayRAMResource(RAMResource):

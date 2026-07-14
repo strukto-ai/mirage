@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RedisClientType } from 'redis'
-import type { NamespaceStore, NodeFields } from '@struktoai/mirage-core'
+import { NamespaceStore, type NodeFields } from '@struktoai/mirage-core'
 import { loadOptionalPeer } from '../optional_peer.ts'
 
 export interface RedisNamespaceStoreOptions {
@@ -29,12 +29,13 @@ export interface RedisNamespaceStoreOptions {
  * single-command (HSET/HDEL) so mutations stay one round trip. Mirrors the
  * Python RedisNamespaceStore.
  */
-export class RedisNamespaceStore implements NamespaceStore {
+export class RedisNamespaceStore extends NamespaceStore {
   readonly url: string
   private readonly key: string
   private clientPromise: Promise<RedisClientType> | null = null
 
   constructor(options: RedisNamespaceStoreOptions = {}) {
+    super()
     this.url = options.url ?? 'redis://localhost:6379/0'
     this.key = `${options.keyPrefix ?? 'mirage:namespace:'}nodes`
   }

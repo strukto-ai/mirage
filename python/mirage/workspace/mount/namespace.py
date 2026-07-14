@@ -19,8 +19,8 @@ from mirage.resource.base import BaseResource
 from mirage.types import MountMode
 from mirage.utils.path import glob_prefix_match, resolve_symlinks
 from mirage.workspace.mount.mount import MountEntry
-from mirage.workspace.mount.namespace_store import (NamespaceStore, NodeFields,
-                                                    RAMNamespaceStore)
+from mirage.workspace.mount.namespace_ram_store import RAMNamespaceStore
+from mirage.workspace.mount.namespace_store import NamespaceStore, NodeFields
 from mirage.workspace.mount.registry import MountRegistry
 
 

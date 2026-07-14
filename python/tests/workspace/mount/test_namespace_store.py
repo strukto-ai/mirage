@@ -14,8 +14,8 @@
 
 import pytest
 
-from mirage.workspace.mount.namespace_store import (NamespaceStore,
-                                                    RAMNamespaceStore)
+from mirage.workspace.mount.namespace_ram_store import RAMNamespaceStore
+from mirage.workspace.mount.namespace_store import NamespaceStore
 
 
 @pytest.mark.asyncio
@@ -82,5 +82,6 @@ async def test_load_returns_copies():
     assert (await store.load())["/a"]["mode"] == 1
 
 
-def test_ram_store_satisfies_protocol():
+def test_ram_store_subclasses_namespace_store():
+    assert issubclass(RAMNamespaceStore, NamespaceStore)
     assert isinstance(RAMNamespaceStore(), NamespaceStore)

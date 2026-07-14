@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { RAMNamespaceStore } from './namespace_store.ts'
+import { RAMNamespaceStore } from './namespace_ram_store.ts'
 
 describe('RAMNamespaceStore', () => {
   it('set/load roundtrip', async () => {
