@@ -82,9 +82,8 @@ def _await_ready(thread: threading.Thread,
 
 def mount_background(ops: Ops,
                      mountpoint: str,
-                     agent_id: str | None = None,
                      root_prefix: str = "") -> threading.Thread:
-    fs = MirageFS(ops, agent_id=agent_id, root_prefix=root_prefix)
+    fs = MirageFS(ops, root_prefix=root_prefix)
     _prepare_mountpoint(mountpoint)
     t = threading.Thread(target=_run_fuse,
                          args=(fs, mountpoint, True),
@@ -97,12 +96,11 @@ def mount_background(ops: Ops,
 def mount(ops: Ops | None = None,
           mountpoint: str = "",
           foreground: bool = True,
-          agent_id: str | None = None,
           fs: MirageFS | None = None,
           daemon: bool = False,
           post_fork=None) -> None:
     if fs is None:
-        fs = MirageFS(ops, agent_id=agent_id)
+        fs = MirageFS(ops)
     _prepare_mountpoint(mountpoint)
     if daemon:
         pid = os.fork()

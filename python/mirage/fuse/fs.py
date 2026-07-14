@@ -19,7 +19,6 @@ import posixpath
 import stat
 import threading
 import time
-import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
@@ -33,9 +32,6 @@ from mirage.fuse.platform.macos import is_macos_metadata
 from mirage.ops import Ops
 from mirage.types import FileStat, FileType
 
-_ENV_AGENT_ID = "MIRAGE_AGENT_ID"
-_MIRAGE_DIR = "/.mirage"
-_MIRAGE_WHOAMI = "/.mirage/whoami"
 # "attribute not found" errno: ENOATTR on macOS, ENODATA on Linux.
 _NO_XATTR = getattr(errno, "ENOATTR", None) or errno.ENODATA
 # Base class only when mfusepy is installed; otherwise the module still imports
@@ -58,10 +54,7 @@ class MirageFS(_FUSE_OPERATIONS):
 
     use_ns = True
 
-    def __init__(self,
-                 ops: Ops,
-                 agent_id: str | None = None,
-                 root_prefix: str = "") -> None:
+    def __init__(self, ops: Ops, root_prefix: str = "") -> None:
         if fuse is None:
             raise RuntimeError(
                 "FUSE support requires the 'fuse' extra: install "
@@ -69,8 +62,6 @@ class MirageFS(_FUSE_OPERATIONS):
                 "WinFsp). Setup and support matrix: "
                 "https://mirage.dev/home/setup/fuse")
         self._ops = ops
-        self.agent_id = (agent_id or os.environ.get(_ENV_AGENT_ID)
-                         or f"agent-{uuid.uuid4().hex[:8]}")
         self._now = time.time_ns()
         self._root = root_prefix.rstrip("/")
         # When scoped to a single mount, the FUSE root maps onto that mount and
@@ -106,15 +97,6 @@ class MirageFS(_FUSE_OPERATIONS):
         if path == "/":
             return self._root
         return self._root + path
-
-    def _whoami_content(self) -> bytes:
-        mounts = self._ops.mount_prefixes()
-        lines = [
-            f"agent: {self.agent_id}",
-            "cwd: /",
-            f"mounts: {', '.join(mounts)}",
-        ]
-        return ("\n".join(lines) + "\n").encode()
 
     def _dir_stat(self) -> dict:
         return {
@@ -301,10 +283,6 @@ class MirageFS(_FUSE_OPERATIONS):
                 return self._file_stat(len(ctx.data))
         if path == "/":
             return self._dir_stat()
-        if path == _MIRAGE_DIR:
-            return self._dir_stat()
-        if path == _MIRAGE_WHOAMI:
-            return self._file_stat(len(self._whoami_content()))
         # macOS Finder/Spotlight probes .DS_Store, ._*, .Spotlight-V100, etc.
         # Reject early to avoid hitting the ops layer.
         name = path.rsplit("/", 1)[-1]
@@ -339,11 +317,7 @@ class MirageFS(_FUSE_OPERATIONS):
         raise fuse.FuseOSError(errno.ENOENT)
 
     def readdir(self, path: str, fh) -> list:
-        if path == _MIRAGE_DIR:
-            return [".", "..", "whoami"]
         names = set(self._virtual_children(path))
-        if path == "/":
-            names.add(".mirage")
         links = self._ops.links
         if links is not None:
             for link_name in links.links_under(self._resolve(path)):
@@ -361,9 +335,6 @@ class MirageFS(_FUSE_OPERATIONS):
         return [".", ".."] + sorted(names)
 
     def read(self, path: str, size: int, offset: int, fh) -> bytes:
-        if path == _MIRAGE_WHOAMI:
-            data = self._whoami_content()
-            return data[offset:offset + size]
         ctx = self._handles.get(fh)
         if ctx is not None and ctx.data is not None:
             return ctx.data[offset:offset + size]
@@ -571,11 +542,6 @@ class MirageFS(_FUSE_OPERATIONS):
         self.flush(path, fh)
 
     def open(self, path: str, flags) -> int:
-        if path == _MIRAGE_WHOAMI:
-            fh = self._next_fh
-            self._next_fh += 1
-            self._handles[fh] = Handle(path=path)
-            return fh
         try:
             s = self._run(self._ops.stat(self._resolve(path)))
         except (FileNotFoundError, ValueError):

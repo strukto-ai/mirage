@@ -87,14 +87,6 @@ describe('MirageFS — getattr', () => {
     const [code] = await callOp<[number]>(mfs, 'getattr', '/data/.DS_Store')
     expect(code).toBe(ENOENT)
   })
-
-  it('serves /.mirage/whoami as a file', async () => {
-    const ws = await mkWs()
-    const mfs = new MirageFS(ws)
-    const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'getattr', '/.mirage/whoami')
-    expect(code).toBe(0)
-    expect(attr.size).toBeGreaterThan(0)
-  })
 })
 
 describe('MirageFS — readdir', () => {
@@ -106,15 +98,6 @@ describe('MirageFS — readdir', () => {
     expect(names.slice(0, 2)).toEqual(['.', '..'])
     expect(names).toContain('data')
     expect(names).toContain('extra')
-    expect(names).toContain('.mirage')
-  })
-
-  it('lists /.mirage as a single-entry virtual dir with "." and ".."', async () => {
-    const ws = await mkWs()
-    const mfs = new MirageFS(ws)
-    const [code, names] = await callOp<[number, string[]]>(mfs, 'readdir', '/.mirage')
-    expect(code).toBe(0)
-    expect(names).toEqual(['.', '..', 'whoami'])
   })
 
   it('lists contents of a mount directory', async () => {
@@ -125,21 +108,6 @@ describe('MirageFS — readdir', () => {
     expect(names.slice(0, 2)).toEqual(['.', '..'])
     expect(names).toContain('greeting.txt')
     expect(names).toContain('sub')
-  })
-})
-
-describe('MirageFS — whoami pseudo-file', () => {
-  it('emits agent/cwd/mounts via read', async () => {
-    const ws = await mkWs()
-    const mfs = new MirageFS(ws, { agentId: 'test-agent-42' })
-    const [code, fh] = await callOp<[number, number]>(mfs, 'open', '/.mirage/whoami', 0)
-    expect(code).toBe(0)
-    const buf = Buffer.alloc(256)
-    const [bytesRead] = await callOp<[number]>(mfs, 'read', '/.mirage/whoami', fh, buf, 256, 0)
-    const text = buf.subarray(0, bytesRead).toString('utf-8')
-    expect(text).toContain('agent: test-agent-42')
-    expect(text).toContain('cwd: /')
-    expect(text).toContain('/data/')
   })
 })
 

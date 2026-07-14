@@ -19,12 +19,11 @@ After Claude exits, the workspace still holds everything Claude created.
 
 Usage:
     python examples/claude/claude-memory.py
-    python examples/claude/claude-memory.py --agent-id my-bot \
+    python examples/claude/claude-memory.py \
         --prompt "write a fibonacci.py"
 """
 
 import argparse
-import os
 import subprocess
 import sys
 import tempfile
@@ -45,7 +44,6 @@ def unmount(mountpoint: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--agent-id", default="claude", dest="agent_id")
     parser.add_argument("--prompt",
                         default="write a hello world script in /hello.py")
     args = parser.parse_args()
@@ -53,17 +51,13 @@ def main() -> None:
     ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
 
     with tempfile.TemporaryDirectory() as mountpoint:
-        t = mount_background(ws, mountpoint, agent_id=args.agent_id)
+        t = mount_background(ws, mountpoint)
         print(f"Mounted memory filesystem at {mountpoint}")
-        print(f"Agent: {args.agent_id}")
 
         try:
             subprocess.run(
                 ["claude", "-p", args.prompt],
                 cwd=mountpoint,
-                env={
-                    **os.environ, "MIRAGE_AGENT_ID": args.agent_id
-                },
             )
         finally:
             unmount(mountpoint)

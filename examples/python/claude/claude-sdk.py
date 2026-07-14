@@ -21,7 +21,7 @@ the agent finishes.
 Usage:
     pip install claude-agent-sdk
     python examples/claude/claude-sdk.py
-    python examples/claude/claude-sdk.py --agent-id code-bot \
+    python examples/claude/claude-sdk.py \
         --prompt "create a python calculator module with tests"
 """
 
@@ -64,13 +64,12 @@ def print_ops(ops: list[dict]) -> None:
         print(f"  [{ts}] {op['op']:6s}  {op['path']}")
 
 
-async def run_agent(mountpoint: str, prompt: str, agent_id: str) -> None:
+async def run_agent(mountpoint: str, prompt: str) -> None:
     options = ClaudeAgentOptions(
         cwd=mountpoint,
         allowed_tools=["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
         permission_mode="bypassPermissions",
         allow_dangerously_skip_permissions=True,
-        env={"MIRAGE_AGENT_ID": agent_id},
     )
     async for message in query(prompt=prompt, options=options):
         if isinstance(message, ResultMessage):
@@ -79,7 +78,6 @@ async def run_agent(mountpoint: str, prompt: str, agent_id: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--agent-id", default="claude-sdk", dest="agent_id")
     parser.add_argument(
         "--prompt",
         default=(
@@ -92,14 +90,13 @@ def main() -> None:
     ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
 
     with tempfile.TemporaryDirectory() as mountpoint:
-        fs = MirageFS(ws.ops, agent_id=args.agent_id)
-        t = mount_background(ws, mountpoint, agent_id=args.agent_id)
+        fs = MirageFS(ws.ops)
+        t = mount_background(ws, mountpoint)
         print(f"Mounted memory workspace at {mountpoint}")
-        print(f"Agent: {args.agent_id}")
         print(f"Prompt: {args.prompt}\n")
 
         try:
-            anyio.run(run_agent, mountpoint, args.prompt, args.agent_id)
+            anyio.run(run_agent, mountpoint, args.prompt)
         finally:
             ops = fs.drain_ops()
             unmount(mountpoint)

@@ -30,7 +30,6 @@ export interface FuseHandle {
 export interface MountOptions {
   /** Caller/deployment-owned mountpoint. Mirage mounts here but does not delete it. */
   mountpoint?: string
-  agentId?: string
   /** Scope the mount to a single workspace mount prefix (subtree exposure). */
   rootPrefix?: string
   /**
@@ -128,9 +127,7 @@ export async function mount(ws: Workspace, options: MountOptions = {}): Promise<
     mountpoint = mkdtempSync(join(tmpdir(), 'mirage-fuse-'))
     ownsMountpoint = true
   }
-  const agentId = options.agentId
   const mfs = new MirageFS(ws, {
-    ...(agentId !== undefined ? { agentId } : {}),
     ...(options.rootPrefix !== undefined ? { rootPrefix: options.rootPrefix } : {}),
   })
   const autoUnmount = options.autoUnmount ?? process.platform === 'linux'

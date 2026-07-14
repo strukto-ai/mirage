@@ -22,10 +22,6 @@ import {
 } from '@struktoai/mirage-core'
 import { isMacosMetadata } from './platform/macos.ts'
 
-const ENV_AGENT_ID = 'MIRAGE_AGENT_ID'
-const MIRAGE_DIR = '/.mirage'
-const MIRAGE_WHOAMI = '/.mirage/whoami'
-
 // FUSE errno values (negative for fuse-native callbacks; positive for errors thrown).
 const ENOENT = -2
 const EACCES = -13
@@ -86,13 +82,11 @@ function classifyError(err: unknown): number {
 }
 
 export interface MirageFSOptions {
-  agentId?: string
   rootPrefix?: string
 }
 
 export class MirageFS {
   private readonly ws: Workspace
-  readonly agentId: string
   private readonly now: Date
   private readonly root: string
   private readonly prefixes: string[]
@@ -108,10 +102,6 @@ export class MirageFS {
 
   constructor(ws: Workspace, options: MirageFSOptions = {}) {
     this.ws = ws
-    this.agentId =
-      options.agentId ??
-      process.env[ENV_AGENT_ID] ??
-      `agent-${Math.random().toString(36).slice(2, 10)}`
     this.now = new Date()
     this.root = options.rootPrefix !== undefined ? rstripSlash(options.rootPrefix) : ''
     // When scoped to a single mount, the FUSE root maps onto that mount and
@@ -126,11 +116,6 @@ export class MirageFS {
   private resolve(path: string): string {
     if (this.root === '') return path
     return path === '/' ? this.root : this.root + path
-  }
-
-  private whoamiContent(): Uint8Array {
-    const lines = [`agent: ${this.agentId}`, 'cwd: /', `mounts: ${this.prefixes.join(', ')}`]
-    return new TextEncoder().encode(lines.join('\n') + '\n')
   }
 
   private dirStat(): FuseAttr {
@@ -338,12 +323,8 @@ export class MirageFS {
 
   private getattr(path: string, cb: Cb<FuseAttr>): void {
     void (async () => {
-      if (path === '/' || path === MIRAGE_DIR) {
+      if (path === '/') {
         cb(0, this.dirStat())
-        return
-      }
-      if (path === MIRAGE_WHOAMI) {
-        cb(0, this.fileStat(this.whoamiContent().byteLength))
         return
       }
       // macOS Finder/Spotlight probes .DS_Store, ._*, .Spotlight-V100, etc.
@@ -398,13 +379,7 @@ export class MirageFS {
 
   private readdir(path: string, cb: Cb<string[]>): void {
     void (async () => {
-      // `/.mirage/` virtual dir — a single pseudo file.
-      if (path === MIRAGE_DIR) {
-        cb(0, ['.', '..', 'whoami'])
-        return
-      }
       const names = new Set(this.virtualChildren(path))
-      if (path === '/') names.add('.mirage')
       const links = this.ws.fs.links
       if (links !== null) {
         for (const linkName of links.linksUnder(this.resolve(path)).keys()) {
@@ -436,13 +411,6 @@ export class MirageFS {
     cb: (result: number) => void,
   ): void {
     void (async () => {
-      if (path === MIRAGE_WHOAMI) {
-        const data = this.whoamiContent()
-        const slice = data.subarray(pos, pos + len)
-        buf.set(slice, 0)
-        cb(slice.byteLength)
-        return
-      }
       const ctx = this.handles.get(fd)
       try {
         // Filetype-aware read: no `raw: true`, so parquet/feather/hdf5/etc.
@@ -781,12 +749,6 @@ export class MirageFS {
 
   private open(path: string, _flags: number, cb: Cb<number>): void {
     void (async () => {
-      if (path === MIRAGE_WHOAMI) {
-        const fh = this.nextFh++
-        this.handles.set(fh, { path })
-        cb(0, fh)
-        return
-      }
       try {
         const s = await this.ws.fs.stat(this.resolve(path))
         const ctx: Handle = { path }
