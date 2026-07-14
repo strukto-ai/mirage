@@ -16,6 +16,7 @@ from typing import Any
 
 from mirage.cache.file import io as cache_io
 from mirage.cache.manager import CacheManager
+from mirage.core.timeutil import epoch_to_iso
 from mirage.io import IOResult
 from mirage.observe.record import OpRecord
 from mirage.types import ConsistencyPolicy, FileStat, PathSpec
@@ -82,9 +83,40 @@ class Dispatcher:
                     return cached, IOResult(reads={path.virtual: cached})
 
         result = await mount.execute_op(op, path.virtual, **kwargs)
+        if op == "stat" and isinstance(result, FileStat):
+            result = self._merge_overlay_stat(path.virtual, result)
         if op in _DISPATCH_WRITE_OPS:
             await self.invalidate_after_write(mount, path.virtual)
         return result, IOResult()
+
+    def _merge_overlay_stat(self, path: str, stat: FileStat) -> FileStat:
+        """Overlay namespace node attrs onto a backend stat.
+
+        Backends without a native attribute slot store chmod/chown/touch
+        results in the namespace node table; merging here (overlay wins
+        per-field) makes dispatch("stat") report them uniformly.
+
+        Args:
+            path (str): virtual path (already link-resolved).
+            stat (FileStat): the backend-reported stat.
+        """
+        meta = self._namespace.meta_for(path)
+        if meta is None:
+            return stat
+        update: dict[str, Any] = {}
+        if meta.mode is not None:
+            update["mode"] = meta.mode
+        if meta.uid is not None:
+            update["uid"] = meta.uid
+        if meta.gid is not None:
+            update["gid"] = meta.gid
+        if meta.atime is not None:
+            update["atime"] = meta.atime
+        if meta.mtime is not None and meta.target is None:
+            update["modified"] = epoch_to_iso(meta.mtime)
+        if not update:
+            return stat
+        return stat.model_copy(update=update)
 
     async def stat(self, path: str) -> FileStat:
         scope = PathSpec(virtual=path,
@@ -138,6 +170,7 @@ class Dispatcher:
 
     async def invalidate_after_write(self, mount: MountEntry,
                                      path: str) -> None:
+        self._namespace.clear_times(path)
         manager = mount.cache_manager
         if manager is None:
             manager = CacheManager(self._cache,

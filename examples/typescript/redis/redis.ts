@@ -58,6 +58,13 @@ async function main(): Promise<void> {
   await runLabeled(ws, 'tail -n 1 /data/reports/q1.csv', 'tail -n 1 /data/reports/q1.csv')
   await runLabeled(ws, 'wc /data/hello.txt', 'wc /data/hello.txt')
   await runLabeled(ws, 'stat /data/hello.txt', 'stat /data/hello.txt')
+
+  // Redis has a native setattr slot: chmod/chown/touch persist in
+  // per-path attr hashes and render in ls -l.
+  await ws.execute('chmod 640 /data/hello.txt')
+  await ws.execute('chown 500:staff /data/hello.txt')
+  await ws.execute('touch -t 202601021530 /data/hello.txt')
+  await runLabeled(ws, 'METADATA (chmod / chown / touch, native)', 'ls -l /data/hello.txt')
   await runLabeled(ws, 'jq .name /data/user.json', 'jq ".name" /data/user.json')
 
   console.log('=== not-found errors show the full virtual path ===')

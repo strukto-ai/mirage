@@ -25,6 +25,7 @@ from mirage.resource.s3 import S3Config, S3Resource
 from mirage.types import MountMode
 from mirage.workspace import Workspace
 from mirage.workspace.snapshot import to_state_dict
+from mirage.workspace.snapshot.utils import FORMAT_VERSION
 
 
 def _load(*args, **kwargs):
@@ -225,7 +226,7 @@ def test_manifest_is_valid_json(tmp_path):
     with tarfile.open(snap, "r") as tar:
         f = tar.extractfile("manifest.json")
         manifest = json.loads(f.read().decode("utf-8"))
-    assert manifest["version"] == 2
+    assert manifest["version"] == FORMAT_VERSION
     assert "mounts" in manifest
     assert "cache" in manifest
 
@@ -334,7 +335,7 @@ def test_to_state_dict_shape():
     ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
     state = asyncio.run(to_state_dict(ws))
-    assert state["version"] == 2
+    assert state["version"] == FORMAT_VERSION
     assert state["mirage_version"] == importlib.metadata.version("mirage-ai")
     assert state["mirage_version"] != "unknown"
     assert isinstance(state["mounts"], list)

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import dotenv from 'dotenv'
-import { MountMode, PostgresResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, PostgresResource, Workspace, type FileStat } from '@struktoai/mirage-node'
 
 dotenv.config({ path: '.env.development' })
 
@@ -57,6 +57,25 @@ try {
     await run(`ls ${dir}`, `ls ${dir}`)
     await run('stat schema.json', `stat ${dir}/schema.json`)
     await run('stat rows.jsonl', `stat ${dir}/rows.jsonl`)
+
+
+    // chmod/chown/touch never hit Postgres: attrs land in the
+    // workspace namespace (durable, snapshot-captured) and merge into
+    // dispatch-level stat.
+    console.log(`=== metadata overlay on ${dir}/rows.jsonl ===`)
+    const metaRes = await ws.execute(
+      `chmod 640 "${dir}/rows.jsonl" && chown 500:dev "${dir}/rows.jsonl" && touch -t 202601021530 "${dir}/rows.jsonl"`,
+    )
+    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+    try {
+      const metaSt = (await ws.dispatch('stat', `${dir}/rows.jsonl`)) as FileStat
+      const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+      console.log(
+        `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+      )
+    } catch {
+      console.log('  dispatch stat: target missing in this environment')
+    }
     await run('cat schema.json', `cat ${dir}/schema.json`)
     await run('head -n 3 rows.jsonl', `head -n 3 ${dir}/rows.jsonl`)
     await run('tail -n 2 rows.jsonl', `tail -n 2 ${dir}/rows.jsonl`)

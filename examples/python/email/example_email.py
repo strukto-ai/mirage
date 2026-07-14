@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.email import EmailConfig, EmailResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -108,6 +109,19 @@ async def main() -> None:
     result = await ws.execute(f"find /email/{folder}/ -maxdepth 1 -size +0c")
     print(f"  exit={result.exit_code}")
     print(await result.stdout_str())
+
+    # chmod/chown/touch never hit the IMAP API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print(f"=== metadata overlay on {first_msg} ===")
+    meta_res = await ws.execute(f'chmod 640 "{first_msg}"'
+                                f' && chown 500:dev "{first_msg}"'
+                                f' && touch -t 202601021530 "{first_msg}"')
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    meta_st, _ = await ws.dispatch("stat",
+                                   PathSpec.from_str_path(f"{first_msg}"))
+    print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+          f"gid={meta_st.gid} mtime={meta_st.modified}")
 
     print("=== email-triage --unseen --max 5 ===")
     result = await ws.execute(

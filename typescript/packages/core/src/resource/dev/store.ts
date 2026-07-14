@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { stripSlash } from '../../utils/slash.ts'
+import type { RAMAttrs } from '../ram/store.ts'
 
 const DEV_NAMES = new Set(['null', 'zero'])
 const ZERO_CHUNK_SIZE = 1 << 20
@@ -82,4 +83,5 @@ export class DevStore {
   readonly files: Map<string, Uint8Array> = new DevFiles()
   readonly dirs = new Set<string>(['/'])
   readonly modified = new Map<string, string>()
+  readonly attrs = new Map<string, RAMAttrs>()
 }

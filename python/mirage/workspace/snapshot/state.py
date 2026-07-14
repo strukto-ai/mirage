@@ -25,7 +25,7 @@ from mirage.shell.job_table import Job, JobStatus
 from mirage.types import (CacheKey, ConsistencyPolicy, JobKey, MountKey,
                           MountMode, ResourceName, ResourceStateKey,
                           SessionKey, StateKey)
-from mirage.workspace.mount.namespace import LinkEntry
+from mirage.workspace.mount.namespace import NodeMeta
 from mirage.workspace.snapshot.config import MountArgs
 from mirage.workspace.snapshot.drift import (capture_fingerprints,
                                              live_only_mount_prefixes)
@@ -95,12 +95,16 @@ async def to_state_dict(ws) -> dict:
         StateKey.JOBS: finished_jobs,
         StateKey.FINGERPRINTS: fingerprints,
         StateKey.LIVE_ONLY_MOUNTS: live_only_mounts,
-        StateKey.SYMLINKS: {
-            link: {
-                "target": entry.target,
-                "mtime": entry.mtime
+        StateKey.NODES: {
+            path: {
+                field: value
+                for field, value in (("target", meta.target), ("mtime",
+                                                               meta.mtime),
+                                     ("mode", meta.mode), ("uid", meta.uid),
+                                     ("gid", meta.gid), ("atime", meta.atime))
+                if value is not None
             }
-            for link, entry in ws._namespace.symlinks.items()
+            for path, meta in ws._namespace.nodes.items()
         },
     }
 
@@ -177,15 +181,21 @@ async def apply_state_dict(ws, state: dict) -> None:
     _restore_cache(ws, state)
     await _restore_history(ws, state)
     _restore_jobs(ws, state)
-    _restore_symlinks(ws, state)
+    _restore_nodes(ws, state)
 
 
-def _restore_symlinks(ws, state: dict) -> None:
+def _restore_nodes(ws, state: dict) -> None:
     entries = {
-        link: LinkEntry(target=d["target"], mtime=d["mtime"])
-        for link, d in (state.get(StateKey.SYMLINKS) or {}).items()
+        path:
+        NodeMeta(target=d.get("target"),
+                 mtime=d.get("mtime"),
+                 mode=d.get("mode"),
+                 uid=d.get("uid"),
+                 gid=d.get("gid"),
+                 atime=d.get("atime"))
+        for path, d in (state.get(StateKey.NODES) or {}).items()
     }
-    ws._namespace.replace_symlinks(entries)
+    ws._namespace.replace_nodes(entries)
 
 
 def _restore_sessions(ws, state: dict) -> None:

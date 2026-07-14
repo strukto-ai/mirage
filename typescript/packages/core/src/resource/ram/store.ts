@@ -12,8 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+export interface RAMAttrs {
+  mode?: number
+  uid?: number | string
+  gid?: number | string
+  atime?: string
+}
+
 export class RAMStore {
   readonly files = new Map<string, Uint8Array>()
   readonly dirs = new Set<string>(['/'])
   readonly modified = new Map<string, string>()
+  readonly attrs = new Map<string, RAMAttrs>()
 }

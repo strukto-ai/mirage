@@ -117,6 +117,28 @@ class RedisResource(BaseResource):
             members = client.smembers(dir_key)
             dirs = sorted(m.decode() if isinstance(m, bytes) else m
                           for m in members)
+            attrs: dict[str, dict[str, str]] = {}
+            attrs_pattern = f"{prefix}attrs:*"
+            astrip = len(f"{prefix}attrs:")
+            for key in client.scan_iter(attrs_pattern):
+                if isinstance(key, bytes):
+                    key = key.decode()
+                raw = client.hgetall(key)
+                attrs[key[astrip:]] = {
+                    (k.decode() if isinstance(k, bytes) else k):
+                    (v.decode() if isinstance(v, bytes) else v)
+                    for k, v in raw.items()
+                }
+            modified: dict[str, str] = {}
+            mod_pattern = f"{prefix}modified:*"
+            mstrip = len(f"{prefix}modified:")
+            for key in client.scan_iter(mod_pattern):
+                if isinstance(key, bytes):
+                    key = key.decode()
+                val = client.get(key)
+                if val is not None:
+                    modified[key[mstrip:]] = (val.decode() if isinstance(
+                        val, bytes) else val)
         finally:
             client.close()
         return {
@@ -128,6 +150,8 @@ class RedisResource(BaseResource):
             "key_prefix": prefix,
             "files": files,
             "dirs": dirs,
+            "attrs": attrs,
+            "modified": modified,
         }
 
     def load_state(self, state: dict) -> None:
@@ -141,6 +165,11 @@ class RedisResource(BaseResource):
                 pipe.set(f"{prefix}file:{p}", data)
             for d in dirs:
                 pipe.sadd(f"{prefix}dir", d)
+            for p, fields in state.get("attrs", {}).items():
+                if fields:
+                    pipe.hset(f"{prefix}attrs:{p}", mapping=fields)
+            for p, ts in state.get("modified", {}).items():
+                pipe.set(f"{prefix}modified:{p}", ts)
             pipe.execute()
         finally:
             client.close()

@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.hf_datasets import HfDatasetsConfig, HfDatasetsResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -77,6 +78,19 @@ async def main():
     print("\n=== stat /ds/README.md ===")
     r = await ws.execute("stat /ds/README.md")
     print(f"  {(await r.stdout_str()).strip()}")
+
+    # chmod/chown/touch never hit the Hub API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print("=== metadata overlay on /ds/README.md ===")
+    meta_res = await ws.execute('chmod 640 "/ds/README.md"'
+                                ' && chown 500:dev "/ds/README.md"'
+                                ' && touch -t 202601021530 "/ds/README.md"')
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    meta_st, _ = await ws.dispatch("stat",
+                                   PathSpec.from_str_path("/ds/README.md"))
+    print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+          f"gid={meta_st.gid} mtime={meta_st.modified}")
 
     # ── find ────────────────────────────────────────────
     print("\n=== find /ds/ -name '*.md' ===")

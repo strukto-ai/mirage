@@ -23,6 +23,7 @@ import { readParquetOp } from './read_parquet.ts'
 import { readdirOp } from './readdir.ts'
 import { renameOp } from './rename.ts'
 import { rmdirOp } from './rmdir.ts'
+import { setAttrsOp } from './set_attrs.ts'
 import { statOp } from './stat.ts'
 import { truncateOp } from './truncate.ts'
 import { unlinkOp } from './unlink.ts'
@@ -39,6 +40,7 @@ export const DISK_OPS: readonly RegisteredOp[] = [
   readdirOp,
   renameOp,
   rmdirOp,
+  setAttrsOp,
   statOp,
   truncateOp,
   unlinkOp,

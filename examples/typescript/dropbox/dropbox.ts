@@ -15,7 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { DropboxResource, MountMode, Workspace, type DropboxConfig } from '@struktoai/mirage-node'
+import { DropboxResource, MountMode, Workspace, type FileStat, type DropboxConfig } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../.env.development'), override: true })
@@ -76,6 +76,21 @@ async function main(): Promise<void> {
     const f2 = files[1] ?? f1
 
     await show(ws, `stat ${quote(f1)}`)
+
+
+    // chmod/chown/touch never hit the Dropbox API: attrs land in the
+    // workspace namespace (durable, snapshot-captured) and merge into
+    // dispatch-level stat.
+    console.log(`=== metadata overlay on ${f1} ===`)
+    const metaRes = await ws.execute(
+      `chmod 640 "${f1}" && chown 500:dev "${f1}" && touch -t 202601021530 "${f1}"`,
+    )
+    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+    const metaSt = (await ws.dispatch('stat', `${f1}`)) as FileStat
+    const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+    console.log(
+      `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+    )
     await show(ws, `file ${quote(f1)}`)
     await show(ws, `head -n 5 ${quote(f1)}`)
     await show(ws, `tail -n 3 ${quote(f1)}`)

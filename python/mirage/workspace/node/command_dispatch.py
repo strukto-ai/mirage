@@ -35,12 +35,13 @@ from mirage.shell.helpers import (  # isort: skip
     ProcessSubDirection, get_command_name, get_parts,
     get_process_sub_direction, get_text, split_env_prefix)
 from mirage.workspace.executor.builtins import (  # isort: skip
-    follow_paths, handle_bash, handle_cd, handle_echo, handle_eval,
-    handle_export, handle_history, handle_ln, handle_local, handle_man,
-    handle_printenv, handle_printf, handle_read, handle_readlink,
-    handle_return, handle_set, handle_shift, handle_sleep, handle_source,
-    handle_test, handle_timeout, handle_trap, handle_unset, handle_whoami,
-    handle_xargs, link_flags, prepare_mv, strip_link_operands)
+    follow_paths, handle_bash, handle_cd, handle_chmod, handle_chown,
+    handle_echo, handle_eval, handle_export, handle_history, handle_ln,
+    handle_local, handle_man, handle_printenv, handle_printf, handle_read,
+    handle_readlink, handle_return, handle_set, handle_shift, handle_sleep,
+    handle_source, handle_test, handle_timeout, handle_touch, handle_trap,
+    handle_unset, handle_whoami, handle_xargs, link_flags, prepare_mv,
+    strip_link_operands)
 
 _CdArgs = list[str | PathSpec]
 
@@ -389,10 +390,20 @@ async def _run_argv(
                                    & {"f", "e", "m"}):
         return handle_readlink(namespace, session, operands)
 
+    # ── metadata commands (namespace-routed: resolve-then-setattr with
+    #    overlay fallback; they run their own link follow) ──
+    if name == "chmod":
+        return await handle_chmod(namespace, dispatch, operands)
+    if name == "chown":
+        return await handle_chown(namespace, dispatch, operands)
+    if name == "touch":
+        return await handle_touch(namespace, dispatch, session, operands)
+
     # ── symlink-aware dispatch: reads follow links (open(2)); rm/mv act
     #    on the link entry itself (lstat semantics) ──
     post_unlink: str | None = None
-    if namespace.symlinks:
+    post_rename: tuple[str, str] | None = None
+    if namespace.nodes:
         try:
             if name == "rm":
                 operands, removed = strip_link_operands(namespace, operands)
@@ -401,7 +412,7 @@ async def _run_argv(
                     return None, IOResult(), ExecutionNode(command=name,
                                                            exit_code=0)
             elif name == "mv":
-                operands, post_unlink, early = await prepare_mv(
+                operands, post_unlink, post_rename, early = await prepare_mv(
                     namespace, dispatch, operands)
                 if early is not None:
                     return early
@@ -427,11 +438,22 @@ async def _run_argv(
                                                  job_table=job_table,
                                                  namespace=namespace)
 
-    if io.exit_code == 0 and namespace.symlinks:
+    if io.exit_code == 0 and namespace.nodes:
         if name == "rm":
+            # A removed path takes its node meta (overlay attrs) with it;
+            # a removed dir purges everything underneath. Glob operands
+            # reach here unexpanded (backend wrappers expand them), so
+            # the node table matches the pattern itself.
             for item in operands:
-                if isinstance(item, PathSpec):
+                if not isinstance(item, PathSpec):
+                    continue
+                if item.pattern:
+                    namespace.unlink_glob(item.virtual)
+                else:
+                    namespace.unlink(item.virtual)
                     namespace.purge_under(item.virtual)
         if post_unlink is not None:
             namespace.unlink(post_unlink)
+        if post_rename is not None:
+            namespace.rename(post_rename[0], post_rename[1])
     return stdout, io, exec_node

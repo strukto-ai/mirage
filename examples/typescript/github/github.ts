@@ -15,7 +15,7 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
-import { GitHubResource, MountMode, Workspace } from "@struktoai/mirage-node";
+import { GitHubResource, MountMode, Workspace, type FileStat } from "@struktoai/mirage-node";
 
 const __HERE = fileURLToPath(new URL(".", import.meta.url));
 dotenv.config({ path: resolve(__HERE, "../../../.env.development") });
@@ -90,6 +90,21 @@ async function main(): Promise<void> {
   await show(ws, "grep -r 'async def' /github/python/mirage/core/s3/");
   await show(ws, "find /github/mirage -name '*.py'");
   await show(ws, "stat /github/python/mirage/types.py");
+
+
+  // chmod/chown/touch never hit the GitHub API: attrs land in the
+  // workspace namespace (durable, snapshot-captured) and merge into
+  // dispatch-level stat.
+  console.log(`=== metadata overlay on /github/python/mirage/types.py ===`)
+  const metaRes = await ws.execute(
+    `chmod 640 "/github/python/mirage/types.py" && chown 500:dev "/github/python/mirage/types.py" && touch -t 202601021530 "/github/python/mirage/types.py"`,
+  )
+  console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+  const metaSt = (await ws.dispatch('stat', `/github/python/mirage/types.py`)) as FileStat
+  const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+  console.log(
+    `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+  )
   await show(ws, "du /github/python/mirage/core");
 
   await header(ws, "head -n 5", "head -n 5 /github/python/pyproject.toml");

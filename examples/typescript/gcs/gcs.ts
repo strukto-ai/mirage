@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import dotenv from 'dotenv'
-import { MountMode, GCSResource, Workspace, type GCSConfig } from '@struktoai/mirage-node'
+import { MountMode, GCSResource, Workspace, type FileStat, type GCSConfig } from '@struktoai/mirage-node'
 
 dotenv.config({ path: '.env.development' })
 
@@ -337,6 +337,21 @@ async function main(): Promise<void> {
 
     const total = ws.records.reduce((sum, rec) => sum + rec.bytes, 0)
     console.log(`\nStats: ${ws.records.length} ops, ${total} bytes transferred`)
+
+
+    // chmod/chown/touch never hit the GCS API: attrs land in the
+    // workspace namespace (durable, snapshot-captured) and merge into
+    // dispatch-level stat.
+    console.log(`=== metadata overlay on /gcs/data/example.jsonl ===`)
+    const metaRes = await ws.execute(
+      `chmod 640 "/gcs/data/example.jsonl" && chown 500:dev "/gcs/data/example.jsonl" && touch -t 202601021530 "/gcs/data/example.jsonl"`,
+    )
+    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+    const metaSt = (await ws.dispatch('stat', `/gcs/data/example.jsonl`)) as FileStat
+    const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+    console.log(
+      `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+    )
   } finally {
     await ws.close()
   }

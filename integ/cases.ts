@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ProvisionResult, Workspace } from "@struktoai/mirage-node";
+import type { FileStat, ProvisionResult, Workspace } from "@struktoai/mirage-node";
 
 export const SEED_FILES: Record<string, string> = {
   "/data/a.txt": "hello\nworld\nfoo\nbar\nbaz\n",
@@ -945,6 +945,40 @@ export const EXIT_CODE_CASES: ReadonlyArray<readonly [string, string]> = [
   ["sym_cleanup", "rm /data/symd/dangle /data/lp1 /data/lp2 /data/dl && rm -r /data/symd"],
 ];
 
+// chmod/chown/touch rendering needs a backend with a native setattr slot
+// (ram/disk/redis); overlay backends store attrs in the namespace, which
+// backend ls -l cannot see, so these run outside the shared CASES suite.
+export const META_CASES: ReadonlyArray<readonly [string, string]> = [
+  [
+    'meta_setup',
+    'mkdir -p /data/metad && echo alpha > /data/metad/f.txt && touch -t 202601021530 /data/metad/f.txt',
+  ],
+  ['meta_ls_long', 'ls -l /data/metad'],
+  ['meta_chmod_octal', 'chmod 601 /data/metad/f.txt && ls -l /data/metad'],
+  ['meta_chmod_symbolic', 'chmod u+x,go-r /data/metad/f.txt && ls -l /data/metad'],
+  ['meta_chown_ids', 'chown 500:dev /data/metad/f.txt && ls -l /data/metad'],
+  ['meta_chown_name', 'chown alice /data/metad/f.txt && ls -l /data/metad'],
+  ['meta_touch_create', 'touch -t 202601021530 /data/metad/new.txt && ls -l /data/metad'],
+  ['meta_touch_nocreate', 'touch -c /data/metad/ghost.txt && ls /data/metad'],
+  ['meta_touch_restamp', 'touch -t 202603041200 /data/metad/f.txt && ls -l /data/metad'],
+  ['meta_mv_carries', 'mv /data/metad/f.txt /data/metad/g.txt && ls -l /data/metad'],
+  [
+    'meta_rm_drops',
+    'rm /data/metad/g.txt && echo fresh > /data/metad/g.txt && touch -t 202601021530 /data/metad/g.txt && ls -l /data/metad',
+  ],
+  [
+    'meta_link_chmod_follows',
+    'ln -s /data/metad/g.txt /data/metad/ln.txt && chmod 604 /data/metad/ln.txt && ls -l /data/metad',
+  ],
+  ['meta_touch_h_link', 'touch -h -t 202601021530 /data/metad/ln.txt && readlink /data/metad/ln.txt'],
+  ['meta_chmod_bad_mode', 'chmod 999 /data/metad/g.txt 2>&1'],
+  ['meta_chmod_bad_symbolic', 'chmod u+q /data/metad/g.txt 2>&1'],
+  ['meta_chmod_enoent', 'chmod 644 /data/metad/missing.txt 2>&1'],
+  ['meta_chown_enoent', 'chown alice /data/metad/missing.txt 2>&1'],
+  ['meta_touch_bad_stamp', 'touch -t 99 /data/metad/g.txt 2>&1'],
+  ['meta_cleanup', 'rm /data/metad/ln.txt && rm -r /data/metad'],
+];
+
 // Invalid numeric/size/mtime arguments to find must exit 1 with a GNU-style
 // message, identically across every backend (parsed before any backend I/O).
 export const FIND_ARG_ERROR_CASES: ReadonlyArray<readonly [string, string]> = [
@@ -1293,6 +1327,118 @@ function emitBody(out: string): void {
     process.stdout.write(out);
   } else {
     process.stdout.write(out + "\n\\ No newline at end of output\n");
+  }
+}
+
+export async function runMetaCases(ws: Workspace): Promise<void> {
+  for (const [name, cmd] of META_CASES) {
+    let out = "";
+    try {
+      const result = await ws.execute(cmd);
+      out = new TextDecoder().decode(result.stdout);
+    } catch (err) {
+      process.stderr.write(`# ${name}: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
+    console.log(`=== ${name} ===`);
+    emitBody(out);
+  }
+}
+
+// Overlay backends (s3 and other API mounts) keep attrs in the namespace,
+// which backend ls -l cannot render, so each step reads back through
+// dispatch-stat (where the overlay merges) and prints only the fields the
+// step stamped; unstamped fields like upload mtime stay out of the output.
+export const META_OVERLAY_CASES: ReadonlyArray<
+  readonly [string, string, string | null, ReadonlyArray<string>]
+> = [
+  [
+    'ometa_setup',
+    'mkdir -p /data/metao && echo alpha > /data/metao/f.txt && touch -t 202601021530 /data/metao/f.txt',
+    '/data/metao/f.txt',
+    ['mode', 'uid', 'gid', 'mtime'],
+  ],
+  ['ometa_chmod_octal', 'chmod 601 /data/metao/f.txt', '/data/metao/f.txt', ['mode', 'mtime']],
+  ['ometa_chmod_symbolic', 'chmod u+x,go-r /data/metao/f.txt', '/data/metao/f.txt', ['mode']],
+  ['ometa_chown_ids', 'chown 500:dev /data/metao/f.txt', '/data/metao/f.txt', ['uid', 'gid']],
+  ['ometa_chown_name', 'chown alice /data/metao/f.txt', '/data/metao/f.txt', ['uid', 'gid']],
+  [
+    'ometa_touch_create',
+    'touch -t 202601021530 /data/metao/new.txt',
+    '/data/metao/new.txt',
+    ['mode', 'mtime'],
+  ],
+  ['ometa_touch_nocreate', 'touch -c /data/metao/ghost.txt', '/data/metao/ghost.txt', ['mode']],
+  ['ometa_touch_restamp', 'touch -t 202603041200 /data/metao/f.txt', '/data/metao/f.txt', ['mtime']],
+  ['ometa_dir_chmod', 'chmod 750 /data/metao', '/data/metao', ['mode']],
+  [
+    'ometa_mv_carries',
+    'mv /data/metao/f.txt /data/metao/g.txt',
+    '/data/metao/g.txt',
+    ['mode', 'uid', 'gid', 'mtime'],
+  ],
+  [
+    'ometa_rm_drops',
+    'rm /data/metao/g.txt && echo fresh > /data/metao/g.txt',
+    '/data/metao/g.txt',
+    ['mode', 'uid', 'gid'],
+  ],
+  [
+    'ometa_link_chmod_follows',
+    'ln -s /data/metao/g.txt /data/metao/ln.txt && chmod 604 /data/metao/ln.txt',
+    '/data/metao/g.txt',
+    ['mode'],
+  ],
+  [
+    'ometa_touch_h_link',
+    'touch -t 202601021530 /data/metao/g.txt && touch -h -t 202603041200 /data/metao/ln.txt',
+    '/data/metao/g.txt',
+    ['mtime'],
+  ],
+  ['ometa_chmod_enoent', 'chmod 644 /data/metao/missing.txt 2>&1', null, []],
+  ['ometa_touch_bad_stamp', 'touch -t 99 /data/metao/g.txt 2>&1', null, []],
+  ['ometa_cleanup', 'rm /data/metao/ln.txt && rm -r /data/metao', null, []],
+];
+
+function metaField(st: FileStat, field: string): string {
+  let value: string;
+  if (field === 'mode') {
+    value = st.mode !== null ? st.mode.toString(8) : '-';
+  } else if (field === 'uid') {
+    value = st.uid !== null ? String(st.uid) : '-';
+  } else if (field === 'gid') {
+    value = st.gid !== null ? String(st.gid) : '-';
+  } else {
+    // First 19 chars ("2026-01-02T15:30:00") so the Z vs +00:00 suffix
+    // never reaches the byte-diffed truth file.
+    value = st.modified !== null && st.modified !== '' ? st.modified.slice(0, 19) : '-';
+  }
+  return `${field}=${value}`;
+}
+
+export function metaStatLine(st: FileStat, fields: ReadonlyArray<string>): string {
+  return fields.map((field) => metaField(st, field)).join(' ');
+}
+
+export async function runMetaOverlayCases(ws: Workspace): Promise<void> {
+  for (const [name, cmd, path, fields] of META_OVERLAY_CASES) {
+    const result = await ws.execute(cmd);
+    const out = new TextDecoder().decode(result.stdout);
+    console.log(`=== ${name} ===`);
+    if (path === null) {
+      emitBody(out);
+      continue;
+    }
+    let st: FileStat;
+    try {
+      st = (await ws.dispatch('stat', path)) as FileStat;
+    } catch (err) {
+      if ((err as { code?: string }).code === 'ENOENT') {
+        console.log('absent');
+        continue;
+      }
+      throw err;
+    }
+    console.log(metaStatLine(st, fields));
   }
 }
 

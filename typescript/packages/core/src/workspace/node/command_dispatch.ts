@@ -45,6 +45,8 @@ import {
   handleEval,
   handleExport,
   handleHistory,
+  handleChmod,
+  handleChown,
   handleLn,
   handleLocal,
   handleMan,
@@ -52,6 +54,7 @@ import {
   handlePrintf,
   handleRead,
   handleReadlink,
+  handleTouch,
   handleReturn,
   handleSet,
   handleShift,
@@ -515,11 +518,24 @@ async function runArgv(
     }
   }
 
+  // Metadata commands (namespace-routed: resolve-then-setattr with
+  // overlay fallback; they run their own link follow).
+  if (name === 'chmod') {
+    return handleChmod(namespace, dispatch, operands)
+  }
+  if (name === 'chown') {
+    return handleChown(namespace, dispatch, operands)
+  }
+  if (name === 'touch') {
+    return handleTouch(namespace, dispatch, session, operands)
+  }
+
   // Symlink-aware dispatch: reads follow links (open(2)); rm/mv act on
   // the link entry itself (lstat semantics).
   let postUnlink: string | null = null
+  let postRename: [string, string] | null = null
   let dispatchArgv = argv
-  if (namespace.symlinks.size > 0) {
+  if (namespace.nodes.size > 0) {
     try {
       if (name === 'rm') {
         const [rest, removed] = stripLinkOperands(namespace, operands)
@@ -531,6 +547,7 @@ async function runArgv(
         const prepared = await prepareMv(namespace, dispatch, operands)
         operands = prepared.items
         postUnlink = prepared.postUnlink
+        postRename = prepared.postRename
         if (prepared.early !== null) return prepared.early
       } else if (!NO_FOLLOW_COMMANDS.has(name)) {
         operands = followPaths(namespace, operands)
@@ -567,13 +584,24 @@ async function runArgv(
     namespace,
   )
 
-  if (io.exitCode === 0 && namespace.symlinks.size > 0) {
+  if (io.exitCode === 0 && namespace.nodes.size > 0) {
     if (name === 'rm') {
+      // A removed path takes its node meta (overlay attrs) with it; a
+      // removed dir purges everything underneath. Glob operands reach
+      // here unexpanded (backend wrappers expand them), so the node
+      // table matches the pattern itself.
       for (const item of operands) {
-        if (item instanceof PathSpec) namespace.purgeUnder(item.virtual)
+        if (!(item instanceof PathSpec)) continue
+        if (item.pattern !== null) {
+          namespace.unlinkGlob(item.virtual)
+        } else {
+          namespace.unlink(item.virtual)
+          namespace.purgeUnder(item.virtual)
+        }
       }
     }
     if (postUnlink !== null) namespace.unlink(postUnlink)
+    if (postRename !== null) namespace.rename(postRename[0], postRename[1])
   }
   return [stdout, io, execNode]
 }

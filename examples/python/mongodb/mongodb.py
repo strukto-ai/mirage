@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.mongodb import MongoDBConfig, MongoDBResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -91,6 +92,18 @@ async def main():
     await _run(ws, f'tail -n 3 "{coll_doc}"')
     await _run(ws, f'wc -l "{coll_doc}"')
     await _run(ws, f'stat "{coll_doc}"')
+
+    # chmod/chown/touch never hit MongoDB: attrs land in the workspace
+    # namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print(f"=== metadata overlay on {coll_doc} ===")
+    meta_res = await ws.execute(f'chmod 640 "{coll_doc}"'
+                                f' && chown 500:dev "{coll_doc}"'
+                                f' && touch -t 202601021530 "{coll_doc}"')
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    meta_st, _ = await ws.dispatch("stat", PathSpec.from_str_path(coll_doc))
+    print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+          f"gid={meta_st.gid} mtime={meta_st.modified}")
     await _run(ws, f'head -n 2 "{view_doc}"')
 
     print("\n" + "=" * 60)

@@ -26,6 +26,7 @@ export async function rmR(accessor: RedisAccessor, path: PathSpec): Promise<void
     if (key === p || key.startsWith(prefix)) {
       await store.delFile(key)
       await store.delModified(key)
+      await store.delAttrs(key)
     }
   }
   const dirs = await store.listDirs()
@@ -33,6 +34,7 @@ export async function rmR(accessor: RedisAccessor, path: PathSpec): Promise<void
     if (key === p || key.startsWith(prefix)) {
       await store.removeDir(key)
       await store.delModified(key)
+      await store.delAttrs(key)
     }
   }
   await invalidateAfterUnlink(path)

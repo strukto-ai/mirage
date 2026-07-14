@@ -162,7 +162,7 @@ async function runOnMount(
     let stdout = initialStdout
     if (cmdName === 'ls' && io.exitCode === 0) {
       stdout = await injectChildMounts(stdout, registry, paths, flags, session.cwd)
-      if (namespace !== undefined && namespace.symlinks.size > 0) {
+      if (namespace?.hasLinks() === true) {
         stdout = await injectLinks(stdout, namespace, paths, flags, session.cwd)
       }
     }

@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.gdrive import GoogleDriveConfig, GoogleDriveResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -55,6 +56,19 @@ async def main() -> None:
     print(f"=== stat /gdrive/{first} ===")
     result = await ws.execute(f'stat "/gdrive/{first}"')
     print(await result.stdout_str())
+
+    # chmod/chown/touch never hit the Drive API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print(f"=== metadata overlay on /gdrive/{first} ===")
+    result = await ws.execute(f'chmod 640 "/gdrive/{first}" && chown 500:dev'
+                              f' "/gdrive/{first}"'
+                              f' && touch -t 202601021530 "/gdrive/{first}"')
+    print(f"  chmod/chown/touch exit={result.exit_code}")
+    st, _ = await ws.dispatch("stat",
+                              PathSpec.from_str_path(f"/gdrive/{first}"))
+    print(f"  dispatch stat: mode={oct(st.mode)[2:]} uid={st.uid} "
+          f"gid={st.gid} mtime={st.modified}")
 
     if first.endswith("/"):
         print(f"=== ls /gdrive/{first} ===")

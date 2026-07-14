@@ -19,6 +19,7 @@ import {
   DatabricksVolumeResource,
   MountMode,
   Workspace,
+  type FileStat,
   normalizeDatabricksVolumeConfig,
 } from '@struktoai/mirage-node'
 
@@ -78,6 +79,21 @@ async function main(): Promise<void> {
       await run(ws, `stat "${target}"`)
       await run(ws, `head -n 20 "${target}"`)
       await run(ws, `grep -n TODO "${target}"`)
+
+
+      // chmod/chown/touch never hit the Databricks API: attrs land in the
+      // workspace namespace (durable, snapshot-captured) and merge into
+      // dispatch-level stat.
+      console.log(`=== metadata overlay on ${target} ===`)
+      const metaRes = await ws.execute(
+        `chmod 640 "${target}" && chown 500:dev "${target}" && touch -t 202601021530 "${target}"`,
+      )
+      console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+      const metaSt = (await ws.dispatch('stat', `${target}`)) as FileStat
+      const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+      console.log(
+        `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+      )
     } else {
       console.log('\nSet DATABRICKS_VOLUME_SAMPLE_FILE to run file reads.')
     }

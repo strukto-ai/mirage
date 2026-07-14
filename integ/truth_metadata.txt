@@ -1,0 +1,175 @@
+##### ram #####
+=== meta_setup ===
+
+=== meta_ls_long ===
+-rw-r--r-- 1 user user 6 Jan  2 15:30 f.txt
+=== meta_chmod_octal ===
+-rw------x 1 user user 6 Jan  2 15:30 f.txt
+=== meta_chmod_symbolic ===
+-rwx-----x 1 user user 6 Jan  2 15:30 f.txt
+=== meta_chown_ids ===
+-rwx-----x 1 500 dev 6 Jan  2 15:30 f.txt
+=== meta_chown_name ===
+-rwx-----x 1 alice dev 6 Jan  2 15:30 f.txt
+=== meta_touch_create ===
+-rwx-----x 1 alice dev 6 Jan  2 15:30 f.txt
+-rw-r--r-- 1 user user 0 Jan  2 15:30 new.txt
+=== meta_touch_nocreate ===
+f.txt
+new.txt
+=== meta_touch_restamp ===
+-rwx-----x 1 alice dev 6 Mar  4 12:00 f.txt
+-rw-r--r-- 1 user user 0 Jan  2 15:30 new.txt
+=== meta_mv_carries ===
+-rwx-----x 1 alice dev 6 Mar  4 12:00 g.txt
+-rw-r--r-- 1 user user 0 Jan  2 15:30 new.txt
+=== meta_rm_drops ===
+-rw-r--r-- 1 user user 6 Jan  2 15:30 g.txt
+-rw-r--r-- 1 user user 0 Jan  2 15:30 new.txt
+=== meta_link_chmod_follows ===
+-rw----r-- 1 user user 6 Jan  2 15:30 g.txt
+-rw-r--r-- 1 user user 0 Jan  2 15:30 new.txt
+l	-	-	ln.txt -> /data/metad/g.txt
+=== meta_touch_h_link ===
+/data/metad/g.txt
+=== meta_chmod_bad_mode ===
+chmod: invalid mode: '999'
+=== meta_chmod_bad_symbolic ===
+chmod: invalid mode: 'u+q'
+=== meta_chmod_enoent ===
+chmod: cannot access '/data/metad/missing.txt': No such file or directory
+=== meta_chown_enoent ===
+chown: cannot access '/data/metad/missing.txt': No such file or directory
+=== meta_touch_bad_stamp ===
+touch: invalid date format '99'
+=== meta_cleanup ===
+
+##### disk #####
+=== meta_setup ===
+
+=== meta_ls_long ===
+-rw-r--r-- 1 user user 6 Jan  2 15:30 f.txt
+=== meta_chmod_octal ===
+-rw------x 1 user user 6 Jan  2 15:30 f.txt
+=== meta_chmod_symbolic ===
+-rwx-----x 1 user user 6 Jan  2 15:30 f.txt
+=== meta_chown_ids ===
+-rwx-----x 1 500 dev 6 Jan  2 15:30 f.txt
+=== meta_chown_name ===
+-rwx-----x 1 alice dev 6 Jan  2 15:30 f.txt
+=== meta_touch_create ===
+-rwx-----x 1 alice dev 6 Jan  2 15:30 f.txt
+-rw-r--r-- 1 user user 0 Jan  2 15:30 new.txt
+=== meta_touch_nocreate ===
+f.txt
+new.txt
+=== meta_touch_restamp ===
+-rwx-----x 1 alice dev 6 Mar  4 12:00 f.txt
+-rw-r--r-- 1 user user 0 Jan  2 15:30 new.txt
+=== meta_mv_carries ===
+-rwx-----x 1 alice dev 6 Mar  4 12:00 g.txt
+-rw-r--r-- 1 user user 0 Jan  2 15:30 new.txt
+=== meta_rm_drops ===
+-rw-r--r-- 1 user user 6 Jan  2 15:30 g.txt
+-rw-r--r-- 1 user user 0 Jan  2 15:30 new.txt
+=== meta_link_chmod_follows ===
+-rw----r-- 1 user user 6 Jan  2 15:30 g.txt
+-rw-r--r-- 1 user user 0 Jan  2 15:30 new.txt
+l	-	-	ln.txt -> /data/metad/g.txt
+=== meta_touch_h_link ===
+/data/metad/g.txt
+=== meta_chmod_bad_mode ===
+chmod: invalid mode: '999'
+=== meta_chmod_bad_symbolic ===
+chmod: invalid mode: 'u+q'
+=== meta_chmod_enoent ===
+chmod: cannot access '/data/metad/missing.txt': No such file or directory
+=== meta_chown_enoent ===
+chown: cannot access '/data/metad/missing.txt': No such file or directory
+=== meta_touch_bad_stamp ===
+touch: invalid date format '99'
+=== meta_cleanup ===
+
+##### redis #####
+=== meta_setup ===
+
+=== meta_ls_long ===
+-rw-r--r-- 1 user user 6 Jan  2 15:30 f.txt
+=== meta_chmod_octal ===
+-rw------x 1 user user 6 Jan  2 15:30 f.txt
+=== meta_chmod_symbolic ===
+-rwx-----x 1 user user 6 Jan  2 15:30 f.txt
+=== meta_chown_ids ===
+-rwx-----x 1 500 dev 6 Jan  2 15:30 f.txt
+=== meta_chown_name ===
+-rwx-----x 1 alice dev 6 Jan  2 15:30 f.txt
+=== meta_touch_create ===
+-rwx-----x 1 alice dev 6 Jan  2 15:30 f.txt
+-rw-r--r-- 1 user user 0 Jan  2 15:30 new.txt
+=== meta_touch_nocreate ===
+f.txt
+new.txt
+=== meta_touch_restamp ===
+-rwx-----x 1 alice dev 6 Mar  4 12:00 f.txt
+-rw-r--r-- 1 user user 0 Jan  2 15:30 new.txt
+=== meta_mv_carries ===
+-rwx-----x 1 alice dev 6 Mar  4 12:00 g.txt
+-rw-r--r-- 1 user user 0 Jan  2 15:30 new.txt
+=== meta_rm_drops ===
+-rw-r--r-- 1 user user 6 Jan  2 15:30 g.txt
+-rw-r--r-- 1 user user 0 Jan  2 15:30 new.txt
+=== meta_link_chmod_follows ===
+-rw----r-- 1 user user 6 Jan  2 15:30 g.txt
+-rw-r--r-- 1 user user 0 Jan  2 15:30 new.txt
+l	-	-	ln.txt -> /data/metad/g.txt
+=== meta_touch_h_link ===
+/data/metad/g.txt
+=== meta_chmod_bad_mode ===
+chmod: invalid mode: '999'
+=== meta_chmod_bad_symbolic ===
+chmod: invalid mode: 'u+q'
+=== meta_chmod_enoent ===
+chmod: cannot access '/data/metad/missing.txt': No such file or directory
+=== meta_chown_enoent ===
+chown: cannot access '/data/metad/missing.txt': No such file or directory
+=== meta_touch_bad_stamp ===
+touch: invalid date format '99'
+=== meta_cleanup ===
+
+##### s3 (overlay) #####
+=== ometa_setup ===
+mode=- uid=- gid=- mtime=2026-01-02T15:30:00
+=== ometa_chmod_octal ===
+mode=601 mtime=2026-01-02T15:30:00
+=== ometa_chmod_symbolic ===
+mode=701
+=== ometa_chown_ids ===
+uid=500 gid=dev
+=== ometa_chown_name ===
+uid=alice gid=dev
+=== ometa_touch_create ===
+mode=- mtime=2026-01-02T15:30:00
+=== ometa_touch_nocreate ===
+absent
+=== ometa_touch_restamp ===
+mtime=2026-03-04T12:00:00
+=== ometa_dir_chmod ===
+mode=750
+=== ometa_mv_carries ===
+mode=701 uid=alice gid=dev mtime=2026-03-04T12:00:00
+=== ometa_rm_drops ===
+mode=- uid=- gid=-
+=== ometa_link_chmod_follows ===
+mode=604
+=== ometa_touch_h_link ===
+mtime=2026-01-02T15:30:00
+=== ometa_chmod_enoent ===
+chmod: cannot access '/data/metao/missing.txt': No such file or directory
+=== ometa_touch_bad_stamp ===
+touch: invalid date format '99'
+=== ometa_cleanup ===
+
+=== overlay_snapshot_roundtrip ===
+mode=601 uid=500 gid=dev mtime=2026-01-02T15:30:00
+=== snapshot_meta_roundtrip ===
+-rw------x 1 500 dev 6 Jan  2 15:30 f.txt

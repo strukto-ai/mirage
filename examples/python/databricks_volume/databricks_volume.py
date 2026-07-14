@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 from mirage import MountMode, Workspace
 from mirage.resource.databricks_volume import (DatabricksVolumeConfig,
                                                DatabricksVolumeResource)
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -70,6 +71,22 @@ async def main():
     target = os.environ.get("DATABRICKS_VOLUME_SAMPLE_FILE")
     if target:
         await _run(ws, f'stat "{target}"')
+
+        # chmod/chown/touch never hit the Databricks API: attrs land in
+        # the workspace namespace and merge into dispatch-level stat.
+        print(f"=== metadata overlay on {target} ===")
+        meta_res = await ws.execute(f'chmod 640 "{target}"'
+                                    f' && chown 500:dev "{target}"'
+                                    f' && touch -t 202601021530 "{target}"')
+        print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+        try:
+            meta_st, _ = await ws.dispatch("stat",
+                                           PathSpec.from_str_path(target))
+            print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} "
+                  f"uid={meta_st.uid} gid={meta_st.gid} "
+                  f"mtime={meta_st.modified}")
+        except FileNotFoundError:
+            print("  dispatch stat: target missing in this environment")
         await _run(ws, f'head -n 20 "{target}"')
         await _run(ws, f'grep -n TODO "{target}"')
     else:

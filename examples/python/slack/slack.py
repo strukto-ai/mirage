@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.slack import SlackConfig, SlackResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -131,6 +132,19 @@ async def main():
     out = (await r.stdout_str()).strip()
     if out:
         print(f"  {out[:120]}")
+
+    # ── metadata (namespace overlay) ─────────────────
+    # chmod/chown/touch never hit the Slack API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print(f"\n=== metadata overlay on {target} ===")
+    r = await ws.execute(f'chmod 640 "{file_path}" && chown 500:dev'
+                         f' "{file_path}" && touch -t 202601021530'
+                         f' "{file_path}"')
+    print(f"  chmod/chown/touch exit={r.exit_code}")
+    st, _ = await ws.dispatch("stat", PathSpec.from_str_path(file_path))
+    print(f"  dispatch stat: mode={oct(st.mode)[2:]} uid={st.uid} "
+          f"gid={st.gid} mtime={st.modified}")
 
     # ── basename / dirname / realpath (path ops) ─────
     print(f"\n=== basename {file_path} ===")

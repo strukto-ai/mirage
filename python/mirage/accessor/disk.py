@@ -19,5 +19,11 @@ from mirage.accessor.base import Accessor
 
 class DiskAccessor(Accessor):
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self,
+                 root: Path,
+                 attrs: dict[str, dict] | None = None) -> None:
         self.root = root
+        # Per-path metadata sidecar (mode/uid/gid/atime); mode is also
+        # applied to the real inode, but stat reports the sidecar value so
+        # output stays deterministic across host umasks.
+        self.attrs: dict[str, dict] = attrs if attrs is not None else {}

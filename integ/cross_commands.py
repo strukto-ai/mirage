@@ -25,6 +25,7 @@ from mirage import MountMode, Workspace
 from mirage.resource.ram import RAMResource
 from mirage.resource.redis import RedisResource
 from mirage.resource.s3 import S3Config, S3Resource
+from mirage.types import PathSpec
 
 S3_BUCKET = "mirage-integ-cross"
 CREDS = dict(aws_access_key_id="testing",
@@ -352,6 +353,47 @@ async def check_symlinks(ws: Workspace, dst: str, label: str) -> None:
     await run(ws, "rm /ram/xl_copy.txt")
 
 
+async def stat_of(ws: Workspace, path: str):
+    st, _ = await ws.dispatch("stat", PathSpec.from_str_path(path))
+    return st
+
+
+async def check_metadata(ws: Workspace, dst: str, label: str) -> None:
+    # setattr is resolve-then-act: chmod/chown/touch on a dst-homed file,
+    # directly and through links homed on another mount, must land on the
+    # target mount (natively or in the namespace overlay) and read back
+    # through dispatch-stat identically.
+    await run(ws, f"printf 'mmm\n' > {dst}/copied/m.txt")
+    await run(
+        ws, f"chmod 601 {dst}/copied/m.txt && chown 500:dev {dst}/copied/m.txt"
+        f" && touch -t 202601021530 {dst}/copied/m.txt")
+    st = await stat_of(ws, f"{dst}/copied/m.txt")
+    check(f"{label}: chmod lands on dst mount", st.mode == 0o601)
+    check(f"{label}: chown lands on dst mount",
+          (st.uid, st.gid) == (500, "dev"))
+    check(f"{label}: touch stamps dst mtime",
+          (st.modified or "").startswith("2026-01-02T15:30"))
+    await run(ws, f"ln -s {dst}/copied/m.txt /ram/ml.txt")
+    await run(ws, "chmod 640 /ram/ml.txt && touch -t 202603041200 /ram/ml.txt")
+    st = await stat_of(ws, f"{dst}/copied/m.txt")
+    check(f"{label}: chmod through cross-mount link hits target",
+          st.mode == 0o640)
+    check(f"{label}: touch through cross-mount link hits target",
+          (st.modified or "").startswith("2026-03-04T12:00"))
+    await run(ws, "touch -h -t 202601010000 /ram/ml.txt")
+    st = await stat_of(ws, f"{dst}/copied/m.txt")
+    check(f"{label}: touch -h writes link node, target untouched",
+          (st.modified or "").startswith("2026-03-04T12:00"))
+    await run(ws, f"ln -s {dst}/copied /ram/mdir")
+    await run(ws, "touch -t 202601021530 /ram/mdir/created.txt")
+    out, _, _ = await run(ws, f"ls {dst}/copied")
+    check(f"{label}: touch creates through cross-mount dir link", "created.txt"
+          in out)
+    await run(
+        ws, f"rm /ram/ml.txt /ram/mdir {dst}/copied/m.txt"
+        f" {dst}/copied/created.txt")
+
+
 async def check_symlink_cache(ws: Workspace, s3_client, label: str) -> None:
     # Reads through a link must share the target's cache entry: warming via
     # the link keys the cache under the REAL path, so a direct read of the
@@ -386,6 +428,7 @@ async def exercise(ws: Workspace, dst: str, label: str,
     await check_omit_directory(ws, dst, label)
     await check_move(ws, dst, label)
     await check_symlinks(ws, dst, label)
+    await check_metadata(ws, dst, label)
 
 
 async def main() -> None:

@@ -15,7 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { GitHubCIResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { GitHubCIResource, MountMode, Workspace, type FileStat } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../.env.development') })
@@ -85,6 +85,25 @@ async function main(): Promise<void> {
     const runStat = await run(ws, `stat "${runPath}"`)
     console.log(`=== stat ${runPath} ===`)
     console.log(`  ${runStat.out.trim()}`)
+
+
+    // chmod/chown/touch never hit the Actions API: attrs land in the
+    // workspace namespace (durable, snapshot-captured) and merge into
+    // dispatch-level stat.
+    console.log(`=== metadata overlay on ${runPath} ===`)
+    const metaRes = await ws.execute(
+      `chmod 640 "${runPath}" && chown 500:dev "${runPath}" && touch -t 202601021530 "${runPath}"`,
+    )
+    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+    try {
+      const metaSt = (await ws.dispatch('stat', `${runPath}`)) as FileStat
+      const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+      console.log(
+        `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+      )
+    } catch {
+      console.log('  dispatch stat: run path unavailable (check GITHUB_TOKEN)')
+    }
 
     const jobsPath = `${runPath}/jobs`
     const jobsLs = await run(ws, `ls "${jobsPath}/"`)

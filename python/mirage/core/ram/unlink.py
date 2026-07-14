@@ -27,4 +27,5 @@ async def unlink(accessor: RAMAccessor, path: PathSpec) -> None:
         raise FileNotFoundError(p)
     del store.files[p]
     store.modified.pop(p, None)
+    store.attrs.pop(p, None)
     await invalidate_after_unlink(path)

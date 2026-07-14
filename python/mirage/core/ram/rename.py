@@ -31,15 +31,21 @@ async def rename(accessor: RAMAccessor, src: PathSpec, dst: PathSpec) -> None:
     if s in store.files:
         store.files[d] = store.files.pop(s)
         store.modified[d] = store.modified.pop(s, now)
+        if s in store.attrs:
+            store.attrs[d] = store.attrs.pop(s)
     elif s in store.dirs:
         store.dirs.discard(s)
         store.dirs.add(d)
         store.modified[d] = store.modified.pop(s, now)
+        if s in store.attrs:
+            store.attrs[d] = store.attrs.pop(s)
         prefix = s.rstrip("/") + "/"
         for key in list(store.files):
             if key.startswith(prefix):
                 new_key = d.rstrip("/") + "/" + key[len(prefix):]
                 store.files[new_key] = store.files.pop(key)
+                if key in store.attrs:
+                    store.attrs[new_key] = store.attrs.pop(key)
     else:
         raise FileNotFoundError(s)
     await invalidate_after_write(dst)

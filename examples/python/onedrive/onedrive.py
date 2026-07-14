@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.resource.onedrive import OneDriveConfig, OneDriveResource
+from mirage.types import PathSpec
 
 load_dotenv(".env.development")
 
@@ -60,13 +61,25 @@ async def main() -> None:
     print("=== stat (fingerprint = cTag) ===")
     print(await (await ws.execute(f"stat {TEST_FILE}")).stdout_str())
 
+    # chmod/chown/touch never hit the Graph API: attrs land in the
+    # workspace namespace (durable, snapshot-captured) and merge into
+    # dispatch-level stat.
+    print(f"=== metadata overlay on {TEST_FILE} ===")
+    meta_res = await ws.execute(f'chmod 640 "{TEST_FILE}"'
+                                f' && chown 500:dev "{TEST_FILE}"'
+                                f' && touch -t 202601021530 "{TEST_FILE}"')
+    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
+    meta_st, _ = await ws.dispatch("stat",
+                                   PathSpec.from_str_path(f"{TEST_FILE}"))
+    print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+          f"gid={meta_st.gid} mtime={meta_st.modified}")
+
     print("=== overwrite (creates a new version) ===")
     await ws.execute(f"echo 'second version' > {TEST_FILE}")
     print(await (await ws.execute(f"cat {TEST_FILE}")).stdout_str())
 
     print("=== version history ===")
     from mirage.core.onedrive.versions import list_versions
-    from mirage.types import PathSpec
     versions = await list_versions(backend.accessor,
                                    PathSpec.from_str_path(TEST_FILE))
     for v in versions:

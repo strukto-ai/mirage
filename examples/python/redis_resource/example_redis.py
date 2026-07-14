@@ -64,6 +64,15 @@ async def main() -> None:
     result = await ws.execute("stat /data/hello.txt")
     print(await result.stdout_str())
 
+    # Redis has a native setattr slot: chmod/chown/touch persist in
+    # per-path attr hashes and render in ls -l.
+    print("=== METADATA (chmod / chown / touch, native) ===")
+    await ws.execute("chmod 640 /data/hello.txt")
+    await ws.execute("chown 500:staff /data/hello.txt")
+    await ws.execute("touch -t 202601021530 /data/hello.txt")
+    result = await ws.execute("ls -l /data/hello.txt")
+    print(await result.stdout_str())
+
     print("=== jq .name /data/user.json ===")
     result = await ws.execute('jq ".name" /data/user.json')
     print(await result.stdout_str())
