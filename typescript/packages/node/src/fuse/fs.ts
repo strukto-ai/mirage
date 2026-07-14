@@ -12,7 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileType, type OpRecord, type Workspace, rstripSlash } from '@struktoai/mirage-core'
+import { posix } from 'node:path'
+import {
+  type FileStat,
+  FileType,
+  type OpRecord,
+  type Workspace,
+  rstripSlash,
+} from '@struktoai/mirage-core'
 import { isMacosMetadata } from './platform/macos.ts'
 
 const ENV_AGENT_ID = 'MIRAGE_AGENT_ID'
@@ -26,6 +33,8 @@ const ENOTDIR = -20
 const EEXIST = -17
 const ENOTEMPTY = -66 // macOS; Linux is -39 — fuse-native normalizes.
 const EIO = -5
+const EINVAL = -22
+const EROFS = -30
 
 export interface FuseAttr {
   mtime: Date
@@ -150,6 +159,65 @@ export class MirageFS {
     }
   }
 
+  /**
+   * Fold merged stat attributes into a FUSE attr. The workspace stat
+   * already carries the namespace overlay (chmod bits, chown ids, touched
+   * mtime), so honoring these fields here is what makes metadata ops
+   * visible over FUSE. String uid/gid (names) are skipped: FUSE wants
+   * numeric ids and there is no user db to map against.
+   */
+  private applyStatAttrs(entry: FuseAttr, s: FileStat): FuseAttr {
+    if (s.mode !== null) {
+      entry.mode = (entry.mode & ~0o7777) | (s.mode & 0o7777)
+    }
+    if (typeof s.uid === 'number') entry.uid = s.uid
+    if (typeof s.gid === 'number') entry.gid = s.gid
+    if (s.modified !== null) {
+      const ts = new Date(s.modified)
+      if (!Number.isNaN(ts.getTime())) {
+        entry.mtime = ts
+        entry.ctime = ts
+      }
+    }
+    return entry
+  }
+
+  /**
+   * The target to present for a namespace link at a FUSE path, or null
+   * when not a link. Relative targets are stored verbatim and returned
+   * as-is. Absolute targets name virtual paths, so they are rewritten
+   * relative to the link's directory: returned raw, the kernel would
+   * resolve them against the host root and escape the mountpoint.
+   */
+  private linkTarget(path: string): string | null {
+    const links = this.ws.fs.links
+    if (links === null) return null
+    const target = links.readlink(this.resolve(path))
+    if (target === null) return null
+    if (!target.startsWith('/')) return target
+    let fuseTarget = target
+    if (this.root !== '') {
+      if (target === this.root) {
+        fuseTarget = '/'
+      } else if (target.startsWith(this.root + '/')) {
+        fuseTarget = target.slice(this.root.length)
+      } else {
+        // points outside the scoped root: unreachable through this
+        // mount, keep the stored form (a dangling link is legal)
+        return target
+      }
+    }
+    const slash = path.lastIndexOf('/')
+    const parent = slash <= 0 ? '/' : path.slice(0, slash)
+    return posix.relative(parent, fuseTarget)
+  }
+
+  private linkStat(target: string): FuseAttr {
+    const entry = this.fileStat(new TextEncoder().encode(target).byteLength)
+    entry.mode = 0o120777
+    return entry
+  }
+
   private isVirtualDir(path: string): boolean {
     const bare = rstripSlash(path)
     const normalized = bare + '/'
@@ -246,6 +314,8 @@ export class MirageFS {
       read: this.read.bind(this),
       write: this.write.bind(this),
       create: this.create.bind(this),
+      readlink: this.readlink.bind(this),
+      symlink: this.symlink.bind(this),
       unlink: this.unlink.bind(this),
       mkdir: this.mkdir.bind(this),
       rmdir: this.rmdir.bind(this),
@@ -283,6 +353,13 @@ export class MirageFS {
         cb(ENOENT)
         return
       }
+      // Link check must precede the workspace stat: the fs facade follows
+      // namespace links, so stat on a link path reports the target.
+      const target = this.linkTarget(path)
+      if (target !== null) {
+        cb(0, this.linkStat(target))
+        return
+      }
       if (this.isVirtualDir(path)) {
         cb(0, this.dirStat())
         return
@@ -290,7 +367,7 @@ export class MirageFS {
       try {
         const s = await this.ws.fs.stat(this.resolve(path))
         if (s.type === FileType.DIRECTORY) {
-          cb(0, this.dirStat())
+          cb(0, this.applyStatAttrs(this.dirStat(), s))
           return
         }
         // Size-unknown API files stat as 0 before open (never a fake size):
@@ -300,7 +377,7 @@ export class MirageFS {
         // CLAUDE.md FUSE section.
         let size = s.size
         size ??= this.cachedSize(path) ?? 0
-        cb(0, this.fileStat(size))
+        cb(0, this.applyStatAttrs(this.fileStat(size), s))
       } catch (err) {
         cb(classifyError(err))
       }
@@ -328,6 +405,12 @@ export class MirageFS {
       }
       const names = new Set(this.virtualChildren(path))
       if (path === '/') names.add('.mirage')
+      const links = this.ws.fs.links
+      if (links !== null) {
+        for (const linkName of links.linksUnder(this.resolve(path)).keys()) {
+          if (linkName !== '' && !isMacosMetadata(linkName)) names.add(linkName)
+        }
+      }
       try {
         const entries = await this.ws.fs.readdir(this.resolve(path))
         for (const e of entries) {
@@ -465,8 +548,49 @@ export class MirageFS {
     })()
   }
 
+  private readlink(path: string, cb: Cb<string>): void {
+    const target = this.linkTarget(path)
+    if (target === null) {
+      cb(EINVAL)
+      return
+    }
+    cb(0, target)
+  }
+
+  /**
+   * Create namespace link `dest -> src` (ln -s src dest; libfuse passes
+   * the pointee first). Relative sources are stored verbatim (resolved
+   * at follow time, exactly like the shell `ln -s`); absolute sources
+   * are mapped into virtual space so a scoped mount stores the path it
+   * will later follow.
+   */
+  private symlink(src: string, dest: string, cb: (code: number) => void): void {
+    void (async () => {
+      const links = this.ws.fs.links
+      if (links === null) {
+        cb(EROFS)
+        return
+      }
+      const stored = src.startsWith('/') ? this.resolve(src) : src
+      try {
+        await links.symlink(this.resolve(dest), stored, Date.now() / 1000)
+        cb(0)
+      } catch (err) {
+        cb(classifyError(err))
+      }
+    })()
+  }
+
   private unlink(path: string, cb: (code: number) => void): void {
     void (async () => {
+      const links = this.ws.fs.links
+      if (links?.isLink(this.resolve(path)) === true) {
+        await links.unlink(this.resolve(path))
+        this.xattrs.delete(path)
+        this.prefetchCache.delete(path)
+        cb(0)
+        return
+      }
       try {
         await this.ws.fs.unlink(this.resolve(path))
         this.xattrs.delete(path)

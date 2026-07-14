@@ -57,6 +57,7 @@ from mirage.workspace.file_prompt import build_file_prompt
 from mirage.workspace.fuse import FuseManager
 from mirage.workspace.mount import MountEntry, MountRegistry
 from mirage.workspace.mount.namespace import Namespace
+from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.node import provision_node, run_command_tree
@@ -173,7 +174,9 @@ class Workspace:
                         on_write=self._invalidate_after_write_by_path,
                         observer=self.observer,
                         agent_id=agent_id,
-                        session_id=session_id)
+                        session_id=session_id,
+                        links=self._namespace,
+                        stat_overlay=self._merge_overlay)
 
         # Graceful default: without the 'monty' extra the default runtime
         # cannot build; leave it unset so python3 reports the install hint
@@ -592,6 +595,18 @@ class Workspace:
         await self._session_mgr.close_all()
 
     # ── mount management ────────────────────────────────────────────────────
+
+    def _merge_overlay(self, path: str, stat: FileStat) -> FileStat:
+        """Overlay namespace attrs onto an ops-facade stat.
+
+        Injected into Ops so FUSE and the os patch report chmod/chown/touch
+        results identically to dispatch("stat").
+
+        Args:
+            path (str): virtual path (already link-resolved).
+            stat (FileStat): the backend-reported stat.
+        """
+        return merge_overlay_stat(self._namespace.meta_for(path), stat)
 
     async def dispatch(self, op: str, path: PathSpec,
                        **kwargs: Any) -> tuple[Any, IOResult]:

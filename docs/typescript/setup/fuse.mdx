@@ -133,3 +133,18 @@ for the per-tool table and the mechanics (`direct_io` + `attr_timeout=0`).
   `fuse` on a single mount per workspace (or run extra mounts in separate
   processes).
 </Warning>
+
+## Symlinks and Permissions
+
+Symlinks live in Mirage's namespace, not in any backend. Links created with
+`ln -s` in the Mirage shell (or with `ln -s` inside the mountpoint) appear as
+real symlinks over FUSE: `ls -l` shows `lrwxrwxrwx`, `readlink` prints the
+target, and reads follow the link. Absolute targets are displayed relative to
+the link's directory so they always resolve inside the mountpoint.
+
+Permission bits shown over FUSE come from Mirage's metadata (`chmod`,
+`chown`, `touch` results), and they are **display only**: access control is
+enforced by Mirage mount modes, not by the kernel. For that reason, never
+mount with the `default_permissions` FUSE option. It would make the kernel
+enforce the displayed bits, and a `chmod 000` could lock Mirage out of its
+own files.

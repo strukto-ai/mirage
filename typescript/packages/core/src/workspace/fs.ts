@@ -15,6 +15,7 @@
 import { NOOPAccessor } from '../accessor/base.ts'
 import { getExtension } from '../commands/resolve.ts'
 import { OpRecord } from '../observe/record.ts'
+import { NO_FOLLOW_OPS, type NamespaceLinks, type StatOverlay } from '../ops/config.ts'
 import type { OpKwargs, OpsRegistry } from '../ops/registry.ts'
 import type { Resource } from '../resource/base.ts'
 import type { FileStat, MountMode, PathSpec } from '../types.ts'
@@ -30,11 +31,29 @@ export class WorkspaceFS {
   private readonly resolver: Resolver
   private readonly ops: OpsRegistry
   private readonly sink: OpSink | null
+  // Injected namespace seam (workspace wires it); FUSE reads `links` for
+  // its symlink surface, and every op here follows links before resolving
+  // so the facade and dispatch can never disagree on the operand.
+  readonly links: NamespaceLinks | null
+  private readonly statOverlay: StatOverlay | null
 
-  constructor(resolver: Resolver, ops: OpsRegistry, sink: OpSink | null = null) {
+  constructor(
+    resolver: Resolver,
+    ops: OpsRegistry,
+    sink: OpSink | null = null,
+    links: NamespaceLinks | null = null,
+    statOverlay: StatOverlay | null = null,
+  ) {
     this.resolver = resolver
     this.ops = ops
     this.sink = sink
+    this.links = links
+    this.statOverlay = statOverlay
+  }
+
+  private follow(op: string, path: string): string {
+    if (this.links === null || NO_FOLLOW_OPS.has(op)) return path
+    return this.links.follow(path)
   }
 
   private async record(
@@ -59,6 +78,7 @@ export class WorkspaceFS {
 
   async readFile(path: string, options: { raw?: boolean } = {}): Promise<Uint8Array> {
     const start = Date.now()
+    path = this.follow('read', path)
     const [resource, pathSpec] = await this.resolver(path)
     const filetype = options.raw === true ? null : getExtension(path)
     const kwargs: OpKwargs = {}
@@ -83,6 +103,7 @@ export class WorkspaceFS {
 
   async writeFile(path: string, data: Uint8Array | string): Promise<void> {
     const start = Date.now()
+    path = this.follow('write', path)
     const [resource, pathSpec] = await this.resolver(path)
     const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
     const kwargs = resource.index !== undefined ? { index: resource.index } : {}
@@ -99,6 +120,7 @@ export class WorkspaceFS {
 
   async readdir(path: string): Promise<string[]> {
     const start = Date.now()
+    path = this.follow('readdir', path)
     const [resource, pathSpec] = await this.resolver(path)
     const kwargs = resource.index !== undefined ? { index: resource.index } : {}
     const result = (await this.ops.call(
@@ -115,6 +137,7 @@ export class WorkspaceFS {
 
   async stat(path: string): Promise<FileStat> {
     const start = Date.now()
+    path = this.follow('stat', path)
     const [resource, pathSpec] = await this.resolver(path)
     const kwargs = resource.index !== undefined ? { index: resource.index } : {}
     const result = (await this.ops.call(
@@ -126,6 +149,7 @@ export class WorkspaceFS {
       kwargs,
     )) as FileStat
     await this.record('stat', path, resource.kind, 0, start)
+    if (this.statOverlay !== null) return this.statOverlay(path, result)
     return result
   }
 
@@ -158,6 +182,7 @@ export class WorkspaceFS {
 
   async mkdir(path: string): Promise<void> {
     const start = Date.now()
+    path = this.follow('mkdir', path)
     const [resource, pathSpec] = await this.resolver(path)
     await this.ops.call(
       'mkdir',
@@ -170,6 +195,7 @@ export class WorkspaceFS {
 
   async unlink(path: string): Promise<void> {
     const start = Date.now()
+    path = this.follow('unlink', path)
     const [resource, pathSpec] = await this.resolver(path)
     await this.ops.call(
       'unlink',
@@ -182,6 +208,7 @@ export class WorkspaceFS {
 
   async rmdir(path: string): Promise<void> {
     const start = Date.now()
+    path = this.follow('rmdir', path)
     const [resource, pathSpec] = await this.resolver(path)
     await this.ops.call(
       'rmdir',
@@ -194,6 +221,8 @@ export class WorkspaceFS {
 
   async rename(src: string, dst: string): Promise<void> {
     const start = Date.now()
+    src = this.follow('rename', src)
+    dst = this.follow('rename', dst)
     const [resource, srcSpec] = await this.resolver(src)
     const [, dstSpec] = await this.resolver(dst)
     await this.ops.call(

@@ -18,6 +18,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 
 import pytest
 import pytest_asyncio
@@ -562,3 +563,84 @@ async def test_unlink_drops_prefetch(sizeless_fs):
     fs.release("/u.json", fh)
     fs.unlink("/u.json")
     assert "/u.json" not in fs._prefetch
+
+
+@pytest.mark.asyncio
+async def test_getattr_symlink(seed_ws):
+    await seed_ws.execute("ln -s /a.txt /lnk")
+    fs = MirageFS(seed_ws.ops)
+    attrs = fs.getattr("/lnk")
+    assert stat.S_ISLNK(attrs["st_mode"])
+    assert attrs["st_size"] == len("a.txt")
+
+
+@pytest.mark.asyncio
+async def test_readlink_absolute_target_rewritten_relative(seed_ws):
+    await seed_ws.execute("ln -s /sub/b.txt /lnk")
+    fs = MirageFS(seed_ws.ops)
+    assert fs.readlink("/lnk") == "sub/b.txt"
+
+
+@pytest.mark.asyncio
+async def test_readlink_non_link_einval(seed_ws):
+    fs = MirageFS(seed_ws.ops)
+    with pytest.raises(OSError) as exc:
+        fs.readlink("/a.txt")
+    assert exc.value.errno == errno.EINVAL
+
+
+@pytest.mark.asyncio
+async def test_readdir_lists_link(seed_ws):
+    await seed_ws.execute("ln -s /a.txt /lnk")
+    fs = MirageFS(seed_ws.ops)
+    assert "lnk" in fs.readdir("/", None)
+
+
+@pytest.mark.asyncio
+async def test_read_through_link(seed_ws):
+    await seed_ws.execute("ln -s /a.txt /lnk")
+    fs = MirageFS(seed_ws.ops)
+    assert fs.read("/lnk", 1024, 0, 0) == b"hello world"
+
+
+@pytest.mark.asyncio
+async def test_symlink_create_then_read(rw_ws):
+    await rw_ws.execute("tee /f.txt", stdin=b"data")
+    fs = MirageFS(rw_ws.ops)
+    fs.symlink("/lnk", "/f.txt")
+    assert fs.readlink("/lnk") == "f.txt"
+    assert fs.read("/lnk", 1024, 0, 0) == b"data"
+
+
+@pytest.mark.asyncio
+async def test_unlink_link_keeps_target(seed_ws):
+    await seed_ws.execute("ln -s /a.txt /lnk")
+    fs = MirageFS(seed_ws.ops)
+    fs.unlink("/lnk")
+    with pytest.raises(OSError):
+        fs.getattr("/lnk")
+    assert fs.getattr("/a.txt")["st_size"] == len(b"hello world")
+
+
+@pytest.mark.asyncio
+async def test_scoped_root_link_display(seed_ws):
+    await seed_ws.execute("ln -s /sub/b.txt /sub/lnk")
+    fs = MirageFS(seed_ws.ops, root_prefix="/sub")
+    assert fs.readlink("/lnk") == "b.txt"
+
+
+@pytest.mark.asyncio
+async def test_getattr_honors_chmod_overlay(seed_ws):
+    await seed_ws.execute("chmod 640 /a.txt")
+    fs = MirageFS(seed_ws.ops)
+    attrs = fs.getattr("/a.txt")
+    assert stat.S_ISREG(attrs["st_mode"])
+    assert stat.S_IMODE(attrs["st_mode"]) == 0o640
+
+
+@pytest.mark.asyncio
+async def test_getattr_honors_touch_mtime(seed_ws):
+    await seed_ws.execute("touch -t 202603041200 /a.txt")
+    fs = MirageFS(seed_ws.ops)
+    stamp = datetime(2026, 3, 4, 12, 0, tzinfo=timezone.utc)
+    assert fs.getattr("/a.txt")["st_mtime"] == int(stamp.timestamp()) * 10**9

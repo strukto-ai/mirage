@@ -20,11 +20,12 @@ import { runWithRevisions } from '../observe/context.ts'
 import type { OpRecord } from '../observe/record.ts'
 import type { OpsRegistry } from '../ops/registry.ts'
 import { type OpKwargs } from '../ops/registry.ts'
+import { NO_FOLLOW_OPS } from '../ops/config.ts'
 import { cachesReads, type Resource } from '../resource/base.ts'
 import { ConsistencyPolicy, FileStat, MountMode, PathSpec } from '../types.ts'
-import { epochToIso } from '../utils/dates.ts'
 import type { DispatchFn } from './executor/cross_mount.ts'
 import type { Namespace } from './mount/namespace/namespace.ts'
+import { mergeOverlayStat } from './mount/namespace/overlay.ts'
 import { effectiveMountMode } from '../context/session_context.ts'
 
 const NOOP_ACCESSOR_INSTANCE = new NOOPAccessor()
@@ -37,10 +38,6 @@ const DISPATCH_WRITE_OPS = new Set([
   'create',
   'truncate',
 ])
-// Ops that act on the path entry itself (lstat semantics); every other op
-// follows symlinks before mount lookup, so reads/writes go to the target
-// and the cache keys under the real path.
-const NO_FOLLOW_OPS = new Set(['unlink', 'rename', 'rmdir'])
 
 export type ResolveFn = (path: string) => Promise<[Resource, PathSpec, MountMode]>
 
@@ -120,46 +117,9 @@ export class Dispatcher {
       await this.invalidateAfterWriteByPath(p.virtual)
     }
     if (opName === 'stat' && result instanceof FileStat) {
-      return [this.mergeOverlayStat(p.virtual, result), new IOResult()]
+      return [mergeOverlayStat(this.namespace.metaFor(p.virtual), result), new IOResult()]
     }
     return [result, new IOResult()]
-  }
-
-  // Overlay namespace node attrs onto a backend stat. Backends without a
-  // native attribute slot store chmod/chown/touch results in the namespace
-  // node table; merging here (overlay wins per-field) makes dispatch('stat')
-  // report them uniformly.
-  mergeOverlayStat(path: string, stat: FileStat): FileStat {
-    const meta = this.namespace.metaFor(path)
-    if (meta === null) return stat
-    const update: {
-      mode?: number
-      uid?: number | string
-      gid?: number | string
-      atime?: string
-      modified?: string
-    } = {}
-    if (meta.mode !== undefined) update.mode = meta.mode
-    if (meta.uid !== undefined) update.uid = meta.uid
-    if (meta.gid !== undefined) update.gid = meta.gid
-    if (meta.atime !== undefined) update.atime = meta.atime
-    if (meta.mtime !== undefined && meta.target === undefined) {
-      update.modified = epochToIso(meta.mtime)
-    }
-    if (Object.keys(update).length === 0) return stat
-    return new FileStat({
-      name: stat.name,
-      size: stat.size,
-      modified: update.modified ?? stat.modified,
-      fingerprint: stat.fingerprint,
-      revision: stat.revision,
-      type: stat.type,
-      mode: update.mode ?? stat.mode,
-      uid: update.uid ?? stat.uid,
-      gid: update.gid ?? stat.gid,
-      atime: update.atime ?? stat.atime,
-      extra: stat.extra,
-    })
   }
 
   async invalidateAfterWriteByPath(path: string): Promise<void> {

@@ -72,6 +72,7 @@ import type { PythonReplRunResult } from './executor/python/types.ts'
 import { makeAbortError } from './abort.ts'
 import { Dispatcher } from './dispatcher.ts'
 import { Namespace } from './mount/namespace/namespace.ts'
+import { mergeOverlayStat } from './mount/namespace/overlay.ts'
 import { provisionNode } from './node/provision_node.ts'
 import { runCommandTree } from './node/run_tree.ts'
 import { buildFilePrompt } from './file_prompt.ts'
@@ -329,6 +330,8 @@ export class Workspace {
         this.records.push(rec)
         await this.observer.logOp(rec, this.agentId, this.sessionManager.defaultId)
       },
+      this.namespace,
+      (path, stat) => mergeOverlayStat(this.namespace.metaFor(path), stat),
     )
   }
 
@@ -728,7 +731,7 @@ export class Workspace {
     )
     const guarded = await applyOpSafeguard(result, opOverride)
     if (opName === 'stat' && guarded instanceof FileStat) {
-      return this.dispatcher.mergeOverlayStat(path, guarded)
+      return mergeOverlayStat(this.namespace.metaFor(path), guarded)
     }
     return guarded
   }

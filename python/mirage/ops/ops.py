@@ -23,7 +23,8 @@ from mirage.commands.resolve import COMPOUND_EXTENSIONS
 from mirage.context import assert_mount_allowed, effective_mount_mode
 from mirage.observe import OpRecord
 from mirage.observe.context import push_mount_prefix
-from mirage.ops.config import OpsMount
+from mirage.ops.config import (NO_FOLLOW_OPS, NamespaceLinks, OpsMount,
+                               StatOverlay)
 from mirage.ops.registry import OpsRegistry, RegisteredOp
 from mirage.types import FileStat, MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -36,7 +37,9 @@ class Ops:
                  on_write: Callable[[str], Awaitable[None]] | None = None,
                  observer: Any | None = None,
                  agent_id: str = "default",
-                 session_id: str = "default") -> None:
+                 session_id: str = "default",
+                 links: NamespaceLinks | None = None,
+                 stat_overlay: StatOverlay | None = None) -> None:
         self._mounts = sorted(mounts,
                               key=lambda m: len(m.prefix),
                               reverse=True)
@@ -45,11 +48,22 @@ class Ops:
         self._observer = observer
         self._agent_id = agent_id
         self._session_id = session_id
+        self._links = links
+        self._stat_overlay = stat_overlay
         self._registry = OpsRegistry()
         for m in self._mounts:
             for ro in m.ops:
                 self._registry.register(ro)
         self.records: list[OpRecord] = []
+
+    @property
+    def links(self) -> NamespaceLinks | None:
+        """The workspace symlink table, when this facade fronts one.
+
+        FUSE reads it for symlink entries (getattr/readlink/readdir and
+        link create/remove); None for standalone Ops without a workspace.
+        """
+        return self._links
 
     def mount_prefixes(self) -> list[str]:
         """Return the mount prefixes in resolution order.
@@ -139,6 +153,8 @@ class Ops:
                     write: bool = False,
                     **kwargs):
         start = int(time.monotonic() * 1000)
+        if self._links is not None and op not in NO_FOLLOW_OPS:
+            path = self._links.follow(path)
         resource_type, rel_path, accessor, index, mode = self._resolve(path)
         mount_prefix = self._mount_prefix(path)
         assert_mount_allowed(mount_prefix)
@@ -171,6 +187,9 @@ class Ops:
         self._record(op, path, resource_type, nbytes, start)
         if write:
             await self._invalidate(path)
+        if (op == "stat" and self._stat_overlay is not None
+                and isinstance(result, FileStat)):
+            return self._stat_overlay(path, result)
         return result
 
     async def read(self,

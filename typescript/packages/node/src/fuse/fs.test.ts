@@ -433,3 +433,102 @@ describe('MirageFS — xattr', () => {
     expect(list).toEqual([])
   })
 })
+
+describe('MirageFS — namespace links', () => {
+  it('getattr reports a link with S_IFLNK and target length', async () => {
+    const ws = await mkWs()
+    await ws.execute('ln -s /data/greeting.txt /data/lnk')
+    const mfs = new MirageFS(ws)
+    const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'getattr', '/data/lnk')
+    expect(code).toBe(0)
+    expect(attr.mode & 0o170000).toBe(0o120000)
+    expect(attr.size).toBe('greeting.txt'.length)
+  })
+
+  it('readlink rewrites an absolute target relative to the link dir', async () => {
+    const ws = await mkWs()
+    await ws.execute('ln -s /data/sub/inner.txt /data/lnk')
+    const mfs = new MirageFS(ws)
+    const [code, target] = await callOp<[number, string]>(mfs, 'readlink', '/data/lnk')
+    expect(code).toBe(0)
+    expect(target).toBe('sub/inner.txt')
+  })
+
+  it('readlink on a non-link returns EINVAL', async () => {
+    const ws = await mkWs()
+    const mfs = new MirageFS(ws)
+    const [code] = await callOp<[number]>(mfs, 'readlink', '/data/greeting.txt')
+    expect(code).toBe(-22)
+  })
+
+  it('readdir lists link entries', async () => {
+    const ws = await mkWs()
+    await ws.execute('ln -s /data/greeting.txt /data/lnk')
+    const mfs = new MirageFS(ws)
+    const [code, entries] = await callOp<[number, string[]]>(mfs, 'readdir', '/data')
+    expect(code).toBe(0)
+    expect(entries).toContain('lnk')
+  })
+
+  it('read follows the link to the target content', async () => {
+    const ws = await mkWs()
+    await ws.execute('ln -s /data/greeting.txt /data/lnk')
+    const mfs = new MirageFS(ws)
+    const buf = Buffer.alloc(256)
+    const [n] = await callOp<[number]>(mfs, 'read', '/data/lnk', 0, buf, 256, 0)
+    expect(n).toBe('hello world\n'.length)
+    expect(buf.subarray(0, n).toString()).toBe('hello world\n')
+  })
+
+  it('symlink creates a namespace link readable through FUSE', async () => {
+    const ws = await mkWs()
+    const mfs = new MirageFS(ws)
+    const [code] = await callOp<[number]>(mfs, 'symlink', '/data/greeting.txt', '/data/lnk')
+    expect(code).toBe(0)
+    const [rlCode, target] = await callOp<[number, string]>(mfs, 'readlink', '/data/lnk')
+    expect(rlCode).toBe(0)
+    expect(target).toBe('greeting.txt')
+  })
+
+  it('unlink removes the link entry but keeps the target', async () => {
+    const ws = await mkWs()
+    await ws.execute('ln -s /data/greeting.txt /data/lnk')
+    const mfs = new MirageFS(ws)
+    const [code] = await callOp<[number]>(mfs, 'unlink', '/data/lnk')
+    expect(code).toBe(0)
+    const [lnkCode] = await callOp<[number]>(mfs, 'getattr', '/data/lnk')
+    expect(lnkCode).toBe(ENOENT)
+    const [fileCode] = await callOp<[number]>(mfs, 'getattr', '/data/greeting.txt')
+    expect(fileCode).toBe(0)
+  })
+
+  it('scoped root displays link targets in mount-relative form', async () => {
+    const ws = await mkWs()
+    await ws.execute('ln -s /data/sub/inner.txt /data/sub/lnk')
+    const mfs = new MirageFS(ws, { rootPrefix: '/data/sub' })
+    const [code, target] = await callOp<[number, string]>(mfs, 'readlink', '/lnk')
+    expect(code).toBe(0)
+    expect(target).toBe('inner.txt')
+  })
+})
+
+describe('MirageFS — stat attr overlay', () => {
+  it('getattr honors chmod overlay bits', async () => {
+    const ws = await mkWs()
+    await ws.execute('chmod 640 /data/greeting.txt')
+    const mfs = new MirageFS(ws)
+    const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'getattr', '/data/greeting.txt')
+    expect(code).toBe(0)
+    expect(attr.mode & 0o170000).toBe(0o100000)
+    expect(attr.mode & 0o7777).toBe(0o640)
+  })
+
+  it('getattr honors touched mtime', async () => {
+    const ws = await mkWs()
+    await ws.execute('touch -t 202603041200 /data/greeting.txt')
+    const mfs = new MirageFS(ws)
+    const [code, attr] = await callOp<[number, FuseAttr]>(mfs, 'getattr', '/data/greeting.txt')
+    expect(code).toBe(0)
+    expect(attr.mtime.getTime()).toBe(Date.UTC(2026, 2, 4, 12, 0, 0))
+  })
+})
