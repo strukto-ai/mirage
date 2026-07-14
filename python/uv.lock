@@ -4135,6 +4135,9 @@ pydantic-ai = [
 qdrant = [
     { name = "qdrant-client", extra = ["fastembed"] },
 ]
+quickjs = [
+    { name = "wasmtime" },
+]
 r2 = [
     { name = "aioboto3" },
 ]
@@ -4250,9 +4253,10 @@ requires-dist = [
     { name = "tree-sitter-bash", specifier = ">=0.25.1" },
     { name = "typer", specifier = ">=0.12.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.41.0" },
+    { name = "wasmtime", marker = "extra == 'quickjs'", specifier = ">=46" },
     { name = "wasmtime", marker = "extra == 'wasi'", specifier = ">=46" },
 ]
-provides-extras = ["monty", "wasi", "s3", "r2", "gcs", "oci", "databricks", "ssh", "nextcloud", "hf", "fuse", "mongodb", "postgres", "redis", "email", "parquet", "hdf5", "pdf", "langfuse", "chroma", "qdrant", "anthropic", "openai", "pydantic-ai", "deepagents", "openhands", "agno", "claude-agent-sdk", "camel", "daytona", "all", "lancedb"]
+provides-extras = ["monty", "wasi", "quickjs", "s3", "r2", "gcs", "oci", "databricks", "ssh", "nextcloud", "hf", "fuse", "mongodb", "postgres", "redis", "email", "parquet", "hdf5", "pdf", "langfuse", "chroma", "qdrant", "anthropic", "openai", "pydantic-ai", "deepagents", "openhands", "agno", "claude-agent-sdk", "camel", "daytona", "all", "lancedb"]
 
 [package.metadata.requires-dev]
 dev = [

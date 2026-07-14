@@ -44,6 +44,7 @@ from mirage.provision import ProvisionResult
 from mirage.resource.base import BaseResource
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
 from mirage.resource.ram import RAMResource
+from mirage.runtime.js import select_js_runtime
 from mirage.runtime.python import select_python_runtime
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
@@ -93,6 +94,7 @@ class Workspace:
         observe: ObserverStore | None = None,
         namespace_store: NamespaceStore | None = None,
         python_runtime: str | None = None,
+        js_runtime: str | None = None,
         runtime_options: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         self._registry = MountRegistry()
@@ -186,6 +188,19 @@ class Workspace:
                 raise
             self._python_runtime = None
         self._registry.python_runtime = self._python_runtime
+
+        # `node`/`js` runtime: quickjs needs the 'quickjs' extra plus a
+        # wasm build, so a default that cannot construct is left unset and
+        # the command reports the hint per invocation; an explicit runtime
+        # or option still fails loud.
+        try:
+            self._js_runtime = select_js_runtime(js_runtime,
+                                                 options=runtime_options)
+        except (ImportError, FileNotFoundError):
+            if js_runtime is not None:
+                raise
+            self._js_runtime = None
+        self._registry.js_runtime = self._js_runtime
 
         for prefix, fuse_target in fuse_targets:
             mountpoint = fuse_target if isinstance(fuse_target, str) else None
@@ -372,6 +387,8 @@ class Workspace:
         drain_tasks = list(self._cache._drain_tasks.values())
         if self._python_runtime is not None:
             await self._python_runtime.close()
+        if self._js_runtime is not None:
+            await self._js_runtime.close()
         await self._namespace.close()
         self._close_parts()
         for task in drain_tasks:

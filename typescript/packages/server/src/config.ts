@@ -20,6 +20,7 @@ import {
   ConsistencyPolicy,
   MountMode,
   OnExceed,
+  JS_RUNTIMES,
   PYTHON_RUNTIMES,
   RAMFileCacheStore,
   RedisFileCacheStore,
@@ -43,7 +44,17 @@ const VALID_CONSISTENCY = new Set<string>([ConsistencyPolicy.LAZY, ConsistencyPo
 
 const VALID_PYTHON_RUNTIMES = new Set<string>(PYTHON_RUNTIMES)
 
-const RUNTIME_BLOCK_NAMES = ['monty', 'wasi', 'local', 'pyodide'] as const
+const VALID_JS_RUNTIMES = new Set<string>(JS_RUNTIMES)
+
+function coerceJsRuntime(value: string): string {
+  const lower = value.toLowerCase()
+  if (!VALID_JS_RUNTIMES.has(lower)) {
+    throw new Error(`invalid js runtime: ${value} (expected 'quickjs')`)
+  }
+  return lower
+}
+
+const RUNTIME_BLOCK_NAMES = ['monty', 'wasi', 'local', 'pyodide', 'quickjs'] as const
 
 function coercePythonRuntime(value: string): string {
   const lower = value.toLowerCase()
@@ -217,10 +228,12 @@ interface RedisIndexBlock {
 
 interface RuntimeBlock {
   python?: string
+  js?: string
   monty?: Record<string, unknown>
   wasi?: Record<string, unknown>
   local?: Record<string, unknown>
   pyodide?: Record<string, unknown>
+  quickjs?: Record<string, unknown>
 }
 
 export interface WorkspaceConfigRaw {
@@ -284,6 +297,7 @@ export interface WorkspaceArgs {
     cache?: FileCache & Resource
     index?: IndexConfig
     pythonRuntime?: string
+    jsRuntime?: string
     runtimeOptions?: Record<string, Record<string, unknown>>
   }
   fuseMounts: Record<string, boolean | string>
@@ -327,7 +341,7 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
   const runtimeOptions: Record<string, Record<string, unknown>> = {}
   if (cfg.runtime !== undefined && cfg.runtime !== null) {
     for (const [name, block] of Object.entries(cfg.runtime)) {
-      if (name === 'python' || block === undefined || block === null) continue
+      if (name === 'python' || name === 'js' || block === undefined || block === null) continue
       if (!isPlainObject(block)) throw new Error(`runtime block '${name}' must be a mapping`)
       runtimeOptions[name] = block
     }
@@ -357,6 +371,7 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
       ...(cfg.runtime?.python !== undefined
         ? { pythonRuntime: coercePythonRuntime(cfg.runtime.python) }
         : {}),
+      ...(cfg.runtime?.js !== undefined ? { jsRuntime: coerceJsRuntime(cfg.runtime.js) } : {}),
       ...(Object.keys(runtimeOptions).length > 0 ? { runtimeOptions } : {}),
     },
     fuseMounts,

@@ -18,6 +18,7 @@ from mirage.commands.builtin.general import COMMANDS as GENERAL_COMMANDS
 from mirage.ops.config import OpsMount
 from mirage.resource.base import BaseResource
 from mirage.resource.dev import DevResource
+from mirage.runtime.js.base import JsRuntime
 from mirage.runtime.python.base import PythonRuntime
 from mirage.types import ConsistencyPolicy, MountMode, PathSpec
 from mirage.workspace.mount.mount import MountEntry
@@ -54,6 +55,8 @@ class MountRegistry:
         # Workspace-level Python runtime for `python3`, set by Workspace
         # after construction (same vehicle as is_exec_allowed()).
         self.python_runtime: PythonRuntime | None = None
+        # Workspace-level JavaScript runtime for `node`/`js`.
+        self.js_runtime: JsRuntime | None = None
         self._consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
         self._file_cache: FileCacheMixin | None = None
         self.mount(DEV_PREFIX, DevResource(), MountMode.WRITE)

@@ -36,6 +36,7 @@ import type { RegisteredOp } from '../../ops/registry.ts'
 import type { Resource } from '../../resource/base.ts'
 import { type CommandSafeguard, ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
 import type { PythonRuntime } from '../executor/python/runtimes/interface.ts'
+import type { JsRuntime } from '../executor/js/interface.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { effectiveMountMode } from '../../context/session_context.ts'
 
@@ -338,6 +339,7 @@ export class MountEntry {
       env?: Record<string, string>
       execAllowed?: boolean
       pythonRuntime?: PythonRuntime
+      jsRuntime?: JsRuntime
       safeguardOverride?: CommandSafeguard | null
     } = {},
   ): Promise<[ByteSource | null, IOResult]> {
@@ -389,6 +391,7 @@ export class MountEntry {
       ...(opts.env !== undefined ? { env: opts.env } : {}),
       ...(opts.execAllowed !== undefined ? { execAllowed: opts.execAllowed } : {}),
       ...(opts.pythonRuntime !== undefined ? { pythonRuntime: opts.pythonRuntime } : {}),
+      ...(opts.jsRuntime !== undefined ? { jsRuntime: opts.jsRuntime } : {}),
     }
 
     setVirtualPrefix(mountPrefix)

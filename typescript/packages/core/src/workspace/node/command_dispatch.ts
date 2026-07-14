@@ -24,6 +24,7 @@ import {
   splitEnvPrefix,
 } from '../../shell/helpers.ts'
 import type { PythonRuntime } from '../executor/python/runtimes/interface.ts'
+import type { JsRuntime } from '../executor/js/interface.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { NodeType as NT, ShellBuiltin as SB } from '../../shell/types.ts'
 import { PathSpec } from '../../types.ts'
@@ -139,6 +140,7 @@ export async function executeCommand(
   ensureOpen?: (resource: Resource) => Promise<void>,
   unmount?: (prefix: string) => Promise<void>,
   pythonRuntime?: PythonRuntime,
+  jsRuntime?: JsRuntime,
   signal?: AbortSignal,
 ): Promise<Result> {
   const name = getCommandName(node)
@@ -199,6 +201,7 @@ export async function executeCommand(
       ensureOpen,
       unmount,
       pythonRuntime,
+      jsRuntime,
       signal,
     )
   } finally {
@@ -234,6 +237,7 @@ async function runCommandBody(
   ensureOpen?: (resource: Resource) => Promise<void>,
   unmount?: (prefix: string) => Promise<void>,
   pythonRuntime?: PythonRuntime,
+  jsRuntime?: JsRuntime,
   signal?: AbortSignal,
 ): Promise<Result> {
   let stdin = stdinIn
@@ -307,6 +311,7 @@ async function runCommandBody(
       ensureOpen,
       unmount,
       pythonRuntime,
+      jsRuntime,
       signal,
     ),
     timeout,
@@ -333,6 +338,7 @@ async function runArgv(
   ensureOpen?: (resource: Resource) => Promise<void>,
   unmount?: (prefix: string) => Promise<void>,
   pythonRuntime?: PythonRuntime,
+  jsRuntime?: JsRuntime,
   signal?: AbortSignal,
 ): Promise<Result> {
   const name = argv.name
@@ -581,6 +587,7 @@ async function runArgv(
     ensureOpen,
     unmount,
     pythonRuntime,
+    jsRuntime,
     namespace,
   )
 

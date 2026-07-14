@@ -26,6 +26,36 @@ SPECS: dict[str, CommandSpec] = {
         options=(Option(short="-c", value_kind=OperandKind.TEXT), ),
         rest=Operand(kind=OperandKind.TEXT),
     ),
+    'js':
+    CommandSpec(
+        description="Run JavaScript on a sandboxed quickjs engine.",
+        options=(
+            Option(short="-e",
+                   value_kind=OperandKind.TEXT,
+                   description="Evaluate the next argument as a script."),
+            Option(short="-m",
+                   long="--module",
+                   description=("Run as an ES module (top-level "
+                                "import/export/await); .mjs files "
+                                "select this automatically.")),
+        ),
+        rest=Operand(kind=OperandKind.TEXT),
+    ),
+    'node':
+    CommandSpec(
+        description="Run JavaScript on a sandboxed quickjs engine.",
+        options=(
+            Option(short="-e",
+                   value_kind=OperandKind.TEXT,
+                   description="Evaluate the next argument as a script."),
+            Option(short="-m",
+                   long="--module",
+                   description=("Run as an ES module (top-level "
+                                "import/export/await); .mjs files "
+                                "select this automatically.")),
+        ),
+        rest=Operand(kind=OperandKind.TEXT),
+    ),
     'mktemp':
     CommandSpec(
         options=(

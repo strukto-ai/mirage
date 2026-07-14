@@ -18,6 +18,7 @@ import { IOResult, type ByteSource } from '../io/types.ts'
 import type { Resource } from '../resource/base.ts'
 import type { CommandSafeguard, PathSpec } from '../types.ts'
 import type { PythonRuntime } from '../workspace/executor/python/runtimes/interface.ts'
+import type { JsRuntime } from '../workspace/executor/js/interface.ts'
 import type { AggregateResult } from './builtin/aggregators.ts'
 import { renderHelp } from './spec/help.ts'
 import { CommandSpec, OperandKind, Option } from './spec/types.ts'
@@ -53,6 +54,7 @@ export interface CommandOpts {
   env?: Record<string, string>
   execAllowed?: boolean
   pythonRuntime?: PythonRuntime
+  jsRuntime?: JsRuntime
 }
 
 export type CommandFnResult = [ByteSource | null, IOResult] | null

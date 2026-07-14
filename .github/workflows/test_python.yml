@@ -285,6 +285,51 @@ jobs:
           MIRAGE_WASI_HOME: /tmp/cpython-wasi
         run: uv run pytest tests/runtime/python/test_wasi.py -v --no-cov
 
+  runtime-quickjs:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
+    runs-on: ubuntu-latest
+    env:
+      QUICKJS_BUILD: v0.15.1
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        working-directory: python
+        run: uv sync --extra quickjs --extra monty
+
+      - name: Cache the quickjs WASI build
+        id: quickjs-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/quickjs
+          key: quickjs-wasi-${{ env.QUICKJS_BUILD }}
+
+      - name: Download the quickjs WASI build
+        if: steps.quickjs-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/quickjs
+          gh release download "$QUICKJS_BUILD" -R quickjs-ng/quickjs \
+            -p qjs-wasi.wasm -O /tmp/quickjs/qjs-wasi.wasm
+
+      - name: Run quickjs runtime tests
+        working-directory: python
+        env:
+          MIRAGE_QUICKJS_HOME: /tmp/quickjs
+        run: uv run pytest tests/runtime/python/test_quickjs.py -v --no-cov
+
   audit:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
@@ -310,7 +355,7 @@ jobs:
   gate:
     name: test-python-gate
     runs-on: ubuntu-latest
-    needs: [changes, test, import-isolation, runtime-no-monty, runtime-wasi]
+    needs: [changes, test, import-isolation, runtime-no-monty, runtime-wasi, runtime-quickjs]
     if: always()
     steps:
       - name: Check required jobs

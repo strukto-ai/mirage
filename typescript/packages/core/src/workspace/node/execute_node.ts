@@ -35,6 +35,7 @@ import {
   getWhileParts,
 } from '../../shell/helpers.ts'
 import type { PythonRuntime } from '../executor/python/runtimes/interface.ts'
+import type { JsRuntime } from '../executor/js/interface.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { ERREXIT_EXEMPT_TYPES, NodeType as NT } from '../../shell/types.ts'
 import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
@@ -85,6 +86,7 @@ export interface ExecuteNodeDeps {
   ensureOpen?: (resource: Resource) => Promise<void>
   unmount?: (prefix: string) => Promise<void>
   pythonRuntime?: PythonRuntime
+  jsRuntime?: JsRuntime
   signal?: AbortSignal
 }
 
@@ -132,6 +134,7 @@ export async function executeNode(
       deps.ensureOpen,
       deps.unmount,
       deps.pythonRuntime,
+      deps.jsRuntime,
       deps.signal,
     )
   }

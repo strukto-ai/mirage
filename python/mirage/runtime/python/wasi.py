@@ -12,11 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-import logging
 import os
-import tempfile
-import threading
 from pathlib import Path
 
 try:
@@ -26,8 +22,7 @@ except ImportError:
 
 from mirage.runtime.python.base import (PythonRunArgs, PythonRunResult,
                                         PythonRuntime)
-
-logger = logging.getLogger(__name__)
+from mirage.runtime.wasm import WasmGuestRuntime
 
 WASI_HOME_ENV = "MIRAGE_WASI_HOME"
 
@@ -38,12 +33,6 @@ _BUILD_HINT = (
     "and point the yaml `runtime: wasi: home:` key, the Workspace "
     f"`runtime_options` argument, or the {WASI_HOME_ENV} environment "
     "variable at the directory")
-
-
-def _epoch_engine() -> "wasmtime.Engine":
-    config = wasmtime.Config()
-    config.epoch_interruption = True
-    return wasmtime.Engine(config)
 
 
 class WasiRuntime(PythonRuntime):
@@ -93,95 +82,20 @@ class WasiRuntime(PythonRuntime):
             raise FileNotFoundError(
                 f"no lib/python3.* under {self._root}; {_BUILD_HINT}")
         self._pythonhome = f"/lib/{stdlibs[-1].name}"
-        self._compile_lock = threading.Lock()
-        self._serialized: bytes | None = None
-
-    def _ensure_serialized(self) -> bytes:
-        """Compile python.wasm once, caching the compilation on disk.
-
-        The precompiled artifact (python.cwasm next to python.wasm)
-        deserializes in milliseconds versus a fresh compile. Epoch
-        checks are compiled in, so a cache produced with different
-        engine settings fails deserialization and is recompiled; an
-        unwritable directory just skips the disk cache.
-        """
-        with self._compile_lock:
-            if self._serialized is not None:
-                return self._serialized
-            wasm = self._root / "python.wasm"
-            cache = self._root / "python.cwasm"
-            engine = _epoch_engine()
-            if (cache.is_file()
-                    and cache.stat().st_mtime >= wasm.stat().st_mtime):
-                try:
-                    wasmtime.Module.deserialize_file(engine, str(cache))
-                    cached = cache.read_bytes()
-                    self._serialized = cached
-                    return cached
-                except wasmtime.WasmtimeError as exc:
-                    logger.debug("stale python.cwasm cache, recompiling: %s",
-                                 exc)
-            module = wasmtime.Module.from_file(engine, str(wasm))
-            serialized = bytes(module.serialize())
-            self._serialized = serialized
-            try:
-                cache.write_bytes(serialized)
-            except OSError as exc:
-                logger.debug("cannot write python.cwasm cache: %s", exc)
-            return serialized
+        self._guest = WasmGuestRuntime(self._root / "python.wasm", "python3")
 
     async def run(self, args: PythonRunArgs) -> PythonRunResult:
-        serialized = await asyncio.to_thread(self._ensure_serialized)
-        engine = _epoch_engine()
-        try:
-            return await asyncio.to_thread(self._run_sync, engine, serialized,
-                                           args)
-        except asyncio.CancelledError:
-            # The worker thread is still inside the guest; bumping the
-            # epoch trips the store's deadline, traps the guest, and
-            # lets the thread exit. Per-run engines keep the bump from
-            # reaching concurrent runs.
-            engine.increment_epoch()
-            raise
-
-    def _run_sync(self, engine: "wasmtime.Engine", serialized: bytes,
-                  args: PythonRunArgs) -> PythonRunResult:
-        module = wasmtime.Module.deserialize(engine, serialized)
-        linker = wasmtime.Linker(engine)
-        linker.define_wasi()
-        store = wasmtime.Store(engine)
-        store.set_epoch_deadline(1)
-        wasi = wasmtime.WasiConfig()
         # sys.argv becomes ['-c', *args.args], matching the local runtime.
-        wasi.argv = ["python", "-c", args.code, *args.args]
-        with tempfile.TemporaryDirectory(prefix="mirage-wasi-") as td:
-            stdin_path = f"{td}/stdin"
-            stdout_path = f"{td}/stdout"
-            stderr_path = f"{td}/stderr"
-            Path(stdin_path).write_bytes(args.stdin or b"")
-            wasi.stdin_file = stdin_path
-            wasi.stdout_file = stdout_path
-            wasi.stderr_file = stderr_path
-            wasi.preopen_dir(str(self._root), "/")
-            wasi.env = [
+        stdout, stderr, exit_code = await self._guest.run(
+            argv=["python", "-c", args.code, *args.args],
+            stdin=args.stdin,
+            env=[
                 *args.env.items(),
                 ("PYTHONHOME", self._pythonhome),
                 ("PYTHONPATH", self._pythonhome),
-            ]
-            store.set_wasi(wasi)
-            instance = linker.instantiate(store, module)
-            start = instance.exports(store)["_start"]
-            exit_code = 0
-            trap_message = b""
-            try:
-                start(store)  # type: ignore[operator]
-            except wasmtime.ExitTrap as exc:
-                exit_code = exc.code
-            except wasmtime.Trap as exc:
-                exit_code = 1
-                trap_message = f"python3: wasm trap: {exc.message}\n".encode()
-            stdout = Path(stdout_path).read_bytes()
-            stderr = Path(stderr_path).read_bytes() + trap_message
+            ],
+            preopens=[(str(self._root), "/")],
+        )
         return PythonRunResult(stdout=stdout,
-                               stderr=stderr or None,
+                               stderr=stderr,
                                exit_code=exit_code)

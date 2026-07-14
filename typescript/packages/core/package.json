@@ -56,7 +56,8 @@
     "tsup": "^8.5.0",
     "typescript": "^6.0.0",
     "vitest": "^3.2.6",
-    "@pydantic/monty": "0.0.19-beta.4"
+    "@pydantic/monty": "0.0.19-beta.4",
+    "quickjs-emscripten": "^0.31.0"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.0.0",
@@ -74,7 +75,8 @@
     "chromadb": "^3.4.3",
     "pyodide": "^0.29.0",
     "redis": "^5.0.0",
-    "@pydantic/monty": ">=0.0.19-beta.4"
+    "@pydantic/monty": ">=0.0.19-beta.4",
+    "quickjs-emscripten": "^0.31.0"
   },
   "peerDependenciesMeta": {
     "@qdrant/js-client-rest": {
@@ -90,6 +92,9 @@
       "optional": true
     },
     "@pydantic/monty": {
+      "optional": true
+    },
+    "quickjs-emscripten": {
       "optional": true
     }
   }

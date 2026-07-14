@@ -163,6 +163,20 @@ export const BUILTIN_SPECS: Readonly<Record<string, CommandSpec>> = Object.freez
     options: [new Option({ short: '-c', valueKind: OperandKind.TEXT })],
     rest: new Operand({ kind: OperandKind.TEXT }),
   }),
+  js: new CommandSpec({
+    options: [
+      new Option({ short: '-e', valueKind: OperandKind.TEXT }),
+      new Option({ short: '-m', long: '--module' }),
+    ],
+    rest: new Operand({ kind: OperandKind.TEXT }),
+  }),
+  node: new CommandSpec({
+    options: [
+      new Option({ short: '-e', valueKind: OperandKind.TEXT }),
+      new Option({ short: '-m', long: '--module' }),
+    ],
+    rest: new Operand({ kind: OperandKind.TEXT }),
+  }),
   nl: new CommandSpec({
     options: [
       new Option({ short: '-b', valueKind: OperandKind.TEXT }),

@@ -68,6 +68,8 @@ import { handlePythonRepl } from './executor/python/handle.ts'
 import type { BridgeDispatchFn, MirageEntry } from './executor/python/mirage_bridge.ts'
 import { selectPythonRuntime } from './executor/python/runtimes/select.ts'
 import type { PythonRuntime } from './executor/python/runtimes/interface.ts'
+import { selectJsRuntime } from './executor/js/select.ts'
+import type { JsRuntime } from './executor/js/interface.ts'
 import type { PythonReplRunResult } from './executor/python/types.ts'
 import { makeAbortError } from './abort.ts'
 import { Dispatcher } from './dispatcher.ts'
@@ -128,6 +130,8 @@ export interface WorkspaceOptions {
   }
   /** Python runtime for `python3`: 'pyodide' (default) or 'monty'. */
   pythonRuntime?: string
+  /** JavaScript runtime for `node`/`js`: 'quickjs' (default). */
+  jsRuntime?: string
   /**
    * Per-runtime option blocks (the yaml `runtime:` sibling blocks end
    * up here); the selected runtime consumes its own block, e.g.
@@ -220,6 +224,7 @@ export class Workspace {
   private readonly workspaceId: string = `ws-${String(Date.now())}-${Math.random().toString(36).slice(2, 10)}`
   private readonly closers: (() => Promise<void>)[] = []
   private readonly pythonRuntime: PythonRuntime
+  private readonly jsRuntime: JsRuntime
   // True when the workspace auto-added an empty `/` anchor (no user `/` mount).
   // The anchor is internal and is not forwarded into the Pyodide filesystem.
   private syntheticRootAnchor = false
@@ -275,6 +280,8 @@ export class Workspace {
       options.runtimeOptions,
     )
     this.closers.push(() => this.pythonRuntime.close())
+    this.jsRuntime = selectJsRuntime(options.jsRuntime, options.runtimeOptions)
+    this.closers.push(() => this.jsRuntime.close())
     this.observer = new Observer(options.observe)
     this.registry.mount(HISTORY_PREFIX, new HistoryViewResource(this.observer), MountMode.READ)
     this.cache = options.cache ?? new RAMFileCacheStore({ limit: options.cacheLimit ?? '512MB' })
@@ -862,6 +869,7 @@ export class Workspace {
       ensureOpen,
       unmount: (prefix: string) => this.unmount(prefix),
       pythonRuntime: this.pythonRuntime,
+      jsRuntime: this.jsRuntime,
       ...(options.signal !== undefined ? { signal: options.signal } : {}),
     }
     const targetSessionId = options.sessionId ?? this.sessionManager.defaultId

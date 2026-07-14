@@ -106,6 +106,24 @@ describe('configToWorkspaceArgs', () => {
     )
   })
 
+  it('threads the js selector and quickjs block', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      runtime: { js: 'quickjs', quickjs: { home: '/opt/qjs' } },
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    expect(args.options.jsRuntime).toBe('quickjs')
+    expect(args.options.runtimeOptions).toEqual({ quickjs: { home: '/opt/qjs' } })
+  })
+
+  it('rejects an invalid js runtime name', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      runtime: { js: 'v8' },
+    })
+    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/invalid js runtime/)
+  })
+
   it('builds a redis index config from an index block', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { resource: 'ram' } },

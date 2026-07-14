@@ -12,17 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.general.bc import bc
-from mirage.commands.builtin.general.curl import curl
-from mirage.commands.builtin.general.date import date
-from mirage.commands.builtin.general.expr import expr
-from mirage.commands.builtin.general.js import js, node
-from mirage.commands.builtin.general.python import python3, python_cmd
-from mirage.commands.builtin.general.seq import seq
-from mirage.commands.builtin.general.wget import wget
+from mirage.runtime.js.base import JsRunArgs, JsRunResult, JsRuntime
+from mirage.runtime.js.quickjs import QuickJsRuntime
+from mirage.runtime.js.select import DEFAULT_JS_RUNTIME, select_js_runtime
 
-_FNS = [bc, curl, date, expr, js, node, python3, python_cmd, seq, wget]
-
-COMMANDS = []
-for _fn in _FNS:
-    COMMANDS.extend(_fn._registered_commands)
+__all__ = [
+    "DEFAULT_JS_RUNTIME",
+    "JsRunArgs",
+    "JsRunResult",
+    "JsRuntime",
+    "QuickJsRuntime",
+    "select_js_runtime",
+]

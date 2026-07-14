@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.resource.registry import build_resource
+from mirage.runtime.js.select import validate_js_runtime_name
 from mirage.runtime.python.select import (DEFAULT_PYTHON_RUNTIME,
                                           validate_python_runtime_name)
 from mirage.types import CommandSafeguard, ConsistencyPolicy, MountMode
@@ -160,22 +161,36 @@ class RuntimeBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     python: str = DEFAULT_PYTHON_RUNTIME
+    # `node`/`js` runtime. None (unset) leaves it graceful: quickjs
+    # needs an external wasm build, so a workspace that does not opt in
+    # is not forced to have one. An explicit value fails loud if it
+    # cannot build.
+    js: str | None = None
     # Per-runtime option blocks, free key/values consumed by the
     # selected runtime; blocks for other runtimes (including the other
     # language's) are ignored, so one config stays portable. `home`
     # locates the interpreter or distribution: a CPython WASI build
     # directory for `wasi` (falls back to MIRAGE_WASI_HOME), an
     # interpreter path for `local` (falls back to MIRAGE_LOCAL_HOME),
-    # a distribution URL for `pyodide` (TypeScript).
+    # a distribution URL for `pyodide` (TypeScript), the directory with
+    # qjs-wasi.wasm for `quickjs` (falls back to MIRAGE_QUICKJS_HOME).
     monty: dict[str, Any] | None = None
     wasi: dict[str, Any] | None = None
     local: dict[str, Any] | None = None
     pyodide: dict[str, Any] | None = None
+    quickjs: dict[str, Any] | None = None
 
     @field_validator("python")
     @classmethod
     def _v_python(cls, v):
         return validate_python_runtime_name(v)
+
+    @field_validator("js")
+    @classmethod
+    def _v_js(cls, v):
+        if v is None:
+            return v
+        return validate_js_runtime_name(v)
 
     def option_blocks(self) -> dict[str, dict[str, Any]]:
         """Collect the declared per-runtime option blocks.
@@ -189,6 +204,7 @@ class RuntimeBlock(BaseModel):
             "wasi": self.wasi,
             "local": self.local,
             "pyodide": self.pyodide,
+            "quickjs": self.quickjs,
         }
         return {k: v for k, v in blocks.items() if v is not None}
 
@@ -244,6 +260,8 @@ class WorkspaceConfig(BaseModel):
             kwargs["index"] = _build_index_config(self.index)
         if self.runtime is not None:
             kwargs["python_runtime"] = self.runtime.python
+            if self.runtime.js is not None:
+                kwargs["js_runtime"] = self.runtime.js
             blocks = self.runtime.option_blocks()
             if blocks:
                 kwargs["runtime_options"] = blocks

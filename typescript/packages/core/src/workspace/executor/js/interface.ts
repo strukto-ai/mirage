@@ -12,25 +12,24 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RegisteredCommand } from '../../config.ts'
-import { GENERAL_BC } from './bc.ts'
-import { GENERAL_CURL } from './curl.ts'
-import { GENERAL_DATE } from './date.ts'
-import { GENERAL_EXPR } from './expr.ts'
-import { GENERAL_JS, GENERAL_NODE } from './js.ts'
-import { GENERAL_PYTHON, GENERAL_PYTHON3 } from './python.ts'
-import { GENERAL_SEQ } from './seq.ts'
-import { GENERAL_WGET } from './wget.ts'
+import type { JsRunArgs, JsRunResult } from './types.ts'
 
-export const GENERAL_COMMANDS: readonly RegisteredCommand[] = [
-  ...GENERAL_BC,
-  ...GENERAL_CURL,
-  ...GENERAL_DATE,
-  ...GENERAL_EXPR,
-  ...GENERAL_JS,
-  ...GENERAL_NODE,
-  ...GENERAL_PYTHON,
-  ...GENERAL_PYTHON3,
-  ...GENERAL_SEQ,
-  ...GENERAL_WGET,
-]
+export const QUICKJS_RUNTIME = 'quickjs'
+
+/** JavaScript runtime names the TypeScript packages can build. */
+export const JS_RUNTIMES = [QUICKJS_RUNTIME] as const
+
+export const DEFAULT_JS_RUNTIME = JS_RUNTIMES[0]
+
+/**
+ * A JavaScript engine the workspace can execute `node`/`js` code on.
+ *
+ * Implementations own their engine lifecycle (lazy boot, reuse across
+ * runs, teardown in `close`). Like the sandboxed Python runtimes, the
+ * engine sees only what the run passes it, not workspace mounts.
+ */
+export interface JsRuntime {
+  readonly name: string
+  run(args: JsRunArgs): Promise<JsRunResult>
+  close(): Promise<void>
+}

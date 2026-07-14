@@ -276,6 +276,8 @@ def test_all_commands_have_specs():
         "join",
         "python",
         "python3",
+        "js",
+        "node",
         "history",
     }
     assert set(SPECS.keys()) == expected

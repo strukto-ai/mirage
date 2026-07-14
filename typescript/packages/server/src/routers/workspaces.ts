@@ -107,6 +107,7 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
           ...(args.options.pythonRuntime !== undefined
             ? { pythonRuntime: args.options.pythonRuntime }
             : {}),
+          ...(args.options.jsRuntime !== undefined ? { jsRuntime: args.options.jsRuntime } : {}),
           ...(args.options.runtimeOptions !== undefined
             ? { runtimeOptions: args.options.runtimeOptions }
             : {}),

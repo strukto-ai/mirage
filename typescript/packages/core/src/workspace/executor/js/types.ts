@@ -12,25 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RegisteredCommand } from '../../config.ts'
-import { GENERAL_BC } from './bc.ts'
-import { GENERAL_CURL } from './curl.ts'
-import { GENERAL_DATE } from './date.ts'
-import { GENERAL_EXPR } from './expr.ts'
-import { GENERAL_JS, GENERAL_NODE } from './js.ts'
-import { GENERAL_PYTHON, GENERAL_PYTHON3 } from './python.ts'
-import { GENERAL_SEQ } from './seq.ts'
-import { GENERAL_WGET } from './wget.ts'
+export interface JsRunArgs {
+  code: string
+  args: string[]
+  env: Record<string, string>
+  stdin: Uint8Array | null
+  module: boolean
+}
 
-export const GENERAL_COMMANDS: readonly RegisteredCommand[] = [
-  ...GENERAL_BC,
-  ...GENERAL_CURL,
-  ...GENERAL_DATE,
-  ...GENERAL_EXPR,
-  ...GENERAL_JS,
-  ...GENERAL_NODE,
-  ...GENERAL_PYTHON,
-  ...GENERAL_PYTHON3,
-  ...GENERAL_SEQ,
-  ...GENERAL_WGET,
-]
+export interface JsRunResult {
+  stdout: Uint8Array
+  stderr: Uint8Array
+  exitCode: number
+}
+
+export class QuickJsUnavailableError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options)
+    this.name = 'QuickJsUnavailableError'
+  }
+}

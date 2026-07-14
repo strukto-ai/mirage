@@ -196,6 +196,9 @@ class ShellBuiltin(StrEnum):
     # python exec
     PYTHON = "python"
     PYTHON3 = "python3"
+    # javascript exec
+    NODE = "node"
+    JS = "js"
     # commands handled by executor
     XARGS = "xargs"
     TIMEOUT = "timeout"

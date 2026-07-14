@@ -365,7 +365,8 @@
           {
             "group": "Runtimes",
             "pages": [
-              "python/runtime/python"
+              "python/runtime/python",
+              "python/runtime/javascript"
             ]
           }
         ]
@@ -515,7 +516,8 @@
           {
             "group": "Runtimes",
             "pages": [
-              "typescript/runtime/python"
+              "typescript/runtime/python",
+              "typescript/runtime/javascript"
             ]
           }
         ]

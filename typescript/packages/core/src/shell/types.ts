@@ -199,6 +199,8 @@ export const ShellBuiltin = Object.freeze({
   SH: 'sh',
   PYTHON: 'python',
   PYTHON3: 'python3',
+  NODE: 'node',
+  JS: 'js',
   XARGS: 'xargs',
   TIMEOUT: 'timeout',
   BREAK: 'break',

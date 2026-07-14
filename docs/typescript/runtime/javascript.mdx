@@ -1,0 +1,103 @@
+---
+title: JavaScript
+description: Run node/js inside the workspace on quickjs, a sandboxed JavaScript engine for small scripts and pipe transforms.
+---
+
+Shell lines like `node script.mjs` or `js -e "..."` need a JavaScript
+engine. Mirage calls that engine a **runtime**, and `node` and `js` are
+two names for the same command family. One runtime ships today:
+
+| Runtime | Engine | Filesystem | Default |
+| --- | --- | --- | --- |
+| `quickjs` | [quickjs-emscripten](https://github.com/justjake/quickjs-emscripten), quickjs compiled to WebAssembly (browser + Node) | None: no host filesystem, no mounts, no network | Yes |
+
+## What it is for
+
+`node`/`js` runs **small, self-contained scripts and pipe transforms**:
+compute, JSON munging, regex text processing, code generation. It is a
+bare modern engine (ES2023 syntax, ES modules, `JSON`, `Promise`,
+top-level await), **not** Node: there is no `require`, no npm, no
+`process`, no `fs`, no `fetch`. Anything that needs those belongs in a
+sandboxed deployment, not the workspace runtime.
+
+```bash
+js -e "console.log(6 * 7)"                 # inline
+node /data/transform.mjs arg1 arg2         # a mounted script, args in scriptArgs
+cat data.json | node -e "const d = JSON.parse(std.in.readAsString()); console.log(d.length)"
+```
+
+Three input forms, mirroring `python3`:
+
+- **`-e <code>`** evaluates the argument.
+- **A file** (`node script.js`) is read through the workspace before the
+  run, so a mounted script executes.
+- **stdin** with no `-e` or file runs the piped text as the program.
+
+`scriptArgs` holds the arguments after the code or script, and
+`std.in.readAsString()` reads piped stdin. These match the Python
+`quickjs` runtime, so a script behaves the same in both languages.
+
+## Modules
+
+A `.mjs` file runs as an ES module automatically (top-level
+`import`/`export`/`await`); `.js` and `-e` run as a classic script. Pass
+`-m`/`--module` to force module mode for inline code:
+
+```bash
+js -m -e "const x = await Promise.resolve(41); console.log(x + 1)"
+```
+
+## Sandbox
+
+The engine sees only what the run passes it. Host files, mounts, and the
+network are all invisible, and file I/O inside the code cannot reach
+workspace mounts. The `node`/`js` command still resolves a script *file*
+through the workspace before running it, so `node /data/script.mjs`
+works, but reading another mount path inside the code does not.
+
+## Setup
+
+The runtime needs the optional `quickjs-emscripten` peer dependency (it
+bundles its own wasm, so there is nothing else to download):
+
+```bash
+npm install quickjs-emscripten
+```
+
+Select it per workspace (it is already the default):
+
+```ts
+const ws = new Workspace(resources, {
+  mode: MountMode.EXEC,
+  jsRuntime: 'quickjs',
+})
+```
+
+## Selecting in YAML
+
+Server workspace config files take a top-level `runtime` block; `js`
+selects the JavaScript runtime alongside `python`:
+
+```yaml
+runtime:
+  python: monty
+  js: quickjs
+
+mounts:
+  /data:
+    resource: ram
+    command_safeguards:
+      js:
+        timeout_seconds: 30
+```
+
+## Resource limits
+
+`node`/`js` is a command like any other: the same `command_safeguards`
+that guard `cat` or `python3` guard it, enforced at the same central
+point. A run that exceeds `timeout_seconds` answers with exit 124, and
+`max_bytes`/`max_lines` cap its output.
+
+One caveat: the guard bounds how long a run may *answer*, not the engine
+itself. Give untrusted code a finite workload, or run it behind a
+sandboxed deployment.
