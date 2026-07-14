@@ -170,7 +170,7 @@ class Dispatcher:
 
     async def invalidate_after_write(self, mount: MountEntry,
                                      path: str) -> None:
-        self._namespace.clear_times(path)
+        await self._namespace.clear_times(path)
         manager = mount.cache_manager
         if manager is None:
             manager = CacheManager(self._cache,

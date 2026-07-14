@@ -57,6 +57,7 @@ from mirage.workspace.file_prompt import build_file_prompt
 from mirage.workspace.fuse import FuseManager
 from mirage.workspace.mount import MountEntry, MountRegistry
 from mirage.workspace.mount.namespace import Namespace
+from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.node import provision_node, run_command_tree
 from mirage.workspace.session import (Session, SessionManager,
@@ -90,6 +91,7 @@ class Workspace:
         session_id: str = DEFAULT_SESSION_ID,
         agent_id: str = DEFAULT_AGENT_ID,
         observe: ObserverStore | None = None,
+        namespace_store: NamespaceStore | None = None,
         python_runtime: str | None = None,
         runtime_options: dict[str, dict[str, Any]] | None = None,
     ) -> None:
@@ -125,7 +127,7 @@ class Workspace:
         self._consistency = consistency
         self._registry.set_consistency(consistency)
         self._registry.attach_file_cache(self._cache)
-        self._namespace = Namespace(self._registry)
+        self._namespace = Namespace(self._registry, store=namespace_store)
         self._dispatcher = Dispatcher(self._namespace, self._cache,
                                       consistency)
 
@@ -370,6 +372,7 @@ class Workspace:
         drain_tasks = list(self._cache._drain_tasks.values())
         if self._python_runtime is not None:
             await self._python_runtime.close()
+        await self._namespace.close()
         self._close_parts()
         for task in drain_tasks:
             try:
@@ -592,6 +595,7 @@ class Workspace:
 
     async def dispatch(self, op: str, path: PathSpec,
                        **kwargs: Any) -> tuple[Any, IOResult]:
+        await self._namespace.ensure_loaded()
         if self._drift_check_pending:
             await self._run_pending_drift_check()
         return await self._dispatcher.dispatch(op, path, **kwargs)
@@ -716,6 +720,7 @@ class Workspace:
         """
         if cancel is not None and cancel.is_set():
             raise MirageAbortError()
+        await self._namespace.ensure_loaded()
         if self._drift_check_pending:
             await self._run_pending_drift_check()
 
