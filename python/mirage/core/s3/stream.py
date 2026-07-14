@@ -14,6 +14,7 @@
 
 import time
 from collections.abc import AsyncIterator
+from contextlib import AsyncExitStack
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
@@ -65,10 +66,18 @@ async def read_stream(
             fingerprint, revision = _fp_rev_from_response(response)
             rec.fingerprint = fingerprint
             rec.revision = revision
-        async for chunk in response["Body"].iter_chunks(chunk_size):
-            if rec is not None:
-                rec.bytes += len(chunk)
-            yield chunk
+        body = response["Body"]
+        async with AsyncExitStack() as stack:
+            if hasattr(body, "__aenter__") and hasattr(body, "__aexit__"):
+                await stack.enter_async_context(body)
+            else:
+                close = getattr(body, "close", None)
+                if close is not None:
+                    stack.callback(close)
+            async for chunk in body.iter_chunks(chunk_size):
+                if rec is not None:
+                    rec.bytes += len(chunk)
+                yield chunk
 
 
 async def range_read(accessor: S3Accessor, path: PathSpec, start: int,

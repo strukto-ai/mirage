@@ -12,9 +12,31 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
+
 from mirage.observe.context import (RecordingScope, push_mount_prefix,
                                     push_revisions, record, record_stream,
-                                    reset_revisions, revision_for)
+                                    reset_revisions, revision_for,
+                                    with_mount_prefix, with_revisions)
+
+
+class ClosingIterator:
+
+    def __init__(self) -> None:
+        self.yielded = False
+        self.closed = False
+
+    def __aiter__(self) -> "ClosingIterator":
+        return self
+
+    async def __anext__(self) -> bytes:
+        if self.yielded:
+            raise StopAsyncIteration
+        self.yielded = True
+        return b"chunk"
+
+    async def aclose(self) -> None:
+        self.closed = True
 
 
 def test_record_no_context():
@@ -91,6 +113,24 @@ def test_push_mount_prefix_returns_previous():
 
 def test_push_mount_prefix_no_recorder_is_noop():
     assert push_mount_prefix("/s3") == ""
+
+
+@pytest.mark.asyncio
+async def test_with_mount_prefix_close_propagates_to_source():
+    source = ClosingIterator()
+    wrapped = with_mount_prefix("/s3", source)
+    assert await anext(wrapped) == b"chunk"
+    await wrapped.aclose()
+    assert source.closed
+
+
+@pytest.mark.asyncio
+async def test_with_revisions_close_propagates_to_source():
+    source = ClosingIterator()
+    wrapped = with_revisions({"/s3/a": "v1"}, source)
+    assert await anext(wrapped) == b"chunk"
+    await wrapped.aclose()
+    assert source.closed
 
 
 def test_record_carries_fingerprint_when_passed():

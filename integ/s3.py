@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import aiobotocore.client
+import aiobotocore.response
 import boto3
 import moto.s3.models as _s3_models
 from cases import (run_cache_verify_cases, run_not_found,
@@ -62,7 +63,9 @@ CREDS = dict(aws_access_key_id="testing",
 # resolves from the index with zero HeadObject calls. A regression that stops
 # threading index would show up here as HeadObject calls.
 API_CALLS: Counter = Counter()
+BODY_EXITS = 0
 _orig_make_api_call = aiobotocore.client.AioBaseClient._make_api_call
+_orig_body_exit = aiobotocore.response.StreamingBody.__aexit__
 
 
 async def _counting_make_api_call(self, operation_name, api_params):
@@ -71,6 +74,15 @@ async def _counting_make_api_call(self, operation_name, api_params):
 
 
 aiobotocore.client.AioBaseClient._make_api_call = _counting_make_api_call
+
+
+async def _counting_body_exit(self, exc_type, exc_val, exc_tb):
+    global BODY_EXITS
+    BODY_EXITS += 1
+    return await _orig_body_exit(self, exc_type, exc_val, exc_tb)
+
+
+aiobotocore.response.StreamingBody.__aexit__ = _counting_body_exit
 
 # Read-only, deterministic commands drawn from examples/python/s3/s3.py and
 # examples/python/gcs/gcs.py. {m} is the mount root (/s3 or /gcs) and the same
@@ -274,6 +286,37 @@ async def _measure(ws: Workspace, name: str, cmd: str) -> None:
     print(f"bytes={net} lines={len(lines)} out0={first!r}")
 
 
+async def _wait_for_drains(ws: Workspace) -> None:
+    while ws.cache._drain_tasks:
+        tasks = tuple(ws.cache._drain_tasks.values())
+        await asyncio.gather(*tasks)
+
+
+async def _run_bounded_drain(ws: Workspace) -> None:
+    global BODY_EXITS
+    path = "/s3/data/example.jsonl"
+    await ws.cache.clear()
+    ws.max_drain_bytes = 4096
+    BODY_EXITS = 0
+    before = sum(rec.bytes for rec in ws.ops.records)
+    try:
+        result = await ws.execute(f"cat {path} | head -c 100")
+        out = await result.stdout_str()
+        await _wait_for_drains(ws)
+        net = sum(rec.bytes for rec in ws.ops.records) - before
+        cached = await ws.cache.get(path)
+        assert len(out.encode()) == 100
+        assert net == 8192
+        assert cached is None
+        assert BODY_EXITS == 1
+        print("=== s3:bounded_drain ===")
+        print(f"bytes={net} cache_entry={cached is not None} "
+              f"source_closed={BODY_EXITS == 1}")
+    finally:
+        ws.max_drain_bytes = None
+        await ws.cache.clear()
+
+
 async def _warm_serve(endpoint: str, name: str, mount: str, cmd: str) -> None:
     ws = _build_workspace(endpoint)
     await (await ws.execute(f"cat {mount}/data/example.jsonl")).stdout_str()
@@ -402,6 +445,7 @@ async def main() -> None:
             for name, tmpl in STREAMING_CASES:
                 await _measure(ws, f"{tag}:stream:{name}",
                                tmpl.format(m=mount))
+        await _run_bounded_drain(ws)
         for mount in MOUNTS:
             tag = mount.lstrip("/")
             for name, tmpl in WARM_SERVE_CASES:

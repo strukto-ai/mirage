@@ -42,3 +42,28 @@ export interface FileCache {
   // Python RAM cache's _drain_tasks); applyIo skips draining without it.
   readonly drainTasks?: Map<string, Promise<void>>
 }
+
+/**
+ * Max bytes a background drain may buffer to fill the cache.
+ *
+ * null (the default) derives the budget from `cacheLimit`. An explicit
+ * value limits speculative background reads further and may not exceed
+ * the cache's intended capacity. Mirrors Python `drain_budget`.
+ */
+export function drainBudget(cache: FileCache): number {
+  validateMaxDrainBytes(cache.cacheLimit, cache.maxDrainBytes)
+  return cache.maxDrainBytes ?? cache.cacheLimit
+}
+
+export function validateMaxDrainBytes(cacheLimit: number, maxDrainBytes: number | null): void {
+  if (!Number.isSafeInteger(cacheLimit) || cacheLimit < 0) {
+    throw new RangeError('cacheLimit must be a non-negative safe integer')
+  }
+  if (maxDrainBytes === null) return
+  if (!Number.isSafeInteger(maxDrainBytes) || maxDrainBytes < 0) {
+    throw new RangeError('maxDrainBytes must be a non-negative safe integer')
+  }
+  if (maxDrainBytes > cacheLimit) {
+    throw new RangeError('maxDrainBytes cannot exceed cacheLimit')
+  }
+}

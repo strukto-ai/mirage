@@ -119,15 +119,20 @@ async def with_mount_prefix(prefix: str,
         it (AsyncIterator[bytes]): The stream to wrap.
     """
     aiter = it.__aiter__()
-    while True:
-        prev = push_mount_prefix(prefix)
-        try:
-            chunk = await aiter.__anext__()
-        except StopAsyncIteration:
-            push_mount_prefix(prev)
-            return
-        push_mount_prefix(prev)
-        yield chunk
+    try:
+        while True:
+            prev = push_mount_prefix(prefix)
+            try:
+                chunk = await aiter.__anext__()
+            except StopAsyncIteration:
+                return
+            finally:
+                push_mount_prefix(prev)
+            yield chunk
+    finally:
+        close = getattr(aiter, "aclose", None)
+        if close is not None:
+            await close()
 
 
 def _virtual(path: str, prefix: str) -> str:
@@ -293,12 +298,17 @@ async def with_revisions(revisions: dict[str, str] | None,
         it (AsyncIterator[bytes]): The stream to wrap.
     """
     aiter = it.__aiter__()
-    while True:
-        token = push_revisions(revisions)
-        try:
-            chunk = await aiter.__anext__()
-        except StopAsyncIteration:
-            reset_revisions(token)
-            return
-        reset_revisions(token)
-        yield chunk
+    try:
+        while True:
+            token = push_revisions(revisions)
+            try:
+                chunk = await aiter.__anext__()
+            except StopAsyncIteration:
+                return
+            finally:
+                reset_revisions(token)
+            yield chunk
+    finally:
+        close = getattr(aiter, "aclose", None)
+        if close is not None:
+            await close()

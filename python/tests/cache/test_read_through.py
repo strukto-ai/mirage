@@ -30,10 +30,14 @@ class _CountingBackend:
         self.data = data
         self.stream_calls = 0
         self.bytes_calls = 0
+        self.stream_closed = False
 
     async def read_stream(self, accessor, path, *args, **kwargs):
         self.stream_calls += 1
-        yield self.data
+        try:
+            yield self.data
+        finally:
+            self.stream_closed = True
 
     async def read_bytes(self, accessor, path, *args, **kwargs) -> bytes:
         self.bytes_calls += 1
@@ -128,6 +132,16 @@ async def test_read_stream_no_manager_falls_through():
     out = await _drain(reader(None, _spec()))
     assert out == b"payload"
     assert backend.stream_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_read_stream_close_propagates_to_backend():
+    backend = _CountingBackend(b"payload")
+    reader = cache_aware_read_stream(backend.read_stream)
+    source = reader(None, _spec())
+    assert await anext(source) == b"payload"
+    await source.aclose()
+    assert backend.stream_closed
 
 
 @pytest.mark.asyncio
