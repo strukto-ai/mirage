@@ -62,7 +62,7 @@ import {
 } from '../executor/builtins/index.ts'
 import { handleConnection, handlePipe, handleSubshell } from '../executor/pipes.ts'
 import { handleRedirect } from '../executor/redirect.ts'
-import type { Namespace } from '../mount/namespace.ts'
+import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Session } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'

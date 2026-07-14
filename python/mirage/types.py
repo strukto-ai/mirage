@@ -421,6 +421,15 @@ class NodeKey(StrEnum):
     CHILDREN = "children"
 
 
+class NodeMetaKey(StrEnum):
+    TARGET = "target"
+    MTIME = "mtime"
+    MODE = "mode"
+    UID = "uid"
+    GID = "gid"
+    ATIME = "atime"
+
+
 class SessionKey(StrEnum):
     SESSION_ID = "session_id"
     CWD = "cwd"

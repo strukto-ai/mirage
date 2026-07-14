@@ -18,7 +18,7 @@ import { FileStat, FileType, PathSpec, wordText } from '../../../types.ts'
 import { CycleError } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { DispatchFn } from '../cross_mount.ts'
-import type { Namespace } from '../../mount/namespace.ts'
+import type { Namespace } from '../../mount/namespace/namespace.ts'
 import type { Session } from '../../session/session.ts'
 import { ExecutionNode } from '../../types.ts'
 import type { Result } from './scope.ts'
@@ -74,11 +74,11 @@ function errorResult(command: string, message: string): Result {
   ]
 }
 
-export function handleLn(
+export async function handleLn(
   namespace: Namespace,
   session: Session,
   args: (string | PathSpec)[],
-): Result {
+): Promise<Result> {
   const [flags, operands] = splitFlags(args, 'sfnv')
   const targetArg = operands[0]
   const linkArg = operands[1]
@@ -101,7 +101,7 @@ export function handleLn(
       `ln: failed to create symbolic link '${wordText(linkArg)}': File exists\n`,
     )
   }
-  namespace.symlink(linkAbs, targetTyped, Date.now() / 1000)
+  await namespace.symlink(linkAbs, targetTyped, Date.now() / 1000)
   let out: Uint8Array | null = null
   if (flags.has('v')) {
     out = new TextEncoder().encode(`'${wordText(linkArg)}' -> '${targetTyped}'\n`)
@@ -150,15 +150,15 @@ export function followPaths(
 
 // Unlink and drop `rm` operands that are symlinks. GNU rm removes the link
 // itself and never follows it; a dangling link removes fine.
-export function stripLinkOperands(
+export async function stripLinkOperands(
   namespace: Namespace,
   items: (string | PathSpec)[],
-): [(string | PathSpec)[], number] {
+): Promise<[(string | PathSpec)[], number]> {
   let removed = 0
   const kept: (string | PathSpec)[] = []
   for (const item of items) {
     if (item instanceof PathSpec && namespace.isLink(item.virtual)) {
-      namespace.unlink(item.virtual)
+      await namespace.unlink(item.virtual)
       removed += 1
       continue
     }
@@ -217,8 +217,8 @@ export async function prepareMv(
   }
 
   if (namespace.isLink(src.virtual)) {
-    namespace.unlink(targetDst)
-    namespace.rename(src.virtual, targetDst)
+    await namespace.unlink(targetDst)
+    await namespace.rename(src.virtual, targetDst)
     const early: Result = [null, new IOResult(), new ExecutionNode({ command: 'mv', exitCode: 0 })]
     return { items, postUnlink: null, postRename: null, early }
   }

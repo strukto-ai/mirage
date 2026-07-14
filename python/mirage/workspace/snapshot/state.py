@@ -96,14 +96,7 @@ async def to_state_dict(ws) -> dict:
         StateKey.FINGERPRINTS: fingerprints,
         StateKey.LIVE_ONLY_MOUNTS: live_only_mounts,
         StateKey.NODES: {
-            path: {
-                field: value
-                for field, value in (("target", meta.target), ("mtime",
-                                                               meta.mtime),
-                                     ("mode", meta.mode), ("uid", meta.uid),
-                                     ("gid", meta.gid), ("atime", meta.atime))
-                if value is not None
-            }
+            path: meta.to_fields()
             for path, meta in ws._namespace.nodes.items()
         },
     }
@@ -181,21 +174,15 @@ async def apply_state_dict(ws, state: dict) -> None:
     _restore_cache(ws, state)
     await _restore_history(ws, state)
     _restore_jobs(ws, state)
-    _restore_nodes(ws, state)
+    await _restore_nodes(ws, state)
 
 
-def _restore_nodes(ws, state: dict) -> None:
+async def _restore_nodes(ws, state: dict) -> None:
     entries = {
-        path:
-        NodeMeta(target=d.get("target"),
-                 mtime=d.get("mtime"),
-                 mode=d.get("mode"),
-                 uid=d.get("uid"),
-                 gid=d.get("gid"),
-                 atime=d.get("atime"))
+        path: NodeMeta.from_fields(d)
         for path, d in (state.get(StateKey.NODES) or {}).items()
     }
-    ws._namespace.replace_nodes(entries)
+    await ws._namespace.replace_nodes(entries)
 
 
 def _restore_sessions(ws, state: dict) -> None:

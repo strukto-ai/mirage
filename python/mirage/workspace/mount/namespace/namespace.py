@@ -12,12 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dataclasses import dataclass, fields
+import asyncio
+from dataclasses import dataclass
 
 from mirage.resource.base import BaseResource
-from mirage.types import MountMode
+from mirage.types import MountMode, NodeMetaKey
 from mirage.utils.path import glob_prefix_match, resolve_symlinks
 from mirage.workspace.mount.mount import MountEntry
+from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
+from mirage.workspace.mount.namespace.store import NamespaceStore, NodeFields
 from mirage.workspace.mount.registry import MountRegistry
 
 
@@ -40,7 +43,30 @@ class NodeMeta:
     atime: str | None = None
 
     def is_empty(self) -> bool:
-        return all(getattr(self, f.name) is None for f in fields(self))
+        return all(getattr(self, key) is None for key in NodeMetaKey)
+
+    def to_fields(self) -> NodeFields:
+        return {
+            str(key): value
+            for key in NodeMetaKey if (value := getattr(self, key)) is not None
+        }
+
+    @classmethod
+    def from_fields(cls, entry: NodeFields) -> "NodeMeta":
+        target = entry.get(NodeMetaKey.TARGET)
+        mtime = entry.get(NodeMetaKey.MTIME)
+        mode = entry.get(NodeMetaKey.MODE)
+        uid = entry.get(NodeMetaKey.UID)
+        gid = entry.get(NodeMetaKey.GID)
+        atime = entry.get(NodeMetaKey.ATIME)
+        return cls(
+            target=target if isinstance(target, str) else None,
+            mtime=float(mtime) if isinstance(mtime, (int, float)) else None,
+            mode=mode if isinstance(mode, int) else None,
+            uid=uid if isinstance(uid, (int, str)) else None,
+            gid=gid if isinstance(gid, (int, str)) else None,
+            atime=atime if isinstance(atime, str) else None,
+        )
 
 
 class Namespace:
@@ -53,14 +79,24 @@ class Namespace:
     execution and caching live in the Dispatcher, which calls this layer
     to locate the mount.
 
+    The in-memory table is the working copy (reads stay synchronous on
+    the hot path); every mutation writes through to a ``NamespaceStore``
+    (RAM by default, Redis for restart-durable namespaces), and the
+    table hydrates from the store once on first use.
+
     Symlinks are stored verbatim as typed: the target string is kept exactly
     as the user wrote it (relative targets are resolved lazily against the
     link's own parent at resolution time), so ``readlink`` is GNU-faithful.
     """
 
-    def __init__(self, registry: MountRegistry) -> None:
+    def __init__(self,
+                 registry: MountRegistry,
+                 store: NamespaceStore | None = None) -> None:
         self._registry = registry
+        self._store = store if store is not None else RAMNamespaceStore()
         self._nodes: dict[str, NodeMeta] = {}
+        self._loaded = False
+        self._load_lock = asyncio.Lock()
 
     @property
     def registry(self) -> MountRegistry:
@@ -70,8 +106,34 @@ class Namespace:
     def nodes(self) -> dict[str, NodeMeta]:
         return self._nodes
 
-    def replace_nodes(self, entries: dict[str, NodeMeta]) -> None:
+    async def ensure_loaded(self) -> None:
+        """Hydrate the working copy from the store, once.
+
+        A snapshot restore (``replace_nodes``) marks the table loaded, so
+        snapshot state wins over whatever the store held before it.
+        """
+        if self._loaded:
+            return
+        async with self._load_lock:
+            if self._loaded:
+                return
+            entries = await self._store.load()
+            self._nodes = {
+                path: NodeMeta.from_fields(entry)
+                for path, entry in entries.items()
+            }
+            self._loaded = True
+
+    async def replace_nodes(self, entries: dict[str, NodeMeta]) -> None:
         self._nodes = dict(entries)
+        self._loaded = True
+        await self._store.replace_all({
+            path: meta.to_fields()
+            for path, meta in entries.items()
+        })
+
+    async def close(self) -> None:
+        await self._store.close()
 
     def symlink_targets(self) -> dict[str, str]:
         return {
@@ -90,15 +152,16 @@ class Namespace:
         meta = self._nodes.get(path)
         return meta.target if meta is not None else None
 
-    def symlink(self, link: str, target: str, mtime: float) -> None:
+    async def symlink(self, link: str, target: str, mtime: float) -> None:
         meta = self._nodes.setdefault(link, NodeMeta())
         meta.target = target
         meta.mtime = mtime
+        await self._store.set(link, meta.to_fields())
 
     def meta_for(self, path: str) -> NodeMeta | None:
         return self._nodes.get(path)
 
-    def set_attrs(
+    async def set_attrs(
         self,
         path: str,
         *,
@@ -132,8 +195,9 @@ class Namespace:
             meta.atime = atime
         if mtime is not None:
             meta.mtime = mtime
+        await self._store.set(path, meta.to_fields())
 
-    def clear_times(self, path: str) -> None:
+    async def clear_times(self, path: str) -> None:
         """Drop overlay times after a content write.
 
         write(2) refreshes mtime, so a stored overlay time would
@@ -150,14 +214,18 @@ class Namespace:
         meta.atime = None
         if meta.is_empty():
             del self._nodes[path]
+            await self._store.delete([path])
+            return
+        await self._store.set(path, meta.to_fields())
 
-    def unlink(self, path: str) -> bool:
+    async def unlink(self, path: str) -> bool:
         if path in self._nodes:
             del self._nodes[path]
+            await self._store.delete([path])
             return True
         return False
 
-    def unlink_glob(self, pattern: str) -> int:
+    async def unlink_glob(self, pattern: str) -> int:
         """Drop node entries matching an unexpanded glob operand.
 
         ``rm`` receives the pattern verbatim (backend wrappers expand
@@ -175,13 +243,17 @@ class Namespace:
         ]
         for path in doomed:
             del self._nodes[path]
+        if doomed:
+            await self._store.delete(doomed)
         return len(doomed)
 
-    def rename(self, src: str, dst: str) -> bool:
+    async def rename(self, src: str, dst: str) -> bool:
         meta = self._nodes.pop(src, None)
         if meta is None:
             return False
         self._nodes[dst] = meta
+        await self._store.set(dst, meta.to_fields())
+        await self._store.delete([src])
         return True
 
     def follow(self, path: str) -> str:
@@ -218,7 +290,7 @@ class Namespace:
                 out[path[len(base):]] = meta.target
         return out
 
-    def purge_under(self, directory: str) -> int:
+    async def purge_under(self, directory: str) -> int:
         """Drop every node entry under a directory (``rm -r`` semantics).
 
         Args:
@@ -231,6 +303,8 @@ class Namespace:
         doomed = [path for path in self._nodes if path.startswith(base)]
         for path in doomed:
             del self._nodes[path]
+        if doomed:
+            await self._store.delete(doomed)
         return len(doomed)
 
     def resolve(self,
