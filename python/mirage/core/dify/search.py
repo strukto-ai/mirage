@@ -1,7 +1,7 @@
 import logging
 from typing import Any
 
-from mirage.cache.index import IndexCacheStore, IndexEntry
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.dify._client import dify_post
 from mirage.core.dify.path import resolve_path
 from mirage.core.dify.read import segment_text
@@ -25,7 +25,7 @@ async def search_segments(
     accessor,
     query: str,
     paths: list[PathSpec],
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
     method: str = "semantic",
     top_k: int = 10,
     threshold: float = 0.0,
@@ -90,7 +90,7 @@ def validate_args(query: str, method: str, top_k: int,
 async def metadata_conditions(
     accessor,
     paths: list[PathSpec],
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> tuple[list[dict], bool]:
     targets = await target_entries(accessor, paths, index)
     slug_values: list[str] = []
@@ -119,7 +119,7 @@ async def metadata_conditions(
 async def target_entries(
     accessor,
     paths: list[PathSpec],
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> dict[str, IndexEntry]:
     targets: dict[str, IndexEntry] = {}
     for path in paths:

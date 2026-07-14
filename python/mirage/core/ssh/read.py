@@ -17,7 +17,7 @@ import time
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.ssh._client import _abs
 from mirage.observe.context import record
 from mirage.types import PathSpec
@@ -26,7 +26,7 @@ from mirage.utils.errors import enoent
 
 async def read_bytes(accessor: SSHAccessor,
                      path: PathSpec,
-                     index: IndexCacheStore | None = None,
+                     index: IndexCacheStore = NULL_INDEX,
                      offset: int = 0,
                      size: int | None = None) -> bytes:
     virtual = path.virtual

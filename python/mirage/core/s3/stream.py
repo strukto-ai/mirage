@@ -16,7 +16,7 @@ import time
 from collections.abc import AsyncIterator
 
 from mirage.accessor.s3 import S3Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.s3._client import _client_kwargs, _key, async_session
 from mirage.core.s3.read import _fp_rev_from_response
 from mirage.observe.context import record, record_stream, revision_for
@@ -34,7 +34,7 @@ def _is_not_found(exc: Exception) -> bool:
 async def read_stream(
     accessor: S3Accessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     chunk_size: int = 8192,
 ) -> AsyncIterator[bytes]:
     """Async generator yielding chunks of an S3 object.

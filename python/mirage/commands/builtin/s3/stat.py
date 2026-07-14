@@ -35,7 +35,7 @@ async def stat(
     stdin: bytes | None = None,
     c: str | None = None,
     f: str | None = None,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:

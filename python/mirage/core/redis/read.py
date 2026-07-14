@@ -15,7 +15,7 @@
 import time
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.observe.context import record
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
@@ -39,7 +39,7 @@ async def read_bytes(accessor: RedisAccessor, path: PathSpec) -> bytes:
 async def read(
     accessor: RedisAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
     try:
         return await read_bytes(accessor, path)

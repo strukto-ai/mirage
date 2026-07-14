@@ -17,7 +17,7 @@ import logging
 import posixpath
 
 from mirage.accessor.gsheets import GSheetsAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gsheets._client import (SHEETS_API_BASE, TokenManager,
                                          google_get)
 from mirage.core.gsheets.readdir import readdir
@@ -64,7 +64,7 @@ async def read_values(token_manager: TokenManager, spreadsheet_id: str,
 async def read(
     accessor: GSheetsAccessor,
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

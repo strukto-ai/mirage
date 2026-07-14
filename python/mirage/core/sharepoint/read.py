@@ -2,7 +2,7 @@ import time
 from urllib.parse import quote
 
 from mirage.accessor.sharepoint import SharePointAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.sharepoint._client import (GraphError, graph_get_bytes,
                                             item_url, split_path)
 from mirage.core.sharepoint._resolver import resolve
@@ -21,7 +21,7 @@ def _range_header(offset: int, size: int | None) -> str | None:
 
 async def read_bytes(accessor: SharePointAccessor,
                      path: PathSpec,
-                     index: IndexCacheStore | None = None,
+                     index: IndexCacheStore = NULL_INDEX,
                      offset: int = 0,
                      size: int | None = None) -> bytes:
     virtual = path.virtual if isinstance(path, PathSpec) else path

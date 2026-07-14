@@ -3,13 +3,13 @@ import gzip
 import json
 from typing import Any
 
-from mirage.cache.index import IndexCacheStore, IndexEntry
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.chroma._client import fetch_path_tree
 from mirage.utils.path import gnu_basename, parent
 
 
 async def ensure_tree(accessor,
-                      index: IndexCacheStore,
+                      index: IndexCacheStore = NULL_INDEX,
                       prefix: str = "") -> None:
     root_key = mount_root(prefix)
     listing = await index.list_dir(root_key)

@@ -16,7 +16,7 @@ import logging
 import re
 
 from mirage.accessor.discord import DiscordAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.discord.entry import snowflake_to_iso
 from mirage.core.discord.readdir import readdir as _readdir
 from mirage.types import FileStat, FileType, PathSpec
@@ -34,7 +34,7 @@ async def _populate_via_parent(
     accessor: DiscordAccessor,
     virtual_key: str,
     prefix: str,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> None:
     parent_virtual = virtual_key.rsplit("/", 1)[0] or "/"
     try:
@@ -53,7 +53,7 @@ async def _populate_via_parent(
 async def stat(
     accessor: DiscordAccessor,
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> FileStat:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

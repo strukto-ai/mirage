@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gsheets import GSheetsAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.google.date_glob import glob_to_modified_range
 from mirage.core.google.drive import GoogleFileSuffix, list_all_files
 from mirage.resource.gsheets.sheet_entry import make_filename
@@ -32,7 +32,7 @@ def is_dir_name(child: str) -> bool:
 async def readdir(
     accessor: GSheetsAccessor,
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
     virtual = path.virtual
     modified_range = None

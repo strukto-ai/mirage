@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.github_ci import GitHubCIAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.constants import SCOPE_ERROR
 from mirage.core.github_ci.readdir import readdir
 from mirage.types import PathSpec
@@ -35,7 +35,7 @@ def is_cross_run_root(path: PathSpec) -> bool:
 async def resolve_glob(
     accessor: GitHubCIAccessor,
     paths: list[PathSpec],
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[PathSpec]:
     return await resolve_glob_with(readdir, accessor, paths, index,
                                    SCOPE_ERROR)

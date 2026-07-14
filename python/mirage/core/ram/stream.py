@@ -15,7 +15,7 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.observe.context import record_stream
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
@@ -40,7 +40,7 @@ async def stream(accessor: RAMAccessor,
 async def read_stream(
         accessor: RAMAccessor,
         path: PathSpec,
-        index: IndexCacheStore | None = None) -> AsyncIterator[bytes]:
+        index: IndexCacheStore = NULL_INDEX) -> AsyncIterator[bytes]:
     try:
         async for chunk in stream(accessor, path):
             yield chunk

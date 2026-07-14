@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.onedrive import OneDriveAccessor
-from mirage.cache.index import IndexCacheStore, ResourceType
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, ResourceType
 from mirage.core.onedrive._client import (GraphError, graph_get, item_url,
                                           split_path)
 from mirage.types import FileStat, FileType, PathSpec
@@ -44,30 +44,29 @@ def _entry_stat(item: dict) -> FileStat:
 
 async def stat(accessor: OneDriveAccessor,
                path: PathSpec,
-               index: IndexCacheStore | None = None) -> FileStat:
+               index: IndexCacheStore = NULL_INDEX) -> FileStat:
     virtual = path.virtual if isinstance(path, PathSpec) else path
     prefix, stripped = split_path(path)
     if not stripped:
         return FileStat(name="/", type=FileType.DIRECTORY)
 
-    if index is not None:
-        virtual_key = (prefix + "/" + stripped if prefix else "/" + stripped)
-        lookup = await index.get(virtual_key)
-        if lookup.entry is not None:
-            entry = lookup.entry
-            if entry.resource_type == ResourceType.FOLDER:
-                return FileStat(name=entry.name,
-                                type=FileType.DIRECTORY,
-                                size=entry.size,
-                                modified=entry.remote_time or None)
+    virtual_key = (prefix + "/" + stripped if prefix else "/" + stripped)
+    lookup = await index.get(virtual_key)
+    if lookup.entry is not None:
+        entry = lookup.entry
+        if entry.resource_type == ResourceType.FOLDER:
             return FileStat(name=entry.name,
+                            type=FileType.DIRECTORY,
                             size=entry.size,
-                            modified=entry.remote_time or None,
-                            type=guess_type(entry.name))
-        parent = virtual_key.rsplit("/", 1)[0] or "/"
-        parent_listing = await index.list_dir(parent)
-        if parent_listing.entries is not None:
-            raise enoent(virtual)
+                            modified=entry.remote_time or None)
+        return FileStat(name=entry.name,
+                        size=entry.size,
+                        modified=entry.remote_time or None,
+                        type=guess_type(entry.name))
+    parent = virtual_key.rsplit("/", 1)[0] or "/"
+    parent_listing = await index.list_dir(parent)
+    if parent_listing.entries is not None:
+        raise enoent(virtual)
 
     try:
         item = await graph_get(accessor.config,

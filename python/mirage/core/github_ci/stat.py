@@ -15,7 +15,7 @@
 import logging
 
 from mirage.accessor.github_ci import GitHubCIAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.github_ci.readdir import readdir as _readdir
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
@@ -30,7 +30,7 @@ async def _lookup_with_fallback(
     accessor: GitHubCIAccessor,
     virtual_key: str,
     prefix: str,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ):
     result = await index.get(virtual_key)
     if result.entry is not None:
@@ -53,7 +53,7 @@ async def _lookup_with_fallback(
 async def stat(
     accessor: GitHubCIAccessor,
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> FileStat:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

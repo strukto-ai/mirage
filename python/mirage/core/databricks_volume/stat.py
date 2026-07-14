@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
 from mirage.types import FileStat, FileType, PathSpec
@@ -78,28 +78,27 @@ async def _directory_stat_or_raise(
 async def stat(
     accessor: DatabricksVolumeAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> FileStat:
     stripped = path.mount_path.strip("/")
     if not stripped:
         return FileStat(name="/", type=FileType.DIRECTORY)
-    if index is not None:
-        prefix = mount_prefix_of(path.virtual, path.resource_path)
-        virtual_key = (prefix.rstrip("/") + "/" + stripped if prefix else "/" +
-                       stripped)
-        lookup = await index.get(virtual_key)
-        if lookup.entry is not None:
-            entry = lookup.entry
-            if entry.resource_type == "folder":
-                return FileStat(name=entry.name, type=FileType.DIRECTORY)
-            return FileStat(name=entry.name,
-                            size=entry.size,
-                            modified=entry.remote_time or None,
-                            type=guess_type(entry.name))
-        parent = virtual_key.rsplit("/", 1)[0] or "/"
-        parent_listing = await index.list_dir(parent)
-        if parent_listing.entries is not None:
-            raise enoent(path)
+    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    virtual_key = (prefix.rstrip("/") + "/" + stripped if prefix else "/" +
+                   stripped)
+    lookup = await index.get(virtual_key)
+    if lookup.entry is not None:
+        entry = lookup.entry
+        if entry.resource_type == "folder":
+            return FileStat(name=entry.name, type=FileType.DIRECTORY)
+        return FileStat(name=entry.name,
+                        size=entry.size,
+                        modified=entry.remote_time or None,
+                        type=guess_type(entry.name))
+    parent = virtual_key.rsplit("/", 1)[0] or "/"
+    parent_listing = await index.list_dir(parent)
+    if parent_listing.entries is not None:
+        raise enoent(path)
     remote_path = backend_path(accessor.config, path)
     try:
         metadata = await asyncio.to_thread(accessor.files.get_metadata,

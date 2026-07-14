@@ -1,6 +1,6 @@
 import re
 
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.dify.read import read_stream
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.types import PathSpec
@@ -10,7 +10,7 @@ async def grep_bytes(
         accessor,
         paths: list[PathSpec],
         pattern: str,
-        index: IndexCacheStore,
+        index: IndexCacheStore = NULL_INDEX,
         ignore_case: bool = False) -> tuple[bytes, dict[str, bytes]]:
     flags = re.IGNORECASE if ignore_case else 0
     regex = re.compile(pattern, flags)

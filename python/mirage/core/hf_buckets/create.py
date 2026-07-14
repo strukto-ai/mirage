@@ -13,12 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.hf_buckets import HfBucketsAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.hf_buckets.write import write_bytes
 from mirage.types import PathSpec
 
 
 async def create(accessor: HfBucketsAccessor,
                  path: PathSpec,
-                 index: IndexCacheStore | None = None) -> None:
+                 index: IndexCacheStore = NULL_INDEX) -> None:
     await write_bytes(accessor, path, b"", index)

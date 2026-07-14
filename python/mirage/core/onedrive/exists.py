@@ -13,14 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.onedrive import OneDriveAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.onedrive.stat import stat
 from mirage.types import PathSpec
 
 
 async def exists(accessor: OneDriveAccessor,
                  path: PathSpec,
-                 index: IndexCacheStore | None = None) -> bool:
+                 index: IndexCacheStore = NULL_INDEX) -> bool:
     try:
         await stat(accessor, path, index)
         return True

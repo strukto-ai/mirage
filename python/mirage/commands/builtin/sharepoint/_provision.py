@@ -22,7 +22,7 @@ from mirage.types import PathSpec
 async def _resolve_sizes(
     accessor: SharePointAccessor,
     paths: list[PathSpec],
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
 ) -> tuple[list[tuple[str, int]], int]:
     """Walk paths, return (path, size) pairs. Self-heals via stat fallback.
 
@@ -41,10 +41,9 @@ async def _resolve_sizes(
     for p in paths:
         path_str = p.virtual if isinstance(p, PathSpec) else p
         size = None
-        if index is not None:
-            lookup = await index.get(path_str)
-            if lookup.entry is not None:
-                size = lookup.entry.size
+        lookup = await index.get(path_str)
+        if lookup.entry is not None:
+            size = lookup.entry.size
         if size is None:
             try:
                 file_stat = await sharepoint_stat(accessor, p, index)
@@ -65,7 +64,7 @@ async def file_read_provision(
     paths: list[PathSpec],
     *_args: object,
     command: str = "",
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
     **_extra: object,
 ) -> ProvisionResult:
     """Cost estimate for full file reads (cat, wc).
@@ -96,7 +95,7 @@ async def head_tail_provision(
     command: str = "",
     n: str | int | None = None,
     c: str | int | None = None,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
     **_extra: object,
 ) -> ProvisionResult:
     """Cost estimate for partial reads (head, tail).
@@ -138,7 +137,7 @@ async def metadata_provision(
     paths: list[PathSpec],
     *_args: object,
     command: str = "",
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
     **_extra: object,
 ) -> ProvisionResult:
     """Cost estimate for metadata-only ops (stat, ls, find).

@@ -15,7 +15,7 @@
 import orjson
 
 from mirage.accessor.postgres import PostgresAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.postgres import _client
 from mirage.core.postgres._schema_json import (build_database_json,
                                                build_entity_schema_json)
@@ -28,7 +28,7 @@ from mirage.utils.key_prefix import mount_key, mount_prefix_of
 async def read(
     accessor: PostgresAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     *,
     limit: int | None = None,
     offset: int | None = None,

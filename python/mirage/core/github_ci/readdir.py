@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.github_ci import GitHubCIAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.github_ci.artifacts import list_artifacts
 from mirage.core.github_ci.runs import list_jobs_for_run, list_runs
 from mirage.core.github_ci.workflows import list_workflows
@@ -31,7 +31,7 @@ def _safe_name(name: str) -> str:
 async def readdir(
     accessor: GitHubCIAccessor,
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

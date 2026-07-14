@@ -8,17 +8,16 @@ from mirage.types import PathSpec
 async def _resolve_sizes(
     accessor: NextcloudAccessor,
     paths: list[PathSpec],
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
 ) -> tuple[list[tuple[str, int]], int]:
     resolved: list[tuple[str, int]] = []
     missing = 0
     for p in paths:
         path_str = p.virtual if isinstance(p, PathSpec) else p
         size = None
-        if index is not None:
-            lookup = await index.get(path_str)
-            if lookup.entry is not None:
-                size = lookup.entry.size
+        lookup = await index.get(path_str)
+        if lookup.entry is not None:
+            size = lookup.entry.size
         if size is None:
             try:
                 file_stat = await nextcloud_stat(accessor, p, index)
@@ -39,7 +38,7 @@ async def file_read_provision(
     paths: list[PathSpec],
     *_args: object,
     command: str = "",
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
     **_extra: object,
 ) -> ProvisionResult:
     if not paths:

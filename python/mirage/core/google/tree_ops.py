@@ -17,7 +17,7 @@ from collections.abc import Callable
 
 from mirage.accessor.base import Accessor
 from mirage.cache.context import invalidate_after_unlink
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.google.drive import delete_file
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
@@ -42,7 +42,7 @@ def make_stat(readdir: Callable) -> Callable:
     async def stat(
         accessor: Accessor,
         path: PathSpec,
-        index: IndexCacheStore,
+        index: IndexCacheStore = NULL_INDEX,
     ) -> FileStat:
         virtual = path.virtual
         prefix = mount_prefix_of(path.virtual, path.resource_path)
@@ -95,7 +95,7 @@ def make_unlink(readdir: Callable) -> Callable:
     async def unlink(
         accessor: Accessor,
         path: PathSpec,
-        index: IndexCacheStore,
+        index: IndexCacheStore = NULL_INDEX,
     ) -> None:
         prefix = mount_prefix_of(path.virtual, path.resource_path)
         raw = path.virtual

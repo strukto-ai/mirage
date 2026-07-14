@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.mongodb import MongoDBAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.mongodb._client import (count_documents, database_exists,
                                          entity_exists, get_indexes, is_view)
 from mirage.core.mongodb.scope import detect_scope
@@ -25,7 +25,7 @@ from mirage.utils.errors import enoent
 async def stat(
     accessor: MongoDBAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> FileStat:
     scope = detect_scope(path)
 

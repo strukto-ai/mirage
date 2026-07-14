@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from opendal.exceptions import NotFound
 
 from mirage.accessor.nextcloud import NextcloudAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.nextcloud.constants import DEFAULT_CHUNK_SIZE
 from mirage.observe.context import record, record_stream
 from mirage.types import PathSpec
@@ -31,7 +31,7 @@ async def range_read(accessor: NextcloudAccessor, path: PathSpec, start: int,
 async def read_stream(
     accessor: NextcloudAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
 ) -> AsyncIterator[bytes]:
     raw = path.mount_path

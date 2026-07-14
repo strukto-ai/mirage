@@ -15,7 +15,7 @@
 import json
 
 from mirage.accessor.discord import DiscordAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.discord.files import download_file
 from mirage.core.discord.history import get_history_jsonl
 from mirage.core.discord.members import list_members
@@ -41,7 +41,7 @@ async def _ensure_channel(
 async def read(
     accessor: DiscordAccessor,
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
     virtual = path.virtual if isinstance(path, PathSpec) else path
     prefix = mount_prefix_of(path.virtual, path.resource_path)

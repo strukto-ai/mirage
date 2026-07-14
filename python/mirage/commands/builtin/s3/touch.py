@@ -38,7 +38,7 @@ async def touch(
     c: bool = False,
     r: str | None = None,
     d: str | None = None,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:

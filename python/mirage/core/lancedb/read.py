@@ -15,7 +15,7 @@
 import base64
 
 from mirage.accessor.lancedb import LanceDBAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.lancedb.query import row_record
 from mirage.core.lancedb.render import render_card
 from mirage.core.lancedb.scope import ScopeLevel, detect_scope
@@ -43,7 +43,7 @@ def _blob_bytes(value: object) -> bytes:
 async def read(
     accessor: LanceDBAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
     config = accessor.config
     scope = detect_scope(path, config)

@@ -16,7 +16,7 @@ import re
 from email.utils import parsedate_to_datetime
 
 from mirage.accessor.email import EmailAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.email._client import fetch_headers, list_message_uids
 from mirage.core.email.folders import list_folders
 from mirage.types import PathSpec
@@ -53,7 +53,7 @@ def _date_from_header(date_str: str) -> str:
 async def readdir(
     accessor: EmailAccessor,
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.history import HistoryAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.history.read import read
 from mirage.types import FileStat, PathSpec
 from mirage.utils.filetype import guess_type
@@ -21,7 +21,7 @@ from mirage.utils.filetype import guess_type
 
 async def stat(accessor: HistoryAccessor,
                path: PathSpec,
-               index: IndexCacheStore | None = None) -> FileStat:
+               index: IndexCacheStore = NULL_INDEX) -> FileStat:
     """Stat the rendered histfile.
 
     Args:

@@ -16,7 +16,7 @@ import asyncio
 from io import BytesIO
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume._helpers import ensure_path_spec
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.read import read_bytes
@@ -78,7 +78,7 @@ async def copy(
     accessor: DatabricksVolumeAccessor,
     src: PathSpec,
     dst: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     recursive: bool = False,
 ) -> None:
     src = ensure_path_spec(src)

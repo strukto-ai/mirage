@@ -15,7 +15,7 @@
 import json
 
 from mirage.accessor.slack import SlackAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.slack import files as slack_files
 from mirage.core.slack.history import get_history_jsonl
 from mirage.core.slack.users import get_user_profile
@@ -27,7 +27,7 @@ from mirage.utils.key_prefix import mount_prefix_of
 async def read(
     accessor: SlackAccessor,
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path) if isinstance(

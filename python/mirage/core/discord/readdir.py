@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 import aiohttp
 
 from mirage.accessor.discord import DiscordAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.discord.channels import list_channels
 from mirage.core.discord.entry import (DiscordResourceType, channel_entry,
                                        guild_entry, history_entry,
@@ -62,7 +62,7 @@ async def _readdir_root(
     accessor: DiscordAccessor,
     prefix: str,
     virtual_key: str,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
     if index is not None:
         listing = await index.list_dir(virtual_key)
@@ -215,7 +215,7 @@ async def _fetch_day(
     channel_id: str,
     date_str: str,
     date_vkey: str,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> None:
     """Walk the day's history once, populate date dir and files dir
     entries in the index. Tolerates soft HTTP errors (403/404/429) by
@@ -330,7 +330,7 @@ async def _readdir_files_dir(
 async def readdir(
     accessor: DiscordAccessor,
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
     """List directory contents.
 

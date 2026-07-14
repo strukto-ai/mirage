@@ -17,7 +17,7 @@ import re
 from datetime import datetime, timezone
 
 from mirage.accessor.gmail import GmailAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.gmail.date_query import date_dir_to_gmail_query
 from mirage.core.gmail.labels import list_labels
 from mirage.core.gmail.messages import (_extract_attachments, _extract_header,
@@ -143,7 +143,7 @@ async def _build_date_groups(
 async def readdir(
     accessor: GmailAccessor,
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

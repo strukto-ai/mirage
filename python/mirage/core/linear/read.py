@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.linear import LinearAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.linear._client import (get_issue, list_issue_comments,
                                         list_team_cycles, list_team_issues,
                                         list_team_members, list_team_projects,
@@ -121,7 +121,7 @@ async def read_bytes(
 async def read(
     accessor: LinearAccessor,
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
     virtual = path.virtual
     if isinstance(path, PathSpec):

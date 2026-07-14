@@ -18,7 +18,7 @@ import aiofiles.os
 from aiofiles.os import path as aio_path
 
 from mirage.accessor.disk import DiskAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.timeutil import epoch_to_iso
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.filetype import guess_type
@@ -34,7 +34,7 @@ def _resolve(root: Path, path: str) -> Path:
 
 async def stat(accessor: DiskAccessor,
                path: PathSpec,
-               index: IndexCacheStore | None = None) -> FileStat:
+               index: IndexCacheStore = NULL_INDEX) -> FileStat:
     virtual = path.virtual
     if isinstance(path, PathSpec):
         path = path.mount_path

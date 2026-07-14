@@ -16,7 +16,7 @@ import logging
 import re
 
 from mirage.accessor.slack import SlackAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.slack.readdir import readdir as _readdir
 from mirage.core.timeutil import epoch_to_iso
 from mirage.types import FileStat, FileType, PathSpec
@@ -46,7 +46,7 @@ async def _populate_via_parent(
     accessor: SlackAccessor,
     virtual_key: str,
     prefix: str,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> None:
     parent_virtual = virtual_key.rsplit("/", 1)[0] or "/"
     try:
@@ -65,7 +65,7 @@ async def _populate_via_parent(
 async def stat(
     accessor: SlackAccessor,
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> FileStat:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path) if isinstance(

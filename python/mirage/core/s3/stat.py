@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.s3 import S3Accessor
-from mirage.cache.index import IndexCacheStore, ResourceType
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, ResourceType
 from mirage.core.s3._client import _client_kwargs, _key, async_session
 from mirage.core.timeutil import to_iso_z
 from mirage.types import FileStat, FileType, PathSpec
@@ -31,7 +31,7 @@ def _is_not_found(exc: Exception) -> bool:
 
 async def stat(accessor: S3Accessor,
                path: PathSpec,
-               index: IndexCacheStore | None = None) -> FileStat:
+               index: IndexCacheStore = NULL_INDEX) -> FileStat:
     virtual = path.virtual if isinstance(path, PathSpec) else path
     original_prefix = ""
     if isinstance(path, PathSpec):
@@ -54,32 +54,31 @@ async def stat(accessor: S3Accessor,
     # Fast path: check the index cache populated by readdir().
     # readdir() stores entries with resource_type="folder" or "file"
     # and file sizes, so stat can return instantly for known paths.
-    if index is not None:
-        virtual_key = (original_prefix + "/" +
-                       stripped if original_prefix else "/" + stripped)
-        lookup = await index.get(virtual_key)
-        if lookup.entry is not None:
-            entry = lookup.entry
-            # S3 "folders" are synthetic common-prefixes with no object,
-            # so readdir() records no time or size for them.
-            if entry.resource_type == ResourceType.FOLDER:
-                return FileStat(name=entry.name, type=FileType.DIRECTORY)
-            # TODO: propagate ETag into IndexCacheEntry so this fast
-            # path can also carry fingerprint.
-            return FileStat(
-                name=entry.name,
-                size=entry.size,
-                modified=entry.remote_time or None,
-                type=guess_type(entry.name),
-            )
-        # If the parent directory was already listed by readdir() but
-        # this path is not among its children, it does not exist.
-        # This avoids expensive network calls for paths that shells
-        # probe speculatively (e.g. .git, HEAD, .hg during cd).
-        parent = virtual_key.rsplit("/", 1)[0] or "/"
-        parent_listing = await index.list_dir(parent)
-        if parent_listing.entries is not None:
-            raise enoent(virtual)
+    virtual_key = (original_prefix + "/" +
+                   stripped if original_prefix else "/" + stripped)
+    lookup = await index.get(virtual_key)
+    if lookup.entry is not None:
+        entry = lookup.entry
+        # S3 "folders" are synthetic common-prefixes with no object,
+        # so readdir() records no time or size for them.
+        if entry.resource_type == ResourceType.FOLDER:
+            return FileStat(name=entry.name, type=FileType.DIRECTORY)
+        # TODO: propagate ETag into IndexCacheEntry so this fast
+        # path can also carry fingerprint.
+        return FileStat(
+            name=entry.name,
+            size=entry.size,
+            modified=entry.remote_time or None,
+            type=guess_type(entry.name),
+        )
+    # If the parent directory was already listed by readdir() but
+    # this path is not among its children, it does not exist.
+    # This avoids expensive network calls for paths that shells
+    # probe speculatively (e.g. .git, HEAD, .hg during cd).
+    parent = virtual_key.rsplit("/", 1)[0] or "/"
+    parent_listing = await index.list_dir(parent)
+    if parent_listing.entries is not None:
+        raise enoent(virtual)
 
     # Slow path: no index cache available, or parent directory not yet
     # listed. Hit the network.

@@ -17,7 +17,7 @@ import logging
 import posixpath
 
 from mirage.accessor.gmail import GmailAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gmail.messages import get_attachment, get_message_processed
 from mirage.core.gmail.readdir import readdir
 from mirage.types import PathSpec
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 async def read(
     accessor: GmailAccessor,
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

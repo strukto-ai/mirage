@@ -16,7 +16,7 @@ import posixpath
 from collections.abc import AsyncIterator
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gdocs.read import read_doc
 from mirage.core.gdrive import DIRECTORY_RESOURCE_TYPES
 from mirage.core.gdrive.readdir import readdir
@@ -32,7 +32,7 @@ from mirage.utils.key_prefix import mount_key, mount_prefix_of
 async def read_stream(
     accessor: GDriveAccessor,
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
     chunk_size: int = 8192,
 ) -> AsyncIterator[bytes] | bytes:
     virtual = path.virtual
@@ -77,7 +77,7 @@ async def read_stream(
 async def stream(
     accessor: GDriveAccessor,
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
     chunk_size: int = 8192,
 ) -> AsyncIterator[bytes]:
     result = await read_stream(accessor, path, index, chunk_size)

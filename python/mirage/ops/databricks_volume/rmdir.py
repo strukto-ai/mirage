@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
+from mirage.cache.index import NULL_INDEX
 from mirage.core.databricks_volume.rmdir import rmdir as rmdir_core
 from mirage.ops.registry import op
 from mirage.types import PathSpec
@@ -24,4 +25,4 @@ async def rmdir(
     path: PathSpec,
     **kwargs,
 ) -> None:
-    await rmdir_core(accessor, path, kwargs.get("index"))
+    await rmdir_core(accessor, path, kwargs.get("index") or NULL_INDEX)

@@ -22,7 +22,7 @@ from mirage.types import PathSpec
 async def _resolve_sizes(
     accessor: RedisAccessor,
     paths: list[PathSpec],
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
 ) -> tuple[list[tuple[str, int]], int]:
     """Walk paths, return (path, size) pairs. Self-heals via stat fallback."""
     resolved: list[tuple[str, int]] = []
@@ -30,13 +30,12 @@ async def _resolve_sizes(
     for p in paths:
         path_str = p.virtual if isinstance(p, PathSpec) else p
         size = None
-        if index is not None:
-            lookup = await index.get(path_str)
-            if lookup.entry is not None:
-                size = lookup.entry.size
+        lookup = await index.get(path_str)
+        if lookup.entry is not None:
+            size = lookup.entry.size
         if size is None:
             try:
-                file_stat = await redis_stat(accessor, p)
+                file_stat = await redis_stat(accessor, p, index)
                 size = file_stat.size
             except (FileNotFoundError, ValueError):
                 # provision estimates degrade, never fail: unresolved
@@ -54,7 +53,7 @@ async def file_read_provision(
     paths: list[PathSpec],
     *_args: object,
     command: str = "",
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
     **_extra: object,
 ) -> ProvisionResult:
     """Cost estimate for full file reads (cat, wc, grep) backed by Redis.
@@ -84,7 +83,7 @@ async def head_tail_provision(
     command: str = "",
     n: str | int | None = None,
     c: str | int | None = None,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
     **_extra: object,
 ) -> ProvisionResult:
     """Cost estimate for partial reads (head, tail) backed by Redis.
@@ -113,7 +112,7 @@ async def metadata_provision(
     paths: list[PathSpec],
     *_args: object,
     command: str = "",
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
     **_extra: object,
 ) -> ProvisionResult:
     """Cost estimate for metadata-only ops (stat, ls, find) backed by Redis."""

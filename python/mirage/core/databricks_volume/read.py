@@ -17,7 +17,7 @@ import time
 from urllib.parse import quote
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
 from mirage.observe.context import record
@@ -83,7 +83,7 @@ def _download_bytes_sync(
 async def read_bytes(
     accessor: DatabricksVolumeAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     offset: int = 0,
     size: int | None = None,
 ) -> bytes:

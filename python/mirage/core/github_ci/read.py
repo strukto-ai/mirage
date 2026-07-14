@@ -15,7 +15,7 @@
 import json
 
 from mirage.accessor.github_ci import GitHubCIAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.github_ci.annotations import list_annotations
 from mirage.core.github_ci.artifacts import download_artifact
 from mirage.core.github_ci.runs import (download_job_log, get_job, get_run,
@@ -29,7 +29,7 @@ from mirage.utils.key_prefix import mount_prefix_of
 async def read(
     accessor: GitHubCIAccessor,
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

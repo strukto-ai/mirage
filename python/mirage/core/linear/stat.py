@@ -15,7 +15,7 @@
 import logging
 
 from mirage.accessor.linear import LinearAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.linear.readdir import readdir as _readdir
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
@@ -30,7 +30,7 @@ async def _populate_via_parent(
     accessor: LinearAccessor,
     idx_key: str,
     prefix: str,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> None:
     parent_idx = idx_key.rsplit("/", 1)[0] or "/"
     parent_path = (prefix + parent_idx) if prefix else parent_idx
@@ -50,7 +50,7 @@ async def _populate_via_parent(
 async def stat(
     accessor: LinearAccessor,
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> FileStat:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

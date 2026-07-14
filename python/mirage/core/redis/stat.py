@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.filetype import guess_type
@@ -36,7 +36,7 @@ def _decode_attrs(raw: dict[str, str]) -> dict:
 async def stat(
     accessor: RedisAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> FileStat:
     virtual = path.virtual
     if isinstance(path, PathSpec):

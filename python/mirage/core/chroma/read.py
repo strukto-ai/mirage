@@ -1,14 +1,15 @@
 import errno
 from collections.abc import AsyncIterator
 
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.chroma._client import fetch_page_chunks, iter_page_chunks
 from mirage.core.chroma.path import resolve_path
 from mirage.types import PathSpec
 
 
-async def read_bytes(accessor, path: PathSpec,
-                     index: IndexCacheStore) -> bytes:
+async def read_bytes(accessor,
+                     path: PathSpec,
+                     index: IndexCacheStore = NULL_INDEX) -> bytes:
     resolved = await resolve_path(accessor, path, index)
     if resolved.is_dir:
         raise IsADirectoryError(errno.EISDIR, "Is a directory", path.virtual)
@@ -16,8 +17,10 @@ async def read_bytes(accessor, path: PathSpec,
     return text.encode()
 
 
-async def read_stream(accessor, path: PathSpec,
-                      index: IndexCacheStore) -> AsyncIterator[bytes]:
+async def read_stream(
+        accessor,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX) -> AsyncIterator[bytes]:
     resolved = await resolve_path(accessor, path, index)
     if resolved.is_dir:
         raise IsADirectoryError(errno.EISDIR, "Is a directory", path.virtual)

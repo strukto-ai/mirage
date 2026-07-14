@@ -17,7 +17,7 @@ import logging
 import posixpath
 
 from mirage.accessor.gdocs import GDocsAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gdocs._client import DOCS_API_BASE, TokenManager, google_get
 from mirage.core.gdocs.readdir import readdir
 from mirage.types import PathSpec
@@ -36,7 +36,7 @@ async def read_doc(token_manager: TokenManager, doc_id: str) -> bytes:
 async def read(
     accessor: GDocsAccessor,
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

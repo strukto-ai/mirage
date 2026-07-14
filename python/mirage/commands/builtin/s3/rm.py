@@ -35,10 +35,11 @@ async def _rm(
     recursive: bool = False,
     force: bool = False,
     remove_dir: bool = False,
-    index: IndexCacheStore | None = None,
+    *,
+    index: IndexCacheStore,
 ) -> None:
     try:
-        s = await stat(accessor, path)
+        s = await stat(accessor, path, index=index)
     except (FileNotFoundError, ValueError):
         if force:
             return
@@ -74,7 +75,7 @@ async def rm(
     f: bool = False,
     v: bool = False,
     d: bool = False,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:

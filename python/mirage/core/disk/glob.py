@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.disk import DiskAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.disk.constants import SCOPE_ERROR
 from mirage.core.disk.readdir import readdir
 from mirage.types import PathSpec
@@ -23,7 +23,7 @@ from mirage.utils.glob_walk import resolve_glob_with
 async def resolve_glob(
     accessor: DiskAccessor,
     paths: list[PathSpec],
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[PathSpec]:
     return await resolve_glob_with(readdir, accessor, paths, index,
                                    SCOPE_ERROR)

@@ -15,7 +15,7 @@
 import time
 
 from mirage.accessor.s3 import S3Accessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.s3._client import _client_kwargs, _key, async_session
 from mirage.observe.context import record, revision_for
 from mirage.types import PathSpec
@@ -43,7 +43,7 @@ def _fp_rev_from_response(resp: dict) -> tuple[str | None, str | None]:
 
 async def read_bytes(accessor: S3Accessor,
                      path: PathSpec,
-                     index: IndexCacheStore | None = None,
+                     index: IndexCacheStore = NULL_INDEX,
                      offset: int = 0,
                      size: int | None = None) -> bytes:
     """Read bytes from S3, with optional range read.

@@ -15,7 +15,7 @@
 import posixpath
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gdocs.read import read_doc
 from mirage.core.gdrive import DIRECTORY_RESOURCE_TYPES
 from mirage.core.gdrive.readdir import readdir
@@ -38,7 +38,7 @@ async def read_bytes(
 async def read(
     accessor: GDriveAccessor,
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

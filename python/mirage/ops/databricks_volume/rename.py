@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
+from mirage.cache.index import NULL_INDEX
 from mirage.core.databricks_volume.rename import rename as rename_core
 from mirage.ops.registry import op
 from mirage.types import PathSpec
@@ -25,4 +26,4 @@ async def rename(
     dst: PathSpec,
     **kwargs,
 ) -> None:
-    await rename_core(accessor, src, dst, kwargs.get("index"))
+    await rename_core(accessor, src, dst, kwargs.get("index") or NULL_INDEX)

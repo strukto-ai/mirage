@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.qdrant import QdrantAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.qdrant.query import (distinct_values, list_tables,
                                       rows_matching)
 from mirage.core.qdrant.scope import ScopeLevel, detect_scope
@@ -48,7 +48,7 @@ def _row_files(rows: list[dict], config) -> list[str]:
 async def readdir(
     accessor: QdrantAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
     config = accessor.config
     scope = detect_scope(path, config)

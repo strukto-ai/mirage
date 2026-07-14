@@ -13,7 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.onedrive import OneDriveAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry, ResourceType
+from mirage.cache.index import (NULL_INDEX, IndexCacheStore, IndexEntry,
+                                ResourceType)
 from mirage.core.onedrive._client import GraphError, graph_list, item_url
 from mirage.core.onedrive.stat import stat
 from mirage.types import FileType, PathSpec
@@ -21,8 +22,9 @@ from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_prefix_of
 
 
-async def readdir(accessor: OneDriveAccessor, path: PathSpec,
-                  index: IndexCacheStore) -> list[str]:
+async def readdir(accessor: OneDriveAccessor,
+                  path: PathSpec,
+                  index: IndexCacheStore = NULL_INDEX) -> list[str]:
     original = path
     prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
     raw = path.directory if path.pattern else path.virtual
@@ -45,7 +47,7 @@ async def readdir(accessor: OneDriveAccessor, path: PathSpec,
     except GraphError as exc:
         if exc.status != 404:
             raise
-        info = await stat(accessor, original)
+        info = await stat(accessor, original, index=index)
         if info.type != FileType.DIRECTORY:
             raise NotADirectoryError(virtual_key) from exc
         raise enoent(virtual_key) from exc

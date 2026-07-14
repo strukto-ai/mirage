@@ -15,7 +15,7 @@
 import re
 from dataclasses import dataclass
 
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 
@@ -56,7 +56,7 @@ def _strip_prefix(raw: str, prefix: str) -> str:
 
 async def detect_scope(
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> DiscordScope:
     """Determine scope from a path.
 
@@ -184,7 +184,7 @@ async def detect_scope(
 
 async def coalesce_scopes(
     paths: list[PathSpec],
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> DiscordScope | None:
     if not paths:
         return None

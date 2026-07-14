@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.lancedb import LanceDBAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.lancedb.query import (distinct_values, list_tables,
                                        rows_matching)
 from mirage.core.lancedb.scope import ScopeLevel, detect_scope
@@ -44,7 +44,7 @@ def _row_files(rows: list[dict], config) -> list[str]:
 async def readdir(
     accessor: LanceDBAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
     config = accessor.config
     scope = detect_scope(path, config)

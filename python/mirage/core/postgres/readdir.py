@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.postgres import PostgresAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.postgres import _client
 from mirage.core.postgres.scope import detect_scope
 from mirage.types import PathSpec
@@ -30,7 +30,7 @@ def is_dir_name(child: str) -> bool:
 
 async def readdir(accessor: PostgresAccessor,
                   path: PathSpec,
-                  index: IndexCacheStore | None = None) -> list[str]:
+                  index: IndexCacheStore = NULL_INDEX) -> list[str]:
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     raw = path.directory if path.pattern else path.virtual
     if prefix and raw.startswith(prefix):
@@ -61,11 +61,10 @@ async def readdir(accessor: PostgresAccessor,
 
 
 async def _list_root(accessor: PostgresAccessor, virtual_key: str,
-                     index: IndexCacheStore | None, prefix: str) -> list[str]:
-    if index is not None:
-        listing = await index.list_dir(virtual_key)
-        if listing.entries is not None:
-            return listing.entries
+                     index: IndexCacheStore, prefix: str) -> list[str]:
+    listing = await index.list_dir(virtual_key)
+    if listing.entries is not None:
+        return listing.entries
     pool = await accessor.pool()
     async with pool.acquire() as conn:
         schemas = await _client.list_schemas(conn, accessor.config.schemas)
@@ -82,18 +81,16 @@ async def _list_root(accessor: PostgresAccessor, virtual_key: str,
                                    name=s,
                                    resource_type="postgres/schema",
                                    vfs_name=s)))
-    if index is not None:
-        await index.set_dir(virtual_key, entries)
+    await index.set_dir(virtual_key, entries)
     return [f"{prefix}/{name}" for name, _ in entries]
 
 
 async def _list_entities(accessor: PostgresAccessor, schema: str, kind: str,
-                         virtual_key: str, index: IndexCacheStore | None,
-                         prefix: str, raw: str) -> list[str]:
-    if index is not None:
-        listing = await index.list_dir(virtual_key)
-        if listing.entries is not None:
-            return listing.entries
+                         virtual_key: str, index: IndexCacheStore, prefix: str,
+                         raw: str) -> list[str]:
+    listing = await index.list_dir(virtual_key)
+    if listing.entries is not None:
+        return listing.entries
     pool = await accessor.pool()
     async with pool.acquire() as conn:
         if kind == "tables":
@@ -109,7 +106,6 @@ async def _list_entities(accessor: PostgresAccessor, schema: str, kind: str,
                                    name=n,
                                    resource_type=f"postgres/{kind[:-1]}",
                                    vfs_name=n)))
-    if index is not None:
-        await index.set_dir(virtual_key, entries)
+    await index.set_dir(virtual_key, entries)
     base = raw.rstrip("/")
     return [f"{prefix}{base}/{n}" for n, _ in entries]

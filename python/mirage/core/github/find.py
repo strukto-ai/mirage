@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.github import GitHubAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
                                                emit_start_path, keep,
                                                start_basename)
@@ -38,7 +38,7 @@ async def find(
     empty: bool = False,
     tree: PredNode | None = None,
     *,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
     base = path.mount_path.strip("/")
     base_depth = 0 if base == "" else base.count("/") + 1

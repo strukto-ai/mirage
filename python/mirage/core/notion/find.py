@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.notion import NotionAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
                                                keep, start_basename)
 from mirage.core.notion.readdir import readdir
@@ -25,7 +25,7 @@ from mirage.utils.key_prefix import mount_key, mount_prefix_of
 async def _collect(
     accessor: NotionAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None,
+    index: IndexCacheStore,
     out: list[tuple[str, FileStat]],
 ) -> None:
     file_stat = await stat(accessor, path, index)
@@ -60,7 +60,8 @@ async def find(
     mindepth: int | None = None,
     empty: bool = False,
     tree: PredNode | None = None,
-    index: IndexCacheStore | None = None,
+    *,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
     start_name = start_basename(path)
     base = path.mount_path

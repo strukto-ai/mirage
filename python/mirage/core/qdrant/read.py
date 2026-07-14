@@ -15,7 +15,7 @@
 import base64
 
 from mirage.accessor.qdrant import QdrantAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.qdrant.query import row_record
 from mirage.core.qdrant.render import render_json, render_text
 from mirage.core.qdrant.scope import ScopeLevel, detect_scope
@@ -43,7 +43,7 @@ def _blob_bytes(value: object) -> bytes:
 async def read(
     accessor: QdrantAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
     config = accessor.config
     scope = detect_scope(path, config)

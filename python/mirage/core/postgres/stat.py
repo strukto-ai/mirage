@@ -17,7 +17,7 @@ import hashlib
 import orjson
 
 from mirage.accessor.postgres import PostgresAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.postgres import _client
 from mirage.core.postgres.scope import detect_scope
 from mirage.types import FileStat, FileType, PathSpec
@@ -27,7 +27,7 @@ from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 async def stat(accessor: PostgresAccessor,
                path: PathSpec,
-               index: IndexCacheStore | None = None) -> FileStat:
+               index: IndexCacheStore = NULL_INDEX) -> FileStat:
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     raw = path.virtual
     if prefix and raw.startswith(prefix):

@@ -46,7 +46,7 @@ async def tail(
     c: str | None = None,
     q: bool = False,
     v: bool = False,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     n_int: int | None = None

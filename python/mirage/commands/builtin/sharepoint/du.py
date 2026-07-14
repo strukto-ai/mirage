@@ -37,7 +37,7 @@ async def du(
     a: bool = False,
     max_depth: str | None = None,
     c: bool = False,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     paths = await resolve_glob(accessor, paths, index)

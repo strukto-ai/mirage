@@ -16,7 +16,7 @@ import json
 import posixpath
 
 from mirage.accessor.email import EmailAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.email._client import fetch_attachment, fetch_message
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
@@ -26,7 +26,7 @@ from mirage.utils.key_prefix import mount_prefix_of
 async def read(
     accessor: EmailAccessor,
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

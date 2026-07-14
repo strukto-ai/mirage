@@ -42,7 +42,7 @@ async def rg(
     *texts: str,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     prefix: str = "",
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore,
     **flags: object,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["rg"])

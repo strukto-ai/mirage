@@ -14,7 +14,7 @@
 
 import logging
 
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.github.readdir import readdir as _readdir
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
@@ -24,7 +24,9 @@ from mirage.utils.key_prefix import mount_key, mount_prefix_of
 logger = logging.getLogger(__name__)
 
 
-async def stat(accessor, path: PathSpec, index: IndexCacheStore) -> FileStat:
+async def stat(accessor,
+               path: PathSpec,
+               index: IndexCacheStore = NULL_INDEX) -> FileStat:
     virtual = path.virtual
     if isinstance(path, PathSpec):
         prefix = mount_prefix_of(path.virtual, path.resource_path)

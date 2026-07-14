@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.filetype import guess_type
@@ -22,7 +22,7 @@ from mirage.utils.path import norm
 
 async def stat(accessor: RAMAccessor,
                path: PathSpec,
-               index: IndexCacheStore | None = None) -> FileStat:
+               index: IndexCacheStore = NULL_INDEX) -> FileStat:
     virtual = path.virtual if isinstance(path, PathSpec) else path
     if isinstance(path, PathSpec):
         path = path.mount_path

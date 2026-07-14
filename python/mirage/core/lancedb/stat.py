@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.lancedb import LanceDBAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.lancedb.query import table_exists
 from mirage.core.lancedb.read import read
 from mirage.core.lancedb.scope import ScopeLevel, detect_scope
@@ -35,7 +35,7 @@ def _name_of(path: PathSpec) -> str:
 async def stat(
     accessor: LanceDBAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> FileStat:
     config = accessor.config
     scope = detect_scope(path, config)

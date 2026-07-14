@@ -17,7 +17,7 @@ import logging
 import posixpath
 
 from mirage.accessor.gslides import GSlidesAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gslides._client import (SLIDES_API_BASE, TokenManager,
                                          google_get)
 from mirage.core.gslides.readdir import readdir
@@ -38,7 +38,7 @@ async def read_presentation(token_manager: TokenManager,
 async def read(
     accessor: GSlidesAccessor,
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.resource_path)

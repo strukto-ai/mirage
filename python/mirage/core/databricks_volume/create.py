@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume.write import write_bytes
 from mirage.types import PathSpec
 
@@ -21,6 +21,6 @@ from mirage.types import PathSpec
 async def create(
     accessor: DatabricksVolumeAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> None:
     await write_bytes(accessor, path, b"", index)

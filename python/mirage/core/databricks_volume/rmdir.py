@@ -16,7 +16,7 @@ import asyncio
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.context import invalidate_after_unlink
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume._helpers import ensure_path_spec
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
@@ -42,7 +42,7 @@ def _delete_directory_sync(
 async def rmdir(
     accessor: DatabricksVolumeAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> None:
     path = ensure_path_spec(path)
     file_stat = await stat(accessor, path, index)

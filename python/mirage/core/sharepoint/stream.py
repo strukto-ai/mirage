@@ -2,7 +2,7 @@ from collections.abc import AsyncIterator
 from urllib.parse import quote
 
 from mirage.accessor.sharepoint import SharePointAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.sharepoint._client import (GraphError, graph_stream, item_url,
                                             split_path)
 from mirage.core.sharepoint._resolver import resolve
@@ -16,7 +16,7 @@ from mirage.utils.errors import enoent
 async def read_stream(
     accessor: SharePointAccessor,
     path: PathSpec,
-    index: IndexCacheStore | None = None,
+    index: IndexCacheStore = NULL_INDEX,
     chunk_size: int = 8192,
 ) -> AsyncIterator[bytes]:
     virtual = path.virtual if isinstance(path, PathSpec) else path
@@ -55,4 +55,8 @@ async def read_stream(
 
 async def range_read(accessor: SharePointAccessor, path: PathSpec, start: int,
                      end: int) -> bytes:
-    return await read_bytes(accessor, path, offset=start, size=end - start)
+    return await read_bytes(accessor,
+                            path,
+                            offset=start,
+                            size=end - start,
+                            index=NULL_INDEX)

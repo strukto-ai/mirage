@@ -1,13 +1,14 @@
 from opendal.exceptions import NotFound
 
 from mirage.accessor.nextcloud import NextcloudAccessor
+from mirage.cache.index import NULL_INDEX
 from mirage.core.nextcloud.stat import stat
 from mirage.types import FileType, PathSpec
 
 
 async def du(accessor: NextcloudAccessor, path: PathSpec) -> int:
     try:
-        info = await stat(accessor, path)
+        info = await stat(accessor, path, index=NULL_INDEX)
     except FileNotFoundError:
         info = None
     if info is not None and info.type != FileType.DIRECTORY:
@@ -32,7 +33,7 @@ async def du(accessor: NextcloudAccessor, path: PathSpec) -> int:
 async def du_all(accessor: NextcloudAccessor,
                  path: PathSpec) -> list[tuple[str, int]]:
     try:
-        info = await stat(accessor, path)
+        info = await stat(accessor, path, index=NULL_INDEX)
     except FileNotFoundError:
         info = None
     if info is not None and info.type != FileType.DIRECTORY:

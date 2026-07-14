@@ -16,7 +16,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from mirage.accessor.slack import SlackAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.slack._client import slack_get
 from mirage.core.slack.channels import list_channels, list_dms
 from mirage.core.slack.files import file_blob_name
@@ -96,7 +96,7 @@ async def _readdir_channels(
     accessor: SlackAccessor,
     prefix: str,
     virtual_key: str,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
     if index is not None:
         listing = await index.list_dir(virtual_key)
@@ -125,7 +125,7 @@ async def _readdir_dms(
     accessor: SlackAccessor,
     prefix: str,
     virtual_key: str,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
     if index is not None:
         listing = await index.list_dir(virtual_key)
@@ -157,7 +157,7 @@ async def _readdir_users(
     accessor: SlackAccessor,
     prefix: str,
     virtual_key: str,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
     if index is not None:
         listing = await index.list_dir(virtual_key)
@@ -188,7 +188,7 @@ async def _readdir_channel_dates(
     key: str,
     virtual_key: str,
     container: str,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
     lookup = await index.get(virtual_key)
     if lookup.entry is None:
@@ -235,7 +235,7 @@ async def _readdir_date_contents(
     container: str,
     chan_seg: str,
     date_str: str,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
     cached = await index.list_dir(virtual_key)
     if cached.entries is not None:
@@ -268,7 +268,7 @@ async def _readdir_files_dir(
     container: str,
     chan_seg: str,
     date_str: str,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
     cached = await index.list_dir(virtual_key)
     if cached.entries is not None:
@@ -287,7 +287,7 @@ async def _readdir_files_dir(
 async def readdir(
     accessor: SlackAccessor,
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
     path, prefix, key, virtual_key = _normalize_path(path)
 
@@ -324,7 +324,7 @@ async def _fetch_day(
     channel_id: str,
     date_str: str,
     date_vkey: str,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> None:
     try:
         messages = await fetch_messages_for_day(accessor.config, channel_id,

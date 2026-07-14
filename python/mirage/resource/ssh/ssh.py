@@ -98,7 +98,7 @@ class SSHResource(BaseResource):
 
     async def fingerprint(self, path: str) -> str | None:
         try:
-            remote = await ssh_stat(self.accessor, path)
+            remote = await ssh_stat(self.accessor, path, index=self._index)
             size = remote.size or 0
             mtime = remote.modified or ""
             return f"{mtime}:{size}"

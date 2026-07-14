@@ -83,7 +83,7 @@ class DiskResource(BaseResource):
 
     async def fingerprint(self, path: str) -> str | None:
         try:
-            remote = await disk_stat(self.accessor, path)
+            remote = await disk_stat(self.accessor, path, index=self._index)
             return remote.modified
         except FileNotFoundError:
             return None
