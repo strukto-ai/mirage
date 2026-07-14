@@ -32,7 +32,7 @@ def link_flags(args: list[str | PathSpec], known: str) -> set[str]:
     return flags
 
 
-def handle_ln(
+async def handle_ln(
     namespace: Namespace,
     session: Session,
     args: list[str | PathSpec],
@@ -54,7 +54,7 @@ def handle_ln(
         return fail(
             "ln", f"ln: failed to create symbolic link "
             f"'{word_text(operands[1])}': File exists\n")
-    namespace.symlink(link_abs, target_typed, time.time())
+    await namespace.symlink(link_abs, target_typed, time.time())
     out = None
     if "v" in flags:
         out = (f"'{word_text(operands[1])}' -> '{target_typed}'\n").encode()
@@ -124,7 +124,7 @@ def follow_paths(
     return out
 
 
-def strip_link_operands(
+async def strip_link_operands(
     namespace: Namespace,
     items: list[str | PathSpec],
 ) -> tuple[list[str | PathSpec], int]:
@@ -145,7 +145,7 @@ def strip_link_operands(
     kept: list[str | PathSpec] = []
     for item in items:
         if isinstance(item, PathSpec) and namespace.is_link(item.virtual):
-            namespace.unlink(item.virtual)
+            await namespace.unlink(item.virtual)
             removed += 1
             continue
         kept.append(item)
@@ -212,8 +212,8 @@ async def prepare_mv(
         target_dst = dst.virtual
 
     if namespace.is_link(src.virtual):
-        namespace.unlink(target_dst)
-        namespace.rename(src.virtual, target_dst)
+        await namespace.unlink(target_dst)
+        await namespace.rename(src.virtual, target_dst)
         return items, None, None, ok("mv")
 
     post_rename: tuple[str, str] | None = None

@@ -181,10 +181,10 @@ async def apply_state_dict(ws, state: dict) -> None:
     _restore_cache(ws, state)
     await _restore_history(ws, state)
     _restore_jobs(ws, state)
-    _restore_nodes(ws, state)
+    await _restore_nodes(ws, state)
 
 
-def _restore_nodes(ws, state: dict) -> None:
+async def _restore_nodes(ws, state: dict) -> None:
     entries = {
         path:
         NodeMeta(target=d.get("target"),
@@ -195,7 +195,7 @@ def _restore_nodes(ws, state: dict) -> None:
                  atime=d.get("atime"))
         for path, d in (state.get(StateKey.NODES) or {}).items()
     }
-    ws._namespace.replace_nodes(entries)
+    await ws._namespace.replace_nodes(entries)
 
 
 def _restore_sessions(ws, state: dict) -> None:

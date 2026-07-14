@@ -201,12 +201,12 @@ async def _setattr_via(
     epoch: float | None = None
     if mtime is not None:
         epoch = datetime.fromisoformat(mtime).timestamp()
-    namespace.set_attrs(path.virtual,
-                        mode=mode,
-                        uid=uid,
-                        gid=gid,
-                        atime=atime,
-                        mtime=epoch)
+    await namespace.set_attrs(path.virtual,
+                              mode=mode,
+                              uid=uid,
+                              gid=gid,
+                              atime=atime,
+                              mtime=epoch)
 
 
 def _follow_operand(
@@ -378,7 +378,7 @@ async def handle_chown(
     errors: list[str] = []
     for target in await expand_operands(namespace, operands[1:]):
         if no_deref and namespace.is_link(target.virtual):
-            namespace.set_attrs(target.virtual, uid=uid, gid=gid)
+            await namespace.set_attrs(target.virtual, uid=uid, gid=gid)
             continue
         found = await _resolve_operand(namespace, dispatch, "chown", target,
                                        errors)
@@ -447,7 +447,7 @@ async def handle_touch(
             continue
         if "h" in flags and namespace.is_link(target.virtual):
             epoch = datetime.fromisoformat(stamp).timestamp()
-            namespace.set_attrs(target.virtual, mtime=epoch)
+            await namespace.set_attrs(target.virtual, mtime=epoch)
             continue
         resolved = _follow_operand(namespace, "touch", "touch", target, errors)
         if resolved is None:

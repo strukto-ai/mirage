@@ -23,6 +23,7 @@ import { runWithRecording, runWithRevisions } from '../observe/context.ts'
 import { type EventDict, Observer } from '../observe/observer.ts'
 import type { OpRecord } from '../observe/record.ts'
 import type { ObserverStore } from '../observe/store.ts'
+import type { NamespaceStore } from './mount/namespace_store.ts'
 import { type OpKwargs, OpsRegistry } from '../ops/registry.ts'
 import { assertMountAllowed, runWithSession } from '../context/session_context.ts'
 import type { Resource } from '../resource/base.ts'
@@ -119,6 +120,7 @@ export interface WorkspaceOptions {
   cache?: FileCache & Resource
   index?: IndexConfig
   observe?: ObserverStore
+  namespaceStore?: NamespaceStore
   python?: {
     autoLoadFromImports?: boolean
     bootstrapCode?: string
@@ -265,7 +267,7 @@ export class Workspace {
     this.registry.mount(HISTORY_PREFIX, new HistoryViewResource(this.observer), MountMode.READ)
     this.cache = options.cache ?? new RAMFileCacheStore({ limit: options.cacheLimit ?? '512MB' })
     this.registry.attachFileCache(this.cache)
-    this.namespace = new Namespace(this.registry, (p) => this.resolve(p))
+    this.namespace = new Namespace(this.registry, (p) => this.resolve(p), options.namespaceStore)
     this.dispatcher = new Dispatcher(this.namespace, this.cache, this.opsRegistry, consistency)
     // The file cache is a hidden store (attached above), never a mount. Arg-less
     // commands and root listing resolve against a neutral root anchor: reuse the
@@ -675,6 +677,7 @@ export class Workspace {
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
+    await this.namespace.ensureLoaded()
     if (this.driftCheckPending) {
       await this.runPendingDriftCheck()
     }
@@ -788,6 +791,7 @@ export class Workspace {
     if (options.signal?.aborted === true) {
       throw makeAbortError()
     }
+    await this.namespace.ensureLoaded()
     if (this.driftCheckPending) {
       await this.runPendingDriftCheck()
     }
@@ -1024,6 +1028,7 @@ export class Workspace {
     for (const task of drainTasks) {
       await task
     }
+    await this.namespace.close()
     await this.cache.clear()
     for (const fn of this.closers.splice(0)) {
       try {

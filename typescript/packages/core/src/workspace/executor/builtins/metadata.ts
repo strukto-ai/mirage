@@ -298,7 +298,7 @@ async function setattrVia(
     if (!isMissingOp(err, 'setattr')) throw err
   }
   const { mtime, ...rest } = fields
-  namespace.setAttrs(path.virtual, {
+  await namespace.setAttrs(path.virtual, {
     ...rest,
     ...(mtime !== undefined ? { mtime: new Date(mtime).getTime() / 1000 } : {}),
   })
@@ -403,7 +403,7 @@ export async function handleChown(
   const errors: string[] = []
   for (const target of await expandOperands(namespace, operands.slice(1))) {
     if (noDeref && namespace.isLink(target.virtual)) {
-      namespace.setAttrs(target.virtual, {
+      await namespace.setAttrs(target.virtual, {
         ...(uid !== null ? { uid } : {}),
         ...(gid !== null ? { gid } : {}),
       })
@@ -498,7 +498,7 @@ export async function handleTouch(
       continue
     }
     if (flags.has('h') && namespace.isLink(target.virtual)) {
-      namespace.setAttrs(target.virtual, { mtime: new Date(stamp).getTime() / 1000 })
+      await namespace.setAttrs(target.virtual, { mtime: new Date(stamp).getTime() / 1000 })
       continue
     }
     let virtual: string

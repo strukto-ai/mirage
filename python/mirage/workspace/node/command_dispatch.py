@@ -384,7 +384,7 @@ async def _run_argv(
     # ── symlinks (namespace-backed; not bash builtins, not mount
     #    commands: they mutate the addressing layer) ──
     if name == "ln" and "s" in link_flags(operands, "sfnv"):
-        return handle_ln(namespace, session, operands)
+        return await handle_ln(namespace, session, operands)
 
     if name == "readlink" and not (link_flags(operands, "fenm")
                                    & {"f", "e", "m"}):
@@ -406,7 +406,8 @@ async def _run_argv(
     if namespace.nodes:
         try:
             if name == "rm":
-                operands, removed = strip_link_operands(namespace, operands)
+                operands, removed = await strip_link_operands(
+                    namespace, operands)
                 if removed and not any(
                         isinstance(a, PathSpec) for a in operands):
                     return None, IOResult(), ExecutionNode(command=name,
@@ -448,12 +449,12 @@ async def _run_argv(
                 if not isinstance(item, PathSpec):
                     continue
                 if item.pattern:
-                    namespace.unlink_glob(item.virtual)
+                    await namespace.unlink_glob(item.virtual)
                 else:
-                    namespace.unlink(item.virtual)
-                    namespace.purge_under(item.virtual)
+                    await namespace.unlink(item.virtual)
+                    await namespace.purge_under(item.virtual)
         if post_unlink is not None:
-            namespace.unlink(post_unlink)
+            await namespace.unlink(post_unlink)
         if post_rename is not None:
-            namespace.rename(post_rename[0], post_rename[1])
+            await namespace.rename(post_rename[0], post_rename[1])
     return stdout, io, exec_node

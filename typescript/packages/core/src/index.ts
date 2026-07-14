@@ -135,6 +135,11 @@ export { OpRecord, type OpRecordInit } from './observe/record.ts'
 export { LogEntry, type LogEntryInit } from './observe/log_entry.ts'
 export { type EventDict, Observer } from './observe/observer.ts'
 export { type ObserverStore, RAMObserverStore } from './observe/store.ts'
+export {
+  type NamespaceStore,
+  type NodeFields,
+  RAMNamespaceStore,
+} from './workspace/mount/namespace_store.ts'
 export { HISTORY_PREFIX, HistoryViewResource } from './resource/history/history.ts'
 export {
   record,

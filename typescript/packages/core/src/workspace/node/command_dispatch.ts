@@ -509,7 +509,7 @@ async function runArgv(
   // They mutate the addressing layer. `readlink -f/-e/-m` is canonicalization,
   // which falls through to the mount command.
   if (name === 'ln' && linkFlags(operands, 'sfnv').has('s')) {
-    return handleLn(namespace, session, operands)
+    return await handleLn(namespace, session, operands)
   }
   if (name === 'readlink') {
     const flags = linkFlags(operands, 'fenm')
@@ -538,7 +538,7 @@ async function runArgv(
   if (namespace.nodes.size > 0) {
     try {
       if (name === 'rm') {
-        const [rest, removed] = stripLinkOperands(namespace, operands)
+        const [rest, removed] = await stripLinkOperands(namespace, operands)
         operands = rest
         if (removed > 0 && !rest.some((a) => a instanceof PathSpec)) {
           return [null, new IOResult(), new ExecutionNode({ command: name, exitCode: 0 })]
@@ -593,15 +593,15 @@ async function runArgv(
       for (const item of operands) {
         if (!(item instanceof PathSpec)) continue
         if (item.pattern !== null) {
-          namespace.unlinkGlob(item.virtual)
+          await namespace.unlinkGlob(item.virtual)
         } else {
-          namespace.unlink(item.virtual)
-          namespace.purgeUnder(item.virtual)
+          await namespace.unlink(item.virtual)
+          await namespace.purgeUnder(item.virtual)
         }
       }
     }
-    if (postUnlink !== null) namespace.unlink(postUnlink)
-    if (postRename !== null) namespace.rename(postRename[0], postRename[1])
+    if (postUnlink !== null) await namespace.unlink(postUnlink)
+    if (postRename !== null) await namespace.rename(postRename[0], postRename[1])
   }
   return [stdout, io, execNode]
 }

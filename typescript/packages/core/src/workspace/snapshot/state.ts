@@ -193,10 +193,10 @@ export async function applyStateDict(ws: Workspace, state: WorkspaceStateDict): 
   restoreCache(ws, state)
   await restoreHistory(ws, state)
   restoreJobs(ws, state)
-  restoreNodes(ws, state)
+  await restoreNodes(ws, state)
 }
 
-function restoreNodes(ws: Workspace, state: WorkspaceStateDict): void {
+async function restoreNodes(ws: Workspace, state: WorkspaceStateDict): Promise<void> {
   const entries = new Map<string, NodeMeta>()
   for (const [path, e] of Object.entries(state.nodes ?? {})) {
     const meta: NodeMeta = {}
@@ -208,7 +208,7 @@ function restoreNodes(ws: Workspace, state: WorkspaceStateDict): void {
     if (e.atime !== undefined) meta.atime = e.atime
     entries.set(path, meta)
   }
-  ws.namespace.replaceNodes(entries)
+  await ws.namespace.replaceNodes(entries)
 }
 
 function restoreSessions(ws: Workspace, state: WorkspaceStateDict): void {

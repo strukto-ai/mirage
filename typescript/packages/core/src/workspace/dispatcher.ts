@@ -165,7 +165,7 @@ export class Dispatcher {
   async invalidateAfterWriteByPath(path: string): Promise<void> {
     const mount = this.namespace.mountFor(path)
     if (mount === null) return
-    this.namespace.clearTimes(path)
+    await this.namespace.clearTimes(path)
     if (cachesReads(mount.resource)) {
       await this.cache.remove(path)
     }
