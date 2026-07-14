@@ -629,6 +629,7 @@ jobs:
       AWS_SECRET_ACCESS_KEY: minio123
       CROSS_DISK_ROOT: /tmp/mirage-cross-disk
       CROSS_REDIS_PREFIX: mirage-cross/
+      QUICKJS_BUILD: v0.15.1
     steps:
       - uses: actions/checkout@v7
 
@@ -655,6 +656,22 @@ jobs:
       - name: Install mirage package
         working-directory: python
         run: uv pip install .
+
+      - name: Cache the quickjs WASI build
+        id: quickjs-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/quickjs
+          key: quickjs-wasi-${{ env.QUICKJS_BUILD }}
+
+      - name: Download the quickjs WASI build
+        if: steps.quickjs-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/quickjs
+          gh release download "$QUICKJS_BUILD" -R quickjs-ng/quickjs \
+            -p qjs-wasi.wasm -O /tmp/quickjs/qjs-wasi.wasm
 
       - name: Install pnpm
         uses: pnpm/action-setup@v6
@@ -714,6 +731,8 @@ jobs:
             "node typescript/packages/cli/dist/bin/mirage.js"
 
       - name: Run CLI runtime battery (yaml runtime selection, cross-language rejection)
+        env:
+          MIRAGE_QUICKJS_HOME: /tmp/quickjs
         run: |
           bash integ/cli_runtime.sh \
             "python/.venv/bin/mirage" \

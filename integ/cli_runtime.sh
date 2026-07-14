@@ -38,10 +38,11 @@ YML
   $cli execute -w rt1 -c 'echo hi-from-vfs > /data/f.txt' </dev/null >/dev/null
   echo "default_py3=$($cli execute -w rt1 -c "python3 -c \"from pathlib import Path; print(Path('/data/f.txt').read_text().strip())\"" </dev/null | grep -o hi-from-vfs | head -1)"
 
-  # --- node/js: ts runs on the bundled quickjs-emscripten (prints 42);
-  # py has no qjs-wasi.wasm here, so it reports the graceful hint. Both
-  # prove the daemon threads the js runtime through to the command.
-  echo "js_out=$($cli execute -w rt1 -c "js -e \"console.log(6 * 7)\"" </dev/null 2>&1 | grep -oE '(^|[^0-9])42([^0-9]|$)|quickjs-ng' | grep -oE '42|quickjs-ng' | head -1)"
+  # --- node/js: both daemons run the same inline script on quickjs and
+  # print 42 (ts bundles quickjs-emscripten; py loads qjs-wasi.wasm from
+  # MIRAGE_QUICKJS_HOME). Proves the daemon threads the js runtime
+  # through to the command identically in both languages.
+  echo "js_out=$($cli execute -w rt1 -c "js -e \"console.log(6 * 7)\"" </dev/null 2>&1 | grep -oE '(^|[^0-9])42([^0-9]|$)' | grep -oE '42' | head -1)"
 
   # --- the language's default runtime configured explicitly in yaml ---
   cat > "$work/explicit.yaml" <<YML
@@ -173,7 +174,7 @@ expect /tmp/cli-runtime-py.txt "invalid_msg" "TypeScript-only"
 expect /tmp/cli-runtime-py.txt "sg_exec" "exit124"
 expect /tmp/cli-runtime-py.txt "sg_msg" "python3: timed out after"
 expect /tmp/cli-runtime-py.txt "wasip_msg" "cpython-wasi-build"
-expect /tmp/cli-runtime-py.txt "js_out" "quickjs-ng"
+expect /tmp/cli-runtime-py.txt "js_out" "42"
 expect /tmp/cli-runtime-ts.txt "default_py3" "hi-from-vfs"
 expect /tmp/cli-runtime-ts.txt "explicit_py3" "explicit-runtime-ok"
 expect /tmp/cli-runtime-ts.txt "selected_py3" "hi-from-vfs"
