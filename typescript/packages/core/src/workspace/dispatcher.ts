@@ -24,7 +24,7 @@ import { cachesReads, type Resource } from '../resource/base.ts'
 import { ConsistencyPolicy, FileStat, MountMode, PathSpec } from '../types.ts'
 import { epochToIso } from '../utils/dates.ts'
 import type { DispatchFn } from './executor/cross_mount.ts'
-import type { Namespace } from './mount/namespace.ts'
+import type { Namespace } from './mount/namespace/namespace.ts'
 import { effectiveMountMode } from '../context/session_context.ts'
 
 const NOOP_ACCESSOR_INSTANCE = new NOOPAccessor()

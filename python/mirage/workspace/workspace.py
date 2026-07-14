@@ -57,7 +57,7 @@ from mirage.workspace.file_prompt import build_file_prompt
 from mirage.workspace.fuse import FuseManager
 from mirage.workspace.mount import MountEntry, MountRegistry
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.mount.namespace_store import NamespaceStore
+from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.node import provision_node, run_command_tree
 from mirage.workspace.session import (Session, SessionManager,

@@ -13,10 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { RAMResource } from '../../resource/ram/ram.ts'
-import { CycleError } from '../../utils/path.ts'
-import { Workspace } from '../workspace.ts'
-import { RAMNamespaceStore } from './namespace_ram_store.ts'
+import { RAMResource } from '../../../resource/ram/ram.ts'
+import { CycleError } from '../../../utils/path.ts'
+import { Workspace } from '../../workspace.ts'
+import { RAMNamespaceStore } from './ram.ts'
 
 describe('Namespace facade (addressing)', () => {
   it('resolve delegates to the workspace resolver', async () => {

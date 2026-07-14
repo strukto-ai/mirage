@@ -14,7 +14,7 @@
 
 from collections.abc import Iterable
 
-from mirage.workspace.mount.namespace_store import NamespaceStore, NodeFields
+from mirage.workspace.mount.namespace.store import NamespaceStore, NodeFields
 
 
 class RAMNamespaceStore(NamespaceStore):

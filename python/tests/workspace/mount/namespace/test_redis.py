@@ -21,8 +21,8 @@ import pytest_asyncio
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
-from mirage.workspace.mount.namespace_redis_store import RedisNamespaceStore
-from mirage.workspace.mount.namespace_store import NamespaceStore
+from mirage.workspace.mount.namespace.redis import RedisNamespaceStore
+from mirage.workspace.mount.namespace.store import NamespaceStore
 
 REDIS_URL = os.environ.get("REDIS_URL")
 

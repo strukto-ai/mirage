@@ -16,8 +16,8 @@ import { randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import type { FileStat, RegisteredOp } from '@struktoai/mirage-core'
 import { MountMode, OpsRegistry, RAMResource } from '@struktoai/mirage-core'
-import { Workspace } from '../workspace.ts'
-import { RedisNamespaceStore } from './namespace_redis_store.ts'
+import { Workspace } from '../../workspace.ts'
+import { RedisNamespaceStore } from './redis.ts'
 
 const REDIS_URL = process.env.REDIS_URL
 const skip = REDIS_URL === undefined

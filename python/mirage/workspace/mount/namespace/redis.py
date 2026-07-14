@@ -18,7 +18,7 @@ from typing import cast
 
 import redis.asyncio as aioredis
 
-from mirage.workspace.mount.namespace_store import NamespaceStore, NodeFields
+from mirage.workspace.mount.namespace.store import NamespaceStore, NodeFields
 
 
 class RedisNamespaceStore(NamespaceStore):

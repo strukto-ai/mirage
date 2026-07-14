@@ -14,8 +14,8 @@
 
 import pytest
 
-from mirage.workspace.mount.namespace_ram_store import RAMNamespaceStore
-from mirage.workspace.mount.namespace_store import NamespaceStore
+from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
+from mirage.workspace.mount.namespace.store import NamespaceStore
 
 
 @pytest.mark.asyncio

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { NamespaceStore, type NodeFields } from './namespace_store.ts'
+import { NamespaceStore, type NodeFields } from './store.ts'
 
 // NamespaceStore held in process memory (the default). Durability equals
 // the process lifetime; snapshots remain the only persistence. Redis-backed

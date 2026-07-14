@@ -46,7 +46,7 @@ import type { ExecuteFn } from '../expand/node.ts'
 import { expandAndClassify, expandParts } from '../expand/parts.ts'
 import { expandRedirects } from '../expand/redirects.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import type { Namespace } from '../mount/namespace.ts'
+import type { Namespace } from '../mount/namespace/namespace.ts'
 import { handleCommandProvision } from '../provision/command.ts'
 import {
   handleForProvision,

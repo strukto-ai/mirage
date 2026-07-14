@@ -13,14 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 
 from mirage.resource.base import BaseResource
-from mirage.types import MountMode
+from mirage.types import MountMode, NodeMetaKey
 from mirage.utils.path import glob_prefix_match, resolve_symlinks
 from mirage.workspace.mount.mount import MountEntry
-from mirage.workspace.mount.namespace_ram_store import RAMNamespaceStore
-from mirage.workspace.mount.namespace_store import NamespaceStore, NodeFields
+from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
+from mirage.workspace.mount.namespace.store import NamespaceStore, NodeFields
 from mirage.workspace.mount.registry import MountRegistry
 
 
@@ -43,22 +43,22 @@ class NodeMeta:
     atime: str | None = None
 
     def is_empty(self) -> bool:
-        return all(getattr(self, f.name) is None for f in fields(self))
+        return all(getattr(self, key) is None for key in NodeMetaKey)
 
     def to_fields(self) -> NodeFields:
         return {
-            f.name: getattr(self, f.name)
-            for f in fields(self) if getattr(self, f.name) is not None
+            str(key): value
+            for key in NodeMetaKey if (value := getattr(self, key)) is not None
         }
 
     @classmethod
     def from_fields(cls, entry: NodeFields) -> "NodeMeta":
-        target = entry.get("target")
-        mtime = entry.get("mtime")
-        mode = entry.get("mode")
-        uid = entry.get("uid")
-        gid = entry.get("gid")
-        atime = entry.get("atime")
+        target = entry.get(NodeMetaKey.TARGET)
+        mtime = entry.get(NodeMetaKey.MTIME)
+        mode = entry.get(NodeMetaKey.MODE)
+        uid = entry.get(NodeMetaKey.UID)
+        gid = entry.get(NodeMetaKey.GID)
+        atime = entry.get(NodeMetaKey.ATIME)
         return cls(
             target=target if isinstance(target, str) else None,
             mtime=float(mtime) if isinstance(mtime, (int, float)) else None,

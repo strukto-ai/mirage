@@ -71,7 +71,7 @@ import {
   stripLinkOperands,
 } from '../executor/builtins/index.ts'
 import { CycleError } from '../../utils/path.ts'
-import type { Namespace } from '../mount/namespace.ts'
+import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { NO_FOLLOW_COMMANDS, UNSUPPORTED_BUILTINS } from '../route/index.ts'
 import type { Session } from '../session/session.ts'

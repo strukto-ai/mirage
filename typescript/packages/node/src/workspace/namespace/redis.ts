@@ -14,7 +14,7 @@
 
 import type { RedisClientType } from 'redis'
 import { NamespaceStore, type NodeFields } from '@struktoai/mirage-core'
-import { loadOptionalPeer } from '../optional_peer.ts'
+import { loadOptionalPeer } from '../../optional_peer.ts'
 
 export interface RedisNamespaceStoreOptions {
   url?: string

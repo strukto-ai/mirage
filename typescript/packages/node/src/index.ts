@@ -27,7 +27,7 @@ export { RedisObserverStore, type RedisObserverStoreOptions } from './observe/re
 export {
   RedisNamespaceStore,
   type RedisNamespaceStoreOptions,
-} from './workspace/namespace_redis_store.ts'
+} from './workspace/namespace/redis.ts'
 export { patchNodeFs } from './fs_monkey.ts'
 export {
   RedisResource,
