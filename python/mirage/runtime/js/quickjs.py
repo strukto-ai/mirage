@@ -21,7 +21,7 @@ except ImportError:
     wasmtime = None  # type: ignore[assignment]
 
 from mirage.runtime.js.base import JsRunArgs, JsRunResult, JsRuntime
-from mirage.runtime.wasm import WasmGuestRuntime
+from mirage.runtime.wasm import WasmRuntime
 
 QUICKJS_HOME_ENV = "MIRAGE_QUICKJS_HOME"
 
@@ -48,7 +48,7 @@ class QuickJsRuntime(JsRuntime):
     before the run, but file I/O inside the code cannot reach mounts.
 
     Each run gets its own epoch-interruption engine (via the shared
-    wasm guest), so a cancelled run traps the guest and reclaims the
+    wasm runtime), so a cancelled run traps it and reclaims the
     thread; a safeguard timeout stops the engine instead of leaking it.
 
     The module comes from the `home` argument (the yaml
@@ -75,7 +75,7 @@ class QuickJsRuntime(JsRuntime):
         if not self._wasm.is_file():
             raise FileNotFoundError(
                 f"no {_WASM_NAME} under {root}; {_BUILD_HINT}")
-        self._guest = WasmGuestRuntime(self._wasm, "js")
+        self._runtime = WasmRuntime(self._wasm, "js")
 
     async def run(self, args: JsRunArgs) -> JsRunResult:
         # --std exposes the std/os globals (stdin via std.in); -m selects
@@ -84,7 +84,7 @@ class QuickJsRuntime(JsRuntime):
         if args.module:
             argv.append("-m")
         argv += ["-e", args.code, *args.args]
-        stdout, stderr, exit_code = await self._guest.run(
+        stdout, stderr, exit_code = await self._runtime.run(
             argv=argv,
             stdin=args.stdin,
             env=list(args.env.items()),

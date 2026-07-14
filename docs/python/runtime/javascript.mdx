@@ -58,13 +58,13 @@ it, so `node /data/script.mjs` works, but `readFile('/data/other')` inside
 the code does not. Use the `monty` Python runtime when code needs live
 workspace file I/O.
 
-This is capability isolation, not a resource sandbox: the guest cannot
-reach your files or the network, but its CPU and memory are bounded only by
-`command_safeguards` timeouts. For untrusted code or hard resource limits,
-run behind a sandboxed deployment.
+This is capability isolation, not a resource sandbox: the sandboxed code
+cannot reach your files or the network, but its CPU and memory are bounded
+only by `command_safeguards` timeouts. For untrusted code or hard resource
+limits, run behind a sandboxed deployment.
 
 Each run gets its own epoch-interruption engine, so a `command_safeguards`
-timeout traps the guest and reclaims the thread instead of leaking it.
+timeout traps the run and reclaims the thread instead of leaking it.
 
 ## Setup
 

@@ -33,17 +33,17 @@ def epoch_engine() -> "wasmtime.Engine":
     return wasmtime.Engine(config)
 
 
-class WasmGuestRuntime:
-    """Compile-once, run-many wasm guest under wasmtime, in-process.
+class WasmRuntime:
+    """Compile-once, run-many WASI module under wasmtime, in-process.
 
     Shared machinery for the WASI-based runtimes (`wasi` CPython,
     `quickjs` JavaScript): compile the module once and cache the
     compilation on disk next to the `.wasm`, then run each request on a
     worker thread with its own epoch-interruption engine so a cancelled
-    run traps the guest and reclaims the thread. Per-run engines keep an
+    run traps the module and reclaims the thread. Per-run engines keep an
     epoch bump from reaching concurrent runs.
 
-    The guest sees only the directories the caller preopens: no host
+    The run sees only the directories the caller preopens: no host
     filesystem, no network, only the passed environment.
 
     Args:
@@ -98,14 +98,14 @@ class WasmGuestRuntime:
         env: list[tuple[str, str]],
         preopens: list[tuple[str, str]],
     ) -> tuple[bytes, bytes | None, int]:
-        """Run the guest once and return (stdout, stderr, exit_code).
+        """Run the module once and return (stdout, stderr, exit_code).
 
         Args:
             argv (list[str]): full argv, including the program name.
-            stdin (bytes | None): bytes fed to the guest's stdin.
+            stdin (bytes | None): bytes fed to the run's stdin.
             env (list[tuple[str, str]]): environment as (name, value) pairs.
-            preopens (list[tuple[str, str]]): (host_dir, guest_path) dirs
-                exposed to the guest's filesystem.
+            preopens (list[tuple[str, str]]): (host_dir, sandbox_path) dirs
+                exposed to the run's filesystem.
         """
         serialized = await asyncio.to_thread(self._ensure_serialized)
         engine = epoch_engine()
@@ -113,9 +113,9 @@ class WasmGuestRuntime:
             return await asyncio.to_thread(self._run_sync, engine, serialized,
                                            argv, stdin, env, preopens)
         except asyncio.CancelledError:
-            # The worker thread is still inside the guest; bumping the
-            # epoch trips the store's deadline, traps the guest, and lets
-            # the thread exit.
+            # The worker thread is still inside the run; bumping the
+            # epoch trips the store's deadline, traps it, and lets the
+            # thread exit.
             engine.increment_epoch()
             raise
 
@@ -143,8 +143,8 @@ class WasmGuestRuntime:
             wasi.stdin_file = stdin_path
             wasi.stdout_file = stdout_path
             wasi.stderr_file = stderr_path
-            for host, guest in preopens:
-                wasi.preopen_dir(str(host), guest)
+            for host, dest in preopens:
+                wasi.preopen_dir(str(host), dest)
             wasi.env = list(env)
             store.set_wasi(wasi)
             instance = linker.instantiate(store, module)

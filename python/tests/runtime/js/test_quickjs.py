@@ -96,7 +96,7 @@ def test_quickjs_exit_code_and_error():
 @live
 def test_quickjs_host_fs_invisible():
     rt = QuickJsRuntime()
-    # No preopens: the guest filesystem is empty, so a host path cannot
+    # No preopens: the sandbox filesystem is empty, so a host path cannot
     # be opened (std.open returns null rather than a handle).
     result = asyncio.run(
         rt.run(
@@ -126,7 +126,7 @@ async def test_quickjs_node_command_end_to_end():
 
 @live
 @pytest.mark.asyncio
-async def test_quickjs_cancellation_stops_the_guest():
+async def test_quickjs_cancellation_stops_the_run():
     rt = QuickJsRuntime()
     task = asyncio.ensure_future(rt.run(JsRunArgs(code="for (;;) {}")))
     await asyncio.sleep(0.5)

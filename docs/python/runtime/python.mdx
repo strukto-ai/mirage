@@ -78,7 +78,7 @@ Monty implements a Python subset. Notably:
 The `wasi` runtime runs a real CPython, compiled to WebAssembly, inside
 your process on wasmtime. It fills monty's gaps (classes, the complete
 stdlib, `sys.argv`, `sys.stdin`) while staying fully sandboxed: the
-guest sees only the interpreter's own build directory, so host files,
+run sees only the interpreter's own build directory, so host files,
 network sockets, and workspace mounts are all invisible. Script files
 still work (`python3 /data/script.py` reads the script through the
 workspace before the run), but file I/O *inside* the code cannot reach
@@ -113,7 +113,7 @@ runtime:
 The first run compiles `python.wasm` (a few hundred milliseconds) and
 caches the compilation as `python.cwasm` next to it; runs after that
 boot in milliseconds. The build directory is mounted read-write into
-the guest (CPython requires it); make it read-only on the host
+the sandbox (CPython requires it); make it read-only on the host
 filesystem to keep runs from persisting files into the bundle.
 
 ## Local
@@ -182,7 +182,7 @@ other command; `max_bytes` and `max_lines` cap its output the same
 way. There is no python3-specific limit surface.
 
 Firing the guard also cancels the run, and every runtime honors
-cancellation: monty halts its interpreter, wasi traps the guest
+cancellation: monty halts its interpreter, wasi traps the run
 through wasmtime's epoch interruption, and local kills the
 subprocess. A timed-out `python3` run is reclaimed at the deadline,
 not left burning in the background.

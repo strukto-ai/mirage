@@ -113,7 +113,7 @@ async def test_wasi_python3_command_end_to_end():
     assert r.exit_code == 0
     assert (await r.stdout_str()) == "wasi says 42\n"
     # Script files resolve through the workspace before the run, so a
-    # mounted script executes even though the guest cannot see mounts.
+    # mounted script executes even though the code cannot see mounts.
     r2 = await ws.execute("python3 /ram/calc.py 7")
     assert r2.exit_code == 0
     assert (await r2.stdout_str()) == "42\n"
@@ -122,7 +122,7 @@ async def test_wasi_python3_command_end_to_end():
 
 @live
 @pytest.mark.asyncio
-async def test_wasi_cancellation_stops_the_guest():
+async def test_wasi_cancellation_stops_the_run():
     rt = WasiRuntime()
     hot = "n = 0\nwhile True:\n    n = n + 1"
     task = asyncio.ensure_future(rt.run(PythonRunArgs(code=hot)))
@@ -130,7 +130,7 @@ async def test_wasi_cancellation_stops_the_guest():
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    # The epoch bump traps the guest; a healthy follow-up run proves the
+    # The epoch bump traps the run; a healthy follow-up run proves the
     # runtime survived and the worker thread was reclaimed.
     result = await rt.run(PythonRunArgs(code="print('alive')"))
     assert result.exit_code == 0

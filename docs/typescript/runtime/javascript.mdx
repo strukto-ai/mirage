@@ -56,10 +56,10 @@ command still resolves a script *file* through the workspace before running
 it, so `node /data/script.mjs` works, but reading another mount path inside
 the code does not.
 
-This is capability isolation, not a resource sandbox: the guest cannot
-reach your files or the network, but CPU and memory are bounded only by soft
-engine caps and `command_safeguards` timeouts. For untrusted code or hard
-resource limits, run behind a sandboxed deployment.
+This is capability isolation, not a resource sandbox: the sandboxed code
+cannot reach your files or the network, but CPU and memory are bounded only
+by soft engine caps and `command_safeguards` timeouts. For untrusted code or
+hard resource limits, run behind a sandboxed deployment.
 
 ## Setup
 
