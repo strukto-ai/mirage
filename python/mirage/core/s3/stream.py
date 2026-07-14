@@ -65,10 +65,12 @@ async def read_stream(
             fingerprint, revision = _fp_rev_from_response(response)
             rec.fingerprint = fingerprint
             rec.revision = revision
-        async for chunk in response["Body"].iter_chunks(chunk_size):
-            if rec is not None:
-                rec.bytes += len(chunk)
-            yield chunk
+        body = response["Body"]
+        async with body:
+            async for chunk in body.iter_chunks(chunk_size):
+                if rec is not None:
+                    rec.bytes += len(chunk)
+                yield chunk
 
 
 async def range_read(accessor: S3Accessor, path: PathSpec, start: int,

@@ -53,6 +53,26 @@ describe('readStream', () => {
     expect(Array.from(chunks[0] ?? [])).toEqual([1, 2, 3])
   })
 
+  it('cancels the response body when the consumer stops early', async () => {
+    let cancelled = false
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(8192).fill(7))
+      },
+      cancel() {
+        cancelled = true
+      },
+    })
+    const { fetch } = routedFetch(() => new Response(stream, { status: 200 }))
+    vi.stubGlobal('fetch', fetch)
+    const source = readStream(makeAccessor(), spec('/volume/big.bin'))[Symbol.asyncIterator]()
+    const first = await source.next()
+    if (first.done === true) throw new Error('stream ended before its first chunk')
+    expect(first.value.byteLength).toBe(8192)
+    await source.return?.()
+    expect(cancelled).toBe(true)
+  })
+
   it('raises ENOENT for missing files', async () => {
     const { fetch } = routedFetch(() => notFoundResponse())
     vi.stubGlobal('fetch', fetch)

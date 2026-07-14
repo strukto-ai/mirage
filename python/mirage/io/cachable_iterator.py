@@ -39,6 +39,22 @@ class CachableAsyncIterator:
         """Chunks consumed from the source so far. Do not mutate."""
         return self._buffer
 
+    @property
+    def source(self) -> AsyncIterator[bytes]:
+        """Underlying iterator used by mount-context wrappers."""
+        return self._source
+
+    def replace_source(self, source: AsyncIterator[bytes]) -> None:
+        """Replace the source before iteration starts.
+
+        Args:
+            source (AsyncIterator[bytes]): Context-wrapped source iterator.
+        """
+        if self._buffer or self._exhausted:
+            raise RuntimeError(
+                "cannot replace a started cache iterator source")
+        self._source = source
+
     def __aiter__(self) -> "CachableAsyncIterator":
         return self
 

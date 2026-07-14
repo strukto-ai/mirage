@@ -25,6 +25,7 @@ from mirage.commands.resolve import get_extension
 from mirage.commands.safeguard import CommandSafeguard, resolve_safeguard
 from mirage.commands.spec import CommandSpec
 from mirage.context import effective_mount_mode
+from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.observe.context import (push_mount_prefix, push_revisions,
                                     reset_revisions, with_mount_prefix,
@@ -66,9 +67,13 @@ def _wrap_cmd_streams(
         oid = id(obj)
         if oid in seen:
             return seen[oid]
-        wrapped = with_mount_prefix(mount_prefix, obj)
+        source = obj.source if isinstance(obj, CachableAsyncIterator) else obj
+        wrapped = with_mount_prefix(mount_prefix, source)
         if revisions:
             wrapped = with_revisions(revisions, wrapped)
+        if isinstance(obj, CachableAsyncIterator):
+            obj.replace_source(wrapped)
+            wrapped = obj
         seen[oid] = wrapped
         return wrapped
 

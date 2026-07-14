@@ -564,6 +564,8 @@ bytes=8192 lines=1 out0='{"type":"queue-operation","operation":"enqueue",'
 bytes=8192 lines=1 out0='{"parentUuid":null,"isSidechain":false,"userType'
 === seaweedfs:stream:cat_wc_full ===
 bytes=10414430 lines=1 out0='5766'
+=== s3:bounded_drain ===
+bytes=8192 cache_entry=False source_closed=True
 === s3:warm:warm_cat ===
 bytes=0 served_from_cache=True
 === s3:warm:warm_grep ===
