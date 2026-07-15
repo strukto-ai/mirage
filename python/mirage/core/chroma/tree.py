@@ -116,7 +116,7 @@ def raise_on_collisions(files: dict[str, dict[str, Any]]) -> None:
                 raise ValueError(
                     "Path collision: Chroma path "
                     f"'{ancestor.strip('/')}' is both a file and a directory "
-                    f"prefix for '{path.strip()}'.")
+                    f"prefix for '{path.strip('/')}'.")
 
 
 def collect_directories(paths: set[str]) -> set[str]:
