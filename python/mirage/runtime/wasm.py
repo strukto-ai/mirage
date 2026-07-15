@@ -14,7 +14,6 @@
 
 import asyncio
 import logging
-import tempfile
 import threading
 from pathlib import Path
 
@@ -22,6 +21,8 @@ try:
     import wasmtime
 except ImportError:
     wasmtime = None  # type: ignore[assignment]
+
+from mirage.runtime.wasm_fs import GuestFs, WasiFs, install_wasi_fs
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,10 @@ class WasmRuntime:
     run traps the module and reclaims the thread. Per-run engines keep an
     epoch bump from reaching concurrent runs.
 
-    The run sees only the directories the caller preopens: no host
+    Filesystem imports are intercepted: every fd_*/path_* call the guest
+    makes lands in WasiFs host functions backed by the caller's GuestFs
+    router, so the run sees exactly what the router serves (interpreter
+    build read-only, workspace mounts through dispatch) — no host
     filesystem, no network, only the passed environment.
 
     Args:
@@ -96,7 +100,7 @@ class WasmRuntime:
         argv: list[str],
         stdin: bytes | None,
         env: list[tuple[str, str]],
-        preopens: list[tuple[str, str]],
+        fs: GuestFs,
     ) -> tuple[bytes, bytes | None, int]:
         """Run the module once and return (stdout, stderr, exit_code).
 
@@ -104,14 +108,13 @@ class WasmRuntime:
             argv (list[str]): full argv, including the program name.
             stdin (bytes | None): bytes fed to the run's stdin.
             env (list[tuple[str, str]]): environment as (name, value) pairs.
-            preopens (list[tuple[str, str]]): (host_dir, sandbox_path) dirs
-                exposed to the run's filesystem.
+            fs (GuestFs): path router serving the run's filesystem.
         """
         serialized = await asyncio.to_thread(self._ensure_serialized)
         engine = epoch_engine()
         try:
             return await asyncio.to_thread(self._run_sync, engine, serialized,
-                                           argv, stdin, env, preopens)
+                                           argv, stdin, env, fs)
         except asyncio.CancelledError:
             # The worker thread is still inside the run; bumping the
             # epoch trips the store's deadline, traps it, and lets the
@@ -126,39 +129,31 @@ class WasmRuntime:
         argv: list[str],
         stdin: bytes | None,
         env: list[tuple[str, str]],
-        preopens: list[tuple[str, str]],
+        fs: GuestFs,
     ) -> tuple[bytes, bytes | None, int]:
         module = wasmtime.Module.deserialize(engine, serialized)
         linker = wasmtime.Linker(engine)
         linker.define_wasi()
         store = wasmtime.Store(engine)
         store.set_epoch_deadline(1)
+        wasi_fs = WasiFs(fs, stdin or b"")
+        install_wasi_fs(linker, store, wasi_fs)
         wasi = wasmtime.WasiConfig()
         wasi.argv = argv
-        with tempfile.TemporaryDirectory(prefix="mirage-wasm-") as td:
-            stdin_path = f"{td}/stdin"
-            stdout_path = f"{td}/stdout"
-            stderr_path = f"{td}/stderr"
-            Path(stdin_path).write_bytes(stdin or b"")
-            wasi.stdin_file = stdin_path
-            wasi.stdout_file = stdout_path
-            wasi.stderr_file = stderr_path
-            for host, dest in preopens:
-                wasi.preopen_dir(str(host), dest)
-            wasi.env = list(env)
-            store.set_wasi(wasi)
-            instance = linker.instantiate(store, module)
-            start = instance.exports(store)["_start"]
-            exit_code = 0
-            trap_message = b""
-            try:
-                start(store)  # type: ignore[operator]
-            except wasmtime.ExitTrap as exc:
-                exit_code = exc.code
-            except wasmtime.Trap as exc:
-                exit_code = 1
-                msg = f"{self._trap_prefix}: wasm trap: {exc.message}\n"
-                trap_message = msg.encode()
-            stdout = Path(stdout_path).read_bytes()
-            stderr = Path(stderr_path).read_bytes() + trap_message
+        wasi.env = list(env)
+        store.set_wasi(wasi)
+        instance = linker.instantiate(store, module)
+        start = instance.exports(store)["_start"]
+        exit_code = 0
+        trap_message = b""
+        try:
+            start(store)  # type: ignore[operator]
+        except wasmtime.ExitTrap as exc:
+            exit_code = exc.code
+        except wasmtime.Trap as exc:
+            exit_code = 1
+            msg = f"{self._trap_prefix}: wasm trap: {exc.message}\n"
+            trap_message = msg.encode()
+        stdout = bytes(wasi_fs.stdout)
+        stderr = bytes(wasi_fs.stderr) + trap_message
         return stdout, stderr or None, exit_code

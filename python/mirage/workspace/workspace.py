@@ -193,7 +193,7 @@ class Workspace:
                 python_runtime,
                 self.dispatch,
                 options=runtime_options,
-                mount_dirs=self._runtime_mount_dirs)
+                mount_prefixes=self._runtime_mount_prefixes)
         except ImportError:
             if python_runtime is not None:
                 raise
@@ -207,8 +207,9 @@ class Workspace:
         try:
             self._js_runtime = select_js_runtime(
                 js_runtime,
+                self.dispatch,
                 options=runtime_options,
-                mount_dirs=self._runtime_mount_dirs)
+                mount_prefixes=self._runtime_mount_prefixes)
         except (ImportError, FileNotFoundError):
             if js_runtime is not None:
                 raise
@@ -348,10 +349,10 @@ class Workspace:
     def fuse_mountpoints(self) -> dict[str, str]:
         return dict(self._fuse_mountpoints)
 
-    def _runtime_mount_dirs(self) -> dict[str, str]:
+    def _runtime_mount_prefixes(self) -> list[str]:
         # Pull-model provider for the wasm runtimes: read per run, so
-        # FUSE mounts added or removed after construction are picked up.
-        return dict(self._fuse_mountpoints)
+        # mounts added or removed after construction are picked up.
+        return self._ops.mount_prefixes()
 
     @property
     def _cwd(self) -> str:

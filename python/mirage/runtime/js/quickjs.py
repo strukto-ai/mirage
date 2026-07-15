@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import os
 from pathlib import Path
 from typing import Callable
@@ -23,6 +24,7 @@ except ImportError:
 
 from mirage.runtime.js.base import JsRunArgs, JsRunResult, JsRuntime
 from mirage.runtime.wasm import WasmRuntime
+from mirage.runtime.wasm_fs import GuestFs, SyncDispatch
 
 QUICKJS_HOME_ENV = "MIRAGE_QUICKJS_HOME"
 
@@ -45,12 +47,12 @@ class QuickJsRuntime(JsRuntime):
     no `require`, no npm, no network. The `std`/`os` globals are exposed
     (quickjs-ng `--std`), so scripts read stdin with
     `std.in.readAsString()` and reach files with `std.open`/`os.readdir`.
-    Workspace mounts are visible when the `mount_dirs` provider reports
-    them (FUSE mountpoints, so file I/O inside the code routes through
-    the workspace with the same cache and modes as shell commands);
-    without a provider the run sees an empty filesystem. The `node`/`js`
-    command resolves script files through the workspace before the run
-    either way.
+    The engine's filesystem imports are intercepted, so that file I/O
+    routes through the workspace dispatch — the same cache, write modes,
+    and session narrowing as shell commands — with no FUSE mount and no
+    extra setup. Without an injected dispatch the run sees an empty
+    filesystem; the `node`/`js` command resolves script files through
+    the workspace before the run either way.
 
     Each run gets its own epoch-interruption engine (via the shared
     wasm runtime), so a cancelled run traps it and reclaims the
@@ -63,17 +65,21 @@ class QuickJsRuntime(JsRuntime):
     Args:
         home (str | None): directory containing qjs-wasi.wasm. None
             reads MIRAGE_QUICKJS_HOME.
-        mount_dirs (Callable[[], dict[str, str]] | None): live map of
-            workspace mount prefixes to host directories to expose to
-            the run, read per run (mounts can come and go).
+        dispatch (Callable | None): workspace dispatch the guest's file
+            I/O bridges through; None leaves mounts invisible.
+        mount_prefixes (Callable[[], list[str]] | None): live list of
+            workspace mount prefixes, read per run (mounts can come
+            and go).
     """
 
     name = "quickjs"
 
     def __init__(
-            self,
-            home: str | None = None,
-            mount_dirs: Callable[[], dict[str, str]] | None = None) -> None:
+        self,
+        home: str | None = None,
+        dispatch: Callable | None = None,
+        mount_prefixes: Callable[[], list[str]] | None = None,
+    ) -> None:
         if wasmtime is None:
             raise ImportError(
                 "the quickjs runtime requires the 'quickjs' extra. Install "
@@ -86,7 +92,8 @@ class QuickJsRuntime(JsRuntime):
         if not self._wasm.is_file():
             raise FileNotFoundError(
                 f"no {_WASM_NAME} under {root}; {_BUILD_HINT}")
-        self._mount_dirs = mount_dirs
+        self._dispatch = dispatch
+        self._mount_prefixes = mount_prefixes
         self._runtime = WasmRuntime(self._wasm, "js")
 
     async def run(self, args: JsRunArgs) -> JsRunResult:
@@ -96,12 +103,13 @@ class QuickJsRuntime(JsRuntime):
         if args.module:
             argv.append("-m")
         argv += ["-e", args.code, *args.args]
-        mounts = self._mount_dirs() if self._mount_dirs is not None else {}
+        bridge = (SyncDispatch(self._dispatch, asyncio.get_running_loop())
+                  if self._dispatch is not None else None)
+        fs = GuestFs(bridge=bridge, mount_prefixes=self._mount_prefixes)
         stdout, stderr, exit_code = await self._runtime.run(
             argv=argv,
             stdin=args.stdin,
             env=list(args.env.items()),
-            preopens=[(host, prefix)
-                      for prefix, host in sorted(mounts.items())],
+            fs=fs,
         )
         return JsRunResult(stdout=stdout, stderr=stderr, exit_code=exit_code)

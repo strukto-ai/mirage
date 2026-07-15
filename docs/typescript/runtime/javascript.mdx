@@ -56,9 +56,10 @@ command still resolves a script *file* through the workspace before running
 it, so `node /data/script.mjs` works, but reading another mount path inside
 the code does not.
 
-Known gap: the Python `quickjs` runtime can expose FUSE-mounted workspace
-mounts to the run (its engine runs on WASI preopens); quickjs-emscripten
-has no equivalent, so TypeScript sandbox code cannot reach mounts yet.
+Known gap: the Python `quickjs` runtime bridges the sandbox's file I/O
+into the workspace mounts (it intercepts the engine's WASI filesystem
+imports); quickjs-emscripten exposes no equivalent seam, so TypeScript
+sandbox code cannot reach mounts yet.
 
 This is capability isolation, not a resource sandbox: the sandboxed code
 cannot reach your files or the network, but CPU and memory are bounded only

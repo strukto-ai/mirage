@@ -96,7 +96,7 @@ def test_quickjs_exit_code_and_error():
 @live
 def test_quickjs_host_fs_invisible():
     rt = QuickJsRuntime()
-    # No preopens: the sandbox filesystem is empty, so a host path cannot
+    # No dispatch: the sandbox filesystem is empty, so a host path cannot
     # be opened (std.open returns null rather than a handle).
     result = asyncio.run(
         rt.run(
@@ -150,29 +150,32 @@ def test_quickjs_reuses_compiled_module():
 
 
 @live
-def test_quickjs_mount_dirs_read_write_readdir(tmp_path):
-    (tmp_path / "in.txt").write_text("hello-mount\n")
-    rt = QuickJsRuntime(mount_dirs=lambda: {"/data": str(tmp_path)})
-    result = asyncio.run(
-        rt.run(
-            JsRunArgs(
-                code=("const f = std.open('/data/in.txt', 'r');"
-                      "console.log(f.readAsString().trim());"
-                      "f.close();"
-                      "const w = std.open('/data/out.txt', 'w');"
-                      "w.puts('from-qjs\\n');"
-                      "w.close();"
-                      "const [names] = os.readdir('/data');"
-                      "console.log(names.filter((n) => !n.startsWith('.'))"
-                      ".sort().join(','))"))))
-    assert result.exit_code == 0
-    assert result.stdout == b"hello-mount\nin.txt,out.txt\n"
-    assert (tmp_path / "out.txt").read_text() == "from-qjs\n"
+@pytest.mark.asyncio
+async def test_quickjs_mounts_read_write_readdir():
+    # Guest file I/O bridges through the workspace dispatch: reads see
+    # shell writes, guest writes land in the mount, readdir lists it.
+    ws = Workspace({"/data": RAMResource()},
+                   mode=MountMode.EXEC,
+                   js_runtime="quickjs")
+    await ws.execute("echo hello-mount > /data/in.txt")
+    r = await ws.execute("js -e \"const f = std.open('/data/in.txt', 'r');"
+                         "console.log(f.readAsString().trim());"
+                         "f.close();"
+                         "const w = std.open('/data/out.txt', 'w');"
+                         "w.puts('from-qjs\\n');"
+                         "w.close();"
+                         "const [names] = os.readdir('/data');"
+                         "console.log(names.filter((n) => !n.startsWith('.'))"
+                         ".sort().join(','))\"")
+    assert r.exit_code == 0
+    assert (await r.stdout_str()) == "hello-mount\nin.txt,out.txt\n"
+    r = await ws.execute("cat /data/out.txt")
+    assert (await r.stdout_str()) == "from-qjs\n"
+    await ws.close()
 
 
 @live
-def test_quickjs_without_mount_dirs_sees_no_mounts(tmp_path):
-    (tmp_path / "in.txt").write_text("hidden\n")
+def test_quickjs_without_dispatch_sees_no_mounts():
     rt = QuickJsRuntime()
     result = asyncio.run(
         rt.run(
@@ -184,17 +187,19 @@ def test_quickjs_without_mount_dirs_sees_no_mounts(tmp_path):
 
 @live
 @pytest.mark.asyncio
-async def test_quickjs_workspace_threads_fuse_mountpoints(tmp_path):
-    # A plain host dir stands in for the FUSE mountpoint: the runtime
-    # reads the live map per run and cannot tell the difference, so this
-    # covers the workspace -> select -> preopen threading without
-    # libfuse (the real-FUSE loop runs in the CLI battery).
-    ram = RAMResource()
-    ws = Workspace({"/data": ram}, mode=MountMode.EXEC, js_runtime="quickjs")
-    (tmp_path / "in.txt").write_text("via-workspace\n")
-    ws._fuse_mountpoints["/data"] = str(tmp_path)
-    r = await ws.execute("js -e \"const f = std.open('/data/in.txt', 'r');"
-                         " console.log(f.readAsString().trim())\"")
+async def test_quickjs_session_narrowing_reaches_the_guest():
+    # A session narrowed to read denies guest writes at open() and no
+    # file materializes in the mount.
+    ws = Workspace({"/data": RAMResource()},
+                   mode=MountMode.EXEC,
+                   js_runtime="quickjs")
+    ws.create_session("narrow", {"/data": "read"})
+    r = await ws.execute(
+        "js -e \"try { std.open('/data/g.txt', 'w').puts('x');"
+        " console.log('WROTE') } catch (e) { console.log('denied') }\"",
+        session_id="narrow")
     assert r.exit_code == 0
-    assert (await r.stdout_str()) == "via-workspace\n"
+    assert (await r.stdout_str()) == "denied\n"
+    r = await ws.execute("cat /data/g.txt", session_id="narrow")
+    assert r.exit_code == 1
     await ws.close()

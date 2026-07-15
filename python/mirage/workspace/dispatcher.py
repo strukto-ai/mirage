@@ -20,14 +20,17 @@ from mirage.io import IOResult
 from mirage.observe.record import OpRecord
 from mirage.ops.config import NO_FOLLOW_OPS
 from mirage.types import ConsistencyPolicy, FileStat, PathSpec
+from mirage.utils.key_prefix import mount_key
 from mirage.workspace.mount import MountEntry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
 from mirage.workspace.session import assert_mount_allowed
 
 _DISPATCH_READ_OPS = frozenset({"read", "read_bytes"})
-_DISPATCH_WRITE_OPS = frozenset(
-    {"write", "write_bytes", "append", "unlink", "create", "truncate"})
+_DISPATCH_WRITE_OPS = frozenset({
+    "write", "write_bytes", "append", "unlink", "create", "truncate", "mkdir",
+    "rmdir", "rename"
+})
 
 
 class Dispatcher:
@@ -79,12 +82,24 @@ class Dispatcher:
                 if cached is not None:
                     return cached, IOResult(reads={path.virtual: cached})
 
+        if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
+            # Ops.rename addresses both endpoints against the source's
+            # mount; mirror that here so the backend sees a
+            # mount-relative destination.
+            dst = kwargs["dst"]
+            kwargs["dst"] = PathSpec(
+                virtual=dst.virtual,
+                directory=dst.virtual.rsplit("/", 1)[0] or "/",
+                resource_path=mount_key(dst.virtual, mount.prefix.rstrip("/")),
+            )
         result = await mount.execute_op(op, path.virtual, **kwargs)
         if op == "stat" and isinstance(result, FileStat):
             result = merge_overlay_stat(self._namespace.meta_for(path.virtual),
                                         result)
         if op in _DISPATCH_WRITE_OPS:
             await self.invalidate_after_write(mount, path.virtual)
+            if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
+                await self.invalidate_after_write(mount, kwargs["dst"].virtual)
         return result, IOResult()
 
     async def stat(self, path: str) -> FileStat:

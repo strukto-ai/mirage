@@ -147,8 +147,59 @@ YML
   sleep 1
 }
 
+# Wasm sandbox mount access (Python daemon only: the py wasi/quickjs
+# runtimes intercept the guest's filesystem imports and bridge them
+# through the workspace dispatch, so sandboxed python3/js code reads AND
+# writes virtual mounts with no FUSE and no host directory. TS quickjs
+# is quickjs-emscripten (no mount bridge), a documented gap, hence no
+# ts probe.
+sandbox_probe() {
+  local cli="$1"
+  local yaml="/tmp/cli-runtime-sbx.yaml"
+  cat > "$yaml" <<YML
+mode: EXEC
+runtime:
+  python: wasi
+mounts:
+  /data:
+    resource: ram
+YML
+  $cli workspace delete sbx >/dev/null 2>&1 </dev/null || true
+  $cli workspace create "$yaml" --id sbx >/dev/null </dev/null
+  $cli execute -w sbx -c 'echo sandbox-sees-me > /data/probe.txt' </dev/null >/dev/null
+  echo "sbx_js_read=$($cli execute -w sbx -c "js -e \"const f = std.open('/data/probe.txt', 'r'); console.log(f.readAsString().trim())\"" </dev/null | grep -o sandbox-sees-me | head -1)"
+  echo "sbx_py3_read=$($cli execute -w sbx -c "python3 -c \"print(open('/data/probe.txt').read().strip() + '-py')\"" </dev/null | grep -o 'sandbox-sees-me-py' | head -1)"
+  $cli execute -w sbx -c "python3 -c \"open('/data/from-py.txt', 'w').write('py-wrote-this\\n')\"" </dev/null >/dev/null
+  echo "sbx_py3_write=$($cli execute -w sbx -c 'cat /data/from-py.txt' </dev/null | grep -o py-wrote-this | head -1)"
+  $cli execute -w sbx -c "js -e \"const w = std.open('/data/from-js.txt', 'w'); w.puts('js-wrote-this\\n'); w.close()\"" </dev/null >/dev/null
+  echo "sbx_js_write=$($cli execute -w sbx -c 'cat /data/from-js.txt' </dev/null | grep -o js-wrote-this | head -1)"
+  $cli execute -w sbx -c "python3 -c \"import os; os.mkdir('/data/sub'); open('/data/sub/n.txt','w').write('nested'); os.rename('/data/sub/n.txt','/data/sub/m.txt')\"" </dev/null >/dev/null
+  echo "sbx_py3_dirops=$($cli execute -w sbx -c 'cat /data/sub/m.txt' </dev/null | grep -o nested | head -1)"
+  $cli workspace delete sbx >/dev/null 2>&1 </dev/null || true
+  rm -f "$yaml"
+}
+
 echo "===== python cli ====="
 probe "$PY_CLI" py 9430 monty local pyodide | tee /tmp/cli-runtime-py.txt
+
+SANDBOX_EXPECT=no
+if [ -f "${MIRAGE_QUICKJS_HOME:-/nonexistent}/qjs-wasi.wasm" ] \
+    && [ -f "${MIRAGE_WASI_HOME:-/nonexistent}/python.wasm" ]; then
+  echo
+  echo "===== wasm sandbox mount access (python daemon) ====="
+  export MIRAGE_HOME
+  MIRAGE_HOME="$(mktemp -d /tmp/cli-runtime-sbx-home.XXXXXX)"
+  "$PY_CLI" config set port 9431 >/dev/null </dev/null
+  "$PY_CLI" config set url "http://127.0.0.1:9431" >/dev/null </dev/null
+  sandbox_probe "$PY_CLI" | tee -a /tmp/cli-runtime-py.txt
+  "$PY_CLI" daemon stop >/dev/null 2>&1 </dev/null || true
+  sleep 1
+  SANDBOX_EXPECT=yes
+else
+  echo
+  echo "skipping wasm sandbox probes (no qjs-wasi.wasm / python.wasm)"
+fi
+
 echo
 echo "===== typescript cli ====="
 probe "$TS_CLI" ts 9440 pyodide monty local | tee /tmp/cli-runtime-ts.txt
@@ -175,6 +226,13 @@ expect /tmp/cli-runtime-py.txt "sg_exec" "exit124"
 expect /tmp/cli-runtime-py.txt "sg_msg" "python3: timed out after"
 expect /tmp/cli-runtime-py.txt "wasip_msg" "cpython-wasi-build"
 expect /tmp/cli-runtime-py.txt "js_out" "42"
+if [ "$SANDBOX_EXPECT" == "yes" ]; then
+  expect /tmp/cli-runtime-py.txt "sbx_js_read" "sandbox-sees-me"
+  expect /tmp/cli-runtime-py.txt "sbx_py3_read" "sandbox-sees-me-py"
+  expect /tmp/cli-runtime-py.txt "sbx_py3_write" "py-wrote-this"
+  expect /tmp/cli-runtime-py.txt "sbx_js_write" "js-wrote-this"
+  expect /tmp/cli-runtime-py.txt "sbx_py3_dirops" "nested"
+fi
 expect /tmp/cli-runtime-ts.txt "default_py3" "hi-from-vfs"
 expect /tmp/cli-runtime-ts.txt "explicit_py3" "explicit-runtime-ok"
 expect /tmp/cli-runtime-ts.txt "selected_py3" "hi-from-vfs"

@@ -54,25 +54,24 @@ def select_python_runtime(
         name: str | None,
         dispatch: Callable | None = None,
         options: dict[str, dict[str, Any]] | None = None,
-        mount_dirs: Callable[[], dict[str, str]] | None = None
+        mount_prefixes: Callable[[], list[str]] | None = None
 ) -> PythonRuntime:
     """Build the Python runtime for a workspace.
 
     Args:
         name (str | None): runtime name; None means the default (monty).
         dispatch (Callable | None): workspace dispatch the sandboxed
-            runtime bridges file I/O through. Ignored by `wasi` and
-            `local`.
+            runtime bridges file I/O through. Ignored by `local`.
         options (dict[str, dict[str, Any]] | None): per-runtime option
             blocks; the selected runtime consumes its own block
             (`wasi`: `home` is the CPython WASI build directory,
             falling back to MIRAGE_WASI_HOME; `local`: `home` is the
             interpreter path, falling back to MIRAGE_LOCAL_HOME then
             the interpreter running mirage). Other blocks are ignored.
-        mount_dirs (Callable[[], dict[str, str]] | None): live map of
-            workspace mount prefixes to host directories (FUSE
-            mountpoints) that `wasi` exposes to runs. Ignored by `monty`
-            (bridged via dispatch) and `local`.
+        mount_prefixes (Callable[[], list[str]] | None): live list of
+            workspace mount prefixes that `wasi` routes to the
+            dispatch. Ignored by `monty` (routes everything) and
+            `local`.
 
     Raises:
         ValueError: unknown runtime name, or an invalid option block.
@@ -82,5 +81,7 @@ def select_python_runtime(
     if resolved == MontyRuntime.name:
         return MontyRuntime(dispatch)
     if resolved == WasiRuntime.name:
-        return WasiRuntime(home=opts.get("home"), mount_dirs=mount_dirs)
+        return WasiRuntime(home=opts.get("home"),
+                           dispatch=dispatch,
+                           mount_prefixes=mount_prefixes)
     return LocalRuntime(home=opts.get("home"))

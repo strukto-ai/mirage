@@ -86,7 +86,7 @@ async def _js(
         runtime = js_runtime
     else:
         try:
-            runtime = QuickJsRuntime()
+            runtime = QuickJsRuntime(dispatch=dispatch)
         except (ImportError, FileNotFoundError) as exc:
             return None, IOResult(exit_code=127,
                                   stderr=f"js: {exc}\n".encode())

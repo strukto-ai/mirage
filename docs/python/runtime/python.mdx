@@ -11,7 +11,7 @@ ship today:
 | Runtime | Engine | Filesystem | Default |
 | --- | --- | --- | --- |
 | `monty` | [Pydantic Monty](https://github.com/pydantic/monty), a sandboxed Python interpreter written in Rust | Workspace mounts only, bridged through Mirage | Yes |
-| `wasi` | Full CPython compiled to WebAssembly, run in-process on [wasmtime](https://wasmtime.dev) | FUSE-mounted workspace mounts; no host filesystem, no network | No |
+| `wasi` | Full CPython compiled to WebAssembly, run in-process on [wasmtime](https://wasmtime.dev) | Workspace mounts only, bridged through Mirage; no host filesystem, no network | No |
 | `local` | The host `python` interpreter, as a subprocess | The host filesystem | No |
 
 ## Monty (default)
@@ -79,19 +79,18 @@ The `wasi` runtime runs a real CPython, compiled to WebAssembly, inside
 your process on wasmtime. It fills monty's gaps (classes, the complete
 stdlib, `sys.argv`, `sys.stdin`) while staying sandboxed: host files
 and network sockets are invisible, and the run sees the interpreter's
-own build directory plus whatever workspace mounts are FUSE-mounted.
+own build directory plus the workspace mounts.
 
-A mount with an active FUSE mountpoint (the `fuse:` key on the mount,
-or `add_fuse_mount`) is preopened into the run at the mount's own
-path, so `open('/data/f.txt')` inside the code reads and writes the
-mount live. That I/O flows through the kernel into the workspace
-(namespace, cache, write modes), so the code sees exactly what `cat`
-sees and its writes are immediately visible to every command. A mount
-at `/` relocates the interpreter build to `/.mirage-wasi`
-transparently. Without a FUSE mount, mounts stay invisible: script
-files still work (`python3 /data/script.py` reads the script through
-the workspace before the run), but file I/O inside the code has
-nowhere to land; use `monty` for mount I/O without FUSE.
+Mirage intercepts the sandbox's filesystem calls and bridges them
+through the workspace dispatch, so `open('/data/f.txt')` inside the
+code reads and writes the mount live — RAM, Redis, S3, or a virtual
+backend — with the same cache, write modes, and per-session mount
+narrowing as `cat`. Guest writes are immediately visible to every
+command, a read-only mount (or a session narrowed to read) answers
+`PermissionError` at `open()`, and none of this needs FUSE, a config
+key, or any setup. The interpreter's own build directory is served
+read-only from the host; a mount at `/` coexists with it (mount
+prefixes win for their subtrees, the build serves the rest).
 
 It needs the `wasi` extra plus a CPython WASI build (download and
 unzip a release from
@@ -121,9 +120,9 @@ runtime:
 
 The first run compiles `python.wasm` (a few hundred milliseconds) and
 caches the compilation as `python.cwasm` next to it; runs after that
-boot in milliseconds. The build directory is mounted read-write into
-the sandbox (CPython requires it); make it read-only on the host
-filesystem to keep runs from persisting files into the bundle.
+boot in milliseconds. The build directory is read-only inside the
+sandbox: guest writes land in the workspace or answer `PermissionError`,
+never in the bundle.
 
 ## Local
 
