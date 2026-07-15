@@ -17,8 +17,10 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.ls import ls as generic_ls
-from mirage.commands.builtin.generic_bind.adapter import Builder, CommandIO
+from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
+                                                          overlaid_stat)
 from mirage.io.types import ByteSource, IOResult
+from mirage.ops.config import StatOverlay
 from mirage.types import LsSortBy, PathSpec
 
 
@@ -41,6 +43,7 @@ async def ls(
     F: bool = False,
     index: IndexCacheStore | None = None,
     cwd: PathSpec | str = "/",
+    stat_overlay: StatOverlay | None = None,
     **kwargs,
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
@@ -57,10 +60,13 @@ async def ls(
         ]
     paths = await ops.resolve_glob(accessor, paths, index)
     sort_by = LsSortBy.TIME if t else LsSortBy.SIZE if S else LsSortBy.NAME
+    stat_fn = partial(ops.stat, accessor)
+    if stat_overlay is not None:
+        stat_fn = partial(overlaid_stat, stat_fn, stat_overlay)
     return await generic_ls(
         paths,
         readdir=partial(ops.readdir, accessor),
-        stat=partial(ops.stat, accessor),
+        stat=stat_fn,
         long=args_l,
         one_per_line=args_1,
         all_files=a or A,

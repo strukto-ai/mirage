@@ -173,8 +173,14 @@ async def _setattr_via(
     atime: str | None = None,
     mtime: str | None = None,
 ) -> None:
-    """Apply attributes natively when the mount supports setattr, else
-    into the namespace overlay. None fields are left untouched.
+    """Apply attributes natively where the backend can hold them; store
+    the rest in the namespace overlay. None fields are left untouched.
+
+    A mount with a setattr op applies what it can and returns the
+    residual (e.g. disk: clamped mode bits, ownership). Residual fields
+    go to the overlay; fields the backend applied natively are dropped
+    from it, so a stale overlay never shadows the fresh backend value.
+    A mount without setattr (API backend) overlays everything.
 
     Args:
         namespace (Namespace): addressing authority (overlay home).
@@ -187,17 +193,34 @@ async def _setattr_via(
         mtime (str | None): ISO modification time.
     """
     mount = namespace.mount_for(path.virtual)
+    requested = {
+        "mode": mode,
+        "uid": uid,
+        "gid": gid,
+        "atime": atime,
+        "mtime": mtime,
+    }
     if mount.supports_op("setattr", path.virtual):
-        await dispatch("setattr",
-                       path,
-                       mode=mode,
-                       uid=uid,
-                       gid=gid,
-                       atime=atime,
-                       mtime=mtime)
-        return
-    # The mount has no setattr op (API backend): store in the overlay,
-    # which is durable, snapshot-captured namespace state.
+        residual, _ = await dispatch("setattr",
+                                     path,
+                                     mode=mode,
+                                     uid=uid,
+                                     gid=gid,
+                                     atime=atime,
+                                     mtime=mtime)
+        applied = [
+            key for key, value in requested.items()
+            if value is not None and key not in residual
+        ]
+        if applied:
+            await namespace.drop_attrs(path.virtual, applied)
+        if not residual:
+            return
+        mode = residual.get("mode")
+        uid = residual.get("uid")
+        gid = residual.get("gid")
+        atime = residual.get("atime")
+        mtime = residual.get("mtime")
     epoch: float | None = None
     if mtime is not None:
         epoch = datetime.fromisoformat(mtime).timestamp()

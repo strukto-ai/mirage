@@ -228,6 +228,21 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
     await ws.close()
   })
 
+  it('renders overlay attrs in ls -l when the mount has no setattr', async () => {
+    // ls stats through the backend, which has no attribute slot here; the
+    // injected namespace overlay must still render chmod/chown/touch.
+    const [ws] = await makeOverlayWs({ '/f.txt': 'hello' })
+    await run(
+      ws,
+      'chmod 664 /data/f.txt && chown 500:dev /data/f.txt && touch -t 202603041200 /data/f.txt',
+    )
+    const [, out] = await run(ws, 'ls -l /data')
+    expect(out).toContain('-rw-rw-r--')
+    expect(out).toContain(' 500 dev ')
+    expect(out).toContain('Mar  4 12:00')
+    await ws.close()
+  })
+
   it('touch cannot create on a stat-only mount', async () => {
     const [ws] = await makeOverlayWs({ '/f.txt': 'hello' }, new StatOnlyRegistry())
     const [code, , err] = await run(ws, 'touch /data/new.txt')

@@ -30,12 +30,11 @@ async def set_attrs(
     mtime: str | None = None,
     index=None,
     **kwargs,
-) -> bool:
-    await set_attrs_core(accessor,
-                         path,
-                         mode=mode,
-                         uid=uid,
-                         gid=gid,
-                         atime=atime,
-                         mtime=mtime)
-    return True
+) -> dict[str, int | str]:
+    return await set_attrs_core(accessor,
+                                path,
+                                mode=mode,
+                                uid=uid,
+                                gid=gid,
+                                atime=atime,
+                                mtime=mtime)

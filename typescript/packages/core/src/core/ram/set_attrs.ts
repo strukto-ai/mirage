@@ -27,12 +27,13 @@ export interface SetAttrsFields {
 
 // Write metadata fields on an existing entry (the write side of stat).
 // Only present fields are written. Stored, not enforced: mount mode does
-// real access control.
+// real access control. Returns the residual (always empty; every field
+// applies natively).
 export function setAttrs(
   accessor: RAMAccessor,
   path: PathSpec,
   fields: SetAttrsFields,
-): Promise<void> {
+): Promise<Record<string, number | string>> {
   const store = accessor.store
   const p = norm(path.mountPath)
   if (!store.files.has(p) && !store.dirs.has(p)) {
@@ -45,5 +46,5 @@ export function setAttrs(
   if (fields.atime !== undefined) entry.atime = fields.atime
   store.attrs.set(p, entry)
   if (fields.mtime !== undefined) store.modified.set(p, fields.mtime)
-  return Promise.resolve()
+  return Promise.resolve({})
 }

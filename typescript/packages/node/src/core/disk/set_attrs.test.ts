@@ -36,72 +36,84 @@ afterEach(() => {
 })
 
 describe('core/disk setAttrs', () => {
-  it('mode hits the real inode and the sidecar', async () => {
-    await setAttrs(accessor, spec('/f.txt'), { mode: 0o601 })
+  it('mode hits the real inode with no residual', async () => {
+    const residual = await setAttrs(accessor, spec('/f.txt'), { mode: 0o601 })
+    expect(residual).toEqual({})
     expect(statSync(join(root, 'f.txt')).mode & 0o777).toBe(0o601)
     const s = await stat(accessor, spec('/f.txt'))
     expect(s.mode).toBe(0o601)
   })
 
-  it('mode 000 keeps owner access on the inode', async () => {
-    await setAttrs(accessor, spec('/f.txt'), { mode: 0 })
+  it('mode 000 clamps the inode and returns residual', async () => {
+    const residual = await setAttrs(accessor, spec('/f.txt'), { mode: 0 })
+    expect(residual).toEqual({ mode: 0 })
     expect(statSync(join(root, 'f.txt')).mode & 0o777).toBe(0o600)
     const s = await stat(accessor, spec('/f.txt'))
-    expect(s.mode).toBe(0)
+    expect(s.mode).toBe(0o600)
     expect(readFileSync(join(root, 'f.txt'), 'utf8')).toBe('hello')
   })
 
-  it('dir mode keeps owner traversal on the inode', async () => {
+  it('dir mode keeps owner traversal and returns residual', async () => {
     await mkdir(join(root, 'sub'))
     await writeFile(join(root, 'sub', 'x.txt'), 'x')
-    await setAttrs(accessor, spec('/sub'), { mode: 0o050 })
+    const residual = await setAttrs(accessor, spec('/sub'), { mode: 0o050 })
+    expect(residual).toEqual({ mode: 0o050 })
     expect(statSync(join(root, 'sub')).mode & 0o777).toBe(0o750)
     expect(readFileSync(join(root, 'sub', 'x.txt'), 'utf8')).toBe('x')
     const s = await stat(accessor, spec('/sub'))
-    expect(s.mode).toBe(0o050)
+    expect(s.mode).toBe(0o750)
   })
 
-  it('ownership is sidecar-only', async () => {
+  it('ownership is residual-only', async () => {
     const before = statSync(join(root, 'f.txt'))
-    await setAttrs(accessor, spec('/f.txt'), { uid: 500, gid: 'dev' })
+    const residual = await setAttrs(accessor, spec('/f.txt'), { uid: 500, gid: 'dev' })
+    expect(residual).toEqual({ uid: 500, gid: 'dev' })
     const after = statSync(join(root, 'f.txt'))
     expect(after.uid).toBe(before.uid)
     expect(after.gid).toBe(before.gid)
     const s = await stat(accessor, spec('/f.txt'))
-    expect(s.uid).toBe(500)
-    expect(s.gid).toBe('dev')
+    expect(s.uid).toBeNull()
+    expect(s.gid).toBeNull()
+  })
+
+  it('stat reports an external chmod', async () => {
+    const { chmodSync } = await import('node:fs')
+    chmodSync(join(root, 'f.txt'), 0o640)
+    const s = await stat(accessor, spec('/f.txt'))
+    expect(s.mode).toBe(0o640)
   })
 
   it('mtime hits the real inode', async () => {
-    await setAttrs(accessor, spec('/f.txt'), { mtime: '2026-03-04T12:00:00+00:00' })
+    const residual = await setAttrs(accessor, spec('/f.txt'), {
+      mtime: '2026-03-04T12:00:00+00:00',
+    })
+    expect(residual).toEqual({})
     const s = await stat(accessor, spec('/f.txt'))
     expect(s.modified).toContain('2026-03-04T12:00:00')
   })
 
-  it('atime is recorded in the sidecar', async () => {
+  it('atime hits the real inode', async () => {
     await setAttrs(accessor, spec('/f.txt'), { atime: '2026-03-04T12:00:00+00:00' })
     const s = await stat(accessor, spec('/f.txt'))
-    expect(s.atime).toBe('2026-03-04T12:00:00+00:00')
+    expect(s.atime).toContain('2026-03-04T12:00:00')
   })
 
   it('throws for a missing path', async () => {
     await expect(setAttrs(accessor, spec('/nope.txt'), { mode: 0o644 })).rejects.toThrow()
   })
 
-  it('unlink drops the sidecar entry', async () => {
-    await setAttrs(accessor, spec('/f.txt'), { uid: 500 })
+  it('unlink then recreate resets the mode', async () => {
+    await setAttrs(accessor, spec('/f.txt'), { mode: 0o601 })
     await unlink(accessor, spec('/f.txt'))
     await writeFile(join(root, 'f.txt'), 'recreated')
     const s = await stat(accessor, spec('/f.txt'))
-    expect(s.uid).toBeNull()
+    expect(s.mode).not.toBe(0o601)
   })
 
-  it('rename moves the sidecar entry', async () => {
-    await setAttrs(accessor, spec('/f.txt'), { uid: 500, gid: 'dev' })
+  it('rename carries the inode mode', async () => {
+    await setAttrs(accessor, spec('/f.txt'), { mode: 0o601 })
     await rename(accessor, spec('/f.txt'), spec('/g.txt'))
     const s = await stat(accessor, spec('/g.txt'))
-    expect(s.uid).toBe(500)
-    expect(s.gid).toBe('dev')
-    expect(accessor.attrs.has('/f.txt')).toBe(false)
+    expect(s.mode).toBe(0o601)
   })
 })

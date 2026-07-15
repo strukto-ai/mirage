@@ -83,3 +83,16 @@ async def test_path_traversal_raises(local_backend):
             PathSpec(resource_path="../etc/passwd",
                      virtual="/../etc/passwd",
                      directory="/../etc/passwd"))
+
+
+@pytest.mark.asyncio
+async def test_get_state_preserves_file_mode(tmp_path):
+    src = DiskResource(str(tmp_path / "src"))
+    ws = Workspace({"/data": src}, mode=MountMode.WRITE)
+    await ws.execute("echo hi > /data/f.txt && chmod 640 /data/f.txt")
+    state = src.get_state()
+    assert state["modes"]["f.txt"] == 0o640
+
+    dst = DiskResource(str(tmp_path / "dst"))
+    dst.load_state(state)
+    assert (tmp_path / "dst" / "f.txt").stat().st_mode & 0o777 == 0o640

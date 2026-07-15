@@ -22,8 +22,6 @@ export const setAttrsOp: RegisteredOp = {
   resource: ResourceName.RAM,
   filetype: null,
   write: true,
-  fn: async (accessor: RAMAccessor, path: PathSpec, _args: readonly unknown[], kwargs) => {
-    await coreSetAttrs(accessor, path, kwargs as SetAttrsFields)
-    return true
-  },
+  fn: async (accessor: RAMAccessor, path: PathSpec, _args: readonly unknown[], kwargs) =>
+    coreSetAttrs(accessor, path, kwargs as SetAttrsFields),
 }

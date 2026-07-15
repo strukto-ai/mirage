@@ -14,6 +14,7 @@
 
 import asyncio
 import logging
+from typing import Any
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
@@ -31,7 +32,7 @@ SCOPE_ERROR = 10_000
 def _list_directory_sync(
     accessor: DatabricksVolumeAccessor,
     remote_path: str,
-) -> list[object]:
+) -> list[Any]:
     return list(accessor.files.list_directory_contents(remote_path))
 
 
