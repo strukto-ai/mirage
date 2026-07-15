@@ -43,8 +43,8 @@ async def fold(
             data = (await read_bytes(accessor, p)).decode(errors="replace")
             for line in split_lines(data):
                 all_lines.append(_fold_line(line, width, break_spaces))
-        return (("\n".join(all_lines) + "\n").encode()
-                if all_lines else b""), IOResult()
+        return (("\n".join(all_lines) +
+                 "\n").encode() if all_lines else b""), IOResult()
 
     raw = await _read_stdin_async(stdin)
     if raw is None:

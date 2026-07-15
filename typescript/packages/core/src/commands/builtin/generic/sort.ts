@@ -43,6 +43,7 @@ export async function sortGeneric(
     allLines = splitSortLines(DEC.decode(raw))
   }
   const sorted = sortAndDedupe(allLines, keyOpts, reverse, unique)
-  const out: ByteSource = sorted.length === 0 ? new Uint8Array(0) : ENC.encode(sorted.join('\n') + '\n')
+  const out: ByteSource =
+    sorted.length === 0 ? new Uint8Array(0) : ENC.encode(sorted.join('\n') + '\n')
   return [out, new IOResult()]
 }
