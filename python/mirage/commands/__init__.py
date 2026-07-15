@@ -18,7 +18,7 @@ from mirage.commands.builtin.ram import COMMANDS as _RAM_COMMANDS
 
 _BY_NAME: dict[str, Callable] = {}
 for _fn in _RAM_COMMANDS:
-    for _rc in _fn._registered_commands:
+    for _rc in getattr(_fn, "_registered_commands"):
         if _rc.filetype is None and _rc.name not in _BY_NAME:
             _BY_NAME[_rc.name] = _fn
 
