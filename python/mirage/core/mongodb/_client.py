@@ -13,11 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
 
 from pymongo import AsyncMongoClient
 
 from mirage.core.mongodb.types import EntityKind
 from mirage.resource.mongodb.config import MongoDBConfig
+
+if TYPE_CHECKING:
+    from mirage.accessor.mongodb import MongoDBAccessor
 
 
 async def list_databases(client: AsyncMongoClient,
@@ -46,7 +50,7 @@ async def database_exists(
     client: AsyncMongoClient,
     config: MongoDBConfig,
     database: str,
-    accessor: object | None = None,
+    accessor: "MongoDBAccessor | None" = None,
 ) -> bool:
     if accessor is not None:
         dbs = await accessor.cached_list(
@@ -64,7 +68,7 @@ async def entity_exists(
     database: str,
     name: str,
     kind: EntityKind | None = None,
-    accessor: object | None = None,
+    accessor: "MongoDBAccessor | None" = None,
 ) -> bool:
     if not await database_exists(client, config, database, accessor):
         return False
@@ -164,7 +168,7 @@ async def get_indexes(
     col = client[database][collection]
     indexes = []
     async for idx in await col.list_indexes():
-        indexes.append(idx)
+        indexes.append(dict(idx))
     return indexes
 
 
