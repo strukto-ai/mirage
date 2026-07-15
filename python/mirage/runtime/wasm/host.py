@@ -12,16 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-import errno as host_errno
 import functools
-import os
 import posixpath
-import struct
-from dataclasses import dataclass
-from datetime import datetime
-from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 try:
     import wasmtime
@@ -32,61 +25,18 @@ except ImportError:
     FuncType = None  # type: ignore[misc, assignment]
     ValType = None  # type: ignore[misc, assignment]
 
-from mirage.types import FileType, PathSpec
-
-# preview1 errno values.
-OK = 0
-EACCES = 2
-EBADF = 8
-EXDEV = 18
-EEXIST = 20
-EINVAL = 28
-EIO = 29
-EISDIR = 31
-ENOENT = 44
-ENOTDIR = 54
-ENOTSUP = 58
-
-# preview1 filetypes.
-FT_UNKNOWN = 0
-FT_CHR = 2
-FT_DIR = 3
-FT_REG = 4
-
-_O_CREAT = 1
-_O_DIRECTORY = 2
-_O_EXCL = 4
-_O_TRUNC = 8
-_FD_APPEND = 1
-_RIGHT_FD_WRITE = 1 << 6
-_ALL_RIGHTS = 2**64 - 1
-
-_READONLY_HINT = "interpreter build directory is read-only"
-
-
-def errno_for(exc: BaseException) -> int:
-    """Map a host/dispatch exception to its preview1 errno.
-
-    Args:
-        exc (BaseException): exception raised by a GuestFs operation.
-    """
-    if isinstance(exc, FileNotFoundError):
-        return ENOENT
-    if isinstance(exc, FileExistsError):
-        return EEXIST
-    if isinstance(exc, IsADirectoryError):
-        return EISDIR
-    if isinstance(exc, NotADirectoryError):
-        return ENOTDIR
-    if isinstance(exc, PermissionError):
-        return EACCES
-    if isinstance(exc, NotImplementedError):
-        return ENOTSUP
-    if isinstance(exc, OSError):
-        if exc.errno == host_errno.EXDEV:
-            return EXDEV
-        return EIO
-    return EINVAL
+# yapf: disable
+from mirage.runtime.wasm.abi import (EBADF, EEXIST, EINVAL, EISDIR, ENOENT,
+                                     ENOTDIR, ENOTSUP, FDFLAG_APPEND, FT_CHR,
+                                     FT_DIR, FT_REG, OFLAG_CREAT,
+                                     OFLAG_DIRECTORY, OFLAG_EXCL, OFLAG_TRUNC,
+                                     OK, RIGHT_FD_WRITE, WHENCE_CUR,
+                                     WHENCE_END, WHENCE_SET, errno_for,
+                                     pack_dirent, pack_fdstat, pack_filestat,
+                                     pack_prestat, pack_u32, pack_u64,
+                                     unpack_iovs)
+# yapf: enable
+from mirage.runtime.wasm.fs import GuestFs
 
 
 def _call_guarded(fn: Callable, caller: "wasmtime.Caller", *args: int) -> int:
@@ -103,249 +53,6 @@ def _call_guarded(fn: Callable, caller: "wasmtime.Caller", *args: int) -> int:
         return fn(caller, *args)
     except (OSError, ValueError, NotImplementedError) as exc:
         return errno_for(exc)
-
-
-def _mtime_ns(modified: str | None) -> int:
-    """Convert a FileStat ISO timestamp to epoch nanoseconds.
-
-    Args:
-        modified (str | None): ISO-8601 timestamp, or None when the
-            backend reports no mtime.
-    """
-    if not modified:
-        return 0
-    try:
-        ts = datetime.fromisoformat(modified)
-    except ValueError:
-        return 0
-    return int(ts.timestamp() * 1_000_000_000)
-
-
-@dataclass(frozen=True, slots=True)
-class GuestStat:
-    is_dir: bool
-    size: int
-    mtime_ns: int
-
-
-class SyncDispatch:
-    """Sync facade over the async workspace dispatch.
-
-    The preview1 host functions run on the wasm worker thread; each
-    workspace op hops to the workspace loop via
-    `run_coroutine_threadsafe` and blocks the worker until it completes
-    (the same bridge shape as monty's OS callbacks). The worker thread
-    carries the launching task's contextvars, so session mount modes
-    are enforced inside the op exactly as for shell commands.
-    """
-
-    def __init__(self, dispatch: Callable,
-                 loop: asyncio.AbstractEventLoop) -> None:
-        self._dispatch = dispatch
-        self._loop = loop
-
-    def call(self, op: str, path: str, **kwargs: Any) -> Any:
-        """Run one workspace op and return its result.
-
-        Args:
-            op (str): dispatch op name (read, write, stat, ...).
-            path (str): guest-absolute virtual path.
-        """
-        coro = self._dispatch(op, PathSpec.from_str_path(path), **kwargs)
-        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        try:
-            result, _ = future.result()
-        except AttributeError as exc:
-            # execute_op raises AttributeError for an op the mount's
-            # resource does not register; surface ENOTSUP to the guest.
-            raise NotImplementedError(str(exc)) from exc
-        return result
-
-
-class GuestFs:
-    """Route guest-absolute paths to the interpreter build or workspace.
-
-    Paths under a workspace mount prefix bridge to the dispatch (cache
-    read-through, write modes, session narrowing — the same path shell
-    commands take). Everything else is served read-only from the host
-    build directory, so the interpreter's own files stay local and
-    fast. A path in neither answers ENOENT. Without a bridge, only the
-    build directory is visible; without a build directory (quickjs),
-    everything bridges.
-    """
-
-    def __init__(
-        self,
-        host_root: Path | None = None,
-        bridge: SyncDispatch | None = None,
-        mount_prefixes: Callable[[], list[str]] | None = None,
-    ) -> None:
-        self._host_root = Path(host_root) if host_root is not None else None
-        self._bridge = bridge
-        self._mount_prefixes = mount_prefixes
-
-    def _prefixes(self) -> list[str]:
-        if self._bridge is None or self._mount_prefixes is None:
-            return []
-        out = []
-        for prefix in self._mount_prefixes():
-            normed = "/" + prefix.strip("/")
-            if normed != "/":
-                out.append(normed)
-        return sorted(out, key=len, reverse=True)
-
-    def _host_target(self, path: str) -> Path | None:
-        """Resolve a guest path to the host build, or None for the bridge.
-
-        Args:
-            path (str): guest-absolute path.
-
-        Raises:
-            FileNotFoundError: no host build and no bridge to serve it.
-        """
-        for prefix in self._prefixes():
-            if path == prefix or path.startswith(prefix + "/"):
-                return None
-        if self._host_root is None:
-            if self._bridge is None:
-                raise FileNotFoundError(path)
-            return None
-        rel = path.lstrip("/")
-        host = self._host_root / rel if rel else self._host_root
-        if self._bridge is None:
-            return host
-        return host if path == "/" or host.exists() else None
-
-    def _bridge_call(self, op: str, path: str, **kwargs: Any) -> Any:
-        if self._bridge is None:
-            raise FileNotFoundError(path)
-        return self._bridge.call(op, path, **kwargs)
-
-    def stat(self, path: str) -> GuestStat:
-        """Stat a guest path.
-
-        Args:
-            path (str): guest-absolute path.
-
-        Raises:
-            FileNotFoundError: the path exists on neither side.
-        """
-        host = self._host_target(path)
-        if host is not None:
-            st = os.stat(host)
-            return GuestStat(is_dir=host.is_dir(),
-                             size=st.st_size,
-                             mtime_ns=st.st_mtime_ns)
-        fs = self._bridge_call("stat", path)
-        return GuestStat(is_dir=fs.type == FileType.DIRECTORY,
-                         size=fs.size or 0,
-                         mtime_ns=_mtime_ns(fs.modified))
-
-    def stat_or_none(self, path: str) -> GuestStat | None:
-        try:
-            return self.stat(path)
-        except (FileNotFoundError, NotADirectoryError):
-            return None
-
-    def read(self, path: str) -> bytes:
-        host = self._host_target(path)
-        if host is not None:
-            return host.read_bytes()
-        data = self._bridge_call("read", path)
-        if isinstance(data, str):
-            return data.encode()
-        return bytes(data)
-
-    def write(self, path: str, data: bytes) -> None:
-        if self._host_target(path) is not None:
-            raise PermissionError(_READONLY_HINT)
-        self._bridge_call("write", path, data=data)
-
-    def create(self, path: str) -> None:
-        if self._host_target(path) is not None:
-            raise PermissionError(_READONLY_HINT)
-        self._bridge_call("create", path)
-
-    def truncate(self, path: str) -> None:
-        if self._host_target(path) is not None:
-            raise PermissionError(_READONLY_HINT)
-        self._bridge_call("truncate", path, length=0)
-
-    def unlink(self, path: str) -> None:
-        if self._host_target(path) is not None:
-            raise PermissionError(_READONLY_HINT)
-        self._bridge_call("unlink", path)
-
-    def mkdir(self, path: str) -> None:
-        if self._host_target(path) is not None:
-            raise PermissionError(_READONLY_HINT)
-        self._bridge_call("mkdir", path)
-
-    def rmdir(self, path: str) -> None:
-        if self._host_target(path) is not None:
-            raise PermissionError(_READONLY_HINT)
-        self._bridge_call("rmdir", path)
-
-    def rename(self, src: str, dst: str) -> None:
-        """Rename within the workspace.
-
-        Args:
-            src (str): guest-absolute source path.
-            dst (str): guest-absolute destination path.
-        """
-        src_host = self._host_target(src) is not None
-        dst_host = self._host_target(dst) is not None
-        if src_host or dst_host:
-            if src_host != dst_host:
-                raise OSError(host_errno.EXDEV, "cross-device rename", src)
-            raise PermissionError(_READONLY_HINT)
-        self._bridge_call("rename", src, dst=PathSpec.from_str_path(dst))
-
-    def readdir(self, path: str) -> list[tuple[str, int]]:
-        """List a guest directory as (name, preview1 filetype) pairs.
-
-        Bridge entries whose kind the backend does not report come back
-        FT_UNKNOWN; guests stat lazily when they care.
-
-        Args:
-            path (str): guest-absolute path.
-        """
-        if path == "/":
-            return self._readdir_root()
-        host = self._host_target(path)
-        if host is not None:
-            return self._readdir_host(host)
-        return self._readdir_bridge(path)
-
-    def _readdir_host(self, host: Path) -> list[tuple[str, int]]:
-        entries = []
-        for entry in os.scandir(host):
-            entries.append((entry.name, FT_DIR if entry.is_dir() else FT_REG))
-        return sorted(entries)
-
-    def _readdir_bridge(self, path: str) -> list[tuple[str, int]]:
-        names = self._bridge_call("readdir", path)
-        entries: dict[str, int] = {}
-        for raw in names:
-            base = raw.rstrip("/").rsplit("/", 1)[-1]
-            if not base:
-                continue
-            kind = FT_DIR if raw.endswith("/") else FT_UNKNOWN
-            entries[base] = kind
-        return sorted(entries.items())
-
-    def _readdir_root(self) -> list[tuple[str, int]]:
-        entries: dict[str, int] = {}
-        if self._host_root is not None:
-            for name, kind in self._readdir_host(self._host_root):
-                entries[name] = kind
-        if self._bridge is not None:
-            for name, kind in self._readdir_bridge("/"):
-                entries.setdefault(name, kind)
-            for prefix in self._prefixes():
-                top = prefix.lstrip("/").split("/", 1)[0]
-                entries[top] = FT_DIR
-        return sorted(entries.items())
 
 
 class WasiFs:
@@ -403,8 +110,7 @@ class WasiFs:
 
     def _iovs(self, caller: "wasmtime.Caller", ptr: int,
               count: int) -> list[tuple[int, int]]:
-        raw = self._load(caller, ptr, count * 8)
-        return [struct.unpack_from("<II", raw, i * 8) for i in range(count)]
+        return unpack_iovs(self._load(caller, ptr, count * 8), count)
 
     def _path_arg(self, caller: "wasmtime.Caller", dirfd: int, ptr: int,
                   length: int) -> str | None:
@@ -424,12 +130,6 @@ class WasiFs:
         return fd
 
     @staticmethod
-    def _pack_filestat(size: int, mtime_ns: int, filetype: int,
-                       ino: int) -> bytes:
-        return struct.pack("<QQBxxxxxxxQQQQQ", 0, ino, filetype, 1, size,
-                           mtime_ns, mtime_ns, mtime_ns)
-
-    @staticmethod
     def _ino(path: str) -> int:
         return hash(path) & (2**63 - 1)
 
@@ -440,8 +140,7 @@ class WasiFs:
         entry = self._fds.get(fd)
         if entry is None or not entry.get("preopen"):
             return EBADF
-        name = entry["path"].encode()
-        self._store(caller, buf, struct.pack("<II", 0, len(name)))
+        self._store(caller, buf, pack_prestat(len(entry["path"].encode())))
         return OK
 
     def fd_prestat_dir_name(self, caller: "wasmtime.Caller", fd: int, ptr: int,
@@ -461,30 +160,30 @@ class WasiFs:
         if path is None:
             return EBADF
         st = self._fs.stat_or_none(path)
-        if oflags & _O_DIRECTORY or (st is not None and st.is_dir
-                                     and not oflags & _O_CREAT):
+        if oflags & OFLAG_DIRECTORY or (st is not None and st.is_dir
+                                        and not oflags & OFLAG_CREAT):
             if st is None:
                 return ENOENT
             if not st.is_dir:
                 return ENOTDIR
             fd = self._alloc({"kind": "dir", "path": path, "dirents": None})
-            self._store(caller, out, struct.pack("<I", fd))
+            self._store(caller, out, pack_u32(fd))
             return OK
         if st is not None and st.is_dir:
             return EISDIR
-        if oflags & _O_CREAT and oflags & _O_EXCL and st is not None:
+        if oflags & OFLAG_CREAT and oflags & OFLAG_EXCL and st is not None:
             return EEXIST
-        if st is None and not oflags & _O_CREAT:
+        if st is None and not oflags & OFLAG_CREAT:
             return ENOENT
-        writable = (bool(oflags & (_O_CREAT | _O_TRUNC))
-                    or bool(rights_base & _RIGHT_FD_WRITE)
-                    or bool(fdflags & _FD_APPEND))
+        writable = (bool(oflags & (OFLAG_CREAT | OFLAG_TRUNC))
+                    or bool(rights_base & RIGHT_FD_WRITE)
+                    or bool(fdflags & FDFLAG_APPEND))
         if st is None:
             # Created through the workspace now, so write modes and a
             # missing parent answer at open time, not at close.
             self._fs.create(path)
             buf = bytearray()
-        elif oflags & _O_TRUNC:
+        elif oflags & OFLAG_TRUNC:
             self._fs.truncate(path)
             buf = bytearray()
         else:
@@ -493,12 +192,12 @@ class WasiFs:
             "kind": "file",
             "path": path,
             "buf": buf,
-            "pos": len(buf) if fdflags & _FD_APPEND else 0,
+            "pos": len(buf) if fdflags & FDFLAG_APPEND else 0,
             "dirty": False,
             "writable": writable,
             "stat": st,
         })
-        self._store(caller, out, struct.pack("<I", fd))
+        self._store(caller, out, pack_u32(fd))
         return OK
 
     def fd_close(self, caller: "wasmtime.Caller", fd: int) -> int:
@@ -534,7 +233,7 @@ class WasiFs:
             total += len(chunk)
             if len(chunk) < blen:
                 break
-        self._store(caller, nread, struct.pack("<I", total))
+        self._store(caller, nread, pack_u32(total))
         return OK
 
     def fd_pread(self, caller: "wasmtime.Caller", fd: int, iovs: int,
@@ -551,7 +250,7 @@ class WasiFs:
             total += len(chunk)
             if len(chunk) < blen:
                 break
-        self._store(caller, nread, struct.pack("<I", total))
+        self._store(caller, nread, pack_u32(total))
         return OK
 
     def fd_write(self, caller: "wasmtime.Caller", fd: int, iovs: int,
@@ -578,7 +277,7 @@ class WasiFs:
             else:
                 return EINVAL
             total += blen
-        self._store(caller, nwritten, struct.pack("<I", total))
+        self._store(caller, nwritten, pack_u32(total))
         return OK
 
     def fd_pwrite(self, caller: "wasmtime.Caller", fd: int, iovs: int,
@@ -598,7 +297,7 @@ class WasiFs:
             pos += blen
             total += blen
             entry["dirty"] = True
-        self._store(caller, nwritten, struct.pack("<I", total))
+        self._store(caller, nwritten, pack_u32(total))
         return OK
 
     def fd_seek(self, caller: "wasmtime.Caller", fd: int, offset: int,
@@ -606,18 +305,22 @@ class WasiFs:
         entry = self._fds.get(fd)
         if entry is None or "buf" not in entry:
             return EBADF
-        base = {0: 0, 1: entry["pos"], 2: len(entry["buf"])}.get(whence)
+        base = {
+            WHENCE_SET: 0,
+            WHENCE_CUR: entry["pos"],
+            WHENCE_END: len(entry["buf"]),
+        }.get(whence)
         if base is None or base + offset < 0:
             return EINVAL
         entry["pos"] = base + offset
-        self._store(caller, out, struct.pack("<Q", entry["pos"]))
+        self._store(caller, out, pack_u64(entry["pos"]))
         return OK
 
     def fd_tell(self, caller: "wasmtime.Caller", fd: int, out: int) -> int:
         entry = self._fds.get(fd)
         if entry is None or "pos" not in entry:
             return EBADF
-        self._store(caller, out, struct.pack("<Q", entry["pos"]))
+        self._store(caller, out, pack_u64(entry["pos"]))
         return OK
 
     # -- stat -------------------------------------------------------------
@@ -628,9 +331,7 @@ class WasiFs:
         if entry is None:
             return EBADF
         filetype = {"dir": FT_DIR, "file": FT_REG}.get(entry["kind"], FT_CHR)
-        self._store(
-            caller, buf,
-            struct.pack("<BxHxxxxQQ", filetype, 0, _ALL_RIGHTS, _ALL_RIGHTS))
+        self._store(caller, buf, pack_fdstat(filetype))
         return OK
 
     def fd_filestat_get(self, caller: "wasmtime.Caller", fd: int,
@@ -640,15 +341,14 @@ class WasiFs:
             return EBADF
         if entry["kind"] == "file":
             st = entry["stat"]
-            packed = self._pack_filestat(len(entry["buf"]),
-                                         st.mtime_ns if st else 0, FT_REG,
-                                         self._ino(entry["path"]))
+            packed = pack_filestat(len(entry["buf"]), st.mtime_ns if st else 0,
+                                   FT_REG, self._ino(entry["path"]))
         elif entry["kind"] == "dir":
             st = self._fs.stat(entry["path"])
-            packed = self._pack_filestat(st.size, st.mtime_ns, FT_DIR,
-                                         self._ino(entry["path"]))
+            packed = pack_filestat(st.size, st.mtime_ns, FT_DIR,
+                                   self._ino(entry["path"]))
         else:
-            packed = self._pack_filestat(0, 0, FT_CHR, fd)
+            packed = pack_filestat(0, 0, FT_CHR, fd)
         self._store(caller, buf, packed)
         return OK
 
@@ -658,9 +358,9 @@ class WasiFs:
         if path is None:
             return EBADF
         st = self._fs.stat(path)
-        packed = self._pack_filestat(st.size, st.mtime_ns,
-                                     FT_DIR if st.is_dir else FT_REG,
-                                     self._ino(path))
+        packed = pack_filestat(st.size,
+                               st.mtime_ns, FT_DIR if st.is_dir else FT_REG,
+                               self._ino(path))
         self._store(caller, buf, packed)
         return OK
 
@@ -692,13 +392,11 @@ class WasiFs:
         i = cookie
         while i < len(entry["dirents"]) and len(out) < buf_len:
             name, filetype = entry["dirents"][i]
-            encoded = name.encode()
-            record = struct.pack("<QQIBxxx", i + 1, i + 1, len(encoded),
-                                 filetype) + encoded
+            record = pack_dirent(i, name.encode(), filetype)
             out += record[:buf_len - len(out)]
             i += 1
         self._store(caller, buf, bytes(out))
-        self._store(caller, used, struct.pack("<I", len(out)))
+        self._store(caller, used, pack_u32(len(out)))
         return OK
 
     # -- fs mutation ------------------------------------------------------

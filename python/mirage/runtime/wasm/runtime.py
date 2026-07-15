@@ -22,7 +22,8 @@ try:
 except ImportError:
     wasmtime = None  # type: ignore[assignment]
 
-from mirage.runtime.wasm_fs import GuestFs, WasiFs, install_wasi_fs
+from mirage.runtime.wasm.fs import GuestFs
+from mirage.runtime.wasm.host import WasiFs, install_wasi_fs
 
 logger = logging.getLogger(__name__)
 

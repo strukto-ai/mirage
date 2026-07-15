@@ -12,16 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import errno as host_errno
 
 import pytest
 
-from mirage.runtime.wasm_fs import (EACCES, EEXIST, EINVAL, EIO, EISDIR,
-                                    ENOENT, ENOTDIR, ENOTSUP, EXDEV, FT_DIR,
-                                    FT_REG, FT_UNKNOWN, GuestFs, GuestStat,
-                                    SyncDispatch, errno_for)
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.runtime.wasm.abi import FT_DIR, FT_REG, FT_UNKNOWN
+from mirage.runtime.wasm.fs import GuestFs, GuestStat
+from mirage.types import FileStat, FileType
 
 
 class FakeBridge:
@@ -77,18 +74,6 @@ class FakeBridge:
                 raise FileNotFoundError(path)
             return sorted(out)
         raise NotImplementedError(op)
-
-
-def test_errno_map_covers_fs_exceptions():
-    assert errno_for(FileNotFoundError("x")) == ENOENT
-    assert errno_for(FileExistsError("x")) == EEXIST
-    assert errno_for(IsADirectoryError("x")) == EISDIR
-    assert errno_for(NotADirectoryError("x")) == ENOTDIR
-    assert errno_for(PermissionError("x")) == EACCES
-    assert errno_for(NotImplementedError("x")) == ENOTSUP
-    assert errno_for(OSError(host_errno.EXDEV, "x")) == EXDEV
-    assert errno_for(OSError("boom")) == EIO
-    assert errno_for(ValueError("no mount matches")) == EINVAL
 
 
 def test_mount_prefix_routes_to_bridge_even_when_host_file_exists(tmp_path):
@@ -179,37 +164,3 @@ def test_rename_within_bridge_and_across_routes(tmp_path):
     with pytest.raises(OSError) as exc:
         fs.rename("/host.txt", "/data/c.txt")
     assert exc.value.errno == host_errno.EXDEV
-
-
-def test_sync_dispatch_bridges_to_the_loop_and_maps_missing_ops():
-
-    async def dispatch(op, path, **kwargs):
-        if op == "boom":
-            raise AttributeError("ram: no op 'boom'")
-        return (op, path.virtual, kwargs), None
-
-    async def run():
-        loop = asyncio.get_running_loop()
-        sync = SyncDispatch(dispatch, loop)
-        result = await asyncio.to_thread(sync.call, "read", "/data/f.txt")
-        assert result == ("read", "/data/f.txt", {})
-        with pytest.raises(NotImplementedError, match="no op 'boom'"):
-            await asyncio.to_thread(sync.call, "boom", "/data/f.txt")
-
-    asyncio.run(run())
-
-
-def test_sync_dispatch_wraps_paths_as_pathspec():
-    seen = []
-
-    async def dispatch(op, path, **kwargs):
-        seen.append(path)
-        return None, None
-
-    async def run():
-        sync = SyncDispatch(dispatch, asyncio.get_running_loop())
-        await asyncio.to_thread(sync.call, "stat", "/data/f.txt")
-
-    asyncio.run(run())
-    assert isinstance(seen[0], PathSpec)
-    assert seen[0].virtual == "/data/f.txt"

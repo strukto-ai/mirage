@@ -23,8 +23,7 @@ except ImportError:
     wasmtime = None  # type: ignore[assignment]
 
 from mirage.runtime.js.base import JsRunArgs, JsRunResult, JsRuntime
-from mirage.runtime.wasm import WasmRuntime
-from mirage.runtime.wasm_fs import GuestFs, SyncDispatch
+from mirage.runtime.wasm import GuestFs, SyncDispatch, WasmRuntime
 
 QUICKJS_HOME_ENV = "MIRAGE_QUICKJS_HOME"
 

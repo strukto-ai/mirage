@@ -24,8 +24,7 @@ except ImportError:
 
 from mirage.runtime.python.base import (PythonRunArgs, PythonRunResult,
                                         PythonRuntime)
-from mirage.runtime.wasm import WasmRuntime
-from mirage.runtime.wasm_fs import GuestFs, SyncDispatch
+from mirage.runtime.wasm import GuestFs, SyncDispatch, WasmRuntime
 
 WASI_HOME_ENV = "MIRAGE_WASI_HOME"
 
