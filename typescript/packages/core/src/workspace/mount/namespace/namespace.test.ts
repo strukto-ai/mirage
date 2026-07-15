@@ -222,6 +222,30 @@ describe('Namespace node metadata overlay', () => {
     await ws.close()
   })
 
+  it('dropAttrs removes applied fields and deletes emptied nodes', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    await ws.namespace.setAttrs('/data/f.txt', { mode: 0o601, uid: 500 })
+    await ws.namespace.dropAttrs('/data/f.txt', ['mode'])
+    const meta = ws.namespace.metaFor('/data/f.txt')
+    expect(meta?.mode).toBeUndefined()
+    expect(meta?.uid).toBe(500)
+    await ws.namespace.setAttrs('/data/g.txt', { mode: 0o601 })
+    await ws.namespace.dropAttrs('/data/g.txt', ['mode'])
+    expect(ws.namespace.metaFor('/data/g.txt')).toBeNull()
+    await ws.close()
+  })
+
+  it('dropAttrs keeps a link target and is a no-op on a missing node', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    await ws.namespace.symlink('/data/link', '/t1', 1)
+    await ws.namespace.dropAttrs('/data/link', ['target', 'mtime'])
+    expect(ws.namespace.readlink('/data/link')).toBe('/t1')
+    expect(ws.namespace.metaFor('/data/link')?.mtime).toBeUndefined()
+    await ws.namespace.dropAttrs('/data/nope.txt', ['mode'])
+    expect(ws.namespace.metaFor('/data/nope.txt')).toBeNull()
+    await ws.close()
+  })
+
   it('unlinkGlob matches segment-wise and purges under matched dirs', async () => {
     const ws = new Workspace({ '/data': new RAMResource() })
     await ws.namespace.setAttrs('/data/a.log', { mode: 0o600 })

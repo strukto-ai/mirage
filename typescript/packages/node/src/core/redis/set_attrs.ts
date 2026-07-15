@@ -27,12 +27,13 @@ export interface SetAttrsFields {
 // Write metadata fields on an existing entry (the write side of stat).
 // Fields live in a per-path attrs hash; values are stored as strings
 // (redis hashes are string-valued) and decoded by stat. Stored, not
-// enforced: mount mode does real access control.
+// enforced: mount mode does real access control. Returns the residual
+// (always empty; every field applies natively).
 export async function setAttrs(
   accessor: RedisAccessor,
   path: PathSpec,
   fields: SetAttrsFields,
-): Promise<void> {
+): Promise<Record<string, number | string>> {
   const store = accessor.store
   const p = norm(path.mountPath)
   if (!(await store.hasFile(p)) && !(await store.hasDir(p))) {
@@ -49,4 +50,5 @@ export async function setAttrs(
   if (fields.mtime !== undefined) {
     await store.setModified(p, fields.mtime)
   }
+  return {}
 }

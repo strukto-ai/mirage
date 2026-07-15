@@ -22,8 +22,6 @@ export const setAttrsOp: RegisteredOp = {
   resource: ResourceName.REDIS,
   filetype: null,
   write: true,
-  fn: async (accessor: RedisAccessor, path: PathSpec, _args: readonly unknown[], kwargs) => {
-    await coreSetAttrs(accessor, path, kwargs as SetAttrsFields)
-    return true
-  },
+  fn: async (accessor: RedisAccessor, path: PathSpec, _args: readonly unknown[], kwargs) =>
+    coreSetAttrs(accessor, path, kwargs as SetAttrsFields),
 }

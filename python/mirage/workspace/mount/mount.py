@@ -30,6 +30,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.observe.context import (push_mount_prefix, push_revisions,
                                     reset_revisions, with_mount_prefix,
                                     with_revisions)
+from mirage.ops.config import StatOverlay
 from mirage.ops.registry import RegisteredOp
 from mirage.resource.base import BaseResource
 from mirage.runtime.js.base import JsRuntime
@@ -400,6 +401,7 @@ class MountEntry:
         exec_allowed: bool = True,
         python_runtime: PythonRuntime | None = None,
         js_runtime: JsRuntime | None = None,
+        stat_overlay: StatOverlay | None = None,
     ) -> tuple[ByteSource | None, IOResult]:
         """Execute a command on this mount's resource.
 
@@ -414,6 +416,8 @@ class MountEntry:
             flag_kwargs (dict): parsed flags from upstream.
             stdin (ByteSource | None): stdin data.
             cwd (str): virtual cwd from session.
+            stat_overlay (StatOverlay | None): namespace attr merge for
+                stat-rendering commands (ls); injected only when passed.
         """
         extension = get_extension(paths[0].virtual) if paths else None
 
@@ -473,6 +477,8 @@ class MountEntry:
         if env is not None:
             kw["env"] = env
         kw["exec_allowed"] = exec_allowed
+        if stat_overlay is not None:
+            kw["stat_overlay"] = stat_overlay
         if python_runtime is not None:
             kw["python_runtime"] = python_runtime
         if js_runtime is not None:

@@ -19,6 +19,7 @@ import type { Resource } from '../resource/base.ts'
 import type { CommandSafeguard, PathSpec } from '../types.ts'
 import type { PythonRuntime } from '../workspace/executor/python/runtimes/interface.ts'
 import type { JsRuntime } from '../workspace/executor/js/interface.ts'
+import type { StatOverlay } from '../ops/config.ts'
 import type { AggregateResult } from './builtin/aggregators.ts'
 import { renderHelp } from './spec/help.ts'
 import { CommandSpec, OperandKind, Option } from './spec/types.ts'
@@ -55,6 +56,7 @@ export interface CommandOpts {
   execAllowed?: boolean
   pythonRuntime?: PythonRuntime
   jsRuntime?: JsRuntime
+  statOverlay?: StatOverlay
 }
 
 export type CommandFnResult = [ByteSource | null, IOResult] | null

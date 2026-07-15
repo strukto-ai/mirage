@@ -37,8 +37,9 @@ def accessor(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_set_attrs_mode_hits_inode_and_sidecar(accessor, tmp_path):
-    await set_attrs(accessor, _spec("/f.txt"), mode=0o601)
+async def test_set_attrs_mode_hits_inode_no_residual(accessor, tmp_path):
+    residual = await set_attrs(accessor, _spec("/f.txt"), mode=0o601)
+    assert residual == {}
     real = os.stat(tmp_path / "f.txt")
     assert real.st_mode & 0o777 == 0o601
     result = await stat(accessor, _spec("/f.txt"))
@@ -47,12 +48,14 @@ async def test_set_attrs_mode_hits_inode_and_sidecar(accessor, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_set_attrs_mode_000_keeps_owner_access(accessor, tmp_path):
-    await set_attrs(accessor, _spec("/f.txt"), mode=0)
+async def test_set_attrs_mode_000_clamps_and_returns_residual(
+        accessor, tmp_path):
+    residual = await set_attrs(accessor, _spec("/f.txt"), mode=0)
+    assert residual == {"mode": 0}
     real = os.stat(tmp_path / "f.txt")
     assert real.st_mode & 0o777 == 0o600
     result = await stat(accessor, _spec("/f.txt"))
-    assert result.mode == 0
+    assert result.mode == 0o600
     assert (tmp_path / "f.txt").read_bytes() == b"hello"
 
 
@@ -60,23 +63,32 @@ async def test_set_attrs_mode_000_keeps_owner_access(accessor, tmp_path):
 async def test_set_attrs_dir_mode_keeps_owner_traversal(accessor, tmp_path):
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "x.txt").write_text("x")
-    await set_attrs(accessor, _spec("/sub"), mode=0o050)
+    residual = await set_attrs(accessor, _spec("/sub"), mode=0o050)
+    assert residual == {"mode": 0o050}
     real = os.stat(tmp_path / "sub")
     assert real.st_mode & 0o777 == 0o750
     assert (tmp_path / "sub" / "x.txt").read_text() == "x"
     result = await stat(accessor, _spec("/sub"))
-    assert result.mode == 0o050
+    assert result.mode == 0o750
 
 
 @pytest.mark.asyncio
-async def test_set_attrs_ownership_is_sidecar_only(accessor, tmp_path):
+async def test_set_attrs_ownership_is_residual_only(accessor, tmp_path):
     before = os.stat(tmp_path / "f.txt")
-    await set_attrs(accessor, _spec("/f.txt"), uid=500, gid="dev")
+    residual = await set_attrs(accessor, _spec("/f.txt"), uid=500, gid="dev")
+    assert residual == {"uid": 500, "gid": "dev"}
     after = os.stat(tmp_path / "f.txt")
     assert (after.st_uid, after.st_gid) == (before.st_uid, before.st_gid)
     result = await stat(accessor, _spec("/f.txt"))
-    assert result.uid == 500
-    assert result.gid == "dev"
+    assert result.uid is None
+    assert result.gid is None
+
+
+@pytest.mark.asyncio
+async def test_stat_reports_external_chmod(accessor, tmp_path):
+    os.chmod(tmp_path / "f.txt", 0o640)
+    result = await stat(accessor, _spec("/f.txt"))
+    assert result.mode == 0o640
 
 
 @pytest.mark.asyncio
@@ -89,12 +101,13 @@ async def test_set_attrs_mtime_hits_inode(accessor, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_set_attrs_atime_recorded(accessor):
-    await set_attrs(accessor,
-                    _spec("/f.txt"),
-                    atime="2026-03-04T12:00:00+00:00")
+async def test_set_attrs_atime_hits_inode(accessor):
+    residual = await set_attrs(accessor,
+                               _spec("/f.txt"),
+                               atime="2026-03-04T12:00:00+00:00")
+    assert residual == {}
     result = await stat(accessor, _spec("/f.txt"))
-    assert result.atime == "2026-03-04T12:00:00+00:00"
+    assert result.atime == "2026-03-04T12:00:00Z"
 
 
 @pytest.mark.asyncio
@@ -104,19 +117,17 @@ async def test_set_attrs_missing_raises(accessor):
 
 
 @pytest.mark.asyncio
-async def test_unlink_drops_sidecar(accessor, tmp_path):
-    await set_attrs(accessor, _spec("/f.txt"), uid=500)
+async def test_unlink_then_recreate_resets_mode(accessor, tmp_path):
+    await set_attrs(accessor, _spec("/f.txt"), mode=0o601)
     await unlink(accessor, _spec("/f.txt"))
     (tmp_path / "f.txt").write_text("recreated")
     result = await stat(accessor, _spec("/f.txt"))
-    assert result.uid is None
+    assert result.mode != 0o601
 
 
 @pytest.mark.asyncio
-async def test_rename_moves_sidecar(accessor):
-    await set_attrs(accessor, _spec("/f.txt"), uid=500, gid="dev")
+async def test_rename_carries_inode_mode(accessor):
+    await set_attrs(accessor, _spec("/f.txt"), mode=0o601)
     await rename(accessor, _spec("/f.txt"), _spec("/g.txt"))
     result = await stat(accessor, _spec("/g.txt"))
-    assert result.uid == 500
-    assert result.gid == "dev"
-    assert "/f.txt" not in accessor.attrs
+    assert result.mode == 0o601

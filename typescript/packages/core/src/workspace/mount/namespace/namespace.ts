@@ -216,6 +216,28 @@ export class Namespace {
   // so a stored overlay time would otherwise shadow the backend's fresh
   // one forever. Permission and ownership survive writes; a symlink entry
   // keeps its own times.
+  // Drop overlay fields that a backend has applied natively. A
+  // residual-free native setattr means the real inode now holds the
+  // requested value, so a stale overlay field would shadow it forever
+  // (chmod 000 then chmod 644 must not keep showing 000). Symlink
+  // entries keep their target.
+  async dropAttrs(path: string, fields: readonly string[]): Promise<void> {
+    const meta = this.nodeTable.get(path)
+    if (meta === undefined) return
+    for (const field of fields) {
+      if (field !== 'target') {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete meta[field as keyof NodeMeta]
+      }
+    }
+    if (Object.keys(meta).length === 0) {
+      this.nodeTable.delete(path)
+      await this.store.delete([path])
+      return
+    }
+    await this.store.set(path, metaToFields(meta))
+  }
+
   async clearTimes(path: string): Promise<void> {
     const meta = this.nodeTable.get(path)
     if (meta === undefined || meta.target !== undefined) return

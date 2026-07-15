@@ -280,24 +280,34 @@ function isMissingOp(err: unknown, op: string): boolean {
   return err instanceof Error && err.message.startsWith(`no op registered: ${op}`)
 }
 
-// Apply attributes natively when the mount supports setattr, else into the
-// namespace overlay (durable, snapshot-captured namespace state). Unlike
-// Python (which asks the mount upfront), ops resolve in the workspace
-// OpsRegistry here, so the probe is the dispatch itself: only the
-// registry's own missing-op error routes to the overlay.
+// Apply attributes natively where the backend can hold them; store the
+// rest in the namespace overlay. A registered setattr op applies what it
+// can and returns the residual (e.g. disk: clamped mode bits, ownership).
+// Residual fields go to the overlay; fields the backend applied natively
+// are dropped from it, so a stale overlay never shadows the fresh backend
+// value. Unlike Python (which asks the mount upfront), ops resolve in the
+// workspace OpsRegistry here, so the probe is the dispatch itself: only
+// the registry's own missing-op error routes everything to the overlay.
 async function setattrVia(
   namespace: Namespace,
   dispatch: DispatchFn,
   path: PathSpec,
   fields: SetAttrFields,
 ): Promise<void> {
+  let effective = fields
   try {
-    await dispatch('setattr', path, [], fields as Record<string, unknown>)
-    return
+    const [result] = await dispatch('setattr', path, [], fields as Record<string, unknown>)
+    const residual = result as Record<string, number | string>
+    const applied = Object.entries(fields)
+      .filter(([key, value]) => value !== undefined && !(key in residual))
+      .map(([key]) => key)
+    if (applied.length > 0) await namespace.dropAttrs(path.virtual, applied)
+    if (Object.keys(residual).length === 0) return
+    effective = residual as SetAttrFields
   } catch (err) {
     if (!isMissingOp(err, 'setattr')) throw err
   }
-  const { mtime, ...rest } = fields
+  const { mtime, ...rest } = effective
   await namespace.setAttrs(path.virtual, {
     ...rest,
     ...(mtime !== undefined ? { mtime: new Date(mtime).getTime() / 1000 } : {}),

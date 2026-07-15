@@ -20,7 +20,6 @@ from mirage.accessor.disk import DiskAccessor
 from mirage.cache.context import (invalidate_after_unlink,
                                   invalidate_after_write)
 from mirage.types import PathSpec
-from mirage.utils.path import norm
 
 
 def _resolve(root: Path, path: str) -> Path:
@@ -39,11 +38,3 @@ async def rename(accessor: DiskAccessor, src: PathSpec, dst: PathSpec) -> None:
     await invalidate_after_unlink(src)
     await invalidate_after_write(dst)
     await aiofiles.os.rename(_resolve(root, src), _resolve(root, dst))
-    s, d = norm(src), norm(dst)
-    prefix = s.rstrip("/") + "/"
-    for key in list(accessor.attrs):
-        if key == s:
-            accessor.attrs[d] = accessor.attrs.pop(key)
-        elif key.startswith(prefix):
-            accessor.attrs[d.rstrip("/") + "/" +
-                           key[len(prefix):]] = accessor.attrs.pop(key)

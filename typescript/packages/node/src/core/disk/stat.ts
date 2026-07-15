@@ -15,7 +15,7 @@
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { stat as fsStat } from 'node:fs/promises'
 import path from 'node:path'
-import { enoent, FileStat, FileType, guessType, norm, type PathSpec } from '@struktoai/mirage-core'
+import { enoent, FileStat, FileType, guessType, type PathSpec } from '@struktoai/mirage-core'
 import { resolveSafe } from './utils.ts'
 
 export async function stat(accessor: DiskAccessor, p: PathSpec): Promise<FileStat> {
@@ -32,17 +32,19 @@ export async function stat(accessor: DiskAccessor, p: PathSpec): Promise<FileSta
   }
   const modified = st.mtime.toISOString()
   const name = path.basename(full)
-  const attrs = accessor.attrs.get(norm(virtual)) ?? {}
+  // Fields setattr applies natively (mode, times) read from the real
+  // inode, so external chmod/utime stays visible. Ownership can never be
+  // applied natively (chown needs privileges), so it lives wholly in the
+  // namespace overlay, merged at the stat-merge layer; host uid/gid
+  // numbers would also be machine-dependent noise.
   if (st.isDirectory()) {
     return new FileStat({
       name,
       size: null,
       modified,
       type: FileType.DIRECTORY,
-      mode: attrs.mode ?? null,
-      uid: attrs.uid ?? null,
-      gid: attrs.gid ?? null,
-      atime: attrs.atime ?? null,
+      mode: st.mode & 0o7777,
+      atime: st.atime.toISOString(),
     })
   }
   return new FileStat({
@@ -51,9 +53,7 @@ export async function stat(accessor: DiskAccessor, p: PathSpec): Promise<FileSta
     modified,
     fingerprint: modified,
     type: guessType(name),
-    mode: attrs.mode ?? null,
-    uid: attrs.uid ?? null,
-    gid: attrs.gid ?? null,
-    atime: attrs.atime ?? null,
+    mode: st.mode & 0o7777,
+    atime: st.atime.toISOString(),
   })
 }

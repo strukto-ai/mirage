@@ -34,7 +34,7 @@ from mirage.io.types import ByteSource
 from mirage.shell.call_stack import CallStack
 from mirage.shell.job_table import JobTable
 from mirage.shell.types import ERREXIT_EXEMPT_TYPES
-from mirage.types import PathSpec, word_text
+from mirage.types import FileStat, PathSpec, word_text
 from mirage.utils.errors import FS_ERRORS, format_fs_error
 from mirage.workspace.executor.control import ReturnSignal
 from mirage.workspace.executor.fanout import (_fan_out_traversal,
@@ -45,6 +45,7 @@ from mirage.workspace.executor.jobs import (handle_jobs, handle_kill,
 from mirage.workspace.mount import (MountCommandUnsupported, MountEntry,
                                     MountRegistry)
 from mirage.workspace.mount.namespace import Namespace
+from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
 from mirage.workspace.route import JOB_BUILTINS, Consumer, route
 from mirage.workspace.session import Session, assert_mount_allowed
 from mirage.workspace.types import ExecutionNode
@@ -149,6 +150,18 @@ def _scalar_find_flags(flag_kwargs: dict) -> dict:
     }
 
 
+def _namespace_stat_overlay(namespace: Namespace, virtual: str,
+                            stat: FileStat) -> FileStat:
+    """Merge namespace attr overlays into one stat row (ls rendering).
+
+    Args:
+        namespace (Namespace): addressing authority holding the overlay.
+        virtual (str): absolute virtual path of the statted entry.
+        stat (FileStat): backend stat result.
+    """
+    return merge_overlay_stat(namespace.meta_for(virtual), stat)
+
+
 async def run_on_mount(
     registry: MountRegistry,
     session: Session,
@@ -209,6 +222,12 @@ async def run_on_mount(
     if cmd_name == "find":
         flag_kwargs = _scalar_find_flags(flag_kwargs)
 
+    # ls renders stat rows from the backend's own stat, which never sees
+    # namespace attr overlays (chmod/chown/touch on overlay backends);
+    # inject the merge so ls -l and the ops facade agree.
+    stat_overlay = (functools.partial(_namespace_stat_overlay, namespace)
+                    if cmd_name == "ls" and namespace is not None else None)
+
     try:
         stdout, io = await mount.execute_cmd(
             cmd_name,
@@ -223,6 +242,7 @@ async def run_on_mount(
             exec_allowed=registry.is_exec_allowed(),
             python_runtime=registry.python_runtime,
             js_runtime=registry.js_runtime,
+            stat_overlay=stat_overlay,
         )
     except UsageError as exc:
         # Command-owned usage errors (extra operands, missing patterns)

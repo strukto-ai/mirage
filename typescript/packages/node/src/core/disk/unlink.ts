@@ -14,7 +14,7 @@
 
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { unlink as fsUnlink } from 'node:fs/promises'
-import { norm, type PathSpec, invalidateAfterUnlink } from '@struktoai/mirage-core'
+import { type PathSpec, invalidateAfterUnlink } from '@struktoai/mirage-core'
 import { resolveSafe } from './utils.ts'
 
 export async function unlink(accessor: DiskAccessor, path: PathSpec): Promise<void> {
@@ -25,6 +25,5 @@ export async function unlink(accessor: DiskAccessor, path: PathSpec): Promise<vo
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return
     throw err
   }
-  accessor.attrs.delete(norm(path.mountPath))
   await invalidateAfterUnlink(path)
 }
