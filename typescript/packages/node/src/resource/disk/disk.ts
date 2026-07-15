@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readdir, readFile, stat as fsStat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   BaseResource,
@@ -56,6 +56,7 @@ export interface DiskResourceOptions {
 export interface DiskResourceState {
   type: string
   files: Record<string, Uint8Array>
+  modes?: Record<string, number>
 }
 
 async function walkFiles(root: string, current: string, out: string[]): Promise<void> {
@@ -213,16 +214,22 @@ export class DiskResource extends BaseResource implements Resource {
   async getState(): Promise<DiskResourceState> {
     await mkdir(this.root, { recursive: true })
     const files: Record<string, Uint8Array> = {}
+    const modes: Record<string, number> = {}
     const fileList: string[] = []
     await walkFiles(this.root, this.root, fileList)
     for (const full of fileList) {
       const rel = path.relative(this.root, full).split(path.sep).join('/')
       const data = await readFile(full)
       files[rel] = new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+      // Capture the real inode mode: it is the base truth for disk
+      // permissions (the sidecar is gone), so restore must reapply it or
+      // a chmod would reset to the host umask.
+      modes[rel] = (await fsStat(full)).mode & 0o7777
     }
     return {
       type: this.kind,
       files,
+      modes,
     }
   }
 
@@ -232,6 +239,8 @@ export class DiskResource extends BaseResource implements Resource {
       const full = path.join(this.root, rel)
       await mkdir(path.dirname(full), { recursive: true })
       await writeFile(full, data)
+      const mode = state.modes?.[rel]
+      if (mode !== undefined) await chmod(full, mode)
     }
   }
 }

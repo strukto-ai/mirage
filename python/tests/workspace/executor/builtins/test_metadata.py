@@ -401,3 +401,16 @@ async def test_disk_chown_overlays_and_renders(tmp_path):
     st, _ = await ws.dispatch("stat", PathSpec.from_str_path("/data/f.txt"))
     assert st.uid == 500
     assert st.gid == "dev"
+
+
+@pytest.mark.asyncio
+async def test_disk_mv_carries_clamped_mode(tmp_path):
+    # chmod 000 clamps the inode to 600 and stores 0 in the overlay; mv must
+    # carry the overlay to the new path while the OS rename moves the inode.
+    ws = _make_disk_ws(tmp_path)
+    await _run(ws, "chmod 000 /data/f.txt")
+    code, _, err = await _run(ws, "mv /data/f.txt /data/g.txt")
+    assert code == 0, err
+    _, out, _ = await _run(ws, "ls -l /data")
+    assert "----------" in out
+    assert os.stat(os.path.join(tmp_path, "g.txt")).st_mode & 0o777 == 0o600
