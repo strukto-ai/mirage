@@ -9,7 +9,7 @@ from mirage.types import PathSpec
 
 def _expand_leading_tabs(text: str, tabsize: int) -> str:
     return re.sub(
-        r"(?m)^\t+",
+        r"(?m)^[ \t]+",
         lambda m: m.group().expandtabs(tabsize),
         text,
     )

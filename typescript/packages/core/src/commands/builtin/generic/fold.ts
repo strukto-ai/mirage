@@ -69,7 +69,7 @@ export async function foldGeneric(
         allLines.push(foldLine(line, width, breakSpaces))
       }
     }
-    const result: ByteSource = ENC.encode(allLines.join('\n') + '\n')
+    const result: ByteSource = allLines.length === 0 ? new Uint8Array(0) : ENC.encode(allLines.join('\n') + '\n')
     return [result, io]
   }
   const stdinData = await readStdinAsync(opts.stdin)
@@ -77,7 +77,7 @@ export async function foldGeneric(
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('fold: missing operand\n') })]
   }
   const lines = splitLinesNoTrailing(DEC.decode(stdinData))
-  const result: ByteSource = ENC.encode(
+  const result: ByteSource = lines.length === 0 ? new Uint8Array(0) : ENC.encode(
     lines.map((ln) => foldLine(ln, width, breakSpaces)).join('\n') + '\n',
   )
   return [result, new IOResult()]

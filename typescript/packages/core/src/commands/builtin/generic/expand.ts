@@ -45,7 +45,7 @@ function expandLeadingTabs(text: string, tabsize: number): string {
   const result: string[] = []
   for (const line of lines) {
     let i = 0
-    while (i < line.length && line[i] === '\t') i += 1
+    while (i < line.length && (line[i] === '\t' || line[i] === ' ')) i += 1
     if (i === 0) {
       result.push(line)
     } else {

@@ -49,7 +49,7 @@ async def sort(
                 deduped.append(line)
         all_lines = deduped
     output = "\n".join(all_lines)
-    return (output + "\n").encode() if output else b"", IOResult()
+    return (output + "\n").encode() if all_lines else b"", IOResult()
 
 
 __all__ = ["sort"]
