@@ -11,7 +11,7 @@ ship today:
 | Runtime | Engine | Filesystem | Default |
 | --- | --- | --- | --- |
 | `monty` | [Pydantic Monty](https://github.com/pydantic/monty), a sandboxed Python interpreter written in Rust | Workspace mounts only, bridged through Mirage | Yes |
-| `wasi` | Full CPython compiled to WebAssembly, run in-process on [wasmtime](https://wasmtime.dev) | None: no host filesystem, no mounts, no network | No |
+| `wasi` | Full CPython compiled to WebAssembly, run in-process on [wasmtime](https://wasmtime.dev) | FUSE-mounted workspace mounts; no host filesystem, no network | No |
 | `local` | The host `python` interpreter, as a subprocess | The host filesystem | No |
 
 ## Monty (default)
@@ -77,12 +77,21 @@ Monty implements a Python subset. Notably:
 
 The `wasi` runtime runs a real CPython, compiled to WebAssembly, inside
 your process on wasmtime. It fills monty's gaps (classes, the complete
-stdlib, `sys.argv`, `sys.stdin`) while staying fully sandboxed: the
-run sees only the interpreter's own build directory, so host files,
-network sockets, and workspace mounts are all invisible. Script files
-still work (`python3 /data/script.py` reads the script through the
-workspace before the run), but file I/O *inside* the code cannot reach
-mounts; use `monty` for that.
+stdlib, `sys.argv`, `sys.stdin`) while staying sandboxed: host files
+and network sockets are invisible, and the run sees the interpreter's
+own build directory plus whatever workspace mounts are FUSE-mounted.
+
+A mount with an active FUSE mountpoint (the `fuse:` key on the mount,
+or `add_fuse_mount`) is preopened into the run at the mount's own
+path, so `open('/data/f.txt')` inside the code reads and writes the
+mount live. That I/O flows through the kernel into the workspace
+(namespace, cache, write modes), so the code sees exactly what `cat`
+sees and its writes are immediately visible to every command. A mount
+at `/` relocates the interpreter build to `/.mirage-wasi`
+transparently. Without a FUSE mount, mounts stay invisible: script
+files still work (`python3 /data/script.py` reads the script through
+the workspace before the run), but file I/O inside the code has
+nowhere to land; use `monty` for mount I/O without FUSE.
 
 It needs the `wasi` extra plus a CPython WASI build (download and
 unzip a release from

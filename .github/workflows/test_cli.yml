@@ -630,6 +630,9 @@ jobs:
       CROSS_DISK_ROOT: /tmp/mirage-cross-disk
       CROSS_REDIS_PREFIX: mirage-cross/
       QUICKJS_BUILD: v0.15.1
+      WASI_BUILD: python-3.14.6-wasi_sdk-24
+      MIRAGE_QUICKJS_HOME: /tmp/quickjs
+      MIRAGE_WASI_HOME: /tmp/cpython-wasi
     steps:
       - uses: actions/checkout@v7
 
@@ -672,6 +675,23 @@ jobs:
           mkdir -p /tmp/quickjs
           gh release download "$QUICKJS_BUILD" -R quickjs-ng/quickjs \
             -p qjs-wasi.wasm -O /tmp/quickjs/qjs-wasi.wasm
+
+      - name: Cache the CPython WASI build
+        id: wasi-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/cpython-wasi
+          key: cpython-wasi-${{ env.WASI_BUILD }}
+
+      - name: Download the CPython WASI build
+        if: steps.wasi-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/cpython-wasi
+          gh release download v3.14.6 -R brettcannon/cpython-wasi-build \
+            -p "$WASI_BUILD.zip" -O /tmp/wasi-build.zip
+          unzip -q /tmp/wasi-build.zip -d /tmp/cpython-wasi
 
       - name: Install pnpm
         uses: pnpm/action-setup@v6
@@ -731,8 +751,6 @@ jobs:
             "node typescript/packages/cli/dist/bin/mirage.js"
 
       - name: Run CLI runtime battery (yaml runtime selection, cross-language rejection)
-        env:
-          MIRAGE_QUICKJS_HOME: /tmp/quickjs
         run: |
           bash integ/cli_runtime.sh \
             "python/.venv/bin/mirage" \

@@ -147,3 +147,54 @@ def test_quickjs_reuses_compiled_module():
     root = _home_dir()
     assert root is not None
     assert (Path(root) / "qjs-wasi.cwasm").is_file()
+
+
+@live
+def test_quickjs_mount_dirs_read_write_readdir(tmp_path):
+    (tmp_path / "in.txt").write_text("hello-mount\n")
+    rt = QuickJsRuntime(mount_dirs=lambda: {"/data": str(tmp_path)})
+    result = asyncio.run(
+        rt.run(
+            JsRunArgs(
+                code=("const f = std.open('/data/in.txt', 'r');"
+                      "console.log(f.readAsString().trim());"
+                      "f.close();"
+                      "const w = std.open('/data/out.txt', 'w');"
+                      "w.puts('from-qjs\\n');"
+                      "w.close();"
+                      "const [names] = os.readdir('/data');"
+                      "console.log(names.filter((n) => !n.startsWith('.'))"
+                      ".sort().join(','))"))))
+    assert result.exit_code == 0
+    assert result.stdout == b"hello-mount\nin.txt,out.txt\n"
+    assert (tmp_path / "out.txt").read_text() == "from-qjs\n"
+
+
+@live
+def test_quickjs_without_mount_dirs_sees_no_mounts(tmp_path):
+    (tmp_path / "in.txt").write_text("hidden\n")
+    rt = QuickJsRuntime()
+    result = asyncio.run(
+        rt.run(
+            JsRunArgs(
+                code="console.log(std.open('/data/in.txt', 'r') === null)")))
+    assert result.exit_code == 0
+    assert result.stdout == b"true\n"
+
+
+@live
+@pytest.mark.asyncio
+async def test_quickjs_workspace_threads_fuse_mountpoints(tmp_path):
+    # A plain host dir stands in for the FUSE mountpoint: the runtime
+    # reads the live map per run and cannot tell the difference, so this
+    # covers the workspace -> select -> preopen threading without
+    # libfuse (the real-FUSE loop runs in the CLI battery).
+    ram = RAMResource()
+    ws = Workspace({"/data": ram}, mode=MountMode.EXEC, js_runtime="quickjs")
+    (tmp_path / "in.txt").write_text("via-workspace\n")
+    ws._fuse_mountpoints["/data"] = str(tmp_path)
+    r = await ws.execute("js -e \"const f = std.open('/data/in.txt', 'r');"
+                         " console.log(f.readAsString().trim())\"")
+    assert r.exit_code == 0
+    assert (await r.stdout_str()) == "via-workspace\n"
+    await ws.close()

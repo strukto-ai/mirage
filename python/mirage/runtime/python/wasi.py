@@ -14,6 +14,7 @@
 
 import os
 from pathlib import Path
+from typing import Callable
 
 try:
     import wasmtime
@@ -25,6 +26,9 @@ from mirage.runtime.python.base import (PythonRunArgs, PythonRunResult,
 from mirage.runtime.wasm import WasmRuntime
 
 WASI_HOME_ENV = "MIRAGE_WASI_HOME"
+
+# Where the interpreter build relocates when a workspace mount claims "/".
+_BUILD_FALLBACK = "/.mirage-wasi"
 
 _BUILD_HINT = (
     "the wasi runtime needs a CPython WASI build directory (python.wasm "
@@ -39,12 +43,14 @@ class WasiRuntime(PythonRuntime):
     """Run Python code on a WASI CPython under wasmtime, in-process.
 
     Full CPython (classes, complete stdlib, real `sys`) inside a wasm
-    sandbox: the run sees only the interpreter's own build directory,
-    no host filesystem, no network, and only the environment the run
-    passes. Code does not see workspace mounts either; the `python3`
-    command still resolves script files through the workspace before the
-    run, but file I/O inside the code cannot reach mounts. Use the
-    `monty` runtime for workspace file I/O.
+    sandbox: the run sees the interpreter's own build directory plus any
+    workspace mount directories the `mount_dirs` provider reports (FUSE
+    mountpoints, so file I/O inside the code routes through the workspace
+    with the same cache and modes as shell commands). No host filesystem,
+    no network, and only the environment the run passes. Without a
+    provider (or with no FUSE mount active) mounts stay invisible, and
+    the `monty` runtime remains the no-FUSE option for workspace file
+    I/O.
 
     Runs execute on a worker thread with the GIL released, and each run
     gets its own epoch-interruption engine: cancelling the `run` task
@@ -56,16 +62,24 @@ class WasiRuntime(PythonRuntime):
     environment variable. CPython requires the preopen to be
     rights-complete, so the directory is mounted read-write into the
     sandbox; make it read-only on the host filesystem to keep runs from
-    persisting files into the bundle.
+    persisting files into the bundle. The build normally sits at `/`;
+    when a workspace mount claims `/` it relocates to `/.mirage-wasi`
+    and PYTHONHOME follows.
 
     Args:
         home (str | None): path to the unzipped CPython WASI build
             directory. None reads MIRAGE_WASI_HOME.
+        mount_dirs (Callable[[], dict[str, str]] | None): live map of
+            workspace mount prefixes to host directories to expose to
+            the run, read per run (mounts can come and go).
     """
 
     name = "wasi"
 
-    def __init__(self, home: str | None = None) -> None:
+    def __init__(
+            self,
+            home: str | None = None,
+            mount_dirs: Callable[[], dict[str, str]] | None = None) -> None:
         if wasmtime is None:
             raise ImportError(
                 "the wasi runtime requires the 'wasi' extra. Install with: "
@@ -82,19 +96,29 @@ class WasiRuntime(PythonRuntime):
             raise FileNotFoundError(
                 f"no lib/python3.* under {self._root}; {_BUILD_HINT}")
         self._pythonhome = f"/lib/{stdlibs[-1].name}"
+        self._mount_dirs = mount_dirs
         self._runtime = WasmRuntime(self._root / "python.wasm", "python3")
 
     async def run(self, args: PythonRunArgs) -> PythonRunResult:
+        # wasi-libc resolves paths against the longest matching preopen,
+        # so mount preopens shadow the build directory under their own
+        # prefixes. A mount claiming "/" would collide with the build
+        # preopen; the build then relocates and PYTHONHOME follows.
+        mounts = self._mount_dirs() if self._mount_dirs is not None else {}
+        build_at = _BUILD_FALLBACK if "/" in mounts else "/"
+        pythonhome = build_at.rstrip("/") + self._pythonhome
+        preopens = [(str(self._root), build_at)]
+        preopens += [(host, prefix) for prefix, host in sorted(mounts.items())]
         # sys.argv becomes ['-c', *args.args], matching the local runtime.
         stdout, stderr, exit_code = await self._runtime.run(
             argv=["python", "-c", args.code, *args.args],
             stdin=args.stdin,
             env=[
                 *args.env.items(),
-                ("PYTHONHOME", self._pythonhome),
-                ("PYTHONPATH", self._pythonhome),
+                ("PYTHONHOME", pythonhome),
+                ("PYTHONPATH", pythonhome),
             ],
-            preopens=[(str(self._root), "/")],
+            preopens=preopens,
         )
         return PythonRunResult(stdout=stdout,
                                stderr=stderr,

@@ -9,7 +9,7 @@ two names for the same command family. One runtime ships today:
 
 | Runtime | Engine | Filesystem | Default |
 | --- | --- | --- | --- |
-| `quickjs` | [quickjs-ng](https://github.com/quickjs-ng/quickjs) compiled to WebAssembly, run in-process on [wasmtime](https://wasmtime.dev) | None: no host filesystem, no mounts, no network | Yes |
+| `quickjs` | [quickjs-ng](https://github.com/quickjs-ng/quickjs) compiled to WebAssembly, run in-process on [wasmtime](https://wasmtime.dev) | FUSE-mounted workspace mounts; no host filesystem, no network | Yes |
 
 ## What it is for
 
@@ -51,12 +51,16 @@ js -m -e "const x = await Promise.resolve(41); console.log(x + 1)"
 ## Isolation
 
 The engine runs under WebAssembly capability isolation: it sees only what
-the run passes it. Host files, mounts, and the network are all invisible,
-and file I/O inside the code cannot reach workspace mounts. The `node`/`js`
-command still resolves a script *file* through the workspace before running
-it, so `node /data/script.mjs` works, but `readFile('/data/other')` inside
-the code does not. Use the `monty` Python runtime when code needs live
-workspace file I/O.
+the run passes it. Host files and the network are invisible. Workspace
+mounts are visible when they are FUSE-mounted (the `fuse:` key on the
+mount, or `add_fuse_mount`): the mountpoint is preopened into the run at
+the mount's own path, so `std.open('/data/f.txt', 'r')` reads the mount
+live and writes are immediately visible to every command (the I/O flows
+through the kernel into the workspace, same cache and modes as `cat`).
+Without a FUSE mount, mounts stay invisible: the `node`/`js` command still
+resolves a script *file* through the workspace before running it, so
+`node /data/script.mjs` works, but file I/O inside the code has nowhere to
+land; use the `monty` Python runtime for mount I/O without FUSE.
 
 This is capability isolation, not a resource sandbox: the sandboxed code
 cannot reach your files or the network, but its CPU and memory are bounded

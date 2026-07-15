@@ -14,6 +14,7 @@
 
 import os
 from pathlib import Path
+from typing import Callable
 
 try:
     import wasmtime
@@ -43,9 +44,13 @@ class QuickJsRuntime(JsRuntime):
     `Promise`, top-level await) inside a wasm sandbox: no node builtins,
     no `require`, no npm, no network. The `std`/`os` globals are exposed
     (quickjs-ng `--std`), so scripts read stdin with
-    `std.in.readAsString()`. Code does not see workspace mounts; the
-    `node`/`js` command resolves script files through the workspace
-    before the run, but file I/O inside the code cannot reach mounts.
+    `std.in.readAsString()` and reach files with `std.open`/`os.readdir`.
+    Workspace mounts are visible when the `mount_dirs` provider reports
+    them (FUSE mountpoints, so file I/O inside the code routes through
+    the workspace with the same cache and modes as shell commands);
+    without a provider the run sees an empty filesystem. The `node`/`js`
+    command resolves script files through the workspace before the run
+    either way.
 
     Each run gets its own epoch-interruption engine (via the shared
     wasm runtime), so a cancelled run traps it and reclaims the
@@ -58,11 +63,17 @@ class QuickJsRuntime(JsRuntime):
     Args:
         home (str | None): directory containing qjs-wasi.wasm. None
             reads MIRAGE_QUICKJS_HOME.
+        mount_dirs (Callable[[], dict[str, str]] | None): live map of
+            workspace mount prefixes to host directories to expose to
+            the run, read per run (mounts can come and go).
     """
 
     name = "quickjs"
 
-    def __init__(self, home: str | None = None) -> None:
+    def __init__(
+            self,
+            home: str | None = None,
+            mount_dirs: Callable[[], dict[str, str]] | None = None) -> None:
         if wasmtime is None:
             raise ImportError(
                 "the quickjs runtime requires the 'quickjs' extra. Install "
@@ -75,6 +86,7 @@ class QuickJsRuntime(JsRuntime):
         if not self._wasm.is_file():
             raise FileNotFoundError(
                 f"no {_WASM_NAME} under {root}; {_BUILD_HINT}")
+        self._mount_dirs = mount_dirs
         self._runtime = WasmRuntime(self._wasm, "js")
 
     async def run(self, args: JsRunArgs) -> JsRunResult:
@@ -84,10 +96,12 @@ class QuickJsRuntime(JsRuntime):
         if args.module:
             argv.append("-m")
         argv += ["-e", args.code, *args.args]
+        mounts = self._mount_dirs() if self._mount_dirs is not None else {}
         stdout, stderr, exit_code = await self._runtime.run(
             argv=argv,
             stdin=args.stdin,
             env=list(args.env.items()),
-            preopens=[],
+            preopens=[(host, prefix)
+                      for prefix, host in sorted(mounts.items())],
         )
         return JsRunResult(stdout=stdout, stderr=stderr, exit_code=exit_code)

@@ -167,6 +167,61 @@ else
   fail=1
 fi
 
+# Wasm sandbox mount access (Python daemon only: the py wasi/quickjs
+# runtimes preopen active FUSE mountpoints, so sandboxed python3/js code
+# reads AND writes workspace mounts through the kernel and the namespace.
+# The daemon serves its own FUSE mount while a wasm run blocks on it, so
+# this is also the no-deadlock proof. TS quickjs is quickjs-emscripten
+# (no WASI preopens), a documented gap, hence no ts probe.
+sandbox_probe() {
+  local cli="$1"
+  local mnt="/tmp/cli-fuse-sbx-data"
+  fusermount -u "$mnt" 2>/dev/null || umount "$mnt" 2>/dev/null || true
+  rm -rf "$mnt"
+  local yaml="/tmp/cli-fuse-sbx.yaml"
+  cat > "$yaml" <<YML
+mode: EXEC
+runtime:
+  python: wasi
+mounts:
+  /data:
+    resource: ram
+    fuse: $mnt
+YML
+  $cli daemon stop >/dev/null 2>&1 </dev/null || true
+  sleep 1
+  $cli workspace delete sbx >/dev/null 2>&1 </dev/null || true
+  $cli workspace create "$yaml" --id sbx >/dev/null </dev/null
+  $cli execute -w sbx -c 'echo sandbox-sees-me > /data/probe.txt' </dev/null >/dev/null
+  local i
+  for i in $(seq 1 50); do
+    [ -f "$mnt/probe.txt" ] && break
+    sleep 0.2
+  done
+  echo "sbx_js_read=$($cli execute -w sbx -c "js -e \"const f = std.open('/data/probe.txt', 'r'); console.log(f.readAsString().trim())\"" </dev/null | grep -o sandbox-sees-me | head -1)"
+  echo "sbx_py3_read=$($cli execute -w sbx -c "python3 -c \"print(open('/data/probe.txt').read().strip() + '-py')\"" </dev/null | grep -o 'sandbox-sees-me-py' | head -1)"
+  $cli execute -w sbx -c "python3 -c \"open('/data/from-py.txt', 'w').write('py-wrote-this\\n')\"" </dev/null >/dev/null
+  echo "sbx_py3_write=$($cli execute -w sbx -c 'cat /data/from-py.txt' </dev/null | grep -o py-wrote-this | head -1)"
+  $cli execute -w sbx -c "js -e \"const w = std.open('/data/from-js.txt', 'w'); w.puts('js-wrote-this\\n'); w.close()\"" </dev/null >/dev/null
+  echo "sbx_js_write=$($cli execute -w sbx -c 'cat /data/from-js.txt' </dev/null | grep -o js-wrote-this | head -1)"
+  $cli workspace delete sbx >/dev/null 2>&1 </dev/null || true
+  $cli daemon stop >/dev/null 2>&1 </dev/null || true
+  fusermount -u "$mnt" 2>/dev/null || umount "$mnt" 2>/dev/null || true
+  rm -rf "$mnt" "$yaml"
+}
+
+SANDBOX_EXPECT=no
+if [ -f "${MIRAGE_QUICKJS_HOME:-/nonexistent}/qjs-wasi.wasm" ] \
+    && [ -f "${MIRAGE_WASI_HOME:-/nonexistent}/python.wasm" ]; then
+  echo
+  echo "===== wasm sandbox mount access (python daemon) ====="
+  sandbox_probe "$PY_CLI" | tee -a /tmp/cli-fuse-py.txt
+  SANDBOX_EXPECT=yes
+else
+  echo
+  echo "skipping wasm sandbox probes (no qjs-wasi.wasm / python.wasm)"
+fi
+
 echo
 echo "===== expected values ====="
 expect() {
@@ -194,6 +249,12 @@ expect "logs_dir_survives" "yes"
 expect "gen_dir_removed" "yes"
 expect "collision_rejected" "yes"
 expect "reuse_after_recreate" "reused"
+if [ "$SANDBOX_EXPECT" == "yes" ]; then
+  expect "sbx_js_read" "sandbox-sees-me"
+  expect "sbx_py3_read" "sandbox-sees-me-py"
+  expect "sbx_py3_write" "py-wrote-this"
+  expect "sbx_js_write" "js-wrote-this"
+fi
 
 if [ "$fail" != "0" ]; then
   echo

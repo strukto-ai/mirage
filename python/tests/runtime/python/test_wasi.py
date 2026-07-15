@@ -146,3 +146,58 @@ def test_wasi_reuses_compiled_module():
     root = _build_dir()
     assert root is not None
     assert (Path(root) / "python.cwasm").is_file()
+
+
+@live
+def test_wasi_mount_dirs_read_write_listdir(tmp_path):
+    (tmp_path / "in.txt").write_text("hello-mount\n")
+    rt = WasiRuntime(mount_dirs=lambda: {"/data": str(tmp_path)})
+    code = ("import os\n"
+            "print(open('/data/in.txt').read().strip())\n"
+            "open('/data/out.txt', 'w').write('from-wasi\\n')\n"
+            "print(sorted(os.listdir('/data')))\n")
+    result = asyncio.run(rt.run(PythonRunArgs(code=code)))
+    assert result.exit_code == 0
+    assert result.stdout == b"hello-mount\n['in.txt', 'out.txt']\n"
+    assert (tmp_path / "out.txt").read_text() == "from-wasi\n"
+
+
+@live
+def test_wasi_root_mount_relocates_the_build(tmp_path):
+    # A mount claiming "/" would collide with the interpreter preopen;
+    # the build relocates and the stdlib still loads.
+    (tmp_path / "f.txt").write_text("root-mount\n")
+    rt = WasiRuntime(mount_dirs=lambda: {"/": str(tmp_path)})
+    code = ("import sys\n"
+            "print(open('/f.txt').read().strip())\n"
+            "print('stdlib', sys.version_info[0])\n")
+    result = asyncio.run(rt.run(PythonRunArgs(code=code)))
+    assert result.exit_code == 0
+    assert result.stdout == b"root-mount\nstdlib 3\n"
+
+
+@live
+def test_wasi_without_mount_dirs_sees_no_mounts():
+    rt = WasiRuntime()
+    code = "import os; print(os.path.exists('/data'))"
+    result = asyncio.run(rt.run(PythonRunArgs(code=code)))
+    assert result.exit_code == 0
+    assert result.stdout == b"False\n"
+
+
+@live
+@pytest.mark.asyncio
+async def test_wasi_workspace_threads_fuse_mountpoints(tmp_path):
+    # A plain host dir stands in for the FUSE mountpoint: the runtime
+    # reads the live map per run and cannot tell the difference, so this
+    # covers the workspace -> select -> preopen threading without
+    # libfuse (the real-FUSE loop runs in the CLI battery).
+    ram = RAMResource()
+    ws = Workspace({"/data": ram}, mode=MountMode.EXEC, python_runtime="wasi")
+    (tmp_path / "in.txt").write_text("via-workspace\n")
+    ws._fuse_mountpoints["/data"] = str(tmp_path)
+    r = await ws.execute(
+        "python3 -c \"print(open('/data/in.txt').read().strip())\"")
+    assert r.exit_code == 0
+    assert (await r.stdout_str()) == "via-workspace\n"
+    await ws.close()

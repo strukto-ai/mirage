@@ -47,6 +47,14 @@ def test_select_quickjs_without_build_fails_loud(monkeypatch):
         select_js_runtime("quickjs")
 
 
+def test_select_threads_mount_dirs(monkeypatch, tmp_path):
+    (tmp_path / "qjs-wasi.wasm").write_bytes(b"\0asm")
+    monkeypatch.setenv(QUICKJS_HOME_ENV, str(tmp_path))
+    provider = dict
+    rt = select_js_runtime("quickjs", mount_dirs=provider)
+    assert rt._mount_dirs is provider
+
+
 def test_unknown_js_runtime_raises():
     with pytest.raises(ValueError, match="unknown js runtime"):
         select_js_runtime("v8")
