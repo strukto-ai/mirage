@@ -21,6 +21,7 @@ import type {
   RegisteredCommand,
 } from '../../commands/config.ts'
 import type { OpKwargs } from '../../ops/registry.ts'
+import type { StatOverlay } from '../../ops/config.ts'
 
 const NOOP_ACCESSOR = new NOOPAccessor()
 import { getExtension } from '../../commands/resolve.ts'
@@ -340,6 +341,7 @@ export class MountEntry {
       execAllowed?: boolean
       pythonRuntime?: PythonRuntime
       jsRuntime?: JsRuntime
+      statOverlay?: StatOverlay
       safeguardOverride?: CommandSafeguard | null
     } = {},
   ): Promise<[ByteSource | null, IOResult]> {
@@ -392,6 +394,7 @@ export class MountEntry {
       ...(opts.execAllowed !== undefined ? { execAllowed: opts.execAllowed } : {}),
       ...(opts.pythonRuntime !== undefined ? { pythonRuntime: opts.pythonRuntime } : {}),
       ...(opts.jsRuntime !== undefined ? { jsRuntime: opts.jsRuntime } : {}),
+      ...(opts.statOverlay !== undefined ? { statOverlay: opts.statOverlay } : {}),
     }
 
     setVirtualPrefix(mountPrefix)

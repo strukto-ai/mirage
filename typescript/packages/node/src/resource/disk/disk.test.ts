@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { chmodSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { FileType, ResourceName } from '@struktoai/mirage-core'
 import { spec, tmpRoot } from '../../test-utils.ts'
@@ -164,6 +166,23 @@ describe('DiskResource — getState / loadState round-trip', () => {
       await res2.loadState(state)
       expect(new TextDecoder().decode(await res2.readFile(spec('/a.txt')))).toBe('A')
       expect(new TextDecoder().decode(await res2.readFile(spec('/d/b.txt')))).toBe('B')
+    } finally {
+      c2()
+    }
+  })
+
+  it('preserves file mode across a state round-trip', async () => {
+    await res.writeFile(spec('/f.txt'), new TextEncoder().encode('hi'))
+    chmodSync(join(root, 'f.txt'), 0o640)
+    const state = await res.getState()
+    expect(state.modes?.['f.txt']).toBe(0o640)
+
+    const { root: root2, cleanup: c2 } = tmpRoot('mirage-diskresource-mode-')
+    try {
+      const res2 = new DiskResource({ root: root2 })
+      await res2.open()
+      await res2.loadState(state)
+      expect(statSync(join(root2, 'f.txt')).mode & 0o777).toBe(0o640)
     } finally {
       c2()
     }

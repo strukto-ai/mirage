@@ -12,8 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import os
+
 import pytest
 
+from mirage.resource.disk import DiskResource
 from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
@@ -335,3 +338,79 @@ async def test_overlay_fallback_when_mount_has_no_setattr():
     assert st.uid == 500
     assert st.gid == "dev"
     assert st.modified == "2026-03-04T12:00:00Z"
+
+
+@pytest.mark.asyncio
+async def test_overlay_attrs_render_in_ls_long():
+    # ls stats through the backend, which has no attribute slot here; the
+    # injected namespace overlay must still render chmod/chown/touch.
+    ws, _ = _make_overlay_ws({"/f.txt": b"hello"})
+    await _run(
+        ws, "chmod 664 /data/f.txt && chown 500:dev /data/f.txt"
+        " && touch -t 202603041200 /data/f.txt")
+    _, out, _ = await _run(ws, "ls -l /data")
+    assert "-rw-rw-r--" in out
+    assert " 500 dev " in out
+    assert "Mar  4 12:00" in out
+
+
+def _make_disk_ws(root) -> Workspace:
+    (root / "f.txt").write_bytes(b"hello")
+    return Workspace(
+        {"/data/": (DiskResource(root=str(root)), MountMode.WRITE)},
+        mode=MountMode.WRITE)
+
+
+@pytest.mark.asyncio
+async def test_disk_chmod_000_shows_zero_keeps_owner_access(tmp_path):
+    ws = _make_disk_ws(tmp_path)
+    code, _, _ = await _run(ws, "chmod 000 /data/f.txt")
+    assert code == 0
+    _, out, _ = await _run(ws, "ls -l /data")
+    assert "----------" in out
+    assert os.stat(tmp_path / "f.txt").st_mode & 0o777 == 0o600
+    code, out, _ = await _run(ws, "cat /data/f.txt")
+    assert code == 0 and out == "hello"
+
+
+@pytest.mark.asyncio
+async def test_disk_chmod_relax_drops_stale_residual(tmp_path):
+    ws = _make_disk_ws(tmp_path)
+    await _run(ws, "chmod 000 /data/f.txt")
+    await _run(ws, "chmod 644 /data/f.txt")
+    assert await _stat_mode(ws, "/data/f.txt") == 0o644
+    assert ws._namespace.meta_for("/data/f.txt") is None
+
+
+@pytest.mark.asyncio
+async def test_disk_external_chmod_visible(tmp_path):
+    ws = _make_disk_ws(tmp_path)
+    os.chmod(tmp_path / "f.txt", 0o640)
+    _, out, _ = await _run(ws, "ls -l /data")
+    assert "-rw-r-----" in out
+    assert await _stat_mode(ws, "/data/f.txt") == 0o640
+
+
+@pytest.mark.asyncio
+async def test_disk_chown_overlays_and_renders(tmp_path):
+    ws = _make_disk_ws(tmp_path)
+    code, _, _ = await _run(ws, "chown 500:dev /data/f.txt")
+    assert code == 0
+    _, out, _ = await _run(ws, "ls -l /data")
+    assert " 500 dev " in out
+    st, _ = await ws.dispatch("stat", PathSpec.from_str_path("/data/f.txt"))
+    assert st.uid == 500
+    assert st.gid == "dev"
+
+
+@pytest.mark.asyncio
+async def test_disk_mv_carries_clamped_mode(tmp_path):
+    # chmod 000 clamps the inode to 600 and stores 0 in the overlay; mv must
+    # carry the overlay to the new path while the OS rename moves the inode.
+    ws = _make_disk_ws(tmp_path)
+    await _run(ws, "chmod 000 /data/f.txt")
+    code, _, err = await _run(ws, "mv /data/f.txt /data/g.txt")
+    assert code == 0, err
+    _, out, _ = await _run(ws, "ls -l /data")
+    assert "----------" in out
+    assert os.stat(os.path.join(tmp_path, "g.txt")).st_mode & 0o777 == 0o600

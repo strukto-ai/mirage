@@ -274,6 +274,36 @@ async def test_replace_nodes_wins_over_store_content(registry):
     assert "/data/stale" not in await store.load()
 
 
+@pytest.mark.asyncio
+async def test_drop_attrs_removes_applied_fields(namespace):
+    await namespace.set_attrs("/data/f.txt", mode=0o601, uid=500)
+    await namespace.drop_attrs("/data/f.txt", ["mode"])
+    meta = namespace.meta_for("/data/f.txt")
+    assert meta.mode is None
+    assert meta.uid == 500
+
+
+@pytest.mark.asyncio
+async def test_drop_attrs_deletes_emptied_node(namespace):
+    await namespace.set_attrs("/data/f.txt", mode=0o601)
+    await namespace.drop_attrs("/data/f.txt", ["mode"])
+    assert namespace.meta_for("/data/f.txt") is None
+
+
+@pytest.mark.asyncio
+async def test_drop_attrs_keeps_link_target(namespace):
+    await namespace.symlink("/data/link", "/t1", 1.0)
+    await namespace.drop_attrs("/data/link", ["target", "mtime"])
+    assert namespace.readlink("/data/link") == "/t1"
+    assert namespace.meta_for("/data/link").mtime is None
+
+
+@pytest.mark.asyncio
+async def test_drop_attrs_missing_node_is_noop(namespace):
+    await namespace.drop_attrs("/data/nope.txt", ["mode"])
+    assert namespace.meta_for("/data/nope.txt") is None
+
+
 def test_user_defaults_before_resolution(namespace):
     assert namespace.user == "default"
 

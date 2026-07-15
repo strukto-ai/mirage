@@ -12,8 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { chmodSync, statSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { MountMode, RAMResource } from '@struktoai/mirage-core'
+import { DiskResource } from './resource/disk/disk.ts'
+import { tmpRoot } from './test-utils.ts'
 import { Workspace } from './workspace.ts'
 
 describe('@struktoai/mirage-node Workspace', () => {
@@ -81,5 +85,61 @@ describe('@struktoai/mirage-node Workspace', () => {
     expect(res.exitCode).toBe(0)
     expect(new TextDecoder().decode(res.stdout)).toBe(expected)
     await ws.close()
+  })
+})
+
+describe('@struktoai/mirage-node Workspace disk metadata', () => {
+  function makeDiskWs(): { ws: Workspace; root: string; cleanup: () => void } {
+    const { root, cleanup } = tmpRoot('mirage-node-meta-')
+    writeFileSync(join(root, 'f.txt'), 'hello')
+    const ws = new Workspace(
+      { '/data': [new DiskResource({ root }), MountMode.WRITE] },
+      { mode: MountMode.WRITE },
+    )
+    return { ws, root, cleanup }
+  }
+
+  it('chmod 000 shows zero in ls -l but keeps owner access', async () => {
+    const { ws, root, cleanup } = makeDiskWs()
+    const c = await ws.execute('chmod 000 /data/f.txt')
+    expect(c.exitCode).toBe(0)
+    const ls = await ws.execute('ls -l /data')
+    expect(ls.stdoutText).toContain('----------')
+    expect(statSync(join(root, 'f.txt')).mode & 0o777).toBe(0o600)
+    const cat = await ws.execute('cat /data/f.txt')
+    expect(cat.exitCode).toBe(0)
+    expect(cat.stdoutText).toBe('hello')
+    await ws.close()
+    cleanup()
+  })
+
+  it('relaxing chmod drops the stale residual overlay', async () => {
+    const { ws, cleanup } = makeDiskWs()
+    await ws.execute('chmod 000 /data/f.txt')
+    await ws.execute('chmod 644 /data/f.txt')
+    const st = (await ws.dispatch('stat', '/data/f.txt')) as { mode: number }
+    expect(st.mode).toBe(0o644)
+    expect(ws.namespace.metaFor('/data/f.txt')).toBeNull()
+    await ws.close()
+    cleanup()
+  })
+
+  it('shows an external chmod in ls -l', async () => {
+    const { ws, root, cleanup } = makeDiskWs()
+    chmodSync(join(root, 'f.txt'), 0o640)
+    const ls = await ws.execute('ls -l /data')
+    expect(ls.stdoutText).toContain('-rw-r-----')
+    await ws.close()
+    cleanup()
+  })
+
+  it('overlays chown and renders owner/group in ls -l', async () => {
+    const { ws, cleanup } = makeDiskWs()
+    const c = await ws.execute('chown 500:dev /data/f.txt')
+    expect(c.exitCode).toBe(0)
+    const ls = await ws.execute('ls -l /data')
+    expect(ls.stdoutText).toContain(' 500 dev ')
+    await ws.close()
+    cleanup()
   })
 })

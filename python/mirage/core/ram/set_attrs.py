@@ -27,7 +27,7 @@ async def set_attrs(
     gid: int | str | None = None,
     atime: str | None = None,
     mtime: str | None = None,
-) -> None:
+) -> dict[str, int | str]:
     """Write metadata fields on an existing entry (the write side of stat).
 
     Only non-None fields are written. Stored, not enforced: mount mode
@@ -41,6 +41,9 @@ async def set_attrs(
         gid (int | str | None): group id or name.
         atime (str | None): ISO access time.
         mtime (str | None): ISO modification time.
+
+    Returns:
+        dict[str, int | str]: always empty; every field applies natively.
     """
     store = accessor.store
     p = norm(path.mount_path)
@@ -57,3 +60,4 @@ async def set_attrs(
         entry["atime"] = atime
     if mtime is not None:
         store.modified[p] = mtime
+    return {}

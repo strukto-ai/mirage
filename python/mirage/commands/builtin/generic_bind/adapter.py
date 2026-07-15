@@ -19,8 +19,26 @@ from typing import NamedTuple
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
-from mirage.types import PathSpec
+from mirage.ops.config import StatOverlay
+from mirage.types import FileStat, PathSpec
 from mirage.utils.glob_walk import resolve_glob_with
+
+
+async def overlaid_stat(stat: Callable, overlay: StatOverlay, path: PathSpec,
+                        index: IndexCacheStore | None) -> FileStat:
+    """Stat through the backend, then merge the namespace attr overlay.
+
+    Bound via ``partial(overlaid_stat, stat_fn, overlay)`` so stat-
+    rendering commands (ls) show chmod/chown/touch state the backend
+    itself cannot hold.
+
+    Args:
+        stat (Callable): backend stat callable ``(path, index) -> FileStat``.
+        overlay (StatOverlay): namespace merge ``(virtual, stat) -> stat``.
+        path (PathSpec): entry being statted.
+        index (IndexCacheStore | None): cache index threaded through.
+    """
+    return overlay(path.virtual, await stat(path, index))
 
 
 def with_index(fn: Callable | None,

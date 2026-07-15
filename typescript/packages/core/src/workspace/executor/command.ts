@@ -25,9 +25,10 @@ import { assertMountAllowed, MountNotAllowedError } from '../../context/session_
 import { CallStack } from '../../shell/call_stack.ts'
 import type { JobTable } from '../../shell/job_table.ts'
 import { ERREXIT_EXEMPT_TYPES } from '../../shell/types.ts'
-import { PathSpec, wordText } from '../../types.ts'
+import { type FileStat, PathSpec, wordText } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
+import { mergeOverlayStat } from '../mount/namespace/overlay.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { Consumer, JOB_BUILTINS, route } from '../route/index.ts'
 import type { PythonRuntime } from './python/runtimes/interface.ts'
@@ -151,6 +152,14 @@ async function runOnMount(
   const realMount = registry.mountFor(paths[0]?.virtual ?? hint?.virtual ?? session.cwd)
   const safeguardOverride = realMount?.commandSafeguards.get(cmdName) ?? null
 
+  // ls renders stat rows from the backend's own stat, which never sees
+  // namespace attr overlays (chmod/chown/touch on overlay backends);
+  // inject the merge so ls -l and the ops facade agree.
+  const statOverlay =
+    cmdName === 'ls' && namespace !== undefined
+      ? (virtual: string, stat: FileStat) => mergeOverlayStat(namespace.metaFor(virtual), stat)
+      : null
+
   try {
     const [initialStdout, io] = await mount.executeCmd(cmdName, paths, texts, flags, {
       stdin: opts.stdin ?? null,
@@ -161,6 +170,7 @@ async function runOnMount(
       execAllowed: registry.isExecAllowed(),
       ...(pythonRuntime !== undefined ? { pythonRuntime } : {}),
       ...(jsRuntime !== undefined ? { jsRuntime } : {}),
+      ...(statOverlay !== null ? { statOverlay } : {}),
       safeguardOverride,
     })
     let stdout = initialStdout

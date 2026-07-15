@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from mirage.resource.base import BaseResource
@@ -231,6 +232,30 @@ class Namespace:
             meta.atime = atime
         if mtime is not None:
             meta.mtime = mtime
+        await self._store.set(path, meta.to_fields())
+
+    async def drop_attrs(self, path: str, fields: Iterable[str]) -> None:
+        """Drop overlay fields that a backend has applied natively.
+
+        A residual-free native setattr means the real inode now holds the
+        requested value, so a stale overlay field would shadow it forever
+        (chmod 000 then chmod 644 must not keep showing 000). Symlink
+        entries keep their target.
+
+        Args:
+            path (str): absolute virtual path.
+            fields (Iterable[str]): NodeMeta field names to drop.
+        """
+        meta = self._nodes.get(path)
+        if meta is None:
+            return
+        for field in fields:
+            if field != str(NodeMetaKey.TARGET):
+                setattr(meta, field, None)
+        if meta.is_empty():
+            del self._nodes[path]
+            await self._store.delete([path])
+            return
         await self._store.set(path, meta.to_fields())
 
     async def clear_times(self, path: str) -> None:

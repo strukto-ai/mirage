@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import dataclasses
+import os
 from pathlib import Path
 
 from mirage.accessor.disk import DiskAccessor
@@ -90,27 +91,28 @@ class DiskResource(BaseResource):
 
     def get_state(self) -> dict:
         files: dict[str, bytes] = {}
+        modes: dict[str, int] = {}
         for p in self.root.rglob("*"):
             if p.is_file():
                 rel = p.relative_to(self.root).as_posix()
                 files[rel] = p.read_bytes()
+                # Capture the real inode mode: it is the base truth for
+                # disk permissions (the sidecar is gone), so restore must
+                # reapply it or a chmod would reset to the host umask.
+                modes[rel] = p.stat().st_mode & 0o7777
         return {
             "type": self.name,
             "files": files,
-            "attrs": {
-                k: dict(v)
-                for k, v in self.accessor.attrs.items()
-            },
+            "modes": modes,
         }
 
     def load_state(self, state: dict) -> None:
         files = state.get("files", {})
+        modes = state.get("modes", {})
         for rel, data in files.items():
             target = self.root / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
-        self.accessor.attrs.clear()
-        self.accessor.attrs.update({
-            k: dict(v)
-            for k, v in state.get("attrs", {}).items()
-        })
+            mode = modes.get(rel)
+            if mode is not None:
+                os.chmod(target, mode)
