@@ -31,6 +31,9 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         self._children: dict[str, list[str]] = {}
         self._expiry: dict[str, datetime] = {}
 
+    def all_entries(self) -> dict[str, IndexEntry]:
+        return self._entries
+
     async def get(self, resource_path: str) -> LookupResult:
         entry = self._entries.get(resource_path)
         if entry is None:

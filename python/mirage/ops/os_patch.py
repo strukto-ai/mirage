@@ -15,6 +15,7 @@
 import asyncio
 import os as _real_os
 import types
+from typing import Any
 
 from mirage.bridge.sync import run_async_from_sync
 from mirage.ops import Ops
@@ -58,7 +59,7 @@ def make_os_module(ops: Ops, loop: asyncio.AbstractEventLoop | None = None):
     Returns:
         module: A patched os module.
     """
-    patched = types.ModuleType("os")
+    patched: Any = types.ModuleType("os")
     patched.__dict__.update(_real_os.__dict__)
 
     def _run(coro):

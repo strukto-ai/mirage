@@ -32,6 +32,7 @@ async def mkdir(
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor) or not paths:
         raise ValueError("mkdir: missing operand")
+    assert ops.mkdir is not None
     paths = await ops.resolve_glob(accessor, paths, index)
     lines: list[str] = []
     for path in paths:

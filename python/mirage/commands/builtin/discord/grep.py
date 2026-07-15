@@ -33,7 +33,7 @@ from mirage.core.discord.readdir import readdir as _readdir
 from mirage.core.discord.scope import coalesce_scopes, detect_scope
 from mirage.core.discord.search import search_guild
 from mirage.core.discord.stat import stat as _stat
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.provision.types import ProvisionResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
@@ -134,5 +134,5 @@ async def grep(
     )
     if pushdown_warnings:
         extra = ("\n".join(pushdown_warnings) + "\n").encode()
-        io.stderr = extra + (io.stderr or b"")
+        io.stderr = extra + await materialize(io.stderr)
     return out, io

@@ -179,10 +179,10 @@ async def apply_op_safeguard(result, safeguard: CommandSafeguard | None):
         return result
     data, sg_io = await apply_safeguard(result, safeguard)
     if sg_io.exit_code != 0:
-        message = sg_io.stderr.decode(
-        ) if sg_io.stderr else "safeguard exceeded"
+        message = (await sg_io.stderr_str()
+                   if sg_io.stderr else "safeguard exceeded")
         raise SafeguardExceededError(message.strip())
     if sg_io.stderr:
         logger.debug("vfs op output truncated: %s",
-                     sg_io.stderr.decode().strip())
+                     (await sg_io.stderr_str()).strip())
     return data

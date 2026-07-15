@@ -12,6 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Awaitable
+from typing import cast
+
 import redis.asyncio as aioredis
 
 from mirage.observe.store import ObserverStoreBase
@@ -76,7 +79,8 @@ class RedisObserverStore(ObserverStoreBase):
         return await self._read_paths(paths)
 
     async def _indexed_paths(self) -> list[str]:
-        members = await self._client.smembers(self._index_key)
+        members = await cast("Awaitable[set[bytes]]",
+                             self._client.smembers(self._index_key))
         return sorted(m.decode() if isinstance(m, bytes) else m
                       for m in members)
 

@@ -15,13 +15,19 @@
 import io
 import json
 import tarfile
+from typing import Literal
 
 from mirage.workspace.snapshot.manifest import resolve_manifest
 from mirage.workspace.snapshot.utils import is_safe_blob_path
 
 _MANIFEST_NAME = "manifest.json"
 
-_COMPRESS_MODES = {None: "w", "gz": "w:gz", "bz2": "w:bz2", "xz": "w:xz"}
+_COMPRESS_MODES: dict[str | None, Literal["w", "w:gz", "w:bz2", "w:xz"]] = {
+    None: "w",
+    "gz": "w:gz",
+    "bz2": "w:bz2",
+    "xz": "w:xz"
+}
 
 
 def write_tar(target,

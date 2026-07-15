@@ -13,9 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from functools import partial
+from typing import cast
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.generic.du import du_multi
 from mirage.commands.builtin.github._provision import metadata_provision
 from mirage.commands.registry import command
@@ -30,7 +32,7 @@ async def _du_total(index: IndexCacheStore, path: PathSpec) -> int:
     key = "/" + path.resource_path if path.resource_path else "/"
     du_prefix = key.rstrip("/") + "/"
     total = 0
-    for ep, entry in index._entries.items():
+    for ep, entry in cast(RAMIndexCacheStore, index).all_entries().items():
         if (ep == key or ep.startswith(du_prefix)) and entry.size is not None:
             total += entry.size
     return total

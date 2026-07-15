@@ -14,6 +14,8 @@
 
 import asyncio
 import weakref
+from collections.abc import Awaitable
+from typing import cast
 
 try:
     import redis as sync_redis
@@ -100,16 +102,18 @@ class RedisStore:
         return length
 
     async def has_dir(self, path: str) -> bool:
-        return bool(await self._client.sismember(self._dk(), path))
+        return bool(await cast("Awaitable[int]",
+                               self._client.sismember(self._dk(), path)))
 
     async def add_dir(self, path: str) -> None:
-        await self._client.sadd(self._dk(), path)
+        await cast("Awaitable[int]", self._client.sadd(self._dk(), path))
 
     async def remove_dir(self, path: str) -> None:
-        await self._client.srem(self._dk(), path)
+        await cast("Awaitable[int]", self._client.srem(self._dk(), path))
 
     async def list_dirs(self) -> set[str]:
-        members = await self._client.smembers(self._dk())
+        members = await cast("Awaitable[set[bytes]]",
+                             self._client.smembers(self._dk()))
         return {m.decode() if isinstance(m, bytes) else m for m in members}
 
     async def get_modified(self, path: str) -> str | None:
@@ -125,7 +129,8 @@ class RedisStore:
         await self._client.delete(self._mk(path))
 
     async def get_attrs(self, path: str) -> dict[str, str]:
-        raw = await self._client.hgetall(self._ak(path))
+        raw = await cast("Awaitable[dict[bytes, bytes]]",
+                         self._client.hgetall(self._ak(path)))
         return {
             (k.decode() if isinstance(k, bytes) else k):
             (v.decode() if isinstance(v, bytes) else v)
@@ -133,7 +138,8 @@ class RedisStore:
         }
 
     async def set_attrs(self, path: str, fields: dict[str, str]) -> None:
-        await self._client.hset(self._ak(path), mapping=fields)
+        await cast("Awaitable[int]",
+                   self._client.hset(self._ak(path), mapping=fields))
 
     async def del_attrs(self, path: str) -> None:
         await self._client.delete(self._ak(path))

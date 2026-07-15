@@ -55,7 +55,9 @@ class PydanticAIWorkspace(SandboxProtocol):
         return self._id
 
     async def _exec(self, command: str) -> IOResult:
-        return await self._ws.execute(command, session_id=self._session_id)
+        result = await self._ws.execute(command, session_id=self._session_id)
+        assert isinstance(result, IOResult)
+        return result
 
     def _read_bytes(self, path: str) -> bytes:
         return self._run(self._aread_bytes(path))
@@ -84,7 +86,7 @@ class PydanticAIWorkspace(SandboxProtocol):
 
     async def als_info(self, path: str) -> list[FileInfo]:
         io = await self._exec(f"ls {shlex.quote(path)}")
-        stdout = (io.stdout or b"").decode("utf-8", errors="replace").strip()
+        stdout = (await io.stdout_str()).strip()
         if not stdout:
             return []
         base = path.rstrip("/")

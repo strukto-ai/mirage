@@ -36,6 +36,7 @@ async def ln(
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor) or len(paths) < 2:
         raise ValueError("ln: usage: ln [-s] [-f] source dest")
+    assert ops.exists is not None and ops.write is not None
     paths = await ops.resolve_glob(accessor, paths, index)
     source_path = paths[0]
     dest_path = paths[1]

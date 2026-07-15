@@ -12,8 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import cast
+
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.find_eval import (FindEntry, PredNode, build_tree,
                                                emit_start_path, keep,
                                                start_basename)
@@ -53,17 +56,18 @@ async def find(
     start_kind = "d" if base == "" else None
     start_size = 0
     has_child = False
-    for entry_path in sorted(index._entries):
+    entries = cast(RAMIndexCacheStore, index).all_entries()
+    for entry_path in sorted(entries):
         p = entry_path.lstrip("/")
         if p == base:
-            meta = index._entries[entry_path]
+            meta = entries[entry_path]
             start_kind = "d" if meta.resource_type == "folder" else "f"
             start_size = meta.size or 0
             continue
         if base and not p.startswith(base + "/"):
             continue
         has_child = True
-        entry_meta = index._entries[entry_path]
+        entry_meta = entries[entry_path]
         is_dir = entry_meta.resource_type == "folder"
         full_path = "/" + p
         depth = p.count("/") + 1 - base_depth

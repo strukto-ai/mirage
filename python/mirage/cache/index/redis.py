@@ -12,7 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Awaitable
 from datetime import datetime, timezone
+from typing import cast
 
 try:
     from redis.asyncio import Redis
@@ -94,7 +96,8 @@ class RedisIndexCacheStore(IndexCacheStore):
         ttl_remaining = await self._client.ttl(key)
         if ttl_remaining == -2:
             return ListResult(status=LookupStatus.EXPIRED)
-        raw = await self._client.lrange(key, 0, -1)
+        raw = await cast("Awaitable[list[str]]",
+                         self._client.lrange(key, 0, -1))
         return ListResult(entries=raw)
 
     async def set_dir(
@@ -131,7 +134,8 @@ class RedisIndexCacheStore(IndexCacheStore):
 
     async def invalidate_dir(self, resource_path: str) -> None:
         children_key = f"{self._children_prefix}{resource_path}"
-        child_paths = await self._client.lrange(children_key, 0, -1)
+        child_paths = await cast("Awaitable[list[str]]",
+                                 self._client.lrange(children_key, 0, -1))
         pipe = self._client.pipeline()
         for child in child_paths:
             pipe.delete(self._entry_key(child))
