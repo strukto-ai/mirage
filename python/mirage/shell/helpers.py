@@ -27,7 +27,7 @@ class ProcessSubDirection(StrEnum):
 
 def get_text(node: tree_sitter.Node) -> str:
     """Get the text content of a node."""
-    return node.text.decode()
+    return (node.text or b"").decode()
 
 
 def get_command_name(node: tree_sitter.Node) -> str:

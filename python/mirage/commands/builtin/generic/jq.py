@@ -12,6 +12,8 @@ async def _read_stdin_bytes(
         stdin: AsyncIterator[bytes] | bytes | None) -> bytes:
     if isinstance(stdin, bytes):
         return stdin
+    if stdin is None:
+        return b""
     raw = b""
     async for chunk in stdin:
         raw += chunk

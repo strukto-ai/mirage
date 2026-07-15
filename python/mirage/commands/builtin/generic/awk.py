@@ -144,7 +144,7 @@ def _split_fields(line: str, fs: str | None) -> list[str]:
 def _build_field_map(line: str, fs: str | None, nr: int,
                      variables: Mapping[str, str]) -> dict[str, str]:
     fields = _split_fields(line, fs)
-    field_map = {
+    field_map: dict[str, str] = {
         AwkBuiltin.REC: line,
         AwkBuiltin.NR: str(nr),
         AwkBuiltin.NF: str(len(fields)),

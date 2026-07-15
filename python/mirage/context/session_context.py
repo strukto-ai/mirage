@@ -82,7 +82,8 @@ def assert_mount_allowed(mount_prefix: str) -> None:
     if _session_mode(mount_prefix) is not None:
         return
     sess = _current_session.get()
-    raise PermissionError(f"session {sess.session_id!r} not allowed to "
+    sid = sess.session_id if sess is not None else "<none>"
+    raise PermissionError(f"session {sid!r} not allowed to "
                           f"access mount {_norm_prefix(mount_prefix)!r}")
 
 

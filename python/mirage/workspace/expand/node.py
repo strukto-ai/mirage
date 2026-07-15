@@ -20,6 +20,7 @@ import tree_sitter
 from mirage.shell.arith import evaluate_arith
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError
+from mirage.shell.helpers import get_text
 from mirage.shell.types import NodeType as NT
 from mirage.utils.path import expand_tilde
 from mirage.workspace.expand.constants import ARITH_DELIMITERS, ARITH_OPERATORS
@@ -61,15 +62,15 @@ async def expand_arith(
             parts.append(await expand_arith(child, session, execute_fn,
                                             call_stack))
         elif child.type in ARITH_OPERATORS:
-            parts.append(child.text.decode())
+            parts.append(get_text(child))
         elif child.type == NT.NUMBER:
-            parts.append(child.text.decode())
+            parts.append(get_text(child))
         elif child.type in (NT.SIMPLE_EXPANSION, NT.EXPANSION,
                             NT.COMMAND_SUBSTITUTION):
             parts.append(await expand_node(child, session, execute_fn,
                                            call_stack))
         elif child.type == NT.VARIABLE_NAME:
-            parts.append(child.text.decode())
+            parts.append(get_text(child))
         else:
             parts.append(await expand_node(child, session, execute_fn,
                                            call_stack))
@@ -86,11 +87,11 @@ async def expand_node(
     ntype = ts_node.type
 
     if ntype == NT.WORD:
-        word = _unescape_unquoted(ts_node.text.decode())
+        word = _unescape_unquoted(get_text(ts_node))
         return expand_tilde(word, home_dir(session))
 
     if ntype == NT.NUMBER:
-        return ts_node.text.decode()
+        return get_text(ts_node)
 
     if ntype == NT.COMMAND_NAME:
         # The name is a word like any other: $CMD, "quoted", $(sub) all
@@ -98,10 +99,10 @@ async def expand_node(
         # through to its own expansion rule.
         for child in ts_node.named_children:
             return await expand_node(child, session, execute_fn, call_stack)
-        return ts_node.text.decode()
+        return get_text(ts_node)
 
     if ntype == NT.SIMPLE_EXPANSION:
-        raw = ts_node.text.decode()
+        raw = get_text(ts_node)
         dollar = raw.rfind("$")
         prefix = raw[:dollar]
         var = raw[dollar + 1:]
@@ -119,7 +120,7 @@ async def expand_node(
         ]
         if not inner_cmds:
             return ""
-        inner = inner_cmds[0].text.decode()
+        inner = get_text(inner_cmds[0])
         io = await execute_fn(inner, session_id=session.session_id)
         return (await io.stdout_str()).rstrip("\n")
 
@@ -128,7 +129,7 @@ async def expand_node(
         try:
             value, updates = evaluate_arith(expr, session.env)
         except ArithError:
-            return ts_node.text.decode()
+            return get_text(ts_node)
         session.env.update(updates)
         return str(value)
 
@@ -156,7 +157,7 @@ async def expand_node(
     if ntype == NT.STRING_CONTENT:
         # Bash double-quote escapes: \$, \`, \", \\, \<newline>.
         # Everything else preserves the backslash literally.
-        text = ts_node.text.decode()
+        text = get_text(ts_node)
         text = text.replace("\\\\", "\x00")
         text = text.replace('\\"', '"')
         text = text.replace("\\$", "$")
@@ -166,11 +167,11 @@ async def expand_node(
         return text
 
     if ntype == NT.RAW_STRING:
-        raw = ts_node.text.decode()
+        raw = get_text(ts_node)
         return raw[1:-1]
 
     if ntype == NT.VARIABLE_ASSIGNMENT:
-        raw = ts_node.text.decode()
+        raw = get_text(ts_node)
         if "=" in raw:
             key, _, val_part = raw.partition("=")
             val_nodes = [
@@ -183,4 +184,4 @@ async def expand_node(
             return f"{key}={val_part}"
         return raw
 
-    return ts_node.text.decode()
+    return get_text(ts_node)

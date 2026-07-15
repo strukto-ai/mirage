@@ -247,6 +247,7 @@ warn_redundant_casts = true
 
 
 
+
 # Ratchet baseline: modules with pre-existing mypy errors. Shrink this
 # list, never grow it: when a module is cleaned, delete its entry so
 # regressions in it fail CI. New modules must not be added here.
@@ -267,11 +268,9 @@ module = [
     "mirage.cache.index.redis",
     "mirage.commands",
     "mirage.commands.builtin.discord.grep",
-    "mirage.commands.builtin.discord.head",
     "mirage.commands.builtin.email.email_triage",
     "mirage.commands.builtin.general.bc",
     "mirage.commands.builtin.general.wget",
-    "mirage.commands.builtin.generic.awk",
     "mirage.commands.builtin.generic.base64_cmd",
     "mirage.commands.builtin.generic.cmp",
     "mirage.commands.builtin.generic.column",
@@ -281,14 +280,12 @@ module = [
     "mirage.commands.builtin.generic.crossmount.relay.mv",
     "mirage.commands.builtin.generic.csplit",
     "mirage.commands.builtin.generic.diff",
-    "mirage.commands.builtin.generic.du",
     "mirage.commands.builtin.generic.find",
     "mirage.commands.builtin.generic.grep",
     "mirage.commands.builtin.generic.gunzip",
     "mirage.commands.builtin.generic.gzip",
     "mirage.commands.builtin.generic.iconv",
     "mirage.commands.builtin.generic.join",
-    "mirage.commands.builtin.generic.jq",
     "mirage.commands.builtin.generic.look",
     "mirage.commands.builtin.generic.ls",
     "mirage.commands.builtin.generic.mv",
@@ -389,11 +386,7 @@ module = [
     "mirage.commands.builtin.utils.copy",
     "mirage.commands.builtin.utils.safeguard",
     "mirage.commands.config",
-    "mirage.commands.spec.parser",
-    "mirage.context.session_context",
-    "mirage.core.chroma.read",
     "mirage.core.databricks_volume.readdir",
-    "mirage.core.dify.read",
     "mirage.core.discord.readdir",
     "mirage.core.disk.append",
     "mirage.core.disk.copy",
@@ -572,8 +565,6 @@ module = [
     "mirage.workspace.executor.pipes",
     "mirage.workspace.executor.redirect",
     "mirage.workspace.expand.globs",
-    "mirage.workspace.expand.node",
-    "mirage.workspace.expand.parts",
     "mirage.workspace.mount.mount",
     "mirage.workspace.mount.registry",
     "mirage.workspace.node.command_dispatch",

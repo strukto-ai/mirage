@@ -79,6 +79,7 @@ async def head(
                     "limit": lines
                 },
             )
+            assert isinstance(msgs, list)
             msgs.sort(key=lambda m: int(m["id"]))
             jsonl = "\n".join(
                 json.dumps(m, ensure_ascii=False, separators=(",", ":"))

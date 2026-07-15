@@ -17,6 +17,7 @@ from collections.abc import Callable
 import tree_sitter
 
 from mirage.shell.call_stack import CallStack
+from mirage.shell.helpers import get_text
 from mirage.shell.types import NodeType as NT
 from mirage.types import PathSpec
 from mirage.workspace.expand.classify import classify_word
@@ -27,7 +28,7 @@ from mirage.workspace.session import Session
 
 def _has_at_expansion(node: tree_sitter.Node) -> bool:
     for child in node.children:
-        if (child.type == NT.SIMPLE_EXPANSION and child.text.decode() == "$@"):
+        if (child.type == NT.SIMPLE_EXPANSION and get_text(child) == "$@"):
             return True
     return False
 
@@ -47,9 +48,9 @@ def _array_at_name(child: tree_sitter.Node) -> str | None:
     var_name = None
     for sc in sub.named_children:
         if sc.type == NT.VARIABLE_NAME:
-            var_name = sc.text.decode()
+            var_name = get_text(sc)
         else:
-            idx_text = sc.text.decode()
+            idx_text = get_text(sc)
     if var_name and idx_text == "@":
         return var_name
     return None

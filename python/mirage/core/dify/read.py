@@ -14,6 +14,7 @@ async def read_bytes(accessor,
     resolved = await resolve_path(accessor, path, index)
     if resolved.is_dir:
         raise IsADirectoryError(errno.EISDIR, "Is a directory", path.virtual)
+    assert resolved.entry is not None
     segments = await get_document_segments(accessor.config, resolved.entry.id)
     return segments_to_bytes(segments)
 
@@ -25,6 +26,7 @@ async def read_stream(
     resolved = await resolve_path(accessor, path, index)
     if resolved.is_dir:
         raise IsADirectoryError(errno.EISDIR, "Is a directory", path.virtual)
+    assert resolved.entry is not None
     first = True
     async for page in iter_segment_pages(accessor.config, resolved.entry.id):
         for segment in page:
