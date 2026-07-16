@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "bc_no_input",
+      "seq": 555,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "bc",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

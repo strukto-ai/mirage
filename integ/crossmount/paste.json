@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "xm_paste",
+      "seq": 717,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "paste /data/b.txt /data2/xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\tcross\n2\t\n3\t\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_paste_d",
+      "seq": 718,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "paste -d, /data/b.txt /data2/xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1,cross\n2,\n3,\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

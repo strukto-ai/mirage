@@ -1,0 +1,52 @@
+{
+  "cases": [
+    {
+      "id": "join",
+      "seq": 84,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "join /data/sorted_a.txt /data/sorted_b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "banana\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "join_t",
+      "seq": 331,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "join -t , /data/abc.csv /data/abc.csv",
+      "expect": {
+        "exit": 0,
+        "stdout": "a,1,1\nb,2,2\nc,3,3\nd,4,4\ne,5,5\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "join_o",
+      "seq": 332,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "join /data/sorted_a.txt /data/sorted_c.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "apple\ncherry\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

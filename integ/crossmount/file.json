@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "xm_file_multi",
+      "seq": 700,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "file /data/a.txt /data2/xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt: text\n/data2/xm.txt: text\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

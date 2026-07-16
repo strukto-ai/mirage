@@ -1,0 +1,148 @@
+{
+  "cases": [
+    {
+      "id": "ls",
+      "seq": 72,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls /data/",
+      "expect": {
+        "exit": 0,
+        "stdout": "a.txt\nabc.csv\nanchors.txt\nb.txt\nbinary.bin\nc.txt\nchat.jsonl\ncsv.csv\ndata.jsonl\ndisptree\ndup.txt\nempty.txt\nfields.txt\nguard\nmixed.txt\nmulti.txt\nno_nl.txt\nnumbers.txt\none_byte.txt\noooo.txt\npatterns.txt\npatterns2.txt\npoem.diff\npoem.txt\nprefix_dup.txt\nrepeats.txt\nsections.txt\nsorted_a.txt\nsorted_b.txt\nsorted_c.txt\nspaced.txt\nsub\ntabbed.txt\nuser.json\nusers.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ls_1",
+      "seq": 73,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls -1 /data/",
+      "expect": {
+        "exit": 0,
+        "stdout": "a.txt\nabc.csv\nanchors.txt\nb.txt\nbinary.bin\nc.txt\nchat.jsonl\ncsv.csv\ndata.jsonl\ndisptree\ndup.txt\nempty.txt\nfields.txt\nguard\nmixed.txt\nmulti.txt\nno_nl.txt\nnumbers.txt\none_byte.txt\noooo.txt\npatterns.txt\npatterns2.txt\npoem.diff\npoem.txt\nprefix_dup.txt\nrepeats.txt\nsections.txt\nsorted_a.txt\nsorted_b.txt\nsorted_c.txt\nspaced.txt\nsub\ntabbed.txt\nuser.json\nusers.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ls_file",
+      "seq": 74,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ls_glob",
+      "seq": 75,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls /data/*.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\n/data/anchors.txt\n/data/b.txt\n/data/c.txt\n/data/dup.txt\n/data/empty.txt\n/data/fields.txt\n/data/mixed.txt\n/data/multi.txt\n/data/no_nl.txt\n/data/numbers.txt\n/data/one_byte.txt\n/data/oooo.txt\n/data/patterns.txt\n/data/patterns2.txt\n/data/poem.txt\n/data/prefix_dup.txt\n/data/repeats.txt\n/data/sections.txt\n/data/sorted_a.txt\n/data/sorted_b.txt\n/data/sorted_c.txt\n/data/spaced.txt\n/data/tabbed.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ls_sub",
+      "seq": 149,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls /data/sub/",
+      "expect": {
+        "exit": 0,
+        "stdout": "deep\nnested.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ls_color",
+      "seq": 279,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls --color /data/sub",
+      "expect": {
+        "exit": 0,
+        "stdout": "deep\nnested.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ls_a",
+      "seq": 350,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls -a /data/sub",
+      "expect": {
+        "exit": 0,
+        "stdout": "deep\nnested.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ls_R",
+      "seq": 351,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls -R /data/sub",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/sub:\ndeep\nnested.txt\n\n/data/sub/deep:\ndeeper.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ls_sub_deep",
+      "seq": 352,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls /data/sub/deep",
+      "expect": {
+        "exit": 0,
+        "stdout": "deeper.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

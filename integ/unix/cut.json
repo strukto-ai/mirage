@@ -1,0 +1,132 @@
+{
+  "cases": [
+    {
+      "id": "cut_f1",
+      "seq": 40,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cut -f 1 -d , /data/csv.csv",
+      "expect": {
+        "exit": 0,
+        "stdout": "name\nalice\nbob\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cut_f2",
+      "seq": 41,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cut -f 2 -d , /data/csv.csv",
+      "expect": {
+        "exit": 0,
+        "stdout": "age\n30\n25\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cut_c2_4",
+      "seq": 42,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cut -c 2-4 /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "ell\norl\noo\nar\naz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cut_tab",
+      "seq": 43,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cut -f 1 /data/tabbed.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\nc\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cut_c1",
+      "seq": 238,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cut -c 1 /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "h\nw\nf\nb\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cut_c_range_open",
+      "seq": 239,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cut -c 3- /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "llo\nrld\no\nr\nz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cut_d_space",
+      "seq": 240,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cut -d ' ' -f 2 /data/fields.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "30\n25\n40\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cut_f1_3",
+      "seq": 241,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cut -d , -f 1,2 /data/csv.csv",
+      "expect": {
+        "exit": 0,
+        "stdout": "name,age\nalice,30\nbob,25\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -1,0 +1,772 @@
+{
+  "cases": [
+    {
+      "id": "grep_world",
+      "seq": 14,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep world /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_n",
+      "seq": 15,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -n bar /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "4:bar\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_v",
+      "seq": 16,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -v foo /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nbar\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_i",
+      "seq": 17,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -i HELLO /data/mixed.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "Hello World\nHELLO world\nhello WORLD\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_c",
+      "seq": 18,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -c hello /data/mixed.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_E_alt",
+      "seq": 19,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -E \"foo|bar\" /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "foo\nbar\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_A1",
+      "seq": 85,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -A 1 world /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\nfoo\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_B1",
+      "seq": 86,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -B 1 foo /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\nfoo\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_o",
+      "seq": 87,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -o ll /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "ll\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_l",
+      "seq": 88,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -l hello /data/mixed.txt /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/mixed.txt\n/data/a.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_pipe_wc",
+      "seq": 107,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep world /data/a.txt | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_w",
+      "seq": 133,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -w world /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_count_no_match",
+      "seq": 134,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -c nothere /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_n_v_combo",
+      "seq": 135,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -n -v foo /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:hello\n2:world\n4:bar\n5:baz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_F",
+      "seq": 254,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -F . /data/user.json",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_m1",
+      "seq": 255,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -m 1 o /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_h",
+      "seq": 256,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -h hello /data/mixed.txt /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello WORLD\nhello\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_only_match_multi",
+      "seq": 257,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -o o /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "o\no\no\no\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_recursive_dir",
+      "seq": 258,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -r hello /data/sub",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_empty_pattern",
+      "seq": 259,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep '' /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n2\n3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_e_flag",
+      "seq": 260,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -e world /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_e_n",
+      "seq": 261,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -n -e bar /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "4:bar\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_e_multi_file",
+      "seq": 262,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -e hello /data/mixed.txt /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/mixed.txt:hello WORLD\n/data/a.txt:hello\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_e_multi_pattern",
+      "seq": 263,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -e world -e bar /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\nbar\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_e_multi_pattern_n",
+      "seq": 264,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -n -e hello -e baz /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:hello\n5:baz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_e_multi_pattern_F",
+      "seq": 265,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -F -e a.b -e foo /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "foo\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_f_file",
+      "seq": 266,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -f /data/patterns.txt /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\nbar\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_e_f_union",
+      "seq": 267,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -e hello -f /data/patterns.txt /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nbar\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_f_multi",
+      "seq": 268,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -f /data/patterns.txt -f /data/patterns2.txt /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\nbar\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_cluster_ne",
+      "seq": 269,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -ne world /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "2:world\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_unknown_long_flag",
+      "seq": 271,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep --bogus world /data/a.txt 2>&1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grep: unrecognized option '--bogus'\nTry 'grep --help' for more information.\ncode=2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_unknown_short_flag",
+      "seq": 272,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -Y world /data/a.txt 2>&1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grep: invalid option -- 'Y'\nTry 'grep --help' for more information.\ncode=2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_missing_flag_value",
+      "seq": 274,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -m 2>&1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "grep: option requires an argument -- 'm'\nTry 'grep --help' for more information.\ncode=2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_color_auto",
+      "seq": 276,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep --color=auto world /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_color_bare",
+      "seq": 277,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep --color world /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_line_buffered",
+      "seq": 278,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep --line-buffered world /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_cluster_attached",
+      "seq": 282,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -neworld /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "2:world\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_cluster_count",
+      "seq": 283,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -im1 l /data/mixed.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "Hello World\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_f_empty_no_match",
+      "seq": 569,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -f /data/empty.txt /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_c_match_exit",
+      "seq": 570,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -c hello /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_c_no_match_exit",
+      "seq": 571,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -c zzz /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_c_stdin_no_match_exit",
+      "seq": 572,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo hi | grep -c zzz",
+      "expect": {
+        "exit": 1,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_c_multi_no_match_exit",
+      "seq": 573,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -c zzz /data/a.txt /data/b.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "/data/a.txt:0\n/data/b.txt:0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_usage_exit",
+      "seq": 576,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "grep: usage: grep [flags] pattern [path]\n"
+      }
+    },
+    {
+      "id": "grep_usage_no_input",
+      "seq": 581,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep foo",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "grep: usage: grep [flags] pattern [path]\n"
+      }
+    },
+    {
+      "id": "grep_usage_stdin_only",
+      "seq": 583,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo hi | grep",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "grep: usage: grep [flags] pattern [path]\n"
+      }
+    },
+    {
+      "id": "grep_dir_operand",
+      "seq": 609,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep hello /data/sub",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "grep: /data/sub: Is a directory\n"
+      }
+    },
+    {
+      "id": "grep_dir_among_files",
+      "seq": 610,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep hello /data/a.txt /data/sub",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt:hello\n",
+        "stderr": "grep: /data/sub: Is a directory\n"
+      }
+    }
+  ]
+}

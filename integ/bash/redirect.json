@@ -1,0 +1,148 @@
+{
+  "cases": [
+    {
+      "id": "redirect_bare_prep",
+      "seq": 385,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/g9 && cd /data/g9",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_bare_target",
+      "seq": 386,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo hi > OUT && cat OUT && cd / && rm -r /data/g9",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_relative_write",
+      "seq": 391,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo one > sub/LOG",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_relative_append",
+      "seq": 392,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo two >> sub/LOG && cat sub/LOG",
+      "expect": {
+        "exit": 0,
+        "stdout": "one\ntwo\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_stdin_relative",
+      "seq": 393,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "wc -l < sub/LOG && cd / && rm -r /data/g11",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_after_cd",
+      "seq": 399,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/g13 && cd /data/g13 && echo hi > CDOUT && cat /data/g13/CDOUT",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_list_last_only",
+      "seq": 400,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo one && echo two > captured && cat captured",
+      "expect": {
+        "exit": 0,
+        "stdout": "one\ntwo\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_chain",
+      "seq": 401,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo a > chain && echo b >> chain && cat chain && wc -l < chain",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_group",
+      "seq": 402,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "{ echo g1; echo g2; } > gout && cat gout && cd / && rm -r /data/g13",
+      "expect": {
+        "exit": 0,
+        "stdout": "g1\ng2\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

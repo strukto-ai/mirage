@@ -1,0 +1,276 @@
+{
+  "cases": [
+    {
+      "id": "jq_dot",
+      "seq": 22,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq \".\" /data/user.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"name\": \"alice\",\n  \"age\": 30\n}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_name",
+      "seq": 23,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq \".name\" /data/user.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "\"alice\"\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_age",
+      "seq": 24,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq \".age\" /data/user.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "30\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_raw",
+      "seq": 25,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -r \".name\" /data/user.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "alice\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_array_iter",
+      "seq": 26,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq \".users[].name\" /data/users.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "\"alice\"\n\"bob\"\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_jsonl_id",
+      "seq": 27,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq \".id\" /data/data.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n2\n3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_jsonl_chain",
+      "seq": 28,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq \".[].id\" /data/data.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n2\n3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_jsonl_chain_raw",
+      "seq": 29,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq -r \".[].msg\" /data/chat.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_no_filter_piped",
+      "seq": 30,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/user.json | jq",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"name\": \"alice\",\n  \"age\": 30\n}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_pipe_wc",
+      "seq": 112,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq \".id\" /data/data.jsonl | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_sort",
+      "seq": 118,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq \".id\" /data/data.jsonl | sort -n",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n2\n3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_keys",
+      "seq": 356,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq \"keys\" /data/user.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\n  \"age\",\n  \"name\"\n]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_length",
+      "seq": 357,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq \". | length\" /data/users.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_select",
+      "seq": 358,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq \".users[] | select(.age > 27)\" /data/users.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"name\": \"alice\",\n  \"age\": 30\n}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_jsonl_select",
+      "seq": 359,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq \"select(.id > 1)\" /data/data.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"id\": 2\n}\n{\n  \"id\": 3\n}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_no_filter_no_input",
+      "seq": 545,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "jq_dot_no_input",
+      "seq": 546,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "jq \".\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

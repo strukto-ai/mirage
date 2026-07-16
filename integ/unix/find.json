@@ -1,0 +1,596 @@
+{
+  "cases": [
+    {
+      "id": "find_name",
+      "seq": 70,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -name \"*.txt\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\n/data/anchors.txt\n/data/b.txt\n/data/c.txt\n/data/disptree/d/y.txt\n/data/disptree/x.txt\n/data/dup.txt\n/data/empty.txt\n/data/fields.txt\n/data/guard/g.txt\n/data/guard/sub/s.txt\n/data/mixed.txt\n/data/multi.txt\n/data/no_nl.txt\n/data/numbers.txt\n/data/one_byte.txt\n/data/oooo.txt\n/data/patterns.txt\n/data/patterns2.txt\n/data/poem.txt\n/data/prefix_dup.txt\n/data/repeats.txt\n/data/sections.txt\n/data/sorted_a.txt\n/data/sorted_b.txt\n/data/sorted_c.txt\n/data/spaced.txt\n/data/sub/deep/deeper.txt\n/data/sub/nested.txt\n/data/tabbed.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_type_f",
+      "seq": 71,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -type f",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\n/data/abc.csv\n/data/anchors.txt\n/data/b.txt\n/data/binary.bin\n/data/c.txt\n/data/chat.jsonl\n/data/csv.csv\n/data/data.jsonl\n/data/disptree/d/y.txt\n/data/disptree/x.txt\n/data/dup.txt\n/data/empty.txt\n/data/fields.txt\n/data/guard/g.txt\n/data/guard/sub/s.txt\n/data/mixed.txt\n/data/multi.txt\n/data/no_nl.txt\n/data/numbers.txt\n/data/one_byte.txt\n/data/oooo.txt\n/data/patterns.txt\n/data/patterns2.txt\n/data/poem.diff\n/data/poem.txt\n/data/prefix_dup.txt\n/data/repeats.txt\n/data/sections.txt\n/data/sorted_a.txt\n/data/sorted_b.txt\n/data/sorted_c.txt\n/data/spaced.txt\n/data/sub/deep/deeper.txt\n/data/sub/nested.txt\n/data/tabbed.txt\n/data/user.json\n/data/users.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_mindepth",
+      "seq": 98,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -mindepth 1 -type f",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\n/data/abc.csv\n/data/anchors.txt\n/data/b.txt\n/data/binary.bin\n/data/c.txt\n/data/chat.jsonl\n/data/csv.csv\n/data/data.jsonl\n/data/disptree/d/y.txt\n/data/disptree/x.txt\n/data/dup.txt\n/data/empty.txt\n/data/fields.txt\n/data/guard/g.txt\n/data/guard/sub/s.txt\n/data/mixed.txt\n/data/multi.txt\n/data/no_nl.txt\n/data/numbers.txt\n/data/one_byte.txt\n/data/oooo.txt\n/data/patterns.txt\n/data/patterns2.txt\n/data/poem.diff\n/data/poem.txt\n/data/prefix_dup.txt\n/data/repeats.txt\n/data/sections.txt\n/data/sorted_a.txt\n/data/sorted_b.txt\n/data/sorted_c.txt\n/data/spaced.txt\n/data/sub/deep/deeper.txt\n/data/sub/nested.txt\n/data/tabbed.txt\n/data/user.json\n/data/users.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_maxdepth",
+      "seq": 99,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -maxdepth 1 -type f",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\n/data/abc.csv\n/data/anchors.txt\n/data/b.txt\n/data/binary.bin\n/data/c.txt\n/data/chat.jsonl\n/data/csv.csv\n/data/data.jsonl\n/data/dup.txt\n/data/empty.txt\n/data/fields.txt\n/data/mixed.txt\n/data/multi.txt\n/data/no_nl.txt\n/data/numbers.txt\n/data/one_byte.txt\n/data/oooo.txt\n/data/patterns.txt\n/data/patterns2.txt\n/data/poem.diff\n/data/poem.txt\n/data/prefix_dup.txt\n/data/repeats.txt\n/data/sections.txt\n/data/sorted_a.txt\n/data/sorted_b.txt\n/data/sorted_c.txt\n/data/spaced.txt\n/data/tabbed.txt\n/data/user.json\n/data/users.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_multi_name",
+      "seq": 100,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -name \"*.txt\" -o -name \"*.json\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\n/data/anchors.txt\n/data/b.txt\n/data/c.txt\n/data/disptree/d/y.txt\n/data/disptree/x.txt\n/data/dup.txt\n/data/empty.txt\n/data/fields.txt\n/data/guard/g.txt\n/data/guard/sub/s.txt\n/data/mixed.txt\n/data/multi.txt\n/data/no_nl.txt\n/data/numbers.txt\n/data/one_byte.txt\n/data/oooo.txt\n/data/patterns.txt\n/data/patterns2.txt\n/data/poem.txt\n/data/prefix_dup.txt\n/data/repeats.txt\n/data/sections.txt\n/data/sorted_a.txt\n/data/sorted_b.txt\n/data/sorted_c.txt\n/data/spaced.txt\n/data/sub/deep/deeper.txt\n/data/sub/nested.txt\n/data/tabbed.txt\n/data/user.json\n/data/users.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_pipe_wc",
+      "seq": 111,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -name \"*.txt\" | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "30\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_sort_head",
+      "seq": 119,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -name \"*.txt\" | sort | head -n 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\n/data/anchors.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_d",
+      "seq": 137,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -type d",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n/data/disptree\n/data/disptree/d\n/data/guard\n/data/guard/sub\n/data/sub\n/data/sub/deep\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_iname",
+      "seq": 138,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -iname \"*.TXT\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\n/data/anchors.txt\n/data/b.txt\n/data/c.txt\n/data/disptree/d/y.txt\n/data/disptree/x.txt\n/data/dup.txt\n/data/empty.txt\n/data/fields.txt\n/data/guard/g.txt\n/data/guard/sub/s.txt\n/data/mixed.txt\n/data/multi.txt\n/data/no_nl.txt\n/data/numbers.txt\n/data/one_byte.txt\n/data/oooo.txt\n/data/patterns.txt\n/data/patterns2.txt\n/data/poem.txt\n/data/prefix_dup.txt\n/data/repeats.txt\n/data/sections.txt\n/data/sorted_a.txt\n/data/sorted_b.txt\n/data/sorted_c.txt\n/data/spaced.txt\n/data/sub/deep/deeper.txt\n/data/sub/nested.txt\n/data/tabbed.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_size_gt",
+      "seq": 139,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -size +10c",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\n/data/abc.csv\n/data/anchors.txt\n/data/binary.bin\n/data/c.txt\n/data/chat.jsonl\n/data/csv.csv\n/data/data.jsonl\n/data/disptree/x.txt\n/data/fields.txt\n/data/mixed.txt\n/data/no_nl.txt\n/data/numbers.txt\n/data/poem.diff\n/data/poem.txt\n/data/prefix_dup.txt\n/data/repeats.txt\n/data/sections.txt\n/data/sorted_a.txt\n/data/sorted_b.txt\n/data/sorted_c.txt\n/data/spaced.txt\n/data/sub/nested.txt\n/data/tabbed.txt\n/data/user.json\n/data/users.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_recurse",
+      "seq": 140,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -name \"*.txt\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\n/data/anchors.txt\n/data/b.txt\n/data/c.txt\n/data/disptree/d/y.txt\n/data/disptree/x.txt\n/data/dup.txt\n/data/empty.txt\n/data/fields.txt\n/data/guard/g.txt\n/data/guard/sub/s.txt\n/data/mixed.txt\n/data/multi.txt\n/data/no_nl.txt\n/data/numbers.txt\n/data/one_byte.txt\n/data/oooo.txt\n/data/patterns.txt\n/data/patterns2.txt\n/data/poem.txt\n/data/prefix_dup.txt\n/data/repeats.txt\n/data/sections.txt\n/data/sorted_a.txt\n/data/sorted_b.txt\n/data/sorted_c.txt\n/data/spaced.txt\n/data/sub/deep/deeper.txt\n/data/sub/nested.txt\n/data/tabbed.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_path_pattern",
+      "seq": 141,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -path \"*sub*\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/guard/sub\n/data/guard/sub/s.txt\n/data/sub\n/data/sub/deep\n/data/sub/deep/deeper.txt\n/data/sub/nested.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_depth2",
+      "seq": 151,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data/sub -type f",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/sub/deep/deeper.txt\n/data/sub/nested.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_empty",
+      "seq": 294,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -empty",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/empty.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_not_name",
+      "seq": 295,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -not -name \"*.txt\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n/data/abc.csv\n/data/binary.bin\n/data/chat.jsonl\n/data/csv.csv\n/data/data.jsonl\n/data/disptree\n/data/disptree/d\n/data/guard\n/data/guard/sub\n/data/poem.diff\n/data/sub\n/data/sub/deep\n/data/user.json\n/data/users.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_name_start",
+      "seq": 296,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -name data",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_maxdepth_zero",
+      "seq": 297,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -maxdepth 0",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_mindepth_zero",
+      "seq": 298,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -mindepth 0 -type d",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n/data/disptree\n/data/disptree/d\n/data/guard\n/data/guard/sub\n/data/sub\n/data/sub/deep\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_size_lt",
+      "seq": 299,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -size -5c",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n/data/disptree\n/data/disptree/d\n/data/empty.txt\n/data/guard\n/data/guard/sub\n/data/one_byte.txt\n/data/patterns2.txt\n/data/sub\n/data/sub/deep\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_depth",
+      "seq": 300,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -depth -type f",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\n/data/abc.csv\n/data/anchors.txt\n/data/b.txt\n/data/binary.bin\n/data/c.txt\n/data/chat.jsonl\n/data/csv.csv\n/data/data.jsonl\n/data/disptree/d/y.txt\n/data/disptree/x.txt\n/data/dup.txt\n/data/empty.txt\n/data/fields.txt\n/data/guard/g.txt\n/data/guard/sub/s.txt\n/data/mixed.txt\n/data/multi.txt\n/data/no_nl.txt\n/data/numbers.txt\n/data/one_byte.txt\n/data/oooo.txt\n/data/patterns.txt\n/data/patterns2.txt\n/data/poem.diff\n/data/poem.txt\n/data/prefix_dup.txt\n/data/repeats.txt\n/data/sections.txt\n/data/sorted_a.txt\n/data/sorted_b.txt\n/data/sorted_c.txt\n/data/spaced.txt\n/data/sub/deep/deeper.txt\n/data/sub/nested.txt\n/data/tabbed.txt\n/data/user.json\n/data/users.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_mtime",
+      "seq": 301,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -mtime +0 -o -mtime -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n/data/a.txt\n/data/abc.csv\n/data/anchors.txt\n/data/b.txt\n/data/binary.bin\n/data/c.txt\n/data/chat.jsonl\n/data/csv.csv\n/data/data.jsonl\n/data/disptree\n/data/disptree/d\n/data/disptree/d/y.txt\n/data/disptree/x.txt\n/data/dup.txt\n/data/empty.txt\n/data/fields.txt\n/data/guard\n/data/guard/g.txt\n/data/guard/sub\n/data/guard/sub/s.txt\n/data/mixed.txt\n/data/multi.txt\n/data/no_nl.txt\n/data/numbers.txt\n/data/one_byte.txt\n/data/oooo.txt\n/data/patterns.txt\n/data/patterns2.txt\n/data/poem.diff\n/data/poem.txt\n/data/prefix_dup.txt\n/data/repeats.txt\n/data/sections.txt\n/data/sorted_a.txt\n/data/sorted_b.txt\n/data/sorted_c.txt\n/data/spaced.txt\n/data/sub\n/data/sub/deep\n/data/sub/deep/deeper.txt\n/data/sub/nested.txt\n/data/tabbed.txt\n/data/user.json\n/data/users.json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_size_gt_dirs",
+      "seq": 302,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/fs/sub && printf 12345678 > /data/fs/sub/big.bin && printf x > /data/fs/small.bin && find /data/fs -size +4c",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fs/sub/big.bin\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_size_lt_dirs",
+      "seq": 303,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data/fs -size -4c",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fs\n/data/fs/small.bin\n/data/fs/sub\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_size_gt_boundary",
+      "seq": 304,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf 1234 > /data/fs/four.bin && find /data/fs -size +4c",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fs/sub/big.bin\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_size_lt_boundary",
+      "seq": 305,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data/fs -size -4c",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fs\n/data/fs/small.bin\n/data/fs/sub\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_size_eq_boundary",
+      "seq": 306,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data/fs -size 4c",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fs/four.bin\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_size_round_k",
+      "seq": 307,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data/fs -size -1k",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fs\n/data/fs/sub\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_path_glob",
+      "seq": 308,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data/fs -path '*data/fs/sub*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fs/sub\n/data/fs/sub/big.bin\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_path_exact",
+      "seq": 309,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data/fs -path '/data/fs/sub'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fs/sub\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_path_or_name",
+      "seq": 310,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data/fs -path '*sub*' -o -name small.bin",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fs/small.bin\n/data/fs/sub\n/data/fs/sub/big.bin\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_bad_maxdepth",
+      "seq": 681,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -maxdepth abc",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: invalid argument 'abc' to '-maxdepth'\n"
+      }
+    },
+    {
+      "id": "find_bad_mindepth",
+      "seq": 682,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -mindepth xx",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: invalid argument 'xx' to '-mindepth'\n"
+      }
+    },
+    {
+      "id": "find_bad_size",
+      "seq": 683,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -size abc",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: invalid argument 'abc' to '-size'\n"
+      }
+    },
+    {
+      "id": "find_empty_size",
+      "seq": 684,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -size ''",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: invalid argument '' to '-size'\n"
+      }
+    },
+    {
+      "id": "find_bad_mtime",
+      "seq": 685,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -mtime abc",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: invalid argument 'abc' to '-mtime'\n"
+      }
+    },
+    {
+      "id": "find_unknown_predicate",
+      "seq": 686,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -regex '.*deep.*'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: unknown predicate '-regex'\n"
+      }
+    },
+    {
+      "id": "find_bogus_predicate",
+      "seq": 687,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -boguspredicate",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: unknown predicate '-boguspredicate'\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,68 @@
+{
+  "cases": [
+    {
+      "id": "comm",
+      "seq": 45,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "comm /data/sorted_a.txt /data/sorted_b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "apple\n\t\tbanana\ncherry\n\tdate\n\telder\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "comm_12",
+      "seq": 144,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "comm -12 /data/sorted_a.txt /data/sorted_b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "banana\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "comm_23",
+      "seq": 145,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "comm -23 /data/sorted_a.txt /data/sorted_b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "apple\ncherry\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "comm_13",
+      "seq": 146,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "comm -13 /data/sorted_a.txt /data/sorted_b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "date\nelder\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

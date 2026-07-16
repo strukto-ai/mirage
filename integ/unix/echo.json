@@ -1,0 +1,84 @@
+{
+  "cases": [
+    {
+      "id": "echo_trailing_dash_n",
+      "seq": 430,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo hi -n",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi -n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "echo_cluster",
+      "seq": 431,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo -ne 'ab\\tcd'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "ab\tcd\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "echo_unknown_cluster",
+      "seq": 432,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo -nq hi",
+      "expect": {
+        "exit": 0,
+        "stdout": "-nq hi\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "echo_empty_squote",
+      "seq": 477,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo a '' b",
+      "expect": {
+        "exit": 0,
+        "stdout": "a  b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "echo_empty_dquote",
+      "seq": 478,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo a \"\" b",
+      "expect": {
+        "exit": 0,
+        "stdout": "a  b\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

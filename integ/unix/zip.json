@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "zip_create",
+      "seq": 598,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "zip /data/sub/arch.zip /data/sub/nested.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "  adding: data/sub/nested.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

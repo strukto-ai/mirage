@@ -1,0 +1,52 @@
+{
+  "cases": [
+    {
+      "id": "expand",
+      "seq": 76,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/tabbed.txt | expand",
+      "expect": {
+        "exit": 0,
+        "stdout": "a       1\nb       2\nc       3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "expand_t4",
+      "seq": 339,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "expand -t 4 /data/tabbed.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a   1\nb   2\nc   3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "expand_i_spacetab",
+      "seq": 347,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo expandisp=$(printf ' \\tX\\n' | expand -i | wc -c)",
+      "expect": {
+        "exit": 0,
+        "stdout": "expandisp=10\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

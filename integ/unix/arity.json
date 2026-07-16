@@ -1,0 +1,100 @@
+{
+  "cases": [
+    {
+      "id": "arity_uniq",
+      "seq": 447,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "uniq /data/a.txt /data/b.txt /data/mixed.txt 2>&1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "uniq: extra operand '/data/mixed.txt'\nTry 'uniq --help' for more information.\ncode=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arity_tr",
+      "seq": 448,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "tr a b /data/a.txt 2>&1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "tr: extra operand '/data/a.txt'\nTry 'tr --help' for more information.\ncode=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arity_diff",
+      "seq": 449,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "diff /data/a.txt /data/b.txt /data/mixed.txt 2>&1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "diff: extra operand '/data/mixed.txt'\ndiff: Try 'diff --help' for more information.\ncode=2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arity_seq",
+      "seq": 450,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "seq 1 2 3 4 2>&1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "seq: extra operand '4'\nTry 'seq --help' for more information.\ncode=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arity_mktemp",
+      "seq": 451,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mktemp t1 t2 2>&1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "mktemp: too many templates\nTry 'mktemp --help' for more information.\ncode=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arity_relative",
+      "seq": 452,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data && uniq a.txt b.txt extra.txt 2>&1); echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "uniq: extra operand 'extra.txt'\nTry 'uniq --help' for more information.\ncode=1\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

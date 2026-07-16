@@ -1,0 +1,132 @@
+{
+  "cases": [
+    {
+      "id": "fold",
+      "seq": 77,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/a.txt | fold -w 3",
+      "expect": {
+        "exit": 0,
+        "stdout": "hel\nlo\nwor\nld\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "fold_s",
+      "seq": 334,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "fold -s -w 6 /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "fold_file",
+      "seq": 335,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "fold -w 3 /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hel\nlo\nwor\nld\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "fold_multi",
+      "seq": 336,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "fold -w 4 /data/a.txt /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hell\no\nworl\nd\nfoo\nbar\nbaz\n1\n2\n3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "fold_default",
+      "seq": 337,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "fold /data/c.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "alpha\nbeta\ngamma\ndelta\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "fold_s_spaces",
+      "seq": 338,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "fold -s -w 8 /data/mixed.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "Hello \nWorld\nHELLO \nworld\nhello \nWORLD\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "fold_empty_file",
+      "seq": 341,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo foldemptyf=$(fold /data/empty.txt | wc -c)",
+      "expect": {
+        "exit": 0,
+        "stdout": "foldemptyf=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "fold_blank_in",
+      "seq": 344,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo foldblankin=$(echo | fold | wc -c)",
+      "expect": {
+        "exit": 0,
+        "stdout": "foldblankin=1\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

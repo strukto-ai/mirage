@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "quoted_command_name",
+      "seq": 373,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "\"cat\" /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

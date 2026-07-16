@@ -1,0 +1,84 @@
+{
+  "cases": [
+    {
+      "id": "midglob_prep",
+      "seq": 411,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/g15/sub /data/g15/sea && cd /data/g15 && printf 'hi\n' | tee sub/x.txt > /dev/null && printf 'yo\n' | tee sea/x.txt > /dev/null",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "midglob_echo",
+      "seq": 412,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo s*/x.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "sea/x.txt sub/x.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "midglob_cat",
+      "seq": 413,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat s*/x.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "yo\nhi\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "midglob_absolute",
+      "seq": 414,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/g15/s*/x.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "yo\nhi\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "midglob_zero_literal",
+      "seq": 415,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo n*/x.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "n*/x.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

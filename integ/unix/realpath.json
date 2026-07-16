@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "realpath",
+      "seq": 69,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "realpath /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

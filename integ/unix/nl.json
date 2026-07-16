@@ -1,0 +1,196 @@
+{
+  "cases": [
+    {
+      "id": "nl",
+      "seq": 37,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "nl /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "     1\thello\n     2\tworld\n     3\tfoo\n     4\tbar\n     5\tbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nl_ba",
+      "seq": 79,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "nl -b a /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "     1\thello\n     2\tworld\n     3\tfoo\n     4\tbar\n     5\tbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nl_d_pipe",
+      "seq": 328,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "nl -d ! /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "     1\thello\n     2\tworld\n     3\tfoo\n     4\tbar\n     5\tbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nl_w3",
+      "seq": 329,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "nl -w 3 /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "  1\thello\n  2\tworld\n  3\tfoo\n  4\tbar\n  5\tbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nl_pin_du",
+      "seq": 601,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "du /data/b.txt | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "14\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nl_pin_stat",
+      "seq": 602,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "stat -c %n /data/b.txt | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "12\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nl_pin_file",
+      "seq": 603,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "file /data/b.txt | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "18\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nl_pin_tree",
+      "seq": 604,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "tree /data/sub | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "126\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nl_pin_ls",
+      "seq": 605,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls /data/sub | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "34\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nl_pin_wc",
+      "seq": 606,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "wc -l /data/b.txt | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "14\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nl_pin_md5",
+      "seq": 607,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "md5 /data/b.txt | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "46\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nl_pin_cmp",
+      "seq": 608,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cmp /data/a.txt /data/b.txt | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "47\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

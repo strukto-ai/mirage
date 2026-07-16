@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "xm_cp_over",
+      "seq": 691,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cp /data/a.txt /data2/xm_copy.txt && cat /data2/xm_copy.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_cp_back",
+      "seq": 692,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cp /data2/xm.txt /data/xm_back.txt && cat /data/xm_back.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "cross\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

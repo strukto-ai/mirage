@@ -1,0 +1,116 @@
+{
+  "cases": [
+    {
+      "id": "md5",
+      "seq": 53,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "md5 /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "191c53e00627438f88824862472a3f59  /data/a.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "md5_multi",
+      "seq": 54,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "md5 /data/a.txt /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "191c53e00627438f88824862472a3f59  /data/a.txt\nc0710d6b4f15dfa88f600b0e6b624077  /data/b.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "md5_multi3",
+      "seq": 104,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "md5 /data/a.txt /data/b.txt /data/dup.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "191c53e00627438f88824862472a3f59  /data/a.txt\nc0710d6b4f15dfa88f600b0e6b624077  /data/b.txt\naa824302994c716187326457c48e125e  /data/dup.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "md5_empty",
+      "seq": 123,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "md5 /data/empty.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "d41d8cd98f00b204e9800998ecf8427e  /data/empty.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "md5_one_byte",
+      "seq": 127,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "md5 /data/one_byte.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "9dd4e461268c8034f5c8564e155c67a6  /data/one_byte.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "md5_stdin",
+      "seq": 159,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo hello | md5",
+      "expect": {
+        "exit": 0,
+        "stdout": "b1946ac92492d2347c6235b4d2611184  -\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "md5_stdin_multi",
+      "seq": 365,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/a.txt | md5",
+      "expect": {
+        "exit": 0,
+        "stdout": "191c53e00627438f88824862472a3f59  -\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

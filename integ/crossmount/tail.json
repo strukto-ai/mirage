@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "xm_tail",
+      "seq": 727,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "tail -n 1 /data/a.txt /data2/xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "==> /data/a.txt <==\nbaz\n\n==> /data2/xm.txt <==\ncross\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_tail_q",
+      "seq": 728,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "tail -q -n 1 /data/a.txt /data2/xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "baz\ncross\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

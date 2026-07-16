@@ -15,7 +15,8 @@ repos:
         exclude: |
           (?x)^(
               typescript/.*|
-              integ/truth\.txt
+              integ/truth\.txt|
+              integ/fixtures/.*
           )$
       - name: mixed-line-ending
         id: mixed-line-ending
@@ -23,14 +24,16 @@ repos:
         exclude: |
           (?x)^(
               typescript/.*|
-              integ/truth\.txt
+              integ/truth\.txt|
+              integ/fixtures/.*
           )$
       - id: trailing-whitespace
         name: Remove trailing whitespaces
         exclude: |
           (?x)^(
               typescript/.*|
-              integ/truth\.txt
+              integ/truth\.txt|
+              integ/fixtures/.*
           )$
       - id: check-toml
         name: Check toml

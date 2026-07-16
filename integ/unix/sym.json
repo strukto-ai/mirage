@@ -1,0 +1,228 @@
+{
+  "cases": [
+    {
+      "id": "sym_setup",
+      "seq": 623,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/symd && echo alpha > /data/symd/t.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sym_ln",
+      "seq": 624,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ln -s /data/symd/t.txt /data/symd/l.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sym_cat_follow",
+      "seq": 625,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/symd/l.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "alpha\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sym_grep_follow",
+      "seq": 626,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep alpha /data/symd/l.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "alpha\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sym_write_through",
+      "seq": 627,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo beta > /data/symd/l.txt && cat /data/symd/t.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "beta\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sym_ls_f",
+      "seq": 628,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls -F /data/symd",
+      "expect": {
+        "exit": 0,
+        "stdout": "t.txt\nl.txt@\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sym_ls_long_arrow",
+      "seq": 629,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls -l /data/symd | grep -- '->'",
+      "expect": {
+        "exit": 0,
+        "stdout": "l\t-\t-\tl.txt -> /data/symd/t.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sym_dirlink_read",
+      "seq": 630,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ln -s /data/symd /data/dl && cat /data/dl/t.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "beta\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sym_mv_rename",
+      "seq": 631,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mv /data/symd/l.txt /data/symd/m.txt && readlink /data/symd/m.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/symd/t.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sym_cp_follow",
+      "seq": 632,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cp /data/symd/m.txt /data/symd/copy.txt && cat /data/symd/copy.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "beta\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sym_rm_link",
+      "seq": 633,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "rm /data/symd/m.txt && readlink /data/symd/m.txt 2>&1",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sym_dangle_cat",
+      "seq": 634,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ln -s /data/symd/none /data/symd/dangle && cat /data/symd/dangle 2>&1",
+      "expect": {
+        "exit": 1,
+        "stdout": "cat: /data/symd/dangle: No such file or directory\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sym_eloop_cat",
+      "seq": 635,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ln -s /data/lp2 /data/lp1 && ln -s /data/lp1 /data/lp2 && cat /data/lp1 2>&1",
+      "expect": {
+        "exit": 1,
+        "stdout": "cat: /data/lp1: Too many levels of symbolic links\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sym_cleanup",
+      "seq": 636,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "rm /data/symd/dangle /data/lp1 /data/lp2 /data/dl && rm -r /data/symd",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

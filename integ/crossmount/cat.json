@@ -1,0 +1,52 @@
+{
+  "cases": [
+    {
+      "id": "xm_cat_concat",
+      "seq": 690,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/a.txt /data2/xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\ncross\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_cat_n",
+      "seq": 709,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat -n /data/b.txt /data2/xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "     1\t1\n     2\t2\n     3\t3\n     4\tcross\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_cat_glob",
+      "seq": 710,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/sorted_*.txt /data2/xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "apple\nbanana\ncherry\nbanana\ndate\nelder\napple\ncherry\nelder\nfig\ncross\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

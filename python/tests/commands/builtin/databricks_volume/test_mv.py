@@ -125,7 +125,7 @@ async def test_mv_multiple_sources_require_directory(write_ws, dbx_files):
     io = await write_ws.execute("mv /dbx/a.txt /dbx/b.txt /dbx/target.txt")
 
     assert io.exit_code != 0
-    assert b"not a directory" in io.stderr
+    assert io.stderr == b"mv: target '/dbx/target.txt': Not a directory\n"
     assert dbx_files.downloads[f"{ROOT}/a.txt"] == b"AAA"
     assert dbx_files.downloads[f"{ROOT}/b.txt"] == b"BBB"
     assert dbx_files.downloads[f"{ROOT}/target.txt"] == b"target"

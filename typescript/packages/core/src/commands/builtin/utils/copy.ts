@@ -15,6 +15,7 @@
 import { rekey } from '../../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
+import { enotdir } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
 export type StatFn = (path: PathSpec, index?: IndexCacheStore) => Promise<FileStat>
@@ -36,7 +37,7 @@ export function copyTargets(
   dstIsDir: boolean,
 ): [PathSpec, PathSpec][] {
   if (sources.length > 1 && !dstIsDir) {
-    throw new Error(`target '${dst.virtual}' is not a directory`)
+    throw enotdir(`target '${dst.virtual}'`)
   }
   if (!dstIsDir) {
     const first = sources[0]

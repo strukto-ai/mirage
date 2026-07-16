@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "xm_awk",
+      "seq": 715,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "awk '{print $1}' /data/a.txt /data2/xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\ncross\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_awk_nr",
+      "seq": 716,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "awk 'END{print NR}' /data/a.txt /data2/xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "6\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

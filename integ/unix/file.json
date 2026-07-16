@@ -1,0 +1,100 @@
+{
+  "cases": [
+    {
+      "id": "file_text",
+      "seq": 89,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "file /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt: text\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "file_json",
+      "seq": 90,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "file /data/user.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/user.json: json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "file_b",
+      "seq": 91,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "file -b /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "text\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "file_multi",
+      "seq": 106,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "file /data/a.txt /data/user.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt: text\n/data/user.json: json\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "file_empty",
+      "seq": 292,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "file /data/empty.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/empty.txt: text\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "file_binary",
+      "seq": 293,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "file /data/binary.bin",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/binary.bin: binary\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

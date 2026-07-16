@@ -1,0 +1,37 @@
+{
+  "targets": [
+    {
+      "id": "ram",
+      "hosts": ["python", "typescript-node"],
+      "mounts": [
+        { "path": "/data", "resource": "ram", "backend": "memory", "fixture": "files/v1" },
+        { "path": "/data2", "resource": "ram", "backend": "memory" }
+      ]
+    },
+    {
+      "id": "disk",
+      "hosts": ["python", "typescript-node"],
+      "mounts": [
+        { "path": "/data", "resource": "disk", "backend": "tmpdir", "fixture": "files/v1" },
+        { "path": "/data2", "resource": "disk", "backend": "tmpdir" }
+      ]
+    },
+    {
+      "id": "redis",
+      "hosts": ["python", "typescript-node"],
+      "service": "redis",
+      "mounts": [
+        { "path": "/data", "resource": "redis", "backend": "redis", "fixture": "files/v1" },
+        { "path": "/data2", "resource": "redis", "backend": "redis" }
+      ]
+    },
+    {
+      "id": "opfs",
+      "hosts": ["typescript-browser"],
+      "mounts": [
+        { "path": "/data", "resource": "opfs", "backend": "memory", "fixture": "files/v1" },
+        { "path": "/data2", "resource": "opfs", "backend": "memory" }
+      ]
+    }
+  ]
+}

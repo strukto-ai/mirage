@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "case_multi_arm",
+      "seq": 232,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "case x in x) echo one; echo two;; esac",
+      "expect": {
+        "exit": 0,
+        "stdout": "one\ntwo\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "case_multi_arm_default",
+      "seq": 233,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "case y in x) echo one;; *) echo fall; echo through;; esac",
+      "expect": {
+        "exit": 0,
+        "stdout": "fall\nthrough\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

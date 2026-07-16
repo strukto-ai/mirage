@@ -1,0 +1,52 @@
+{
+  "cases": [
+    {
+      "id": "tac",
+      "seq": 39,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "tac /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "baz\nbar\nfoo\nworld\nhello\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tac_nested",
+      "seq": 348,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "tac /data/sub/nested.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "content\nnested\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tac_no_input",
+      "seq": 547,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "tac",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

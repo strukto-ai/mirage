@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "xm_find",
+      "seq": 701,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data2 -type f | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data2/xm.txt\n/data2/xm_copy.txt\n/data2/xm_moved.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_find_roots",
+      "seq": 734,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data/sub /data2 -name '*.txt'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/sub/deep/a.txt\n/data/sub/deep/b.txt\n/data/sub/deep/deeper.txt\n/data/sub/nested.txt\n/data2/xm.txt\n/data2/xm_copy.txt\n/data2/xm_moved.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

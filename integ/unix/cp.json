@@ -1,0 +1,68 @@
+{
+  "cases": [
+    {
+      "id": "cp_multi_into_dir",
+      "seq": 453,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cp /data/a.txt /data/b.txt /data/sub",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cp_multi_verify_a",
+      "seq": 454,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/sub/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cp_multi_verify_b",
+      "seq": 455,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/sub/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n2\n3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cp_reject_multi_nondir",
+      "seq": 584,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cp /data/a.txt /data/b.txt /data/c.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cp: target '/data/c.txt': Not a directory\n"
+      }
+    }
+  ]
+}

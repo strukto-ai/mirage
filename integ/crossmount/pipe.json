@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "xm_pipe",
+      "seq": 702,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data2/xm.txt | tr a-z A-Z",
+      "expect": {
+        "exit": 0,
+        "stdout": "CROSS\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "cases": [
+    {
+      "id": "rev",
+      "seq": 38,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "rev /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "olleh\ndlrow\noof\nrab\nzab\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rev_empty_file",
+      "seq": 343,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo revemptyf=$(rev /data/empty.txt | wc -c)",
+      "expect": {
+        "exit": 0,
+        "stdout": "revemptyf=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rev_blank_in",
+      "seq": 346,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo revblankin=$(echo | rev | wc -c)",
+      "expect": {
+        "exit": 0,
+        "stdout": "revblankin=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rev_b",
+      "seq": 349,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "rev /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n2\n3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rev_stdin",
+      "seq": 369,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo hello | rev",
+      "expect": {
+        "exit": 0,
+        "stdout": "olleh\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

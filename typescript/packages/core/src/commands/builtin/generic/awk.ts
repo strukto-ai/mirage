@@ -58,7 +58,13 @@ export async function awkGeneric(
       try {
         pieces.push(DEC.decode(await materialize(stream(programSpec))).trim())
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
+        const code = (err as { code?: string }).code
+        const msg =
+          code === 'ENOENT'
+            ? `awk: ${programFile}: No such file or directory`
+            : err instanceof Error
+              ? err.message
+              : String(err)
         return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(`${msg}\n`) })]
       }
     }

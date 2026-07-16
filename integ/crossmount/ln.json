@@ -1,0 +1,52 @@
+{
+  "cases": [
+    {
+      "id": "xm_ln_over",
+      "seq": 703,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ln -s /data/a.txt /data2/xm_link.txt && cat /data2/xm_link.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_ln_readlink",
+      "seq": 704,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "readlink /data2/xm_link.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_ln_back",
+      "seq": 705,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ln -s /data2/xm.txt /data/xm_rlink.txt && cat /data/xm_rlink.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "cross\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -1,0 +1,436 @@
+{
+  "cases": [
+    {
+      "id": "cwd_pwd_root",
+      "seq": 484,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(pwd)",
+      "expect": {
+        "exit": 0,
+        "stdout": "/\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_cd_mount_pwd",
+      "seq": 485,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data && pwd)",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_cd_subdir_pwd",
+      "seq": 486,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data/sub && pwd)",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/sub\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_cd_dotdot_pwd",
+      "seq": 487,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data/sub && cd .. && pwd)",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_rel_cat",
+      "seq": 488,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data && cat a.txt)",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_rel_dot_cat",
+      "seq": 489,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data && cat ./a.txt)",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_rel_subdir_cat",
+      "seq": 490,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data && cat sub/nested.txt)",
+      "expect": {
+        "exit": 0,
+        "stdout": "nested\ncontent\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_rel_dotdot_cat",
+      "seq": 491,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data/sub && cat ../a.txt)",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_rel_csplit",
+      "seq": 492,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data/sub && csplit -s -f cs_ nested.txt 2 && cat cs_00 cs_01 && rm cs_00 cs_01)",
+      "expect": {
+        "exit": 0,
+        "stdout": "nested\ncontent\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_echo_pwd",
+      "seq": 493,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data/sub && echo $PWD)",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/sub\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_echo_home_unset",
+      "seq": 494,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(echo \"[$HOME]\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "[]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_cd_oldpwd",
+      "seq": 495,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data && cd /data/sub && echo $OLDPWD)",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_cd_dash",
+      "seq": 496,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data && cd /data/sub && cd -)",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_cd_dash_pwd",
+      "seq": 497,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data && cd /data/sub && cd - > /dev/null && pwd)",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_home_cd_tilde",
+      "seq": 498,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(export HOME=/data && cd ~ && pwd)",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_home_echo",
+      "seq": 499,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(export HOME=/data && echo $HOME)",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_tilde_cat",
+      "seq": 500,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(export HOME=/data && cat ~/a.txt)",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_tilde_subdir_cat",
+      "seq": 501,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(export HOME=/data && cat ~/sub/nested.txt)",
+      "expect": {
+        "exit": 0,
+        "stdout": "nested\ncontent\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_cd_double_slash",
+      "seq": 502,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd //data && pwd)",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_cd_phys_flag",
+      "seq": 503,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd -P /data/sub && pwd)",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/sub\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_cd_log_flag",
+      "seq": 504,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd -L /data && pwd)",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_cd_dashdash",
+      "seq": 505,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd -- /data && pwd)",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_cd_cdpath",
+      "seq": 506,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(export CDPATH=/data && cd sub && pwd)",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/sub\n/data/sub\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_cd_too_many",
+      "seq": 540,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cd /data /data/sub 2>&1",
+      "expect": {
+        "exit": 1,
+        "stdout": "cd: too many arguments\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_cd_bad_opt",
+      "seq": 541,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cd -x /data 2>&1",
+      "expect": {
+        "exit": 2,
+        "stdout": "cd: -x: invalid option\ncd: usage: cd [-L|[-P [-e]] [-@]] [dir]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_cd_home_unset",
+      "seq": 542,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(unset HOME; cd) 2>&1",
+      "expect": {
+        "exit": 1,
+        "stdout": "cd: HOME not set\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cwd_cd_quoted_tilde",
+      "seq": 543,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data && cd '~') 2>&1",
+      "expect": {
+        "exit": 1,
+        "stdout": "cd: /data/~: No such file or directory\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

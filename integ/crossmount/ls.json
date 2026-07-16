@@ -1,0 +1,52 @@
+{
+  "cases": [
+    {
+      "id": "xm_ls",
+      "seq": 689,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls /data2",
+      "expect": {
+        "exit": 0,
+        "stdout": "xm.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_ls_files",
+      "seq": 733,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls /data/b.txt /data2/xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/b.txt\n/data2/xm.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_ls_multi",
+      "seq": 741,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls /data/sub /data2",
+      "expect": {
+        "exit": 0,
+        "stdout": "arch.zip\ndeep\nnested.txt\nlink.txt\nxm.txt\nxm_copy.txt\nxm_moved.txt\nxm_link.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

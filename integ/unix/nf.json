@@ -1,0 +1,180 @@
+{
+  "cases": [
+    {
+      "id": "nf_cat",
+      "seq": 637,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /data/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "nf_head",
+      "seq": 638,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "head /data/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "head: /data/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "nf_tail",
+      "seq": 639,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "tail /data/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "tail: /data/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "nf_wc",
+      "seq": 640,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "wc /data/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "wc: /data/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "nf_stat",
+      "seq": 641,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "stat /data/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "stat: /data/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "nf_grep",
+      "seq": 642,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep x /data/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "grep: /data/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "nf_cat_nested",
+      "seq": 643,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/sub/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /data/sub/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "nf_cat_pipe",
+      "seq": 644,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/missing.txt | cat",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "cat: /data/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "nf_cat_rel",
+      "seq": 645,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data && cat missing.txt)",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "nf_cat_rel_subdir",
+      "seq": 646,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data && cat sub/missing.txt)",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: sub/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "nf_grep_r_rel",
+      "seq": 647,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data && grep -r x missing)",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "grep: missing: No such file or directory\n"
+      }
+    }
+  ]
+}
