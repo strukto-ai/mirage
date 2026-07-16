@@ -12,16 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import cast
+
 from mirage.core.github_ci._client import ci_get
 from mirage.resource.github_ci.config import GitHubCIConfig
 
 
 async def list_annotations(config: GitHubCIConfig,
                            check_run_id: str) -> list[dict]:
-    return await ci_get(
-        config.token,
-        "/repos/{owner}/{repo}/check-runs/{check_run_id}/annotations",
-        owner=config.owner,
-        repo=config.repo,
-        check_run_id=check_run_id,
-    )
+    return cast(
+        list[dict], await ci_get(
+            config.token,
+            "/repos/{owner}/{repo}/check-runs/{check_run_id}/annotations",
+            owner=config.owner,
+            repo=config.repo,
+            check_run_id=check_run_id,
+        ))

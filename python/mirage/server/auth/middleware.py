@@ -61,6 +61,10 @@ class AuthMiddleware:
             return
 
         if self.config.mode == AuthMode.JWT:
+            if self.config.jwt is None:
+                await self._unauthorized(scope, receive, send,
+                                         "JWT auth is not configured")
+                return
             if not _JWT_SHAPE.match(token):
                 await self._unauthorized(scope, receive, send,
                                          "token shape is not a JWT")

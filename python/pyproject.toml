@@ -253,9 +253,6 @@ warn_redundant_casts = true
 # regressions in it fail CI. New modules must not be added here.
 [[tool.mypy.overrides]]
 module = [
-    "mirage.accessor.databricks_volume",
-    "mirage.accessor.mongodb",
-    "mirage.cache.file.io",
     "mirage.commands.builtin.general.bc",
     "mirage.commands.builtin.general.wget",
     "mirage.commands.builtin.generic.base64_cmd",
@@ -308,24 +305,9 @@ module = [
     "mirage.commands.builtin.generic_bind.builders.unzip",
     "mirage.commands.builtin.generic_bind.builders.zip_cmd",
     "mirage.commands.builtin.generic_bind.factory",
-    "mirage.commands.builtin.github.narrow",
     "mirage.commands.builtin.history.cat",
     "mirage.commands.builtin.s3.mkdir",
     "mirage.commands.builtin.s3.rm",
     "mirage.commands.builtin.s3.touch",
-    "mirage.core.github.readdir",
-    "mirage.core.github_ci.annotations",
-    "mirage.fuse.fs",
-    "mirage.fuse.mount",
-    "mirage.ops.ops",
-    "mirage.provision.types",
-    "mirage.resource.dev.dev",
-    "mirage.server.auth.middleware",
-    "mirage.server.routers.versions",
-    "mirage.shell.arith",
-    "mirage.utils.glob_walk",
-    "mirage.workspace.mount.registry",
-    "mirage.workspace.node.run_tree",
-    "mirage.workspace.snapshot.state",
 ]
 ignore_errors = true

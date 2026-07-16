@@ -264,12 +264,12 @@ class ArithEvaluator:
                 raise ArithError(
                     f"expression recursion level exceeded (error token is "
                     f'"{raw}")') from None
-            value, _ = evaluate_arith(raw, {
+            result, _ = evaluate_arith(raw, {
                 **dict(self.env),
                 **self.updates
             },
-                                      depth=self.depth + 1)
-            return value
+                                       depth=self.depth + 1)
+            return result
 
     def run(self, node: tuple) -> int:
         kind = node[0]

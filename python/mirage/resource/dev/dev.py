@@ -26,6 +26,8 @@ _ZERO_CHUNK_SIZE = 1 << 20
 class _DevFiles(dict[str, bytes]):
 
     def __contains__(self, key: object) -> bool:
+        if not isinstance(key, str):
+            return False
         name = key.strip("/")
         return name in _DEV_NAMES
 

@@ -13,30 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import logging
 import time
 from collections.abc import Awaitable, Callable
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as get_version
 from typing import Any
 
 from pymongo import AsyncMongoClient
-from pymongo.driver_info import DriverInfo
 
 from mirage.accessor.base import Accessor
 from mirage.resource.mongodb.config import MongoDBConfig
 from mirage.resource.secrets import reveal_secret
-
-logger = logging.getLogger(__name__)
-
-try:
-    _VERSION = get_version("mirage-ai")
-except PackageNotFoundError:
-    logger.error("mirage-ai package metadata not found; "
-                 "MongoDB driver handshake will omit the version")
-    _VERSION = None
-
-_DRIVER_INFO = DriverInfo(name="Mirage", version=_VERSION)
 
 
 class MongoDBAccessor(Accessor):
@@ -62,8 +47,7 @@ class MongoDBAccessor(Accessor):
         key = id(loop) if loop is not None else 0
         client = self._clients.get(key)
         if client is None:
-            client = AsyncMongoClient(reveal_secret(self.config.uri),
-                                      driver=_DRIVER_INFO)
+            client = AsyncMongoClient(reveal_secret(self.config.uri))
             self._clients[key] = client
         return client
 

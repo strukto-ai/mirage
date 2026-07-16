@@ -32,7 +32,7 @@ class JobStatus(str, Enum):
 class Job:
     id: int
     command: str
-    task: asyncio.Task
+    task: asyncio.Task | None
     cwd: str
     status: JobStatus = JobStatus.RUNNING
     stdout: bytes = b""
@@ -100,6 +100,7 @@ class JobTable:
         """
         if job.status != JobStatus.RUNNING:
             return
+        assert job.task is not None
         if not job.task.done():
             return
         if job.task.cancelled():
@@ -129,7 +130,8 @@ class JobTable:
         job = self._jobs.get(job_id)
         if job is None:
             return False
-        job.task.cancel()
+        if job.task is not None:
+            job.task.cancel()
         job.status = JobStatus.KILLED
         job.exit_code = 137
         job.stderr = b"Killed"
@@ -139,6 +141,7 @@ class JobTable:
         job = self._jobs[job_id]
         if job.status != JobStatus.RUNNING:
             return job
+        assert job.task is not None
         try:
             stdout, io_result, exec_node = await job.task
             job.stdout = stdout if isinstance(stdout, bytes) else b""

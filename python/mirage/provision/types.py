@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -198,7 +199,7 @@ def combine_alternative(op: str,
         ProvisionResult: Envelope result; precision is RANGE unless a
         child is UNKNOWN, cost is the cheapest child's when all have one.
     """
-    fields = {
+    fields: dict[str, Any] = {
         f: min((getattr(c, f) for c in children), default=0)
         for f in LOW_FIELDS
     }

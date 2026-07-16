@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from collections.abc import Iterable
 
 
@@ -34,6 +35,7 @@ class FileCacheMixin:
     """
 
     _max_drain_bytes: int | None = None
+    _drain_tasks: dict[str, asyncio.Task]
 
     async def get(self, key: str) -> bytes | None:
         raise NotImplementedError
