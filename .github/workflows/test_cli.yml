@@ -738,6 +738,9 @@ jobs:
             "python/.venv/bin/mirage" \
             "node typescript/packages/cli/dist/bin/mirage.js"
 
+      - name: Run cross-language state store interop (both directions)
+        run: bash integ/state_store.sh
+
       - name: Run CLI feature parity (subshell, sessions, session modes, versioning, fuse)
         run: |
           bash integ/parity.sh \
