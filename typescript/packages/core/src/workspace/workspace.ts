@@ -12,14 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { NOOPAccessor } from '../accessor/base.ts'
 import type { FileCache } from '../cache/file/mixin.ts'
 import type { IndexConfig } from '../cache/index/config.ts'
 import { RAMFileCacheStore } from '../cache/file/ram.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
 import type { ByteSource } from '../io/types.ts'
 import { IOResult, materialize } from '../io/types.ts'
-import { runWithRecording, runWithRevisions } from '../observe/context.ts'
+import { runWithRecording } from '../observe/context.ts'
 import { type EventDict, Observer } from '../observe/observer.ts'
 import type { OpRecord } from '../observe/record.ts'
 import type { ObserverStore } from '../observe/store.ts'
@@ -46,16 +45,16 @@ import { readFileBytes } from './snapshot/fs.ts'
 import { applyStateDict, buildMountArgs, toStateDict } from './snapshot/state.ts'
 import { readSnapshotTar } from './snapshot/tar_io.ts'
 import type { WorkspaceStateDict } from './snapshot/types.ts'
+import type { FileStat } from '../types.ts'
 import {
   type CommandSafeguard,
   ConsistencyPolicy,
   DEFAULT_AGENT_ID,
   DriftPolicy,
-  FileStat,
   FileType,
   MountMode,
   parseMountMode,
-  type PathSpec,
+  PathSpec,
 } from '../types.ts'
 import type { TSNodeLike } from './expand/variable.ts'
 import type { ExecuteFn } from './expand/node.ts'
@@ -83,9 +82,6 @@ import type { Session } from './session/session.ts'
 import type { ExecutionNode } from './types.ts'
 import { errorVirtualPath, gnuStrerror } from '../utils/errors.ts'
 import { stripSlash } from '../utils/slash.ts'
-import { effectiveMountMode } from '../context/session_context.ts'
-
-const NOOP_ACCESSOR_INSTANCE = new NOOPAccessor()
 
 /**
  * One mount entry: a bare resource takes the workspace default mode, a
@@ -380,32 +376,29 @@ export class Workspace {
     return this.observer.commandEvents()
   }
 
+  // The sandboxed runtimes' sole data path (quickjs, pyodide, monty).
+  // Routes through `dispatch`, not the raw WorkspaceFS, so sandbox I/O
+  // takes the same path as shell commands — cache read-through on
+  // reads, post-write invalidation, and mount-mode enforcement narrowed
+  // by the current session all come from the Dispatcher. Reads are raw
+  // bytes (no filetype rendering), matching the Python GuestFs.
   private buildWorkspaceBridge(): BridgeDispatchFn {
     return async (op, path, bytes) => {
       switch (op) {
         case 'READ':
-          return await this.fs.readFile(path)
+          return (await this.dispatch('read', path)) as Uint8Array
         case 'WRITE': {
           if (bytes === undefined) throw new Error('WRITE op requires bytes')
           const buf =
             bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes as ArrayLike<number>)
-          // Enforce the mount's mode, narrowed by the current session,
-          // the same way the command dispatch does. The bridge is the
-          // sole write path for the sandboxed runtimes, so a read-only
-          // mount (or a session narrowed to read) denies their writes.
-          const [, , mode] = await this.resolve(path)
-          const capPrefix = this.registry.mountFor(path)?.prefix ?? '/'
-          if (effectiveMountMode(capPrefix, mode) === MountMode.READ) {
-            throw new Error(`mount at '${path}' is read-only`)
-          }
-          await this.fs.writeFile(path, buf)
+          await this.dispatch('write', path, [buf])
           return undefined
         }
         case 'LIST': {
-          const entries = await this.fs.readdir(path)
+          const entries = ((await this.dispatch('readdir', path)) as string[] | null) ?? []
           const result: MirageEntry[] = []
           for (const entry of entries) {
-            const stat = await this.fs.stat(entry)
+            const stat = (await this.dispatch('stat', entry)) as FileStat
             const isDir = stat.type === FileType.DIRECTORY
             const size = isDir ? 0 : (stat.size ?? 0)
             result.push({ path: entry, size, isDir })
@@ -727,44 +720,21 @@ export class Workspace {
     if (this.driftCheckPending) {
       await this.runPendingDriftCheck()
     }
-    const [resource, spec, mode] = await this.resolve(path)
-    const capPrefix = this.registry.mountFor(path)?.prefix ?? '/'
-    if (
-      effectiveMountMode(capPrefix, mode) === MountMode.READ &&
-      this.opsRegistry.find(opName, resource.kind)?.write === true
-    ) {
-      throw new Error(`mount at '${path}' is read-only`)
-    }
-    const fullKwargs: OpKwargs =
-      kwargs.index === undefined && resource.index !== undefined
-        ? { ...kwargs, index: resource.index }
-        : kwargs
+    // Opens the backing resource lazily and asserts the mount is
+    // allowed; the Dispatcher then owns symlink follow, cache
+    // read-through, mode enforcement, index threading, revisions,
+    // overlay stat, and post-write invalidation — the same single path
+    // Python's Workspace.dispatch delegates to.
+    await this.resolve(path)
     const mount = this.registry.mountFor(path)
     const opOverride = mount?.commandSafeguards.get(opName) ?? null
     const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
-    const result = await runWithRevisions(
-      mount !== null && mount.revisions.size > 0 ? mount.revisions : null,
-      async () =>
-        runWithTimeout(
-          Promise.resolve(
-            this.opsRegistry.call(
-              opName,
-              resource.kind,
-              resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-              spec,
-              args,
-              fullKwargs,
-            ),
-          ),
-          opTimeout,
-          opName,
-        ),
+    const [result] = await runWithTimeout(
+      this.dispatcher.dispatch(opName, PathSpec.fromStrPath(path), args, kwargs),
+      opTimeout,
+      opName,
     )
-    const guarded = await applyOpSafeguard(result, opOverride)
-    if (opName === 'stat' && guarded instanceof FileStat) {
-      return mergeOverlayStat(this.namespace.metaFor(path), guarded)
-    }
-    return guarded
+    return await applyOpSafeguard(result, opOverride)
   }
 
   async resolve(path: string): Promise<[Resource, PathSpec, MountMode]> {

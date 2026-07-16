@@ -37,6 +37,9 @@ const DISPATCH_WRITE_OPS = new Set([
   'unlink',
   'create',
   'truncate',
+  'mkdir',
+  'rmdir',
+  'rename',
 ])
 
 export type ResolveFn = (path: string) => Promise<[Resource, PathSpec, MountMode]>
@@ -100,6 +103,14 @@ export class Dispatcher {
       kwargs?.index === undefined && resource.index !== undefined
         ? { ...(kwargs ?? {}), index: resource.index }
         : (kwargs ?? {})
+    let fullArgs = args ?? []
+    if (opName === 'rename' && fullArgs[0] instanceof PathSpec) {
+      // Re-address the destination against its mount, mirroring the
+      // Python dispatcher: a caller-supplied dst built from the virtual
+      // path alone would otherwise reach the backend untranslated.
+      const [, dstScope] = await this.namespace.resolve(fullArgs[0].virtual, false)
+      fullArgs = [dstScope, ...fullArgs.slice(1)]
+    }
     const mount = this.namespace.mountFor(p.virtual)
     const result = await runWithRevisions(
       mount !== null && mount.revisions.size > 0 ? mount.revisions : null,
@@ -109,12 +120,15 @@ export class Dispatcher {
           resource.kind,
           resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
           scope,
-          args ?? [],
+          fullArgs,
           fullKwargs,
         ),
     )
     if (DISPATCH_WRITE_OPS.has(opName)) {
       await this.invalidateAfterWriteByPath(p.virtual)
+      if (opName === 'rename' && args?.[0] instanceof PathSpec) {
+        await this.invalidateAfterWriteByPath(args[0].virtual)
+      }
     }
     if (opName === 'stat' && result instanceof FileStat) {
       return [mergeOverlayStat(this.namespace.metaFor(p.virtual), result), new IOResult()]
