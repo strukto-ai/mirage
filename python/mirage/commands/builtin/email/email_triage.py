@@ -16,7 +16,8 @@ import json
 
 from mirage.accessor.email import EmailAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, OperandKind, Option
+from mirage.commands.spec.types import (CommandSpec, FlagView, OperandKind,
+                                        Option)
 from mirage.core.email._client import fetch_headers
 from mirage.core.email.search import search_messages
 from mirage.io.stream import yield_bytes
@@ -43,20 +44,19 @@ async def email_triage(
     *texts: str,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
-    folder = _extra.get("folder", "INBOX")
-    if not isinstance(folder, str):
-        folder = "INBOX"
-    max_results = int(_extra.get("max", 20))
+    fl = FlagView(_extra, spec=SPEC)
+    folder = fl.as_str("folder") or "INBOX"
+    max_results = fl.as_int("max") or 20
     uids = await search_messages(
         accessor,
         folder,
-        text=_extra.get("body"),
-        subject=_extra.get("subject"),
-        from_addr=_extra.get("from"),
-        to_addr=_extra.get("to"),
-        since=_extra.get("since"),
-        before=_extra.get("before"),
-        unseen=bool(_extra.get("unseen")),
+        text=fl.as_str("body"),
+        subject=fl.as_str("subject"),
+        from_addr=fl.as_str("from"),
+        to_addr=fl.as_str("to"),
+        since=fl.as_str("since"),
+        before=fl.as_str("before"),
+        unseen=fl.as_bool("unseen"),
         max_results=max_results,
     )
     if not uids:

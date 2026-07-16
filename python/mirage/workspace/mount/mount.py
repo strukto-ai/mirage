@@ -63,8 +63,8 @@ def _wrap_cmd_streams(
     stream, io = result
     seen: dict[int, ByteSource] = {}
 
-    def _wrap(obj: ByteSource | None) -> ByteSource | None:
-        if obj is None or isinstance(obj, (bytes, bytearray)):
+    def _wrap(obj: ByteSource) -> ByteSource:
+        if isinstance(obj, (bytes, bytearray)):
             return obj
         oid = id(obj)
         if oid in seen:
@@ -79,7 +79,7 @@ def _wrap_cmd_streams(
         seen[oid] = wrapped
         return wrapped
 
-    stream = _wrap(stream)
+    stream = _wrap(stream) if stream is not None else None
     for k, v in list(io.reads.items()):
         io.reads[k] = _wrap(v)
     for k, v in list(io.writes.items()):
@@ -444,7 +444,7 @@ class MountEntry:
         # single grep -f) or a list of PathSpec (repeatable grep -f).
         # Everything else (bools, strings, list[str] like repeated -e) is
         # not a path and passes through unchanged.
-        kw = {}
+        kw: dict[str, Any] = {}
         for k, v in flag_kwargs.items():
             if isinstance(v, PathSpec):
                 kw[k] = dataclasses.replace(v,

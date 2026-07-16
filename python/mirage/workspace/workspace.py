@@ -18,7 +18,7 @@ import logging
 import sys
 from collections.abc import AsyncIterator, Iterable, Mapping
 from functools import partial
-from typing import Any
+from typing import Any, Literal, overload
 
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.file.ram import RAMFileCacheStore
@@ -727,6 +727,33 @@ class Workspace:
         # open its own recording context (GNU: history is appended by
         # the line reader, the evaluator can't touch it).
         return await self.execute(cmd, cancel=cancel, record=False, **opts)
+
+    @overload
+    async def execute(self,
+                      command: str,
+                      session_id: str | None = ...,
+                      stdin: AsyncIterator[bytes] | bytes | None = ...,
+                      provision: Literal[False] = ...,
+                      agent_id: str = ...,
+                      cwd: str | None = ...,
+                      env: dict[str, str] | None = ...,
+                      cancel: asyncio.Event | None = ...,
+                      record: bool = ...) -> IOResult:
+        ...
+
+    @overload
+    async def execute(self,
+                      command: str,
+                      session_id: str | None = ...,
+                      stdin: AsyncIterator[bytes] | bytes | None = ...,
+                      *,
+                      provision: Literal[True],
+                      agent_id: str = ...,
+                      cwd: str | None = ...,
+                      env: dict[str, str] | None = ...,
+                      cancel: asyncio.Event | None = ...,
+                      record: bool = ...) -> ProvisionResult:
+        ...
 
     async def execute(
         self,

@@ -460,6 +460,7 @@ async def handle_command(
     # Shell functions
     if cmd_name in session.functions:
         func_body = session.functions[cmd_name]
+        assert isinstance(func_body, list)
         cs = call_stack or CallStack()
         # Positional args carry the word as typed ($1 stays sub/a.txt).
         text_args = [word_text(p) for p in parts[1:]]
@@ -550,11 +551,12 @@ async def handle_command(
                        if find_expr_tokens is not None else cross_parsed.texts)
         cross_refusal = _option_error(cmd_name, cross_parsed)
         if cross_refusal is not None:
-            msg, code = cross_refusal
+            refusal_msg, code = cross_refusal
             return None, IOResult(exit_code=code,
-                                  stderr=msg), ExecutionNode(command=cmd_str,
-                                                             exit_code=code,
-                                                             stderr=msg)
+                                  stderr=refusal_msg), ExecutionNode(
+                                      command=cmd_str,
+                                      exit_code=code,
+                                      stderr=refusal_msg)
         run_single = functools.partial(run_on_mount, registry, session,
                                        dispatch, namespace)
         stdout, io = await handle_cross_mount(cmd_name,
@@ -595,11 +597,11 @@ async def handle_command(
                 pass
         if len(mount_prefixes) > 1:
             prefixes_str = ", ".join(sorted(mount_prefixes))
-            err = (f"{cmd_name}: paths span multiple mounts "
-                   f"({prefixes_str}), cross-mount not supported\n")
+            span_err = (f"{cmd_name}: paths span multiple mounts "
+                        f"({prefixes_str}), cross-mount not supported\n")
             return None, IOResult(
                 exit_code=1,
-                stderr=err.encode(),
+                stderr=span_err.encode(),
             ), ExecutionNode(command=cmd_str, exit_code=1)
 
     try:
@@ -638,11 +640,12 @@ async def handle_command(
                                                  single_parsed.warnings)
     refusal = _option_error(cmd_name, single_parsed)
     if refusal is not None:
-        msg, code = refusal
+        refusal_msg, code = refusal
         return None, IOResult(exit_code=code,
-                              stderr=msg), ExecutionNode(command=cmd_str,
-                                                         exit_code=code,
-                                                         stderr=msg)
+                              stderr=refusal_msg), ExecutionNode(
+                                  command=cmd_str,
+                                  exit_code=code,
+                                  stderr=refusal_msg)
 
     if find_expr_tokens is not None:
         texts = find_expr_tokens

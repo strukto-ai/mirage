@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import shlex
+from typing import Any, Callable
 
 try:
     from agno.tools import Toolkit
@@ -38,8 +39,10 @@ class MirageToolkit(Toolkit):
 
     def __init__(self, workspace: Workspace, **kwargs) -> None:
         self._ws = workspace
-        tools = [self.execute, self.read, self.write, self.ls, self.grep]
-        async_tools = [
+        tools: list[Callable[..., Any]] = [
+            self.execute, self.read, self.write, self.ls, self.grep
+        ]
+        async_tools: list[tuple[Callable[..., Any], str]] = [
             (self.aexecute, "execute"),
             (self.aread, "read"),
             (self.awrite, "write"),

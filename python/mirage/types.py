@@ -15,7 +15,7 @@
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import Enum, StrEnum
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt
 
@@ -174,7 +174,7 @@ class CommandSafeguard(BaseModel):
         present = [s for s in safeguards if s is not None]
         if not present:
             return None
-        kwargs = {}
+        kwargs: dict[str, Any] = {}
         for name, field in cls.model_fields.items():
             rule = next((m for m in field.metadata if isinstance(m, Aggr)),
                         None)
@@ -311,7 +311,9 @@ def word_text(word: "str | PathSpec") -> str:
     Args:
         word (str | PathSpec): text argument or path.
     """
-    return word.raw_path if isinstance(word, PathSpec) else word
+    if isinstance(word, PathSpec):
+        return word.raw_path if word.raw_path is not None else word.virtual
+    return word
 
 
 class IndexType(str, Enum):

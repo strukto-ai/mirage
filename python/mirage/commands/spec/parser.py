@@ -337,8 +337,8 @@ def parse_command(
     )
 
 
-def parse_to_kwargs(parsed: ParsedArgs) -> dict[str, str | bool | list[str]]:
-    result: dict[str, str | bool | list[str]] = {}
+def parse_to_kwargs(parsed: ParsedArgs) -> dict[str, object]:
+    result: dict[str, object] = {}
     for key, value in parsed.flags.items():
         result[flag_kwarg_name(key)] = value
     return result

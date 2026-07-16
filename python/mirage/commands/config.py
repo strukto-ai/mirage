@@ -50,7 +50,7 @@ def _with_help_support(name: str, spec: CommandSpec,
 class RegisteredCommand:
     name: str
     spec: CommandSpec
-    resource: str
+    resource: str | None
     filetype: str | None
     fn: Callable
     provision_fn: Callable | None = None
@@ -77,8 +77,7 @@ def command(
     def decorator(fn: Callable) -> Callable:
         resources = (resource if isinstance(resource, list) else [resource])
         new_spec, wrapped_fn = _with_help_support(name, spec, fn)
-        if not hasattr(wrapped_fn, "_registered_commands"):
-            wrapped_fn._registered_commands = []
+        cmds = getattr(wrapped_fn, "_registered_commands", [])
         for p in resources:
             rc = RegisteredCommand(
                 name=name,
@@ -91,7 +90,8 @@ def command(
                 write=write,
                 safeguard=safeguard,
             )
-            wrapped_fn._registered_commands.append(rc)
+            cmds.append(rc)
+        setattr(wrapped_fn, "_registered_commands", cmds)
         return wrapped_fn
 
     return decorator
@@ -115,9 +115,9 @@ def cross_command(
             src=src,
             dst=dst,
         )
-        if not hasattr(fn, "_registered_commands"):
-            fn._registered_commands = []
-        fn._registered_commands.append(rc)
+        cmds = getattr(fn, "_registered_commands", [])
+        cmds.append(rc)
+        setattr(fn, "_registered_commands", cmds)
         return fn
 
     return decorator
