@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { RedisFileCacheStore } from '@struktoai/mirage-node'
+import { RAMNamespaceStore, RedisFileCacheStore, RedisNamespaceStore } from '@struktoai/mirage-node'
 import { describe, expect, it } from 'vitest'
 import { interpolateEnv, loadWorkspaceConfig, configToWorkspaceArgs } from './config.ts'
 
@@ -144,6 +144,24 @@ describe('configToWorkspaceArgs', () => {
     })
     const args = await configToWorkspaceArgs(cfg)
     expect(args.options.cache).toBeInstanceOf(RedisFileCacheStore)
+  })
+
+  it('builds a redis namespace store from a namespace block (snake_case key_prefix)', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      namespace: { type: 'redis', url: 'redis://localhost:6379/4', key_prefix: 'ns:' },
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    expect(args.options.namespaceStore).toBeInstanceOf(RedisNamespaceStore)
+  })
+
+  it('builds a ram namespace store from a namespace block', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      namespace: { type: 'ram' },
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    expect(args.options.namespaceStore).toBeInstanceOf(RAMNamespaceStore)
   })
 
   it('parses per-mount command_safeguards (snake_case YAML) into the resource tuple', async () => {

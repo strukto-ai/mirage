@@ -238,6 +238,19 @@ export class Namespace {
     await this.store.set(path, metaToFields(meta))
   }
 
+  // Drop a metadata overlay whose backend file is gone (orphan GC). When a
+  // backend reports a path deleted, its attribute overlay is orphaned and
+  // would otherwise linger forever. Symlink entries are authoritative (they
+  // have no backend file), so they are left intact; only a target-less
+  // overlay node is removed.
+  async dropOverlay(path: string): Promise<boolean> {
+    const meta = this.nodeTable.get(path)
+    if (meta === undefined || meta.target !== undefined) return false
+    this.nodeTable.delete(path)
+    await this.store.delete([path])
+    return true
+  }
+
   async clearTimes(path: string): Promise<void> {
     const meta = this.nodeTable.get(path)
     if (meta === undefined || meta.target !== undefined) return

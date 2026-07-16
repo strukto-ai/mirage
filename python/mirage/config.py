@@ -27,6 +27,12 @@ from mirage.runtime.js.select import validate_js_runtime_name
 from mirage.runtime.python.select import (DEFAULT_PYTHON_RUNTIME,
                                           validate_python_runtime_name)
 from mirage.types import CommandSafeguard, ConsistencyPolicy, MountMode
+from mirage.workspace.mount.namespace import NamespaceStore, RAMNamespaceStore
+
+try:
+    from mirage.workspace.mount.namespace import RedisNamespaceStore
+except ImportError:
+    RedisNamespaceStore = None
 
 
 def _coerce_mount_mode(value):
@@ -139,6 +145,26 @@ IndexBlock = Annotated[
 ]
 
 
+class RamNamespaceBlock(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["ram"] = "ram"
+
+
+class RedisNamespaceBlock(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["redis"]
+    url: str = "redis://localhost:6379/0"
+    key_prefix: str = "mirage:namespace:"
+
+
+NamespaceBlock = Annotated[
+    RamNamespaceBlock | RedisNamespaceBlock,
+    Field(discriminator="type"),
+]
+
+
 class MountBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -220,6 +246,7 @@ class WorkspaceConfig(BaseModel):
     default_agent_id: str = "default"
     cache: CacheBlock | None = None
     index: IndexBlock | None = None
+    namespace: NamespaceBlock | None = None
 
     @field_validator("mode", mode="before")
     @classmethod
@@ -258,6 +285,8 @@ class WorkspaceConfig(BaseModel):
             kwargs["cache"] = _build_cache_config(self.cache)
         if self.index is not None:
             kwargs["index"] = _build_index_config(self.index)
+        if self.namespace is not None:
+            kwargs["namespace_store"] = _build_namespace_store(self.namespace)
         if self.runtime is not None:
             kwargs["python_runtime"] = self.runtime.python
             if self.runtime.js is not None:
@@ -302,6 +331,16 @@ def _build_index_config(block: RamIndexBlock | RedisIndexBlock) -> IndexConfig:
             key_prefix=block.key_prefix,
         )
     return IndexConfig(ttl=block.ttl)
+
+
+def _build_namespace_store(
+        block: RamNamespaceBlock | RedisNamespaceBlock) -> NamespaceStore:
+    if isinstance(block, RedisNamespaceBlock):
+        if RedisNamespaceStore is None:
+            raise ImportError("A redis namespace requires the 'redis' extra. "
+                              "Install with: pip install mirage-ai[redis]")
+        return RedisNamespaceStore(url=block.url, key_prefix=block.key_prefix)
+    return RAMNamespaceStore()
 
 
 def load_config(source: str | Path | dict,

@@ -303,6 +303,7 @@ export class Workspace {
       options.agentId ?? null,
     )
     this.dispatcher = new Dispatcher(this.namespace, this.cache, this.opsRegistry, consistency)
+    this.registry.setReconciler(this.dispatcher.reconciler)
     // The file cache is a hidden store (attached above), never a mount. Arg-less
     // commands and root listing resolve against a neutral root anchor: reuse the
     // user's `/` mount if they gave one, else add a plain empty RAM mount at `/`.
@@ -742,24 +743,30 @@ export class Workspace {
     const mount = this.registry.mountFor(path)
     const opOverride = mount?.commandSafeguards.get(opName) ?? null
     const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
-    const result = await runWithRevisions(
-      mount !== null && mount.revisions.size > 0 ? mount.revisions : null,
-      async () =>
-        runWithTimeout(
-          Promise.resolve(
-            this.opsRegistry.call(
-              opName,
-              resource.kind,
-              resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-              spec,
-              args,
-              fullKwargs,
+    let result
+    try {
+      result = await runWithRevisions(
+        mount !== null && mount.revisions.size > 0 ? mount.revisions : null,
+        async () =>
+          runWithTimeout(
+            Promise.resolve(
+              this.opsRegistry.call(
+                opName,
+                resource.kind,
+                resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+                spec,
+                args,
+                fullKwargs,
+              ),
             ),
+            opTimeout,
+            opName,
           ),
-          opTimeout,
-          opName,
-        ),
-    )
+      )
+    } catch (err) {
+      await this.dispatcher.reconciler.onOpMissing(opName, path, err)
+      throw err
+    }
     const guarded = await applyOpSafeguard(result, opOverride)
     if (opName === 'stat' && guarded instanceof FileStat) {
       return mergeOverlayStat(this.namespace.metaFor(path), guarded)

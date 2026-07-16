@@ -23,10 +23,13 @@ import {
   JS_RUNTIMES,
   PYTHON_RUNTIMES,
   RAMFileCacheStore,
+  RAMNamespaceStore,
   RedisFileCacheStore,
+  RedisNamespaceStore,
   validateRuntimeOptions,
   type FileCache,
   type IndexConfig,
+  type NamespaceStore,
   type RedisIndexConfig,
   type Resource,
 } from '@struktoai/mirage-node'
@@ -120,6 +123,7 @@ function normalizeConfigKeys(raw: Record<string, unknown>): Record<string, unkno
   const out = camelizeKeys(raw)
   if (isPlainObject(out.cache)) out.cache = camelizeKeys(out.cache)
   if (isPlainObject(out.index)) out.index = camelizeKeys(out.index)
+  if (isPlainObject(out.namespace)) out.namespace = camelizeKeys(out.namespace)
   if (isPlainObject(out.runtime)) {
     const runtime = camelizeKeys(out.runtime)
     for (const name of RUNTIME_BLOCK_NAMES) {
@@ -226,6 +230,16 @@ interface RedisIndexBlock {
   keyPrefix?: string
 }
 
+interface RamNamespaceBlock {
+  type?: 'ram'
+}
+
+interface RedisNamespaceBlock {
+  type: 'redis'
+  url?: string
+  keyPrefix?: string
+}
+
 interface RuntimeBlock {
   python?: string
   js?: string
@@ -245,6 +259,7 @@ export interface WorkspaceConfigRaw {
   defaultAgentId?: string
   cache?: RamCacheBlock | RedisCacheBlock | null
   index?: RamIndexBlock | RedisIndexBlock | null
+  namespace?: RamNamespaceBlock | RedisNamespaceBlock | null
 }
 
 function readProcessEnv(): Record<string, string> {
@@ -296,6 +311,7 @@ export interface WorkspaceArgs {
     agentId: string
     cache?: FileCache & Resource
     index?: IndexConfig
+    namespaceStore?: NamespaceStore
     pythonRuntime?: string
     jsRuntime?: string
     runtimeOptions?: Record<string, Record<string, unknown>>
@@ -337,6 +353,19 @@ function buildIndex(
   return cfg
 }
 
+function buildNamespaceStore(
+  block: RamNamespaceBlock | RedisNamespaceBlock | null | undefined,
+): NamespaceStore | undefined {
+  if (block === null || block === undefined) return undefined
+  if (block.type === 'redis') {
+    return new RedisNamespaceStore({
+      ...(block.url !== undefined ? { url: block.url } : {}),
+      ...(block.keyPrefix !== undefined ? { keyPrefix: block.keyPrefix } : {}),
+    })
+  }
+  return new RAMNamespaceStore()
+}
+
 export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<WorkspaceArgs> {
   const runtimeOptions: Record<string, Record<string, unknown>> = {}
   if (cfg.runtime !== undefined && cfg.runtime !== null) {
@@ -359,6 +388,7 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
   }
   const cache = buildCache(cfg.cache)
   const index = buildIndex(cfg.index)
+  const namespaceStore = buildNamespaceStore(cfg.namespace)
   return {
     resources,
     options: {
@@ -368,6 +398,7 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
       agentId: cfg.defaultAgentId ?? 'default',
       ...(cache !== undefined ? { cache } : {}),
       ...(index !== undefined ? { index } : {}),
+      ...(namespaceStore !== undefined ? { namespaceStore } : {}),
       ...(cfg.runtime?.python !== undefined
         ? { pythonRuntime: coercePythonRuntime(cfg.runtime.python) }
         : {}),

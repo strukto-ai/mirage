@@ -35,7 +35,7 @@ from mirage.resource.disk import DiskResource  # noqa: E402
 from mirage.resource.ram import RAMResource  # noqa: E402
 from mirage.resource.redis import RedisResource  # noqa: E402
 from mirage.resource.s3 import S3Config, S3Resource  # noqa: E402
-from mirage.types import PathSpec  # noqa: E402
+from mirage.types import ConsistencyPolicy, PathSpec  # noqa: E402
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 BUCKET = "mirage-integ-meta"
@@ -60,6 +60,24 @@ async def run_overlay_snapshot_roundtrip(ws: Workspace, fresh) -> None:
     print(meta_stat_line(st, ("mode", "uid", "gid", "mtime")))
     await restored.execute("rm /data/f.txt")
     shutil.rmtree(snap.parent)
+
+
+async def run_overlay_orphan_gc(config) -> None:
+    # A chmod on a slot-less backend (s3) creates an attribute overlay in
+    # the namespace. When the object is deleted out-of-band (another agent,
+    # the raw API), the overlay is orphaned. Under ALWAYS, a stat that the
+    # backend reports gone must GC that orphaned node.
+    ws = Workspace({"/data": S3Resource(config)},
+                   mode=MountMode.WRITE,
+                   consistency=ConsistencyPolicy.ALWAYS)
+    await ws.execute("echo alpha > /data/g.txt && chmod 601 /data/g.txt")
+    before = ws.namespace.meta_for("/data/g.txt") is not None
+    mount = ws.namespace.mount_for("/data/g.txt")
+    await mount.execute_op("unlink", "/data/g.txt")
+    await ws.execute("stat /data/g.txt")
+    after = ws.namespace.meta_for("/data/g.txt") is not None
+    print("=== overlay_orphan_gc ===")
+    print(f"before={before} after={after}")
 
 
 async def run_snapshot_roundtrip() -> None:
@@ -117,6 +135,7 @@ async def main() -> None:
         s3_ws = Workspace({"/data": S3Resource(config)}, mode=MountMode.WRITE)
         await run_meta_overlay_cases(s3_ws)
         await run_overlay_snapshot_roundtrip(s3_ws, S3Resource(config))
+        await run_overlay_orphan_gc(config)
     finally:
         server.stop()
 

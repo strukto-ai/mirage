@@ -24,6 +24,7 @@ from mirage.utils.key_prefix import mount_key
 from mirage.workspace.mount import MountEntry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
+from mirage.workspace.reconcile import Reconciler
 from mirage.workspace.session import assert_mount_allowed
 
 _DISPATCH_READ_OPS = frozenset({"read", "read_bytes"})
@@ -50,7 +51,11 @@ class Dispatcher:
                  consistency: ConsistencyPolicy) -> None:
         self._namespace = namespace
         self._cache = cache
-        self._consistency = consistency
+        self._reconciler = Reconciler(cache, namespace, consistency)
+
+    @property
+    def reconciler(self) -> Reconciler:
+        return self._reconciler
 
     async def dispatch(self, op: str, path: PathSpec,
                        **kwargs: Any) -> tuple[Any, IOResult]:
@@ -64,23 +69,9 @@ class Dispatcher:
 
         if caches_reads and op in _DISPATCH_READ_OPS:
             cached = await self._cache.get(path.virtual)
-            if cached is not None:
-                if self._consistency == ConsistencyPolicy.ALWAYS:
-                    try:
-                        remote_stat = await mount.execute_op(
-                            "stat", path.virtual)
-                    except FileNotFoundError:
-                        await self._cache.remove(path.virtual)
-                        raise
-                    if (remote_stat is not None
-                            and remote_stat.fingerprint is not None):
-                        fresh = await self._cache.is_fresh(
-                            path.virtual, remote_stat.fingerprint)
-                        if not fresh:
-                            await self._cache.remove(path.virtual)
-                            cached = None
-                if cached is not None:
-                    return cached, IOResult(reads={path.virtual: cached})
+            if cached is not None and await self._reconciler.may_serve_cached(
+                    mount, path.virtual):
+                return cached, IOResult(reads={path.virtual: cached})
 
         if op == "rename" and isinstance(kwargs.get("dst"), PathSpec):
             # Ops.rename addresses both endpoints against the source's
@@ -92,7 +83,11 @@ class Dispatcher:
                 directory=dst.virtual.rsplit("/", 1)[0] or "/",
                 resource_path=mount_key(dst.virtual, mount.prefix.rstrip("/")),
             )
-        result = await mount.execute_op(op, path.virtual, **kwargs)
+        try:
+            result = await mount.execute_op(op, path.virtual, **kwargs)
+        except FileNotFoundError:
+            await self._reconciler.on_op_missing(op, path.virtual)
+            raise
         if op == "stat" and isinstance(result, FileStat):
             result = merge_overlay_stat(self._namespace.meta_for(path.virtual),
                                         result)

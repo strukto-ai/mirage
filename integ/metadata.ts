@@ -19,6 +19,7 @@ import { join } from 'node:path'
 import type { FileStat } from '@struktoai/mirage-node'
 import {
   DiskResource,
+  ConsistencyPolicy,
   MountMode,
   RAMResource,
   RedisResource,
@@ -66,6 +67,30 @@ async function runOverlaySnapshotRoundtrip(ws: Workspace, fresh: S3Resource): Pr
   await restored.execute('rm /data/f.txt')
   await restored.close()
   rmSync(dir, { recursive: true, force: true })
+}
+
+async function runOverlayOrphanGc(keyPrefix: string): Promise<void> {
+  // A chmod on a slot-less backend (s3) creates an attribute overlay. When
+  // the object is deleted out-of-band (raw op, another agent), the overlay
+  // is orphaned. Under ALWAYS, a single-mount shell stat the backend reports
+  // gone must GC that orphaned node.
+  const ws = new Workspace(
+    { '/data': s3ResourceFromEnv(keyPrefix) },
+    { mode: MountMode.WRITE, consistency: ConsistencyPolicy.ALWAYS },
+  )
+  try {
+    await ws.execute('echo alpha > /data/g.txt && chmod 601 /data/g.txt')
+    const before = ws.namespace.metaFor('/data/g.txt') !== null
+    // Out-of-band delete: dispatch the raw unlink op (not the rm command, which
+    // would drop the namespace node itself), leaving the overlay orphaned.
+    await ws.dispatch('unlink', '/data/g.txt')
+    await ws.execute('stat /data/g.txt')
+    const after = ws.namespace.metaFor('/data/g.txt') !== null
+    console.log('=== overlay_orphan_gc ===')
+    console.log(`before=${before ? 'True' : 'False'} after=${after ? 'True' : 'False'}`)
+  } finally {
+    await ws.close()
+  }
 }
 
 async function runSnapshotRoundtrip(): Promise<void> {
@@ -124,6 +149,7 @@ async function main(): Promise<void> {
   try {
     await runMetaOverlayCases(s3Ws)
     await runOverlaySnapshotRoundtrip(s3Ws, s3ResourceFromEnv(keyPrefix))
+    await runOverlayOrphanGc(keyPrefix)
   } finally {
     await s3Ws.close()
   }
