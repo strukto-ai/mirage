@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { BridgeDispatchFn } from '../python/mirage_bridge.ts'
 import type { JsRunArgs, JsRunResult } from './types.ts'
 
 export const QUICKJS_RUNTIME = 'quickjs'
@@ -22,11 +23,25 @@ export const JS_RUNTIMES = [QUICKJS_RUNTIME] as const
 export const DEFAULT_JS_RUNTIME = JS_RUNTIMES[0]
 
 /**
+ * Construction options a JavaScript runtime accepts.
+ *
+ * `workspaceBridge` and `listMounts` wire the engine's `std.open` /
+ * `os.readdir` to the workspace dispatch, so guest file I/O reaches the
+ * mounts (the same bridge the sandboxed Python runtimes take). Omit them
+ * for an engine with no filesystem.
+ */
+export interface JsRuntimeOptions {
+  workspaceBridge?: BridgeDispatchFn
+  listMounts?: () => string[]
+}
+
+/**
  * A JavaScript engine the workspace can execute `node`/`js` code on.
  *
  * Implementations own their engine lifecycle (lazy boot, reuse across
- * runs, teardown in `close`). Like the sandboxed Python runtimes, the
- * engine sees only what the run passes it, not workspace mounts.
+ * runs, teardown in `close`). With a workspace bridge the engine sees
+ * the workspace mounts through `std.open`/`os.readdir`; without one it
+ * sees an empty filesystem.
  */
 export interface JsRuntime {
   readonly name: string

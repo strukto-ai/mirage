@@ -12,16 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { QUICKJS_RUNTIME, type JsRuntime } from './interface.ts'
+import {
+  createMirageBridge,
+  type BridgeDispatchFn,
+  type MirageBridge,
+} from '../python/mirage_bridge.ts'
+import { QUICKJS_RUNTIME, type JsRuntime, type JsRuntimeOptions } from './interface.ts'
+import { installMirageFs, MIRAGE_FS_BOOTSTRAP } from './mirage_fs.ts'
 import { QuickJsUnavailableError, type JsRunArgs, type JsRunResult } from './types.ts'
 import type {
-  QuickJSContext,
+  QuickJSAsyncContext,
+  QuickJSAsyncRuntime,
+  QuickJSAsyncWASMModule,
   QuickJSHandle,
-  QuickJSRuntime,
-  QuickJSWASMModule,
 } from 'quickjs-emscripten'
 
-type GetQuickJS = () => Promise<QuickJSWASMModule>
+type NewAsyncModule = () => Promise<QuickJSAsyncWASMModule>
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -32,7 +38,8 @@ const STACK_SIZE = 1024 * 1024
 // Assembles the std/console/scriptArgs surface from injected primitives.
 // Kept identical to the quickjs-ng `--std` globals the Python runtime
 // exposes, so a script runs the same on both: `std.in.readAsString()`,
-// `std.exit()`, `console.log`, `scriptArgs`.
+// `std.exit()`, `console.log`, `scriptArgs`. `std.open`/`os.readdir` are
+// added afterward by MIRAGE_FS_BOOTSTRAP when a workspace bridge is wired.
 const BOOTSTRAP = `
 const __fmt = (v) =>
   typeof v === 'string' ? v
@@ -56,15 +63,25 @@ globalThis.std = {
 
 // quickjs-emscripten bundles its own wasm, so the `home` option the
 // config accepts (for parity with the Python quickjs runtime, which
-// locates qjs-wasi.wasm) has nothing to locate here and is ignored.
+// locates qjs-wasi.wasm) has nothing to locate here and is ignored. The
+// asyncify variant is used so `std.open`/`os.readdir` can suspend the
+// guest while a workspace-mount read or write awaits the dispatch,
+// matching the Python runtime's live file I/O.
 export class QuickJsRuntime implements JsRuntime {
   readonly name = QUICKJS_RUNTIME
-  private getQuickJS: GetQuickJS | null = null
+  private newAsyncModule: NewAsyncModule | null = null
+  private readonly workspaceBridge: BridgeDispatchFn | null
+  private readonly listMounts: () => string[]
+
+  constructor(options: JsRuntimeOptions = {}) {
+    this.workspaceBridge = options.workspaceBridge ?? null
+    this.listMounts = options.listMounts ?? ((): string[] => [])
+  }
 
   async run(args: JsRunArgs): Promise<JsRunResult> {
-    const getQuickJS = await this.loadModule()
-    const QuickJS = await getQuickJS()
-    const runtime = QuickJS.newRuntime()
+    const newAsyncModule = await this.loadModule()
+    const QuickJS = await newAsyncModule()
+    const runtime: QuickJSAsyncRuntime = QuickJS.newRuntime()
     runtime.setMemoryLimit(MEMORY_LIMIT)
     runtime.setMaxStackSize(STACK_SIZE)
     const ctx = runtime.newContext()
@@ -73,14 +90,20 @@ export class QuickJsRuntime implements JsRuntime {
     const exit = { code: 0, called: false }
     try {
       this.installGlobals(ctx, args, out, err, exit)
-      const boot = ctx.evalCode(BOOTSTRAP, 'mirage:bootstrap')
+      const bridge: MirageBridge | null =
+        this.workspaceBridge !== null
+          ? createMirageBridge(this.workspaceBridge, this.listMounts)
+          : null
+      installMirageFs(ctx, bridge)
+
+      const boot = ctx.evalCode(BOOTSTRAP + MIRAGE_FS_BOOTSTRAP, 'mirage:bootstrap')
       if (boot.error) {
         boot.error.dispose()
         throw new Error('quickjs bootstrap failed')
       }
       boot.value.dispose()
 
-      const result = ctx.evalCode(args.code, args.module ? 'input.mjs' : 'input.js', {
+      const result = await ctx.evalCodeAsync(args.code, args.module ? 'input.mjs' : 'input.js', {
         type: args.module ? 'module' : 'global',
       })
       let exitCode = 0
@@ -114,7 +137,7 @@ export class QuickJsRuntime implements JsRuntime {
   }
 
   private installGlobals(
-    ctx: QuickJSContext,
+    ctx: QuickJSAsyncContext,
     args: JsRunArgs,
     out: string[],
     err: string[],
@@ -155,7 +178,11 @@ export class QuickJsRuntime implements JsRuntime {
     setGlobal('__mirage_env', env)
   }
 
-  private drainJobs(runtime: QuickJSRuntime, ctx: QuickJSContext, err: string[]): number | null {
+  private drainJobs(
+    runtime: QuickJSAsyncRuntime,
+    ctx: QuickJSAsyncContext,
+    err: string[],
+  ): number | null {
     for (;;) {
       const jobs = runtime.executePendingJobs()
       if (jobs.error) {
@@ -167,7 +194,7 @@ export class QuickJsRuntime implements JsRuntime {
     }
   }
 
-  private formatError(ctx: QuickJSContext, handle: QuickJSHandle): string {
+  private formatError(ctx: QuickJSAsyncContext, handle: QuickJSHandle): string {
     const readStr = (key: string): string | undefined => {
       const p = ctx.getProp(handle, key)
       const value: unknown = ctx.dump(p)
@@ -179,17 +206,19 @@ export class QuickJsRuntime implements JsRuntime {
     return `${name}: ${message}`
   }
 
-  private async loadModule(): Promise<GetQuickJS> {
-    if (this.getQuickJS !== null) return this.getQuickJS
+  private async loadModule(): Promise<NewAsyncModule> {
+    if (this.newAsyncModule !== null) return this.newAsyncModule
     try {
-      const mod = (await import('quickjs-emscripten')) as unknown as { getQuickJS: GetQuickJS }
-      this.getQuickJS = mod.getQuickJS
+      const mod = (await import('quickjs-emscripten')) as unknown as {
+        newQuickJSAsyncWASMModule: NewAsyncModule
+      }
+      this.newAsyncModule = mod.newQuickJSAsyncWASMModule
     } catch (err) {
       throw new QuickJsUnavailableError(
         "the quickjs runtime requires the 'quickjs-emscripten' package — install it to run `node`/`js`",
         { cause: err },
       )
     }
-    return this.getQuickJS
+    return this.newAsyncModule
   }
 }

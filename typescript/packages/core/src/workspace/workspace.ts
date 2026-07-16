@@ -276,12 +276,19 @@ export class Workspace {
       {
         ...userPython,
         workspaceBridge: this.buildWorkspaceBridge(),
-        listMounts: () => this.pythonVisibleMounts(),
+        listMounts: () => this.sandboxVisibleMounts(),
       },
       options.runtimeOptions,
     )
     this.closers.push(() => this.pythonRuntime.close())
-    this.jsRuntime = selectJsRuntime(options.jsRuntime, options.runtimeOptions)
+    this.jsRuntime = selectJsRuntime(
+      options.jsRuntime,
+      {
+        workspaceBridge: this.buildWorkspaceBridge(),
+        listMounts: () => this.sandboxVisibleMounts(),
+      },
+      options.runtimeOptions,
+    )
     this.closers.push(() => this.jsRuntime.close())
     this.observer = new Observer(options.observe)
     this.registry.mount(HISTORY_PREFIX, new HistoryViewResource(this.observer), MountMode.READ)
@@ -350,11 +357,12 @@ export class Workspace {
   }
 
   /**
-   * Mount prefixes the Python runtime may see. Excludes the history view
-   * and a synthetic `/` anchor: Pyodide's own `/` filesystem holds the
-   * Python stdlib and must not be hijacked by an internal anchor.
+   * Mount prefixes the sandboxed runtimes (python3 and node/js) may see.
+   * Excludes the history view and a synthetic `/` anchor: Pyodide's own
+   * `/` filesystem holds the Python stdlib and must not be hijacked by an
+   * internal anchor.
    */
-  private pythonVisibleMounts(): string[] {
+  private sandboxVisibleMounts(): string[] {
     const prefixes: string[] = []
     for (const m of this.registry.allMounts()) {
       if (m.prefix === HISTORY_PREFIX || m.prefix === HISTORY_PREFIX + '/') continue
@@ -381,6 +389,15 @@ export class Workspace {
           if (bytes === undefined) throw new Error('WRITE op requires bytes')
           const buf =
             bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes as ArrayLike<number>)
+          // Enforce the mount's mode, narrowed by the current session,
+          // the same way the command dispatch does. The bridge is the
+          // sole write path for the sandboxed runtimes, so a read-only
+          // mount (or a session narrowed to read) denies their writes.
+          const [, , mode] = await this.resolve(path)
+          const capPrefix = this.registry.mountFor(path)?.prefix ?? '/'
+          if (effectiveMountMode(capPrefix, mode) === MountMode.READ) {
+            throw new Error(`mount at '${path}' is read-only`)
+          }
           await this.fs.writeFile(path, buf)
           return undefined
         }
