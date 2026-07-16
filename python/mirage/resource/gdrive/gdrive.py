@@ -23,6 +23,7 @@ from mirage.types import ResourceName
 
 class GoogleDriveResource(BaseResource):
 
+    accessor: GDriveAccessor
     name: str = ResourceName.GDRIVE
     caches_reads: bool = True
     PROMPT: str = PROMPT

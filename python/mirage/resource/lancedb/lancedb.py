@@ -24,6 +24,7 @@ _REMOTE_SCHEMES = ("s3://", "gs://", "az://", "hf://", "db://")
 
 class LanceDBResource(BaseResource):
 
+    accessor: LanceDBAccessor
     name: str = ResourceName.LANCEDB
     PROMPT: str = PROMPT
 

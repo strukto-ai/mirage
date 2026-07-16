@@ -23,6 +23,7 @@ from mirage.types import ResourceName
 
 class GDocsResource(BaseResource):
 
+    accessor: GDocsAccessor
     name: str = ResourceName.GDOCS
     caches_reads: bool = True
     PROMPT: str = PROMPT

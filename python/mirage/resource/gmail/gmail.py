@@ -23,6 +23,7 @@ from mirage.types import ResourceName
 
 class GmailResource(BaseResource):
 
+    accessor: GmailAccessor
     name: str = ResourceName.GMAIL
     caches_reads: bool = True
     PROMPT: str = PROMPT

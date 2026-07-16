@@ -22,6 +22,7 @@ from mirage.types import ResourceName
 
 class LangfuseResource(BaseResource):
 
+    accessor: LangfuseAccessor
     name: str = ResourceName.LANGFUSE
     caches_reads: bool = True
     PROMPT: str = PROMPT

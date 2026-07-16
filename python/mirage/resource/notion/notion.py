@@ -31,6 +31,7 @@ _NOTION_OPS = {
 
 class NotionResource(BaseResource):
 
+    accessor: NotionAccessor
     name: str = ResourceName.NOTION
     caches_reads: bool = True
     _ops: dict = _NOTION_OPS

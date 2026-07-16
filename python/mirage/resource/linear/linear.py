@@ -31,6 +31,7 @@ _LINEAR_OPS = {
 
 class LinearResource(BaseResource):
 
+    accessor: LinearAccessor
     name: str = ResourceName.LINEAR
     caches_reads: bool = True
     _ops: dict = _LINEAR_OPS

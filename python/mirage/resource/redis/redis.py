@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import dataclasses
+from typing import cast
 
 try:
     import redis as sync_redis
@@ -72,6 +73,7 @@ _REDIS_OPS = {
 
 class RedisResource(BaseResource):
 
+    accessor: RedisAccessor
     name: str = ResourceName.REDIS
     index_ttl: float = 0
     _ops: dict = _REDIS_OPS
@@ -110,11 +112,13 @@ class RedisResource(BaseResource):
             for key in client.scan_iter(file_pattern):
                 if isinstance(key, bytes):
                     key = key.decode()
-                data = client.get(key)
+                # redis-py's sync client is typed with an async-or-sync
+                # union (ResponseT); this path is sync, so narrow it.
+                data = cast("bytes | None", client.get(key))
                 if data is not None:
                     files[key[strip:]] = data
             dir_key = f"{prefix}dir"
-            members = client.smembers(dir_key)
+            members = cast("set[bytes]", client.smembers(dir_key))
             dirs = sorted(m.decode() if isinstance(m, bytes) else m
                           for m in members)
             attrs: dict[str, dict[str, str]] = {}
@@ -123,7 +127,7 @@ class RedisResource(BaseResource):
             for key in client.scan_iter(attrs_pattern):
                 if isinstance(key, bytes):
                     key = key.decode()
-                raw = client.hgetall(key)
+                raw = cast("dict[bytes, bytes]", client.hgetall(key))
                 attrs[key[astrip:]] = {
                     (k.decode() if isinstance(k, bytes) else k):
                     (v.decode() if isinstance(v, bytes) else v)
@@ -135,7 +139,7 @@ class RedisResource(BaseResource):
             for key in client.scan_iter(mod_pattern):
                 if isinstance(key, bytes):
                     key = key.decode()
-                val = client.get(key)
+                val = cast("bytes | None", client.get(key))
                 if val is not None:
                     modified[key[mstrip:]] = (val.decode() if isinstance(
                         val, bytes) else val)

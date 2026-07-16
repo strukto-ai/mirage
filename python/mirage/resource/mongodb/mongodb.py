@@ -22,6 +22,7 @@ from mirage.types import ResourceName
 
 class MongoDBResource(BaseResource):
 
+    accessor: MongoDBAccessor
     name: str = ResourceName.MONGODB
     caches_reads: bool = False
     PROMPT: str = PROMPT

@@ -22,6 +22,7 @@ from mirage.types import ResourceName
 
 class SlackResource(BaseResource):
 
+    accessor: SlackAccessor
     name: str = ResourceName.SLACK
     caches_reads: bool = True
     PROMPT: str = PROMPT

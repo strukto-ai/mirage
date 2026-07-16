@@ -22,6 +22,7 @@ from mirage.types import ResourceName
 
 class PostgresResource(BaseResource):
 
+    accessor: PostgresAccessor
     name: str = ResourceName.POSTGRES
     caches_reads: bool = False
     PROMPT: str = PROMPT
