@@ -122,7 +122,7 @@ async def sed(
         operands,
         script,
         read_bytes=with_index(ops.read_bytes, index),
-        write_bytes=ops.require("write"),
+        write_bytes=ops.write,
         accessor=accessor,
         stdin=stdin,
         in_place=i,

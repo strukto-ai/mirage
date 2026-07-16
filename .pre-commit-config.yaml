@@ -5,7 +5,7 @@ ci:
   autoupdate_schedule: monthly
   # mypy needs the full dependency tree (unavailable on pre-commit.ci);
   # the Test (Python) workflow runs it as the enforcing gate.
-  skip: [mypy]
+  skip: [py-mypy]
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -128,12 +128,6 @@ repos:
 
   - repo: local
     hooks:
-      - id: mypy
-        name: Type check (mypy)
-        entry: bash -c 'cd python && ./.venv/bin/mypy mirage'
-        language: system
-        pass_filenames: false
-        files: ^python/mirage/.*\.py$
       - id: ts-prettier
         name: Prettier (typescript)
         entry: typescript/scripts/precommit-run.sh prettier --write
@@ -153,7 +147,7 @@ repos:
         files: ^typescript/.*\.(ts|tsx|js|mjs|cjs|json)$
         pass_filenames: false
       - id: py-mypy
-        name: Mypy (ratcheted)
+        name: Type check (mypy)
         entry: bash -c 'cd python && uv run mypy'
         language: system
         files: ^python/(mirage/.*\.py|pyproject\.toml)$
