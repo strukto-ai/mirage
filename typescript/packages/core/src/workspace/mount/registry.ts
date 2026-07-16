@@ -20,8 +20,15 @@ import { cachesReads, type Resource } from '../../resource/base.ts'
 import { DevResource } from '../../resource/dev/dev.ts'
 import { ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
 import { MountEntry } from './mount.ts'
-import type { Reconciler } from '../reconcile.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
+
+// The one thing the registry needs from a reconciler. Depending on this local
+// interface (not the concrete Reconciler) keeps the dependency pointing down:
+// `reconcile` imports the mount layer, not the other way round. The Reconciler
+// satisfies it structurally.
+interface ReadReconciler {
+  reconcileRead(mount: MountEntry, path: string): Promise<void>
+}
 
 export const DEV_PREFIX = '/dev/'
 
@@ -55,9 +62,9 @@ export class MountRegistry {
   private consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
   private readonly defaultMode: MountMode
   private cacheStore: FileCache | null = null
-  private reconciler: Reconciler | null = null
+  private reconciler: ReadReconciler | null = null
 
-  setReconciler(reconciler: Reconciler): void {
+  setReconciler(reconciler: ReadReconciler): void {
     this.reconciler = reconciler
   }
 

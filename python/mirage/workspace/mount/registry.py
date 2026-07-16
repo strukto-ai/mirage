@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import TYPE_CHECKING
+from typing import Protocol
 
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.manager import CacheManager
@@ -25,10 +25,19 @@ from mirage.runtime.python.base import PythonRuntime
 from mirage.types import ConsistencyPolicy, MountMode, PathSpec
 from mirage.workspace.mount.mount import MountEntry
 
-if TYPE_CHECKING:
-    from mirage.workspace.reconcile import Reconciler
-
 DEV_PREFIX = "/dev/"
+
+
+class ReadReconciler(Protocol):
+    """The one thing the registry needs from a reconciler.
+
+    Depending on this local interface (not the concrete ``Reconciler``)
+    keeps the dependency pointing down: ``reconcile`` imports the mount
+    layer, not the other way round. The Reconciler satisfies it structurally.
+    """
+
+    async def reconcile_read(self, mount: MountEntry, path: str) -> None:
+        ...
 
 
 class MountCommandUnsupported(Exception):
@@ -64,13 +73,13 @@ class MountRegistry:
         self.js_runtime: JsRuntime | None = None
         self._consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
         self._file_cache: FileCacheMixin | None = None
-        self._reconciler: "Reconciler | None" = None
+        self._reconciler: ReadReconciler | None = None
         self.mount(DEV_PREFIX, DevResource(), MountMode.WRITE)
 
     def set_consistency(self, consistency: ConsistencyPolicy) -> None:
         self._consistency = consistency
 
-    def set_reconciler(self, reconciler: "Reconciler") -> None:
+    def set_reconciler(self, reconciler: ReadReconciler) -> None:
         self._reconciler = reconciler
 
     def attach_file_cache(self, cache: FileCacheMixin | None) -> None:
