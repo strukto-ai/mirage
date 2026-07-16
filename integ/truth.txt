@@ -1676,6 +1676,20 @@ b   2
 c   3
 === unexpand_all ===
     hi
+=== fold_empty_file ===
+foldemptyf=0
+=== sort_empty_file ===
+sortemptyf=0
+=== rev_empty_file ===
+revemptyf=0
+=== fold_blank_in ===
+foldblankin=1
+=== sort_blank_in ===
+sortblankin=1
+=== rev_blank_in ===
+revblankin=1
+=== expand_i_spacetab ===
+expandisp=10
 === tac_nested ===
 content
 nested

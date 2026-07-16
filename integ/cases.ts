@@ -520,6 +520,17 @@ export const CASES: ReadonlyArray<readonly [string, string]> = [
   ["expand_t4", "expand -t 4 /data/tabbed.txt"],
   ["unexpand_all", "echo '    hi' | unexpand -a"],
 
+  // Empty / blank-line edge cases (GNU parity). Empty input emits
+  // nothing; a lone blank line survives as "\n". Byte counts are
+  // labelled so the truth file asserts them as fixed substrings.
+  ["fold_empty_file", "echo foldemptyf=$(fold /data/empty.txt | wc -c)"],
+  ["sort_empty_file", "echo sortemptyf=$(sort /data/empty.txt | wc -c)"],
+  ["rev_empty_file", "echo revemptyf=$(rev /data/empty.txt | wc -c)"],
+  ["fold_blank_in", "echo foldblankin=$(echo | fold | wc -c)"],
+  ["sort_blank_in", "echo sortblankin=$(echo | sort | wc -c)"],
+  ["rev_blank_in", "echo revblankin=$(echo | rev | wc -c)"],
+  ["expand_i_spacetab", "echo expandisp=$(printf ' \\tX\\n' | expand -i | wc -c)"],
+
   ["tac_nested", "tac /data/sub/nested.txt"],
   ["rev_b", "rev /data/b.txt"],
 
