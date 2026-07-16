@@ -3,9 +3,6 @@ ci:
   autofix_prs: true
   autoupdate_commit_msg: '[pre-commit.ci] pre-commit suggestions'
   autoupdate_schedule: monthly
-  # mypy needs the full dependency tree (unavailable on pre-commit.ci);
-  # the Test (Python) workflow runs it as the enforcing gate.
-  skip: [py-mypy]
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
