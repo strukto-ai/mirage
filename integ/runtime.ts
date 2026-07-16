@@ -119,6 +119,17 @@ async function seedMongo(): Promise<void> {
   }
 }
 
+async function putS3(key: string, body: string): Promise<void> {
+  const client = new S3Client({
+    region: "us-east-1",
+    endpoint: S3_ENDPOINT,
+    forcePathStyle: true,
+    credentials: { accessKeyId: S3_KEY, secretAccessKey: S3_SECRET },
+  });
+  await client.send(new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: body }));
+  client.destroy();
+}
+
 async function seedS3(): Promise<void> {
   const client = new S3Client({
     region: "us-east-1",
@@ -131,10 +142,10 @@ async function seedS3(): Promise<void> {
   } catch {
     // bucket already exists from a prior run
   }
-  await client.send(
-    new PutObjectCommand({ Bucket: BUCKET, Key: "greeting.txt", Body: "hello from s3\n" }),
-  );
   client.destroy();
+  await putS3("greeting.txt", "hello from s3\n");
+  await putS3("cache_inval.txt", "seeded-cold\n");
+  await putS3("warm.txt", "cold-bytes\n");
 }
 
 function buildWorkspace(runId: string): Workspace {
@@ -181,6 +192,27 @@ async function main(): Promise<void> {
   await ws.execute("echo redis says hi > /redis/notes.txt");
   for (const [name, cmd] of CASES) await run(ws, name, cmd);
   for (const [name, cmd] of ERROR_CASES) await runError(ws, name, cmd);
+
+  // Sandbox I/O shares the shell file cache (s3 caches reads).
+  // Invalidate: prime the cache with cat (applyIo populates it after
+  // the command), then a sandbox write must drop the entry so the
+  // follow-up cat re-fetches the new bytes.
+  await run(ws, "s3_inval_prime", "cat /s3/cache_inval.txt");
+  await run(
+    ws,
+    "py3_s3_cache_invalidate",
+    "python3 -c \"from pathlib import Path; Path('/s3/cache_inval.txt').write_text('updated-by-sandbox')\" && cat /s3/cache_inval.txt",
+  );
+  // Warm read: prime, mutate the backend out of band, and the sandbox
+  // read (LAZY, never revalidated) must keep serving the cached bytes
+  // instead of hitting the backend.
+  await run(ws, "s3_warm_prime", "cat /s3/warm.txt");
+  await putS3("warm.txt", "hot-bytes\n");
+  await run(
+    ws,
+    "py3_s3_warm_read",
+    "python3 -c \"from pathlib import Path; print(Path('/s3/warm.txt').read_text().strip())\"",
+  );
 
   const slowRam = new RAMResource();
   slowRam.store.files.set("/slow.py", ENC.encode(SLOW_SCRIPT));

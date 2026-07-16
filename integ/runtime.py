@@ -123,6 +123,17 @@ async def _seed_mongo() -> None:
         await client.close()
 
 
+def _put_s3(endpoint: str, key: str, body: bytes) -> None:
+    client = boto3.client(
+        "s3",
+        region_name="us-east-1",
+        endpoint_url=endpoint,
+        aws_access_key_id="testing",
+        aws_secret_access_key="testing",
+    )
+    client.put_object(Bucket=BUCKET, Key=key, Body=body)
+
+
 def _seed_s3(endpoint: str) -> None:
     client = boto3.client(
         "s3",
@@ -135,6 +146,10 @@ def _seed_s3(endpoint: str) -> None:
     client.put_object(Bucket=BUCKET,
                       Key="greeting.txt",
                       Body=b"hello from s3\n")
+    client.put_object(Bucket=BUCKET,
+                      Key="cache_inval.txt",
+                      Body=b"seeded-cold\n")
+    client.put_object(Bucket=BUCKET, Key="warm.txt", Body=b"cold-bytes\n")
 
 
 def _build_workspace(endpoint: str, run_id: str) -> Workspace:
@@ -193,6 +208,26 @@ async def main() -> None:
             await _run(ws, name, cmd)
         for name, cmd in ERROR_CASES:
             await _run_error(ws, name, cmd)
+
+        # Sandbox I/O shares the shell file cache (s3 caches reads).
+        # Invalidate: prime the cache with cat (applyIo populates it
+        # after the command), then a sandbox write must drop the entry
+        # so the follow-up cat re-fetches the new bytes.
+        await _run(ws, "s3_inval_prime", "cat /s3/cache_inval.txt")
+        await _run(
+            ws, "py3_s3_cache_invalidate",
+            "python3 -c \"from pathlib import Path; "
+            "Path('/s3/cache_inval.txt').write_text('updated-by-sandbox')\" "
+            "&& cat /s3/cache_inval.txt")
+        # Warm read: prime, mutate the backend out of band, and the
+        # sandbox read (LAZY, never revalidated) must keep serving the
+        # cached bytes instead of hitting the backend.
+        await _run(ws, "s3_warm_prime", "cat /s3/warm.txt")
+        _put_s3(endpoint, "warm.txt", b"hot-bytes\n")
+        await _run(
+            ws, "py3_s3_warm_read", "python3 -c \"from pathlib import Path; "
+            "print(Path('/s3/warm.txt').read_text().strip())\"")
+
         for name, cmd in PY_ONLY_CASES:
             await _run(ws, name, cmd)
 

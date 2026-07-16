@@ -26,6 +26,14 @@ hello-runtime
 exit_code=1
 === py3_host_fs_invisible ===
 exit_code=1
+=== s3_inval_prime ===
+seeded-cold
+=== py3_s3_cache_invalidate ===
+updated-by-sandbox
+=== s3_warm_prime ===
+cold-bytes
+=== py3_s3_warm_read ===
+cold-bytes
 === py3_builtin_open ===
 hello from ram
 === py3_builtin_open_write ===
