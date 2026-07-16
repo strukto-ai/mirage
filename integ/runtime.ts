@@ -18,6 +18,7 @@ import {
   CommandSafeguard,
   MongoDBResource,
   MountMode,
+  PathSpec,
   RAMResource,
   RedisResource,
   S3Resource,
@@ -213,6 +214,43 @@ async function main(): Promise<void> {
     "py3_s3_warm_read",
     "python3 -c \"from pathlib import Path; print(Path('/s3/warm.txt').read_text().strip())\"",
   );
+
+  // Op safeguards bind to the executing (post-symlink-follow) mount: a
+  // sandbox read through a link on an unsafeguarded mount still gets
+  // the target mount's byte cap.
+  const wsLink = new Workspace(
+    {
+      "/data": [
+        new RAMResource(),
+        MountMode.EXEC,
+        { read: new CommandSafeguard({ maxBytes: 8 }) },
+      ],
+      "/r": new RAMResource(),
+    },
+    { mode: MountMode.EXEC, pythonRuntime: "monty" },
+  );
+  await wsLink.execute("echo 0123456789abcdef > /data/big.txt");
+  await wsLink.execute("ln -s /data/big.txt /r/link");
+  await run(
+    wsLink,
+    "sbx_link_guard",
+    "python3 -c \"from pathlib import Path; print(Path('/r/link').read_text())\"",
+  );
+  await wsLink.close();
+
+  // Cross-mount rename through dispatch: both languages address the dst
+  // against the source mount, so the file lands on the source backend
+  // under the dst's virtual path (EXDEV follow-up).
+  const wsMv = new Workspace(
+    { "/a": new RAMResource(), "/b": new RAMResource() },
+    { mode: MountMode.EXEC, pythonRuntime: "monty" },
+  );
+  await wsMv.execute("echo moved-bytes > /a/x.txt");
+  await wsMv.dispatch("rename", "/a/x.txt", [PathSpec.fromStrPath("/b/y.txt")]);
+  await run(wsMv, "xmount_rename", "cat /a/b/y.txt");
+  await runError(wsMv, "xmount_rename_src", "cat /a/x.txt");
+  await runError(wsMv, "xmount_rename_dst_mount", "cat /b/y.txt");
+  await wsMv.close();
 
   const slowRam = new RAMResource();
   slowRam.store.files.set("/slow.py", ENC.encode(SLOW_SCRIPT));

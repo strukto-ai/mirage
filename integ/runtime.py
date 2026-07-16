@@ -33,7 +33,7 @@ from mirage.resource.mongodb import MongoDBResource  # noqa: E402
 from mirage.resource.ram import RAMResource  # noqa: E402
 from mirage.resource.redis import RedisResource  # noqa: E402
 from mirage.resource.s3 import S3Config, S3Resource  # noqa: E402
-from mirage.types import CommandSafeguard  # noqa: E402
+from mirage.types import CommandSafeguard, PathSpec  # noqa: E402
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb://localhost:27017")
@@ -223,6 +223,43 @@ async def main() -> None:
         await _run(
             ws, "py3_s3_warm_read", "python3 -c \"from pathlib import Path; "
             "print(Path('/s3/warm.txt').read_text().strip())\"")
+
+        # Op safeguards bind to the executing (post-symlink-follow)
+        # mount: a sandbox read through a link on an unsafeguarded
+        # mount still gets the target mount's byte cap.
+        ws_link = Workspace(
+            {
+                "/data": (RAMResource(), MountMode.EXEC, {
+                    "read": CommandSafeguard(max_bytes=8)
+                }),
+                "/r":
+                RAMResource(),
+            },
+            mode=MountMode.EXEC)
+        await ws_link.execute("echo 0123456789abcdef > /data/big.txt")
+        await ws_link.execute("ln -s /data/big.txt /r/link")
+        await _run(
+            ws_link, "sbx_link_guard",
+            "python3 -c \"from pathlib import Path; "
+            "print(Path('/r/link').read_text())\"")
+        await ws_link.close()
+
+        # Cross-mount rename through dispatch: both languages address
+        # the dst against the source mount, so the file lands on the
+        # source backend under the dst's virtual path (EXDEV follow-up).
+        ws_mv = Workspace({
+            "/a": RAMResource(),
+            "/b": RAMResource()
+        },
+                          mode=MountMode.EXEC)
+        await ws_mv.execute("echo moved-bytes > /a/x.txt")
+        await ws_mv.dispatch("rename",
+                             PathSpec.from_str_path("/a/x.txt"),
+                             dst=PathSpec.from_str_path("/b/y.txt"))
+        await _run(ws_mv, "xmount_rename", "cat /a/b/y.txt")
+        await _run_error(ws_mv, "xmount_rename_src", "cat /a/x.txt")
+        await _run_error(ws_mv, "xmount_rename_dst_mount", "cat /b/y.txt")
+        await ws_mv.close()
 
         for name, cmd in PY_ONLY_CASES:
             await _run(ws, name, cmd)
