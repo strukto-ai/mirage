@@ -30,10 +30,10 @@ def _resolve(root: Path, path: str) -> Path:
     return resolved
 
 
-async def write_bytes(accessor: DiskAccessor, path: PathSpec,
+async def write_bytes(accessor: DiskAccessor, path_spec: str | PathSpec,
                       data: bytes) -> None:
-    if isinstance(path, PathSpec):
-        path = path.mount_path
+    path = path_spec.mount_path if isinstance(path_spec,
+                                              PathSpec) else path_spec
     root = accessor.root
     start_ms = int(time.monotonic() * 1000)
     p = _resolve(root, path)

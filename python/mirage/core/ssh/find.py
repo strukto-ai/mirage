@@ -24,7 +24,7 @@ from mirage.types import PathSpec
 
 async def find(
     accessor: SSHAccessor,
-    path: PathSpec,
+    path_spec: str | PathSpec,
     name: str | None = None,
     type: str | None = None,
     min_size: int | None = None,
@@ -40,9 +40,9 @@ async def find(
     empty: bool = False,
     tree: PredNode | None = None,
 ) -> list[str]:
-    start_name = start_basename(path)
-    if isinstance(path, PathSpec):
-        path = path.mount_path
+    start_name = start_basename(path_spec)
+    path = path_spec.mount_path if isinstance(path_spec,
+                                              PathSpec) else path_spec
     config = accessor.config
     sftp = await accessor.sftp()
     results: list[str] = []

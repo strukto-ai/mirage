@@ -31,12 +31,11 @@ def _resolve(root: Path, path: str) -> Path:
 
 
 async def read_stream(accessor: DiskAccessor,
-                      path: PathSpec,
+                      path_spec: PathSpec,
                       index: IndexCacheStore = NULL_INDEX,
                       chunk_size: int = 8192) -> AsyncIterator[bytes]:
-    virtual = path.virtual
-    if isinstance(path, PathSpec):
-        path = path.mount_path
+    virtual = path_spec.virtual
+    path = path_spec.mount_path
     root = accessor.root
     rec = record_stream("read", path, "disk")
     p = _resolve(root, path)

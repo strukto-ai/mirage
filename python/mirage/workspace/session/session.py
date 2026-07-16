@@ -14,6 +14,7 @@
 
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.types import MountMode
@@ -72,7 +73,7 @@ class Session:
         Args:
             **overrides: Field-name kwargs to override on the copy.
         """
-        defaults = {
+        defaults: dict[str, Any] = {
             "session_id":
             self.session_id,
             "cwd":

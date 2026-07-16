@@ -22,18 +22,16 @@ from mirage.utils.path import norm
 
 async def rename(
     accessor: RedisAccessor,
-    src: PathSpec,
-    dst: PathSpec,
+    src_spec: str | PathSpec,
+    dst_spec: str | PathSpec,
 ) -> None:
-    if isinstance(src, PathSpec):
-        src = src.mount_path
-    if isinstance(dst, PathSpec):
-        dst = dst.mount_path
+    src = src_spec.mount_path if isinstance(src_spec, PathSpec) else src_spec
+    dst = dst_spec.mount_path if isinstance(dst_spec, PathSpec) else dst_spec
     store = accessor.store
     s, d = norm(src), norm(dst)
     now = now_iso()
     if await store.has_file(s):
-        data = await store.get_file(s)
+        data = await store.get_file(s) or b""
         mod = await store.get_modified(s)
         attrs = await store.get_attrs(s)
         await store.del_file(s)
@@ -58,7 +56,7 @@ async def rename(
         for key in all_files:
             if key.startswith(prefix):
                 new_key = d.rstrip("/") + "/" + key[len(prefix):]
-                data = await store.get_file(key)
+                data = await store.get_file(key) or b""
                 sub_attrs = await store.get_attrs(key)
                 await store.del_file(key)
                 await store.del_attrs(key)

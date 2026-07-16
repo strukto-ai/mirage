@@ -16,21 +16,12 @@ from pathlib import Path
 
 import asyncssh
 
-from mirage.types import PathSpec
-
-
-def _resolve_path(path: PathSpec) -> str:
-    if isinstance(path, PathSpec):
-        return path.mount_path
-    return path
-
 
 def _key(path: str) -> str:
     return path.lstrip("/")
 
 
-def _abs(config, path: PathSpec) -> str:
-    path = _resolve_path(path)
+def _abs(config, path: str) -> str:
     root = config.root.rstrip("/")
     rel = _key(path)
     if not rel:

@@ -20,10 +20,10 @@ from mirage.utils.path import norm, parent
 
 
 async def mkdir(accessor: RAMAccessor,
-                path: PathSpec,
+                path_spec: str | PathSpec,
                 parents: bool = False) -> None:
-    if isinstance(path, PathSpec):
-        path = path.mount_path
+    path = path_spec.mount_path if isinstance(path_spec,
+                                              PathSpec) else path_spec
     store = accessor.store
     p = norm(path)
     if parents:

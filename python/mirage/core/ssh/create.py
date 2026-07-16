@@ -21,6 +21,6 @@ from mirage.types import PathSpec
 async def create(accessor: SSHAccessor, path: PathSpec) -> None:
     config = accessor.config
     sftp = await accessor.sftp()
-    async with sftp.open(_abs(config, path), "wb"):
+    async with sftp.open(_abs(config, path.mount_path), "wb"):
         pass
     await invalidate_after_write(path)

@@ -28,7 +28,7 @@ async def du(accessor: SSHAccessor, path: PathSpec) -> int:
         info = None
     if info is not None and info.type != FileType.DIRECTORY:
         return info.size or 0
-    target = path.mount_path if isinstance(path, PathSpec) else path
+    target = path.mount_path
     config = accessor.config
     sftp = await accessor.sftp()
     return await _du_walk(sftp, _abs(config, target))
@@ -44,7 +44,7 @@ async def du_all(
         info = None
     if info is not None and info.type != FileType.DIRECTORY:
         return [], info.size or 0
-    target = path.mount_path if isinstance(path, PathSpec) else path
+    target = path.mount_path
     config = accessor.config
     sftp = await accessor.sftp()
     entries: list[tuple[str, int]] = []

@@ -22,6 +22,6 @@ async def append_bytes(accessor: SSHAccessor, path: PathSpec,
                        data: bytes) -> None:
     config = accessor.config
     sftp = await accessor.sftp()
-    async with sftp.open(_abs(config, path), "ab") as f:
+    async with sftp.open(_abs(config, path.mount_path), "ab") as f:
         await f.write(data)
     await invalidate_after_write(path)

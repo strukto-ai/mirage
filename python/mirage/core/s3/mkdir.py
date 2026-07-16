@@ -19,11 +19,11 @@ from mirage.types import PathSpec
 
 
 async def mkdir(accessor: S3Accessor,
-                path: PathSpec,
+                path_spec: str | PathSpec,
                 parents: bool = False) -> None:
     # Object stores have no real directories; parents is implicit.
-    if isinstance(path, PathSpec):
-        path = path.mount_path
+    path = path_spec.mount_path if isinstance(path_spec,
+                                              PathSpec) else path_spec
     config = accessor.config
     pfx = _prefix(path, config)
     if pfx:

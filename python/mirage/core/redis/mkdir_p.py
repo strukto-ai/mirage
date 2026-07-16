@@ -18,9 +18,9 @@ from mirage.types import PathSpec
 from mirage.utils.path import norm
 
 
-async def mkdir_p(accessor: RedisAccessor, path: PathSpec) -> None:
+async def mkdir_p(accessor: RedisAccessor, path: str | PathSpec) -> None:
     store = accessor.store
-    p = norm(path)
+    p = norm(path.mount_path if isinstance(path, PathSpec) else path)
     parts = p.strip("/").split("/")
     current = ""
     now = now_iso()

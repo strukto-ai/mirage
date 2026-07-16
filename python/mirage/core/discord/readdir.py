@@ -47,7 +47,7 @@ def _date_range(end_date: str, days: int = 30) -> list[str]:
             for i in range(days - 1, -1, -1)]
 
 
-def _normalize_path(path: PathSpec | str) -> tuple[str, str, str]:
+def _normalize_path(path: PathSpec) -> tuple[str, str, str]:
     """Reduce input to (prefix, key, virtual_key)."""
     prefix = mount_prefix_of(path.virtual, path.resource_path)
     raw = path.directory if path.pattern else path.virtual

@@ -23,9 +23,9 @@ from mirage.utils.path import norm
 
 
 async def stream(accessor: RAMAccessor,
-                 path: PathSpec) -> AsyncIterator[bytes]:
-    virtual = path.virtual
-    path = norm(path.resource_path)
+                 path_spec: PathSpec) -> AsyncIterator[bytes]:
+    virtual = path_spec.virtual
+    path = norm(path_spec.resource_path)
     store = accessor.store
     key = norm(path)
     if key not in store.files:

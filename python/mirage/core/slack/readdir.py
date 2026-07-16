@@ -78,7 +78,7 @@ async def _latest_message_ts(config, channel_id: str) -> float | None:
     return None
 
 
-def _normalize_path(path: PathSpec | str) -> tuple[PathSpec, str, str, str]:
+def _normalize_path(path: PathSpec) -> tuple[PathSpec, str, str, str]:
     prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
     raw = path.directory if path.pattern else path.virtual
     if prefix and raw.startswith(prefix):
