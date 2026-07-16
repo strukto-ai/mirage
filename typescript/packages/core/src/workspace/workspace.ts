@@ -29,11 +29,7 @@ import type { Resource } from '../resource/base.ts'
 import { HISTORY_PREFIX, HistoryViewResource } from '../resource/history/history.ts'
 import { resourceStateRequiresOverride } from '../resource/secrets.ts'
 import { GENERAL_COMMANDS } from '../commands/builtin/general/index.ts'
-import {
-  applyOpSafeguard,
-  CommandTimeoutError,
-  runWithTimeout,
-} from '../commands/builtin/utils/safeguard.ts'
+import { CommandTimeoutError, runWithTimeout } from '../commands/builtin/utils/safeguard.ts'
 import { resolveSafeguard } from '../commands/safeguard.ts'
 import { JobTable } from '../shell/job_table.ts'
 import { findSyntaxError, type ShellParser } from '../shell/parse.ts'
@@ -397,14 +393,17 @@ export class Workspace {
         }
         case 'LIST': {
           const entries = ((await this.dispatch('readdir', path)) as string[] | null) ?? []
-          const result: MirageEntry[] = []
-          for (const entry of entries) {
-            const stat = (await this.dispatch('stat', entry)) as FileStat
-            const isDir = stat.type === FileType.DIRECTORY
-            const size = isDir ? 0 : (stat.size ?? 0)
-            result.push({ path: entry, size, isDir })
-          }
-          return result
+          return await Promise.all(
+            entries.map(async (entry): Promise<MirageEntry> => {
+              // Backends that mark directories with a trailing slash
+              // skip the stat; unmarked entries (e.g. RAM) need one to
+              // learn dir-ness.
+              if (entry.endsWith('/')) return { path: entry, size: 0, isDir: true }
+              const stat = (await this.dispatch('stat', entry)) as FileStat
+              const isDir = stat.type === FileType.DIRECTORY
+              return { path: entry, size: isDir ? 0 : (stat.size ?? 0), isDir }
+            }),
+          )
         }
       }
     }
@@ -721,21 +720,19 @@ export class Workspace {
     if (this.driftCheckPending) {
       await this.runPendingDriftCheck()
     }
-    // Opens the backing resource lazily and asserts the mount is
-    // allowed; the Dispatcher then owns symlink follow, cache
-    // read-through, mode enforcement, index threading, revisions,
-    // overlay stat, and post-write invalidation — the same single path
-    // Python's Workspace.dispatch delegates to.
-    await this.resolve(path)
-    const mount = this.registry.mountFor(path)
-    const opOverride = mount?.commandSafeguards.get(opName) ?? null
-    const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
-    const [result] = await runWithTimeout(
-      this.dispatcher.dispatch(opName, PathSpec.fromStrPath(path), args, kwargs),
-      opTimeout,
+    // The Dispatcher owns the rest — symlink follow, resolution (its
+    // resolveFn is Workspace.resolve, so lazy open and mount grants
+    // happen there), cache read-through, mode enforcement, per-op
+    // safeguards on the executing mount, revisions, overlay stat, and
+    // post-write invalidation — the same single path Python's
+    // Workspace.dispatch delegates to.
+    const [result] = await this.dispatcher.dispatch(
       opName,
+      PathSpec.fromStrPath(path),
+      args,
+      kwargs,
     )
-    return await applyOpSafeguard(result, opOverride)
+    return result
   }
 
   async resolve(path: string): Promise<[Resource, PathSpec, MountMode]> {

@@ -17,6 +17,7 @@ import {
   type FileStat,
   FileType,
   type OpRecord,
+  PathSpec,
   type Workspace,
   rstripSlash,
 } from '@struktoai/mirage-core'
@@ -508,7 +509,9 @@ export class MirageFS {
   private mkdir(path: string, _mode: number, cb: (code: number) => void): void {
     void (async () => {
       try {
-        await this.ws.fs.mkdir(this.resolve(path))
+        // Metadata ops route through dispatch (not ws.fs) so the file
+        // cache and readdir index are invalidated like any other write.
+        await this.ws.dispatch('mkdir', this.resolve(path))
         cb(0)
       } catch (err) {
         cb(classifyError(err))
@@ -560,7 +563,7 @@ export class MirageFS {
         return
       }
       try {
-        await this.ws.fs.unlink(this.resolve(path))
+        await this.ws.dispatch('unlink', this.resolve(path))
         this.xattrs.delete(path)
         cb(0)
       } catch (err) {
@@ -572,7 +575,9 @@ export class MirageFS {
   private rename(src: string, dst: string, cb: (code: number) => void): void {
     void (async () => {
       try {
-        await this.ws.fs.rename(this.resolve(src), this.resolve(dst))
+        await this.ws.dispatch('rename', this.resolve(src), [
+          PathSpec.fromStrPath(this.resolve(dst)),
+        ])
         const moved = this.xattrs.get(src)
         if (moved !== undefined) {
           this.xattrs.delete(src)
@@ -601,7 +606,7 @@ export class MirageFS {
           // readdir failure — fall through to rmdir and let it raise the real
           // error (e.g. ENOENT for missing path).
         }
-        await this.ws.fs.rmdir(this.resolve(path))
+        await this.ws.dispatch('rmdir', this.resolve(path))
         this.xattrs.delete(path)
         cb(0)
       } catch (err) {

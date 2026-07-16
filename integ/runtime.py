@@ -143,13 +143,9 @@ def _seed_s3(endpoint: str) -> None:
         aws_secret_access_key="testing",
     )
     client.create_bucket(Bucket=BUCKET)
-    client.put_object(Bucket=BUCKET,
-                      Key="greeting.txt",
-                      Body=b"hello from s3\n")
-    client.put_object(Bucket=BUCKET,
-                      Key="cache_inval.txt",
-                      Body=b"seeded-cold\n")
-    client.put_object(Bucket=BUCKET, Key="warm.txt", Body=b"cold-bytes\n")
+    _put_s3(endpoint, "greeting.txt", b"hello from s3\n")
+    _put_s3(endpoint, "cache_inval.txt", b"seeded-cold\n")
+    _put_s3(endpoint, "warm.txt", b"cold-bytes\n")
 
 
 def _build_workspace(endpoint: str, run_id: str) -> Workspace:
