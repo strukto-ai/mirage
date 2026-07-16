@@ -34,7 +34,7 @@ def get_command_name(node: tree_sitter.Node) -> str:
     """Get the command name string."""
     for c in node.named_children:
         if c.type == NT.COMMAND_NAME:
-            return c.text.decode()
+            return (c.text or b"").decode()
     return ""
 
 
@@ -186,7 +186,7 @@ def get_redirects(
             continue
 
         fd = 1
-        target = ""
+        target: str | int = ""
         target_node = None
         kind = RedirectKind.STDOUT
         append = False
@@ -282,6 +282,7 @@ def get_list_parts(
         if c.type in (NT.AND, NT.OR, NT.SEMI):
             op = c.type
             break
+    assert op is not None
     return left, op, right
 
 
@@ -296,7 +297,7 @@ def get_if_branches(
     else_body is also a list of nodes, or None.
     """
     nc = node.named_children
-    condition = nc[0]
+    condition: tree_sitter.Node | None = nc[0]
     body: list[tree_sitter.Node] = []
     branches: list[tuple[tree_sitter.Node, list[tree_sitter.Node]]] = []
     else_body = None

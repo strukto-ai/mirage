@@ -59,16 +59,15 @@ async def handle_redirect(
     stdout, io, exec_node = await execute_node(command, session, cmd_stdin,
                                                call_stack)
 
-    stdout_data = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
-    if stdout_data is None:
-        stdout_data = b""
-    if isinstance(stdout_data, memoryview):
-        stdout_data = bytes(stdout_data)
+    barriered = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
+    if isinstance(barriered, memoryview):
+        barriered = bytes(barriered)
+    stdout_data = await materialize(barriered)
 
     stderr_data = await materialize(io.stderr)
 
-    result_stdout = stdout_data
-    result_stderr = stderr_data
+    result_stdout: bytes | None = stdout_data
+    result_stderr: bytes | None = stderr_data
 
     for r in redirects:
         stream = r.kind

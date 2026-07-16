@@ -13,8 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import base64
+from typing import cast
 
-from agents import Runner
+from agents import Runner, TResponseInputItem
 from openai import AsyncOpenAI
 
 from mirage.types import FileType
@@ -112,10 +113,5 @@ class MirageRunner:
             The result from `agents.Runner.run`.
         """
         blocks = await self.build_blocks(prompt, paths)
-        return await Runner.run(
-            agent,
-            [{
-                "role": "user",
-                "content": blocks
-            }],
-        )
+        message = cast(TResponseInputItem, {"role": "user", "content": blocks})
+        return await Runner.run(agent, [message])

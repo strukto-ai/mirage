@@ -15,7 +15,7 @@
 import asyncio
 import logging
 import threading
-from typing import Awaitable, TypeVar
+from typing import Any, Coroutine, TypeVar
 
 from mirage.workspace.workspace import Workspace
 
@@ -71,7 +71,7 @@ class WorkspaceRunner:
         self.loop.call_soon(self._ready.set)
         self.loop.run_forever()
 
-    async def call(self, coro: Awaitable[T]) -> T:
+    async def call(self, coro: Coroutine[Any, Any, T]) -> T:
         """Run ``coro`` on the workspace loop and await the result.
 
         Safe to call from any other event loop. The current loop is
@@ -87,7 +87,9 @@ class WorkspaceRunner:
         fut = asyncio.run_coroutine_threadsafe(coro, self.loop)
         return await asyncio.wrap_future(fut)
 
-    def call_sync(self, coro: Awaitable[T], timeout: float | None = None) -> T:
+    def call_sync(self,
+                  coro: Coroutine[Any, Any, T],
+                  timeout: float | None = None) -> T:
         """Run ``coro`` on the workspace loop and block until done.
 
         Use from synchronous callers (tests, blocking scripts). Do

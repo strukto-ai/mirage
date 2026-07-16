@@ -255,7 +255,6 @@ warn_redundant_casts = true
 module = [
     "mirage.accessor.databricks_volume",
     "mirage.accessor.mongodb",
-    "mirage.agents.openai_agents.runner",
     "mirage.cache.file.io",
     "mirage.commands.builtin.general.bc",
     "mirage.commands.builtin.general.wget",
@@ -324,18 +323,9 @@ module = [
     "mirage.server.auth.middleware",
     "mirage.server.routers.versions",
     "mirage.shell.arith",
-    "mirage.shell.helpers",
     "mirage.utils.glob_walk",
-    "mirage.workspace.executor.fanout",
-    "mirage.workspace.executor.redirect",
-    "mirage.workspace.expand.globs",
     "mirage.workspace.mount.registry",
-    "mirage.workspace.node.command_dispatch",
-    "mirage.workspace.node.execute_node",
-    "mirage.workspace.node.provision_node",
     "mirage.workspace.node.run_tree",
-    "mirage.workspace.runner",
     "mirage.workspace.snapshot.state",
-    "mirage.workspace.workspace",
 ]
 ignore_errors = true

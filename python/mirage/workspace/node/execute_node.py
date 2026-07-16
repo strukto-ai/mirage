@@ -288,14 +288,14 @@ async def execute_node(
     if kind == NodeKind.CASE:
         word_node = get_case_word(node)
         word = await expand_node(word_node, session, execute_fn, cs)
-        items = get_case_items(node)
-        return await handle_case(recurse, word, items, session, stdin, cs)
+        case_items = get_case_items(node)
+        return await handle_case(recurse, word, case_items, session, stdin, cs)
 
     # ── function definition ─────────────────────
     if kind == NodeKind.FUNCTION_DEF:
         name = get_function_name(node)
-        body = get_function_body(node)
-        session.functions[name] = body
+        func_body = get_function_body(node)
+        session.functions[name] = func_body
         return None, IOResult(), ExecutionNode(command=f"function {name}",
                                                exit_code=0)
 

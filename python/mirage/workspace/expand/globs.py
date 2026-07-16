@@ -66,9 +66,10 @@ async def _walk_segments(item: PathSpec, mount: MountEntry,
         level = gathered
         if not level:
             return []
+    item_raw = item.raw_path if item.raw_path is not None else item.virtual
     return [
         dataclasses.replace(PathSpec.from_str_path(v, mount_key(v, prefix)),
-                            raw_path=spell_match(item.raw_path, v, walked))
+                            raw_path=spell_match(item_raw, v, walked))
         for v in level
     ]
 
@@ -87,11 +88,12 @@ def _match_raw(item: PathSpec, match: PathSpec) -> PathSpec:
         item (PathSpec): the glob word being resolved.
         match (PathSpec): one resolved match.
     """
-    if item.raw_path == item.virtual or match.raw_path != match.virtual:
+    raw = item.raw_path if item.raw_path is not None else item.virtual
+    if raw == item.virtual or match.raw_path != match.virtual:
         return match
     if not match.virtual.startswith(item.directory):
         return match
-    raw_dir = item.raw_path[:item.raw_path.rfind("/") + 1]
+    raw_dir = raw[:raw.rfind("/") + 1]
     spelled = raw_dir + match.virtual[len(item.directory):]
     return dataclasses.replace(match, raw_path=spelled)
 
