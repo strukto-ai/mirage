@@ -244,13 +244,3 @@ warn_redundant_casts = true
 
 
 
-
-
-
-
-# Ratchet baseline: modules with pre-existing mypy errors. Shrink this
-# list, never grow it: when a module is cleaned, delete its entry so
-# regressions in it fail CI. New modules must not be added here.
-[[tool.mypy.overrides]]
-module = []
-ignore_errors = true
