@@ -16,7 +16,8 @@ import json
 
 from mirage.accessor.linear import LinearAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, OperandKind, Option
+from mirage.commands.spec.types import (CommandSpec, FlagView, OperandKind,
+                                        Option)
 from mirage.core.linear._client import (issue_update, list_teams,
                                         resolve_issue_id)
 from mirage.core.linear.normalize import normalize_issue
@@ -58,20 +59,17 @@ async def linear_issue_transition(
     *texts: str,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(_extra, spec=SPEC)
     config = accessor.config
     issue_id = await resolve_issue_id(
         config,
-        issue_id=_extra.get("issue_id")
-        if isinstance(_extra.get("issue_id"), str) else None,
-        issue_key=_extra.get("issue_key") if isinstance(
-            _extra.get("issue_key"), str) else None,
+        issue_id=fl.as_str("issue_id"),
+        issue_key=fl.as_str("issue_key"),
     )
     state_id = await _resolve_state_id(
         config,
-        state_id=_extra.get("state_id")
-        if isinstance(_extra.get("state_id"), str) else None,
-        state_name=_extra.get("state_name") if isinstance(
-            _extra.get("state_name"), str) else None,
+        state_id=fl.as_str("state_id"),
+        state_name=fl.as_str("state_name"),
     )
     issue = await issue_update(config,
                                issue_id=issue_id,

@@ -16,7 +16,8 @@ import json
 
 from mirage.accessor.linear import LinearAccessor
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, OperandKind, Option
+from mirage.commands.spec.types import (CommandSpec, FlagView, OperandKind,
+                                        Option)
 from mirage.core.linear._client import (issue_update, resolve_issue_id,
                                         resolve_user_id)
 from mirage.core.linear.normalize import normalize_issue
@@ -39,20 +40,17 @@ async def linear_issue_assign(
     *texts: str,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(_extra, spec=SPEC)
     config = accessor.config
     issue_id = await resolve_issue_id(
         config,
-        issue_id=_extra.get("issue_id")
-        if isinstance(_extra.get("issue_id"), str) else None,
-        issue_key=_extra.get("issue_key") if isinstance(
-            _extra.get("issue_key"), str) else None,
+        issue_id=fl.as_str("issue_id"),
+        issue_key=fl.as_str("issue_key"),
     )
     assignee_id = await resolve_user_id(
         config,
-        assignee_id=_extra.get("assignee_id") if isinstance(
-            _extra.get("assignee_id"), str) else None,
-        assignee_email=_extra.get("assignee_email") if isinstance(
-            _extra.get("assignee_email"), str) else None,
+        assignee_id=fl.as_str("assignee_id"),
+        assignee_email=fl.as_str("assignee_email"),
     )
     issue = await issue_update(config,
                                issue_id=issue_id,

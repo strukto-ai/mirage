@@ -18,7 +18,8 @@ from collections.abc import AsyncIterator
 from mirage.accessor.linear import LinearAccessor
 from mirage.commands.builtin.linear._input import resolve_text_input
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, OperandKind, Option
+from mirage.commands.spec.types import (CommandSpec, FlagView, OperandKind,
+                                        Option)
 from mirage.core.linear._client import issue_update, resolve_issue_id
 from mirage.core.linear.normalize import normalize_issue
 from mirage.io.stream import yield_bytes
@@ -42,26 +43,22 @@ async def linear_issue_update(
     stdin: AsyncIterator[bytes] | bytes | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(_extra, spec=SPEC)
     config = accessor.config
     issue_id = await resolve_issue_id(
         config,
-        issue_id=_extra.get("issue_id")
-        if isinstance(_extra.get("issue_id"), str) else None,
-        issue_key=_extra.get("issue_key") if isinstance(
-            _extra.get("issue_key"), str) else None,
+        issue_id=fl.as_str("issue_id"),
+        issue_key=fl.as_str("issue_key"),
     )
-    title = _extra.get("title") if isinstance(_extra.get("title"),
-                                              str) else None
+    title = fl.as_str("title")
     description = None
     if (_extra.get("description") is not None
             or _extra.get("description_file") is not None
             or stdin is not None):
         description = await resolve_text_input(
             config,
-            inline_text=_extra.get("description") if isinstance(
-                _extra.get("description"), str) else None,
-            file_path=_extra.get("description_file") if isinstance(
-                _extra.get("description_file"), str) else None,
+            inline_text=fl.as_str("description"),
+            file_path=fl.as_str("description_file"),
             stdin=stdin,
             error_message="description is required",
         )
