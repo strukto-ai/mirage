@@ -304,6 +304,25 @@ async def test_drop_attrs_missing_node_is_noop(namespace):
     assert namespace.meta_for("/data/nope.txt") is None
 
 
+@pytest.mark.asyncio
+async def test_drop_overlay_removes_orphaned_node(namespace):
+    await namespace.set_attrs("/data/f.txt", mode=0o601, uid=500)
+    assert await namespace.drop_overlay("/data/f.txt") is True
+    assert namespace.meta_for("/data/f.txt") is None
+
+
+@pytest.mark.asyncio
+async def test_drop_overlay_keeps_symlink(namespace):
+    await namespace.symlink("/data/link", "/data/target", 1.0)
+    assert await namespace.drop_overlay("/data/link") is False
+    assert namespace.readlink("/data/link") == "/data/target"
+
+
+@pytest.mark.asyncio
+async def test_drop_overlay_missing_node_is_noop(namespace):
+    assert await namespace.drop_overlay("/data/nope.txt") is False
+
+
 def test_user_defaults_before_resolution(namespace):
     assert namespace.user == "default"
 

@@ -87,3 +87,36 @@ describe('warm read serves from the hidden store, command stays on its mount', (
     }
   })
 })
+
+describe('namespace orphan GC on remote delete', () => {
+  it('GCs an orphaned overlay when a stat reports the path gone under ALWAYS', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMResource() },
+      { mode: MountMode.WRITE, consistency: ConsistencyPolicy.ALWAYS },
+    )
+    try {
+      await ws.namespace.ensureLoaded()
+      await ws.namespace.setAttrs('/data/gone.txt', { mode: 0o600 })
+      expect(ws.namespace.metaFor('/data/gone.txt')).not.toBeNull()
+      await expect(ws.dispatch('stat', '/data/gone.txt')).rejects.toThrow()
+      expect(ws.namespace.metaFor('/data/gone.txt')).toBeNull()
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('leaves the overlay in place under LAZY', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMResource() },
+      { mode: MountMode.WRITE, consistency: ConsistencyPolicy.LAZY },
+    )
+    try {
+      await ws.namespace.ensureLoaded()
+      await ws.namespace.setAttrs('/data/gone.txt', { mode: 0o600 })
+      await expect(ws.dispatch('stat', '/data/gone.txt')).rejects.toThrow()
+      expect(ws.namespace.metaFor('/data/gone.txt')).not.toBeNull()
+    } finally {
+      await ws.close()
+    }
+  })
+})

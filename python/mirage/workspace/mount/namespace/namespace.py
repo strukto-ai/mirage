@@ -258,6 +258,27 @@ class Namespace:
             return
         await self._store.set(path, meta.to_fields())
 
+    async def drop_overlay(self, path: str) -> bool:
+        """Drop a metadata overlay whose backend file is gone (orphan GC).
+
+        When a backend reports a path deleted, its attribute overlay is
+        orphaned and would otherwise linger forever. Symlink entries are
+        authoritative (they have no backend file), so they are left intact;
+        only a target-less overlay node is removed.
+
+        Args:
+            path (str): absolute virtual path reported gone by the backend.
+
+        Returns:
+            bool: True when an overlay node was dropped.
+        """
+        meta = self._nodes.get(path)
+        if meta is None or meta.target is not None:
+            return False
+        del self._nodes[path]
+        await self._store.delete([path])
+        return True
+
     async def clear_times(self, path: str) -> None:
         """Drop overlay times after a content write.
 
