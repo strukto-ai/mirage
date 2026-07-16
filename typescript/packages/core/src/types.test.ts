@@ -16,8 +16,6 @@ import { mountKey, mountPrefixOf } from './utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import {
   ConsistencyPolicy,
-  DEFAULT_AGENT_ID,
-  DEFAULT_SESSION_ID,
   FileStat,
   FileType,
   MountMode,
@@ -93,16 +91,6 @@ describe('ResourceName', () => {
 
   it('is frozen at runtime', () => {
     expect(Object.isFrozen(ResourceName)).toBe(true)
-  })
-})
-
-describe('default id constants', () => {
-  it('DEFAULT_SESSION_ID is "default"', () => {
-    expect(DEFAULT_SESSION_ID).toBe('default')
-  })
-
-  it('DEFAULT_AGENT_ID is "default"', () => {
-    expect(DEFAULT_AGENT_ID).toBe('default')
   })
 })
 

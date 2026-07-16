@@ -14,11 +14,13 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { RAMResource, Workspace, MountMode } from '@struktoai/mirage-node'
-import { WorkspaceRegistry, newWorkspaceId } from './registry.ts'
+import { newWorkspaceId } from '@struktoai/mirage-node'
+import { WorkspaceRegistry } from './registry.ts'
 
 describe('newWorkspaceId', () => {
-  it('mints ws_<hex16> ids', () => {
-    expect(newWorkspaceId()).toMatch(/^ws_[a-f0-9]{16}$/)
+  it('mints canonical UUIDv7 ids', () => {
+    const id = newWorkspaceId()
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
   })
 })
 

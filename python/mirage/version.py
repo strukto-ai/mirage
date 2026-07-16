@@ -11,20 +11,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import importlib.metadata
 
-from dataclasses import dataclass
-
-from mirage.types import ConsistencyPolicy
-
-
-@dataclass
-class MountArgs:
-    """Constructor inputs derived from a state dict.
-
-    Workspace.load uses this to instantiate a fresh Workspace; snapshot
-    code never constructs Workspace itself.
-    """
-    mount_args: dict
-    consistency: ConsistencyPolicy
-    default_session_id: str
-    default_agent_id: str | None
+# Single source of truth: the installed distribution's metadata, i.e.
+# pyproject's version (mirrors TS version.ts reading package.json).
+# A missing distribution raises PackageNotFoundError loudly.
+__version__ = importlib.metadata.version("mirage-ai")

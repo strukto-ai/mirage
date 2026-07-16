@@ -26,7 +26,7 @@ def workspace(tmp_path):
 @pytest.mark.asyncio
 async def test_du_single_file(workspace):
     await workspace.ops.write("/f.txt", b"hello")
-    io = await workspace.execute("du /f.txt", session_id="default")
+    io = await workspace.execute("du /f.txt")
     assert io.exit_code == 0
     assert io.stdout.decode().strip() == "5\t/f.txt"
 
@@ -36,7 +36,7 @@ async def test_du_directory_collapses(workspace):
     await workspace.ops.mkdir("/dir")
     await workspace.ops.write("/dir/a.txt", b"aaa")
     await workspace.ops.write("/dir/b.txt", b"bb")
-    io = await workspace.execute("du /dir", session_id="default")
+    io = await workspace.execute("du /dir")
     assert io.exit_code == 0
     assert io.stdout.decode().strip() == "5\t/dir"
 
@@ -46,7 +46,7 @@ async def test_du_a_lists_files(workspace):
     await workspace.ops.mkdir("/dir")
     await workspace.ops.write("/dir/a.txt", b"aaa")
     await workspace.ops.write("/dir/b.txt", b"bb")
-    io = await workspace.execute("du -a /dir", session_id="default")
+    io = await workspace.execute("du -a /dir")
     assert io.exit_code == 0
     out = io.stdout.decode()
     assert "a.txt" in out
@@ -59,7 +59,7 @@ async def test_du_s_summary(workspace):
     await workspace.ops.mkdir("/dir/sub")
     await workspace.ops.write("/dir/a.txt", b"hello")
     await workspace.ops.write("/dir/sub/b.txt", b"world")
-    io = await workspace.execute("du -s /dir", session_id="default")
+    io = await workspace.execute("du -s /dir")
     assert io.exit_code == 0
     lines = io.stdout.decode().strip().splitlines()
     assert len(lines) == 1
@@ -69,7 +69,7 @@ async def test_du_s_summary(workspace):
 async def test_du_c_total(workspace):
     await workspace.ops.write("/a.txt", b"hello")
     await workspace.ops.write("/b.txt", b"world")
-    io = await workspace.execute("du -c /a.txt /b.txt", session_id="default")
+    io = await workspace.execute("du -c /a.txt /b.txt")
     assert io.exit_code == 0
     lines = io.stdout.decode().strip().splitlines()
     assert lines[-1] == "10\ttotal"
@@ -78,7 +78,7 @@ async def test_du_c_total(workspace):
 @pytest.mark.asyncio
 async def test_du_h_human(workspace):
     await workspace.ops.write("/big.txt", b"x" * 2048)
-    io = await workspace.execute("du -h /big.txt", session_id="default")
+    io = await workspace.execute("du -h /big.txt")
     assert io.exit_code == 0
     size_str = io.stdout.decode().strip().split("\t")[0]
     assert size_str.endswith("K")
@@ -86,6 +86,6 @@ async def test_du_h_human(workspace):
 
 @pytest.mark.asyncio
 async def test_du_missing_operand_errors(workspace):
-    io = await workspace.execute("du", session_id="default")
+    io = await workspace.execute("du")
     assert io.exit_code != 0
     assert b"missing operand" in (io.stderr or b"")

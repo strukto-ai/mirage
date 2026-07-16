@@ -12,13 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  DEFAULT_SESSION_ID,
-  MountMode,
-  PathSpec,
-  RAMResource,
-  stripSlash,
-} from '@struktoai/mirage-core'
+import { MountMode, PathSpec, RAMResource, stripSlash } from '@struktoai/mirage-core'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Workspace } from '../../workspace.ts'
 
@@ -171,12 +165,12 @@ describe('pipeline', () => {
   it('subshell cd isolated', async () => {
     await ws.execute('cd /data')
     await ws.execute('(cd /data/subdir)')
-    expect(ws.getSession(DEFAULT_SESSION_ID).cwd).toBe('/data')
+    expect(ws.getSession(ws.defaultSessionId).cwd).toBe('/data')
   })
 
   it('subshell export isolated', async () => {
     await ws.execute('(export LEAK=yes)')
-    expect(Object.hasOwn(ws.getSession(DEFAULT_SESSION_ID).env, 'LEAK')).toBe(false)
+    expect(Object.hasOwn(ws.getSession(ws.defaultSessionId).env, 'LEAK')).toBe(false)
   })
 
   it('subshell inherits parent env', async () => {
@@ -187,7 +181,7 @@ describe('pipeline', () => {
 
   it('nested subshell export does not leak', async () => {
     await ws.execute('((export DEEP=yes))')
-    expect(Object.hasOwn(ws.getSession(DEFAULT_SESSION_ID).env, 'DEEP')).toBe(false)
+    expect(Object.hasOwn(ws.getSession(ws.defaultSessionId).env, 'DEEP')).toBe(false)
   })
 
   // ── Background jobs ──────────────────────────────────────────────
@@ -201,13 +195,13 @@ describe('pipeline', () => {
   it('background isolation env', async () => {
     await ws.execute('export BG_VAR=leaked &')
     await ws.execute('wait %1')
-    expect(Object.hasOwn(ws.getSession(DEFAULT_SESSION_ID).env, 'BG_VAR')).toBe(false)
+    expect(Object.hasOwn(ws.getSession(ws.defaultSessionId).env, 'BG_VAR')).toBe(false)
   })
 
   it('background isolation cwd', async () => {
     await ws.execute('cd /data &')
     await ws.execute('wait %1')
-    expect(ws.getSession(DEFAULT_SESSION_ID).cwd).toBe('/')
+    expect(ws.getSession(ws.defaultSessionId).cwd).toBe('/')
   })
 
   it('background sees parent env', async () => {
@@ -240,9 +234,9 @@ describe('pipeline', () => {
 
   it('export unset cycle', async () => {
     await ws.execute('export TMP=val')
-    expect(ws.getSession(DEFAULT_SESSION_ID).env.TMP).toBe('val')
+    expect(ws.getSession(ws.defaultSessionId).env.TMP).toBe('val')
     await ws.execute('unset TMP')
-    expect(Object.hasOwn(ws.getSession(DEFAULT_SESSION_ID).env, 'TMP')).toBe(false)
+    expect(Object.hasOwn(ws.getSession(ws.defaultSessionId).env, 'TMP')).toBe(false)
   })
 
   it('printenv shows all', async () => {
@@ -305,7 +299,7 @@ describe('pipeline', () => {
   it('for loop variable restored', async () => {
     await ws.execute('export i=original')
     await ws.execute('for i in 1 2 3; do echo $i; done')
-    expect(ws.getSession(DEFAULT_SESSION_ID).env.i).toBe('original')
+    expect(ws.getSession(ws.defaultSessionId).env.i).toBe('original')
   })
 
   // ── If/else ──────────────────────────────────────────────────────

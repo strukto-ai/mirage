@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Resource } from '../../../resource/base.ts'
-import { DEFAULT_AGENT_ID, type MountMode, type PathSpec } from '../../../types.ts'
+import { type MountMode, type PathSpec } from '../../../types.ts'
 import { globPrefixMatch, resolveSymlinks } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { ResolveFn } from '../../dispatcher.ts'
@@ -107,12 +107,12 @@ export class Namespace {
   }
 
   // The workspace user (whoami identity). Before store resolution the
-  // launch claim (or DEFAULT_AGENT_ID) answers; after it, the resolved
-  // identity.
-  get user(): string {
+  // launch claim answers; after it, the resolved identity. Null when no
+  // agent ever claimed the workspace, mirroring a uid with no passwd
+  // entry.
+  get user(): string | null {
     if (this.workspaceUser !== null) return this.workspaceUser
-    if (this.claim !== null) return this.claim
-    return DEFAULT_AGENT_ID
+    return this.claim
   }
 
   // Resolve the workspace user against the store, once. An explicit launch

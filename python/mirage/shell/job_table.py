@@ -18,7 +18,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from mirage.io.types import IOResult
-from mirage.types import DEFAULT_SESSION_ID
 from mirage.workspace.types import ExecutionNode
 
 
@@ -42,7 +41,7 @@ class Job:
     io_result: IOResult | None = None
     created_at: float = field(default_factory=time.time)
     agent: str = "unknown"
-    session_id: str = DEFAULT_SESSION_ID
+    session_id: str = ""
 
 
 class JobTable:
@@ -57,7 +56,7 @@ class JobTable:
         task: asyncio.Task,
         cwd: str,
         agent: str = "unknown",
-        session_id: str = DEFAULT_SESSION_ID,
+        session_id: str = "",
     ) -> Job:
         job = Job(id=self._next_id,
                   command=command,

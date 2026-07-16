@@ -18,6 +18,8 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { buildApp } from '../app.ts'
 
+const UUID7_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+
 describe('workspaces router', () => {
   it('GET /v1/health returns ok', async () => {
     const app = buildApp()
@@ -38,7 +40,7 @@ describe('workspaces router', () => {
     })
     expect(res.statusCode).toBe(201)
     const body = res.json<{ id: string }>()
-    expect(body.id).toMatch(/^ws_/)
+    expect(body.id).toMatch(UUID7_RE)
     await app.close()
   })
 
@@ -112,7 +114,7 @@ describe('workspaces router', () => {
     })
     expect(res.statusCode).toBe(201)
     const body = res.json<{ id: string }>()
-    expect(body.id).toMatch(/^ws_/)
+    expect(body.id).toMatch(UUID7_RE)
     expect(body.id).not.toBe('src-w')
     await app.close()
   })

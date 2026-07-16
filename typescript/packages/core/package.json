@@ -48,16 +48,16 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@pydantic/monty": "0.0.19-beta.4",
     "@qdrant/js-client-rest": "^1.18.0",
     "chromadb": "^3.4.3",
     "hyparquet-writer": "^0.13.0",
     "pyodide": "^0.29.3",
+    "quickjs-emscripten": "^0.31.0",
     "tree-sitter-bash": "^0.25.1",
     "tsup": "^8.5.0",
     "typescript": "^6.0.0",
-    "vitest": "^3.2.6",
-    "@pydantic/monty": "0.0.19-beta.4",
-    "quickjs-emscripten": "^0.31.0"
+    "vitest": "^3.2.6"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.0.0",
@@ -67,16 +67,17 @@
     "h5wasm": "^0.10.1",
     "hyparquet": "^1.25.6",
     "jq-wasm": "1.1.0-jq-1.8.1",
+    "uuid": "^14.0.1",
     "web-tree-sitter": "^0.26.8",
     "zod": "^4.3.6"
   },
   "peerDependencies": {
+    "@pydantic/monty": ">=0.0.19-beta.4",
     "@qdrant/js-client-rest": "^1.18.0",
     "chromadb": "^3.4.3",
     "pyodide": "^0.29.0",
-    "redis": "^5.0.0",
-    "@pydantic/monty": ">=0.0.19-beta.4",
-    "quickjs-emscripten": "^0.31.0"
+    "quickjs-emscripten": "^0.31.0",
+    "redis": "^5.0.0"
   },
   "peerDependenciesMeta": {
     "@qdrant/js-client-rest": {

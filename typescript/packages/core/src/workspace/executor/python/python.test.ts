@@ -13,12 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import {
-  DEFAULT_SESSION_ID,
-  makeWorkspace,
-  stderrStr,
-  stdoutStr,
-} from '../../fixtures/workspace_fixture.ts'
+import { makeWorkspace, stderrStr, stdoutStr } from '../../fixtures/workspace_fixture.ts'
 
 // All tests in this file are direct ports of Python mirage's python3 tests
 // in tests/workspace/test_workspace.py. Citations are in the `it()` title.
@@ -102,7 +97,7 @@ describe('python3: core (ports of Python tests_workspace)', { timeout: 30000 }, 
   it('bare-filename script in subdir: python3 sub/deep.py runs via cwd', async () => {
     const { ws, disk } = await makeWorkspace()
     disk.store.files.set('/sub/deep.py', new TextEncoder().encode("print('deep ok')\n"))
-    ws.getSession(DEFAULT_SESSION_ID).cwd = '/disk'
+    ws.getSession(ws.defaultSessionId).cwd = '/disk'
     const io = await ws.execute('python3 sub/deep.py')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('deep ok\n')
@@ -153,7 +148,7 @@ describe('python3: core (ports of Python tests_workspace)', { timeout: 30000 }, 
       '/with_argv.py',
       new TextEncoder().encode('import sys; print(sys.argv[1:])\n'),
     )
-    ws.getSession(DEFAULT_SESSION_ID).cwd = '/disk'
+    ws.getSession(ws.defaultSessionId).cwd = '/disk'
     const io = await ws.execute('python3 with_argv.py one two')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe("['one', 'two']\n")

@@ -113,8 +113,8 @@ export interface WorkspaceStateDict {
   version: number
   mirage_version: string
   default_session_id: string
-  default_agent_id: string
-  current_agent_id: string
+  default_agent_id: string | null
+  current_agent_id: string | null
   sessions: SessionSnapshot[]
   mounts: MountSnapshot[]
   cache: CacheSnapshot

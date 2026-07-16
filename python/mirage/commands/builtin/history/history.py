@@ -17,7 +17,7 @@ from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.history.render import render_history_listing
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import DEFAULT_SESSION_ID, PathSpec
+from mirage.types import PathSpec
 
 
 def _out_of_range(value: str) -> IOResult:
@@ -55,7 +55,9 @@ async def history_cmd(
     (bash-verified for both -ps and -sp).
     """
     observer = accessor.observer
-    session = session_id if session_id is not None else DEFAULT_SESSION_ID
+    if session_id is None:
+        raise ValueError("history requires the caller's session id")
+    session = session_id
     if c:
         await observer.log_clear(session=session)
     if d is not None:

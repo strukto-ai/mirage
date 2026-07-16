@@ -80,7 +80,9 @@ EXIT_CODE_CASES: list[tuple[str, str, str]] = [
 
 
 async def main() -> None:
-    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/data": RAMResource()},
+                   mode=MountMode.WRITE,
+                   session_id="default")
     ws.create_session("s2")
 
     for name, session, cmd in CASES:

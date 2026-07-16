@@ -144,29 +144,21 @@ def to_state(entries: dict[str, bytes], meta: dict) -> dict:
             CacheKey.SIZE: c.get(CacheKey.SIZE),
         })
     return {
-        StateKey.VERSION:
-        FORMAT_VERSION,
-        StateKey.MIRAGE_VERSION:
-        config.get(StateKey.MIRAGE_VERSION, "unknown"),
-        StateKey.MOUNTS:
-        mounts,
-        StateKey.SESSIONS:
-        meta.get("sessions", []),
-        StateKey.DEFAULT_SESSION_ID:
-        config.get(StateKey.DEFAULT_SESSION_ID, "default"),
-        StateKey.DEFAULT_AGENT_ID:
-        config.get(StateKey.DEFAULT_AGENT_ID, "default"),
-        StateKey.CURRENT_AGENT_ID:
-        config.get(StateKey.CURRENT_AGENT_ID, "default"),
+        StateKey.VERSION: FORMAT_VERSION,
+        StateKey.MIRAGE_VERSION: config.get(StateKey.MIRAGE_VERSION,
+                                            "unknown"),
+        StateKey.MOUNTS: mounts,
+        StateKey.SESSIONS: meta.get("sessions", []),
+        StateKey.DEFAULT_SESSION_ID: config.get(StateKey.DEFAULT_SESSION_ID),
+        StateKey.DEFAULT_AGENT_ID: config.get(StateKey.DEFAULT_AGENT_ID),
+        StateKey.CURRENT_AGENT_ID: config.get(StateKey.CURRENT_AGENT_ID),
         StateKey.CACHE: {
             CacheKey.LIMIT: config.get(CacheKey.LIMIT, "512MB"),
             CacheKey.MAX_DRAIN_BYTES: config.get(CacheKey.MAX_DRAIN_BYTES),
             CacheKey.ENTRIES: cache_entries,
         },
-        StateKey.HISTORY:
-        None,
+        StateKey.HISTORY: None,
         StateKey.JOBS: [],
-        StateKey.FINGERPRINTS:
-        meta.get("fingerprints", []),
+        StateKey.FINGERPRINTS: meta.get("fingerprints", []),
         StateKey.LIVE_ONLY_MOUNTS: [],
     }

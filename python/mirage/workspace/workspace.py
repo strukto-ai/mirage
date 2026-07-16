@@ -49,11 +49,10 @@ from mirage.runtime.js import JsRuntime, select_js_runtime
 from mirage.runtime.python import PythonRuntime, select_python_runtime
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
-from mirage.types import (DEFAULT_AGENT_ID, DEFAULT_SESSION_ID,
-                          DEFAULT_WORKSPACE_ID, ConsistencyPolicy, DriftPolicy,
-                          FileStat, MountMode, PathSpec, StateKey,
-                          parse_mount_mode)
+from mirage.types import (ConsistencyPolicy, DriftPolicy, FileStat, MountMode,
+                          PathSpec, StateKey, parse_mount_mode)
 from mirage.utils.errors import format_fs_error
+from mirage.utils.ids import new_session_id, new_workspace_id
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.dispatcher import Dispatcher
 from mirage.workspace.file_prompt import build_file_prompt
@@ -93,7 +92,7 @@ class Workspace:
         index: IndexConfig | None = None,
         mode: MountMode = MountMode.READ,
         consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY,
-        session_id: str = DEFAULT_SESSION_ID,
+        session_id: str | None = None,
         agent_id: str | None = None,
         workspace_id: str | None = None,
         store: WorkspaceStateStore | None = None,
@@ -109,7 +108,13 @@ class Workspace:
         # the per-plane params (observe / namespace_store / session_store)
         # remain as direct overrides that win over the provider.
         self._workspace_id = workspace_id if workspace_id is not None \
-            else DEFAULT_WORKSPACE_ID
+            else new_workspace_id()
+        # A minted default session id is provisional: attaching to a
+        # workspace whose discovery record already names one adopts the
+        # stored pointer instead (see _ensure_meta).
+        self._session_id_explicit = session_id is not None
+        if session_id is None:
+            session_id = new_session_id()
         # A caller-passed provider may be shared with sibling workspaces,
         # so only a workspace that built its own provider closes it.
         self._owns_state_store = store is None
@@ -146,10 +151,9 @@ class Workspace:
         # First dispatch/execute drains via asyncio.gather, then clears.
         self._pending_drift: list[tuple[MountEntry, str, str]] = []
         self.job_table = JobTable()
-        resolved_agent = agent_id if agent_id is not None else DEFAULT_AGENT_ID
-        self._current_agent_id: str = resolved_agent
+        self._current_agent_id: str | None = agent_id
         self._default_session_id = session_id
-        self._default_agent_id = resolved_agent
+        self._default_agent_id = agent_id
         self._session_mgr = SessionManager(session_id, store=session_store)
         self._consistency = consistency
         self._registry.set_consistency(consistency)
@@ -204,7 +208,7 @@ class Workspace:
         self._ops = Ops(self._registry.ops_mounts(),
                         on_write=self._invalidate_after_write_by_path,
                         observer=self.observer,
-                        agent_id=resolved_agent,
+                        agent_id=agent_id or "",
                         session_id=session_id,
                         links=self._namespace,
                         stat_overlay=self._merge_overlay)
@@ -662,13 +666,21 @@ class Workspace:
         return self._session_mgr.list()
 
     async def ensure_sessions_loaded(self) -> None:
-        """Hydrate sessions from the session store (idempotent)."""
-        await self._session_mgr.ensure_loaded()
+        """Hydrate sessions from the session store (idempotent).
+
+        The discovery record resolves first so a minted default session
+        id can adopt the stored pointer before hydration keys off it.
+        """
         await self._ensure_meta()
+        await self._session_mgr.ensure_loaded()
 
     @property
     def workspace_id(self) -> str:
         return self._workspace_id
+
+    @property
+    def default_session_id(self) -> str:
+        return self._session_mgr.default_id
 
     @property
     def state_store(self) -> WorkspaceStateStore:
@@ -698,6 +710,11 @@ class Workspace:
                     "default_session_id": self._default_session_id,
                     "created_at": time.time(),
                 })
+        else:
+            stored = existing.get("default_session_id")
+            if not self._session_id_explicit and isinstance(stored, str):
+                self._session_mgr.adopt_default(stored)
+                self._default_session_id = stored
         self._meta_written = True
 
     async def flush_sessions(self) -> None:
@@ -817,7 +834,7 @@ class Workspace:
                       session_id: str | None = ...,
                       stdin: AsyncIterator[bytes] | bytes | None = ...,
                       provision: Literal[False] = ...,
-                      agent_id: str = ...,
+                      agent_id: str | None = ...,
                       cwd: str | None = ...,
                       env: dict[str, str] | None = ...,
                       cancel: asyncio.Event | None = ...,
@@ -831,7 +848,7 @@ class Workspace:
                       stdin: AsyncIterator[bytes] | bytes | None = ...,
                       *,
                       provision: Literal[True],
-                      agent_id: str = ...,
+                      agent_id: str | None = ...,
                       cwd: str | None = ...,
                       env: dict[str, str] | None = ...,
                       cancel: asyncio.Event | None = ...,
@@ -844,7 +861,7 @@ class Workspace:
         session_id: str | None = None,
         stdin: AsyncIterator[bytes] | bytes | None = None,
         provision: bool = False,
-        agent_id: str = DEFAULT_AGENT_ID,
+        agent_id: str | None = None,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
@@ -879,8 +896,8 @@ class Workspace:
         if cancel is not None and cancel.is_set():
             raise MirageAbortError()
         await self._namespace.ensure_loaded()
-        await self._session_mgr.ensure_loaded()
         await self._ensure_meta()
+        await self._session_mgr.ensure_loaded()
         if self._drift_check_pending:
             await self._run_pending_drift_check()
 
@@ -897,7 +914,8 @@ class Workspace:
             effective_session = session.fork(**overrides)
         else:
             effective_session = session
-        self._current_agent_id = agent_id
+        self._current_agent_id = (agent_id if agent_id is not None else
+                                  self._default_agent_id)
         io = IOResult()
         # The line-reader decision (GNU: history is appended where the
         # typed line is read, never inside the evaluator). Internal
@@ -935,7 +953,7 @@ class Workspace:
                 self._namespace,
                 self.job_table,
                 exec_recursion,
-                self._current_agent_id,
+                self._current_agent_id or "",
                 ast,
                 effective_session,
                 stdin,
@@ -983,5 +1001,5 @@ class Workspace:
             self._ops.records.extend(scope.records)
             if is_line:
                 await self.observer.log_execution(
-                    command, io, scope.records, agent_id, session_id,
-                    self._session_cwd(session_id))
+                    command, io, scope.records, self._current_agent_id or "",
+                    session_id, self._session_cwd(session_id))

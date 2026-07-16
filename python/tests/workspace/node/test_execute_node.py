@@ -382,18 +382,19 @@ def test_printenv_all():
 # ── whoami ──────────────────────────────────────
 
 
-def test_whoami_default():
+def test_whoami_errors_without_identity():
+    # No agent ever claimed this workspace: GNU errors for a uid with
+    # no passwd entry, and so do we.
     stdout, io, _, _, _, _ = _exec("whoami", env={})
-    assert io.exit_code == 0
-    assert stdout == b"default\n"
-    assert io.stderr in (None, b"")
+    assert io.exit_code == 1
+    assert io.stderr == b"whoami: cannot find name for user ID\n"
 
 
 def test_whoami_ignores_env_user():
     # GNU whoami reports the effective user, never $USER.
     stdout, io, _, _, _, _ = _exec("whoami", env={"USER": "alice"})
-    assert io.exit_code == 0
-    assert stdout == b"default\n"
+    assert io.exit_code == 1
+    assert stdout != b"alice\n"
 
 
 # ── unsupported node raises ─────────────────────

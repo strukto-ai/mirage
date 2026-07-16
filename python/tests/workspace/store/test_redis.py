@@ -94,7 +94,7 @@ async def test_workspace_discovery_and_session_sharing(prefix):
 
         meta = await store_b.load_meta("agent-ws")
         assert meta is not None
-        assert meta["default_session_id"] == "default"
+        assert meta["default_session_id"] == ws.default_session_id
         sessions = await store_b.sessions("agent-ws").load()
         assert sessions["narrow"]["mount_modes"]["/data"] == "read"
     finally:

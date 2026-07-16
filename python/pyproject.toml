@@ -49,6 +49,7 @@ dependencies = [
     "jq>=1.11.0",
     "pyjwt[crypto]>=2.13.0",
     "dulwich>=1.2.5",
+    "uuid6>=2025.0.1",
 ]
 
 [project.urls]

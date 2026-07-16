@@ -97,7 +97,14 @@ async def handle_whoami(
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     # GNU whoami reports the effective user and never consults $USER;
     # the workspace user (launch agent_id, shared via the namespace
-    # store) is the effective identity here.
+    # store) is the effective identity here. With no claimed identity
+    # it fails like GNU does for a uid with no passwd entry.
+    if namespace.user is None:
+        err = b"whoami: cannot find name for user ID\n"
+        return None, IOResult(exit_code=1,
+                              stderr=err), ExecutionNode(command="whoami",
+                                                         exit_code=1,
+                                                         stderr=err)
     out = f"{namespace.user}\n".encode()
     return out, IOResult(), ExecutionNode(command="whoami", exit_code=0)
 

@@ -14,7 +14,6 @@
 
 import type { OpRecord } from '../observe/record.ts'
 import type { PathSpec } from '../types.ts'
-import { DEFAULT_SESSION_ID } from '../types.ts'
 
 export interface ExecutionNodeInit {
   command?: string | null
@@ -89,7 +88,7 @@ export class ExecutionRecord {
     this.exitCode = init.exitCode
     this.tree = init.tree
     this.timestamp = init.timestamp
-    this.sessionId = init.sessionId ?? DEFAULT_SESSION_ID
+    this.sessionId = init.sessionId ?? ''
   }
 
   toJSON(): Record<string, unknown> {

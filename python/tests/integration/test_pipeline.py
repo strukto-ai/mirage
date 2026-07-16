@@ -17,7 +17,7 @@ import asyncio
 import pytest
 
 from mirage.resource.ram import RAMResource
-from mirage.types import DEFAULT_SESSION_ID, MountMode
+from mirage.types import MountMode
 from mirage.workspace import Workspace
 
 
@@ -40,7 +40,7 @@ def ws():
         {"/data": (mem, MountMode.WRITE)},
         mode=MountMode.WRITE,
     )
-    ws.get_session(DEFAULT_SESSION_ID).cwd = "/"
+    ws.get_session(ws.default_session_id).cwd = "/"
     return ws
 
 
@@ -168,13 +168,13 @@ async def test_heredoc(ws):
 async def test_subshell_cd_isolated(ws):
     await ws.execute("cd /data")
     await ws.execute("(cd /data/subdir)")
-    assert ws.get_session(DEFAULT_SESSION_ID).cwd == "/data"
+    assert ws.get_session(ws.default_session_id).cwd == "/data"
 
 
 @pytest.mark.asyncio
 async def test_subshell_export_isolated(ws):
     await ws.execute("(export LEAK=yes)")
-    assert "LEAK" not in ws.get_session(DEFAULT_SESSION_ID).env
+    assert "LEAK" not in ws.get_session(ws.default_session_id).env
 
 
 @pytest.mark.asyncio
@@ -187,7 +187,7 @@ async def test_subshell_inherits_parent_env(ws):
 @pytest.mark.asyncio
 async def test_nested_subshell(ws):
     await ws.execute("((export DEEP=yes))")
-    assert "DEEP" not in ws.get_session(DEFAULT_SESSION_ID).env
+    assert "DEEP" not in ws.get_session(ws.default_session_id).env
 
 
 # --- Background jobs ---
@@ -204,14 +204,14 @@ async def test_background_basic(ws):
 async def test_background_isolation_env(ws):
     await ws.execute("export BG_VAR=leaked &")
     await ws.execute("wait %1")
-    assert "BG_VAR" not in ws.get_session(DEFAULT_SESSION_ID).env
+    assert "BG_VAR" not in ws.get_session(ws.default_session_id).env
 
 
 @pytest.mark.asyncio
 async def test_background_isolation_cwd(ws):
     await ws.execute("cd /data &")
     await ws.execute("wait %1")
-    assert ws.get_session(DEFAULT_SESSION_ID).cwd == "/"
+    assert ws.get_session(ws.default_session_id).cwd == "/"
 
 
 @pytest.mark.asyncio
@@ -250,9 +250,9 @@ async def test_export_then_variable_expansion(ws):
 @pytest.mark.asyncio
 async def test_export_unset_cycle(ws):
     await ws.execute("export TMP=val")
-    assert ws.get_session(DEFAULT_SESSION_ID).env["TMP"] == "val"
+    assert ws.get_session(ws.default_session_id).env["TMP"] == "val"
     await ws.execute("unset TMP")
-    assert "TMP" not in ws.get_session(DEFAULT_SESSION_ID).env
+    assert "TMP" not in ws.get_session(ws.default_session_id).env
 
 
 @pytest.mark.asyncio
@@ -328,7 +328,7 @@ async def test_for_loop_basic(ws):
 async def test_for_loop_variable_restored(ws):
     await ws.execute("export i=original")
     await ws.execute("for i in 1 2 3; do echo $i; done")
-    assert ws.get_session(DEFAULT_SESSION_ID).env["i"] == "original"
+    assert ws.get_session(ws.default_session_id).env["i"] == "original"
 
 
 # --- If/else ---

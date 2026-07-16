@@ -24,7 +24,6 @@ from mirage.agents.langchain._convert import (io_to_execute_response,
                                               io_to_file_infos,
                                               io_to_grep_matches)
 from mirage.io.types import IOResult
-from mirage.types import DEFAULT_SESSION_ID
 from mirage.workspace.workspace import Workspace
 
 
@@ -40,7 +39,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
         self,
         workspace: Workspace,
         sandbox_id: str = "mirage",
-        session_id: str = DEFAULT_SESSION_ID,
+        session_id: str | None = None,
     ) -> None:
         self._ws = workspace
         self._id = sandbox_id

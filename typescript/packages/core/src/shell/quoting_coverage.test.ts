@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMResource } from '../resource/ram/ram.ts'
-import { DEFAULT_SESSION_ID, MountMode } from '../types.ts'
+import { MountMode } from '../types.ts'
 import { getTestParser, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
@@ -43,7 +43,7 @@ async function makeQuotingWs(): Promise<Workspace> {
     { '/data': ram },
     { mode: MountMode.WRITE, ops: registry, shellParser: parser },
   )
-  ws.getSession(DEFAULT_SESSION_ID).cwd = '/data'
+  ws.getSession(ws.defaultSessionId).cwd = '/data'
   return ws
 }
 

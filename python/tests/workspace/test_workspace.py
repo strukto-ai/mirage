@@ -16,7 +16,7 @@ import asyncio
 
 from mirage.resource.ram import RAMResource
 from mirage.runtime.python import select_python_runtime
-from mirage.types import DEFAULT_SESSION_ID, MountMode
+from mirage.types import MountMode
 from mirage.workspace import Workspace
 
 
@@ -59,7 +59,7 @@ def _ws():
         "/disk/": (disk, MountMode.EXEC),
         "/ram/": (ram, MountMode.EXEC),
     }, )
-    ws.get_session(DEFAULT_SESSION_ID).cwd = "/s3"
+    ws.get_session(ws.default_session_id).cwd = "/s3"
     return ws
 
 
@@ -112,7 +112,7 @@ def test_head_file():
 def test_export():
     ws = _ws()
     _exec(ws, "export MSG=hello")
-    assert ws.get_session(DEFAULT_SESSION_ID).env["MSG"] == "hello"
+    assert ws.get_session(ws.default_session_id).env["MSG"] == "hello"
 
 
 def test_export_used_in_command():
@@ -129,7 +129,7 @@ def test_export_used_in_command():
 def test_cd():
     ws = _ws()
     _exec(ws, "cd /disk")
-    assert ws.get_session(DEFAULT_SESSION_ID).cwd == "/disk"
+    assert ws.get_session(ws.default_session_id).cwd == "/disk"
 
 
 def test_cd_nonexistent():
@@ -180,32 +180,32 @@ def test_redirect_append():
 def test_if_true():
     ws = _ws()
     _exec(ws, "if true; then export R=yes; fi")
-    assert ws.get_session(DEFAULT_SESSION_ID).env["R"] == "yes"
+    assert ws.get_session(ws.default_session_id).env["R"] == "yes"
 
 
 def test_if_false_else():
     ws = _ws()
     _exec(ws, "if false; then export R=yes; else export R=no; fi")
-    assert ws.get_session(DEFAULT_SESSION_ID).env["R"] == "no"
+    assert ws.get_session(ws.default_session_id).env["R"] == "no"
 
 
 def test_for_loop():
     ws = _ws()
     _exec(ws, "for x in a b c; do export LAST=$x; done")
-    assert ws.get_session(DEFAULT_SESSION_ID).env["LAST"] == "c"
+    assert ws.get_session(ws.default_session_id).env["LAST"] == "c"
 
 
 def test_while_false():
     ws = _ws()
     io = _exec(ws, "while false; do export RAN=yes; done")
     assert io.exit_code == 0
-    assert "RAN" not in ws.get_session(DEFAULT_SESSION_ID).env
+    assert "RAN" not in ws.get_session(ws.default_session_id).env
 
 
 def test_case_match():
     ws = _ws()
     _exec(ws, "case hello in hello) export M=yes;; esac")
-    assert ws.get_session(DEFAULT_SESSION_ID).env["M"] == "yes"
+    assert ws.get_session(ws.default_session_id).env["M"] == "yes"
 
 
 # ── operators ──────────────────────────────────
@@ -214,7 +214,7 @@ def test_case_match():
 def test_semicolons():
     ws = _ws()
     _exec(ws, "export A=1; export B=2; export C=3")
-    s = ws.get_session(DEFAULT_SESSION_ID)
+    s = ws.get_session(ws.default_session_id)
     assert s.env["A"] == "1"
     assert s.env["B"] == "2"
     assert s.env["C"] == "3"
@@ -223,19 +223,19 @@ def test_semicolons():
 def test_and_chain():
     ws = _ws()
     _exec(ws, "true && export OK=yes")
-    assert ws.get_session(DEFAULT_SESSION_ID).env["OK"] == "yes"
+    assert ws.get_session(ws.default_session_id).env["OK"] == "yes"
 
 
 def test_and_short_circuit():
     ws = _ws()
     _exec(ws, "false && export SKIP=yes")
-    assert "SKIP" not in ws.get_session(DEFAULT_SESSION_ID).env
+    assert "SKIP" not in ws.get_session(ws.default_session_id).env
 
 
 def test_or_fallback():
     ws = _ws()
     _exec(ws, "false || export FALL=yes")
-    assert ws.get_session(DEFAULT_SESSION_ID).env["FALL"] == "yes"
+    assert ws.get_session(ws.default_session_id).env["FALL"] == "yes"
 
 
 # ── subshell ───────────────────────────────────
@@ -245,7 +245,7 @@ def test_subshell_isolates_env():
     ws = _ws()
     _exec(ws, "export X=outer")
     _exec(ws, "(export X=inner)")
-    assert ws.get_session(DEFAULT_SESSION_ID).env["X"] == "outer"
+    assert ws.get_session(ws.default_session_id).env["X"] == "outer"
 
 
 # ── function ───────────────────────────────────
@@ -254,13 +254,13 @@ def test_subshell_isolates_env():
 def test_function_define_call():
     ws = _ws()
     _exec(ws, "greet() { export MSG=hello; }; greet")
-    assert ws.get_session(DEFAULT_SESSION_ID).env["MSG"] == "hello"
+    assert ws.get_session(ws.default_session_id).env["MSG"] == "hello"
 
 
 def test_function_with_args():
     ws = _ws()
     _exec(ws, "f() { export A=$1; export B=$2; }; f x y")
-    s = ws.get_session(DEFAULT_SESSION_ID)
+    s = ws.get_session(ws.default_session_id)
     assert s.env["A"] == "x"
     assert s.env["B"] == "y"
 
@@ -286,7 +286,7 @@ def test_negated_false():
 def test_brace_group():
     ws = _ws()
     _exec(ws, "{ export A=1; export B=2; }")
-    s = ws.get_session(DEFAULT_SESSION_ID)
+    s = ws.get_session(ws.default_session_id)
     assert s.env["A"] == "1"
     assert s.env["B"] == "2"
 
@@ -316,14 +316,14 @@ def test_var_concat_path():
 def test_bare_assignment():
     ws = _ws()
     _exec(ws, "X=hello")
-    assert ws.get_session(DEFAULT_SESSION_ID).env["X"] == "hello"
+    assert ws.get_session(ws.default_session_id).env["X"] == "hello"
 
 
 def test_assignment_expansion():
     ws = _ws()
     _exec(ws, "export BASE=/s3")
     _exec(ws, "OUT=$BASE/result.txt")
-    assert ws.get_session(DEFAULT_SESSION_ID).env["OUT"] == "/s3/result.txt"
+    assert ws.get_session(ws.default_session_id).env["OUT"] == "/s3/result.txt"
 
 
 # ── while read ─────────────────────────────────
@@ -334,7 +334,7 @@ def test_while_read():
     _exec(ws,
           "while read LINE; do export LAST=$LINE; done",
           stdin=b"a\nb\nc\n")
-    assert ws.get_session(DEFAULT_SESSION_ID).env["LAST"] == "c"
+    assert ws.get_session(ws.default_session_id).env["LAST"] == "c"
 
 
 # ── cross-mount ────────────────────────────────
@@ -396,9 +396,9 @@ def test_exit_code_propagation():
 def test_last_exit_code():
     ws = _ws()
     _exec(ws, "true")
-    assert ws.get_session(DEFAULT_SESSION_ID).last_exit_code == 0
+    assert ws.get_session(ws.default_session_id).last_exit_code == 0
     _exec(ws, "false")
-    assert ws.get_session(DEFAULT_SESSION_ID).last_exit_code == 1
+    assert ws.get_session(ws.default_session_id).last_exit_code == 1
 
 
 # ═══════════════════════════════════════════════
@@ -508,7 +508,7 @@ def test_nested_for_cross_mount():
     done
     """
     ws = _ws()
-    s = ws.get_session(DEFAULT_SESSION_ID)
+    s = ws.get_session(ws.default_session_id)
     _exec(
         ws, "for src in /s3 /ram; do "
         "for f in report.csv notes.txt; do "
@@ -529,7 +529,7 @@ def test_background_with_foreground_work():
     _exec(
         ws, "sleep 0.01 & export A=1; export B=2; "
         "cat /s3/report.csv > /disk/copy.txt")
-    s = ws.get_session(DEFAULT_SESSION_ID)
+    s = ws.get_session(ws.default_session_id)
     assert s.env["A"] == "1"
     assert s.env["B"] == "2"
     io = _exec(ws, "cat /disk/copy.txt")
@@ -544,7 +544,7 @@ def test_subshell_pipeline_redirect():
     ws = _ws()
     _exec(ws, "(export TMP=inner; cat /s3/report.csv) | "
           "sort > /disk/out.txt")
-    s = ws.get_session(DEFAULT_SESSION_ID)
+    s = ws.get_session(ws.default_session_id)
     assert "TMP" not in s.env
     io = _exec(ws, "cat /disk/out.txt")
     out = _stdout(io)
@@ -810,7 +810,7 @@ def test_nl_numbers():
 def test_unset_removes():
     ws = _ws()
     _exec(ws, "export FOO=bar; unset FOO")
-    assert "FOO" not in ws.get_session(DEFAULT_SESSION_ID).env
+    assert "FOO" not in ws.get_session(ws.default_session_id).env
 
 
 def test_printenv_single():
@@ -832,7 +832,7 @@ def test_printenv_all():
 def test_export_override():
     ws = _ws()
     _exec(ws, "export X=first; export X=second")
-    assert ws.get_session(DEFAULT_SESSION_ID).env["X"] == "second"
+    assert ws.get_session(ws.default_session_id).env["X"] == "second"
 
 
 def test_env_in_pipeline():
@@ -922,7 +922,7 @@ def test_config_loader():
     _exec(ws,
           "while read LINE; do export $LINE; done",
           stdin=b"DB_HOST=localhost\nDB_PORT=5432\n")
-    s = ws.get_session(DEFAULT_SESSION_ID)
+    s = ws.get_session(ws.default_session_id)
     assert s.env["DB_HOST"] == "localhost"
     assert s.env["DB_PORT"] == "5432"
 
@@ -1178,7 +1178,7 @@ def test_pipeline_four_stages():
 def test_pipeline_with_default_cwd():
     """Pipeline works even with default cwd=/mirage."""
     ws = _ws()
-    ws.get_session(DEFAULT_SESSION_ID).cwd = "/mirage"
+    ws.get_session(ws.default_session_id).cwd = "/mirage"
     io = _exec(ws, "cat /s3/report.csv | wc -l")
     assert io.exit_code == 0
     assert b"3" in _stdout(io)
@@ -1198,7 +1198,7 @@ def test_pipeline_sed():
 def test_cache_fallback_wc():
     """wc uses cache resource when cwd has no mount."""
     ws = _ws()
-    ws.get_session(DEFAULT_SESSION_ID).cwd = "/mirage"
+    ws.get_session(ws.default_session_id).cwd = "/mirage"
     io = _exec(ws, "cat /s3/report.csv | wc -l")
     assert io.exit_code == 0
     assert b"3" in _stdout(io)
@@ -1207,7 +1207,7 @@ def test_cache_fallback_wc():
 def test_cache_fallback_head():
     """head uses cache resource fallback."""
     ws = _ws()
-    ws.get_session(DEFAULT_SESSION_ID).cwd = "/nonexistent"
+    ws.get_session(ws.default_session_id).cwd = "/nonexistent"
     io = _exec(ws, "cat /ram/notes.txt | head -n 1")
     assert io.exit_code == 0
     assert b"line1" in _stdout(io)
@@ -1216,7 +1216,7 @@ def test_cache_fallback_head():
 def test_cache_fallback_grep():
     """grep uses cache resource fallback in pipeline."""
     ws = _ws()
-    ws.get_session(DEFAULT_SESSION_ID).cwd = "/mirage"
+    ws.get_session(ws.default_session_id).cwd = "/mirage"
     io = _exec(ws, "cat /s3/report.csv | grep alice")
     assert io.exit_code == 0
     assert b"alice" in _stdout(io)
@@ -1225,7 +1225,7 @@ def test_cache_fallback_grep():
 def test_cache_fallback_sort_uniq():
     """sort | uniq uses cache resource."""
     ws = _ws()
-    ws.get_session(DEFAULT_SESSION_ID).cwd = "/mirage"
+    ws.get_session(ws.default_session_id).cwd = "/mirage"
     io = _exec(ws, "cat /ram/words.txt | sort | uniq")
     assert io.exit_code == 0
     assert _stdout(io).count(b"apple") == 1
@@ -1234,7 +1234,7 @@ def test_cache_fallback_sort_uniq():
 def test_cache_fallback_multi_pipe():
     """Four-stage pipeline with cache fallback."""
     ws = _ws()
-    ws.get_session(DEFAULT_SESSION_ID).cwd = "/mirage"
+    ws.get_session(ws.default_session_id).cwd = "/mirage"
     io = _exec(ws, "cat /s3/report.csv | grep -v name "
                "| cut -d, -f1 | sort")
     assert io.exit_code == 0
@@ -2510,11 +2510,11 @@ def test_unmount_after_close_raises():
 
 def test_cd_nonexistent_under_mount_keeps_cwd():
     ws = Workspace(resources={"/": (RAMResource(), MountMode.WRITE)}, )
-    before = ws.get_session(DEFAULT_SESSION_ID).cwd
+    before = ws.get_session(ws.default_session_id).cwd
     io = _exec(ws, "cd /missing")
     assert io.exit_code != 0
     assert b"No such file or directory" in io.stderr
-    assert ws.get_session(DEFAULT_SESSION_ID).cwd == before
+    assert ws.get_session(ws.default_session_id).cwd == before
 
 
 def test_cd_into_mount_root_succeeds():
@@ -2524,7 +2524,7 @@ def test_cd_into_mount_root_succeeds():
     }, )
     io = _exec(ws, "cd /data")
     assert io.exit_code == 0
-    assert ws.get_session(DEFAULT_SESSION_ID).cwd == "/data"
+    assert ws.get_session(ws.default_session_id).cwd == "/data"
 
 
 # ── ls injects child mounts as virtual subdirectories ─────────────

@@ -17,7 +17,7 @@ import asyncio
 from mirage.io.types import IOResult
 from mirage.resource.ram import RAMResource
 from mirage.shell.job_table import JobStatus, JobTable
-from mirage.types import DEFAULT_SESSION_ID, MountMode
+from mirage.types import MountMode
 from mirage.workspace import Workspace
 from mirage.workspace.types import ExecutionNode
 
@@ -86,7 +86,7 @@ def test_background_does_not_consume_stdin():
             {"/data": (mem, MountMode.WRITE)},
             mode=MountMode.WRITE,
         )
-        ws.get_session(DEFAULT_SESSION_ID).cwd = "/data"
+        ws.get_session(ws.default_session_id).cwd = "/data"
         io = await ws.execute("sleep 0 & cat", stdin=b"hello\n")
         assert (await io.stdout_str()).strip() == "hello"
 

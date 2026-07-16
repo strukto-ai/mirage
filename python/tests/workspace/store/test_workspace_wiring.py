@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import uuid
+
 import pytest
 
 from mirage.observe.store import RAMObserverStore
@@ -32,9 +34,67 @@ async def test_meta_written_on_first_execute():
     meta = await store.load_meta("ws-a")
     assert meta is not None
     assert meta["workspace_id"] == "ws-a"
-    assert meta["default_session_id"] == "default"
+    assert meta["default_session_id"] == ws.default_session_id
+    assert uuid.UUID(meta["default_session_id"]).version == 7
     assert meta["created_at"] > 0
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_bare_workspace_mints_uuid7_ids():
+    ws = Workspace({"/data": RAMResource()}, mode=MountMode.EXEC)
+    assert uuid.UUID(ws.workspace_id).version == 7
+    assert uuid.UUID(ws.default_session_id).version == 7
+    sibling = Workspace({"/data": RAMResource()}, mode=MountMode.EXEC)
+    assert sibling.workspace_id != ws.workspace_id
+    await ws.close()
+    await sibling.close()
+
+
+@pytest.mark.asyncio
+async def test_attach_adopts_stored_default_session():
+    """A minted default session id yields to the discovery record's
+    pointer, so a fresh attach lands on the writer's default session."""
+    store = RAMWorkspaceStateStore()
+    ws_a = Workspace({"/data": RAMResource()},
+                     mode=MountMode.EXEC,
+                     workspace_id="shared",
+                     store=store)
+    await ws_a.execute("export MARK=1")
+    await ws_a.flush_sessions()
+
+    ws_b = Workspace({"/data": RAMResource()},
+                     mode=MountMode.EXEC,
+                     workspace_id="shared",
+                     store=store)
+    minted = ws_b.default_session_id
+    await ws_b.ensure_sessions_loaded()
+    assert ws_b.default_session_id == ws_a.default_session_id
+    assert ws_b.default_session_id != minted
+    session = ws_b.get_session(ws_b.default_session_id)
+    assert session.env.get("MARK") == "1"
+    await ws_a.close()
+    await ws_b.close()
+
+
+@pytest.mark.asyncio
+async def test_explicit_session_id_is_not_adopted_away():
+    store = RAMWorkspaceStateStore()
+    ws_a = Workspace({"/data": RAMResource()},
+                     mode=MountMode.EXEC,
+                     workspace_id="shared",
+                     store=store)
+    await ws_a.execute("echo hi")
+
+    ws_b = Workspace({"/data": RAMResource()},
+                     mode=MountMode.EXEC,
+                     workspace_id="shared",
+                     session_id="pinned",
+                     store=store)
+    await ws_b.ensure_sessions_loaded()
+    assert ws_b.default_session_id == "pinned"
+    await ws_a.close()
+    await ws_b.close()
 
 
 @pytest.mark.asyncio

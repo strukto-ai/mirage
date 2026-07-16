@@ -29,7 +29,7 @@ async def test_grep_recursive_dir_returns_matches(workspace):
                               b"hello world\ngoodbye\nhello again")
     await workspace.ops.write("/sub/b.txt", b"nothing here\n")
 
-    io = await workspace.execute("grep -rn hello /sub", session_id="default")
+    io = await workspace.execute("grep -rn hello /sub")
     output = (io.stdout or b"").decode()
     assert io.exit_code == 0
     assert "hello" in output

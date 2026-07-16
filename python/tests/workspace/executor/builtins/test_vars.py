@@ -89,7 +89,8 @@ async def test_whoami_prints_workspace_user():
 
 
 @pytest.mark.asyncio
-async def test_whoami_defaults_without_identity():
+async def test_whoami_errors_without_identity():
     out, io, _ = await handle_whoami(Namespace(MagicMock()))
-    assert io.exit_code == 0
-    assert out == b"default\n"
+    assert io.exit_code == 1
+    assert out is None
+    assert io.stderr == b"whoami: cannot find name for user ID\n"

@@ -23,7 +23,7 @@ import asyncio
 import pytest
 
 from mirage.resource.ram import RAMResource
-from mirage.types import DEFAULT_SESSION_ID, MountMode
+from mirage.types import MountMode
 from mirage.workspace import Workspace
 
 
@@ -41,7 +41,7 @@ def _ws_with_paths():
     ram._store.dirs.add("/my folder")
     ram._store.dirs.add("/数据")
     ws = Workspace(resources={"/data/": (ram, MountMode.WRITE)}, )
-    ws.get_session(DEFAULT_SESSION_ID).cwd = "/data"
+    ws.get_session(ws.default_session_id).cwd = "/data"
     return ws
 
 

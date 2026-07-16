@@ -27,8 +27,7 @@ async def test_rg_dash_e_matches_like_positional_pattern(workspace):
     await workspace.ops.mkdir("/data")
     await workspace.ops.write("/data/a.txt", b"orange line\nplain line\n")
 
-    io = await workspace.execute("rg -e orange /data/a.txt",
-                                 session_id="default")
+    io = await workspace.execute("rg -e orange /data/a.txt")
     assert io.exit_code == 0
     assert "orange line" in (io.stdout or b"").decode()
 
@@ -39,8 +38,7 @@ async def test_rg_repeated_dash_e_matches_any_pattern(workspace):
     await workspace.ops.write("/data/a.txt",
                               b"orange line\nplain line\nlast line\n")
 
-    io = await workspace.execute("rg -e orange -e plain /data/a.txt",
-                                 session_id="default")
+    io = await workspace.execute("rg -e orange -e plain /data/a.txt")
     assert io.exit_code == 0
     out = (io.stdout or b"").decode()
     assert "orange line" in out
@@ -55,8 +53,7 @@ async def test_rg_dash_f_reads_patterns_from_file(workspace):
                               b"orange line\nplain line\nlast line\n")
     await workspace.ops.write("/data/pats.txt", b"orange\nlast\n")
 
-    io = await workspace.execute("rg -f /data/pats.txt /data/a.txt",
-                                 session_id="default")
+    io = await workspace.execute("rg -f /data/pats.txt /data/a.txt")
     assert io.exit_code == 0
     out = (io.stdout or b"").decode()
     assert "orange line" in out
@@ -71,8 +68,7 @@ async def test_rg_dash_e_and_dash_f_union(workspace):
                               b"orange line\nplain line\nlast line\n")
     await workspace.ops.write("/data/pats.txt", b"last\n")
 
-    io = await workspace.execute("rg -e plain -f /data/pats.txt /data/a.txt",
-                                 session_id="default")
+    io = await workspace.execute("rg -e plain -f /data/pats.txt /data/a.txt")
     assert io.exit_code == 0
     out = (io.stdout or b"").decode()
     assert "plain line" in out

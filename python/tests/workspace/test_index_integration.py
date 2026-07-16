@@ -20,7 +20,7 @@ from moto import mock_aws
 from mirage.cache.index import LookupStatus
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3.s3 import S3Config, S3Resource
-from mirage.types import DEFAULT_SESSION_ID, MountMode
+from mirage.types import MountMode
 from mirage.workspace import Workspace
 
 
@@ -66,7 +66,7 @@ def _ram_ws():
     p._store.files["/sub/b.txt"] = b"bbb\n"
     p._store.files["/sub/c.csv"] = b"col\n"
     ws = Workspace(resources={"/data/": (p, MountMode.WRITE)}, )
-    ws.get_session(DEFAULT_SESSION_ID).cwd = "/data"
+    ws.get_session(ws.default_session_id).cwd = "/data"
     return ws, p
 
 
@@ -157,7 +157,7 @@ def test_index_expired_refetches():
     p._store.dirs.add("/sub")
     p._store.files["/sub/a.txt"] = b"aaa\n"
     ws = Workspace(resources={"/data/": (p, MountMode.WRITE)}, )
-    ws.get_session(DEFAULT_SESSION_ID).cwd = "/data"
+    ws.get_session(ws.default_session_id).cwd = "/data"
     _run(ws.execute("cat /data/sub/*.txt"))
     listing = _run(p.index.list_dir("/data/sub"))
     # RAM ttl=0 → expired immediately after set

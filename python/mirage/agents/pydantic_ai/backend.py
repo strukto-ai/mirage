@@ -25,7 +25,6 @@ from mirage.agents.pydantic_ai._convert import (io_to_execute_response,
 from mirage.bridge.sync import run_async_from_sync
 from mirage.core.filetype.pdf import pages_to_images
 from mirage.io.types import IOResult
-from mirage.types import DEFAULT_SESSION_ID
 from mirage.workspace.workspace import Workspace
 
 
@@ -41,7 +40,7 @@ class PydanticAIWorkspace(SandboxProtocol):
         self,
         workspace: Workspace,
         sandbox_id: str = "mirage",
-        session_id: str = DEFAULT_SESSION_ID,
+        session_id: str | None = None,
     ) -> None:
         self._ws = workspace
         self._id = sandbox_id

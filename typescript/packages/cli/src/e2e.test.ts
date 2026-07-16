@@ -149,7 +149,9 @@ describe('mirage CLI end-to-end', () => {
     const cfgPath = writeRamConfig(tmp, 'config.yaml')
 
     const created = (await runCli(env, ['workspace', 'create', cfgPath])) as { id: string }
-    expect(created.id).toMatch(/^ws_/)
+    expect(created.id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    )
 
     const listed = (await runCli(env, ['workspace', 'list'])) as { id: string }[]
     expect(listed.some((w) => w.id === created.id)).toBe(true)
