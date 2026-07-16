@@ -27,18 +27,12 @@ from mirage.runtime.js.select import validate_js_runtime_name
 from mirage.runtime.python.select import (DEFAULT_PYTHON_RUNTIME,
                                           validate_python_runtime_name)
 from mirage.types import CommandSafeguard, ConsistencyPolicy, MountMode
-from mirage.workspace.mount.namespace import NamespaceStore, RAMNamespaceStore
-from mirage.workspace.session import RAMSessionStore, SessionStore
+from mirage.workspace.store import RAMWorkspaceStateStore, WorkspaceStateStore
 
 try:
-    from mirage.workspace.mount.namespace import RedisNamespaceStore
+    from mirage.workspace.store import RedisWorkspaceStateStore
 except ImportError:
-    RedisNamespaceStore = None
-
-try:
-    from mirage.workspace.session import RedisSessionStore
-except ImportError:
-    RedisSessionStore = None
+    RedisWorkspaceStateStore = None
 
 
 def _coerce_mount_mode(value):
@@ -151,44 +145,47 @@ IndexBlock = Annotated[
 ]
 
 
-class RamNamespaceBlock(BaseModel):
+class RamStoreBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["ram"] = "ram"
 
 
-class RedisNamespaceBlock(BaseModel):
+class RedisStoreBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["redis"]
     url: str = "redis://localhost:6379/0"
-    key_prefix: str = "mirage:namespace:"
+    key_prefix: str = "mirage:"
 
 
-NamespaceBlock = Annotated[
-    RamNamespaceBlock | RedisNamespaceBlock,
+StoreGroupBlock = Annotated[
+    RamStoreBlock | RedisStoreBlock,
     Field(discriminator="type"),
 ]
 
 
-class RamSessionBlock(BaseModel):
+class StoreBlock(BaseModel):
+    """The workspace state store: one block, four planes.
+
+    The top-level type/url/key_prefix pick the default backend for
+    every control-plane group (namespace nodes, observer events,
+    sessions + workspace metadata). The optional per-group overrides
+    redirect one group to a different backend, e.g. large observer
+    logs to a separate server. Sessions and workspace metadata move
+    together by design (the default-session pointer must live beside
+    the session table it points into), so there is one `workspace`
+    override, not two.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
-    type: Literal["ram"] = "ram"
-
-
-class RedisSessionBlock(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    type: Literal["redis"]
+    type: Literal["ram", "redis"] = "ram"
     url: str = "redis://localhost:6379/0"
-    key_prefix: str = "mirage:session:"
-
-
-SessionBlock = Annotated[
-    RamSessionBlock | RedisSessionBlock,
-    Field(discriminator="type"),
-]
+    key_prefix: str = "mirage:"
+    namespace: StoreGroupBlock | None = None
+    observer: StoreGroupBlock | None = None
+    workspace: StoreGroupBlock | None = None
 
 
 class MountBlock(BaseModel):
@@ -270,10 +267,10 @@ class WorkspaceConfig(BaseModel):
     consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
     default_session_id: str = "default"
     default_agent_id: str = "default"
+    workspace_id: str | None = None
     cache: CacheBlock | None = None
     index: IndexBlock | None = None
-    namespace: NamespaceBlock | None = None
-    session: SessionBlock | None = None
+    store: StoreBlock | None = None
 
     @field_validator("mode", mode="before")
     @classmethod
@@ -312,10 +309,10 @@ class WorkspaceConfig(BaseModel):
             kwargs["cache"] = _build_cache_config(self.cache)
         if self.index is not None:
             kwargs["index"] = _build_index_config(self.index)
-        if self.namespace is not None:
-            kwargs["namespace_store"] = _build_namespace_store(self.namespace)
-        if self.session is not None:
-            kwargs["session_store"] = _build_session_store(self.session)
+        if self.workspace_id is not None:
+            kwargs["workspace_id"] = self.workspace_id
+        if self.store is not None:
+            kwargs["store"] = _build_state_store(self.store)
         if self.runtime is not None:
             kwargs["python_runtime"] = self.runtime.python
             if self.runtime.js is not None:
@@ -362,25 +359,37 @@ def _build_index_config(block: RamIndexBlock | RedisIndexBlock) -> IndexConfig:
     return IndexConfig(ttl=block.ttl)
 
 
-def _build_namespace_store(
-        block: RamNamespaceBlock | RedisNamespaceBlock) -> NamespaceStore:
-    if isinstance(block, RedisNamespaceBlock):
-        if RedisNamespaceStore is None:
-            raise ImportError("A redis namespace requires the 'redis' extra. "
+def _build_store_group(
+        block: RamStoreBlock | RedisStoreBlock) -> WorkspaceStateStore:
+    if isinstance(block, RedisStoreBlock):
+        if RedisWorkspaceStateStore is None:
+            raise ImportError("A redis store requires the 'redis' extra. "
                               "Install with: pip install mirage-ai[redis]")
-        return RedisNamespaceStore(url=block.url, key_prefix=block.key_prefix)
-    return RAMNamespaceStore()
+        return RedisWorkspaceStateStore(url=block.url,
+                                        key_prefix=block.key_prefix)
+    return RAMWorkspaceStateStore()
 
 
-def _build_session_store(
-        block: RamSessionBlock | RedisSessionBlock) -> SessionStore:
-    if isinstance(block, RedisSessionBlock):
-        if RedisSessionStore is None:
-            raise ImportError(
-                "A redis session store requires the 'redis' extra. "
-                "Install with: pip install mirage-ai[redis]")
-        return RedisSessionStore(url=block.url, key_prefix=block.key_prefix)
-    return RAMSessionStore()
+def _build_state_store(block: StoreBlock) -> WorkspaceStateStore:
+    overrides: dict[str, WorkspaceStateStore | None] = {
+        "namespace":
+        _build_store_group(block.namespace)
+        if block.namespace is not None else None,
+        "observer":
+        _build_store_group(block.observer)
+        if block.observer is not None else None,
+        "workspace":
+        _build_store_group(block.workspace)
+        if block.workspace is not None else None,
+    }
+    if block.type == "redis":
+        if RedisWorkspaceStateStore is None:
+            raise ImportError("A redis store requires the 'redis' extra. "
+                              "Install with: pip install mirage-ai[redis]")
+        return RedisWorkspaceStateStore(url=block.url,
+                                        key_prefix=block.key_prefix,
+                                        **overrides)
+    return RAMWorkspaceStateStore(**overrides)
 
 
 def load_config(source: str | Path | dict,

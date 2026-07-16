@@ -23,18 +23,15 @@ import {
   JS_RUNTIMES,
   PYTHON_RUNTIMES,
   RAMFileCacheStore,
-  RAMNamespaceStore,
-  RAMSessionStore,
+  RAMWorkspaceStateStore,
   RedisFileCacheStore,
-  RedisNamespaceStore,
-  RedisSessionStore,
+  RedisWorkspaceStateStore,
   validateRuntimeOptions,
   type FileCache,
   type IndexConfig,
-  type NamespaceStore,
   type RedisIndexConfig,
   type Resource,
-  type SessionStore,
+  type WorkspaceStateStore,
 } from '@struktoai/mirage-node'
 
 const VALID_MODES = new Set<string>([MountMode.READ, MountMode.WRITE, MountMode.EXEC])
@@ -126,8 +123,15 @@ function normalizeConfigKeys(raw: Record<string, unknown>): Record<string, unkno
   const out = camelizeKeys(raw)
   if (isPlainObject(out.cache)) out.cache = camelizeKeys(out.cache)
   if (isPlainObject(out.index)) out.index = camelizeKeys(out.index)
-  if (isPlainObject(out.namespace)) out.namespace = camelizeKeys(out.namespace)
-  if (isPlainObject(out.session)) out.session = camelizeKeys(out.session)
+  if (isPlainObject(out.store)) {
+    const store = camelizeKeys(out.store)
+    for (const group of ['namespace', 'observer', 'workspace']) {
+      if (isPlainObject(store[group])) {
+        store[group] = camelizeKeys(store[group])
+      }
+    }
+    out.store = store
+  }
   if (isPlainObject(out.runtime)) {
     const runtime = camelizeKeys(out.runtime)
     for (const name of RUNTIME_BLOCK_NAMES) {
@@ -234,24 +238,33 @@ interface RedisIndexBlock {
   keyPrefix?: string
 }
 
-interface RamNamespaceBlock {
+interface RamStoreGroupBlock {
   type?: 'ram'
 }
 
-interface RedisNamespaceBlock {
+interface RedisStoreGroupBlock {
   type: 'redis'
   url?: string
   keyPrefix?: string
 }
 
-interface RamSessionBlock {
-  type?: 'ram'
-}
+type StoreGroupBlock = RamStoreGroupBlock | RedisStoreGroupBlock
 
-interface RedisSessionBlock {
-  type: 'redis'
+/**
+ * The workspace state store: one block, four planes. The top-level
+ * type/url/keyPrefix pick the default backend for every control-plane
+ * group (namespace nodes, observer events, sessions + workspace
+ * metadata); the optional per-group overrides redirect one group to a
+ * different backend. Sessions and workspace metadata move together by
+ * design, so there is one `workspace` override, not two.
+ */
+interface StoreBlock {
+  type?: 'ram' | 'redis'
   url?: string
   keyPrefix?: string
+  namespace?: StoreGroupBlock | null
+  observer?: StoreGroupBlock | null
+  workspace?: StoreGroupBlock | null
 }
 
 interface RuntimeBlock {
@@ -271,10 +284,10 @@ export interface WorkspaceConfigRaw {
   consistency?: string
   defaultSessionId?: string
   defaultAgentId?: string
+  workspaceId?: string
   cache?: RamCacheBlock | RedisCacheBlock | null
   index?: RamIndexBlock | RedisIndexBlock | null
-  namespace?: RamNamespaceBlock | RedisNamespaceBlock | null
-  session?: RamSessionBlock | RedisSessionBlock | null
+  store?: StoreBlock | null
 }
 
 function readProcessEnv(): Record<string, string> {
@@ -326,7 +339,8 @@ export interface WorkspaceArgs {
     agentId: string
     cache?: FileCache & Resource
     index?: IndexConfig
-    namespaceStore?: NamespaceStore
+    workspaceId?: string
+    store?: WorkspaceStateStore
     pythonRuntime?: string
     jsRuntime?: string
     runtimeOptions?: Record<string, Record<string, unknown>>
@@ -368,30 +382,31 @@ function buildIndex(
   return cfg
 }
 
-function buildNamespaceStore(
-  block: RamNamespaceBlock | RedisNamespaceBlock | null | undefined,
-): NamespaceStore | undefined {
-  if (block === null || block === undefined) return undefined
+function buildStoreGroup(block: StoreGroupBlock): WorkspaceStateStore {
   if (block.type === 'redis') {
-    return new RedisNamespaceStore({
+    return new RedisWorkspaceStateStore({
       ...(block.url !== undefined ? { url: block.url } : {}),
       ...(block.keyPrefix !== undefined ? { keyPrefix: block.keyPrefix } : {}),
     })
   }
-  return new RAMNamespaceStore()
+  return new RAMWorkspaceStateStore()
 }
 
-function buildSessionStore(
-  block: RamSessionBlock | RedisSessionBlock | null | undefined,
-): SessionStore | undefined {
+function buildStateStore(block: StoreBlock | null | undefined): WorkspaceStateStore | undefined {
   if (block === null || block === undefined) return undefined
+  const overrides = {
+    ...(block.namespace != null ? { namespace: buildStoreGroup(block.namespace) } : {}),
+    ...(block.observer != null ? { observer: buildStoreGroup(block.observer) } : {}),
+    ...(block.workspace != null ? { workspace: buildStoreGroup(block.workspace) } : {}),
+  }
   if (block.type === 'redis') {
-    return new RedisSessionStore({
+    return new RedisWorkspaceStateStore({
       ...(block.url !== undefined ? { url: block.url } : {}),
       ...(block.keyPrefix !== undefined ? { keyPrefix: block.keyPrefix } : {}),
+      ...overrides,
     })
   }
-  return new RAMSessionStore()
+  return new RAMWorkspaceStateStore(overrides)
 }
 
 export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<WorkspaceArgs> {
@@ -416,8 +431,7 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
   }
   const cache = buildCache(cfg.cache)
   const index = buildIndex(cfg.index)
-  const namespaceStore = buildNamespaceStore(cfg.namespace)
-  const sessionStore = buildSessionStore(cfg.session)
+  const stateStore = buildStateStore(cfg.store)
   return {
     resources,
     options: {
@@ -425,10 +439,10 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
       consistency,
       sessionId: cfg.defaultSessionId ?? 'default',
       agentId: cfg.defaultAgentId ?? 'default',
+      ...(cfg.workspaceId !== undefined ? { workspaceId: cfg.workspaceId } : {}),
       ...(cache !== undefined ? { cache } : {}),
       ...(index !== undefined ? { index } : {}),
-      ...(namespaceStore !== undefined ? { namespaceStore } : {}),
-      ...(sessionStore !== undefined ? { sessionStore } : {}),
+      ...(stateStore !== undefined ? { store: stateStore } : {}),
       ...(cfg.runtime?.python !== undefined
         ? { pythonRuntime: coercePythonRuntime(cfg.runtime.python) }
         : {}),

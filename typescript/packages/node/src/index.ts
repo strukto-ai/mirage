@@ -29,6 +29,10 @@ export {
   type RedisNamespaceStoreOptions,
 } from './workspace/namespace/redis.ts'
 export { RedisSessionStore, type RedisSessionStoreOptions } from './workspace/session/redis.ts'
+export {
+  RedisWorkspaceStateStore,
+  type RedisWorkspaceStateStoreOptions,
+} from './workspace/store/redis.ts'
 export { patchNodeFs } from './fs_monkey.ts'
 export {
   RedisResource,

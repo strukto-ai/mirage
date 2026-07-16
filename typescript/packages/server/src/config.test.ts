@@ -12,7 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { RAMNamespaceStore, RedisFileCacheStore, RedisNamespaceStore } from '@struktoai/mirage-node'
+import {
+  RAMNamespaceStore,
+  RAMWorkspaceStateStore,
+  RedisFileCacheStore,
+  RedisNamespaceStore,
+  RedisWorkspaceStateStore,
+} from '@struktoai/mirage-node'
 import { describe, expect, it } from 'vitest'
 import { interpolateEnv, loadWorkspaceConfig, configToWorkspaceArgs } from './config.ts'
 
@@ -146,22 +152,47 @@ describe('configToWorkspaceArgs', () => {
     expect(args.options.cache).toBeInstanceOf(RedisFileCacheStore)
   })
 
-  it('builds a redis namespace store from a namespace block (snake_case key_prefix)', async () => {
+  it('builds a redis state store from a store block (snake_case key_prefix)', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { resource: 'ram' } },
-      namespace: { type: 'redis', url: 'redis://localhost:6379/4', key_prefix: 'ns:' },
+      store: { type: 'redis', url: 'redis://localhost:6379/4', key_prefix: 'test_store:' },
     })
     const args = await configToWorkspaceArgs(cfg)
-    expect(args.options.namespaceStore).toBeInstanceOf(RedisNamespaceStore)
+    expect(args.options.store).toBeInstanceOf(RedisWorkspaceStateStore)
+    expect(args.options.store?.namespace('ws1')).toBeInstanceOf(RedisNamespaceStore)
   })
 
-  it('builds a ram namespace store from a namespace block', async () => {
+  it('builds a ram state store from a store block', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { resource: 'ram' } },
-      namespace: { type: 'ram' },
+      store: { type: 'ram' },
     })
     const args = await configToWorkspaceArgs(cfg)
-    expect(args.options.namespaceStore).toBeInstanceOf(RAMNamespaceStore)
+    expect(args.options.store).toBeInstanceOf(RAMWorkspaceStateStore)
+    expect(args.options.store?.namespace('ws1')).toBeInstanceOf(RAMNamespaceStore)
+  })
+
+  it('routes a per-group override to its own backend', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      store: {
+        type: 'ram',
+        observer: { type: 'redis', url: 'redis://localhost:6379/4', key_prefix: 'obs:' },
+      },
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    expect(args.options.store).toBeInstanceOf(RAMWorkspaceStateStore)
+    expect(args.options.store?.namespace('ws1')).toBeInstanceOf(RAMNamespaceStore)
+    expect(args.options.store?.observer('ws1').constructor.name).toBe('RedisObserverStore')
+  })
+
+  it('passes workspace_id through (snake_case YAML)', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { resource: 'ram' } },
+      workspace_id: 'agent-ws-7',
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    expect(args.options.workspaceId).toBe('agent-ws-7')
   })
 
   it('parses per-mount command_safeguards (snake_case YAML) into the resource tuple', async () => {

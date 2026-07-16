@@ -46,6 +46,7 @@ import {
   type CommandSafeguard,
   ConsistencyPolicy,
   DEFAULT_AGENT_ID,
+  DEFAULT_WORKSPACE_ID,
   DriftPolicy,
   FileType,
   MountMode,
@@ -76,6 +77,8 @@ import type { ExecuteNodeDeps } from './node/execute_node.ts'
 import { buildFilePrompt } from './file_prompt.ts'
 import { SessionManager } from './session/manager.ts'
 import type { SessionStore } from './session/store.ts'
+import { RAMWorkspaceStateStore } from './store/ram.ts'
+import type { WorkspaceFields, WorkspaceStateStore } from './store/base.ts'
 import type { Session } from './session/session.ts'
 import type { ExecutionNode } from './types.ts'
 import { errorVirtualPath, gnuStrerror } from '../utils/errors.ts'
@@ -119,6 +122,8 @@ export interface WorkspaceOptions {
   observe?: ObserverStore
   namespaceStore?: NamespaceStore
   sessionStore?: SessionStore
+  workspaceId?: string
+  store?: WorkspaceStateStore
   python?: {
     autoLoadFromImports?: boolean
     bootstrapCode?: string
@@ -202,6 +207,10 @@ export interface ExecuteOptions {
 export class Workspace {
   readonly registry: MountRegistry
   readonly sessionManager: SessionManager
+  private readonly wsId: string
+  private readonly stateStoreInternal: WorkspaceStateStore
+  private readonly ownsStateStore: boolean
+  private metaWritten = false
   private readonly opsRegistry: OpsRegistry
   private shellParser: ShellParser | null
   private readonly shellParserFactory: (() => Promise<ShellParser>) | null
@@ -217,7 +226,6 @@ export class Workspace {
   readonly records: OpRecord[] = []
   readonly fs: WorkspaceFS
   private closed = false
-  private readonly workspaceId: string = `ws-${String(Date.now())}-${Math.random().toString(36).slice(2, 10)}`
   private readonly closers: (() => Promise<void>)[] = []
   private readonly pythonRuntime: PythonRuntime
   private readonly jsRuntime: JsRuntime
@@ -260,7 +268,18 @@ export class Workspace {
         resource.setIndex?.(options.index)
       }
     }
-    this.sessionManager = new SessionManager(options.sessionId ?? 'default', options.sessionStore)
+    // One provider scopes every control-plane store by workspace id; the
+    // per-plane options (observe / namespaceStore / sessionStore) remain
+    // as direct overrides that win over the provider. A caller-passed
+    // provider may be shared with sibling workspaces, so only a
+    // workspace that built its own provider closes it.
+    this.wsId = options.workspaceId ?? DEFAULT_WORKSPACE_ID
+    this.ownsStateStore = options.store === undefined
+    this.stateStoreInternal = options.store ?? new RAMWorkspaceStateStore()
+    const observeStore = options.observe ?? this.stateStoreInternal.observer(this.wsId)
+    const namespaceStore = options.namespaceStore ?? this.stateStoreInternal.namespace(this.wsId)
+    const sessionStore = options.sessionStore ?? this.stateStoreInternal.sessions(this.wsId)
+    this.sessionManager = new SessionManager(options.sessionId ?? 'default', sessionStore)
     this.opsRegistry = options.ops ?? new OpsRegistry()
     this.shellParser = options.shellParser ?? null
     this.shellParserFactory = options.shellParserFactory ?? null
@@ -285,7 +304,7 @@ export class Workspace {
       options.runtimeOptions,
     )
     this.closers.push(() => this.jsRuntime.close())
-    this.observer = new Observer(options.observe)
+    this.observer = new Observer(observeStore)
     this.registry.mount(HISTORY_PREFIX, new HistoryViewResource(this.observer), MountMode.READ)
     this.cache = options.cache ?? new RAMFileCacheStore({ limit: options.cacheLimit ?? '512MB' })
     this.registry.attachFileCache(this.cache)
@@ -294,7 +313,7 @@ export class Workspace {
     this.namespace = new Namespace(
       this.registry,
       (p) => this.resolve(p),
-      options.namespaceStore,
+      namespaceStore,
       options.agentId ?? null,
     )
     this.dispatcher = new Dispatcher(this.namespace, this.cache, this.opsRegistry, consistency)
@@ -518,8 +537,43 @@ export class Workspace {
   }
 
   /** Hydrate sessions from the session store (idempotent). */
-  ensureSessionsLoaded(): Promise<void> {
-    return this.sessionManager.ensureLoaded()
+  async ensureSessionsLoaded(): Promise<void> {
+    await this.sessionManager.ensureLoaded()
+    await this.ensureMeta()
+  }
+
+  get workspaceId(): string {
+    return this.wsId
+  }
+
+  get stateStore(): WorkspaceStateStore {
+    return this.stateStoreInternal
+  }
+
+  /** This workspace's metadata record (discovery surface). */
+  async workspaceMeta(): Promise<WorkspaceFields> {
+    await this.ensureMeta()
+    const meta = await this.stateStoreInternal.loadMeta(this.wsId)
+    return meta ?? {}
+  }
+
+  /**
+   * Write the discovery record once per process. An existing record
+   * wins (another process or an earlier run already registered it); a
+   * fresh workspace registers itself so siblings pointed at the same
+   * store can find its sessions and default session.
+   */
+  private async ensureMeta(): Promise<void> {
+    if (this.metaWritten) return
+    const existing = await this.stateStoreInternal.loadMeta(this.wsId)
+    if (existing === null) {
+      await this.stateStoreInternal.setMeta(this.wsId, {
+        workspace_id: this.wsId,
+        default_session_id: this.sessionManager.defaultId,
+        created_at: Date.now() / 1000,
+      })
+    }
+    this.metaWritten = true
   }
 
   /** Write every session's durable fields through to the session store. */
@@ -820,6 +874,7 @@ export class Workspace {
     }
     await this.namespace.ensureLoaded()
     await this.sessionManager.ensureLoaded()
+    await this.ensureMeta()
     if (this.driftCheckPending) {
       await this.runPendingDriftCheck()
     }
@@ -871,7 +926,7 @@ export class Workspace {
       jobTable: this.jobTable,
       executeFn,
       agentId: callAgentId,
-      workspaceId: this.workspaceId,
+      workspaceId: this.wsId,
       registerCloser: (fn: () => Promise<void>) => {
         this.closers.push(fn)
       },
@@ -1077,6 +1132,9 @@ export class Workspace {
     }
     await this.namespace.close()
     await this.sessionManager.closeStore()
+    if (this.ownsStateStore) {
+      await this.stateStoreInternal.close()
+    }
     await this.cache.clear()
     for (const fn of this.closers.splice(0)) {
       try {
