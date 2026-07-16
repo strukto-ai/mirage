@@ -1,0 +1,68 @@
+{
+  "cases": [
+    {
+      "id": "diff_same",
+      "seq": 314,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "diff /data/a.txt /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "diff_differ",
+      "seq": 315,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "diff /data/a.txt /data/b.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "1,5c1,3\n< hello\n< world\n< foo\n< bar\n< baz\n---\n> 1\n> 2\n> 3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "diff_u",
+      "seq": 316,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "diff -u /data/sorted_a.txt /data/sorted_b.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "--- /data/sorted_a.txt\n+++ /data/sorted_b.txt\n@@ -1,3 +1,3 @@\n-apple\n banana\n-cherry\n+date\n+elder\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "diff_recursive",
+      "seq": 317,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/dr/x/sub /data/dr/y/sub && echo aaa | tee /data/dr/x/a.txt > /dev/null && echo AAA | tee /data/dr/y/a.txt > /dev/null && echo keep | tee /data/dr/x/c.txt > /dev/null && echo keep | tee /data/dr/y/c.txt > /dev/null && echo deep1 | tee /data/dr/x/sub/d.txt > /dev/null && echo deep2 | tee /data/dr/y/sub/d.txt > /dev/null && echo L | tee /data/dr/x/leftonly.txt > /dev/null && echo R | tee /data/dr/y/rightonly.txt > /dev/null && diff -r /data/dr/x /data/dr/y",
+      "expect": {
+        "exit": 1,
+        "stdout": "diff -r /data/dr/x/a.txt /data/dr/y/a.txt\n1c1\n< aaa\n---\n> AAA\nOnly in /data/dr/x: leftonly.txt\nOnly in /data/dr/y: rightonly.txt\ndiff -r /data/dr/x/sub/d.txt /data/dr/y/sub/d.txt\n1c1\n< deep1\n---\n> deep2\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "ln_create",
+      "seq": 597,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ln -s /data/sub/nested.txt /data/sub/link.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_read_back",
+      "seq": 600,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "readlink /data/sub/link.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/sub/nested.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

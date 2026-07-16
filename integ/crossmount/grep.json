@@ -1,0 +1,68 @@
+{
+  "cases": [
+    {
+      "id": "xm_grep_multi",
+      "seq": 694,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -c s /data/a.txt /data2/xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt:0\n/data2/xm.txt:1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_grep_names",
+      "seq": 724,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -n o /data/a.txt /data2/xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt:1:hello\n/data/a.txt:2:world\n/data/a.txt:3:foo\n/data2/xm.txt:1:cross\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_grep_h",
+      "seq": 725,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -h o /data/a.txt /data2/xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\ncross\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_grep_nomatch",
+      "seq": 742,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep zzz /data/a.txt /data2/xm.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

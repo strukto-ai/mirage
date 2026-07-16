@@ -1,0 +1,68 @@
+{
+  "cases": [
+    {
+      "id": "inv_ls_warm",
+      "seq": 585,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls -1 /data/sub",
+      "expect": {
+        "exit": 0,
+        "stdout": "deep\nnested.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "inv_touch",
+      "seq": 586,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "touch /data/sub/inv_late.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "inv_rm",
+      "seq": 587,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "rm /data/sub/inv_late.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "inv_gone",
+      "seq": 588,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/sub/inv_late.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /data/sub/inv_late.txt: No such file or directory\n"
+      }
+    }
+  ]
+}

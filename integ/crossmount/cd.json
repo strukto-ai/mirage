@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "xm_cd_across",
+      "seq": 707,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data2 && cat xm.txt && cd /data && ls b.txt)",
+      "expect": {
+        "exit": 0,
+        "stdout": "cross\nb.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

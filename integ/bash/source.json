@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "source_prep",
+      "seq": 387,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/g10 && cd /data/g10 && printf 'echo sourced-ok\\n' | tee lib.sh > /dev/null",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "source_relative",
+      "seq": 388,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "source lib.sh && . /data/g10/lib.sh && cd / && rm -r /data/g10",
+      "expect": {
+        "exit": 0,
+        "stdout": "sourced-ok\nsourced-ok\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

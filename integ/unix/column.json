@@ -1,0 +1,52 @@
+{
+  "cases": [
+    {
+      "id": "column_t",
+      "seq": 82,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "column -s , -t /data/csv.csv",
+      "expect": {
+        "exit": 0,
+        "stdout": "name   age\nalice  30\nbob    25\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "column_n",
+      "seq": 330,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "column -t /data/fields.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "alice  30  engineer\nbob    25  designer\ncarol  40  manager\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "column_no_input",
+      "seq": 549,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "column",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -1,0 +1,500 @@
+{
+  "cases": [
+    {
+      "id": "pr_seed",
+      "seq": 650,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/pr && printf '1\\n2\\n' > /data/pr/one.txt && printf '3\\n4\\n' > /data/pr/two.txt && printf 'hello\\n' > /data/pr/h1.txt && printf 'worlds\\n' > /data/pr/h2.txt && printf 'z\\n' > /data/pr/z1.txt && printf 'y\\n' > /data/pr/z2.txt && gzip /data/pr/z1.txt /data/pr/z2.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pr_cut_multi",
+      "seq": 651,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cut -c1 /data/pr/one.txt /data/pr/two.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n2\n3\n4\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pr_tac_multi",
+      "seq": 652,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "tac /data/pr/one.txt /data/pr/two.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n1\n4\n3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pr_nl_multi",
+      "seq": 653,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "nl /data/pr/one.txt /data/pr/two.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "     1\t1\n     2\t2\n     3\t3\n     4\t4\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pr_strings_multi",
+      "seq": 654,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "strings /data/pr/h1.txt /data/pr/h2.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworlds\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pr_zcat_multi",
+      "seq": 655,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "zcat /data/pr/z1.txt.gz /data/pr/z2.txt.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "z\ny\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pr_cat",
+      "seq": 656,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/pr/one.txt /data/pr/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "1\n2\n",
+        "stderr": "cat: /data/pr/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pr_head",
+      "seq": 657,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "head -n 1 /data/pr/one.txt /data/pr/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "==> /data/pr/one.txt <==\n1\n",
+        "stderr": "head: /data/pr/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pr_tail",
+      "seq": 658,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "tail -n 1 /data/pr/one.txt /data/pr/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "==> /data/pr/one.txt <==\n2\n",
+        "stderr": "tail: /data/pr/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pr_wc",
+      "seq": 659,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "wc -l /data/pr/one.txt /data/pr/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "2 /data/pr/one.txt\n2 total\n",
+        "stderr": "wc: /data/pr/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pr_nl",
+      "seq": 660,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "nl /data/pr/one.txt /data/pr/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "     1\t1\n     2\t2\n",
+        "stderr": "nl: /data/pr/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pr_md5",
+      "seq": 661,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "md5 /data/pr/one.txt /data/pr/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "6ddb4095eb719e2a9f0a3f95677d24e0  /data/pr/one.txt\n",
+        "stderr": "md5: /data/pr/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pr_sha256sum",
+      "seq": 662,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sha256sum /data/pr/one.txt /data/pr/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "a6e2b7a040683432de03a18fd8a1939a2fdf82585b364bfc874bdd4095c4cae1  /data/pr/one.txt\n",
+        "stderr": "sha256sum: /data/pr/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pr_strings",
+      "seq": 663,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "strings /data/pr/h1.txt /data/pr/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "hello\n",
+        "stderr": "strings: /data/pr/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pr_tac",
+      "seq": 664,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "tac /data/pr/one.txt /data/pr/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "2\n1\n",
+        "stderr": "tac: /data/pr/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pr_rev",
+      "seq": 665,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "rev /data/pr/one.txt /data/pr/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "1\n2\n",
+        "stderr": "rev: /data/pr/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pr_cut",
+      "seq": 666,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cut -c1 /data/pr/one.txt /data/pr/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "1\n2\n",
+        "stderr": "cut: /data/pr/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pr_expand",
+      "seq": 667,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "expand /data/pr/one.txt /data/pr/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "1\n2\n",
+        "stderr": "expand: /data/pr/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pr_unexpand",
+      "seq": 668,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "unexpand /data/pr/one.txt /data/pr/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "1\n2\n",
+        "stderr": "unexpand: /data/pr/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pr_fold",
+      "seq": 669,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "fold /data/pr/one.txt /data/pr/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "1\n2\n",
+        "stderr": "fold: /data/pr/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pr_fmt",
+      "seq": 670,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "fmt /data/pr/one.txt /data/pr/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "1 2\n",
+        "stderr": "fmt: /data/pr/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pr_zcat",
+      "seq": 671,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "zcat /data/pr/z1.txt.gz /data/pr/missing.gz",
+      "expect": {
+        "exit": 1,
+        "stdout": "z\n",
+        "stderr": "zcat: /data/pr/missing.gz: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pr_sed",
+      "seq": 672,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sed s/1/X/ /data/pr/one.txt /data/pr/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "X\n2\n",
+        "stderr": "sed: /data/pr/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pr_sort",
+      "seq": 673,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sort /data/pr/one.txt /data/pr/missing.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "sort: /data/pr/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pr_missing_first",
+      "seq": 674,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/pr/missing.txt /data/pr/one.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "1\n2\n",
+        "stderr": "cat: /data/pr/missing.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pr_all_missing_wc",
+      "seq": 675,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "wc -l /data/pr/m1.txt /data/pr/m2.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "0 total\n",
+        "stderr": "wc: /data/pr/m1.txt: No such file or directory\nwc: /data/pr/m2.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "pr_cat_dir",
+      "seq": 676,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/pr/one.txt /data/pr",
+      "expect": {
+        "exit": 1,
+        "stdout": "1\n2\n",
+        "stderr": "cat: /data/pr: Is a directory\n"
+      }
+    },
+    {
+      "id": "pr_head_dir",
+      "seq": 677,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "head /data/pr",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "head: /data/pr: Is a directory\n"
+      }
+    },
+    {
+      "id": "pr_wc_dir",
+      "seq": 678,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "wc /data/pr/one.txt /data/pr",
+      "expect": {
+        "exit": 1,
+        "stdout": "2 2 4 /data/pr/one.txt\n2 2 4 total\n",
+        "stderr": "wc: /data/pr: Is a directory\n"
+      }
+    },
+    {
+      "id": "pr_tac_dir",
+      "seq": 679,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "tac /data/pr",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "tac: /data/pr: Is a directory\n"
+      }
+    },
+    {
+      "id": "pr_cleanup",
+      "seq": 680,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "rm -r /data/pr",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

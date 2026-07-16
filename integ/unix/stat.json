@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "stat_size",
+      "seq": 92,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "stat -c \"%s\" /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "24\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "stat_name",
+      "seq": 93,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "stat -c \"%n\" /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

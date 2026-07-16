@@ -1,0 +1,148 @@
+{
+  "cases": [
+    {
+      "id": "arith_cmd_true",
+      "seq": 438,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(( 2 > 1 )); echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arith_cmd_false",
+      "seq": 439,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(( 0 )); echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arith_incr",
+      "seq": 440,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "i=0; (( i++ )); echo code=$? i=$i; (( i++ )); echo code=$? i=$i; unset i",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=1 i=1\ncode=0 i=2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arith_assign_comma",
+      "seq": 441,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "x=$(( y = 3, y + 2 )); echo $x $y; unset x y",
+      "expect": {
+        "exit": 0,
+        "stdout": "5 3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arith_c_semantics",
+      "seq": 442,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo $(( -7 / 2 )) $(( -7 % 2 )) $(( 2 ** 10 )) $(( 0x10 )) $(( 010 ))",
+      "expect": {
+        "exit": 0,
+        "stdout": "-3 -1 1024 16 8\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arith_while",
+      "seq": 443,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "n=0; while (( n < 3 )); do (( n++ )); done; echo n=$n; unset n",
+      "expect": {
+        "exit": 0,
+        "stdout": "n=3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arith_if",
+      "seq": 444,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "if (( 2 > 1 )); then echo yes; fi",
+      "expect": {
+        "exit": 0,
+        "stdout": "yes\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arith_divzero",
+      "seq": 445,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(( 1 / 0 )) 2>&1; echo code=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "bash: ((: 1 / 0: division by 0\ncode=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "arith_short_circuit",
+      "seq": 446,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(( 0 && (q = 7) )); echo q=${q:-unset}",
+      "expect": {
+        "exit": 0,
+        "stdout": "q=unset\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

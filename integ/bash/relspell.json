@@ -1,0 +1,132 @@
+{
+  "cases": [
+    {
+      "id": "relspell_prep",
+      "seq": 403,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/g14/sub && cd /data/g14 && printf 'hello\n' | tee sub/a.txt > /dev/null && printf 'hello\n' | tee sub/b.txt > /dev/null",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "relspell_walk_grep",
+      "seq": 404,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -r hello sub",
+      "expect": {
+        "exit": 0,
+        "stdout": "sub/a.txt:hello\nsub/b.txt:hello\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "relspell_walk_find",
+      "seq": 405,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find sub -name '*.txt'",
+      "expect": {
+        "exit": 0,
+        "stdout": "sub/a.txt\nsub/b.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "relspell_error_cat",
+      "seq": 406,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat sub/missing.txt 2>&1",
+      "expect": {
+        "exit": 1,
+        "stdout": "cat: sub/missing.txt: No such file or directory\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "relspell_error_grep",
+      "seq": 407,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep hello sub/missing.txt 2>&1",
+      "expect": {
+        "exit": 1,
+        "stdout": "grep: sub/missing.txt: No such file or directory\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "relspell_glob_dot",
+      "seq": 408,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo ./sub/*.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "./sub/a.txt ./sub/b.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "relspell_du_slash",
+      "seq": 409,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "du -s sub/",
+      "expect": {
+        "exit": 0,
+        "stdout": "12\tsub/\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "relspell_labels",
+      "seq": 410,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "wc -l sub/a.txt && head -v sub/a.txt && cd / && rm -r /data/g14",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 sub/a.txt\n==> sub/a.txt <==\nhello\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

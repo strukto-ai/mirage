@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "lnzip_ls_warm",
+      "seq": 596,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls -1 /data/sub",
+      "expect": {
+        "exit": 0,
+        "stdout": "deep\nnested.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "lnzip_ls_after",
+      "seq": 599,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls -1 /data/sub",
+      "expect": {
+        "exit": 0,
+        "stdout": "arch.zip\ndeep\nnested.txt\nlink.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

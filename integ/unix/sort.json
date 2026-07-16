@@ -1,0 +1,276 @@
+{
+  "cases": [
+    {
+      "id": "sort",
+      "seq": 31,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sort /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "bar\nbaz\nfoo\nhello\nworld\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sort_r",
+      "seq": 32,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sort -r /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\nhello\nfoo\nbaz\nbar\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sort_n",
+      "seq": 33,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sort -n /data/numbers.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n4\n5\n10\n30\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sort_uniq",
+      "seq": 108,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sort /data/dup.txt | uniq",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\nc\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sort_head",
+      "seq": 116,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sort /data/a.txt | head -n 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "bar\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sort_tail",
+      "seq": 117,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sort /data/a.txt | tail -n 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sort_u",
+      "seq": 129,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sort -u /data/dup.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\nc\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sort_k_t",
+      "seq": 130,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sort -k 2 -t , /data/csv.csv",
+      "expect": {
+        "exit": 0,
+        "stdout": "bob,25\nalice,30\nname,age\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sort_f",
+      "seq": 131,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sort -f /data/mixed.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "HELLO world\nHello World\nhello WORLD\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sort_n_r",
+      "seq": 132,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sort -n -r /data/numbers.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "30\n10\n5\n4\n2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sort_t_comma",
+      "seq": 242,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sort -t , -k 1 /data/abc.csv",
+      "expect": {
+        "exit": 0,
+        "stdout": "a,1\nb,2\nc,3\nd,4\ne,5\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sort_k2n",
+      "seq": 243,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sort -t ' ' -k 2 -n /data/fields.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "bob 25 designer\nalice 30 engineer\ncarol 40 manager\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sort_M",
+      "seq": 244,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo -e 'Feb\\nJan\\nMar' | sort -M",
+      "expect": {
+        "exit": 0,
+        "stdout": "Jan\nFeb\nMar\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sort_b",
+      "seq": 245,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sort -b /data/spaced.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "  both  \n  leading\ntrailing  \n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sort_empty_file",
+      "seq": 342,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo sortemptyf=$(sort /data/empty.txt | wc -c)",
+      "expect": {
+        "exit": 0,
+        "stdout": "sortemptyf=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sort_blank_in",
+      "seq": 345,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo sortblankin=$(echo | sort | wc -c)",
+      "expect": {
+        "exit": 0,
+        "stdout": "sortblankin=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sort_stdin",
+      "seq": 368,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/dup.txt | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\na\nb\nb\nc\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

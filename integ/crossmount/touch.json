@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "xm_touch_rm",
+      "seq": 735,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "touch /data/xt.txt /data2/xt.txt && ls /data/xt.txt /data2/xt.txt && rm /data/xt.txt /data2/xt.txt && ls /data2",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/xt.txt\n/data2/xt.txt\nxm.txt\nxm_copy.txt\nxm_moved.txt\nxm_link.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

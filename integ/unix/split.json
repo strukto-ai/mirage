@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "split_no_input",
+      "seq": 553,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "split",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

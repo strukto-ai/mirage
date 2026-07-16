@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "tsort_no_input",
+      "seq": 551,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "tsort",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

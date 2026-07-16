@@ -1,0 +1,148 @@
+{
+  "cases": [
+    {
+      "id": "subshell_var_isolated",
+      "seq": 507,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(x=1; (x=2); echo $x)",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "subshell_var_inherit",
+      "seq": 508,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(x=7; (echo $x))",
+      "expect": {
+        "exit": 0,
+        "stdout": "7\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "subshell_export_isolated",
+      "seq": 509,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(export Z=9); echo [$Z]",
+      "expect": {
+        "exit": 0,
+        "stdout": "[]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "subshell_func_redef",
+      "seq": 510,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(f(){ echo A; }; (f(){ echo B; }); f)",
+      "expect": {
+        "exit": 0,
+        "stdout": "A\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "subshell_func_no_leak",
+      "seq": 511,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(nofn(){ echo x; }); nofn 2>/dev/null || echo gone",
+      "expect": {
+        "exit": 0,
+        "stdout": "gone\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "subshell_positional_isolated",
+      "seq": 512,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(set -- a b c; (set -- x); echo $#)",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "subshell_positional_inherit",
+      "seq": 513,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(set -- a b; (echo $1 $2))",
+      "expect": {
+        "exit": 0,
+        "stdout": "a b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "subshell_cd_no_leak",
+      "seq": 514,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data); pwd",
+      "expect": {
+        "exit": 0,
+        "stdout": "/\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "subshell_nested_cd",
+      "seq": 515,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data && (cd /data/sub) && pwd)",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

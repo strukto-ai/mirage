@@ -1,0 +1,116 @@
+{
+  "cases": [
+    {
+      "id": "xxd",
+      "seq": 57,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "head -c 8 /data/a.txt | xxd",
+      "expect": {
+        "exit": 0,
+        "stdout": "00000000: 6865 6c6c 6f0a 776f                      hello.wo\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xxd_p",
+      "seq": 58,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "head -c 8 /data/a.txt | xxd -p",
+      "expect": {
+        "exit": 0,
+        "stdout": "68656c6c6f0a776f\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xxd_roundtrip",
+      "seq": 97,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/a.txt | xxd | xxd -r",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xxd_c4",
+      "seq": 311,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "head -c 12 /data/a.txt | xxd -c 4",
+      "expect": {
+        "exit": 0,
+        "stdout": "00000000: 6865 6c6c  hell\n00000004: 6f0a 776f  o.wo\n00000008: 726c 640a  rld.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xxd_g1",
+      "seq": 312,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "head -c 8 /data/a.txt | xxd -g 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "00000000: 68 65 6c 6c 6f 0a 77 6f                          hello.wo\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xxd_u",
+      "seq": 313,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "head -c 8 /data/a.txt | xxd -u",
+      "expect": {
+        "exit": 0,
+        "stdout": "00000000: 6865 6C6C 6F0A 776F                      hello.wo\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xxd_no_input",
+      "seq": 548,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "xxd",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

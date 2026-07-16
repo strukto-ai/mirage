@@ -1,0 +1,116 @@
+{
+  "cases": [
+    {
+      "id": "head_default",
+      "seq": 3,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "head /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "head_n1",
+      "seq": 4,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "head -n 1 /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "head_n2",
+      "seq": 5,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "head -n 2 /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "head_c5",
+      "seq": 6,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "head -c 5 /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "head_pipe_tail",
+      "seq": 115,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "head -n 3 /data/a.txt | tail -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "foo\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "head_empty",
+      "seq": 122,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "head /data/empty.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "head_numeric_shorthand",
+      "seq": 280,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "head -2 /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

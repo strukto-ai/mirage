@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "zcat_no_input",
+      "seq": 563,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "zcat",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "zcat: (stdin): unexpected end of file"
+      }
+    }
+  ]
+}

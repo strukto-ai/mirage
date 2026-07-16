@@ -1,0 +1,212 @@
+{
+  "cases": [
+    {
+      "id": "wc",
+      "seq": 10,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "wc /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": " 5  5 24 /data/a.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "wc_l",
+      "seq": 11,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "wc -l /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "5 /data/a.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "wc_w",
+      "seq": 12,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "wc -w /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "5 /data/a.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "wc_c",
+      "seq": 13,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "wc -c /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "24 /data/a.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "wc_multi",
+      "seq": 101,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "wc /data/a.txt /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": " 5  5 24 /data/a.txt\n 3  3  6 /data/b.txt\n 8  8 30 total\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "wc_l_multi",
+      "seq": 102,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "wc -l /data/a.txt /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "5 /data/a.txt\n3 /data/b.txt\n8 total\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "wc_empty",
+      "seq": 121,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "wc /data/empty.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "0 0 0 /data/empty.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "wc_no_nl",
+      "seq": 126,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "wc /data/no_nl.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": " 0  3 19 /data/no_nl.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "wc_one_byte",
+      "seq": 128,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "wc /data/one_byte.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "0 1 1 /data/one_byte.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "wc_m",
+      "seq": 142,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "wc -m /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "24 /data/a.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "wc_L",
+      "seq": 143,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "wc -L /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "5 /data/a.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "wc_stdin",
+      "seq": 162,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo 'a b c' | wc",
+      "expect": {
+        "exit": 0,
+        "stdout": "      1       3       6\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "wc_stdin_l",
+      "seq": 367,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/a.txt | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "5\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

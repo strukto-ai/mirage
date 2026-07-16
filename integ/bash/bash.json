@@ -1,0 +1,52 @@
+{
+  "cases": [
+    {
+      "id": "bash_history_tail",
+      "seq": 531,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -v '^#' /.bash_history | tail -n 3",
+      "expect": {
+        "exit": 0,
+        "stdout": "(cd /data && ls -R disptree)\n(cd /data && find disptree)\nhistory 2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "bash_history_after_find",
+      "seq": 534,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "grep -v '^#' /.bash_history | tail -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "find /.bash_history -type d\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "bash_history_format",
+      "seq": 535,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /.bash_history | sed 's/^#[0-9]*$/#TS/' | tail -n 4",
+      "expect": {
+        "exit": 0,
+        "stdout": "#TS\nfind /.bash_history -type d\n#TS\ngrep -v '^#' /.bash_history | tail -n 1\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

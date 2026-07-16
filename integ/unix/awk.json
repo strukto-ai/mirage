@@ -1,0 +1,324 @@
+{
+  "cases": [
+    {
+      "id": "awk_first_col",
+      "seq": 50,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "cat /data/csv.csv | awk -F, '{print $1}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "name\nalice\nbob\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_nr",
+      "seq": 51,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "awk 'NR==2' /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_sum",
+      "seq": 52,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "awk '{s+=$1} END{print s}' /data/numbers.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "51\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_nf",
+      "seq": 163,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "awk '{print NF}' /data/fields.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n3\n3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_nr_total",
+      "seq": 164,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "awk 'END{print NR}' /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "5\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_last_col",
+      "seq": 165,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "awk '{print $NF}' /data/fields.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "engineer\ndesigner\nmanager\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_if",
+      "seq": 166,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "awk '$2 > 28' /data/fields.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "alice 30 engineer\ncarol 40 manager\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_begin_end",
+      "seq": 167,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "awk 'BEGIN{print \"start\"} {print} END{print \"done\"}' /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "start\n1\n2\n3\ndone\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_fs_comma",
+      "seq": 168,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "awk -F , '{print $2}' /data/csv.csv",
+      "expect": {
+        "exit": 0,
+        "stdout": "age\n30\n25\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_ofs",
+      "seq": 169,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "awk -F , 'BEGIN{OFS=\":\"} {print $1, $2}' /data/csv.csv",
+      "expect": {
+        "exit": 0,
+        "stdout": "name age\nalice 30\nbob 25\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_range",
+      "seq": 170,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "awk 'NR>=2 && NR<=4' /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\nfoo\nbar\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_v_repeat",
+      "seq": 171,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "awk -v a=va1 -v b=vb2 '{print a, b}' /data/one_byte.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "va1 vb2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_v_equals",
+      "seq": 172,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "awk -v x=eq=val '{print x}' /data/one_byte.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "eq=val\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_f_program",
+      "seq": 173,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo '{print $3, $1}' | tee /data/prog.awk > /dev/null && awk -f /data/prog.awk /data/fields.txt && rm /data/prog.awk",
+      "expect": {
+        "exit": 0,
+        "stdout": "engineer alice\ndesigner bob\nmanager carol\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_default_fs",
+      "seq": 174,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "awk '{print NF, $1}' /data/spaced.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 leading\n1 trailing\n1 both\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_multifile",
+      "seq": 175,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "awk '{print NR, $1}' /data/a.txt /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 hello\n2 world\n3 foo\n4 bar\n5 baz\n6 1\n7 2\n8 3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_f_repeat",
+      "seq": 176,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo '{sum += $1}' | tee /data/pa.awk > /dev/null && echo 'END {print sum}' | tee /data/pb.awk > /dev/null && awk -f /data/pa.awk -f /data/pb.awk /data/numbers.txt && rm /data/pa.awk /data/pb.awk",
+      "expect": {
+        "exit": 0,
+        "stdout": "51\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_no_input",
+      "seq": 557,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "awk '{print}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_usage_exit",
+      "seq": 579,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "awk",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "awk: usage: awk [-F fs] [-v var=val] 'program' [file ...]\n"
+      }
+    },
+    {
+      "id": "awk_f_missing_exit",
+      "seq": 580,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "awk -f /data/nope.awk /data/a.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "awk: /data/nope.awk: No such file or directory\n"
+      }
+    }
+  ]
+}

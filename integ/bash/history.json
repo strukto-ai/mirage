@@ -1,0 +1,52 @@
+{
+  "cases": [
+    {
+      "id": "history_last_two",
+      "seq": 530,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "history 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "499  (cd /data && ls -R disptree)\n500  (cd /data && find disptree)\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "history_find_view",
+      "seq": 532,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /.bash_history",
+      "expect": {
+        "exit": 0,
+        "stdout": "/.bash_history\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "history_find_no_dir",
+      "seq": 533,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /.bash_history -type d",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

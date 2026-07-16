@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "xm_refuse_uniq",
+      "seq": 746,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "uniq /data/a.txt /data2/xm_uniq_out.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "uniq: paths span multiple mounts (/data/, /data2/), cross-mount not supported\n"
+      }
+    }
+  ]
+}

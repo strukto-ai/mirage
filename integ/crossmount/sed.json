@@ -1,0 +1,36 @@
+{
+  "cases": [
+    {
+      "id": "xm_sed_stream",
+      "seq": 713,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "sed s/l/L/ /data/a.txt /data2/xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "heLlo\nworLd\nfoo\nbar\nbaz\ncross\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_sed_inplace",
+      "seq": 738,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo abc | tee /data/xi.txt /data2/xi.txt > /dev/null && sed -i s/b/B/ /data/xi.txt /data2/xi.txt && cat /data/xi.txt /data2/xi.txt && rm /data/xi.txt /data2/xi.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "aBc\naBc\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

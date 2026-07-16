@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "csplit_no_input",
+      "seq": 565,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "csplit",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

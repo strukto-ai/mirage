@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "id": "test_relative_paths",
+      "seq": 395,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "test -f plain.txt && echo yes-f && test -d sub && echo yes-d && test -f missing.txt || echo no-f",
+      "expect": {
+        "exit": 0,
+        "stdout": "yes-f\nyes-d\nno-f\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

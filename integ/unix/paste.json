@@ -1,0 +1,52 @@
+{
+  "cases": [
+    {
+      "id": "paste",
+      "seq": 44,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "paste /data/a.txt /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\t1\nworld\t2\nfoo\t3\nbar\t\nbaz\t\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "paste_s",
+      "seq": 290,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "paste -s /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\t2\t3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "paste_d_comma",
+      "seq": 291,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "paste -d , /data/a.txt /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello,1\nworld,2\nfoo,3\nbar,\nbaz,\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

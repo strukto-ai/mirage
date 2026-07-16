@@ -1,0 +1,3 @@
+  leading
+trailing  
+  both  

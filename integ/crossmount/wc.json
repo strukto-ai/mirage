@@ -1,0 +1,52 @@
+{
+  "cases": [
+    {
+      "id": "xm_wc_multi",
+      "seq": 696,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "wc -l /data/a.txt /data2/xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "5 /data/a.txt\n1 /data2/xm.txt\n6 total\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_wc_full",
+      "seq": 729,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "wc /data/b.txt /data2/xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": " 3  3  6 /data/b.txt\n 1  1  6 /data2/xm.txt\n 4  4 12 total\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_wc_glob",
+      "seq": 730,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "wc -l /data/sorted_*.txt /data2/xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": " 3 /data/sorted_a.txt\n 3 /data/sorted_b.txt\n 4 /data/sorted_c.txt\n 1 /data2/xm.txt\n11 total\n",
+        "stderr": ""
+      }
+    }
+  ]
+}
