@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { ResourceName, command, lsGeneric, specOf } from '@struktoai/mirage-core'
+import type { PathSpec } from '@struktoai/mirage-core'
 import { stat as opfsStat } from '../../../../core/opfs/stat.ts'
 import { readdir as opfsReaddir } from '../../../../core/opfs/readdir.ts'
 import type { OPFSAccessor } from '../../../../accessor/opfs.ts'
@@ -21,11 +22,15 @@ export const OPFS_LS = command({
   name: 'ls',
   resource: ResourceName.OPFS,
   spec: specOf('ls'),
-  fn: (accessor: OPFSAccessor, paths, _texts, opts) =>
-    lsGeneric(
-      paths,
-      opts,
-      (p) => opfsReaddir(accessor, p),
-      (p) => opfsStat(accessor, p),
-    ),
+  fn: (accessor: OPFSAccessor, paths, _texts, opts) => {
+    const overlay = opts.statOverlay
+    // ls renders stat rows the backend produces, which never see the
+    // namespace attr overlay (chmod/chown/touch on overlay backends);
+    // merge it in so ls -l matches the ops facade.
+    const stat =
+      overlay !== undefined
+        ? async (p: PathSpec) => overlay(p.virtual, await opfsStat(accessor, p))
+        : (p: PathSpec) => opfsStat(accessor, p)
+    return lsGeneric(paths, opts, (p) => opfsReaddir(accessor, p), stat)
+  },
 })

@@ -13,14 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { parquetWriteBuffer } from 'hyparquet-writer'
 import { materialize } from '../../../../io/types.ts'
 import { RAMResource } from '../../../../resource/ram/ram.ts'
 import { PathSpec } from '../../../../types.ts'
 import { RAM_COMMANDS } from '../index.ts'
 const RAM_LS = RAM_COMMANDS.filter((c) => c.name === 'ls' && c.filetype == null)
-
-const RAM_LS_PARQUET = RAM_COMMANDS.filter((c) => c.name === 'ls' && c.filetype === '.parquet')
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -66,30 +63,8 @@ describe('ls filetype', () => {
     expect(out).toContain('notes.txt')
   })
 
-  it('ls -l on parquet via RAM_LS_PARQUET reports rows and columns', async () => {
-    const resource = new RAMResource()
-    const ab = parquetWriteBuffer({
-      columnData: [
-        { name: 'name', data: ['alice', 'bob'], type: 'STRING' },
-        { name: 'score', data: [95, 80], type: 'INT32' },
-      ],
-    })
-    resource.store.files.set('/data.parquet', new Uint8Array(ab))
-    const cmd = RAM_LS_PARQUET[0]
-    if (cmd === undefined) throw new Error('ls_parquet not registered')
-    const result = await cmd.fn(resource.accessor, [PathSpec.fromStrPath('/data.parquet')], [], {
-      stdin: null,
-      flags: { args_l: true },
-      filetypeFns: null,
-      cwd: '/',
-      resource,
-    })
-    if (result === null) throw new Error('no result')
-    const [out] = result
-    const buf =
-      out instanceof Uint8Array ? out : await materialize(out as AsyncIterable<Uint8Array>)
-    const text = DEC.decode(buf)
-    expect(text).toContain('2 rows')
-    expect(text).toContain('2 cols')
+  it('ls has no filetype variant, a parquet operand prints as a plain name (GNU)', () => {
+    const variants = RAM_COMMANDS.filter((c) => c.name === 'ls' && c.filetype != null)
+    expect(variants).toEqual([])
   })
 })

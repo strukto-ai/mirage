@@ -147,8 +147,3 @@ def file(raw: bytes) -> bytes:
                      for name, type_name in _fields(pf.schema_arrow))
     return (f"parquet, {meta.num_rows} rows, {meta.num_columns} columns"
             f" ({cols})").encode()
-
-
-def ls(raw: bytes) -> tuple[int, int]:
-    pf = _open(raw)
-    return pf.metadata.num_rows, len(pf.schema_arrow)

@@ -2283,7 +2283,7 @@ def test_ln_multi_source_is_error():
     ws = _ws()
     io = _exec(ws, "ln -s /ram/*.txt /ram/lnk")
     assert io.exit_code == 1
-    assert b"is not a directory" in io.stderr
+    assert b": Not a directory" in io.stderr
 
 
 def test_ln_single_match_resolves():

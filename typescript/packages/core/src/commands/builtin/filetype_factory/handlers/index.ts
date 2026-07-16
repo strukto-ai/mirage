@@ -21,7 +21,6 @@ import { ftCut } from './cut.ts'
 import { ftFile } from './file.ts'
 import { ftGrep } from './grep.ts'
 import { ftHead } from './head.ts'
-import { ftLs } from './ls.ts'
 import { ftStat } from './stat.ts'
 import { ftTail } from './tail.ts'
 import { ftWc } from './wc.ts'
@@ -45,5 +44,4 @@ export const BUILDERS: readonly (readonly [string, FiletypeHandler])[] = [
   ['cut', ftCut],
   ['file', ftFile],
   ['grep', ftGrep],
-  ['ls', ftLs],
 ]

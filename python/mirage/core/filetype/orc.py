@@ -145,8 +145,3 @@ def file(raw: bytes) -> bytes:
                      for name, type_name in _fields(schema))
     return (f"orc, {f.nrows} rows, {len(schema)} columns, "
             f"{f.nstripes} stripes ({cols})").encode()
-
-
-def ls(raw: bytes) -> tuple[int, int]:
-    f = _open(raw)
-    return f.nrows, len(f.schema)

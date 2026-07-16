@@ -401,25 +401,6 @@ export async function tail(raw: Uint8Array, n = 10): Promise<Uint8Array> {
   return ENC.encode(lines.join('\n'))
 }
 
-export async function ls(
-  raw: Uint8Array,
-  meta: { size: number; modified: string | null; name: string },
-): Promise<Uint8Array> {
-  const frame = await readFrame(raw)
-  const rows = frame.rows.length
-  const cols = fieldsFromFrame(frame).length
-  const line = `hdf5\t${String(meta.size)}\t${String(rows)} rows\t${String(cols)} cols\t${meta.modified ?? ''}\t${meta.name}`
-  return ENC.encode(line)
-}
-
-export function lsFallback(meta: {
-  size: number
-  modified: string | null
-  name: string
-}): Uint8Array {
-  return ENC.encode(`hdf5\t${String(meta.size)}\t\t\t${meta.modified ?? ''}\t${meta.name}`)
-}
-
 export async function wc(raw: Uint8Array): Promise<number> {
   const frame = await readFrame(raw)
   return frame.rows.length

@@ -2533,7 +2533,7 @@ exit=127
 nosuchcmd: command not found
 === glob_ln_multi_source ===
 exit=1
-ln: target '/data/lnk_multi' is not a directory
+ln: target '/data/lnk_multi': Not a directory
 === pr_seed ===
 exit=0
 === pr_cut_multi ===
