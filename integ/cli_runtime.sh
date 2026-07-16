@@ -231,10 +231,11 @@ echo
 echo "===== js sandbox mount access (typescript daemon) ====="
 export MIRAGE_HOME
 MIRAGE_HOME="$(mktemp -d /tmp/cli-runtime-sbxts-home.XXXXXX)"
-"$TS_CLI" config set port 9441 >/dev/null </dev/null
-"$TS_CLI" config set url "http://127.0.0.1:9441" >/dev/null </dev/null
+# $TS_CLI is multi-word ("node .../mirage.js") so it must expand unquoted.
+$TS_CLI config set port 9441 >/dev/null </dev/null
+$TS_CLI config set url "http://127.0.0.1:9441" >/dev/null </dev/null
 sandbox_probe_ts "$TS_CLI" | tee -a /tmp/cli-runtime-ts.txt
-"$TS_CLI" daemon stop >/dev/null 2>&1 </dev/null || true
+$TS_CLI daemon stop >/dev/null 2>&1 </dev/null || true
 sleep 1
 
 echo
