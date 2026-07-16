@@ -27,8 +27,9 @@ class _FakeThread:
 
 
 def _fake_mount(monkeypatch):
-    monkeypatch.setattr("mirage.workspace.fuse.mount_background",
-                        lambda ops, mountpoint, root_prefix="": _FakeThread())
+    monkeypatch.setattr(
+        "mirage.workspace.fuse.mount_background",
+        lambda ops, mountpoint, root_prefix="", session=None: _FakeThread())
     monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: None)
 
 
@@ -69,7 +70,7 @@ def test_multiple_fuse_mounts_are_independent(monkeypatch):
 def test_collision_rejected_before_mount(monkeypatch):
     calls = []
     monkeypatch.setattr("mirage.workspace.fuse.mount_background",
-                        lambda ops, mountpoint, root_prefix="":
+                        lambda ops, mountpoint, root_prefix="", session=None:
                         (calls.append(mountpoint) or _FakeThread()))
     monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: None)
     ws = Workspace({
