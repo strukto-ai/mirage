@@ -15,7 +15,7 @@
 import functools
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import NamedTuple
+from typing import NamedTuple, overload
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
@@ -39,6 +39,16 @@ async def overlaid_stat(stat: Callable, overlay: StatOverlay, path: PathSpec,
         index (IndexCacheStore | None): cache index threaded through.
     """
     return overlay(path.virtual, await stat(path, index))
+
+
+@overload
+def with_index(fn: Callable, index: IndexCacheStore | None) -> Callable:
+    ...
+
+
+@overload
+def with_index(fn: None, index: IndexCacheStore | None) -> None:
+    ...
 
 
 def with_index(fn: Callable | None,
