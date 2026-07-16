@@ -7,7 +7,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "ln -s /data/a.txt /data2/xm_link.txt && cat /data2/xm_link.txt",
       "expect": {
@@ -23,7 +25,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "readlink /data2/xm_link.txt",
       "expect": {
@@ -39,7 +43,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "ln -s /data2/xm.txt /data/xm_rlink.txt && cat /data/xm_rlink.txt",
       "expect": {

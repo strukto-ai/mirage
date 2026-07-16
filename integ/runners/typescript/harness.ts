@@ -25,6 +25,8 @@ export interface Mount {
   resource: string
   backend: string
   fixture?: string
+  bucket?: string
+  prefix?: string
 }
 
 export interface Target {

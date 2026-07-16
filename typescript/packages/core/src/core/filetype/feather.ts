@@ -14,6 +14,7 @@
 
 import { tableFromIPC, type Table } from 'apache-arrow'
 import {
+  canonicalType,
   cutColumns,
   ENC,
   grepRows,
@@ -29,7 +30,7 @@ function readTable(raw: Uint8Array): Table {
 }
 
 function schemaFields(table: Table): SchemaField[] {
-  return table.schema.fields.map((f) => ({ name: f.name, type: String(f.type) }))
+  return table.schema.fields.map((f) => ({ name: f.name, type: canonicalType(String(f.type)) }))
 }
 
 function tableRows(table: Table, start = 0, end?: number): Record<string, unknown>[] {

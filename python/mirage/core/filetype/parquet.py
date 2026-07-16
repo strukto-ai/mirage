@@ -13,59 +13,27 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import io
-import re
 
-import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-_MAX_PREVIEW_ROWS = 20
+from mirage.core.filetype import table as tbl
+from mirage.core.filetype.constants import MAX_PREVIEW_ROWS
 
 
 def _open(raw: bytes) -> pq.ParquetFile:
     return pq.ParquetFile(io.BytesIO(raw))
 
 
-def _render_schema(schema: pa.Schema) -> list[str]:
-    lines = ["## Schema"]
-    for field in schema:
-        lines.append(f"  {field.name}: {field.type}")
-    return lines
+def _fields(schema: pa.Schema) -> list[tuple[str, str]]:
+    return [(f.name, tbl.canonical_type(str(f.type))) for f in schema]
 
 
-def _render_table(table: pa.Table, label: str, count: int) -> list[str]:
-    lines = [f"## {label} ({count} rows)", ""]
-    lines.append(table.to_pandas().to_string(index=False))
-    lines.append("")
-    return lines
+def _columns(schema: pa.Schema) -> list[str]:
+    return [f.name for f in schema]
 
 
-def cat(raw: bytes, max_rows: int = _MAX_PREVIEW_ROWS) -> bytes:
-    pf = _open(raw)
-    schema = pf.schema_arrow
-    num_rows = pf.metadata.num_rows
-    batches: list[pa.Table] = []
-    collected = 0
-    for i in range(pf.metadata.num_row_groups):
-        if collected >= max_rows:
-            break
-        rg = pf.read_row_group(i)
-        batches.append(rg)
-        collected += rg.num_rows
-    table = pa.concat_tables(batches).slice(0, max_rows)
-    preview_count = min(num_rows, max_rows)
-    lines = [f"# Rows: {num_rows}, Columns: {len(schema)}", ""]
-    lines.extend(_render_schema(schema))
-    lines.append("")
-    lines.extend(_render_table(table, "Preview", preview_count))
-    return "\n".join(lines).encode()
-
-
-def head(raw: bytes, n: int = 10) -> bytes:
-    pf = _open(raw)
-    schema = pf.schema_arrow
-    num_rows = pf.metadata.num_rows
-    rows_needed = min(n, num_rows)
+def _read_head(pf: pq.ParquetFile, rows_needed: int) -> pa.Table:
     batches: list[pa.Table] = []
     collected = 0
     for i in range(pf.metadata.num_row_groups):
@@ -74,11 +42,34 @@ def head(raw: bytes, n: int = 10) -> bytes:
         rg = pf.read_row_group(i)
         batches.append(rg)
         collected += rg.num_rows
-    table = pa.concat_tables(batches).slice(0, rows_needed)
+    if not batches:
+        return pf.read().slice(0, 0)
+    return pa.concat_tables(batches).slice(0, rows_needed)
+
+
+def cat(raw: bytes, max_rows: int = MAX_PREVIEW_ROWS) -> bytes:
+    pf = _open(raw)
+    schema = pf.schema_arrow
+    num_rows = pf.metadata.num_rows
+    preview_count = min(num_rows, max_rows)
+    rows = _read_head(pf, preview_count).to_pylist()
     lines = [f"# Rows: {num_rows}, Columns: {len(schema)}", ""]
-    lines.extend(_render_schema(schema))
+    lines.extend(tbl.render_schema(_fields(schema)))
     lines.append("")
-    lines.extend(_render_table(table, f"First {rows_needed}", rows_needed))
+    lines.extend(tbl.render_table(rows, "Preview", preview_count))
+    return "\n".join(lines).encode()
+
+
+def head(raw: bytes, n: int = 10) -> bytes:
+    pf = _open(raw)
+    schema = pf.schema_arrow
+    num_rows = pf.metadata.num_rows
+    rows_needed = min(n, num_rows)
+    rows = _read_head(pf, rows_needed).to_pylist()
+    lines = [f"# Rows: {num_rows}, Columns: {len(schema)}", ""]
+    lines.extend(tbl.render_schema(_fields(schema)))
+    lines.append("")
+    lines.extend(tbl.render_table(rows, f"First {rows_needed}", rows_needed))
     return "\n".join(lines).encode()
 
 
@@ -95,13 +86,14 @@ def tail(raw: bytes, n: int = 10) -> bytes:
         rg = pf.read_row_group(i)
         batches.insert(0, rg)
         collected += rg.num_rows
-    combined = pa.concat_tables(batches)
-    table = combined.slice(max(0, combined.num_rows - rows_needed),
-                           rows_needed)
+    combined = pa.concat_tables(batches) if batches else pf.read().slice(0, 0)
+    result = combined.slice(max(0, combined.num_rows - rows_needed),
+                            rows_needed)
+    rows = result.to_pylist()
     lines = [f"# Rows: {num_rows}, Columns: {len(schema)}", ""]
-    lines.extend(_render_schema(schema))
+    lines.extend(tbl.render_schema(_fields(schema)))
     lines.append("")
-    lines.extend(_render_table(table, f"Last {rows_needed}", rows_needed))
+    lines.extend(tbl.render_table(rows, f"Last {rows_needed}", rows_needed))
     return "\n".join(lines).encode()
 
 
@@ -123,7 +115,7 @@ def stat(raw: bytes) -> bytes:
         f"serialized_size: {meta.serialized_size}",
         "",
     ]
-    lines.extend(_render_schema(schema))
+    lines.extend(tbl.render_schema(_fields(schema)))
     lines.append("")
     for i in range(meta.num_row_groups):
         rg = meta.row_group(i)
@@ -135,36 +127,24 @@ def stat(raw: bytes) -> bytes:
 
 
 def grep(raw: bytes, pattern: str, ignore_case: bool = False) -> bytes:
-    flags = re.IGNORECASE if ignore_case else 0
-    regex = re.compile(pattern, flags)
     pf = _open(raw)
-    table = pf.read()
-    df = table.to_pandas()
-    str_cols = df.select_dtypes(include=["object", "string"]).columns
-    if len(str_cols) == 0:
-        return df.head(0).to_csv(index=False).encode()
-    row_mask = pd.Series(False, index=df.index)
-    for col_name in str_cols:
-        row_mask = row_mask | df[col_name].astype(str).str.contains(regex,
-                                                                    na=False)
-    matched = df[row_mask]
-    return matched.to_csv(index=False).encode()
+    rows = pf.read().to_pylist()
+    matched = tbl.grep_rows(rows, pattern, ignore_case)
+    return tbl.to_csv(matched)
 
 
 def cut(raw: bytes, columns: list[str]) -> bytes:
     pf = _open(raw)
-    schema_names = [f.name for f in pf.schema_arrow]
-    for col in columns:
-        if col not in schema_names:
-            raise ValueError(f"column not found: {col}")
-    table = pf.read(columns=columns)
-    return table.to_pandas().to_csv(index=False).encode()
+    rows = pf.read().to_pylist()
+    projected = tbl.cut_columns(rows, _columns(pf.schema_arrow), list(columns))
+    return tbl.to_csv(projected)
 
 
 def file(raw: bytes) -> bytes:
     pf = _open(raw)
     meta = pf.metadata
-    cols = ", ".join(f"{f.name}: {f.type}" for f in pf.schema_arrow)
+    cols = ", ".join(f"{name}: {type_name}"
+                     for name, type_name in _fields(pf.schema_arrow))
     return (f"parquet, {meta.num_rows} rows, {meta.num_columns} columns"
             f" ({cols})").encode()
 

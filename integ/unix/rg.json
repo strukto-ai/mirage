@@ -7,7 +7,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "rg world /data/a.txt",
       "expect": {
@@ -23,7 +25,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "rg -i WORLD /data/mixed.txt",
       "expect": {
@@ -39,7 +43,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "rg -c hello /data/mixed.txt",
       "expect": {
@@ -55,7 +61,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "rg -f /data/patterns.txt -f /data/patterns2.txt /data/a.txt",
       "expect": {
@@ -71,7 +79,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "rg -e world /data/a.txt",
       "expect": {
@@ -87,7 +97,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "rg -e world -e bar /data/a.txt",
       "expect": {
@@ -103,7 +115,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "rg -f /data/patterns.txt /data/a.txt",
       "expect": {
@@ -119,7 +133,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "mkdir -p /data/rgm/d1",
       "expect": {
@@ -135,7 +151,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "mkdir -p /data/rgm/d2",
       "expect": {
@@ -151,7 +169,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "cp /data/a.txt /data/rgm/d1/f1.txt",
       "expect": {
@@ -167,7 +187,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "cp /data/mixed.txt /data/rgm/d2/f2.txt",
       "expect": {
@@ -183,7 +205,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "rg -i hello /data/rgm/d1 /data/rgm/d2",
       "expect": {
@@ -199,7 +223,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "rg -l hello /data/rgm/d1/f1.txt /data/rgm/d2/f2.txt",
       "expect": {
@@ -215,7 +241,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "cp /data/a.txt /data/rgm/d1/skip.parquet",
       "expect": {
@@ -231,7 +259,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "rg world /data/rgm/d1",
       "expect": {
@@ -247,7 +277,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "rg",
       "expect": {
@@ -263,7 +295,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "rg foo",
       "expect": {

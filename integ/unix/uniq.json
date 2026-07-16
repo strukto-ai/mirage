@@ -7,7 +7,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "uniq /data/dup.txt",
       "expect": {
@@ -23,7 +25,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "uniq -c /data/dup.txt",
       "expect": {
@@ -39,7 +43,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "uniq -d /data/dup.txt",
       "expect": {
@@ -55,7 +61,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "uniq -u /data/dup.txt",
       "expect": {
@@ -71,7 +79,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "uniq /data/repeats.txt",
       "expect": {
@@ -87,7 +97,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "uniq -c /data/repeats.txt",
       "expect": {
@@ -103,7 +115,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "uniq -f 1 /data/prefix_dup.txt",
       "expect": {
@@ -119,7 +133,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "uniq -s 1 /data/prefix_dup.txt",
       "expect": {
@@ -135,7 +151,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "uniq -w 3 /data/prefix_dup.txt",
       "expect": {
@@ -151,7 +169,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "uniq -w 0 /data/prefix_dup.txt",
       "expect": {
@@ -167,7 +187,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "uniq -c -f 1 /data/prefix_dup.txt",
       "expect": {

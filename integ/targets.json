@@ -5,7 +5,8 @@
       "hosts": ["python", "typescript-node"],
       "mounts": [
         { "path": "/data", "resource": "ram", "backend": "memory", "fixture": "files/v1" },
-        { "path": "/data2", "resource": "ram", "backend": "memory" }
+        { "path": "/data2", "resource": "ram", "backend": "memory" },
+        { "path": "/res", "resource": "ram", "backend": "memory", "fixture": "columnar/v1" }
       ]
     },
     {
@@ -13,7 +14,8 @@
       "hosts": ["python", "typescript-node"],
       "mounts": [
         { "path": "/data", "resource": "disk", "backend": "tmpdir", "fixture": "files/v1" },
-        { "path": "/data2", "resource": "disk", "backend": "tmpdir" }
+        { "path": "/data2", "resource": "disk", "backend": "tmpdir" },
+        { "path": "/res", "resource": "disk", "backend": "tmpdir", "fixture": "columnar/v1" }
       ]
     },
     {
@@ -22,7 +24,8 @@
       "service": "redis",
       "mounts": [
         { "path": "/data", "resource": "redis", "backend": "redis", "fixture": "files/v1" },
-        { "path": "/data2", "resource": "redis", "backend": "redis" }
+        { "path": "/data2", "resource": "redis", "backend": "redis" },
+        { "path": "/res", "resource": "redis", "backend": "redis", "fixture": "columnar/v1" }
       ]
     },
     {
@@ -30,7 +33,28 @@
       "hosts": ["typescript-browser"],
       "mounts": [
         { "path": "/data", "resource": "opfs", "backend": "memory", "fixture": "files/v1" },
-        { "path": "/data2", "resource": "opfs", "backend": "memory" }
+        { "path": "/data2", "resource": "opfs", "backend": "memory" },
+        { "path": "/res", "resource": "opfs", "backend": "memory", "fixture": "columnar/v1" }
+      ]
+    },
+    {
+      "id": "s3",
+      "hosts": ["python", "typescript-node"],
+      "service": "s3",
+      "mounts": [
+        { "path": "/data", "resource": "s3", "backend": "s3", "bucket": "data", "fixture": "files/v1" },
+        { "path": "/data2", "resource": "s3", "backend": "s3", "bucket": "data2" },
+        { "path": "/res", "resource": "s3", "backend": "s3", "bucket": "res", "fixture": "columnar/v1" }
+      ]
+    },
+    {
+      "id": "s3-prefix",
+      "hosts": ["python", "typescript-node"],
+      "service": "s3",
+      "mounts": [
+        { "path": "/data", "resource": "s3", "backend": "s3", "bucket": "shared", "prefix": "team/reports/data", "fixture": "files/v1" },
+        { "path": "/data2", "resource": "s3", "backend": "s3", "bucket": "shared", "prefix": "team/reports/data2" },
+        { "path": "/res", "resource": "s3", "backend": "s3", "bucket": "shared", "prefix": "team/reports/res", "fixture": "columnar/v1" }
       ]
     }
   ]

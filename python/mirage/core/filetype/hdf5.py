@@ -12,13 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
 import tempfile
 
 import h5py
 import pandas as pd
 
-_MAX_PREVIEW_ROWS = 20
+from mirage.core.filetype import table as tbl
+from mirage.core.filetype.constants import MAX_PREVIEW_ROWS
 
 
 def _read_df(raw: bytes) -> pd.DataFrame:
@@ -47,28 +47,42 @@ def _read_df(raw: bytes) -> pd.DataFrame:
             raise ValueError("unsupported HDF5 dataset structure")
 
 
-def _render_schema(df: pd.DataFrame) -> list[str]:
-    lines = ["## Schema"]
-    for col in df.columns:
-        lines.append(f"  {col}: {df[col].dtype}")
-    return lines
+def _scalar(value: object) -> object:
+    if hasattr(value, "item"):
+        value = value.item()
+    if isinstance(value, (bytes, bytearray)):
+        return value.decode("utf-8", "replace")
+    return value
 
 
-def _render_df(df: pd.DataFrame, label: str, count: int) -> list[str]:
-    lines = [f"## {label} ({count} rows)", ""]
-    lines.append(df.to_string(index=False))
-    lines.append("")
-    return lines
+def _columns(df: pd.DataFrame) -> list[str]:
+    return [str(c) for c in df.columns]
 
 
-def cat(raw: bytes, max_rows: int = _MAX_PREVIEW_ROWS) -> bytes:
+def _fields(df: pd.DataFrame) -> list[tuple[str, str]]:
+    return [(str(c), tbl.canonical_type(str(df[c].dtype))) for c in df.columns]
+
+
+def _rows(df: pd.DataFrame) -> list[dict]:
+    columns = _columns(df)
+    out: list[dict] = []
+    for record in df.to_dict("records"):
+        out.append({
+            col: _scalar(value)
+            for col, value in zip(columns, record.values())
+        })
+    return out
+
+
+def cat(raw: bytes, max_rows: int = MAX_PREVIEW_ROWS) -> bytes:
     df = _read_df(raw)
     num_rows = len(df)
     preview_count = min(num_rows, max_rows)
+    rows = _rows(df.head(max_rows))
     lines = [f"# Rows: {num_rows}, Columns: {len(df.columns)}", ""]
-    lines.extend(_render_schema(df))
+    lines.extend(tbl.render_schema(_fields(df)))
     lines.append("")
-    lines.extend(_render_df(df.head(max_rows), "Preview", preview_count))
+    lines.extend(tbl.render_table(rows, "Preview", preview_count))
     return "\n".join(lines).encode()
 
 
@@ -76,11 +90,11 @@ def head(raw: bytes, n: int = 10) -> bytes:
     df = _read_df(raw)
     num_rows = len(df)
     rows_needed = min(n, num_rows)
+    rows = _rows(df.head(rows_needed))
     lines = [f"# Rows: {num_rows}, Columns: {len(df.columns)}", ""]
-    lines.extend(_render_schema(df))
+    lines.extend(tbl.render_schema(_fields(df)))
     lines.append("")
-    lines.extend(
-        _render_df(df.head(rows_needed), f"First {rows_needed}", rows_needed))
+    lines.extend(tbl.render_table(rows, f"First {rows_needed}", rows_needed))
     return "\n".join(lines).encode()
 
 
@@ -88,11 +102,11 @@ def tail(raw: bytes, n: int = 10) -> bytes:
     df = _read_df(raw)
     num_rows = len(df)
     rows_needed = min(n, num_rows)
+    rows = _rows(df.tail(rows_needed))
     lines = [f"# Rows: {num_rows}, Columns: {len(df.columns)}", ""]
-    lines.extend(_render_schema(df))
+    lines.extend(tbl.render_schema(_fields(df)))
     lines.append("")
-    lines.extend(
-        _render_df(df.tail(rows_needed), f"Last {rows_needed}", rows_needed))
+    lines.extend(tbl.render_table(rows, f"Last {rows_needed}", rows_needed))
     return "\n".join(lines).encode()
 
 
@@ -108,28 +122,30 @@ def stat(raw: bytes) -> bytes:
         f"columns: {len(df.columns)}",
         "",
     ]
-    lines.extend(_render_schema(df))
+    lines.extend(tbl.render_schema(_fields(df)))
     lines.append("")
     return "\n".join(lines).encode()
 
 
 def grep(raw: bytes, pattern: str, ignore_case: bool = False) -> bytes:
-    flags = re.IGNORECASE if ignore_case else 0
-    regex = re.compile(pattern, flags)
     df = _read_df(raw)
-    str_cols = df.select_dtypes(include=["object", "string"]).columns
-    if len(str_cols) == 0:
-        return df.head(0).to_csv(index=False).encode()
-    row_mask = pd.Series(False, index=df.index)
-    for col_name in str_cols:
-        row_mask = row_mask | df[col_name].astype(str).str.contains(regex,
-                                                                    na=False)
-    return df[row_mask].to_csv(index=False).encode()
+    matched = tbl.grep_rows(_rows(df), pattern, ignore_case)
+    return tbl.to_csv(matched)
 
 
 def cut(raw: bytes, columns: list[str]) -> bytes:
     df = _read_df(raw)
-    for col in columns:
-        if col not in df.columns:
-            raise ValueError(f"column not found: {col}")
-    return df[columns].to_csv(index=False).encode()
+    projected = tbl.cut_columns(_rows(df), _columns(df), list(columns))
+    return tbl.to_csv(projected)
+
+
+def file(raw: bytes) -> bytes:
+    df = _read_df(raw)
+    cols = ", ".join(f"{name}: {type_name}" for name, type_name in _fields(df))
+    return (f"hdf5, {len(df)} rows, {len(df.columns)} columns"
+            f" ({cols})").encode()
+
+
+def ls(raw: bytes) -> tuple[int, int]:
+    df = _read_df(raw)
+    return len(df), len(df.columns)

@@ -7,7 +7,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "file /data/a.txt",
       "expect": {
@@ -23,7 +25,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "file /data/user.json",
       "expect": {
@@ -39,7 +43,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "file -b /data/a.txt",
       "expect": {
@@ -55,7 +61,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "file /data/a.txt /data/user.json",
       "expect": {
@@ -71,7 +79,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "file /data/empty.txt",
       "expect": {
@@ -87,7 +97,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "file /data/binary.bin",
       "expect": {

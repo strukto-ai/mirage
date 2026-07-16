@@ -7,7 +7,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "grep -v '^#' /.bash_history | tail -n 3",
       "expect": {
@@ -23,7 +25,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "grep -v '^#' /.bash_history | tail -n 1",
       "expect": {
@@ -39,7 +43,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "cat /.bash_history | sed 's/^#[0-9]*$/#TS/' | tail -n 4",
       "expect": {

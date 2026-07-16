@@ -93,11 +93,11 @@ ca04d1f4b6a5f1a774fb076af00a791e7f7ef70958300e314c4eafc563ac3bb9  /s3/data/examp
 -rw-r--r-- 1 user user      631 Mar 31 12:00 example.orc
 -rw-r--r-- 1 user user     2401 Mar 31 12:00 example.parquet
 === s3:file_parquet ===
-parquet, 10 rows, 3 columns (id: int64, value: double, label: large_string)
+parquet, 10 rows, 3 columns (id: int64, value: float64, label: string)
 === s3:file_orc ===
-orc, 10 rows, 3 columns, 1 stripes (id: int64, value: double, label: string)
+orc, 10 rows, 3 columns, 1 stripes (id: int64, value: float64, label: string)
 === s3:file_feather ===
-feather, 10 rows, 3 columns (id: int64, value: double, label: large_string)
+feather, 10 rows, 3 columns (id: int64, value: float64, label: string)
 === s3:du_multi ===
 15533	/s3/data/example.json
 10414430	/s3/data/example.jsonl
@@ -223,11 +223,11 @@ ca04d1f4b6a5f1a774fb076af00a791e7f7ef70958300e314c4eafc563ac3bb9  /gcs/data/exam
 -rw-r--r-- 1 user user      631 Mar 31 12:00 example.orc
 -rw-r--r-- 1 user user     2401 Mar 31 12:00 example.parquet
 === gcs:file_parquet ===
-parquet, 10 rows, 3 columns (id: int64, value: double, label: large_string)
+parquet, 10 rows, 3 columns (id: int64, value: float64, label: string)
 === gcs:file_orc ===
-orc, 10 rows, 3 columns, 1 stripes (id: int64, value: double, label: string)
+orc, 10 rows, 3 columns, 1 stripes (id: int64, value: float64, label: string)
 === gcs:file_feather ===
-feather, 10 rows, 3 columns (id: int64, value: double, label: large_string)
+feather, 10 rows, 3 columns (id: int64, value: float64, label: string)
 === gcs:du_multi ===
 15533	/gcs/data/example.json
 10414430	/gcs/data/example.jsonl
@@ -353,11 +353,11 @@ ca04d1f4b6a5f1a774fb076af00a791e7f7ef70958300e314c4eafc563ac3bb9  /minio/data/ex
 -rw-r--r-- 1 user user      631 Mar 31 12:00 example.orc
 -rw-r--r-- 1 user user     2401 Mar 31 12:00 example.parquet
 === minio:file_parquet ===
-parquet, 10 rows, 3 columns (id: int64, value: double, label: large_string)
+parquet, 10 rows, 3 columns (id: int64, value: float64, label: string)
 === minio:file_orc ===
-orc, 10 rows, 3 columns, 1 stripes (id: int64, value: double, label: string)
+orc, 10 rows, 3 columns, 1 stripes (id: int64, value: float64, label: string)
 === minio:file_feather ===
-feather, 10 rows, 3 columns (id: int64, value: double, label: large_string)
+feather, 10 rows, 3 columns (id: int64, value: float64, label: string)
 === minio:du_multi ===
 15533	/minio/data/example.json
 10414430	/minio/data/example.jsonl
@@ -483,11 +483,11 @@ ca04d1f4b6a5f1a774fb076af00a791e7f7ef70958300e314c4eafc563ac3bb9  /seaweedfs/dat
 -rw-r--r-- 1 user user      631 Mar 31 12:00 example.orc
 -rw-r--r-- 1 user user     2401 Mar 31 12:00 example.parquet
 === seaweedfs:file_parquet ===
-parquet, 10 rows, 3 columns (id: int64, value: double, label: large_string)
+parquet, 10 rows, 3 columns (id: int64, value: float64, label: string)
 === seaweedfs:file_orc ===
-orc, 10 rows, 3 columns, 1 stripes (id: int64, value: double, label: string)
+orc, 10 rows, 3 columns, 1 stripes (id: int64, value: float64, label: string)
 === seaweedfs:file_feather ===
-feather, 10 rows, 3 columns (id: int64, value: double, label: large_string)
+feather, 10 rows, 3 columns (id: int64, value: float64, label: string)
 === seaweedfs:du_multi ===
 15533	/seaweedfs/data/example.json
 10414430	/seaweedfs/data/example.jsonl

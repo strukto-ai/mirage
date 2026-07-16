@@ -22,7 +22,7 @@ from pathlib import Path
 
 INTEG = Path(__file__).resolve().parents[2]
 
-TARGETS = ["ram", "disk", "redis", "opfs"]
+TARGETS = ["ram", "disk", "redis", "opfs", "s3", "s3-prefix"]
 
 GROUPS = [
     "CASES",

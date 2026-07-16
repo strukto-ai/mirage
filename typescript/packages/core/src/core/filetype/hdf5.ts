@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  canonicalType,
   cutColumns,
   ENC,
   grepRows,
@@ -339,7 +340,10 @@ function friendlyDtype(code: string | undefined): string {
 }
 
 function fieldsFromFrame(frame: Frame): SchemaField[] {
-  return frame.columns.map((c, i) => ({ name: c, type: friendlyDtype(frame.dtypes[i]) }))
+  return frame.columns.map((c, i) => ({
+    name: c,
+    type: canonicalType(friendlyDtype(frame.dtypes[i])),
+  }))
 }
 
 export async function describe(raw: Uint8Array): Promise<string> {

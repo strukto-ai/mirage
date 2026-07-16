@@ -90,6 +90,10 @@ async function main(): Promise<void> {
       process.stderr.write(`skip [${id}]: no typescript adapter\n`)
       continue
     }
+    if (target.service === 's3' && !process.env.S3_ENDPOINT) {
+      process.stderr.write(`skip [${id}]: S3_ENDPOINT not set\n`)
+      continue
+    }
     await runTarget(target, cases, root, report, emit)
   }
 

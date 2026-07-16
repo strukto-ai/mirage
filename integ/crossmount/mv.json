@@ -7,7 +7,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "mv /data/xm_back.txt /data2/xm_moved.txt && cat /data2/xm_moved.txt && ls /data2",
       "expect": {

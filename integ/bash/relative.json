@@ -7,7 +7,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "mkdir -p /data/g11/sub && cd /data/g11 && printf 'one\\ntwo\\n' | tee sub/README > /dev/null",
       "expect": {
@@ -23,7 +25,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "cat sub/README && wc -l sub/README && head -1 sub/README",
       "expect": {

@@ -37,7 +37,7 @@ export async function ftWc<A extends Accessor>(
   try {
     const raw = await readBytes(accessor, first, opts.index ?? undefined)
     const rows = await entry.module.wc(raw)
-    const out: ByteSource = ENC.encode(`${String(rows)}\t${first.virtual}\n`)
+    const out: ByteSource = ENC.encode(`${String(rows)} ${first.virtual}\n`)
     return [out, new IOResult({ cache: [first.mountPath] })]
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

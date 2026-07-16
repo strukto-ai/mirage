@@ -7,7 +7,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "touch /data/xt.txt /data2/xt.txt && ls /data/xt.txt /data2/xt.txt && rm /data/xt.txt /data2/xt.txt && ls /data2",
       "expect": {

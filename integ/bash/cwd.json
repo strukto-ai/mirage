@@ -7,7 +7,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(pwd)",
       "expect": {
@@ -23,7 +25,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(cd /data && pwd)",
       "expect": {
@@ -39,7 +43,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(cd /data/sub && pwd)",
       "expect": {
@@ -55,7 +61,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(cd /data/sub && cd .. && pwd)",
       "expect": {
@@ -71,7 +79,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(cd /data && cat a.txt)",
       "expect": {
@@ -87,7 +97,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(cd /data && cat ./a.txt)",
       "expect": {
@@ -103,7 +115,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(cd /data && cat sub/nested.txt)",
       "expect": {
@@ -119,7 +133,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(cd /data/sub && cat ../a.txt)",
       "expect": {
@@ -135,7 +151,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(cd /data/sub && csplit -s -f cs_ nested.txt 2 && cat cs_00 cs_01 && rm cs_00 cs_01)",
       "expect": {
@@ -151,7 +169,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(cd /data/sub && echo $PWD)",
       "expect": {
@@ -167,7 +187,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(echo \"[$HOME]\")",
       "expect": {
@@ -183,7 +205,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(cd /data && cd /data/sub && echo $OLDPWD)",
       "expect": {
@@ -199,7 +223,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(cd /data && cd /data/sub && cd -)",
       "expect": {
@@ -215,7 +241,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(cd /data && cd /data/sub && cd - > /dev/null && pwd)",
       "expect": {
@@ -231,7 +259,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(export HOME=/data && cd ~ && pwd)",
       "expect": {
@@ -247,7 +277,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(export HOME=/data && echo $HOME)",
       "expect": {
@@ -263,7 +295,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(export HOME=/data && cat ~/a.txt)",
       "expect": {
@@ -279,7 +313,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(export HOME=/data && cat ~/sub/nested.txt)",
       "expect": {
@@ -295,7 +331,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(cd //data && pwd)",
       "expect": {
@@ -311,7 +349,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(cd -P /data/sub && pwd)",
       "expect": {
@@ -327,7 +367,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(cd -L /data && pwd)",
       "expect": {
@@ -343,7 +385,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(cd -- /data && pwd)",
       "expect": {
@@ -359,7 +403,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(export CDPATH=/data && cd sub && pwd)",
       "expect": {
@@ -375,7 +421,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "cd /data /data/sub 2>&1",
       "expect": {
@@ -391,7 +439,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "cd -x /data 2>&1",
       "expect": {
@@ -407,7 +457,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(unset HOME; cd) 2>&1",
       "expect": {
@@ -423,7 +475,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(cd /data && cd '~') 2>&1",
       "expect": {

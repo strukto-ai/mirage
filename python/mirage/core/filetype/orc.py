@@ -13,59 +13,27 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import io
-import re
 
-import pandas as pd
 import pyarrow as pa
 import pyarrow.orc as orc
 
-_MAX_PREVIEW_ROWS = 20
+from mirage.core.filetype import table as tbl
+from mirage.core.filetype.constants import MAX_PREVIEW_ROWS
 
 
 def _open(raw: bytes) -> orc.ORCFile:
     return orc.ORCFile(io.BytesIO(raw))
 
 
-def _render_schema(schema: pa.Schema) -> list[str]:
-    lines = ["## Schema"]
-    for field in schema:
-        lines.append(f"  {field.name}: {field.type}")
-    return lines
+def _fields(schema: pa.Schema) -> list[tuple[str, str]]:
+    return [(f.name, tbl.canonical_type(str(f.type))) for f in schema]
 
 
-def _render_table(table: pa.Table, label: str, count: int) -> list[str]:
-    lines = [f"## {label} ({count} rows)", ""]
-    lines.append(table.to_pandas().to_string(index=False))
-    lines.append("")
-    return lines
+def _columns(schema: pa.Schema) -> list[str]:
+    return [f.name for f in schema]
 
 
-def cat(raw: bytes, max_rows: int = _MAX_PREVIEW_ROWS) -> bytes:
-    f = _open(raw)
-    schema = f.schema
-    num_rows = f.nrows
-    batches: list[pa.RecordBatch] = []
-    collected = 0
-    for i in range(f.nstripes):
-        if collected >= max_rows:
-            break
-        stripe = f.read_stripe(i)
-        batches.append(stripe)
-        collected += stripe.num_rows
-    table = pa.Table.from_batches(batches).slice(0, max_rows)
-    preview_count = min(num_rows, max_rows)
-    lines = [f"# Rows: {num_rows}, Columns: {len(schema)}", ""]
-    lines.extend(_render_schema(schema))
-    lines.append("")
-    lines.extend(_render_table(table, "Preview", preview_count))
-    return "\n".join(lines).encode()
-
-
-def head(raw: bytes, n: int = 10) -> bytes:
-    f = _open(raw)
-    schema = f.schema
-    num_rows = f.nrows
-    rows_needed = min(n, num_rows)
+def _read_head(f: orc.ORCFile, rows_needed: int) -> pa.Table:
     batches: list[pa.RecordBatch] = []
     collected = 0
     for i in range(f.nstripes):
@@ -74,11 +42,34 @@ def head(raw: bytes, n: int = 10) -> bytes:
         stripe = f.read_stripe(i)
         batches.append(stripe)
         collected += stripe.num_rows
-    table = pa.Table.from_batches(batches).slice(0, rows_needed)
+    if not batches:
+        return f.read().slice(0, 0)
+    return pa.Table.from_batches(batches).slice(0, rows_needed)
+
+
+def cat(raw: bytes, max_rows: int = MAX_PREVIEW_ROWS) -> bytes:
+    f = _open(raw)
+    schema = f.schema
+    num_rows = f.nrows
+    preview_count = min(num_rows, max_rows)
+    rows = _read_head(f, preview_count).to_pylist()
     lines = [f"# Rows: {num_rows}, Columns: {len(schema)}", ""]
-    lines.extend(_render_schema(schema))
+    lines.extend(tbl.render_schema(_fields(schema)))
     lines.append("")
-    lines.extend(_render_table(table, f"First {rows_needed}", rows_needed))
+    lines.extend(tbl.render_table(rows, "Preview", preview_count))
+    return "\n".join(lines).encode()
+
+
+def head(raw: bytes, n: int = 10) -> bytes:
+    f = _open(raw)
+    schema = f.schema
+    num_rows = f.nrows
+    rows_needed = min(n, num_rows)
+    rows = _read_head(f, rows_needed).to_pylist()
+    lines = [f"# Rows: {num_rows}, Columns: {len(schema)}", ""]
+    lines.extend(tbl.render_schema(_fields(schema)))
+    lines.append("")
+    lines.extend(tbl.render_table(rows, f"First {rows_needed}", rows_needed))
     return "\n".join(lines).encode()
 
 
@@ -95,13 +86,15 @@ def tail(raw: bytes, n: int = 10) -> bytes:
         stripe = f.read_stripe(i)
         batches.insert(0, stripe)
         collected += stripe.num_rows
-    combined = pa.Table.from_batches(batches)
-    table = combined.slice(max(0, combined.num_rows - rows_needed),
-                           rows_needed)
+    combined = pa.Table.from_batches(batches) if batches else f.read().slice(
+        0, 0)
+    result = combined.slice(max(0, combined.num_rows - rows_needed),
+                            rows_needed)
+    rows = result.to_pylist()
     lines = [f"# Rows: {num_rows}, Columns: {len(schema)}", ""]
-    lines.extend(_render_schema(schema))
+    lines.extend(tbl.render_schema(_fields(schema)))
     lines.append("")
-    lines.extend(_render_table(table, f"Last {rows_needed}", rows_needed))
+    lines.extend(tbl.render_table(rows, f"Last {rows_needed}", rows_needed))
     return "\n".join(lines).encode()
 
 
@@ -121,7 +114,7 @@ def stat(raw: bytes) -> bytes:
         f"stripes: {f.nstripes}",
         "",
     ]
-    lines.extend(_render_schema(schema))
+    lines.extend(tbl.render_schema(_fields(schema)))
     lines.append("")
     for i in range(f.nstripes):
         stripe = f.read_stripe(i)
@@ -132,36 +125,24 @@ def stat(raw: bytes) -> bytes:
 
 
 def grep(raw: bytes, pattern: str, ignore_case: bool = False) -> bytes:
-    flags = re.IGNORECASE if ignore_case else 0
-    regex = re.compile(pattern, flags)
     f = _open(raw)
-    table = f.read()
-    df = table.to_pandas()
-    str_cols = df.select_dtypes(include=["object", "string"]).columns
-    if len(str_cols) == 0:
-        return df.head(0).to_csv(index=False).encode()
-    row_mask = pd.Series(False, index=df.index)
-    for col_name in str_cols:
-        row_mask = row_mask | df[col_name].astype(str).str.contains(regex,
-                                                                    na=False)
-    matched = df[row_mask]
-    return matched.to_csv(index=False).encode()
+    rows = f.read().to_pylist()
+    matched = tbl.grep_rows(rows, pattern, ignore_case)
+    return tbl.to_csv(matched)
 
 
 def cut(raw: bytes, columns: list[str]) -> bytes:
     f = _open(raw)
-    schema_names = f.schema.names
-    for col in columns:
-        if col not in schema_names:
-            raise ValueError(f"column not found: {col}")
-    table = f.read(columns=columns)
-    return table.to_pandas().to_csv(index=False).encode()
+    rows = f.read().to_pylist()
+    projected = tbl.cut_columns(rows, _columns(f.schema), list(columns))
+    return tbl.to_csv(projected)
 
 
 def file(raw: bytes) -> bytes:
     f = _open(raw)
     schema = f.schema
-    cols = ", ".join(f"{field.name}: {field.type}" for field in schema)
+    cols = ", ".join(f"{name}: {type_name}"
+                     for name, type_name in _fields(schema))
     return (f"orc, {f.nrows} rows, {len(schema)} columns, "
             f"{f.nstripes} stripes ({cols})").encode()
 

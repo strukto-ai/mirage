@@ -13,43 +13,36 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import io
-import re
 
-import pandas as pd
 import pyarrow as pa
 import pyarrow.feather as feather
 
-_MAX_PREVIEW_ROWS = 20
+from mirage.core.filetype import table as tbl
+from mirage.core.filetype.constants import MAX_PREVIEW_ROWS
 
 
 def _read_table(raw: bytes) -> pa.Table:
     return feather.read_table(io.BytesIO(raw))
 
 
-def _render_schema(schema: pa.Schema) -> list[str]:
-    lines = ["## Schema"]
-    for field in schema:
-        lines.append(f"  {field.name}: {field.type}")
-    return lines
+def _fields(schema: pa.Schema) -> list[tuple[str, str]]:
+    return [(f.name, tbl.canonical_type(str(f.type))) for f in schema]
 
 
-def _render_table(table: pa.Table, label: str, count: int) -> list[str]:
-    lines = [f"## {label} ({count} rows)", ""]
-    lines.append(table.to_pandas().to_string(index=False))
-    lines.append("")
-    return lines
+def _columns(schema: pa.Schema) -> list[str]:
+    return [f.name for f in schema]
 
 
-def cat(raw: bytes, max_rows: int = _MAX_PREVIEW_ROWS) -> bytes:
+def cat(raw: bytes, max_rows: int = MAX_PREVIEW_ROWS) -> bytes:
     table = _read_table(raw)
     schema = table.schema
     num_rows = table.num_rows
-    preview = table.slice(0, max_rows)
     preview_count = min(num_rows, max_rows)
+    rows = table.slice(0, preview_count).to_pylist()
     lines = [f"# Rows: {num_rows}, Columns: {len(schema)}", ""]
-    lines.extend(_render_schema(schema))
+    lines.extend(tbl.render_schema(_fields(schema)))
     lines.append("")
-    lines.extend(_render_table(preview, "Preview", preview_count))
+    lines.extend(tbl.render_table(rows, "Preview", preview_count))
     return "\n".join(lines).encode()
 
 
@@ -58,11 +51,11 @@ def head(raw: bytes, n: int = 10) -> bytes:
     schema = table.schema
     num_rows = table.num_rows
     rows_needed = min(n, num_rows)
-    result = table.slice(0, rows_needed)
+    rows = table.slice(0, rows_needed).to_pylist()
     lines = [f"# Rows: {num_rows}, Columns: {len(schema)}", ""]
-    lines.extend(_render_schema(schema))
+    lines.extend(tbl.render_schema(_fields(schema)))
     lines.append("")
-    lines.extend(_render_table(result, f"First {rows_needed}", rows_needed))
+    lines.extend(tbl.render_table(rows, f"First {rows_needed}", rows_needed))
     return "\n".join(lines).encode()
 
 
@@ -71,11 +64,11 @@ def tail(raw: bytes, n: int = 10) -> bytes:
     schema = table.schema
     num_rows = table.num_rows
     rows_needed = min(n, num_rows)
-    result = table.slice(max(0, num_rows - rows_needed), rows_needed)
+    rows = table.slice(max(0, num_rows - rows_needed), rows_needed).to_pylist()
     lines = [f"# Rows: {num_rows}, Columns: {len(schema)}", ""]
-    lines.extend(_render_schema(schema))
+    lines.extend(tbl.render_schema(_fields(schema)))
     lines.append("")
-    lines.extend(_render_table(result, f"Last {rows_needed}", rows_needed))
+    lines.extend(tbl.render_table(rows, f"Last {rows_needed}", rows_needed))
     return "\n".join(lines).encode()
 
 
@@ -94,41 +87,30 @@ def stat(raw: bytes) -> bytes:
         f"columns: {len(schema)}",
         "",
     ]
-    lines.extend(_render_schema(schema))
+    lines.extend(tbl.render_schema(_fields(schema)))
     lines.append("")
     return "\n".join(lines).encode()
 
 
 def grep(raw: bytes, pattern: str, ignore_case: bool = False) -> bytes:
-    flags = re.IGNORECASE if ignore_case else 0
-    regex = re.compile(pattern, flags)
     table = _read_table(raw)
-    df = table.to_pandas()
-    str_cols = df.select_dtypes(include=["object", "string"]).columns
-    if len(str_cols) == 0:
-        return df.head(0).to_csv(index=False).encode()
-    row_mask = pd.Series(False, index=df.index)
-    for col_name in str_cols:
-        row_mask = row_mask | df[col_name].astype(str).str.contains(regex,
-                                                                    na=False)
-    matched = df[row_mask]
-    return matched.to_csv(index=False).encode()
+    rows = table.to_pylist()
+    matched = tbl.grep_rows(rows, pattern, ignore_case)
+    return tbl.to_csv(matched)
 
 
 def cut(raw: bytes, columns: list[str]) -> bytes:
     table = _read_table(raw)
-    schema_names = [f.name for f in table.schema]
-    for col in columns:
-        if col not in schema_names:
-            raise ValueError(f"column not found: {col}")
-    result = table.select(columns)
-    return result.to_pandas().to_csv(index=False).encode()
+    rows = table.to_pylist()
+    projected = tbl.cut_columns(rows, _columns(table.schema), list(columns))
+    return tbl.to_csv(projected)
 
 
 def file(raw: bytes) -> bytes:
     table = _read_table(raw)
     schema = table.schema
-    cols = ", ".join(f"{f.name}: {f.type}" for f in schema)
+    cols = ", ".join(f"{name}: {type_name}"
+                     for name, type_name in _fields(schema))
     return (f"feather, {table.num_rows} rows, {len(schema)} columns"
             f" ({cols})").encode()
 

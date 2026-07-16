@@ -93,11 +93,11 @@ ca04d1f4b6a5f1a774fb076af00a791e7f7ef70958300e314c4eafc563ac3bb9  /onedrive/data
 === ls_l_root ===
 drwxr-xr-x 1 user user 10435509 Mar 31 00:00 data
 === file_parquet ===
-parquet, 10 rows, 3 columns (id: int64, value: double, label: large_string)
+parquet, 10 rows, 3 columns (id: int64, value: float64, label: string)
 === file_orc ===
-orc, 10 rows, 3 columns, 1 stripes (id: int64, value: double, label: string)
+orc, 10 rows, 3 columns, 1 stripes (id: int64, value: float64, label: string)
 === file_feather ===
-feather, 10 rows, 3 columns (id: int64, value: double, label: large_string)
+feather, 10 rows, 3 columns (id: int64, value: float64, label: string)
 === du_multi ===
 15533	/onedrive/data/example.json
 10414430	/onedrive/data/example.jsonl

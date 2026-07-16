@@ -7,7 +7,9 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "s3",
+        "s3-prefix"
       ],
       "command": "(cd /data2 && cat xm.txt && cd /data && ls b.txt)",
       "expect": {
