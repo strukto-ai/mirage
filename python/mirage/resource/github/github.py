@@ -29,6 +29,7 @@ from mirage.types import ResourceName
 
 class GitHubResource(BaseResource):
 
+    accessor: GitHubAccessor
     name: str = ResourceName.GITHUB
     caches_reads: bool = True
     PROMPT: str = PROMPT

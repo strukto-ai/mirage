@@ -48,8 +48,8 @@ async def tar(
     paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_tar(paths,
                              read_bytes=with_index(ops.read_bytes, index),
-                             write_bytes=ops.write,
-                             mkdir_fn=ops.mkdir,
+                             write_bytes=ops.require("write"),
+                             mkdir_fn=ops.require("mkdir"),
                              accessor=accessor,
                              c=c,
                              x=x,

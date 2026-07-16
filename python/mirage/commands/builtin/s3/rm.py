@@ -38,6 +38,8 @@ async def _rm(
     *,
     index: IndexCacheStore,
 ) -> None:
+    if isinstance(path, str):
+        path = PathSpec.from_str_path(path)
     try:
         s = await stat(accessor, path, index=index)
     except (FileNotFoundError, ValueError):
@@ -82,7 +84,7 @@ async def rm(
         raise ValueError("rm: missing operand")
     paths = await resolve_glob(accessor, paths, index)
     verbose_parts: list[str] = []
-    removed: dict[str, bytes] = {}
+    removed: dict[str, ByteSource] = {}
     for p in paths:
         await _rm(accessor,
                   p,

@@ -46,13 +46,13 @@ async def tsort(
     stdin: AsyncIterator[bytes] | bytes | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 1:
-        raise extra_operand_error(CommandName.TSORT, paths[1].raw_path)
+        raise extra_operand_error(CommandName.TSORT, paths[1].raw_path
+                                  or paths[1].virtual)
     if paths:
         raw = await read_bytes(accessor, paths[0])
     else:
-        raw = await _read_stdin_async(stdin)
-        if raw is None:
-            raw = b""
+        stdin_raw = await _read_stdin_async(stdin)
+        raw = stdin_raw if stdin_raw is not None else b""
     text = raw.decode(errors="replace")
     tokens = text.split()
     if len(tokens) % 2 != 0:

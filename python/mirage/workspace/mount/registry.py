@@ -295,8 +295,9 @@ class MountRegistry:
 
         if mount is not None and mount.resolve_command(cmd_name) is None:
             if path_scopes:
-                raise MountCommandUnsupported(cmd_name, mount.resource.name,
-                                              path_scopes[0].raw_path)
+                raise MountCommandUnsupported(
+                    cmd_name, mount.resource.name, path_scopes[0].raw_path
+                    or path_scopes[0].virtual)
             mount = self.mount_for_command(cmd_name)
         elif mount is None:
             mount = self.mount_for_command(cmd_name)

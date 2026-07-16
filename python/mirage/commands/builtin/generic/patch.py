@@ -114,7 +114,7 @@ async def _load_patch_data(
     has_resource: bool,
     stdin: AsyncIterator[bytes] | bytes | None,
     read_bytes: Callable[..., Awaitable[bytes]],
-    accessor: Accessor,
+    accessor: Accessor | None,
 ) -> bytes:
     if i is not None and has_resource:
         return await read_bytes(accessor, i)
@@ -140,13 +140,14 @@ async def patch(
     N: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 2:
-        raise extra_operand_error(CommandName.PATCH, paths[2].raw_path)
+        raise extra_operand_error(CommandName.PATCH, paths[2].raw_path
+                                  or paths[2].virtual)
     strip_count = int(p) if p else 0
     patch_data = await _load_patch_data(i, paths, has_resource, stdin,
                                         read_bytes, accessor)
     patch_text = patch_data.decode(errors="replace")
     file_hunks = _parse_patch(patch_text, strip_count)
-    writes: dict[str, bytes] = {}
+    writes: dict[str, ByteSource] = {}
     for file_path, hunks in file_hunks.items():
         file_spec = PathSpec.from_str_path(file_path)
         try:

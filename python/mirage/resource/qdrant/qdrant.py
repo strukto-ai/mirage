@@ -22,6 +22,7 @@ from mirage.types import ResourceName
 
 class QdrantResource(BaseResource):
 
+    accessor: QdrantAccessor
     name: str = ResourceName.QDRANT
     is_remote: bool = True
     PROMPT: str = PROMPT

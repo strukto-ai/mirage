@@ -286,6 +286,7 @@ async def _run_argv(
                                    print_path=True,
                                    links=namespace.symlink_targets(),
                                    physical=physical)
+        path: str | PathSpec
         if isinstance(raw, PathSpec):
             path = raw
             cdpath_target = raw.raw_path

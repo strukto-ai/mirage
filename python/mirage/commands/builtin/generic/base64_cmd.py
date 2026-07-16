@@ -46,7 +46,8 @@ async def base64_cmd(
     wrap: int | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 1:
-        raise extra_operand_error(CommandName.BASE64, paths[1].raw_path)
+        raise extra_operand_error(CommandName.BASE64, paths[1].raw_path
+                                  or paths[1].virtual)
     cache: list[str] = []
     if paths:
         source: AsyncIterator[bytes] = read_stream(accessor, paths[0])

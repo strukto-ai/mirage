@@ -28,6 +28,7 @@ class NextcloudConfig(BaseModel):
 
 class NextcloudResource(BaseResource):
 
+    accessor: NextcloudAccessor
     name: str = ResourceName.NEXTCLOUD
     caches_reads: bool = True
     _ops: dict[str, Any] = _NEXTCLOUD_OPS
@@ -55,7 +56,7 @@ class NextcloudResource(BaseResource):
     async def fingerprint(self, path: str) -> str | None:
         try:
             remote = await nextcloud_stat(self.accessor,
-                                          path,
+                                          PathSpec.from_str_path(path),
                                           index=self._index)
             return remote.extra.get("etag")
         except FileNotFoundError:

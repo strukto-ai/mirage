@@ -112,8 +112,10 @@ async def diff_versions(
             changes = await version_diff(store, await resolve_ref(store, a),
                                          await resolve_ref(store, b))
         elif a is not None:
+            assert state is not None
             changes = await diff_live_vs_ref(store, state, a)
         else:
+            assert state is not None
             changes = await status_state(store, state, branch)
     except KeyError:
         raise HTTPException(status_code=404, detail="version not found")

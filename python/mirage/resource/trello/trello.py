@@ -22,6 +22,7 @@ from mirage.types import ResourceName
 
 class TrelloResource(BaseResource):
 
+    accessor: TrelloAccessor
     name: str = ResourceName.TRELLO
     caches_reads: bool = True
     PROMPT: str = PROMPT

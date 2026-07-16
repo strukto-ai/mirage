@@ -123,6 +123,7 @@ def make_generic_commands(
         else:
             cmd_ops = ops
         bound = functools.partial(b.fn, cmd_ops)
+        provision: Callable | None
         if b.name in prov_over:
             provision = prov_over[b.name]
         elif b.provision is not None:

@@ -22,6 +22,7 @@ from mirage.types import ResourceName
 
 class DiscordResource(BaseResource):
 
+    accessor: DiscordAccessor
     name: str = ResourceName.DISCORD
     caches_reads: bool = True
     PROMPT: str = PROMPT

@@ -64,6 +64,7 @@ _S3_OPS = {
 
 class S3Resource(BaseResource):
 
+    accessor: S3Accessor
     name: str = ResourceName.S3
     caches_reads: bool = True
     _ops: dict[str, Any] = _S3_OPS
@@ -90,7 +91,9 @@ class S3Resource(BaseResource):
 
     async def fingerprint(self, path: str) -> str | None:
         try:
-            remote = await s3_stat(self.accessor, path, index=self._index)
+            remote = await s3_stat(self.accessor,
+                                   PathSpec.from_str_path(path),
+                                   index=self._index)
             return remote.extra.get("etag")
         except FileNotFoundError:
             return None

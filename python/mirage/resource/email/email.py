@@ -22,6 +22,7 @@ from mirage.types import ResourceName
 
 class EmailResource(BaseResource):
 
+    accessor: EmailAccessor
     name: str = ResourceName.EMAIL
     caches_reads: bool = True
     PROMPT: str = PROMPT

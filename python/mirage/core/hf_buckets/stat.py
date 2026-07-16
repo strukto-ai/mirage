@@ -15,7 +15,7 @@
 from opendal.exceptions import NotFound
 from opendal.types import EntryMode
 
-from mirage.accessor.hf_buckets import HfBucketsAccessor
+from mirage.accessor._hf import _HfAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
@@ -23,7 +23,7 @@ from mirage.utils.filetype import guess_type
 from mirage.utils.key_prefix import mount_prefix_of
 
 
-async def stat(accessor: HfBucketsAccessor,
+async def stat(accessor: _HfAccessor,
                path: PathSpec,
                index: IndexCacheStore = NULL_INDEX) -> FileStat:
     original_prefix = mount_prefix_of(path.virtual, path.resource_path)

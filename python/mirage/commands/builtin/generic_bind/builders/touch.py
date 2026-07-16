@@ -34,12 +34,14 @@ async def touch(
     if not ops.is_mounted(accessor) or not paths:
         raise ValueError("touch: missing operand")
     paths = await ops.resolve_glob(accessor, paths, index)
-    created: dict[str, bytes] = {}
+    exists = ops.require("exists")
+    write = ops.require("write")
+    created: dict[str, ByteSource] = {}
     for p in paths:
         if c:
             continue
-        if not await ops.exists(accessor, p):
-            await ops.write(accessor, p, b"")
+        if not await exists(accessor, p):
+            await write(accessor, p, b"")
             created[p.mount_path] = b""
     return None, IOResult(writes=created)
 

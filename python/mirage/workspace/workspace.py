@@ -45,8 +45,8 @@ from mirage.provision import ProvisionResult
 from mirage.resource.base import BaseResource
 from mirage.resource.history import HISTORY_PREFIX, HistoryViewResource
 from mirage.resource.ram import RAMResource
-from mirage.runtime.js import select_js_runtime
-from mirage.runtime.python import select_python_runtime
+from mirage.runtime.js import JsRuntime, select_js_runtime
+from mirage.runtime.python import PythonRuntime, select_python_runtime
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
 from mirage.types import (DEFAULT_AGENT_ID, DEFAULT_SESSION_ID,
@@ -173,9 +173,9 @@ class Workspace:
                 if value.command_safeguards:
                     mount_safeguards = dict(value.command_safeguards)
                 mount_fuse = value.fuse
-            elif isinstance(value, tuple) and len(value) >= 2:
+            elif isinstance(value, tuple):
                 prov = value[0]
-                mount_mode = value[1]
+                mount_mode = value[1] if len(value) >= 2 else mode
                 if len(value) >= 3 and value[2]:
                     mount_safeguards = dict(value[2])
             else:
@@ -212,6 +212,7 @@ class Workspace:
         # Graceful default: without the 'monty' extra the default runtime
         # cannot build; leave it unset so python3 reports the install hint
         # per invocation. An explicitly requested runtime still fails loud.
+        self._python_runtime: PythonRuntime | None
         try:
             self._python_runtime = select_python_runtime(
                 python_runtime,
@@ -228,6 +229,7 @@ class Workspace:
         # wasm build, so a default that cannot construct is left unset and
         # the command reports the hint per invocation; an explicit runtime
         # or option still fails loud.
+        self._js_runtime: JsRuntime | None
         try:
             self._js_runtime = select_js_runtime(
                 js_runtime,
@@ -925,7 +927,8 @@ class Workspace:
                 return await run_with_timeout(
                     provision_node(self._registry, self.dispatch,
                                    self._plan_eval_stub, self._namespace, ast,
-                                   effective_session), prov_timeout, prov_name)
+                                   effective_session), prov_timeout, prov_name
+                    or "")
             io, _ = await run_command_tree(
                 self.dispatch,
                 self._registry,

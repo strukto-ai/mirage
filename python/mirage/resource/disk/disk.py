@@ -60,6 +60,7 @@ _DISK_OPS = {
 class DiskResource(BaseResource):
 
     name: str = ResourceName.DISK
+    accessor: DiskAccessor
     index_ttl: float = 60
     _ops: dict = _DISK_OPS
     PROMPT: str = PROMPT
@@ -84,7 +85,9 @@ class DiskResource(BaseResource):
 
     async def fingerprint(self, path: str) -> str | None:
         try:
-            remote = await disk_stat(self.accessor, path, index=self._index)
+            remote = await disk_stat(self.accessor,
+                                     PathSpec.from_str_path(path),
+                                     index=self._index)
             return remote.modified
         except FileNotFoundError:
             return None

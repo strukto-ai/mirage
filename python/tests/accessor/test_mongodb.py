@@ -15,9 +15,8 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from pymongo.driver_info import DriverInfo
 
-from mirage.accessor.mongodb import _DRIVER_INFO, MongoDBAccessor
+from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.resource.mongodb.config import MongoDBConfig
 
 
@@ -27,20 +26,14 @@ def accessor():
         uri="mongodb://localhost:27017"))
 
 
-def test_driver_info_is_pymongo_driverinfo_named_mirage():
-    assert isinstance(_DRIVER_INFO, DriverInfo)
-    assert _DRIVER_INFO.name == "Mirage"
-
-
 @pytest.mark.asyncio
-async def test_client_constructs_async_mongo_client_with_driver_info(accessor):
+async def test_client_constructs_async_mongo_client(accessor):
     sentinel = MagicMock()
     with patch("mirage.accessor.mongodb.AsyncMongoClient",
                return_value=sentinel) as ctor:
         client = accessor.client
     assert client is sentinel
-    ctor.assert_called_once_with("mongodb://localhost:27017",
-                                 driver=_DRIVER_INFO)
+    ctor.assert_called_once_with("mongodb://localhost:27017")
 
 
 @pytest.mark.asyncio

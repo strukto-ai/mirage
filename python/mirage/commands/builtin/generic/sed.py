@@ -21,7 +21,7 @@ async def sed(
     expression: str,
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
-    write_bytes: Callable[..., Awaitable[None]],
+    write_bytes: Callable[..., Awaitable[None]] | None,
     accessor: Accessor | None = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
     in_place: bool = False,
@@ -45,7 +45,10 @@ async def sed(
         # missing file; the repo exits 1 where GNU exits 2).
         err = b""
         if in_place:
-            writes: dict[str, bytes] = {}
+            if write_bytes is None:
+                raise NotImplementedError(
+                    "sed: in-place edit (-i) is not supported on this backend")
+            writes: dict[str, ByteSource] = {}
             edited: list[PathSpec] = []
             for p in paths:
                 try:
@@ -105,6 +108,10 @@ async def sed(
                                       suppress=suppress,
                                       extended=extended)
             if modifying:
+                if write_bytes is None:
+                    raise NotImplementedError(
+                        "sed: in-place edit (-i) is not supported on this "
+                        "backend")
                 new_data = result.encode()
                 await write_bytes(accessor, p, new_data)
                 writes[p.mount_path] = new_data

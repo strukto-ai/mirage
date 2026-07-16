@@ -20,6 +20,7 @@ _DIFY_OPS = {
 
 class DifyResource(BaseResource):
 
+    accessor: DifyAccessor
     name: str = ResourceName.DIFY
     caches_reads: bool = True
     _ops = _DIFY_OPS

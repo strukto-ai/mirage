@@ -45,6 +45,7 @@ async def wget(
         output = "" if q else f"Spider mode: {url} exists ({len(data)} bytes)"
         return output.encode(), IOResult()
 
+    dest_raw: str | PathSpec
     if args_O:
         dest_raw = args_O
     elif paths:

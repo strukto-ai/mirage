@@ -80,7 +80,7 @@ async def run_command_tree(
         cancel=cancel,
     )
     stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
-    if io.safeguard is not None:
+    if io.safeguard is not None and stdout is not None:
         stdout, sg_io = await apply_safeguard(stdout, io.safeguard)
         if sg_io.stderr is not None:
             existing = await materialize(io.stderr)

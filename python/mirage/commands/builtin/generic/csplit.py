@@ -53,13 +53,12 @@ async def csplit(
     if paths:
         raw = await read_bytes(accessor, paths[0])
     else:
-        raw = await _read_stdin_async(stdin)
-        if raw is None:
-            raw = b""
+        stdin_raw = await _read_stdin_async(stdin)
+        raw = stdin_raw if stdin_raw is not None else b""
     text = raw.decode(errors="replace")
     lines = split_lines(text)
     parts = _split_by_patterns(lines, list(patterns))
-    writes: dict[str, bytes] = {}
+    writes: dict[str, ByteSource] = {}
     sizes: list[str] = []
     try:
         for idx, part in enumerate(parts):

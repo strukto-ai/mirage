@@ -43,7 +43,7 @@ async def mkdir(
         raise ValueError("mkdir: missing operand")
     paths = await resolve_glob(accessor, paths, index)
     lines: list[str] = []
-    writes: dict[str, bytes] = {}
+    writes: dict[str, ByteSource] = {}
     for path in paths:
         await mkdir_impl(accessor, path)
         writes[path.mount_path] = b""

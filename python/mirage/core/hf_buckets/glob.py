@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.hf_buckets import HfBucketsAccessor
+from mirage.accessor._hf import _HfAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.hf_buckets.constants import SCOPE_ERROR
 from mirage.core.hf_buckets.readdir import readdir
@@ -21,7 +21,7 @@ from mirage.utils.glob_walk import resolve_glob_with
 
 
 async def resolve_glob(
-    accessor: HfBucketsAccessor,
+    accessor: _HfAccessor,
     paths: list[PathSpec],
     index: IndexCacheStore = NULL_INDEX,
 ) -> list[PathSpec]:

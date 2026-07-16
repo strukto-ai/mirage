@@ -56,7 +56,7 @@ def make_rm(
             raise ValueError("rm: missing operand")
         paths = await glob_fn(accessor, paths, index)
         verbose_parts: list[str] = []
-        removed: dict[str, bytes] = {}
+        removed: dict[str, ByteSource] = {}
         for p in paths:
             try:
                 await unlink(accessor, p, index)

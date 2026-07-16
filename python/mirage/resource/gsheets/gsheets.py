@@ -23,6 +23,7 @@ from mirage.types import ResourceName
 
 class GSheetsResource(BaseResource):
 
+    accessor: GSheetsAccessor
     name: str = ResourceName.GSHEETS
     caches_reads: bool = True
     PROMPT: str = PROMPT

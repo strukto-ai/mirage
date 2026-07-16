@@ -59,7 +59,7 @@ async def unzip(
             archive_path.virtual, archive_path.resource_path) if isinstance(
                 archive_path, PathSpec) else ""
         dest = _resolve_dest(d, mount_prefix)
-        writes: dict[str, bytes] = {}
+        writes: dict[str, ByteSource] = {}
         output_lines: list[str] = []
         for info in zf.infolist():
             if info.is_dir():

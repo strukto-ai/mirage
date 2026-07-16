@@ -14,6 +14,7 @@
 
 import asyncio
 import logging
+from functools import partial
 from typing import Callable
 
 from mirage.cache.file.mixin import FileCacheMixin
@@ -61,6 +62,11 @@ async def _set_cached(
     await cache.set(path, data, fingerprint=fingerprint)
 
 
+def _drop_drain_task(cache: FileCacheMixin, path: str,
+                     task: asyncio.Task) -> None:
+    cache._drain_tasks.pop(path, None)
+
+
 async def apply_io(
     cache: FileCacheMixin,
     io: IOResult,
@@ -91,7 +97,7 @@ async def apply_io(
                                           cache.drain_budget, records))
                     cache._drain_tasks[path] = task
                     task.add_done_callback(
-                        lambda t, p=path: cache._drain_tasks.pop(p, None))
+                        partial(_drop_drain_task, cache, path))
     for path in io.writes:
         if path in cache_set:
             continue

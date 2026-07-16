@@ -38,7 +38,7 @@ async def mv(
         raise ValueError("mv: requires src and dst")
     paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_mv(paths,
-                            rename=partial(ops.rename, accessor),
+                            rename=partial(ops.require("rename"), accessor),
                             stat=partial(ops.stat, accessor),
                             n=n,
                             v=v,

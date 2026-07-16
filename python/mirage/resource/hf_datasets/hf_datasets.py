@@ -54,6 +54,7 @@ _OPS = {
 
 class HfDatasetsResource(BaseResource):
 
+    accessor: HfDatasetsAccessor
     name: str = ResourceName.HF_DATASETS
     caches_reads: bool = True
     _ops: dict[str, Any] = _OPS
@@ -80,7 +81,9 @@ class HfDatasetsResource(BaseResource):
 
     async def fingerprint(self, path: str) -> str | None:
         try:
-            s = await hf_stat(self.accessor, path, index=self._index)
+            s = await hf_stat(self.accessor,
+                              PathSpec.from_str_path(path),
+                              index=self._index)
             return s.fingerprint
         except FileNotFoundError:
             return None

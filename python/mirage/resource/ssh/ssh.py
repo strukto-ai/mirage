@@ -39,7 +39,7 @@ from mirage.core.ssh.write import write_bytes
 from mirage.ops.ssh import OPS as SSH_OPS
 from mirage.resource.base import BaseResource
 from mirage.resource.ssh.prompt import PROMPT
-from mirage.types import ResourceName
+from mirage.types import PathSpec, ResourceName
 
 _SSH_OPS = {
     "read_bytes": read_bytes,
@@ -79,6 +79,7 @@ class SSHConfig(BaseModel):
 
 class SSHResource(BaseResource):
 
+    accessor: SSHAccessor
     name: str = ResourceName.SSH
     caches_reads: bool = True
     _ops: dict[str, Any] = _SSH_OPS
@@ -98,7 +99,9 @@ class SSHResource(BaseResource):
 
     async def fingerprint(self, path: str) -> str | None:
         try:
-            remote = await ssh_stat(self.accessor, path, index=self._index)
+            remote = await ssh_stat(self.accessor,
+                                    PathSpec.from_str_path(path),
+                                    index=self._index)
             size = remote.size or 0
             mtime = remote.modified or ""
             return f"{mtime}:{size}"

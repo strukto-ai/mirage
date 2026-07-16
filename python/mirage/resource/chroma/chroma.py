@@ -20,6 +20,7 @@ _CHROMA_OPS = {
 
 class ChromaResource(BaseResource):
 
+    accessor: ChromaAccessor
     name: str = ResourceName.CHROMA
     caches_reads: bool = False
     _ops = _CHROMA_OPS

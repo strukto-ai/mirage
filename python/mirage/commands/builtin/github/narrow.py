@@ -13,9 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Callable
+from typing import cast
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexCacheStore
+from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.constants import PatternType
 from mirage.commands.builtin.grep_helper import classify_pattern, search_query
 from mirage.commands.builtin.utils.output import format_records
@@ -61,7 +63,8 @@ async def narrow_scope(
             search actually narrowed the set.
     """
     key = scope_relative_key(paths[0])
-    file_count = count_scope_files(index._entries, key)
+    file_count = count_scope_files(
+        cast(RAMIndexCacheStore, index).all_entries(), key)
     query = search_query(pattern,
                          fixed_string) if pattern is not None else None
     use_search = (query is not None and should_use_search(
@@ -69,6 +72,7 @@ async def narrow_scope(
         on_default_branch=(accessor.ref == accessor.default_branch),
     ) and file_count > SCOPE_WARN)
     if use_search:
+        assert query is not None
         narrowed = await narrow_paths(accessor.config, accessor.owner,
                                       accessor.repo, query, paths)
         if narrowed:

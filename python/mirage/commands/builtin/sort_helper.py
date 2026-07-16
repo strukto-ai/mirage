@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
+from typing import Any
 
 _HUMAN_SUFFIXES = {"K": 1e3, "M": 1e6, "G": 1e9, "T": 1e12, "P": 1e15}
 _VERSION_RE = re.compile(r"(\d+)|(\D+)")
@@ -68,7 +69,7 @@ def _sort_key(
     version: bool = False,
     month: bool = False,
     strip_blanks: bool = False,
-) -> object:
+) -> Any:
     if key_field is not None:
         sep = field_sep if field_sep else None
         parts = line.split(sep)

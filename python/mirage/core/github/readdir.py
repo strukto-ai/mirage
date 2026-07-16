@@ -110,7 +110,7 @@ async def _resolve_dir_sha(accessor, path: str,
                     resource_type="folder" if entry.type == "tree" else "file",
                     size=entry.size,
                 )
-                index._entries[current_path] = idx_entry
+                await index.put(current_path, idx_entry)
                 found = True
                 break
         if not found:

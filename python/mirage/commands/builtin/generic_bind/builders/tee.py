@@ -39,7 +39,7 @@ async def tee(
     return await generic_tee(paths,
                              texts,
                              read_stream=with_index(ops.read_stream, index),
-                             write_bytes=ops.write,
+                             write_bytes=ops.require("write"),
                              accessor=accessor,
                              stdin=stdin,
                              append=a)

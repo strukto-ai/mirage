@@ -65,6 +65,7 @@ _RAM_OPS = {
 
 class RAMResource(BaseResource):
 
+    accessor: RAMAccessor
     name: str = ResourceName.RAM
     index_ttl: float = 0
     _ops: dict = _RAM_OPS

@@ -83,6 +83,10 @@ jobs:
         working-directory: python
         run: uv pip install .
 
+      - name: Type check (mypy)
+        working-directory: python
+        run: uv run mypy mirage
+
       - name: Run pytest (main suite, camel excluded)
         working-directory: python
         env:

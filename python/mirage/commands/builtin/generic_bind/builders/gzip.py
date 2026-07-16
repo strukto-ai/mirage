@@ -42,8 +42,8 @@ async def gzip(
         paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_gzip(paths,
                               read_bytes=with_index(ops.read_bytes, index),
-                              write_bytes=ops.write,
-                              unlink=ops.unlink,
+                              write_bytes=ops.require("write"),
+                              unlink=ops.require("unlink"),
                               accessor=accessor,
                               stdin=stdin,
                               decompress=d,

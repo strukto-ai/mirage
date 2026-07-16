@@ -113,7 +113,7 @@ async def _provision_redirected(
     # A cmdsub target expands empty under provision, so its
     # classification is garbage; the precision degrade below keeps
     # the plan honest without costing a phantom write (mirrors TS).
-    targets = [
+    targets: list[tuple[RedirectKind, PathSpec]] = [
         (r.kind, r.target) for r in expanded
         if r.kind in (RedirectKind.STDIN, RedirectKind.STDOUT) and isinstance(
             r.target, PathSpec) and not r.target.virtual.startswith("/dev/")
@@ -213,10 +213,10 @@ async def provision_node(
 
     if kind == NodeKind.COMMAND:
         name = get_command_name(node)
-        func_body = plan_scope.functions.get(name)
+        func_body: object = plan_scope.functions.get(name)
         if func_body is None:
             func_body = session.functions.get(name)
-        if func_body is not None:
+        if isinstance(func_body, list):
             return await handle_function_provision(recurse, name, func_body,
                                                    plan_scope.planning,
                                                    session)
@@ -299,9 +299,9 @@ async def provision_node(
 
     if kind == NodeKind.FUNCTION_DEF:
         name = get_function_name(node)
-        body = get_function_body(node)
-        if name and body is not None:
-            plan_scope.functions[name] = body
+        fn_body = get_function_body(node)
+        if name and fn_body is not None:
+            plan_scope.functions[name] = fn_body
         return await handle_builtin_provision()
 
     if kind in (NodeKind.DECLARATION, NodeKind.UNSET, NodeKind.TEST,

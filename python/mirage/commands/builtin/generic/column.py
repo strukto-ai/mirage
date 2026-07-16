@@ -50,9 +50,8 @@ async def column(
     if paths:
         raw = await read_bytes(accessor, paths[0])
     else:
-        raw = await _read_stdin_async(stdin)
-        if raw is None:
-            raw = b""
+        stdin_raw = await _read_stdin_async(stdin)
+        raw = stdin_raw if stdin_raw is not None else b""
     text = raw.decode(errors="replace")
     if table:
         out = _table_format(

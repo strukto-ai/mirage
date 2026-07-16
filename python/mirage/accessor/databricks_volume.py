@@ -42,7 +42,7 @@ class DatabricksVolumeAccessor(Accessor):
                 raise ImportError("DatabricksVolumeResource requires the "
                                   "'databricks' extra. Install with: "
                                   "pip install mirage-ai[databricks]")
-            kwargs = {
+            kwargs: dict[str, Any] = {
                 "host": self.config.host,
                 "token": self.config.token,
                 "profile": self.config.profile,

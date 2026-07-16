@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from functools import partial
+from typing import Callable
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
@@ -33,7 +34,7 @@ async def _walk_find(readdir, stat, index, src, type=None) -> list[str]:
 
 
 def _make_find(ops: CommandIO, accessor: Accessor,
-               index: IndexCacheStore | None) -> object:
+               index: IndexCacheStore | None) -> Callable:
     if ops.find is not None:
         return partial(ops.find, accessor)
     return partial(_walk_find, partial(ops.readdir, accessor),
@@ -60,7 +61,7 @@ async def cp(
     paths = await ops.resolve_glob(accessor, paths, index)
     dir_copy = partial(ops.dir_copy, accessor) if ops.dir_copy else None
     return await generic_cp(paths,
-                            copy=partial(ops.copy, accessor),
+                            copy=partial(ops.require("copy"), accessor),
                             find=_make_find(ops, accessor, index),
                             find_type="f",
                             stat=partial(ops.stat, accessor),

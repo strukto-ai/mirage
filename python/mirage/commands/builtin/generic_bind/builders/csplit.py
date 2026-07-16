@@ -43,7 +43,7 @@ async def csplit(
     return await generic_csplit(paths,
                                 texts,
                                 read_bytes=with_index(ops.read_bytes, index),
-                                write_bytes=ops.write,
+                                write_bytes=ops.require("write"),
                                 accessor=accessor,
                                 stdin=stdin,
                                 prefix=f or "xx",

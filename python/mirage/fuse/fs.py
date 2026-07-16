@@ -52,7 +52,7 @@ class Handle:
     write_buf: list[tuple[int, bytes]] = field(default_factory=list)
 
 
-class MirageFS(_FUSE_OPERATIONS):
+class MirageFS(_FUSE_OPERATIONS):  # type: ignore[valid-type,misc]
 
     use_ns = True
 

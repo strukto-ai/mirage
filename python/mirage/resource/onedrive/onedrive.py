@@ -64,6 +64,7 @@ _ONEDRIVE_OPS = {
 
 class OneDriveResource(BaseResource):
 
+    accessor: OneDriveAccessor
     name: str = ResourceName.ONEDRIVE
     caches_reads: bool = True
     _ops: dict[str, Any] = _ONEDRIVE_OPS
@@ -91,7 +92,7 @@ class OneDriveResource(BaseResource):
     async def fingerprint(self, path: str) -> str | None:
         try:
             remote = await onedrive_stat(self.accessor,
-                                         path,
+                                         PathSpec.from_str_path(path),
                                          index=self._index)
             return remote.fingerprint
         except FileNotFoundError:

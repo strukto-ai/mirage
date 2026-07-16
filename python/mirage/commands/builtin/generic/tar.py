@@ -31,11 +31,12 @@ async def _create_archive(
     verbose: bool,
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
-    accessor: Accessor,
+    accessor: Accessor | None,
 ) -> tuple[ByteSource | None, IOResult]:
     buf = io.BytesIO()
     names: list[str] = []
-    with tarfile.open(fileobj=buf, mode=f"w{mode_suffix}") as tf:
+    with tarfile.open(  # type: ignore[call-overload]
+            fileobj=buf, mode=f"w{mode_suffix}") as tf:
         for p in paths:
             name = p.virtual.lstrip("/")
             if exclude and _excluded(name, exclude):
@@ -55,10 +56,12 @@ async def _list_archive(
     archive_path: PathSpec,
     mode_suffix: str,
     read_bytes: Callable[..., Awaitable[bytes]],
-    accessor: Accessor,
+    accessor: Accessor | None,
 ) -> tuple[ByteSource | None, IOResult]:
     data = await read_bytes(accessor, archive_path)
-    with tarfile.open(fileobj=io.BytesIO(data), mode=f"r{mode_suffix}") as tf:
+    with tarfile.open(  # type: ignore[call-overload]
+            fileobj=io.BytesIO(data),
+            mode=f"r{mode_suffix}") as tf:
         names = tf.getnames()
     return ("\n".join(names) + "\n").encode(), IOResult()
 
@@ -72,12 +75,14 @@ async def _extract_archive(
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
     mkdir_fn: Callable[..., Awaitable[None]],
-    accessor: Accessor,
+    accessor: Accessor | None,
 ) -> tuple[ByteSource | None, IOResult]:
     data = await read_bytes(accessor, archive_path)
-    writes: dict[str, bytes] = {}
+    writes: dict[str, ByteSource] = {}
     names: list[str] = []
-    with tarfile.open(fileobj=io.BytesIO(data), mode=f"r{mode_suffix}") as tf:
+    with tarfile.open(  # type: ignore[call-overload]
+            fileobj=io.BytesIO(data),
+            mode=f"r{mode_suffix}") as tf:
         for member in tf.getmembers():
             if not member.isfile():
                 continue

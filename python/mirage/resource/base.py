@@ -21,6 +21,7 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import (IndexCacheStore, IndexConfig,
                                 RAMIndexCacheStore, RedisIndexConfig)
 from mirage.resource.secrets import redacted_config_dump
+from mirage.types import PathSpec
 
 try:
     from mirage.cache.index import RedisIndexCacheStore
@@ -77,7 +78,9 @@ class BaseResource:
     def index(self) -> IndexCacheStore:
         return self._index
 
-    async def resolve_glob(self, paths: list, prefix: str = "") -> list[str]:
+    async def resolve_glob(self,
+                           paths: list,
+                           prefix: str = "") -> list[PathSpec]:
         raise NotImplementedError
 
     def __getattr__(self, name: str) -> Any:

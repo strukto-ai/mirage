@@ -43,8 +43,8 @@ async def unzip(
     paths = await ops.resolve_glob(accessor, paths, index)
     return await generic_unzip(paths,
                                read_bytes=with_index(ops.read_bytes, index),
-                               write_bytes=ops.write,
-                               mkdir_fn=ops.mkdir,
+                               write_bytes=ops.require("write"),
+                               mkdir_fn=ops.require("mkdir"),
                                accessor=accessor,
                                o=o,
                                args_l=args_l,

@@ -29,6 +29,7 @@ class HistoryViewResource(BaseResource):
     Args:
         observer (Observer): The workspace's hidden recorder.
     """
+    accessor: HistoryAccessor
 
     name = "history"
 

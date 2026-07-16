@@ -50,6 +50,7 @@ _SHAREPOINT_OPS = {
 
 class SharePointResource(BaseResource):
 
+    accessor: SharePointAccessor
     name: str = ResourceName.SHAREPOINT
     caches_reads: bool = True
     _ops: dict[str, Any] = _SHAREPOINT_OPS
@@ -77,7 +78,7 @@ class SharePointResource(BaseResource):
     async def fingerprint(self, path: str) -> str | None:
         try:
             remote = await sharepoint_stat(self.accessor,
-                                           path,
+                                           PathSpec.from_str_path(path),
                                            index=self._index)
             return remote.fingerprint
         except FileNotFoundError:

@@ -22,9 +22,8 @@ async def iconv(
     if paths:
         raw = await read_bytes(accessor, paths[0])
     else:
-        raw = await _read_stdin_async(stdin)
-        if raw is None:
-            raw = b""
+        stdin_raw = await _read_stdin_async(stdin)
+        raw = stdin_raw if stdin_raw is not None else b""
     decoded = raw.decode(from_enc, errors=err_mode)
     encoded = decoded.encode(to_enc, errors=err_mode)
     if output_path is not None:

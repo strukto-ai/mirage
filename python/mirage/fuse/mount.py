@@ -102,6 +102,8 @@ def mount(ops: Ops | None = None,
           daemon: bool = False,
           post_fork=None) -> None:
     if fs is None:
+        if ops is None:
+            raise ValueError("mount requires either ops or a prebuilt fs")
         fs = MirageFS(ops)
     _prepare_mountpoint(mountpoint)
     if daemon:

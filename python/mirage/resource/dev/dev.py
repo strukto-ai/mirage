@@ -16,15 +16,18 @@ from mirage.accessor.ram import RAMAccessor
 from mirage.commands.builtin.ram import COMMANDS
 from mirage.ops.ram import OPS as RAM_OPS
 from mirage.resource.base import BaseResource
+from mirage.resource.ram.store import RAMStore
 from mirage.types import ResourceName
 
 _DEV_NAMES = frozenset({"null", "zero"})
 _ZERO_CHUNK_SIZE = 1 << 20
 
 
-class _DevFiles:
+class _DevFiles(dict[str, bytes]):
 
-    def __contains__(self, key: str) -> bool:
+    def __contains__(self, key: object) -> bool:
+        if not isinstance(key, str):
+            return False
         name = key.strip("/")
         return name in _DEV_NAMES
 
@@ -49,17 +52,18 @@ class _DevFiles:
         return ["/null", "/zero"]
 
 
-class DevStore:
+class DevStore(RAMStore):
 
     def __init__(self) -> None:
-        self.files: _DevFiles = _DevFiles()
-        self.dirs: set[str] = {"/"}
-        self.modified: dict[str, str] = {}
-        self.attrs: dict[str, dict] = {}
+        self.files = _DevFiles()
+        self.dirs = {"/"}
+        self.modified = {}
+        self.attrs = {}
 
 
 class DevResource(BaseResource):
 
+    accessor: RAMAccessor
     name: str = ResourceName.RAM
 
     def __init__(self) -> None:

@@ -25,6 +25,7 @@ from mirage.types import ResourceName
 
 class GSlidesResource(BaseResource):
 
+    accessor: GSlidesAccessor
     name: str = ResourceName.GSLIDES
     caches_reads: bool = True
     PROMPT: str = PROMPT

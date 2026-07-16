@@ -21,7 +21,7 @@ from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.types import PathSpec
 from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
-from mirage.workspace.mount import MountRegistry
+from mirage.workspace.mount import MountEntry, MountRegistry
 from mirage.workspace.types import ExecutionNode
 
 _TRAVERSAL_CMDS = frozenset({"find", "tree", "du"})
@@ -242,7 +242,7 @@ async def _fan_out_traversal(
     texts: list[str],
     flag_kwargs: dict,
     registry: MountRegistry,
-    primary_mount: object,
+    primary_mount: MountEntry,
     cwd: str,
     cmd_str: str,
     stdin: ByteSource | None,
@@ -275,10 +275,11 @@ async def _fan_out_traversal(
             sub_texts = list(texts)
         else:
             mount_root = mount.prefix.rstrip("/") or "/"
-            sub_flags = _adjust_depth_flags(flag_kwargs, target_path,
-                                            mount.prefix)
-            if sub_flags is None:
+            adjusted = _adjust_depth_flags(flag_kwargs, target_path,
+                                           mount.prefix)
+            if adjusted is None:
                 continue
+            sub_flags = adjusted
             sub_texts = _adjust_depth_texts(texts, target_path, mount.prefix)
             sub_paths = [
                 PathSpec(virtual=mount_root,
@@ -344,5 +345,5 @@ async def _fan_out_traversal(
                                                 [primary_mount, *descendants])
     exec_node = ExecutionNode(command=cmd_str,
                               exit_code=final_io_exit,
-                              stderr=merged_io.stderr)
+                              stderr=await materialize(merged_io.stderr))
     return combined, merged_io, exec_node

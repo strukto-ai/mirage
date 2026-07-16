@@ -42,7 +42,7 @@ async def split(
     paths = await resolve_or_empty(ops, accessor, paths, index)
     return await generic_split(paths,
                                read_stream=with_index(ops.read_stream, index),
-                               write_bytes=ops.write,
+                               write_bytes=ops.require("write"),
                                accessor=accessor,
                                stdin=stdin,
                                lines_per_file=int(args_l) if args_l else 0,
