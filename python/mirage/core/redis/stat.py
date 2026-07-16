@@ -35,12 +35,11 @@ def _decode_attrs(raw: dict[str, str]) -> dict:
 
 async def stat(
     accessor: RedisAccessor,
-    path: PathSpec,
+    path_spec: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
 ) -> FileStat:
-    virtual = path.virtual
-    if isinstance(path, PathSpec):
-        path = path.mount_path
+    virtual = path_spec.virtual
+    path = path_spec.mount_path
     store = accessor.store
     p = norm(path)
     if await store.has_dir(p):

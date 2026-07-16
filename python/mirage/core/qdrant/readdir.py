@@ -59,6 +59,7 @@ async def readdir(
         return [f"{base}/{name}" for name in names]
 
     if scope.level == ScopeLevel.GROUP_DIR:
+        assert scope.table is not None
         depth = len(scope.filters)
         total = len(config.group_by)
         if depth < total:

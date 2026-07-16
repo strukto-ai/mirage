@@ -16,12 +16,13 @@ import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
 from mirage.cache.context import invalidate_after_unlink
-from mirage.core.ssh._client import _abs, _resolve_path
+from mirage.core.ssh._client import _abs
 from mirage.types import PathSpec
 
 
-async def rm_r(accessor: SSHAccessor, path: PathSpec) -> None:
-    path = _resolve_path(path)
+async def rm_r(accessor: SSHAccessor, path_spec: str | PathSpec) -> None:
+    path = path_spec.mount_path if isinstance(path_spec,
+                                              PathSpec) else path_spec
     config = accessor.config
     sftp = await accessor.sftp()
     try:
@@ -31,7 +32,7 @@ async def rm_r(accessor: SSHAccessor, path: PathSpec) -> None:
     await invalidate_after_unlink(path)
 
 
-async def _rm_r_inner(sftp, config, path: PathSpec) -> None:
+async def _rm_r_inner(sftp, config, path: str) -> None:
     remote = _abs(config, path)
     attrs = await sftp.stat(remote)
     if attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY:

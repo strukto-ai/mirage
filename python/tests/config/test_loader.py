@@ -18,11 +18,13 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
-from mirage.config import (RamCacheBlock, RedisCacheBlock, WorkspaceConfig,
-                           load_config)
+from mirage.config import (RamCacheBlock, RedisCacheBlock, RedisNamespaceBlock,
+                           WorkspaceConfig, load_config)
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Resource
 from mirage.types import ConsistencyPolicy
+from mirage.workspace.mount.namespace import (RAMNamespaceStore,
+                                              RedisNamespaceStore)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -100,6 +102,55 @@ def test_to_workspace_kwargs_emits_ram_cache_config():
     assert isinstance(kwargs["cache"], CacheConfig)
     assert not isinstance(kwargs["cache"], RedisCacheConfig)
     assert kwargs["cache"].limit == "128MB"
+
+
+def test_namespace_redis_discriminated_union():
+    cfg = load_config({
+        "namespace": {
+            "type": "redis",
+            "url": "redis://localhost:6379/4",
+            "key_prefix": "test_ns:",
+        },
+        "mounts": {
+            "/": {
+                "resource": "ram"
+            }
+        },
+    })
+    assert isinstance(cfg.namespace, RedisNamespaceBlock)
+    assert cfg.namespace.key_prefix == "test_ns:"
+    kwargs = cfg.to_workspace_kwargs()
+    assert isinstance(kwargs["namespace_store"], RedisNamespaceStore)
+
+
+def test_namespace_ram_emits_ram_store():
+    cfg = load_config({
+        "namespace": {
+            "type": "ram"
+        },
+        "mounts": {
+            "/": {
+                "resource": "ram"
+            }
+        },
+    })
+    kwargs = cfg.to_workspace_kwargs()
+    assert isinstance(kwargs["namespace_store"], RAMNamespaceStore)
+
+
+def test_namespace_block_rejects_ttl():
+    with pytest.raises(Exception):
+        load_config({
+            "namespace": {
+                "type": "ram",
+                "ttl": 600
+            },
+            "mounts": {
+                "/": {
+                    "resource": "ram"
+                }
+            },
+        })
 
 
 def test_dict_source_works_too():

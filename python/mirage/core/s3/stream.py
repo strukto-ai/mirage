@@ -34,7 +34,7 @@ def _is_not_found(exc: Exception) -> bool:
 
 async def read_stream(
     accessor: S3Accessor,
-    path: PathSpec,
+    path_spec: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
     chunk_size: int = 8192,
 ) -> AsyncIterator[bytes]:
@@ -42,12 +42,12 @@ async def read_stream(
 
     Args:
         accessor (S3Accessor): S3 accessor.
-        path (PathSpec | str): Object path.
+        path_spec (PathSpec): Object path.
         index: Index cache store.
         chunk_size (int): Size of each chunk in bytes.
     """
-    virtual = path.virtual
-    path = path.mount_path
+    virtual = path_spec.virtual
+    path = path_spec.mount_path
     pinned_revision = revision_for(virtual)
     config = accessor.config
     rec = record_stream("read", path, "s3")
@@ -80,19 +80,19 @@ async def read_stream(
                 yield chunk
 
 
-async def range_read(accessor: S3Accessor, path: PathSpec, start: int,
+async def range_read(accessor: S3Accessor, path_spec: PathSpec, start: int,
                      end: int) -> bytes:
     """Read a byte range from an S3 object.
 
     Args:
         accessor (S3Accessor): S3 accessor.
-        path (PathSpec | str): Object path.
+        path_spec (PathSpec | str): Object path_spec.
         start (int): Start byte offset.
         end (int): End byte offset (exclusive).
     """
-    virtual = path.virtual if isinstance(path, PathSpec) else path
-    if isinstance(path, PathSpec):
-        path = path.mount_path
+    virtual = path_spec.virtual if isinstance(path_spec,
+                                              PathSpec) else path_spec
+    path = path_spec.mount_path
     config = accessor.config
     start_ms = int(time.monotonic() * 1000)
     session = async_session(config)

@@ -28,12 +28,11 @@ logger = logging.getLogger(__name__)
 
 
 async def readdir(accessor: SSHAccessor,
-                  path: PathSpec,
+                  path_spec: PathSpec,
                   index: IndexCacheStore = NULL_INDEX) -> list[str]:
-    virtual = path.virtual
-    if isinstance(path, PathSpec):
-        prefix = mount_prefix_of(path.virtual, path.resource_path)
-        path = path.directory if path.pattern else path.virtual
+    virtual = path_spec.virtual
+    prefix = mount_prefix_of(path_spec.virtual, path_spec.resource_path)
+    path = path_spec.directory if path_spec.pattern else path_spec.virtual
     if prefix and path.startswith(prefix):
         rest = path[len(prefix):]
         if prefix.endswith("/") or rest == "" or rest.startswith("/"):
@@ -53,9 +52,12 @@ async def readdir(accessor: SSHAccessor,
         base = "/" + path.strip("/")
         names: list[str] = []
         for entry in entries:
-            if entry.filename in (".", ".."):
+            name = entry.filename
+            if isinstance(name, bytes):
+                name = name.decode()
+            if name in (".", ".."):
                 continue
-            child = base.rstrip("/") + "/" + entry.filename
+            child = base.rstrip("/") + "/" + name
             names.append(child)
         names = sorted(names)
         if len(names) > SCOPE_ERROR:

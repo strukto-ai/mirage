@@ -26,7 +26,7 @@ TOP_LEVEL_DIRS = ["traces", "sessions", "prompts", "datasets"]
 
 async def readdir(
     accessor: LangfuseAccessor,
-    path: PathSpec,
+    path_spec: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
     """List directory contents.
@@ -37,9 +37,9 @@ async def readdir(
         index (IndexCacheStore | None): index cache.
         prefix (str): mount prefix for virtual index keys.
     """
-    virtual = path.virtual
-    prefix = mount_prefix_of(path.virtual, path.resource_path)
-    path = (path.dir if path.pattern else path).mount_path
+    virtual = path_spec.virtual
+    prefix = mount_prefix_of(path_spec.virtual, path_spec.resource_path)
+    path = (path_spec.dir if path_spec.pattern else path_spec).mount_path
     key = path.strip("/")
 
     if key and any(p.startswith(".") for p in key.split("/")):

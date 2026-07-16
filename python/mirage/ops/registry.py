@@ -36,8 +36,7 @@ def op(
 
     def decorator(fn: Callable) -> Callable:
         resources = (resource if isinstance(resource, list) else [resource])
-        if not hasattr(fn, "_registered_ops"):
-            fn._registered_ops = []
+        ops = getattr(fn, "_registered_ops", [])
         for p in resources:
             ro = RegisteredOp(
                 name=name,
@@ -46,7 +45,8 @@ def op(
                 fn=fn,
                 write=write,
             )
-            fn._registered_ops.append(ro)
+            ops.append(ro)
+        setattr(fn, "_registered_ops", ops)
         return fn
 
     return decorator
@@ -86,7 +86,8 @@ class OpsRegistry:
         filetype: str | None = None,
     ) -> Callable:
         if filetype:
-            key = (name, filetype, resource)
+            key: tuple[str, str | None,
+                       str | None] = (name, filetype, resource)
             if key in self._registered:
                 return self._registered[key].fn
 
@@ -112,7 +113,8 @@ class OpsRegistry:
     ):
         levels = []
         if filetype:
-            key = (name, filetype, resource)
+            key: tuple[str, str | None,
+                       str | None] = (name, filetype, resource)
             if key in self._registered:
                 levels.append(self._registered[key].fn)
 

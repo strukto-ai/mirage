@@ -30,11 +30,10 @@ def _resolve(root: Path, path: str) -> Path:
     return resolved
 
 
-async def copy(accessor: DiskAccessor, src: PathSpec, dst: PathSpec) -> None:
-    if isinstance(src, PathSpec):
-        src = src.mount_path
-    if isinstance(dst, PathSpec):
-        dst = dst.mount_path
+async def copy(accessor: DiskAccessor, src_spec: str | PathSpec,
+               dst_spec: str | PathSpec) -> None:
+    src = src_spec.mount_path if isinstance(src_spec, PathSpec) else src_spec
+    dst = dst_spec.mount_path if isinstance(dst_spec, PathSpec) else dst_spec
     root = accessor.root
     s = _resolve(root, src)
     d = _resolve(root, dst)

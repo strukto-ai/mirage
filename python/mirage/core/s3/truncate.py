@@ -18,9 +18,10 @@ from mirage.core.s3._client import _client_kwargs, _key, async_session
 from mirage.types import PathSpec
 
 
-async def truncate(accessor: S3Accessor, path: PathSpec, length: int) -> None:
-    if isinstance(path, PathSpec):
-        path = path.mount_path
+async def truncate(accessor: S3Accessor, path_spec: str | PathSpec,
+                   length: int) -> None:
+    path = path_spec.mount_path if isinstance(path_spec,
+                                              PathSpec) else path_spec
     config = accessor.config
     session = async_session(config)
     async with session.client(**_client_kwargs(config)) as client:

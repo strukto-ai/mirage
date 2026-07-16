@@ -31,9 +31,9 @@ def _resolve(root: Path, path: str) -> Path:
     return resolved
 
 
-async def rm_r(accessor: DiskAccessor, path: PathSpec) -> None:
-    if isinstance(path, PathSpec):
-        path = path.mount_path
+async def rm_r(accessor: DiskAccessor, path_spec: str | PathSpec) -> None:
+    path = path_spec.mount_path if isinstance(path_spec,
+                                              PathSpec) else path_spec
     p = _resolve(accessor.root, path)
     if await aio_path.isdir(p):
         await asyncio.to_thread(shutil.rmtree, p)

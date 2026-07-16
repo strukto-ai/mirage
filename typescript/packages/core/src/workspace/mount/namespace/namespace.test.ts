@@ -246,6 +246,20 @@ describe('Namespace node metadata overlay', () => {
     await ws.close()
   })
 
+  it('dropOverlay removes an orphaned overlay but keeps symlinks', async () => {
+    const ws = new Workspace({ '/data': new RAMResource() })
+    await ws.namespace.setAttrs('/data/f.txt', { mode: 0o601, uid: 500 })
+    expect(await ws.namespace.dropOverlay('/data/f.txt')).toBe(true)
+    expect(ws.namespace.metaFor('/data/f.txt')).toBeNull()
+
+    await ws.namespace.symlink('/data/link', '/data/target', 1)
+    expect(await ws.namespace.dropOverlay('/data/link')).toBe(false)
+    expect(ws.namespace.readlink('/data/link')).toBe('/data/target')
+
+    expect(await ws.namespace.dropOverlay('/data/nope.txt')).toBe(false)
+    await ws.close()
+  })
+
   it('unlinkGlob matches segment-wise and purges under matched dirs', async () => {
     const ws = new Workspace({ '/data': new RAMResource() })
     await ws.namespace.setAttrs('/data/a.log', { mode: 0o600 })

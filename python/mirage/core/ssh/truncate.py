@@ -23,5 +23,5 @@ async def truncate(accessor: SSHAccessor,
                    length: int = 0) -> None:
     config = accessor.config
     sftp = await accessor.sftp()
-    await sftp.truncate(_abs(config, path), length)
+    await sftp.truncate(_abs(config, path.mount_path), length)
     await invalidate_after_write(path)

@@ -31,14 +31,13 @@ from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 async def read_stream(
     accessor: GDriveAccessor,
-    path: PathSpec,
+    path_spec: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
     chunk_size: int = 8192,
 ) -> AsyncIterator[bytes] | bytes:
-    virtual = path.virtual
-    if isinstance(path, PathSpec):
-        prefix = mount_prefix_of(path.virtual, path.resource_path)
-        path = path.virtual
+    virtual = path_spec.virtual
+    prefix = mount_prefix_of(path_spec.virtual, path_spec.resource_path)
+    path = path_spec.virtual
 
     if prefix and path.startswith(prefix):
         rest = path[len(prefix):]

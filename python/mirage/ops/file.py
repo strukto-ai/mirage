@@ -87,30 +87,37 @@ class MirageFile:
 
     def read(self, size: int = -1) -> bytes | str:
         self._load()
+        assert self._buf is not None
         return self._buf.read(size)
 
     def readline(self) -> bytes | str:
         self._load()
+        assert self._buf is not None
         return self._buf.readline()
 
     def readlines(self) -> list:
         self._load()
+        assert self._buf is not None
         return self._buf.readlines()
 
     def write(self, data) -> int:
         self._load()
+        assert self._buf is not None
         return self._buf.write(data)
 
     def writelines(self, lines) -> None:
         self._load()
+        assert self._buf is not None
         self._buf.writelines(lines)
 
     def seek(self, offset: int, whence: int = 0) -> int:
         self._load()
+        assert self._buf is not None
         return self._buf.seek(offset, whence)
 
     def tell(self) -> int:
         self._load()
+        assert self._buf is not None
         return self._buf.tell()
 
     def flush(self) -> None:
@@ -123,7 +130,7 @@ class MirageFile:
         if "w" in self._mode or "a" in self._mode:
             if self._buf is not None:
                 val = self._buf.getvalue()
-                if not self._binary:
+                if isinstance(val, str):
                     val = val.encode(self._encoding)
                 self._run(self._ops.write(self._path, val))
 
@@ -138,8 +145,10 @@ class MirageFile:
 
     def __iter__(self):
         self._load()
+        assert self._buf is not None
         return iter(self._buf)
 
     def __next__(self):
         self._load()
+        assert self._buf is not None
         return next(self._buf)

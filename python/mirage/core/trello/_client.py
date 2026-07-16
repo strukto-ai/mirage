@@ -16,7 +16,6 @@ import aiohttp
 
 from mirage.resource.secrets import reveal_secret
 from mirage.resource.trello.config import TrelloConfig
-from mirage.types import PathSpec
 
 
 class TrelloAPIError(RuntimeError):
@@ -41,7 +40,7 @@ def _auth_params(config: TrelloConfig) -> dict[str, str]:
 async def _request(
     config: TrelloConfig,
     method: str,
-    path: PathSpec,
+    path: str,
     *,
     params: dict | None = None,
     json_body: dict | None = None,
@@ -66,7 +65,7 @@ async def _request(
 
 async def _get(
     config: TrelloConfig,
-    path: PathSpec,
+    path: str,
     params: dict | None = None,
 ) -> dict | list:
     return await _request(config, "GET", path, params=params)
@@ -74,7 +73,7 @@ async def _get(
 
 async def _post(
     config: TrelloConfig,
-    path: PathSpec,
+    path: str,
     params: dict | None = None,
 ) -> dict | list:
     return await _request(config, "POST", path, params=params)
@@ -82,7 +81,7 @@ async def _post(
 
 async def _put(
     config: TrelloConfig,
-    path: PathSpec,
+    path: str,
     params: dict | None = None,
 ) -> dict | list:
     return await _request(config, "PUT", path, params=params)
@@ -90,7 +89,7 @@ async def _put(
 
 async def _delete(
     config: TrelloConfig,
-    path: PathSpec,
+    path: str,
     params: dict | None = None,
 ) -> dict | list:
     return await _request(config, "DELETE", path, params=params)

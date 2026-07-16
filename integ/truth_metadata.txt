@@ -171,5 +171,7 @@ touch: invalid date format '99'
 
 === overlay_snapshot_roundtrip ===
 mode=601 uid=500 gid=dev mtime=2026-01-02T15:30:00
+=== overlay_orphan_gc ===
+before=True after=False
 === snapshot_meta_roundtrip ===
 -rw------x 1 500 dev 6 Jan  2 15:30 f.txt

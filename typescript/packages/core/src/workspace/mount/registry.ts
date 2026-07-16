@@ -22,6 +22,14 @@ import { ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
 import { MountEntry } from './mount.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 
+// The one thing the registry needs from a reconciler. Depending on this local
+// interface (not the concrete Reconciler) keeps the dependency pointing down:
+// `reconcile` imports the mount layer, not the other way round. The Reconciler
+// satisfies it structurally.
+interface ReadReconciler {
+  reconcileRead(mount: MountEntry, path: string): Promise<void>
+}
+
 export const DEV_PREFIX = '/dev/'
 
 // Raised when a path-bound command is unsupported by its backend.
@@ -54,6 +62,11 @@ export class MountRegistry {
   private consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
   private readonly defaultMode: MountMode
   private cacheStore: FileCache | null = null
+  private reconciler: ReadReconciler | null = null
+
+  setReconciler(reconciler: ReadReconciler): void {
+    this.reconciler = reconciler
+  }
 
   /**
    * Attach the workspace file cache and build per-mount CacheManagers.
@@ -340,51 +353,23 @@ export class MountRegistry {
     }
     if (mount === null) return null
     // Warm reads are served in place by withReadCache, so a read-only command
-    // stays on its real mount. The cache is a hidden store (not a mount);
-    // under ALWAYS we evict stale entries from it here so the read-through
-    // serves fresh bytes.
+    // stays on its real mount. Single-mount reads do not go through the
+    // dispatcher, so this is where they reconcile against backend truth: the
+    // shared Reconciler evicts a stale cache entry and GCs an orphaned overlay
+    // when the backend reports the path gone.
     const baseCmd = mount.resolveCommand(cmdName)
     if (
-      this.cacheStore !== null &&
+      this.reconciler !== null &&
       pathScopes.length > 0 &&
       cachesReads(mount.resource) &&
       baseCmd?.write !== true &&
       this.consistency === ConsistencyPolicy.ALWAYS
     ) {
-      await this.evictStale(mount, this.cacheStore, pathScopes)
+      for (const scope of pathScopes) {
+        await this.reconciler.reconcileRead(mount, scope.virtual)
+      }
     }
     return mount
-  }
-
-  private async evictStale(
-    realMount: MountEntry,
-    cache: FileCache,
-    pathScopes: readonly PathSpec[],
-  ): Promise<void> {
-    const resource = realMount.resource
-    if (resource.fingerprint === undefined) return
-    const mountPrefix = rstripSlash(realMount.prefix)
-    for (const scope of pathScopes) {
-      const key = scope.virtual
-      if (!(await cache.exists(key))) continue
-      const prefixedScope = new PathSpec({
-        virtual: scope.virtual,
-        directory: scope.directory,
-        pattern: scope.pattern,
-        resolved: scope.resolved,
-        resourcePath: mountKey(scope.virtual, mountPrefix),
-      })
-      let remoteFp: string | null = null
-      try {
-        remoteFp = await resource.fingerprint(prefixedScope)
-      } catch {
-        continue
-      }
-      if (remoteFp === null) continue
-      if (!(await cache.isFresh(key, remoteFp))) {
-        await cache.remove(key)
-      }
-    }
   }
 }
 

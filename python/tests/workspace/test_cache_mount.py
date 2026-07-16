@@ -95,3 +95,60 @@ async def test_cross_mount_read_serves_cache(tmp_path):
     out = await (await ws.execute("cat /d/a.txt /r/b.txt")).stdout_str()
     assert "v1" in out and "v2" not in out, (
         f"cross-mount read did not serve the warm operand from cache: {out!r}")
+
+
+def _stat_scope(path):
+    return PathSpec(virtual=path,
+                    directory=path,
+                    resource_path="",
+                    resolved=True)
+
+
+@pytest.mark.asyncio
+async def test_stat_gcs_orphaned_overlay_under_always():
+    """A remotely-deleted path leaves an orphaned attribute overlay. Under
+    ALWAYS, a stat that the backend reports gone GCs the overlay node."""
+    ws = Workspace({"/data/": RAMResource()},
+                   mode=MountMode.WRITE,
+                   consistency=ConsistencyPolicy.ALWAYS)
+    await ws.namespace.ensure_loaded()
+    await ws.namespace.set_attrs("/data/gone.txt", mode=0o600)
+    assert ws.namespace.meta_for("/data/gone.txt") is not None
+
+    with pytest.raises(FileNotFoundError):
+        await ws.dispatch("stat", _stat_scope("/data/gone.txt"))
+
+    assert ws.namespace.meta_for("/data/gone.txt") is None
+
+
+@pytest.mark.asyncio
+async def test_shell_stat_gcs_orphan_under_always():
+    """A single-mount shell read (not the dispatcher) reconciles via the
+    registry: under ALWAYS, a stat the backend reports gone GCs the overlay."""
+    ram = RAMResource()
+    ram.caches_reads = True
+    ws = Workspace({"/r/": ram},
+                   mode=MountMode.WRITE,
+                   consistency=ConsistencyPolicy.ALWAYS)
+    await ws.namespace.ensure_loaded()
+    await ws.namespace.set_attrs("/r/gone.txt", mode=0o600)
+    assert ws.namespace.meta_for("/r/gone.txt") is not None
+
+    await ws.execute("stat /r/gone.txt")
+
+    assert ws.namespace.meta_for("/r/gone.txt") is None
+
+
+@pytest.mark.asyncio
+async def test_stat_keeps_overlay_under_lazy():
+    """Under LAZY the overlay is left in place (no reconcile)."""
+    ws = Workspace({"/data/": RAMResource()},
+                   mode=MountMode.WRITE,
+                   consistency=ConsistencyPolicy.LAZY)
+    await ws.namespace.ensure_loaded()
+    await ws.namespace.set_attrs("/data/gone.txt", mode=0o600)
+
+    with pytest.raises(FileNotFoundError):
+        await ws.dispatch("stat", _stat_scope("/data/gone.txt"))
+
+    assert ws.namespace.meta_for("/data/gone.txt") is not None

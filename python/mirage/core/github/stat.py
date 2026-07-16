@@ -25,12 +25,11 @@ logger = logging.getLogger(__name__)
 
 
 async def stat(accessor,
-               path: PathSpec,
+               path_spec: PathSpec,
                index: IndexCacheStore = NULL_INDEX) -> FileStat:
-    virtual = path.virtual
-    if isinstance(path, PathSpec):
-        prefix = mount_prefix_of(path.virtual, path.resource_path)
-        path = path.virtual
+    virtual = path_spec.virtual
+    prefix = mount_prefix_of(path_spec.virtual, path_spec.resource_path)
+    path = path_spec.virtual
 
     if prefix and path.startswith(prefix):
         rest = path[len(prefix):]

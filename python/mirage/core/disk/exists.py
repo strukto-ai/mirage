@@ -27,8 +27,8 @@ def _resolve(root: Path, path: str) -> Path:
     return resolved
 
 
-async def exists(accessor: DiskAccessor, path: PathSpec) -> bool:
-    if isinstance(path, PathSpec):
-        path = path.mount_path
+async def exists(accessor: DiskAccessor, path_spec: str | PathSpec) -> bool:
+    path = path_spec.mount_path if isinstance(path_spec,
+                                              PathSpec) else path_spec
     p = _resolve(accessor.root, path)
     return await aio_path.exists(p)

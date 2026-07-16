@@ -36,12 +36,11 @@ async def read_bytes(config: GitHubConfig, owner: str, repo: str,
 
 async def read(
     accessor: GitHubAccessor,
-    path: PathSpec,
+    path_spec: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
-    virtual = path.virtual
-    if isinstance(path, PathSpec):
-        path = path.mount_path
+    virtual = path_spec.virtual
+    path = path_spec.mount_path
 
     key = "/" + path.strip("/")
     result = await index.get(key)

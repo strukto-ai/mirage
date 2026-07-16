@@ -29,11 +29,10 @@ def _resolve(root: Path, path: str) -> Path:
     return resolved
 
 
-async def rename(accessor: DiskAccessor, src: PathSpec, dst: PathSpec) -> None:
-    if isinstance(src, PathSpec):
-        src = src.mount_path
-    if isinstance(dst, PathSpec):
-        dst = dst.mount_path
+async def rename(accessor: DiskAccessor, src_spec: str | PathSpec,
+                 dst_spec: str | PathSpec) -> None:
+    src = src_spec.mount_path if isinstance(src_spec, PathSpec) else src_spec
+    dst = dst_spec.mount_path if isinstance(dst_spec, PathSpec) else dst_spec
     root = accessor.root
     await invalidate_after_unlink(src)
     await invalidate_after_write(dst)

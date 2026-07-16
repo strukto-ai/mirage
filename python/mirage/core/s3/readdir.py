@@ -28,14 +28,13 @@ logger = logging.getLogger(__name__)
 
 
 async def readdir(accessor: S3Accessor,
-                  path: PathSpec,
+                  path_spec: PathSpec,
                   index: IndexCacheStore = NULL_INDEX) -> list[str]:
-    if isinstance(path, PathSpec):
-        prefix = mount_prefix_of(path.virtual, path.resource_path)
-        # When called from resolve_glob with a pattern (e.g. *.txt),
-        # use path.directory for the listing. Direct callers (ls, ops)
-        # pass pattern=None so path.virtual is used.
-        path = path.directory if path.pattern else path.virtual
+    prefix = mount_prefix_of(path_spec.virtual, path_spec.resource_path)
+    # When called from resolve_glob with a pattern (e.g. *.txt),
+    # use path.directory for the listing. Direct callers (ls, ops)
+    # pass pattern=None so path.virtual is used.
+    path = path_spec.directory if path_spec.pattern else path_spec.virtual
     if prefix and path.startswith(prefix):
         rest = path[len(prefix):]
         if prefix.endswith("/") or rest == "" or rest.startswith("/"):

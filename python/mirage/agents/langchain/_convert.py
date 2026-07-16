@@ -19,8 +19,8 @@ from mirage.io.types import IOResult
 
 
 def io_to_execute_response(io: IOResult) -> ExecuteResponse:
-    stdout = decode(io.stdout)
-    stderr = decode(io.stderr)
+    stdout = decode(io.stdout if isinstance(io.stdout, bytes) else None)
+    stderr = decode(io.stderr if isinstance(io.stderr, bytes) else None)
     output = stdout
     if stderr:
         output = f"{stdout}\n{stderr}" if stdout else stderr
@@ -28,7 +28,8 @@ def io_to_execute_response(io: IOResult) -> ExecuteResponse:
 
 
 def io_to_grep_matches(io: IOResult) -> list[GrepMatch]:
-    stdout = decode(io.stdout).strip()
+    stdout = decode(
+        io.stdout if isinstance(io.stdout, bytes) else None).strip()
     if not stdout:
         return []
     matches: list[GrepMatch] = []
@@ -45,7 +46,8 @@ def io_to_grep_matches(io: IOResult) -> list[GrepMatch]:
 
 
 def io_to_file_infos(io: IOResult) -> list[FileInfo]:
-    stdout = decode(io.stdout).strip()
+    stdout = decode(
+        io.stdout if isinstance(io.stdout, bytes) else None).strip()
     if not stdout:
         return []
     infos: list[FileInfo] = []

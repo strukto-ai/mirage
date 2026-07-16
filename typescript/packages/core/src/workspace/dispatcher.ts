@@ -26,6 +26,7 @@ import { ConsistencyPolicy, FileStat, MountMode, PathSpec } from '../types.ts'
 import type { DispatchFn } from './executor/cross_mount.ts'
 import type { Namespace } from './mount/namespace/namespace.ts'
 import { mergeOverlayStat } from './mount/namespace/overlay.ts'
+import { Reconciler } from './reconcile.ts'
 import { effectiveMountMode } from '../context/session_context.ts'
 
 const NOOP_ACCESSOR_INSTANCE = new NOOPAccessor()
@@ -48,7 +49,7 @@ export class Dispatcher {
   private readonly namespace: Namespace
   private readonly cache: FileCache & Resource
   private readonly opsRegistry: OpsRegistry
-  private readonly consistency: ConsistencyPolicy
+  readonly reconciler: Reconciler
 
   constructor(
     namespace: Namespace,
@@ -59,7 +60,7 @@ export class Dispatcher {
     this.namespace = namespace
     this.cache = cache
     this.opsRegistry = opsRegistry
-    this.consistency = consistency
+    this.reconciler = new Reconciler(cache, namespace, opsRegistry, consistency)
   }
 
   dispatch: DispatchFn = async (opName, path, args, kwargs) => {
@@ -69,30 +70,15 @@ export class Dispatcher {
       if (followed !== path.virtual) p = PathSpec.fromStrPath(followed)
     }
     const [resource, scope, mode] = await this.namespace.resolve(p.virtual, false)
+    const mount = this.namespace.mountFor(p.virtual)
     const caches = cachesReads(resource)
-    if (caches && DISPATCH_READ_OPS.has(opName)) {
-      let cached = await this.cache.get(p.virtual)
-      if (
-        cached !== null &&
-        this.consistency === ConsistencyPolicy.ALWAYS &&
-        resource.fingerprint !== undefined
-      ) {
-        let remoteFp: string | null = null
-        try {
-          remoteFp = await resource.fingerprint(scope)
-        } catch {
-          remoteFp = null
-        }
-        if (remoteFp !== null && !(await this.cache.isFresh(p.virtual, remoteFp))) {
-          await this.cache.remove(p.virtual)
-          cached = null
-        }
-      }
-      if (cached !== null) {
+    if (caches && mount !== null && DISPATCH_READ_OPS.has(opName)) {
+      const cached = await this.cache.get(p.virtual)
+      if (cached !== null && (await this.reconciler.mayServeCached(mount, p.virtual))) {
         return [cached, new IOResult({ reads: { [p.virtual]: cached } })]
       }
     }
-    const mountPrefix = this.namespace.mountFor(p.virtual)?.prefix ?? '/'
+    const mountPrefix = mount?.prefix ?? '/'
     if (
       effectiveMountMode(mountPrefix, mode) === MountMode.READ &&
       this.opsRegistry.find(opName, resource.kind)?.write === true
@@ -111,19 +97,24 @@ export class Dispatcher {
       const [, dstScope] = await this.namespace.resolve(fullArgs[0].virtual, false)
       fullArgs = [dstScope, ...fullArgs.slice(1)]
     }
-    const mount = this.namespace.mountFor(p.virtual)
-    const result = await runWithRevisions(
-      mount !== null && mount.revisions.size > 0 ? mount.revisions : null,
-      async () =>
-        this.opsRegistry.call(
-          opName,
-          resource.kind,
-          resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-          scope,
-          fullArgs,
-          fullKwargs,
-        ),
-    )
+    let result
+    try {
+      result = await runWithRevisions(
+        mount !== null && mount.revisions.size > 0 ? mount.revisions : null,
+        async () =>
+          this.opsRegistry.call(
+            opName,
+            resource.kind,
+            resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+            scope,
+            fullArgs,
+            fullKwargs,
+          ),
+      )
+    } catch (err) {
+      await this.reconciler.onOpMissing(opName, p.virtual, err)
+      throw err
+    }
     if (DISPATCH_WRITE_OPS.has(opName)) {
       await this.invalidateAfterWriteByPath(p.virtual)
       if (opName === 'rename' && args?.[0] instanceof PathSpec) {

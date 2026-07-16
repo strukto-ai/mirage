@@ -23,7 +23,7 @@ async def exists(accessor: SSHAccessor, path: PathSpec) -> bool:
     config = accessor.config
     sftp = await accessor.sftp()
     try:
-        await sftp.stat(_abs(config, path))
+        await sftp.stat(_abs(config, path.mount_path))
         return True
     except asyncssh.SFTPNoSuchFile:
         return False

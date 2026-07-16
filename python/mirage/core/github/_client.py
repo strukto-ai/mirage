@@ -17,15 +17,15 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 import aiohttp
+from pydantic import SecretStr
 
 from mirage.resource.secrets import reveal_secret
-from mirage.types import PathSpec
 
 API_BASE = "https://api.github.com"
 API_VERSION = "2022-11-28"
 
 
-def github_headers(token: str) -> dict[str, str]:
+def github_headers(token: SecretStr) -> dict[str, str]:
     return {
         "Authorization": f"Bearer {reveal_secret(token)}",
         "Accept": "application/vnd.github+json",
@@ -37,8 +37,8 @@ def github_url(path: str, **kwargs: str) -> str:
     return API_BASE + path.format(**kwargs)
 
 
-async def github_get(token: str,
-                     path: PathSpec,
+async def github_get(token: SecretStr,
+                     path: str,
                      params: dict | None = None,
                      **kwargs: str) -> dict:
     url = github_url(path, **kwargs)
@@ -49,8 +49,8 @@ async def github_get(token: str,
             return await resp.json()
 
 
-def github_get_sync(token: str,
-                    path: PathSpec,
+def github_get_sync(token: SecretStr,
+                    path: str,
                     params: dict | None = None,
                     **kwargs: str) -> dict:
     url = github_url(path, **kwargs)

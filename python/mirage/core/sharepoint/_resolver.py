@@ -59,7 +59,7 @@ async def _resolve_drive_id(accessor: SharePointAccessor, site_id: str,
 
 
 async def resolve(accessor: SharePointAccessor,
-                  path: PathSpec | str) -> ResolvedPath:
+                  path: PathSpec) -> ResolvedPath:
     """Resolve a virtual path to (site_id, drive_id, item_path).
 
     Args:

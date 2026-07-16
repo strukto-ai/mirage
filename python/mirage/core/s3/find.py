@@ -23,7 +23,7 @@ from mirage.types import PathSpec
 
 async def find(
     accessor: S3Accessor,
-    path: PathSpec,
+    path_spec: str | PathSpec,
     name: str | None = None,
     type: str | None = None,
     min_size: int | None = None,
@@ -57,8 +57,9 @@ async def find(
         path_pattern (str | None): Glob pattern to match full path.
         mindepth (int | None): Minimum depth to include.
     """
-    start_name = start_basename(path)
-    path = path.mount_path
+    start_name = start_basename(path_spec)
+    path = path_spec.mount_path if isinstance(path_spec,
+                                              PathSpec) else path_spec
     config = accessor.config
     pfx = _prefix(path, config)
     results: list[str] = []
