@@ -31,11 +31,10 @@ def _resolve(root: Path, path: str) -> Path:
 
 
 async def read_bytes(accessor: DiskAccessor,
-                     path: PathSpec,
+                     path_spec: PathSpec,
                      index: IndexCacheStore = NULL_INDEX) -> bytes:
-    virtual = path.virtual
-    if isinstance(path, PathSpec):
-        path = path.mount_path
+    virtual = path_spec.virtual
+    path = path_spec.mount_path
     root = accessor.root
     start_ms = int(time.monotonic() * 1000)
     p = _resolve(root, path)

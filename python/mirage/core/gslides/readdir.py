@@ -31,16 +31,15 @@ def is_dir_name(child: str) -> bool:
 
 async def readdir(
     accessor: GSlidesAccessor,
-    path: PathSpec,
+    path_spec: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
-    virtual = path.virtual
+    virtual = path_spec.virtual
     modified_range = None
-    if isinstance(path, PathSpec):
-        prefix = mount_prefix_of(path.virtual, path.resource_path)
-        if path.pattern:
-            modified_range = glob_to_modified_range(path.pattern)
-        path = path.directory if path.pattern else path.virtual
+    prefix = mount_prefix_of(path_spec.virtual, path_spec.resource_path)
+    if path_spec.pattern:
+        modified_range = glob_to_modified_range(path_spec.pattern)
+    path = path_spec.directory if path_spec.pattern else path_spec.virtual
     if prefix and path.startswith(prefix):
         rest = path[len(prefix):]
         if prefix.endswith("/") or rest == "" or rest.startswith("/"):
@@ -59,13 +58,11 @@ async def readdir(
         if cached.entries is not None:
             return cached.entries
 
-    range_kwargs: dict[str, str] = {}
-    if modified_range:
-        range_kwargs["modified_after"] = modified_range[0]
-        range_kwargs["modified_before"] = modified_range[1]
-    files = await list_all_files(accessor.token_manager,
-                                 mime_type=MIME,
-                                 **range_kwargs)
+    files = await list_all_files(
+        accessor.token_manager,
+        mime_type=MIME,
+        modified_after=modified_range[0] if modified_range else None,
+        modified_before=modified_range[1] if modified_range else None)
     is_owned = key == "owned"
     entries = []
     for f in files:

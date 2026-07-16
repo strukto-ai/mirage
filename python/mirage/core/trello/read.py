@@ -30,7 +30,7 @@ from mirage.utils.errors import enoent
 
 async def read_bytes(
     config: TrelloConfig,
-    path: PathSpec,
+    path: str,
     virtual: str,
 ) -> bytes:
     key = path.strip("/")
@@ -103,11 +103,10 @@ async def read_bytes(
 
 async def read(
     accessor: TrelloAccessor,
-    path: PathSpec,
+    path_spec: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
-    virtual = path.virtual
-    if isinstance(path, PathSpec):
-        path = path.mount_path
+    virtual = path_spec.virtual
+    path = path_spec.mount_path
 
     return await read_bytes(accessor.config, path, virtual)

@@ -22,10 +22,9 @@ from mirage.utils.errors import enoent
 from mirage.utils.path import norm
 
 
-async def read_bytes(accessor: RedisAccessor, path: PathSpec) -> bytes:
-    virtual = path.virtual
-    if isinstance(path, PathSpec):
-        path = path.mount_path
+async def read_bytes(accessor: RedisAccessor, path_spec: PathSpec) -> bytes:
+    virtual = path_spec.virtual
+    path = path_spec.mount_path
     store = accessor.store
     start_ms = int(time.monotonic() * 1000)
     key = norm(path)

@@ -31,11 +31,10 @@ def _resolve(root: Path, path: str) -> Path:
 
 
 async def readdir(accessor: DiskAccessor,
-                  path: PathSpec,
+                  path_spec: PathSpec,
                   index: IndexCacheStore = NULL_INDEX) -> list[str]:
-    if isinstance(path, PathSpec):
-        prefix = mount_prefix_of(path.virtual, path.resource_path)
-        path = path.directory if path.pattern else path.virtual
+    prefix = mount_prefix_of(path_spec.virtual, path_spec.resource_path)
+    path = path_spec.directory if path_spec.pattern else path_spec.virtual
     if prefix and path.startswith(prefix):
         rest = path[len(prefix):]
         if prefix.endswith("/") or rest == "" or rest.startswith("/"):

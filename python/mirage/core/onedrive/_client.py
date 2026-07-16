@@ -27,7 +27,7 @@ RETRY_STATUSES = {429, 503, 504}
 MAX_BACKOFF = 30.0
 
 
-def split_path(path: PathSpec | str) -> tuple[str, str]:
+def split_path(path: PathSpec) -> tuple[str, str]:
     prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
     return prefix, path.resource_path
 
@@ -76,9 +76,8 @@ def drive_ref_path(config: OneDriveConfig, folder: str = "") -> str:
 
 def _resolve_token(config: OneDriveConfig) -> str:
     token = config.access_token
-    if callable(token):
-        token = token()
-    return reveal_secret(token)
+    resolved = token() if callable(token) else token
+    return reveal_secret(resolved)
 
 
 def headers(config: OneDriveConfig) -> dict[str, str]:

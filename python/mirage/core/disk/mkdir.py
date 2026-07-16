@@ -29,10 +29,10 @@ def _resolve(root: Path, path: str) -> Path:
 
 
 async def mkdir(accessor: DiskAccessor,
-                path: PathSpec,
+                path_spec: str | PathSpec,
                 parents: bool = False) -> None:
-    if isinstance(path, PathSpec):
-        path = path.mount_path
+    path = path_spec.mount_path if isinstance(path_spec,
+                                              PathSpec) else path_spec
     p = _resolve(accessor.root, path)
     if parents:
         await aiofiles.os.makedirs(p, exist_ok=True)

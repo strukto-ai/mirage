@@ -46,6 +46,7 @@ async def stat(
         if not await database_exists(accessor.client, accessor.config,
                                      scope.database, accessor):
             raise enoent(path)
+        assert scope.kind is not None
         return FileStat(
             name=_kind_dir_name(scope.kind),
             type=FileType.DIRECTORY,
@@ -78,6 +79,7 @@ async def stat(
                                    scope.database, scope.name, scope.kind,
                                    accessor):
             raise enoent(path)
+        assert scope.kind is not None
         return await _documents_stat(accessor, scope.database, scope.kind,
                                      scope.name)
 

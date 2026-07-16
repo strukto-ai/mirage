@@ -24,7 +24,7 @@ async def rmdir(accessor: SSHAccessor, path: PathSpec) -> None:
     config = accessor.config
     sftp = await accessor.sftp()
     try:
-        await sftp.rmdir(_abs(config, path))
+        await sftp.rmdir(_abs(config, path.mount_path))
     except asyncssh.SFTPNoSuchFile:
         raise FileNotFoundError(path)
     await invalidate_after_unlink(path)

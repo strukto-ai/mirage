@@ -21,10 +21,10 @@ from mirage.observe.context import record
 from mirage.types import PathSpec
 
 
-async def write_bytes(accessor: S3Accessor, path: PathSpec,
+async def write_bytes(accessor: S3Accessor, path_spec: str | PathSpec,
                       data: bytes) -> None:
-    if isinstance(path, PathSpec):
-        path = path.mount_path
+    path = path_spec.mount_path if isinstance(path_spec,
+                                              PathSpec) else path_spec
     config = accessor.config
     key = _key(path, config)
     start_ms = int(time.monotonic() * 1000)

@@ -18,7 +18,8 @@ from collections.abc import AsyncIterator
 from mirage.accessor.trello import TrelloAccessor
 from mirage.commands.builtin.trello._input import resolve_text_input
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, OperandKind, Option
+from mirage.commands.spec.types import (CommandSpec, FlagView, OperandKind,
+                                        Option)
 from mirage.core.trello._client import card_update
 from mirage.core.trello.normalize import normalize_card
 from mirage.io.stream import yield_bytes
@@ -43,27 +44,27 @@ async def trello_card_update(
     stdin: AsyncIterator[bytes] | bytes | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(_extra, spec=SPEC)
     config = accessor.config
     card_id = _extra.get("card_id")
     if not card_id or not isinstance(card_id, str):
         raise ValueError("--card_id is required")
-    name = _extra.get("name") if isinstance(_extra.get("name"), str) else None
+    name = fl.as_str("name")
     desc = None
     if (_extra.get("desc") is not None or _extra.get("desc_file") is not None
             or stdin is not None):
         desc = await resolve_text_input(
             config,
-            inline_text=_extra.get("desc") if isinstance(
-                _extra.get("desc"), str) else None,
-            file_path=_extra.get("desc_file") if isinstance(
-                _extra.get("desc_file"), str) else None,
+            inline_text=fl.as_str("desc"),
+            file_path=fl.as_str("desc_file"),
             stdin=stdin,
             error_message="desc is required",
         )
     closed = None
-    if isinstance(_extra.get("closed"), str):
-        closed = _extra["closed"].lower() in ("true", "1", "yes")
-    due = _extra.get("due") if isinstance(_extra.get("due"), str) else None
+    closed_flag = fl.as_str("closed")
+    if closed_flag is not None:
+        closed = closed_flag.lower() in ("true", "1", "yes")
+    due = fl.as_str("due")
     card = await card_update(
         config,
         card_id=card_id,

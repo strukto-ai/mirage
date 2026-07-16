@@ -17,13 +17,14 @@ import asyncssh
 from mirage.accessor.ssh import SSHAccessor
 from mirage.cache.context import (invalidate_after_unlink,
                                   invalidate_after_write)
-from mirage.core.ssh._client import _abs, _resolve_path
+from mirage.core.ssh._client import _abs
 from mirage.types import PathSpec
 
 
-async def rename(accessor: SSHAccessor, src: PathSpec, dst: PathSpec) -> None:
-    src = _resolve_path(src)
-    dst = _resolve_path(dst)
+async def rename(accessor: SSHAccessor, src_spec: str | PathSpec,
+                 dst_spec: str | PathSpec) -> None:
+    src = src_spec.mount_path if isinstance(src_spec, PathSpec) else src_spec
+    dst = dst_spec.mount_path if isinstance(dst_spec, PathSpec) else dst_spec
     config = accessor.config
     sftp = await accessor.sftp()
     try:

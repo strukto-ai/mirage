@@ -9,7 +9,7 @@ two names for the same command family. One runtime ships today:
 
 | Runtime | Engine | Filesystem | Default |
 | --- | --- | --- | --- |
-| `quickjs` | [quickjs-emscripten](https://github.com/justjake/quickjs-emscripten), quickjs compiled to WebAssembly (browser + Node) | None: no host filesystem, no mounts, no network | Yes |
+| `quickjs` | [quickjs-emscripten](https://github.com/justjake/quickjs-emscripten), quickjs compiled to WebAssembly (browser + Node) | Workspace mounts only, bridged through Mirage; no host filesystem, no network | Yes |
 
 ## What it is for
 
@@ -33,9 +33,10 @@ Three input forms, mirroring `python3`:
   run, so a mounted script executes.
 - **stdin** with no `-e` or file runs the piped text as the program.
 
-`scriptArgs` holds the arguments after the code or script, and
-`std.in.readAsString()` reads piped stdin. These match the Python
-`quickjs` runtime, so a script behaves the same in both languages.
+`scriptArgs` holds the arguments after the code or script,
+`std.in.readAsString()` reads piped stdin, and `std.open`/`os.readdir`
+reach workspace mounts (see [Isolation](#isolation)). These match the
+Python `quickjs` runtime, so a script behaves the same in both languages.
 
 ## Modules
 
@@ -50,16 +51,17 @@ js -m -e "const x = await Promise.resolve(41); console.log(x + 1)"
 ## Isolation
 
 The engine runs under WebAssembly capability isolation: it sees only what
-the run passes it. Host files, mounts, and the network are all invisible,
-and file I/O inside the code cannot reach workspace mounts. The `node`/`js`
-command still resolves a script *file* through the workspace before running
-it, so `node /data/script.mjs` works, but reading another mount path inside
-the code does not.
+the run passes it. Host files and the network are invisible.
 
-Known gap: the Python `quickjs` runtime bridges the sandbox's file I/O
-into the workspace mounts (it intercepts the engine's WASI filesystem
-imports); quickjs-emscripten exposes no equivalent seam, so TypeScript
-sandbox code cannot reach mounts yet.
+Workspace mounts are visible with no setup: `std.open('/data/f.txt', 'r')`
+reads the mount and `os.readdir('/data')` lists it, bridged through the
+workspace dispatch so the code sees exactly what `cat` sees, with the same
+cache and write modes. Writes are visible to every command once the file is
+closed, and a read-only mount (or a session narrowed to read) fails the
+open, so `std.open` returns `null` instead of writing. The engine runs on
+quickjs-emscripten's asyncify build, which lets `std.open` suspend the run
+while a mount read or write awaits the dispatch, matching the Python
+`quickjs` runtime's live file I/O.
 
 This is capability isolation, not a resource sandbox: the sandboxed code
 cannot reach your files or the network, but CPU and memory are bounded only

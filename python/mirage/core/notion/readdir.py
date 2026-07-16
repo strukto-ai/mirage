@@ -27,11 +27,11 @@ VIRTUAL_ROOTS = ("pages", "databases")
 
 async def readdir(
     accessor: NotionAccessor,
-    path: PathSpec,
+    path_spec: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
-    prefix = mount_prefix_of(path.virtual, path.resource_path)
-    path = (path.dir if path.pattern else path).mount_path
+    prefix = mount_prefix_of(path_spec.virtual, path_spec.resource_path)
+    path = (path_spec.dir if path_spec.pattern else path_spec).mount_path
     key = path.strip("/")
     idx_key = "/" + key if key else "/"
 
@@ -46,7 +46,7 @@ async def readdir(
         top_level = [
             p for p in pages if p.get("parent", {}).get("type") == "workspace"
         ]
-        entries = []
+        entries: list[tuple[str, IndexEntry]] = []
         for page in top_level:
             dirname = page_dirname(page)
             entry = IndexEntry(
@@ -91,7 +91,7 @@ async def readdir(
 
         blocks = await list_block_children(accessor.config, page_id)
         child_pages = [b for b in blocks if b.get("type") == "child_page"]
-        entries: list[tuple[str, IndexEntry]] = []
+        entries = []
 
         page_json_entry = IndexEntry(
             id=f"{page_id}:page",
@@ -129,7 +129,7 @@ async def readdir(
             return [f"{prefix}{entry}" for entry in listing.entries]
 
         rows = await query_database(accessor.config, database_id)
-        entries: list[tuple[str, IndexEntry]] = []
+        entries = []
         database_json_entry = IndexEntry(
             id=f"{database_id}:database",
             name="database.json",

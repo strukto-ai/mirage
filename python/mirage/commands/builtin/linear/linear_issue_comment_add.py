@@ -18,7 +18,8 @@ from collections.abc import AsyncIterator
 from mirage.accessor.linear import LinearAccessor
 from mirage.commands.builtin.linear._input import resolve_text_input
 from mirage.commands.registry import command
-from mirage.commands.spec.types import CommandSpec, OperandKind, Option
+from mirage.commands.spec.types import (CommandSpec, FlagView, OperandKind,
+                                        Option)
 from mirage.core.linear._client import comment_create, resolve_issue_id
 from mirage.core.linear.normalize import normalize_comment
 from mirage.io.stream import yield_bytes
@@ -41,20 +42,17 @@ async def linear_issue_comment_add(
     stdin: AsyncIterator[bytes] | bytes | None = None,
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(_extra, spec=SPEC)
     config = accessor.config
     issue_id = await resolve_issue_id(
         config,
-        issue_id=_extra.get("issue_id")
-        if isinstance(_extra.get("issue_id"), str) else None,
-        issue_key=_extra.get("issue_key") if isinstance(
-            _extra.get("issue_key"), str) else None,
+        issue_id=fl.as_str("issue_id"),
+        issue_key=fl.as_str("issue_key"),
     )
     body = await resolve_text_input(
         config,
-        inline_text=_extra.get("body")
-        if isinstance(_extra.get("body"), str) else None,
-        file_path=_extra.get("body_file") if isinstance(
-            _extra.get("body_file"), str) else None,
+        inline_text=fl.as_str("body"),
+        file_path=fl.as_str("body_file"),
         stdin=stdin,
         error_message="comment body is required",
     )

@@ -81,9 +81,9 @@ async def wc(
         return format_records(
             format_wc_lines(rows, args_l=args_l, w=w, c=c, m=m,
                             L=L)), IOResult()
-    data = await _read_stdin_async(stdin)
-    if data is None:
+    stdin_data = await _read_stdin_async(stdin)
+    if stdin_data is None:
         raise ValueError("wc: missing operand")
-    counts = await generic_wc(data)
+    counts = await generic_wc(stdin_data)
     return format_wc(counts, args_l=args_l, w=w, c=c, m=m,
                      L=L).encode() + b"\n", IOResult()

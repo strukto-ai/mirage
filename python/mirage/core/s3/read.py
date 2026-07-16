@@ -42,7 +42,7 @@ def _fp_rev_from_response(resp: dict) -> tuple[str | None, str | None]:
 
 
 async def read_bytes(accessor: S3Accessor,
-                     path: PathSpec,
+                     path_spec: PathSpec,
                      index: IndexCacheStore = NULL_INDEX,
                      offset: int = 0,
                      size: int | None = None) -> bytes:
@@ -50,13 +50,13 @@ async def read_bytes(accessor: S3Accessor,
 
     Args:
         accessor (S3Accessor): S3 accessor.
-        path (PathSpec | str): Object path.
+        path_spec (PathSpec): Object path.
         index: Index cache store.
         offset (int): Byte offset for range reads.
         size (int | None): Number of bytes for range reads.
     """
-    virtual = path.virtual
-    path = path.mount_path
+    virtual = path_spec.virtual
+    path = path_spec.mount_path
     config = accessor.config
     key = _key(path, config)
     kwargs = {"Bucket": config.bucket, "Key": key}

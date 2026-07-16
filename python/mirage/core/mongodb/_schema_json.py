@@ -69,7 +69,7 @@ async def build_collection_schema_json(
             "name": idx.get("name"),
             "keys": dict(idx.get("key", {})),
             "type": _index_type(idx),
-            "stats": stats.get(idx.get("name"), {}),
+            "stats": stats.get(idx["name"], {}),
         } for idx in indexes]
     return {
         "database": database,

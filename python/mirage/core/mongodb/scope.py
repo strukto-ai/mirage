@@ -21,9 +21,9 @@ from mirage.types import PathSpec
 @dataclass
 class MongoDBScope:
     level: ScopeLevel
-    database: str | None = None
+    database: str = ""
     kind: EntityKind | None = None
-    name: str | None = None
+    name: str = ""
     resource_path: str = "/"
 
 

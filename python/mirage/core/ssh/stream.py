@@ -21,12 +21,11 @@ from mirage.utils.errors import enoent
 
 
 async def read_stream(accessor: SSHAccessor,
-                      path: PathSpec,
+                      path_spec: PathSpec,
                       index=None,
                       chunk_size: int = 8192):
-    virtual = path.virtual
-    if isinstance(path, PathSpec):
-        path = path.mount_path
+    virtual = path_spec.virtual
+    path = path_spec.mount_path
     config = accessor.config
     sftp = await accessor.sftp()
     try:
@@ -46,9 +45,9 @@ async def range_read(accessor: SSHAccessor, path: PathSpec, start: int,
     config = accessor.config
     sftp = await accessor.sftp()
     try:
-        remote_path = _abs(config, path)
+        remote_path = _abs(config, path.mount_path)
         async with sftp.open(remote_path, "rb") as f:
             await f.seek(start)
             return await f.read(end - start)
     except asyncssh.SFTPNoSuchFile:
-        raise enoent(path)
+        raise enoent(path.virtual)

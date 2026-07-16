@@ -20,9 +20,9 @@ from mirage.utils.key_prefix import mount_key
 def test_root():
     scope = detect_scope("/")
     assert scope.level == "root"
-    assert scope.database is None
+    assert scope.database == ""
     assert scope.kind is None
-    assert scope.name is None
+    assert scope.name == ""
 
 
 def test_database():
@@ -30,7 +30,7 @@ def test_database():
     assert scope.level == "database"
     assert scope.database == "sample_mflix"
     assert scope.kind is None
-    assert scope.name is None
+    assert scope.name == ""
 
 
 def test_database_json():

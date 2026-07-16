@@ -29,9 +29,9 @@ def _resolve(root: Path, path: str) -> Path:
     return resolved
 
 
-async def create(accessor: DiskAccessor, path: PathSpec) -> None:
-    if isinstance(path, PathSpec):
-        path = path.mount_path
+async def create(accessor: DiskAccessor, path_spec: str | PathSpec) -> None:
+    path = path_spec.mount_path if isinstance(path_spec,
+                                              PathSpec) else path_spec
     p = _resolve(accessor.root, path)
     await aiofiles.os.makedirs(p.parent, exist_ok=True)
     async with aiofiles.open(p, "wb") as f:

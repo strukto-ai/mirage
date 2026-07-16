@@ -32,11 +32,10 @@ def _resolve(root: Path, path: str) -> Path:
 
 
 async def stat(accessor: DiskAccessor,
-               path: PathSpec,
+               path_spec: PathSpec,
                index: IndexCacheStore = NULL_INDEX) -> FileStat:
-    virtual = path.virtual
-    if isinstance(path, PathSpec):
-        path = path.mount_path
+    virtual = path_spec.virtual
+    path = path_spec.mount_path
     root = accessor.root
     p = _resolve(root, path)
     if not await aio_path.exists(p):

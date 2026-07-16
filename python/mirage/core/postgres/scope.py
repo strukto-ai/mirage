@@ -20,10 +20,10 @@ from mirage.types import PathSpec
 @dataclass
 class PostgresScope:
     level: str
-    schema: str | None = None
-    kind: str | None = None
-    entity: str | None = None
-    file: str | None = None
+    schema: str = ""
+    kind: str = ""
+    entity: str = ""
+    file: str = ""
     resource_path: str = "/"
 
 

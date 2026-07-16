@@ -24,7 +24,7 @@ async def mkdir(accessor: SSHAccessor,
     config = accessor.config
     sftp = await accessor.sftp()
     if parents:
-        await sftp.makedirs(_abs(config, path), exist_ok=True)
+        await sftp.makedirs(_abs(config, path.mount_path), exist_ok=True)
     else:
-        await sftp.mkdir(_abs(config, path))
+        await sftp.mkdir(_abs(config, path.mount_path))
     await invalidate_after_write(path)

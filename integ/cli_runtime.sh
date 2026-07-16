@@ -150,9 +150,9 @@ YML
 # Wasm sandbox mount access (Python daemon only: the py wasi/quickjs
 # runtimes intercept the guest's filesystem imports and bridge them
 # through the workspace dispatch, so sandboxed python3/js code reads AND
-# writes virtual mounts with no FUSE and no host directory. TS quickjs
-# is quickjs-emscripten (no mount bridge), a documented gap, hence no
-# ts probe.
+# writes virtual mounts with no FUSE and no host directory. The TS
+# daemon runs the same js probe on quickjs-emscripten (see
+# sandbox_probe_ts), which bridges std.open/os.readdir to the dispatch.
 sandbox_probe() {
   local cli="$1"
   local yaml="/tmp/cli-runtime-sbx.yaml"
@@ -176,6 +176,29 @@ YML
   $cli execute -w sbx -c "python3 -c \"import os; os.mkdir('/data/sub'); open('/data/sub/n.txt','w').write('nested'); os.rename('/data/sub/n.txt','/data/sub/m.txt')\"" </dev/null >/dev/null
   echo "sbx_py3_dirops=$($cli execute -w sbx -c 'cat /data/sub/m.txt' </dev/null | grep -o nested | head -1)"
   $cli workspace delete sbx >/dev/null 2>&1 </dev/null || true
+  rm -f "$yaml"
+}
+
+# TS js mount access on quickjs-emscripten (bundled, no wasm download).
+# The default runtimes (js quickjs, python pyodide) both bridge mounts;
+# this probes the js side, the newly-closed parity gap.
+sandbox_probe_ts() {
+  local cli="$1"
+  local yaml="/tmp/cli-runtime-sbx-ts.yaml"
+  cat > "$yaml" <<YML
+mode: EXEC
+mounts:
+  /data:
+    resource: ram
+YML
+  $cli workspace delete sbxts >/dev/null 2>&1 </dev/null || true
+  $cli workspace create "$yaml" --id sbxts >/dev/null </dev/null
+  $cli execute -w sbxts -c 'echo sandbox-sees-me > /data/probe.txt' </dev/null >/dev/null
+  echo "sbx_js_read=$($cli execute -w sbxts -c "js -e \"const f = std.open('/data/probe.txt', 'r'); console.log(f.readAsString().trim())\"" </dev/null | grep -o sandbox-sees-me | head -1)"
+  $cli execute -w sbxts -c "js -e \"const w = std.open('/data/from-js.txt', 'w'); w.puts('js-wrote-this'); w.close()\"" </dev/null >/dev/null
+  echo "sbx_js_write=$($cli execute -w sbxts -c 'cat /data/from-js.txt' </dev/null | grep -o js-wrote-this | head -1)"
+  echo "sbx_js_readdir=$($cli execute -w sbxts -c "js -e \"const [n] = os.readdir('/data'); console.log(n.includes('probe.txt') ? 'listed' : 'no')\"" </dev/null | grep -o listed | head -1)"
+  $cli workspace delete sbxts >/dev/null 2>&1 </dev/null || true
   rm -f "$yaml"
 }
 
@@ -203,6 +226,17 @@ fi
 echo
 echo "===== typescript cli ====="
 probe "$TS_CLI" ts 9440 pyodide monty local | tee /tmp/cli-runtime-ts.txt
+
+echo
+echo "===== js sandbox mount access (typescript daemon) ====="
+export MIRAGE_HOME
+MIRAGE_HOME="$(mktemp -d /tmp/cli-runtime-sbxts-home.XXXXXX)"
+# $TS_CLI is multi-word ("node .../mirage.js") so it must expand unquoted.
+$TS_CLI config set port 9441 >/dev/null </dev/null
+$TS_CLI config set url "http://127.0.0.1:9441" >/dev/null </dev/null
+sandbox_probe_ts "$TS_CLI" | tee -a /tmp/cli-runtime-ts.txt
+$TS_CLI daemon stop >/dev/null 2>&1 </dev/null || true
+sleep 1
 
 echo
 echo "===== expected values ====="
@@ -241,6 +275,9 @@ expect /tmp/cli-runtime-ts.txt "sg_exec" "exit124"
 expect /tmp/cli-runtime-ts.txt "sg_msg" "python3: timed out after"
 expect /tmp/cli-runtime-ts.txt "wasip_msg" "unknown pyodide runtime option"
 expect /tmp/cli-runtime-ts.txt "js_out" "42"
+expect /tmp/cli-runtime-ts.txt "sbx_js_read" "sandbox-sees-me"
+expect /tmp/cli-runtime-ts.txt "sbx_js_write" "js-wrote-this"
+expect /tmp/cli-runtime-ts.txt "sbx_js_readdir" "listed"
 
 py_invalid="$(grep -F 'invalid_create=' /tmp/cli-runtime-py.txt | head -1 | cut -d= -f2-)"
 ts_invalid="$(grep -F 'invalid_create=' /tmp/cli-runtime-ts.txt | head -1 | cut -d= -f2-)"
