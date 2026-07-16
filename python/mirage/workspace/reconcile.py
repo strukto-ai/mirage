@@ -72,7 +72,8 @@ class Reconciler:
             op (str): the op that raised.
             path (str): absolute virtual path the backend reports gone.
         """
-        if self._consistency == ConsistencyPolicy.ALWAYS and op in _REVALIDATE_OPS:
+        if (self._consistency == ConsistencyPolicy.ALWAYS
+                and op in _REVALIDATE_OPS):
             await self.on_missing(path)
 
     async def on_missing(self, path: str) -> None:

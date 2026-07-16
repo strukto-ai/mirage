@@ -39,11 +39,7 @@ export class Reconciler {
   private readonly namespace: Namespace
   private readonly consistency: ConsistencyPolicy
 
-  constructor(
-    cache: FileCache & Resource,
-    namespace: Namespace,
-    consistency: ConsistencyPolicy,
-  ) {
+  constructor(cache: FileCache & Resource, namespace: Namespace, consistency: ConsistencyPolicy) {
     this.cache = cache
     this.namespace = namespace
     this.consistency = consistency

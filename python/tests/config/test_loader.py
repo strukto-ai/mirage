@@ -18,8 +18,8 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
-from mirage.config import (RamCacheBlock, RedisCacheBlock,
-                           RedisNamespaceBlock, WorkspaceConfig, load_config)
+from mirage.config import (RamCacheBlock, RedisCacheBlock, RedisNamespaceBlock,
+                           WorkspaceConfig, load_config)
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Resource
 from mirage.types import ConsistencyPolicy

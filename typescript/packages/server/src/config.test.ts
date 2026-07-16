@@ -12,11 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  RAMNamespaceStore,
-  RedisFileCacheStore,
-  RedisNamespaceStore,
-} from '@struktoai/mirage-node'
+import { RAMNamespaceStore, RedisFileCacheStore, RedisNamespaceStore } from '@struktoai/mirage-node'
 import { describe, expect, it } from 'vitest'
 import { interpolateEnv, loadWorkspaceConfig, configToWorkspaceArgs } from './config.ts'
 

@@ -32,7 +32,7 @@ from mirage.workspace.mount.namespace import NamespaceStore, RAMNamespaceStore
 try:
     from mirage.workspace.mount.namespace import RedisNamespaceStore
 except ImportError:
-    RedisNamespaceStore = None  # type: ignore[misc, assignment]
+    RedisNamespaceStore = None
 
 
 def _coerce_mount_mode(value):
@@ -337,9 +337,8 @@ def _build_namespace_store(
         block: RamNamespaceBlock | RedisNamespaceBlock) -> NamespaceStore:
     if isinstance(block, RedisNamespaceBlock):
         if RedisNamespaceStore is None:
-            raise ImportError(
-                "A redis namespace requires the 'redis' extra. "
-                "Install with: pip install mirage-ai[redis]")
+            raise ImportError("A redis namespace requires the 'redis' extra. "
+                              "Install with: pip install mirage-ai[redis]")
         return RedisNamespaceStore(url=block.url, key_prefix=block.key_prefix)
     return RAMNamespaceStore()
 
