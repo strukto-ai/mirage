@@ -14,6 +14,7 @@
 
 import type { EventDict } from '../../observe/observer.ts'
 import type { RAMResourceState } from '../../resource/ram/ram.ts'
+import type { MountMode } from '../../types.ts'
 
 interface ResourceStateBase {
   type: string
@@ -69,6 +70,8 @@ export interface SessionSnapshot {
   session_id: string
   cwd: string
   env: Record<string, string>
+  created_at?: number
+  mount_modes?: Record<string, MountMode>
 }
 
 export interface JobSnapshot {

@@ -115,32 +115,41 @@ export class Workspace extends CoreWorkspace {
    * its own {@link FuseManager}, so a workspace can expose any number of FUSE
    * subtrees at once. A pinned mountpoint is collision-checked BEFORE mounting,
    * so a clash never leaves a partial kernel mount.
+   *
+   * A session-bound mount (`sessionId` given) runs every op under that
+   * session's mount grants (the kernel-tier primitive: bind-mount the tree
+   * into a container and the narrowing travels with it); it is keyed
+   * separately so the same prefix can also be exposed unbound.
    */
-  async addFuseMount(prefix: string, mountpoint?: string): Promise<string> {
-    if (mountpoint !== undefined) this.registerFuseMount(prefix, mountpoint)
+  async addFuseMount(prefix: string, mountpoint?: string, sessionId?: string): Promise<string> {
+    const session = sessionId !== undefined ? this.getSession(sessionId) : undefined
+    const key = sessionId === undefined ? prefix : `${prefix}@${sessionId}`
+    if (mountpoint !== undefined) this.registerFuseMount(key, mountpoint)
     const fm = new FuseManager()
-    this.fuseManagers.set(prefix, fm)
+    this.fuseManagers.set(key, fm)
     try {
       const mp = await fm.setup(this, {
         rootPrefix: prefix,
         ...(mountpoint !== undefined ? { mountpoint } : {}),
+        ...(session !== undefined ? { session } : {}),
       })
-      if (mountpoint === undefined) this.registerFuseMount(prefix, mp)
+      if (mountpoint === undefined) this.registerFuseMount(key, mp)
       return mp
     } catch (err) {
       // The mount never came up; drop the manager and any registered path so
       // fuseMountpoints does not misreport it as live.
-      this.fuseManagers.delete(prefix)
-      this.fuseMountpointsMap.delete(prefix)
+      this.fuseManagers.delete(key)
+      this.fuseMountpointsMap.delete(key)
       throw err
     }
   }
 
-  async removeFuseMount(prefix: string): Promise<void> {
-    const fm = this.fuseManagers.get(prefix)
-    this.fuseManagers.delete(prefix)
+  async removeFuseMount(prefix: string, sessionId?: string): Promise<void> {
+    const key = sessionId === undefined ? prefix : `${prefix}@${sessionId}`
+    const fm = this.fuseManagers.get(key)
+    this.fuseManagers.delete(key)
     if (fm !== undefined) await fm.unmount()
-    this.fuseMountpointsMap.delete(prefix)
+    this.fuseMountpointsMap.delete(key)
   }
 
   get fuseMountpoints(): Record<string, string> {

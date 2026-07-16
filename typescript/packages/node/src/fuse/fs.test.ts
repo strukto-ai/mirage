@@ -500,3 +500,41 @@ describe('MirageFS — stat attr overlay', () => {
     expect(attr.mtime.getTime()).toBe(Date.UTC(2026, 2, 4, 12, 0, 0))
   })
 })
+
+describe('MirageFS — session binding', () => {
+  it('a bound tree enforces the session mount grants', async () => {
+    const ws = await mkWs()
+    await ws.execute("echo 'hidden' > /extra/secret.txt")
+    const session = ws.createSession('narrow', { mounts: ['/data'] })
+
+    const bound = new MirageFS(ws, { session })
+    const [okCode, attr] = await callOp<[number, FuseAttr]>(bound, 'getattr', '/data/greeting.txt')
+    expect(okCode).toBe(0)
+    expect(attr.mode & 0o170000).toBe(0o100000)
+    const [deniedCode] = await callOp<[number]>(bound, 'getattr', '/extra/secret.txt')
+    expect(deniedCode).toBeLessThan(0)
+
+    const unbound = new MirageFS(ws)
+    const [plainCode] = await callOp<[number, FuseAttr]>(unbound, 'getattr', '/extra/secret.txt')
+    expect(plainCode).toBe(0)
+  })
+
+  it('a read-narrowed session reads through the bound tree but cannot create', async () => {
+    const ws = await mkWs()
+    const session = ws.createSession('ro', { mounts: { '/data': 'read' } })
+    const bound = new MirageFS(ws, { session })
+
+    const [openCode, fd] = await callOp<[number, number]>(bound, 'open', '/data/greeting.txt', 0)
+    expect(openCode).toBe(0)
+    const buf = Buffer.alloc(64)
+    const readLen = await new Promise<number>((resolve) => {
+      const fn = (bound.ops() as Record<string, (...a: unknown[]) => void>).read
+      if (fn === undefined) throw new Error('read op missing')
+      fn('/data/greeting.txt', fd, buf, 64, 0, resolve)
+    })
+    expect(buf.subarray(0, readLen).toString()).toContain('hello world')
+
+    const [createCode] = await callOp<[number]>(bound, 'create', '/data/new.txt', 0o644)
+    expect(createCode).toBeLessThan(0)
+  })
+})

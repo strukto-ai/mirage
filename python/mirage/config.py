@@ -28,11 +28,17 @@ from mirage.runtime.python.select import (DEFAULT_PYTHON_RUNTIME,
                                           validate_python_runtime_name)
 from mirage.types import CommandSafeguard, ConsistencyPolicy, MountMode
 from mirage.workspace.mount.namespace import NamespaceStore, RAMNamespaceStore
+from mirage.workspace.session import RAMSessionStore, SessionStore
 
 try:
     from mirage.workspace.mount.namespace import RedisNamespaceStore
 except ImportError:
     RedisNamespaceStore = None
+
+try:
+    from mirage.workspace.session import RedisSessionStore
+except ImportError:
+    RedisSessionStore = None
 
 
 def _coerce_mount_mode(value):
@@ -165,6 +171,26 @@ NamespaceBlock = Annotated[
 ]
 
 
+class RamSessionBlock(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["ram"] = "ram"
+
+
+class RedisSessionBlock(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["redis"]
+    url: str = "redis://localhost:6379/0"
+    key_prefix: str = "mirage:session:"
+
+
+SessionBlock = Annotated[
+    RamSessionBlock | RedisSessionBlock,
+    Field(discriminator="type"),
+]
+
+
 class MountBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -247,6 +273,7 @@ class WorkspaceConfig(BaseModel):
     cache: CacheBlock | None = None
     index: IndexBlock | None = None
     namespace: NamespaceBlock | None = None
+    session: SessionBlock | None = None
 
     @field_validator("mode", mode="before")
     @classmethod
@@ -287,6 +314,8 @@ class WorkspaceConfig(BaseModel):
             kwargs["index"] = _build_index_config(self.index)
         if self.namespace is not None:
             kwargs["namespace_store"] = _build_namespace_store(self.namespace)
+        if self.session is not None:
+            kwargs["session_store"] = _build_session_store(self.session)
         if self.runtime is not None:
             kwargs["python_runtime"] = self.runtime.python
             if self.runtime.js is not None:
@@ -341,6 +370,17 @@ def _build_namespace_store(
                               "Install with: pip install mirage-ai[redis]")
         return RedisNamespaceStore(url=block.url, key_prefix=block.key_prefix)
     return RAMNamespaceStore()
+
+
+def _build_session_store(
+        block: RamSessionBlock | RedisSessionBlock) -> SessionStore:
+    if isinstance(block, RedisSessionBlock):
+        if RedisSessionStore is None:
+            raise ImportError(
+                "A redis session store requires the 'redis' extra. "
+                "Install with: pip install mirage-ai[redis]")
+        return RedisSessionStore(url=block.url, key_prefix=block.key_prefix)
+    return RAMSessionStore()
 
 
 def load_config(source: str | Path | dict,

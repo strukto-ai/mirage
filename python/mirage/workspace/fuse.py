@@ -20,6 +20,7 @@ from threading import Thread
 
 from mirage.fuse.mount import mount_background
 from mirage.ops import Ops
+from mirage.workspace.session.session import Session
 
 
 class FuseManager:
@@ -37,7 +38,8 @@ class FuseManager:
     def setup(self,
               ops: Ops,
               prefix: str = "/",
-              mountpoint: str | None = None) -> str:
+              mountpoint: str | None = None,
+              session: Session | None = None) -> str:
         if mountpoint:
             # Caller/deployment-owned mountpoints may be reused across process
             # restarts, container lifecycles, or volume mounts. Mirage should
@@ -50,7 +52,8 @@ class FuseManager:
             self._owns_mountpoint = True
         self._thread = mount_background(ops,
                                         self._mountpoint,
-                                        root_prefix=prefix)
+                                        root_prefix=prefix,
+                                        session=session)
         return self._mountpoint
 
     def unmount(self) -> None:

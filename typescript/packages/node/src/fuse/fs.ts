@@ -18,6 +18,8 @@ import {
   FileType,
   type OpRecord,
   PathSpec,
+  runWithSession,
+  type Session,
   type Workspace,
   rstripSlash,
 } from '@struktoai/mirage-core'
@@ -69,6 +71,9 @@ function classifyError(err: unknown): number {
   const msg = (err instanceof Error ? err.message : String(err)).toLowerCase()
   if (msg.includes('not empty') || msg.includes('enotempty')) return ENOTEMPTY
   if (msg.includes('not a directory') || msg.includes('enotdir')) return ENOTDIR
+  // A session capability rejection (MountNotAllowedError) is a permission
+  // failure, mirroring Python's PermissionError -> EACCES.
+  if (msg.includes('not allowed to access mount')) return EACCES
   if (msg.includes('permission') || msg.includes('eacces') || msg.includes('read-only'))
     return EACCES
   if (msg.includes('file exists') || msg.includes('eexist')) return EEXIST
@@ -84,6 +89,13 @@ function classifyError(err: unknown): number {
 
 export interface MirageFSOptions {
   rootPrefix?: string
+  /**
+   * Bind every FUSE op to this session's mount grants. The kernel-tier
+   * primitive: bind-mount the tree into a container and the narrowing
+   * travels with it. Enforcement happens inside dispatch/Ops via the
+   * session context, so binding at the op entry point is sufficient.
+   */
+  session?: Session
 }
 
 export class MirageFS {
@@ -100,6 +112,7 @@ export class MirageFS {
   private nextFh = 1
   private readonly uid: number
   private readonly gid: number
+  private readonly session: Session | null
 
   constructor(ws: Workspace, options: MirageFSOptions = {}) {
     this.ws = ws
@@ -110,6 +123,7 @@ export class MirageFS {
     this.prefixes = this.root === '' ? ws.mounts().map((m) => m.prefix) : []
     this.uid = typeof process.getuid === 'function' ? process.getuid() : 0
     this.gid = typeof process.getgid === 'function' ? process.getgid() : 0
+    this.session = options.session ?? null
   }
 
   // ── helpers ──────────────────────────────────────────────────────
@@ -292,7 +306,7 @@ export class MirageFS {
   // ── FUSE op surface (mirrors mfusepy Operations) ─────────────────
 
   ops(): Record<string, unknown> {
-    return {
+    const table: Record<string, (...args: never[]) => void> = {
       readdir: this.readdir.bind(this),
       getattr: this.getattr.bind(this),
       fgetattr: this.fgetattr.bind(this),
@@ -320,6 +334,22 @@ export class MirageFS {
       removexattr: this.removexattr.bind(this),
       statfs: this.statfs.bind(this),
     }
+    const session = this.session
+    if (session === null) return table
+    // A session-bound tree enters the session context before every op,
+    // mirroring Python's MirageFS._bind_session: the async work each
+    // callback starts inherits the context, so dispatch/Ops enforce the
+    // session's mount grants for kernel-originated I/O too.
+    const bound: Record<string, unknown> = {}
+    for (const [name, fn] of Object.entries(table)) {
+      bound[name] = (...args: never[]) => {
+        void runWithSession(session, () => {
+          fn(...args)
+          return Promise.resolve()
+        })
+      }
+    }
+    return bound
   }
 
   private getattr(path: string, cb: Cb<FuseAttr>): void {

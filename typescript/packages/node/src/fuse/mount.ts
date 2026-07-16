@@ -16,7 +16,7 @@ import { execSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { Workspace } from '@struktoai/mirage-core'
+import type { Session, Workspace } from '@struktoai/mirage-core'
 import { loadOptionalPeer } from '../optional_peer.ts'
 import { MirageFS } from './fs.ts'
 
@@ -32,6 +32,8 @@ export interface MountOptions {
   mountpoint?: string
   /** Scope the mount to a single workspace mount prefix (subtree exposure). */
   rootPrefix?: string
+  /** Run every op under this session's mount grants (session-bound mountpoint). */
+  session?: Session
   /**
    * When true, `@zkochan/fuse-native`'s `autoUnmount` flag is set so the
    * kernel releases the mount if the process exits abnormally. Defaults to
@@ -129,6 +131,7 @@ export async function mount(ws: Workspace, options: MountOptions = {}): Promise<
   }
   const mfs = new MirageFS(ws, {
     ...(options.rootPrefix !== undefined ? { rootPrefix: options.rootPrefix } : {}),
+    ...(options.session !== undefined ? { session: options.session } : {}),
   })
   const autoUnmount = options.autoUnmount ?? process.platform === 'linux'
   // Size-unknown recipe, mirroring Python's mount.py: direct_io (appended

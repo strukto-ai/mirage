@@ -28,9 +28,11 @@ except ImportError:
     fuse = None
 
 from mirage.bridge.sync import run_async_from_sync
+from mirage.context import reset_current_session, set_current_session
 from mirage.fuse.platform.macos import is_macos_metadata
 from mirage.ops import Ops
 from mirage.types import FileStat, FileType
+from mirage.workspace.session.session import Session
 
 # "attribute not found" errno: ENOATTR on macOS, ENODATA on Linux.
 _NO_XATTR = getattr(errno, "ENOATTR", None) or errno.ENODATA
@@ -54,7 +56,10 @@ class MirageFS(_FUSE_OPERATIONS):
 
     use_ns = True
 
-    def __init__(self, ops: Ops, root_prefix: str = "") -> None:
+    def __init__(self,
+                 ops: Ops,
+                 root_prefix: str = "",
+                 session: Session | None = None) -> None:
         if fuse is None:
             raise RuntimeError(
                 "FUSE support requires the 'fuse' extra: install "
@@ -62,6 +67,10 @@ class MirageFS(_FUSE_OPERATIONS):
                 "WinFsp). Setup and support matrix: "
                 "https://mirage.dev/home/setup/fuse")
         self._ops = ops
+        # A session-bound mountpoint: every op through this FUSE tree
+        # runs under the session's mount grants, exactly as a shell
+        # command in that session would. None = unrestricted (default).
+        self._session = session
         self._now = time.time_ns()
         self._root = root_prefix.rstrip("/")
         # When scoped to a single mount, the FUSE root maps onto that mount and
@@ -88,7 +97,22 @@ class MirageFS(_FUSE_OPERATIONS):
         self._loop_thread.start()
 
     def _run(self, coro):
+        if self._session is not None:
+            coro = self._bind_session(coro)
         return run_async_from_sync(coro, self._loop)
+
+    async def _bind_session(self, coro):
+        """Run one op under the bound session's mount grants.
+
+        The session context is set inside the coroutine so it lands on
+        the fs event-loop task that executes the op, mirroring how
+        ``execute`` brackets a command with the session token.
+        """
+        token = set_current_session(self._session)
+        try:
+            return await coro
+        finally:
+            reset_current_session(token)
 
     def _resolve(self, path: str) -> str:
         """Map a FUSE path onto the workspace, honoring the mount root."""

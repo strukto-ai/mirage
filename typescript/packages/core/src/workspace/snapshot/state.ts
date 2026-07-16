@@ -24,6 +24,7 @@ import { Job, JobStatus } from '../../shell/job_table.ts'
 import { ConsistencyPolicy, MountMode } from '../../types.ts'
 import { VERSION } from '../../version.ts'
 import type { NodeMeta } from '../mount/namespace/namespace.ts'
+import { Session } from '../session/session.ts'
 import type { Workspace } from '../workspace.ts'
 import type { MountArgs } from './config.ts'
 import { captureFingerprints, liveOnlyMountPrefixes } from './drift.ts'
@@ -74,11 +75,9 @@ export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
           size: entry.size,
         }))
       : []
-  const sessions: SessionSnapshot[] = ws.sessionManager.list().map((s) => ({
-    session_id: s.sessionId,
-    cwd: s.cwd,
-    env: s.env,
-  }))
+  const sessions: SessionSnapshot[] = ws.sessionManager
+    .list()
+    .map((s) => s.toJSON() as unknown as SessionSnapshot)
   const jobs: JobSnapshot[] = ws.jobTable
     .listJobs()
     .filter((j) => j.status !== JobStatus.RUNNING)
@@ -187,7 +186,7 @@ export async function applyStateDict(ws: Workspace, state: WorkspaceStateDict): 
     }
     await Promise.resolve(resource.loadState(m.resource_state as RAMResourceState))
   }
-  restoreSessions(ws, state)
+  await restoreSessions(ws, state)
   // current_agent_id is not restored separately: TS models a single
   // readonly agentId, set to default_agent_id at construction (== current).
   restoreCache(ws, state)
@@ -211,15 +210,22 @@ async function restoreNodes(ws: Workspace, state: WorkspaceStateDict): Promise<v
   await ws.namespace.replaceNodes(entries)
 }
 
-function restoreSessions(ws: Workspace, state: WorkspaceStateDict): void {
+async function restoreSessions(ws: Workspace, state: WorkspaceStateDict): Promise<void> {
+  const restored: Session[] = []
   for (const s of state.sessions) {
     const exists = ws.sessionManager.list().some((x) => x.sessionId === s.session_id)
     const session = exists
       ? ws.sessionManager.get(s.session_id)
       : ws.sessionManager.create(s.session_id)
-    session.cwd = s.cwd
-    session.env = s.env
+    const fields = Session.fromJSON(s)
+    session.cwd = fields.cwd
+    session.env = fields.env
+    session.mountModes = fields.mountModes
+    restored.push(session)
   }
+  // The snapshot's session table wins over prior store contents,
+  // mirroring Namespace.replaceNodes.
+  await ws.sessionManager.replaceFromSnapshot(restored)
 }
 
 function restoreCache(ws: Workspace, state: WorkspaceStateDict): void {

@@ -62,7 +62,7 @@ from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.node import provision_node, run_command_tree
-from mirage.workspace.session import (Session, SessionManager,
+from mirage.workspace.session import (Session, SessionManager, SessionStore,
                                       reset_current_session,
                                       set_current_session)
 from mirage.workspace.snapshot import (ContentDriftError, apply_state_dict,
@@ -94,6 +94,7 @@ class Workspace:
         agent_id: str | None = None,
         observe: ObserverStore | None = None,
         namespace_store: NamespaceStore | None = None,
+        session_store: SessionStore | None = None,
         python_runtime: str | None = None,
         js_runtime: str | None = None,
         runtime_options: dict[str, dict[str, Any]] | None = None,
@@ -127,7 +128,7 @@ class Workspace:
         self._current_agent_id: str = resolved_agent
         self._default_session_id = session_id
         self._default_agent_id = resolved_agent
-        self._session_mgr = SessionManager(session_id)
+        self._session_mgr = SessionManager(session_id, store=session_store)
         self._consistency = consistency
         self._registry.set_consistency(consistency)
         self._registry.attach_file_cache(self._cache)
@@ -310,31 +311,42 @@ class Workspace:
 
     def add_fuse_mount(self,
                        prefix: str,
-                       mountpoint: str | None = None) -> str:
+                       mountpoint: str | None = None,
+                       session_id: str | None = None) -> str:
         # Register a pinned path BEFORE mounting so a collision is rejected
         # without leaving a partial mount. Each mount gets its own manager,
         # so a workspace can expose any number of FUSE subtrees at once.
+        # A session-bound mount runs every op under that session's mount
+        # grants (the kernel-tier primitive: bind-mount the tree into a
+        # container and the narrowing travels with it); it is keyed
+        # separately so the same prefix can also be exposed unbound.
+        session = (self._session_mgr.get(session_id)
+                   if session_id is not None else None)
+        key = prefix if session_id is None else f"{prefix}@{session_id}"
         if mountpoint is not None:
-            self._register_fuse(prefix, mountpoint)
+            self._register_fuse(key, mountpoint)
         fm = FuseManager()
-        self._fuse_managers[prefix] = fm
+        self._fuse_managers[key] = fm
         try:
-            mp = fm.setup(self._ops, prefix, mountpoint)
+            mp = fm.setup(self._ops, prefix, mountpoint, session=session)
         except Exception:
             # The mount never came up; drop the manager and any registered
             # path so fuse_mountpoints does not misreport it as live.
-            self._fuse_managers.pop(prefix, None)
-            self._deregister_fuse(prefix)
+            self._fuse_managers.pop(key, None)
+            self._deregister_fuse(key)
             raise
         if mountpoint is None:
-            self._register_fuse(prefix, mp)
+            self._register_fuse(key, mp)
         return mp
 
-    def remove_fuse_mount(self, prefix: str) -> None:
-        fm = self._fuse_managers.pop(prefix, None)
+    def remove_fuse_mount(self,
+                          prefix: str,
+                          session_id: str | None = None) -> None:
+        key = prefix if session_id is None else f"{prefix}@{session_id}"
+        fm = self._fuse_managers.pop(key, None)
         if fm is not None:
             fm.unmount()
-        self._deregister_fuse(prefix)
+        self._deregister_fuse(key)
 
     @property
     def fuse_mountpoint(self) -> str | None:
@@ -410,6 +422,7 @@ class Workspace:
         if self._js_runtime is not None:
             await self._js_runtime.close()
         await self._namespace.close()
+        await self._session_mgr.close_store()
         self._close_parts()
         for task in drain_tasks:
             try:
@@ -622,6 +635,14 @@ class Workspace:
     def list_sessions(self) -> list[Session]:
         return self._session_mgr.list()
 
+    async def ensure_sessions_loaded(self) -> None:
+        """Hydrate sessions from the session store (idempotent)."""
+        await self._session_mgr.ensure_loaded()
+
+    async def flush_sessions(self) -> None:
+        """Persist every session's durable fields to the session store."""
+        await self._session_mgr.flush()
+
     async def close_session(self, session_id: str) -> None:
         await self._session_mgr.close(session_id)
 
@@ -797,6 +818,7 @@ class Workspace:
         if cancel is not None and cancel.is_set():
             raise MirageAbortError()
         await self._namespace.ensure_loaded()
+        await self._session_mgr.ensure_loaded()
         if self._drift_check_pending:
             await self._run_pending_drift_check()
 
@@ -894,6 +916,7 @@ class Workspace:
             # emitted them succeeded.
             scope.close()
             reset_current_session(session_token)
+            await self._session_mgr.flush()
             self._ops.records.extend(scope.records)
             if is_line:
                 await self.observer.log_execution(

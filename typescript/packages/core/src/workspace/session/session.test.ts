@@ -33,14 +33,14 @@ describe('Session', () => {
     expect(s.env.FOO).toBe('bar')
   })
 
-  it('toJSON includes only the serializable fields', () => {
+  it('toJSON includes only the serializable fields, snake_case like Python', () => {
     const s = new Session({ sessionId: 'x', cwd: '/a', env: { K: 'V' } })
     const json = s.toJSON()
     expect(json).toEqual({
-      sessionId: 'x',
+      session_id: 'x',
       cwd: '/a',
       env: { K: 'V' },
-      createdAt: s.createdAt,
+      created_at: s.createdAt,
     })
     expect('functions' in json).toBe(false)
     expect('lastExitCode' in json).toBe(false)
@@ -50,10 +50,10 @@ describe('Session', () => {
     const original = new Session({ sessionId: 'x', cwd: '/a', env: { K: 'V' } })
     const restored = Session.fromJSON(
       original.toJSON() as {
-        sessionId: string
+        session_id: string
         cwd: string
         env: Record<string, string>
-        createdAt: number
+        created_at: number
       },
     )
     expect(restored.sessionId).toBe('x')
@@ -70,18 +70,18 @@ describe('Session', () => {
       ]),
     })
     const json = original.toJSON()
-    expect(json.mountModes).toEqual({ '/s3': 'read', '/scratch': 'write' })
+    expect(json.mount_modes).toEqual({ '/s3': 'read', '/scratch': 'write' })
     const restored = Session.fromJSON(
-      json as { sessionId: string; mountModes?: Record<string, MountMode> | null },
+      json as { session_id: string; mount_modes?: Record<string, MountMode> | null },
     )
     expect(restored.mountModes?.get('/s3')).toBe(MountMode.READ)
     expect(restored.mountModes?.get('/scratch')).toBe(MountMode.WRITE)
   })
 
-  it('toJSON omits mountModes when unrestricted', () => {
+  it('toJSON omits mount_modes when unrestricted', () => {
     const s = new Session({ sessionId: 'x' })
-    expect('mountModes' in s.toJSON()).toBe(false)
-    expect(Session.fromJSON({ sessionId: 'x' }).mountModes).toBeNull()
+    expect('mount_modes' in s.toJSON()).toBe(false)
+    expect(Session.fromJSON({ session_id: 'x' }).mountModes).toBeNull()
   })
 })
 

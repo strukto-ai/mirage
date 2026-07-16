@@ -55,6 +55,7 @@ export function registerSessionsRoutes(app: FastifyInstance, deps: SessionsRoute
       }
       const sid = req.body.sessionId ?? `sess_${randomBytes(6).toString('hex')}`
       const ws = deps.registry.get(wsId).runner.ws
+      await ws.ensureSessionsLoaded()
       if (ws.listSessions().some((s) => s.sessionId === sid)) {
         return reply.status(409).send({ detail: `session id already exists: ${sid}` })
       }
@@ -71,19 +72,19 @@ export function registerSessionsRoutes(app: FastifyInstance, deps: SessionsRoute
       } catch (err) {
         return reply.status(422).send({ detail: err instanceof Error ? err.message : String(err) })
       }
+      await ws.flushSessions()
       return reply.status(201).send({ sessionId: sess.sessionId, cwd: sess.cwd })
     },
   )
 
-  app.get<{ Params: WsIdParams }>('/v1/workspaces/:wsId/sessions', (req, reply) => {
+  app.get<{ Params: WsIdParams }>('/v1/workspaces/:wsId/sessions', async (req, reply) => {
     const { wsId } = req.params
     if (!deps.registry.has(wsId)) {
       return reply.status(404).send({ detail: 'workspace not found' })
     }
-    return deps.registry
-      .get(wsId)
-      .runner.ws.listSessions()
-      .map((s) => ({ sessionId: s.sessionId, cwd: s.cwd }))
+    const ws = deps.registry.get(wsId).runner.ws
+    await ws.ensureSessionsLoaded()
+    return ws.listSessions().map((s) => ({ sessionId: s.sessionId, cwd: s.cwd }))
   })
 
   app.delete<{ Params: WsSessionParams }>(

@@ -16,8 +16,10 @@ import asyncio
 
 import pytest
 
+from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
-from mirage.workspace.session import SessionManager
+from mirage.workspace import Workspace
+from mirage.workspace.session import RAMSessionStore, SessionManager
 
 
 def _run(coro):
@@ -136,3 +138,89 @@ def test_manager_create_default_unrestricted():
     mgr = SessionManager("default")
     s = mgr.create("worker")
     assert s.mount_modes is None
+
+
+@pytest.mark.asyncio
+async def test_manager_hydrates_from_store():
+    store = RAMSessionStore()
+    await store.set(
+        "restored", {
+            "session_id": "restored",
+            "cwd": "/w",
+            "env": {
+                "K": "v"
+            },
+            "created_at": 1.0,
+            "mount_modes": {
+                "/data": "read"
+            }
+        })
+    mgr = SessionManager("default", store=store)
+    await mgr.ensure_loaded()
+    s = mgr.get("restored")
+    assert s.cwd == "/w"
+    assert s.env == {"K": "v"}
+    assert s.mount_modes == {"/data": MountMode.READ}
+
+
+@pytest.mark.asyncio
+async def test_manager_hydration_local_wins():
+    store = RAMSessionStore()
+    await store.set("s1", {"session_id": "s1", "cwd": "/stale"})
+    mgr = SessionManager("default", store=store)
+    local = mgr.create("s1")
+    local.cwd = "/fresh"
+    await mgr.ensure_loaded()
+    assert mgr.get("s1").cwd == "/fresh"
+
+
+@pytest.mark.asyncio
+async def test_manager_default_adopts_stored_fields():
+    store = RAMSessionStore()
+    await store.set("default", {
+        "session_id": "default",
+        "cwd": "/w",
+        "env": {
+            "A": "1"
+        }
+    })
+    mgr = SessionManager("default", store=store)
+    await mgr.ensure_loaded()
+    assert mgr.cwd == "/w"
+    assert mgr.env == {"A": "1"}
+
+
+@pytest.mark.asyncio
+async def test_manager_flush_writes_through():
+    store = RAMSessionStore()
+    mgr = SessionManager("default", store=store)
+    mgr.create("agent", mount_modes={"/s3": MountMode.READ})
+    mgr.cwd = "/moved"
+    await mgr.flush()
+    entries = await store.load()
+    assert entries["default"]["cwd"] == "/moved"
+    assert entries["agent"]["mount_modes"] == {"/s3": "read"}
+
+
+@pytest.mark.asyncio
+async def test_manager_close_deletes_from_store():
+    store = RAMSessionStore()
+    mgr = SessionManager("default", store=store)
+    mgr.create("gone")
+    await mgr.flush()
+    await mgr.close("gone")
+    assert "gone" not in await store.load()
+
+
+@pytest.mark.asyncio
+async def test_sessions_persist_across_workspaces_on_shared_store():
+    store = RAMSessionStore()
+    ram = RAMResource()
+    ws_a = Workspace({"/data": ram}, mode=MountMode.EXEC, session_store=store)
+    ws_a.create_session("narrow", mounts={"/data": "read"})
+    await ws_a.flush_sessions()
+
+    ws_b = Workspace({"/data": ram}, mode=MountMode.EXEC, session_store=store)
+    result = await ws_b.execute("echo blocked > /data/x.txt",
+                                session_id="narrow")
+    assert result.exit_code != 0

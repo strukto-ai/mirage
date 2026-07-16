@@ -72,8 +72,10 @@ import { Namespace } from './mount/namespace/namespace.ts'
 import { mergeOverlayStat } from './mount/namespace/overlay.ts'
 import { provisionNode } from './node/provision_node.ts'
 import { runCommandTree } from './node/run_tree.ts'
+import type { ExecuteNodeDeps } from './node/execute_node.ts'
 import { buildFilePrompt } from './file_prompt.ts'
 import { SessionManager } from './session/manager.ts'
+import type { SessionStore } from './session/store.ts'
 import type { Session } from './session/session.ts'
 import type { ExecutionNode } from './types.ts'
 import { errorVirtualPath, gnuStrerror } from '../utils/errors.ts'
@@ -116,6 +118,7 @@ export interface WorkspaceOptions {
   index?: IndexConfig
   observe?: ObserverStore
   namespaceStore?: NamespaceStore
+  sessionStore?: SessionStore
   python?: {
     autoLoadFromImports?: boolean
     bootstrapCode?: string
@@ -257,7 +260,7 @@ export class Workspace {
         resource.setIndex?.(options.index)
       }
     }
-    this.sessionManager = new SessionManager(options.sessionId ?? 'default')
+    this.sessionManager = new SessionManager(options.sessionId ?? 'default', options.sessionStore)
     this.opsRegistry = options.ops ?? new OpsRegistry()
     this.shellParser = options.shellParser ?? null
     this.shellParserFactory = options.shellParserFactory ?? null
@@ -512,6 +515,16 @@ export class Workspace {
 
   closeAllSessions(): Promise<void> {
     return this.sessionManager.closeAll()
+  }
+
+  /** Hydrate sessions from the session store (idempotent). */
+  ensureSessionsLoaded(): Promise<void> {
+    return this.sessionManager.ensureLoaded()
+  }
+
+  /** Write every session's durable fields through to the session store. */
+  flushSessions(): Promise<void> {
+    return this.sessionManager.flush()
   }
 
   mounts(): readonly MountEntry[] {
@@ -806,6 +819,7 @@ export class Workspace {
       throw makeAbortError()
     }
     await this.namespace.ensureLoaded()
+    await this.sessionManager.ensureLoaded()
     if (this.driftCheckPending) {
       await this.runPendingDriftCheck()
     }
@@ -869,6 +883,24 @@ export class Workspace {
     }
     const targetSessionId = options.sessionId ?? this.sessionManager.defaultId
     const targetSession = this.sessionManager.get(targetSessionId)
+    try {
+      return await this.executeParsed(command, options, rootNode, deps, targetSession, stdin)
+    } finally {
+      // Durable session fields (cwd, env, grants) flush at the end of
+      // every execute, success or failure, mirroring Python's finally.
+      await this.sessionManager.flush()
+    }
+  }
+
+  private async executeParsed(
+    command: string,
+    options: ExecuteOptions,
+    rootNode: TSNodeLike,
+    deps: ExecuteNodeDeps,
+    targetSession: Session,
+    stdin: ByteSource | null,
+  ): Promise<ExecuteResult> {
+    const callAgentId = options.agentId ?? this.agentId
     const useOverride = options.cwd !== undefined || options.env !== undefined
     const effectiveSession = useOverride
       ? targetSession.fork({
@@ -1044,6 +1076,7 @@ export class Workspace {
       await task
     }
     await this.namespace.close()
+    await this.sessionManager.closeStore()
     await this.cache.clear()
     for (const fn of this.closers.splice(0)) {
       try {
