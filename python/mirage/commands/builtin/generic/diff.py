@@ -10,7 +10,7 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec.types import CommandName
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileType, PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import rekey
 from mirage.utils.path import gnu_basename
 
@@ -34,7 +34,7 @@ def _child_spec(parent: PathSpec, name: str) -> PathSpec:
 
 
 async def _diff_pair(
-    accessor: Accessor,
+    accessor: Accessor | None,
     path1: PathSpec | str,
     path2: PathSpec | str,
     read_bytes: Callable[..., Awaitable[bytes]],
@@ -73,12 +73,12 @@ async def _diff_pair(
 
 
 async def _diff_dirs(
-    accessor: Accessor,
+    accessor: Accessor | None,
     dir_a: PathSpec,
     dir_b: PathSpec,
     read_bytes: Callable[..., Awaitable[bytes]],
     readdir_fn: Callable[..., Awaitable[list[str]]],
-    stat_fn: Callable[..., Awaitable[object]],
+    stat_fn: Callable[..., Awaitable[FileStat]],
     index: object,
     flags: _DiffFlags,
 ) -> bytes:
@@ -130,7 +130,7 @@ async def diff(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     readdir_fn: Callable[..., Awaitable[list[str]]],
-    stat_fn: Callable[..., Awaitable[object]] | None = None,
+    stat_fn: Callable[..., Awaitable[FileStat]] | None = None,
     accessor: Accessor | None = None,
     index: object = None,
     i: bool = False,
@@ -142,7 +142,8 @@ async def diff(
     r: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 2:
-        raise extra_operand_error(CommandName.DIFF, paths[2].raw_path)
+        raise extra_operand_error(CommandName.DIFF, paths[2].raw_path
+                                  or paths[2].virtual)
     if len(paths) < 2:
         raise UsageError("diff: requires two paths")
     flags = _DiffFlags(i=i, w=w, b=b, e=e, u=u, q=q)
@@ -153,6 +154,7 @@ async def diff(
                      and (await stat_fn(accessor, paths[1],
                                         index)).type == FileType.DIRECTORY)
     if both_dirs:
+        assert stat_fn is not None
         output = await _diff_dirs(accessor, paths[0], paths[1], read_bytes,
                                   readdir_fn, stat_fn, index, flags)
     else:

@@ -19,7 +19,7 @@ from mirage.commands.builtin.utils.copy import (backend_key_default,
                                                 copy_targets, is_directory,
                                                 path_exists)
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileType, PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 
 
 async def walk(readdir: Callable, stat: Callable, root: str,
@@ -56,7 +56,7 @@ async def walk(readdir: Callable, stat: Callable, root: str,
 async def cp(
     paths: list[PathSpec],
     *,
-    stat: Callable[..., Awaitable[object]],
+    stat: Callable[..., Awaitable[FileStat]],
     recursive: bool,
     n: bool,
     v: bool,
@@ -104,8 +104,8 @@ async def cp(
     key_of = backend_key if backend_key is not None else backend_key_default
     *sources, dst = paths
     dst_is_dir = await is_directory(stat, dst, index)
-    writes: dict[str, bytes] = {}
-    reads: dict[str, bytes] = {}
+    writes: dict[str, ByteSource] = {}
+    reads: dict[str, ByteSource] = {}
     lines: list[str] = []
     errors: list[str] = []
     for src, target in copy_targets(sources, dst, dst_is_dir):
@@ -129,6 +129,8 @@ async def cp(
             src_base = src.mount_path.rstrip("/")
             dst_base = target.mount_path.rstrip("/")
             if copy is None:
+                assert readdir is not None and mkdir is not None
+                assert read_bytes is not None and write is not None
                 for entry, is_dir in await walk(readdir, stat, src.virtual,
                                                 index):
                     entry_dst = dst_base + entry[len(src_base):]
@@ -148,6 +150,7 @@ async def cp(
                     if v:
                         lines.append(f"'{entry}' -> '{entry_dst}'")
                 continue
+            assert find is not None
             if dir_copy is not None:
                 if n and await path_exists(stat, target):
                     continue
@@ -170,6 +173,7 @@ async def cp(
         if n and await path_exists(stat, target):
             continue
         if copy is None:
+            assert read_bytes is not None and write is not None
             # write takes bytes, not a stream: the file is materialized here.
             data = await read_bytes(src)
             await write(target, data=data)

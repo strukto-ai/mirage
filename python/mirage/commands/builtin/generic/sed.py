@@ -45,7 +45,7 @@ async def sed(
         # missing file; the repo exits 1 where GNU exits 2).
         err = b""
         if in_place:
-            writes: dict[str, bytes] = {}
+            writes: dict[str, ByteSource] = {}
             edited: list[PathSpec] = []
             for p in paths:
                 try:

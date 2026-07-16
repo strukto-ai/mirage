@@ -35,7 +35,8 @@ async def split(
     numeric_suffix: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 2:
-        raise extra_operand_error(CommandName.SPLIT, paths[2].raw_path)
+        raise extra_operand_error(CommandName.SPLIT, paths[2].raw_path
+                                  or paths[2].virtual)
     prefix_name = paths[1].mount_path if len(paths) >= 2 else "x"
     if lines_per_file == 0 and byte_limit == 0 and n_chunks == 0:
         lines_per_file = 1000
@@ -46,7 +47,7 @@ async def split(
     else:
         source = _resolve_source(stdin)
 
-    writes: dict[str, bytes] = {}
+    writes: dict[str, ByteSource] = {}
     file_idx = 0
 
     if n_chunks > 0:

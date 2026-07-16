@@ -19,13 +19,13 @@ async def look(
     fold_case: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 1:
-        raise extra_operand_error(CommandName.LOOK, paths[1].raw_path)
+        raise extra_operand_error(CommandName.LOOK, paths[1].raw_path
+                                  or paths[1].virtual)
     if paths:
         raw = await read_bytes(accessor, paths[0])
     else:
-        raw = await _read_stdin_async(stdin)
-        if raw is None:
-            raw = b""
+        stdin_raw = await _read_stdin_async(stdin)
+        raw = stdin_raw if stdin_raw is not None else b""
     text = raw.decode(errors="replace")
     cmp_prefix = prefix.lower() if fold_case else prefix
     matched: list[str] = []

@@ -65,7 +65,8 @@ async def comm(
     check_order: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 2:
-        raise extra_operand_error(CommandName.COMM, paths[2].raw_path)
+        raise extra_operand_error(CommandName.COMM, paths[2].raw_path
+                                  or paths[2].virtual)
     if len(paths) < 2:
         raise ValueError("comm: requires two paths")
     data1 = (await read_bytes(accessor, paths[0])).decode(errors="replace")

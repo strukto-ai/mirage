@@ -215,7 +215,7 @@ async def rg(
             for p in paths:
                 data = split_lines((await
                                     rb(p.virtual)).decode(errors="replace"))
-                hits = grep_lines(p.raw_path, data, pat, f.invert,
+                hits = grep_lines(p.raw_path or p.virtual, data, pat, f.invert,
                                   f.line_numbers, f.count_only, f.files_only,
                                   f.only_matching, f.max_count)
                 if f.count_only:
@@ -235,8 +235,8 @@ async def rg(
         if read_stream is not None:
             source: AsyncIterator[bytes] = read_stream(accessor, paths[0])
         else:
-            data = await rb(paths[0].virtual)
-            source = _wrap_bytes(data)
+            raw_bytes = await rb(paths[0].virtual)
+            source = _wrap_bytes(raw_bytes)
         stream = grep_stream(
             source,
             pat,

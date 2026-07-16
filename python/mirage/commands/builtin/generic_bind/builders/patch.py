@@ -38,7 +38,7 @@ async def patch(
 ) -> tuple[ByteSource | None, IOResult]:
     return await generic_patch(paths,
                                read_bytes=with_index(ops.read_bytes, index),
-                               write_bytes=ops.write,
+                               write_bytes=ops.require("write"),
                                has_resource=ops.is_mounted(accessor),
                                accessor=accessor,
                                stdin=stdin,

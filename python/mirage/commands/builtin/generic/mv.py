@@ -20,13 +20,13 @@ from mirage.commands.builtin.utils.copy import (backend_key_default,
                                                 copy_targets, is_directory,
                                                 path_exists)
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 async def mv(
     paths: list[PathSpec],
     *,
-    stat: Callable[..., Awaitable[object]],
+    stat: Callable[..., Awaitable[FileStat]],
     n: bool,
     v: bool,
     rename: Callable[..., Awaitable[None]] | None = None,
@@ -71,7 +71,7 @@ async def mv(
     key_of = backend_key if backend_key is not None else backend_key_default
     *sources, dst = paths
     dst_is_dir = await is_directory(stat, dst, index)
-    writes: dict[str, bytes] = {}
+    writes: dict[str, ByteSource] = {}
     lines: list[str] = []
     errors: list[str] = []
     for src, target in copy_targets(sources, dst, dst_is_dir):
@@ -90,6 +90,9 @@ async def mv(
         if n and await path_exists(stat, target):
             continue
         if rename is None:
+            assert readdir is not None and mkdir is not None
+            assert write is not None and read_bytes is not None
+            assert rmdir is not None and unlink is not None
             src_base = src.mount_path.rstrip("/")
             dst_base = target.mount_path.rstrip("/")
             entries = await walk(readdir, stat, src.virtual, index)

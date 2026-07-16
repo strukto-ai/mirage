@@ -9,7 +9,7 @@ from mirage.utils.key_prefix import mount_prefix_of
 
 
 async def _exists(stat_fn: Callable[..., Awaitable[object]],
-                  accessor: Accessor, path: PathSpec) -> bool:
+                  accessor: Accessor | None, path: PathSpec) -> bool:
     try:
         await stat_fn(accessor, path)
         return True

@@ -44,7 +44,7 @@ async def touch(
     if not paths:
         raise ValueError("touch: missing operand")
     paths = await resolve_glob(accessor, paths, index)
-    writes: dict[str, bytes] = {}
+    writes: dict[str, ByteSource] = {}
     for p in paths:
         if c:
             continue

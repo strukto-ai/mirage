@@ -50,7 +50,7 @@ async def gunzip(
             chunks.append(zlib.decompress(raw, zlib.MAX_WBITS | 16))
         return b"".join(chunks), IOResult()
 
-    writes: dict[str, bytes] = {}
+    writes: dict[str, ByteSource] = {}
     for p in paths:
         raw = await read_bytes(accessor, p)
         stripped = p.mount_path

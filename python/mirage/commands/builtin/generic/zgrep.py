@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from functools import partial
 
 from mirage.accessor.base import Accessor
+from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.grep_helper import (build_pattern_str,
                                                  resolve_pattern)
 from mirage.commands.builtin.utils.lines import split_lines
@@ -20,7 +21,7 @@ async def _read_plain(
     read_bytes: Callable[..., Awaitable[bytes]],
     accessor: Accessor,
     path: PathSpec,
-    index: object = None,
+    index: IndexCacheStore | None = None,
 ) -> bytes:
     return await read_bytes(accessor, path)
 
@@ -136,7 +137,7 @@ async def zgrep(
     read_bytes: Callable[..., Awaitable[bytes]],
     accessor: Accessor | None = None,
     stdin: AsyncIterator[bytes] | bytes | None = None,
-    index: object = None,
+    index: IndexCacheStore | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["zgrep"])
     pattern, never_match = await resolve_pattern(
@@ -168,8 +169,8 @@ async def zgrep(
                     any_match = True
                 all_results.extend(result)
     else:
-        raw = await _read_stdin_async(stdin)
-        data = gziplib.decompress(raw) if raw else b""
+        stdin_raw = await _read_stdin_async(stdin)
+        data = gziplib.decompress(stdin_raw) if stdin_raw else b""
         if f.files_only:
             if _files_only_match(data, compiled, f.ignore_case, f.invert):
                 all_results.append("(standard input)")

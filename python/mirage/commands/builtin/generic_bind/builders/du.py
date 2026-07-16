@@ -77,17 +77,17 @@ async def du(
                              max_depth=depth,
                              c=c)
         return out, IOResult()
-    out = await generic_du(
+    text = await generic_du(
         paths,
         compute_total=partial(ops.du_total, accessor),
-        compute_all=partial(ops.du_all, accessor),
+        compute_all=partial(ops.require("du_all"), accessor),
         s=s,
         a=a,
         h=h,
         max_depth=depth,
         c=c,
     )
-    return out.encode(), IOResult()
+    return text.encode(), IOResult()
 
 
 BUILDER = Builder('du', du, None, False, None)

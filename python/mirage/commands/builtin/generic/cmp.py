@@ -21,7 +21,8 @@ async def cmp_cmd(
     skip: int | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 2:
-        raise extra_operand_error(CommandName.CMP, paths[2].raw_path)
+        raise extra_operand_error(CommandName.CMP, paths[2].raw_path
+                                  or paths[2].virtual)
     if len(paths) < 2:
         raise UsageError("cmp: requires two paths")
     p0, p1 = paths[0], paths[1]

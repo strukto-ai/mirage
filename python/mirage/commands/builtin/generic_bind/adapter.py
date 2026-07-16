@@ -125,3 +125,20 @@ class CommandIO:
     @property
     def resolve_glob(self) -> Callable:
         return make_resolve_glob(self.readdir, self.max_glob_matches)
+
+    def require(self, op: str) -> Callable:
+        """Return an optional backend op, raising if the backend omits it.
+
+        Builders wire write-side ops (write/mkdir/unlink/rename/...) that
+        are ``None`` on read-only backends into generic commands that
+        require them. This surfaces the missing capability as a clear
+        error instead of a ``NoneType is not callable`` crash.
+
+        Args:
+            op (str): CommandIO field name of the operation.
+        """
+        fn = getattr(self, op)
+        if fn is None:
+            raise NotImplementedError(
+                f"operation {op!r} is not supported on this backend")
+        return fn

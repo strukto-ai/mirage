@@ -18,7 +18,7 @@ async def _sha256_stream(source: AsyncIterator[bytes],
 
 
 async def _sha256_multi(
-    accessor: Accessor,
+    accessor: Accessor | None,
     paths: list[PathSpec],
     read_stream: Callable[..., AsyncIterator[bytes]],
 ) -> AsyncIterator[bytes]:
@@ -26,7 +26,8 @@ async def _sha256_multi(
         h = hashlib.sha256()
         async for chunk in read_stream(accessor, p):
             h.update(chunk)
-        yield (h.hexdigest() + "  " + p.raw_path + "\n").encode()
+        yield (h.hexdigest() + "  " + (p.raw_path or p.virtual) +
+               "\n").encode()
 
 
 def _resolve_check_target(filename: str, mount_prefix: str) -> str | PathSpec:
@@ -38,7 +39,7 @@ def _resolve_check_target(filename: str, mount_prefix: str) -> str | PathSpec:
 
 
 async def _sha256_check(
-    accessor: Accessor,
+    accessor: Accessor | None,
     path: PathSpec,
     read_bytes: Callable[..., Awaitable[bytes]],
     read_stream: Callable[..., AsyncIterator[bytes]],

@@ -39,7 +39,7 @@ async def _nl_stream(
 
 
 async def _nl_multi(
-    accessor: Accessor,
+    accessor: Accessor | None,
     paths: list[PathSpec],
     read_stream: Callable[..., AsyncIterator[bytes]],
     body_numbering: str,

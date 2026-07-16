@@ -121,7 +121,8 @@ async def xxd(
     limit: int = 0,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 2:
-        raise extra_operand_error(CommandName.XXD, paths[2].raw_path)
+        raise extra_operand_error(CommandName.XXD, paths[2].raw_path
+                                  or paths[2].virtual)
     cache: list[str] = []
     if paths:
         source: AsyncIterator[bytes] = read_stream(accessor, paths[0])

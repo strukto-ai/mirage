@@ -112,7 +112,7 @@ def flat_scopes(scopes: list[PathSpec]) -> list[PathSpec]:
     ]
 
 
-def transfer_primitives(dispatch: Callable) -> dict[str, Callable]:
+def transfer_primitives(dispatch: Callable) -> dict[str, Any]:
     """Dispatch-relayed primitives shared by the transfer generics (cp/mv).
 
     Args:

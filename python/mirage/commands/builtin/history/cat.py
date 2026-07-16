@@ -42,11 +42,12 @@ async def cat(
     **_extra: object,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
-        reads = {
+        contents: dict[str, bytes] = {
             p.mount_path: await history_read(accessor, p, index)
             for p in paths
         }
-        merged = b"".join(reads.values())
+        merged = b"".join(contents.values())
+        reads: dict[str, ByteSource] = {k: v for k, v in contents.items()}
         io = IOResult(reads=reads)
         if n:
             return generic_cat(merged, number_lines=True), io

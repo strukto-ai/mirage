@@ -41,7 +41,7 @@ async def iconv(
     paths = await resolve_or_empty(ops, accessor, paths, index)
     return await generic_iconv(paths,
                                read_bytes=with_index(ops.read_bytes, index),
-                               write_bytes=ops.write,
+                               write_bytes=ops.require("write"),
                                accessor=accessor,
                                stdin=stdin,
                                from_enc=f or "utf-8",

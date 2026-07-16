@@ -31,8 +31,8 @@ async def mktemp(
     **flags,
 ) -> tuple[ByteSource | None, IOResult]:
     return await generic_mktemp(*texts,
-                                mkdir_fn=ops.mkdir,
-                                write_bytes_fn=ops.write,
+                                mkdir_fn=ops.require("mkdir"),
+                                write_bytes_fn=ops.require("write"),
                                 accessor=accessor,
                                 d=d,
                                 p=p,

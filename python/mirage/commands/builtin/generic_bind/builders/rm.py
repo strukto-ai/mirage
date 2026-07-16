@@ -39,7 +39,7 @@ async def rm(
     paths = await ops.resolve_glob(accessor, paths, index)
     recursive = r or R
     verbose_parts: list[str] = []
-    removed: dict[str, bytes] = {}
+    removed: dict[str, ByteSource] = {}
     for p in paths:
         try:
             s = await ops.stat(accessor, p)
@@ -62,7 +62,7 @@ async def rm(
                 raise IsADirectoryError(
                     f"rm: cannot remove '{p.virtual}': Is a directory")
         else:
-            await ops.unlink(accessor, p)
+            await ops.require("unlink")(accessor, p)
         removed[p.mount_path] = b""
         if v:
             verbose_parts.append(f"removed '{p.virtual}'")
