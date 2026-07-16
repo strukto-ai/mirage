@@ -67,3 +67,53 @@ async def test_on_op_missing_gcs_on_always_stat():
     rec = Reconciler(ws.cache, ws.namespace, ConsistencyPolicy.ALWAYS)
     await rec.on_op_missing("stat", "/data/f.txt")
     assert ws.namespace.meta_for("/data/f.txt") is None
+
+
+@pytest.mark.asyncio
+async def test_may_serve_cached_trusts_cache_under_lazy():
+    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    await ws.namespace.ensure_loaded()
+    mount = ws.namespace.mount_for("/data/f.txt")
+    rec = Reconciler(ws.cache, ws.namespace, ConsistencyPolicy.LAZY)
+    assert await rec.may_serve_cached(mount, "/data/f.txt") is True
+
+
+@pytest.mark.asyncio
+async def test_may_serve_cached_no_fingerprint_forces_reread():
+    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    await ws.namespace.ensure_loaded()
+    mount = ws.namespace.mount_for("/data/f.txt")
+    assert mount.resource.SUPPORTS_SNAPSHOT is False
+    rec = Reconciler(ws.cache, ws.namespace, ConsistencyPolicy.ALWAYS)
+    assert await rec.may_serve_cached(mount, "/data/f.txt") is False
+
+
+@pytest.mark.asyncio
+async def test_reconcile_read_gcs_orphan_on_delete():
+    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    await ws.namespace.ensure_loaded()
+    await ws.namespace.set_attrs("/data/gone.txt", mode=0o600)
+    mount = ws.namespace.mount_for("/data/gone.txt")
+    rec = Reconciler(ws.cache, ws.namespace, ConsistencyPolicy.ALWAYS)
+    await rec.reconcile_read(mount, "/data/gone.txt")
+    assert ws.namespace.meta_for("/data/gone.txt") is None
+
+
+@pytest.mark.asyncio
+async def test_reconcile_read_noop_without_overlay_or_cache():
+    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    await ws.namespace.ensure_loaded()
+    mount = ws.namespace.mount_for("/data/plain.txt")
+    rec = Reconciler(ws.cache, ws.namespace, ConsistencyPolicy.ALWAYS)
+    await rec.reconcile_read(mount, "/data/plain.txt")
+
+
+@pytest.mark.asyncio
+async def test_reconcile_read_skips_under_lazy():
+    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    await ws.namespace.ensure_loaded()
+    await ws.namespace.set_attrs("/data/gone.txt", mode=0o600)
+    mount = ws.namespace.mount_for("/data/gone.txt")
+    rec = Reconciler(ws.cache, ws.namespace, ConsistencyPolicy.LAZY)
+    await rec.reconcile_read(mount, "/data/gone.txt")
+    assert ws.namespace.meta_for("/data/gone.txt") is not None

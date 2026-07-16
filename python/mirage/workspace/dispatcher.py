@@ -53,6 +53,10 @@ class Dispatcher:
         self._cache = cache
         self._reconciler = Reconciler(cache, namespace, consistency)
 
+    @property
+    def reconciler(self) -> Reconciler:
+        return self._reconciler
+
     async def dispatch(self, op: str, path: PathSpec,
                        **kwargs: Any) -> tuple[Any, IOResult]:
         if op not in NO_FOLLOW_OPS:

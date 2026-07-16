@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import TYPE_CHECKING
+
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.general import COMMANDS as GENERAL_COMMANDS
@@ -22,6 +24,9 @@ from mirage.runtime.js.base import JsRuntime
 from mirage.runtime.python.base import PythonRuntime
 from mirage.types import ConsistencyPolicy, MountMode, PathSpec
 from mirage.workspace.mount.mount import MountEntry
+
+if TYPE_CHECKING:
+    from mirage.workspace.reconcile import Reconciler
 
 DEV_PREFIX = "/dev/"
 
@@ -59,10 +64,14 @@ class MountRegistry:
         self.js_runtime: JsRuntime | None = None
         self._consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
         self._file_cache: FileCacheMixin | None = None
+        self._reconciler: "Reconciler | None" = None
         self.mount(DEV_PREFIX, DevResource(), MountMode.WRITE)
 
     def set_consistency(self, consistency: ConsistencyPolicy) -> None:
         self._consistency = consistency
+
+    def set_reconciler(self, reconciler: "Reconciler") -> None:
+        self._reconciler = reconciler
 
     def attach_file_cache(self, cache: FileCacheMixin | None) -> None:
         """Attach the workspace file cache and build per-mount
@@ -288,44 +297,18 @@ class MountRegistry:
 
         resolved = mount.resolve_command(cmd_name)
         # Warm reads are served in place by with_read_cache, so a read-only
-        # command stays on its real mount. The cache is a hidden store (not a
-        # mount); under ALWAYS we evict stale entries from it here so the
-        # read-through serves fresh bytes.
-        if (self._file_cache is not None and path_scopes
+        # command stays on its real mount. Single-mount reads do not go
+        # through the dispatcher, so this is where they reconcile against
+        # backend truth: the shared Reconciler evicts a stale cache entry and
+        # GCs an orphaned overlay when the backend reports the path gone.
+        if (self._reconciler is not None and path_scopes
                 and resolved is not None and not resolved.write
                 and mount.resource.caches_reads
                 and self._consistency == ConsistencyPolicy.ALWAYS):
-            await self._evict_stale(mount, self._file_cache, path_scopes)
+            for scope in path_scopes:
+                await self._reconciler.reconcile_read(mount, scope.virtual)
 
         return mount
-
-    async def _evict_stale(
-        self,
-        real_mount: MountEntry,
-        cache: FileCacheMixin,
-        path_scopes: list[PathSpec],
-    ) -> None:
-        """Evict cached entries whose remote fingerprint has changed.
-
-        Only used when ConsistencyPolicy.ALWAYS is active. Backends that
-        return stat.fingerprint=None silently fall back to LAZY behavior
-        (no eviction, cache serves whatever it has).
-        """
-        for scope in path_scopes:
-            key = scope.virtual
-            if not await cache.exists(key):
-                continue
-            try:
-                remote_stat = await real_mount.execute_op("stat", key)
-            except FileNotFoundError:
-                await cache.remove(key)
-                continue
-            except Exception:
-                continue
-            if remote_stat is None or remote_stat.fingerprint is None:
-                continue
-            if not await cache.is_fresh(key, remote_stat.fingerprint):
-                await cache.remove(key)
 
     @property
     def root_mount(self) -> MountEntry | None:

@@ -138,6 +138,7 @@ class Workspace:
                                     user=agent_id)
         self._dispatcher = Dispatcher(self._namespace, self._cache,
                                       consistency)
+        self._registry.set_reconciler(self._dispatcher.reconciler)
 
         fuse_targets: list[tuple[str, bool | str]] = []
         for prefix, value in resources.items():

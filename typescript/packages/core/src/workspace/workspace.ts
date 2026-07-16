@@ -296,6 +296,7 @@ export class Workspace {
       options.agentId ?? null,
     )
     this.dispatcher = new Dispatcher(this.namespace, this.cache, this.opsRegistry, consistency)
+    this.registry.setReconciler(this.dispatcher.reconciler)
     // The file cache is a hidden store (attached above), never a mount. Arg-less
     // commands and root listing resolve against a neutral root anchor: reuse the
     // user's `/` mount if they gave one, else add a plain empty RAM mount at `/`.

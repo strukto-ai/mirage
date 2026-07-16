@@ -57,7 +57,7 @@ export class Dispatcher {
     this.namespace = namespace
     this.cache = cache
     this.opsRegistry = opsRegistry
-    this.reconciler = new Reconciler(cache, namespace, consistency)
+    this.reconciler = new Reconciler(cache, namespace, opsRegistry, consistency)
   }
 
   dispatch: DispatchFn = async (opName, path, args, kwargs) => {
@@ -67,14 +67,15 @@ export class Dispatcher {
       if (followed !== path.virtual) p = PathSpec.fromStrPath(followed)
     }
     const [resource, scope, mode] = await this.namespace.resolve(p.virtual, false)
+    const mount = this.namespace.mountFor(p.virtual)
     const caches = cachesReads(resource)
-    if (caches && DISPATCH_READ_OPS.has(opName)) {
+    if (caches && mount !== null && DISPATCH_READ_OPS.has(opName)) {
       const cached = await this.cache.get(p.virtual)
-      if (cached !== null && (await this.reconciler.mayServeCached(resource, scope, p.virtual))) {
+      if (cached !== null && (await this.reconciler.mayServeCached(mount, p.virtual))) {
         return [cached, new IOResult({ reads: { [p.virtual]: cached } })]
       }
     }
-    const mountPrefix = this.namespace.mountFor(p.virtual)?.prefix ?? '/'
+    const mountPrefix = mount?.prefix ?? '/'
     if (
       effectiveMountMode(mountPrefix, mode) === MountMode.READ &&
       this.opsRegistry.find(opName, resource.kind)?.write === true
@@ -85,7 +86,6 @@ export class Dispatcher {
       kwargs?.index === undefined && resource.index !== undefined
         ? { ...(kwargs ?? {}), index: resource.index }
         : (kwargs ?? {})
-    const mount = this.namespace.mountFor(p.virtual)
     let result
     try {
       result = await runWithRevisions(

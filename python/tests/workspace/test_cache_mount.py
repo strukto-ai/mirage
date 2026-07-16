@@ -122,6 +122,24 @@ async def test_stat_gcs_orphaned_overlay_under_always():
 
 
 @pytest.mark.asyncio
+async def test_shell_stat_gcs_orphan_under_always():
+    """A single-mount shell read (not the dispatcher) reconciles via the
+    registry: under ALWAYS, a stat the backend reports gone GCs the overlay."""
+    ram = RAMResource()
+    ram.caches_reads = True
+    ws = Workspace({"/r/": ram},
+                   mode=MountMode.WRITE,
+                   consistency=ConsistencyPolicy.ALWAYS)
+    await ws.namespace.ensure_loaded()
+    await ws.namespace.set_attrs("/r/gone.txt", mode=0o600)
+    assert ws.namespace.meta_for("/r/gone.txt") is not None
+
+    await ws.execute("stat /r/gone.txt")
+
+    assert ws.namespace.meta_for("/r/gone.txt") is None
+
+
+@pytest.mark.asyncio
 async def test_stat_keeps_overlay_under_lazy():
     """Under LAZY the overlay is left in place (no reconcile)."""
     ws = Workspace({"/data/": RAMResource()},

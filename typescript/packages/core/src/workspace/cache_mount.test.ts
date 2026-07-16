@@ -105,6 +105,28 @@ describe('namespace orphan GC on remote delete', () => {
     }
   })
 
+  it('a single-mount shell stat GCs an orphaned overlay under ALWAYS', async () => {
+    const ram = new RAMResource()
+    ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
+    const ws = new Workspace(
+      { '/r': ram },
+      {
+        mode: MountMode.WRITE,
+        consistency: ConsistencyPolicy.ALWAYS,
+        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
+      },
+    )
+    try {
+      await ws.namespace.ensureLoaded()
+      await ws.namespace.setAttrs('/r/gone.txt', { mode: 0o600 })
+      expect(ws.namespace.metaFor('/r/gone.txt')).not.toBeNull()
+      await ws.execute('stat /r/gone.txt')
+      expect(ws.namespace.metaFor('/r/gone.txt')).toBeNull()
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('leaves the overlay in place under LAZY', async () => {
     const ws = new Workspace(
       { '/data': new RAMResource() },
