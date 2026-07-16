@@ -17,7 +17,7 @@ import { dirname, resolve, sep } from 'node:path'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { CommandSafeguard, MountSpec } from '@struktoai/mirage-node'
 import { Workspace, type Resource } from '@struktoai/mirage-node'
-import type { WorkspaceRegistry } from '../registry.ts'
+import { newWorkspaceId, type WorkspaceRegistry } from '../registry.ts'
 import { buildOverrideResources, cloneWorkspaceWithOverride, type OverrideShape } from '../clone.ts'
 import {
   configToWorkspaceArgs,
@@ -94,6 +94,10 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         resourceMap[prefix] = [resource, mode]
         if (Object.keys(safeguards).length > 0) commandSafeguards[prefix] = safeguards
       }
+      // The registry id and the state-store scope must be the same identity,
+      // so resolve it before construction: explicit REST id, then the
+      // config's workspaceId, then a fresh mint.
+      const wid = body.id ?? args.options.workspaceId ?? newWorkspaceId()
       let ws: Workspace
       try {
         ws = new Workspace(resourceMap, {
@@ -101,6 +105,8 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
           consistency: args.options.consistency,
           sessionId: args.options.sessionId,
           agentId: args.options.agentId,
+          workspaceId: wid,
+          ...(args.options.store !== undefined ? { store: args.options.store } : {}),
           ...(Object.keys(commandSafeguards).length > 0 ? { commandSafeguards } : {}),
           ...(args.options.cache !== undefined ? { cache: args.options.cache } : {}),
           ...(args.options.index !== undefined ? { index: args.options.index } : {}),
@@ -121,7 +127,7 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
           const mountpoint = typeof target === 'string' ? target : undefined
           await ws.addFuseMount(prefix, mountpoint)
         }
-        entry = deps.registry.add(ws, body.id)
+        entry = deps.registry.add(ws, wid)
       } catch (e) {
         await ws.close()
         return reply.status(409).send({ detail: (e as Error).message })

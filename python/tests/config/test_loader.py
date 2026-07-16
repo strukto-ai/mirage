@@ -18,13 +18,15 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
-from mirage.config import (RamCacheBlock, RedisCacheBlock, RedisNamespaceBlock,
+from mirage.config import (RamCacheBlock, RedisCacheBlock, RedisStoreBlock,
                            WorkspaceConfig, load_config)
 from mirage.resource.ram import RAMResource
 from mirage.resource.s3 import S3Resource
 from mirage.types import ConsistencyPolicy
-from mirage.workspace.mount.namespace import (RAMNamespaceStore,
-                                              RedisNamespaceStore)
+from mirage.workspace.mount.namespace import RAMNamespaceStore
+from mirage.workspace.mount.namespace.redis import RedisNamespaceStore
+from mirage.workspace.store import (RAMWorkspaceStateStore,
+                                    RedisWorkspaceStateStore)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -104,12 +106,12 @@ def test_to_workspace_kwargs_emits_ram_cache_config():
     assert kwargs["cache"].limit == "128MB"
 
 
-def test_namespace_redis_discriminated_union():
+def test_store_redis_block_builds_redis_provider():
     cfg = load_config({
-        "namespace": {
+        "store": {
             "type": "redis",
             "url": "redis://localhost:6379/4",
-            "key_prefix": "test_ns:",
+            "key_prefix": "test_store:",
         },
         "mounts": {
             "/": {
@@ -117,15 +119,16 @@ def test_namespace_redis_discriminated_union():
             }
         },
     })
-    assert isinstance(cfg.namespace, RedisNamespaceBlock)
-    assert cfg.namespace.key_prefix == "test_ns:"
+    assert cfg.store is not None
+    assert cfg.store.key_prefix == "test_store:"
     kwargs = cfg.to_workspace_kwargs()
-    assert isinstance(kwargs["namespace_store"], RedisNamespaceStore)
+    assert isinstance(kwargs["store"], RedisWorkspaceStateStore)
+    assert isinstance(kwargs["store"].namespace("ws1"), RedisNamespaceStore)
 
 
-def test_namespace_ram_emits_ram_store():
+def test_store_ram_block_builds_ram_provider():
     cfg = load_config({
-        "namespace": {
+        "store": {
             "type": "ram"
         },
         "mounts": {
@@ -135,13 +138,49 @@ def test_namespace_ram_emits_ram_store():
         },
     })
     kwargs = cfg.to_workspace_kwargs()
-    assert isinstance(kwargs["namespace_store"], RAMNamespaceStore)
+    assert isinstance(kwargs["store"], RAMWorkspaceStateStore)
+    assert isinstance(kwargs["store"].namespace("ws1"), RAMNamespaceStore)
 
 
-def test_namespace_block_rejects_ttl():
+def test_store_group_override_redirects_one_plane():
+    cfg = load_config({
+        "store": {
+            "type": "ram",
+            "observer": {
+                "type": "redis",
+                "url": "redis://localhost:6379/4",
+                "key_prefix": "obs:",
+            },
+        },
+        "mounts": {
+            "/": {
+                "resource": "ram"
+            }
+        },
+    })
+    assert isinstance(cfg.store.observer, RedisStoreBlock)
+    store = cfg.to_workspace_kwargs()["store"]
+    assert isinstance(store, RAMWorkspaceStateStore)
+    assert isinstance(store.namespace("ws1"), RAMNamespaceStore)
+    assert type(store.observer("ws1")).__name__ == "RedisObserverStore"
+
+
+def test_workspace_id_passes_through():
+    cfg = load_config({
+        "workspace_id": "agent-ws-7",
+        "mounts": {
+            "/": {
+                "resource": "ram"
+            }
+        },
+    })
+    assert cfg.to_workspace_kwargs()["workspace_id"] == "agent-ws-7"
+
+
+def test_store_block_rejects_unknown_field():
     with pytest.raises(Exception):
         load_config({
-            "namespace": {
+            "store": {
                 "type": "ram",
                 "ttl": 600
             },

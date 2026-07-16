@@ -333,6 +333,7 @@ class RuntimeType(str, Enum):
 
 DEFAULT_SESSION_ID = "default"
 DEFAULT_AGENT_ID = "default"
+DEFAULT_WORKSPACE_ID = "default"
 
 
 class StateKey(StrEnum):

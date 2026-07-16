@@ -20,6 +20,7 @@ from mirage import Workspace
 from mirage.resource.registry import build_resource
 from mirage.server.clone import clone_workspace_with_override
 from mirage.server.paths import PathOutsideRootError, resolve_within_root
+from mirage.server.registry import new_workspace_id
 from mirage.server.summary import make_brief, make_detail
 from mirage.workspace.snapshot.utils import norm_mount_prefix
 
@@ -39,6 +40,11 @@ async def create_workspace(req: CreateWorkspaceRequest,
         raise HTTPException(status_code=409,
                             detail=f"workspace id already exists: {req.id!r}")
     kwargs = req.config.to_workspace_kwargs()
+    # The registry id and the state-store scope must be the same identity,
+    # so resolve it before construction: explicit REST id, then the
+    # config's workspace_id, then a fresh mint.
+    wid = req.id or kwargs.get("workspace_id") or new_workspace_id()
+    kwargs["workspace_id"] = wid
     try:
         ws = Workspace(**kwargs)
     except (FileNotFoundError, ImportError, ValueError) as e:
@@ -49,7 +55,7 @@ async def create_workspace(req: CreateWorkspaceRequest,
         for prefix, target in req.config.fuse_mounts().items():
             mountpoint = target if isinstance(target, str) else None
             ws.add_fuse_mount(prefix, mountpoint)
-        entry = registry.add(ws, workspace_id=req.id)
+        entry = registry.add(ws, workspace_id=wid)
     except ValueError as e:
         await ws.close()
         raise HTTPException(status_code=409, detail=str(e))

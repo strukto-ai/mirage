@@ -115,8 +115,13 @@ export class RedisObserverStore implements ObserverStore {
   }
 
   async close(): Promise<void> {
+    // Idempotent: the workspace closes the plane store it consumed and the
+    // owning WorkspaceStateStore closes every plane it built; the second
+    // close must be a no-op, not a crash on an already-quit client.
     if (this.clientPromise === null) return
-    const c = await this.clientPromise
+    const pending = this.clientPromise
+    this.clientPromise = null
+    const c = await pending
     await c.quit()
   }
 }

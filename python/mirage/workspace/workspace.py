@@ -16,6 +16,7 @@ import asyncio
 import builtins
 import logging
 import sys
+import time
 from collections.abc import AsyncIterator, Iterable, Mapping
 from functools import partial
 from typing import Any, Literal, overload
@@ -49,8 +50,9 @@ from mirage.runtime.python import PythonRuntime, select_python_runtime
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import find_syntax_error, parse
 from mirage.types import (DEFAULT_AGENT_ID, DEFAULT_SESSION_ID,
-                          ConsistencyPolicy, DriftPolicy, FileStat, MountMode,
-                          PathSpec, StateKey, parse_mount_mode)
+                          DEFAULT_WORKSPACE_ID, ConsistencyPolicy, DriftPolicy,
+                          FileStat, MountMode, PathSpec, StateKey,
+                          parse_mount_mode)
 from mirage.utils.errors import format_fs_error
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.dispatcher import Dispatcher
@@ -71,6 +73,7 @@ from mirage.workspace.snapshot import (ContentDriftError, apply_state_dict,
                                        read_tar, requires_resource_override)
 from mirage.workspace.snapshot import snapshot as _write_snapshot
 from mirage.workspace.snapshot import to_state_dict
+from mirage.workspace.store import RAMWorkspaceStateStore, WorkspaceStateStore
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +95,8 @@ class Workspace:
         consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY,
         session_id: str = DEFAULT_SESSION_ID,
         agent_id: str | None = None,
+        workspace_id: str | None = None,
+        store: WorkspaceStateStore | None = None,
         observe: ObserverStore | None = None,
         namespace_store: NamespaceStore | None = None,
         session_store: SessionStore | None = None,
@@ -100,6 +105,23 @@ class Workspace:
         runtime_options: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         self._registry = MountRegistry()
+        # One provider scopes every control-plane store by workspace id;
+        # the per-plane params (observe / namespace_store / session_store)
+        # remain as direct overrides that win over the provider.
+        self._workspace_id = workspace_id if workspace_id is not None \
+            else DEFAULT_WORKSPACE_ID
+        # A caller-passed provider may be shared with sibling workspaces,
+        # so only a workspace that built its own provider closes it.
+        self._owns_state_store = store is None
+        self._meta_written = False
+        self._state_store = store if store is not None \
+            else RAMWorkspaceStateStore()
+        if observe is None:
+            observe = self._state_store.observer(self._workspace_id)
+        if namespace_store is None:
+            namespace_store = self._state_store.namespace(self._workspace_id)
+        if session_store is None:
+            session_store = self._state_store.sessions(self._workspace_id)
         if isinstance(cache, RedisCacheConfig):
             if RedisFileCacheStore is None:
                 raise ImportError(
@@ -425,6 +447,8 @@ class Workspace:
             await self._js_runtime.close()
         await self._namespace.close()
         await self._session_mgr.close_store()
+        if self._owns_state_store:
+            await self._state_store.close()
         self._close_parts()
         for task in drain_tasks:
             try:
@@ -640,6 +664,41 @@ class Workspace:
     async def ensure_sessions_loaded(self) -> None:
         """Hydrate sessions from the session store (idempotent)."""
         await self._session_mgr.ensure_loaded()
+        await self._ensure_meta()
+
+    @property
+    def workspace_id(self) -> str:
+        return self._workspace_id
+
+    @property
+    def state_store(self) -> WorkspaceStateStore:
+        return self._state_store
+
+    async def workspace_meta(self) -> dict[str, Any]:
+        """This workspace's metadata record (discovery surface)."""
+        await self._ensure_meta()
+        meta = await self._state_store.load_meta(self._workspace_id)
+        return meta if meta is not None else {}
+
+    async def _ensure_meta(self) -> None:
+        """Write the discovery record once per process.
+
+        An existing record wins (another process or an earlier run of
+        this workspace already registered it); a fresh workspace
+        registers itself so siblings pointed at the same store can find
+        its sessions and default session.
+        """
+        if self._meta_written:
+            return
+        existing = await self._state_store.load_meta(self._workspace_id)
+        if existing is None:
+            await self._state_store.set_meta(
+                self._workspace_id, {
+                    "workspace_id": self._workspace_id,
+                    "default_session_id": self._default_session_id,
+                    "created_at": time.time(),
+                })
+        self._meta_written = True
 
     async def flush_sessions(self) -> None:
         """Persist every session's durable fields to the session store."""
@@ -821,6 +880,7 @@ class Workspace:
             raise MirageAbortError()
         await self._namespace.ensure_loaded()
         await self._session_mgr.ensure_loaded()
+        await self._ensure_meta()
         if self._drift_check_pending:
             await self._run_pending_drift_check()
 
