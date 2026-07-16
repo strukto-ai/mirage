@@ -12,21 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.resource.databricks_volume.config import DatabricksVolumeConfig
 
-if TYPE_CHECKING:
+try:
     from databricks.sdk import WorkspaceClient
     from databricks.sdk.config import Config as WorkspaceConfig
-else:
-    try:
-        from databricks.sdk import WorkspaceClient
-        from databricks.sdk.config import Config as WorkspaceConfig
-    except ImportError:
-        WorkspaceConfig = None
-        WorkspaceClient = None
+except ImportError:
+    WorkspaceConfig = None  # type: ignore[misc, assignment]
+    WorkspaceClient = None  # type: ignore[misc, assignment]
 
 
 class DatabricksVolumeAccessor(Accessor):
